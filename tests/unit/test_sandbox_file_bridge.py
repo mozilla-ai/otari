@@ -22,7 +22,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.files_exceptions import FileStorageError
 from gateway.models.files import FileObject
-from gateway.repositories.files import FileRepositories, FileRepository, OutputFileRow
+from gateway.repositories.files import FileRepositories, FileRepository
 from gateway.services.files import (
     CODE_EXECUTION_OUTPUT_PURPOSE,
     FileService,
@@ -139,10 +139,10 @@ class _StubFiles(FileRepository):
             raise self._error
         return set(file_ids) & (self._known | {row.id for row in self._rows})
 
-    async def reserve_output(self, row: OutputFileRow) -> FileObject:
+    async def add(self, record: FileObject) -> None:
         if self._record_error is not None:
             raise self._record_error
-        return await super().reserve_output(row)
+        await super().add(record)
 
     async def mark_stored(self, record: FileObject, size: int) -> bool:
         record.bytes = size
@@ -191,8 +191,8 @@ async def test_store_output_streams_the_file_in_and_writes_its_row() -> None:
     file_id = await _bridge(store, _CommittingUnitOfWork(db)).store_output("chart.png", _chunks(b"\x89PNG", b"..."))
 
     assert file_id is not None and file_id.startswith("file-")
-    assert store.blobs == {file_id: b"\x89PNG..."}
     (record,) = db.added
+    assert store.blobs == {record.storage_ref: b"\x89PNG..."}
     assert (record.id, record.filename, record.bytes, record.purpose) == (
         file_id,
         "chart.png",

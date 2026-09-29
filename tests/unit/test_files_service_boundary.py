@@ -18,7 +18,7 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.files_exceptions import FileStorageError
 from gateway.models.files import FileObject
 from gateway.ports.file_storage_port import FileStoragePort
-from gateway.repositories.files import FileRepositories, FileRepository, OutputFileRow
+from gateway.repositories.files import FileRepositories, FileRepository
 from gateway.services.files import FileService, NewOutput, SweepBatch, _sweeper
 
 
@@ -50,7 +50,18 @@ def _service(uow: _Transactions, repo: Mock, store: Mock) -> FileService:
 
 
 def _output() -> NewOutput:
-    return NewOutput("file-1", "user-1", uuid.uuid4(), "out.txt", "text/plain", "user_data", "blob-1", None)
+    return NewOutput("file-1", "user-1", uuid.uuid4(), "out.txt", "text/plain", "user_data", None)
+
+
+async def _chunks(*parts: bytes) -> AsyncIterator[bytes]:
+    for part in parts:
+        yield part
+
+
+def _store() -> Mock:
+    store = Mock(spec=FileStoragePort)
+    store.allocate.return_value = "blob-1"
+    return store
 
 
 @pytest.mark.asyncio
@@ -92,28 +103,25 @@ async def test_sweep_transfers_outside_transactions(delete_error: OSError | None
 @pytest.mark.parametrize(
     "error_type", [asyncio.CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit, RuntimeError, ConnectionError]
 )
-async def test_a_reservation_that_fails_leaves_the_store_alone(
-    during_commit: bool, error_type: type[BaseException]
-) -> None:
+async def test_a_reservation_that_fails_writes_no_bytes(during_commit: bool, error_type: type[BaseException]) -> None:
     """The row comes before the bytes, so a failed reservation has nothing to undo."""
     error = error_type()
     uow = _Transactions(commit_error=error if during_commit else None)
     repo = Mock(spec=FileRepository)
-    store = Mock(spec=FileStoragePort)
+    store = _store()
 
-    async def reserve(row: OutputFileRow) -> FileObject:
+    async def add(record: FileObject) -> None:
         assert uow.depth == 1
         if not during_commit:
             raise error
-        return FileObject(id=row.file_id)
 
-    repo.reserve_output.side_effect = reserve
+    repo.add.side_effect = add
     with pytest.raises(error_type) as raised:
-        await _service(uow, repo, store).reserve_output(_output())
+        await _service(uow, repo, store).store_produced(_output(), _chunks(b"x"))
     assert raised.value is error
     assert uow.depth == 0
-    store.delete.assert_not_awaited()
     store.put_stream.assert_not_awaited()
+    store.delete.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -121,11 +129,11 @@ async def test_a_reservation_that_fails_leaves_the_store_alone(
 async def test_a_reservation_the_database_refuses_is_a_storage_error(error_type: type[BaseException]) -> None:
     uow = _Transactions()
     repo = Mock(spec=FileRepository)
-    store = Mock(spec=FileStoragePort)
-    repo.reserve_output.side_effect = error_type()
+    store = _store()
+    repo.add.side_effect = error_type()
 
     with pytest.raises(FileStorageError):
-        await _service(uow, repo, store).reserve_output(_output())
+        await _service(uow, repo, store).store_produced(_output(), _chunks(b"x"))
 
     assert uow.depth == 0
     store.put_stream.assert_not_awaited()
@@ -133,10 +141,12 @@ async def test_a_reservation_the_database_refuses_is_a_storage_error(error_type:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", [None, "anthropic"])
-async def test_output_maps_service_input_to_repository_row(provider: str | None) -> None:
+async def test_a_produced_file_is_reserved_from_its_output(provider: str | None) -> None:
     uow = _Transactions()
     repo = Mock(spec=FileRepository)
-    store = Mock(spec=FileStoragePort)
+    store = _store()
+    store.put_stream.return_value = 3
+    repo.mark_stored.return_value = True
     workspace_id = uuid.uuid4()
     expires_at = datetime.now(UTC)
     instance = "primary" if provider else None
@@ -148,36 +158,27 @@ async def test_output_maps_service_input_to_repository_row(provider: str | None)
         filename="out.txt",
         mime_type="text/plain",
         purpose="user_data",
-        storage_ref="blob-1",
         expires_at=expires_at,
         provider=provider,
         provider_instance=instance,
         provider_container_id=container,
     )
+    added: list[FileObject] = []
 
-    async def reserve(row: OutputFileRow) -> FileObject:
+    async def add(record: FileObject) -> None:
         assert uow.depth == 1
-        assert type(row) is OutputFileRow
-        assert row == OutputFileRow(
-            file_id="file-1",
-            user_id="user-1",
-            workspace_id=workspace_id,
-            filename="out.txt",
-            mime_type="text/plain",
-            purpose="user_data",
-            storage_ref="blob-1",
-            expires_at=expires_at,
-            provider=provider,
-            provider_instance=instance,
-            provider_container_id=container,
-        )
-        return FileObject(id=row.file_id)
+        added.append(record)
 
-    repo.reserve_output.side_effect = reserve
-    await _service(uow, repo, store).reserve_output(output)
+    repo.add.side_effect = add
+    size = await _service(uow, repo, store).store_produced(output, _chunks(b"abc"))
 
-    repo.reserve_output.assert_awaited_once()
-    assert uow.blocks == 1
+    (record,) = added
+    assert size == 3
+    assert (record.id, record.user_id, record.workspace_id) == ("file-1", "user-1", workspace_id)
+    assert (record.filename, record.mime_type, record.purpose) == ("out.txt", "text/plain", "user_data")
+    assert (record.storage_ref, record.bytes, record.expires_at) == ("blob-1", 0, expires_at)
+    assert (record.provider, record.provider_instance, record.provider_container_id) == (provider, instance, container)
+    assert record.pending_since is not None
     assert uow.depth == 0
     store.delete.assert_not_awaited()
 

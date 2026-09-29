@@ -19,9 +19,9 @@ from gateway.exceptions.files_exceptions import (
     UploadTooLargeError,
 )
 from gateway.log_config import logger
-from gateway.models.files import FileObject
+from gateway.models.files import FileObject, new_file_id
 from gateway.ports.file_storage_port import FileStoragePort
-from gateway.repositories.files import FilePageQuery, FileRepositories, OutputFileRow
+from gateway.repositories.files import FilePageQuery, FileRepositories
 from gateway.services.files._file_ids import file_id_in, page_token
 from gateway.services.files._metadata import expiry_for, guess_mime_type
 from gateway.services.files._staging import StagedFile
@@ -89,7 +89,6 @@ class NewOutput:
     filename: str
     mime_type: str
     purpose: str
-    storage_ref: str
     expires_at: datetime | None
     provider: str | None = None
     provider_instance: str | None = None
@@ -170,34 +169,25 @@ class FileService:
     async def store(self, upload: NewFile) -> FileObject:
         """Store an upload's bytes and record the file, and return the row.
 
-        The row is written before the bytes and stamped once they land. A
-        refused upload gives both back, and an upload that stops some other way
-        leaves a row the sweep reclaims, so the store never holds bytes nothing
-        names.
+        The row is written before the bytes and stamped once they land. An
+        upload that does not complete gives both back, and one whose cleanup
+        cannot finish leaves a row the sweep reclaims, so the store never holds
+        bytes nothing names.
 
         Raises:
             UploadTooLargeError: the upload ran past the deployment's ceiling.
             EmptyUploadError: the upload carried no bytes.
             FileStorageError: the file could not be recorded.
         """
-        file_id = f"file-{uuid.uuid4().hex}"
+        file_id = new_file_id()
         storage_ref = await self._file_store.allocate(file_id)
         record = await self._reserve(upload, file_id, storage_ref)
-
-        try:
-            size = await self._file_store.put_stream(storage_ref, _capped(upload.chunks, self._config.files_max_bytes))
-        except UploadTooLargeError:
-            await self.abandon(record)
-            raise
-        if size == 0:
-            await self.abandon(record)
+        if await self._write(record, _capped(upload.chunks, self._config.files_max_bytes)) == 0:
             raise EmptyUploadError
-
-        await self.mark_stored(record, size)
         logger.info(
             "Stored file %s (%d bytes) for user %s in workspace %s",
             file_id,
-            size,
+            record.bytes,
             upload.user_id,
             record.workspace_id,
         )
@@ -328,69 +318,20 @@ class FileService:
         async with self._uow:
             return await self._files.existing_ids(file_ids)
 
-    async def reserve_output(self, output: NewOutput) -> FileObject:
-        """Record a produced file pending, so its bytes are named before they are written.
+    async def store_produced(self, output: NewOutput, chunks: AsyncIterator[bytes]) -> int:
+        """Store a produced file's bytes under ``output.file_id``, and return the size served.
+
+        The row is recorded before the bytes, which go to a blob keyed on a
+        fresh ID rather than on ``output.file_id``, so two files recorded under
+        one ID never share a blob. Zero means ``chunks`` carried nothing, and
+        nothing is served.
 
         Raises:
-            FileStorageError: the row would not land, so no bytes are written.
+            FileStorageError: the file could not be recorded.
         """
-        row = OutputFileRow(
-            file_id=output.file_id,
-            user_id=output.user_id,
-            workspace_id=output.workspace_id,
-            filename=output.filename,
-            mime_type=output.mime_type,
-            purpose=output.purpose,
-            storage_ref=output.storage_ref,
-            expires_at=output.expires_at,
-            provider=output.provider,
-            provider_instance=output.provider_instance,
-            provider_container_id=output.provider_container_id,
-        )
-        try:
-            async with self._uow:
-                return await self._files.reserve_output(row)
-        except DATABASE_ERRORS as exc:
-            logger.error("Failed to reserve file metadata for %s: %s", output.file_id, exc)
-            raise FileStorageError(f"Could not record the file {output.file_id}") from exc
-
-    async def mark_stored(self, record: FileObject, size: int) -> None:
-        """Start serving a reserved file, now that its bytes are in the store.
-
-        Raises:
-            FileStorageError: the file is not served, because its reservation
-                would not change or was reclaimed while the bytes were written.
-        """
-        try:
-            async with self._uow:
-                stamped = await self._files.mark_stored(record, size)
-        except DATABASE_ERRORS as exc:
-            logger.error("Failed to record the stored bytes of file %s: %s", record.id, exc)
-            raise FileStorageError(f"Could not record the file {record.id}") from exc
-        if not stamped:
-            logger.warning("File %s was reclaimed while its bytes were being written", record.id)
-            await self.abandon(record)
-            raise FileStorageError(f"Could not record the file {record.id}")
-
-    async def abandon(self, record: FileObject) -> None:
-        """Give back a reservation whose file will never be served, best effort.
-
-        Both halves are best effort because the row outlives a failed cleanup,
-        so whatever does not come away here the sweep reclaims later.
-        The bytes go first: a row left behind is reclaimable, and a row removed
-        ahead of bytes that will not go is the orphan this order exists to stop.
-        """
-        if record.storage_ref is not None:
-            try:
-                await self._file_store.delete(record.storage_ref)
-            except OSError as exc:
-                logger.warning("Could not remove the bytes of the abandoned file %s: %s", record.id, exc)
-                return
-        try:
-            async with self._uow:
-                await self._files.remove_all([record.id])
-        except DATABASE_ERRORS as exc:
-            logger.warning("Could not remove the row of the abandoned file %s: %s", record.id, exc)
+        storage_ref = await self._file_store.allocate(new_file_id())
+        record = await self._reserve_produced(output, storage_ref)
+        return await self._write(record, chunks)
 
     async def sweep(self, *, batch_size: int, after: tuple[datetime, str] | None = None) -> SweepBatch:
         """Delete expired, revoked and abandoned bytes between short database transactions."""
@@ -423,6 +364,60 @@ class FileService:
         cursor = (candidates[-1][2], candidates[-1][0]) if candidates else None
         return SweepBatch(reclaimed=len(reclaimed), seen=len(candidates), cursor=cursor)
 
+    async def _abandon(self, record: FileObject) -> None:
+        """Give back a reservation whose file will never be served, best effort.
+
+        Both halves are best effort because the row outlives a failed cleanup,
+        so whatever does not come away here the sweep reclaims later.
+        The bytes go first: a row left behind is reclaimable, and a row removed
+        ahead of bytes that will not go is the orphan this order exists to stop.
+        """
+        if record.storage_ref is not None:
+            try:
+                await self._file_store.delete(record.storage_ref)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                logger.warning("Could not remove the bytes of the abandoned file %s: %s", record.id, exc)
+                return
+        try:
+            async with self._uow:
+                await self._files.remove_all([record.id])
+        except DATABASE_ERRORS as exc:
+            logger.warning("Could not remove the row of the abandoned file %s: %s", record.id, exc)
+
+    async def _mark_stored(self, record: FileObject, size: int) -> None:
+        """Start serving a reserved file, now that its bytes are in the store.
+
+        Raises:
+            FileStorageError: the file is not served, because its reservation
+                would not change or was reclaimed while the bytes were written.
+        """
+        try:
+            async with self._uow:
+                stamped = await self._files.mark_stored(record, size)
+        except DATABASE_ERRORS as exc:
+            logger.error("Failed to record the stored bytes of file %s: %s", record.id, exc)
+            raise FileStorageError(f"Could not record the file {record.id}") from exc
+        if not stamped:
+            logger.warning("File %s was reclaimed while its bytes were being written", record.id)
+            await self._abandon(record)
+            raise FileStorageError(f"Could not record the file {record.id}")
+
+    async def _position(self, cursor_id: str, listing: FileListing) -> tuple[datetime, str]:
+        """The ``(created_at, id)`` key a cursor resumes after.
+
+        Read with the tenant predicates only, so a cursor deleted or expired
+        between two pages still says where the next page starts. Another user's
+        ID names no position.
+        """
+        cursor = await self._files.any_owned(cursor_id, listing.scope.user_id, workspace_id=listing.scope.workspace_id)
+        if cursor is None:
+            if listing.dialect is FileDialect.ANTHROPIC:
+                raise UnknownPageCursorError
+            raise FileNotServedError
+        return cursor.created_at, cursor.id
+
     async def _reserve(self, upload: NewFile, file_id: str, storage_ref: str) -> FileObject:
         """Record the file pending, so its bytes are named before they are written.
 
@@ -454,19 +449,63 @@ class FileService:
             raise FileStorageError(f"Could not record the file {file_id}") from exc
         return record
 
-    async def _position(self, cursor_id: str, listing: FileListing) -> tuple[datetime, str]:
-        """The ``(created_at, id)`` key a cursor resumes after.
+    async def _reserve_produced(self, output: NewOutput, storage_ref: str) -> FileObject:
+        """Record a produced file pending, so its bytes are named before they are written.
 
-        Read with the tenant predicates only, so a cursor deleted or expired
-        between two pages still says where the next page starts. Another user's
-        ID names no position.
+        Raises:
+            FileStorageError: the row would not land, so no bytes are written.
         """
-        cursor = await self._files.any_owned(cursor_id, listing.scope.user_id, workspace_id=listing.scope.workspace_id)
-        if cursor is None:
-            if listing.dialect is FileDialect.ANTHROPIC:
-                raise UnknownPageCursorError
-            raise FileNotServedError
-        return cursor.created_at, cursor.id
+        now = datetime.now(UTC)
+        record = FileObject(
+            id=output.file_id,
+            user_id=output.user_id,
+            workspace_id=output.workspace_id,
+            filename=output.filename,
+            mime_type=output.mime_type,
+            bytes=0,
+            purpose=output.purpose,
+            storage_ref=storage_ref,
+            provider=output.provider,
+            provider_instance=output.provider_instance,
+            provider_container_id=output.provider_container_id,
+            created_at=now,
+            pending_since=now,
+            expires_at=output.expires_at,
+        )
+        try:
+            async with self._uow:
+                await self._files.add(record)
+        except DATABASE_ERRORS as exc:
+            logger.error("Failed to reserve file metadata for %s: %s", output.file_id, exc)
+            raise FileStorageError(f"Could not record the file {output.file_id}") from exc
+        return record
+
+    async def _write(self, record: FileObject, chunks: AsyncIterator[bytes]) -> int:
+        """Write a reserved file's bytes and serve it, or give the reservation back.
+
+        Returns the size served. Zero means ``chunks`` carried nothing, and the
+        reservation has been given back.
+
+        Raises:
+            ValueError: ``record`` has no storage reference to write at.
+            FileStorageError: the bytes landed but the file could not be served.
+            Whatever ``chunks`` raises, once the reservation is given back.
+        """
+        if record.storage_ref is None:
+            msg = f"File {record.id} has no storage reference to write at"
+            raise ValueError(msg)
+        try:
+            size = await self._file_store.put_stream(record.storage_ref, chunks)
+        except BaseException:
+            await self._abandon(record)
+            raise
+        if size == 0:
+            await self._abandon(record)
+            return 0
+        # Outside the guard above: a stamp whose outcome is unknown may have
+        # served the row, and a served row keeps its bytes.
+        await self._mark_stored(record, size)
+        return size
 
 
 async def _capped(chunks: AsyncIterator[bytes], max_bytes: int) -> AsyncIterator[bytes]:

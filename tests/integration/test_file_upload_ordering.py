@@ -208,7 +208,7 @@ async def test_a_stamp_that_lands_under_the_sweep_is_refused(async_db: AsyncSess
 
     async def _stamp_under_the_sweep() -> None:
         try:
-            await service.mark_stored(reserved, _CEILING)
+            await service._mark_stored(reserved, _CEILING)
         except FileStorageError:
             stamped.append(False)
         else:

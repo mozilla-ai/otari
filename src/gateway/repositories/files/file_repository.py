@@ -52,23 +52,6 @@ def _past(key: tuple[datetime, str], *, ascending: bool) -> ColumnElement[bool]:
 
 
 @dataclass(frozen=True)
-class OutputFileRow:
-    """Metadata for a produced file, as it stands before its bytes are written."""
-
-    file_id: str
-    user_id: str
-    workspace_id: uuid.UUID
-    filename: str
-    mime_type: str
-    purpose: str
-    storage_ref: str
-    expires_at: datetime | None
-    provider: str | None = None
-    provider_instance: str | None = None
-    provider_container_id: str | None = None
-
-
-@dataclass(frozen=True)
 class FilePageQuery:
     """Which of one user's served files a page selects, and in what order."""
 
@@ -213,29 +196,6 @@ class FileRepository(BaseRepository[FileObject, Never, Never]):
             return set()
         result = await self.db.execute(select(FileObject.id).where(FileObject.id.in_(usable)))
         return set(result.scalars())
-
-    async def reserve_output(self, row: OutputFileRow) -> FileObject:
-        """Stage a pending row for a file a run is writing, and return it."""
-        now = datetime.now(UTC)
-        record = FileObject(
-            id=row.file_id,
-            user_id=row.user_id,
-            workspace_id=row.workspace_id,
-            filename=row.filename,
-            mime_type=row.mime_type,
-            bytes=0,
-            purpose=row.purpose,
-            storage_ref=row.storage_ref,
-            provider=row.provider,
-            provider_instance=row.provider_instance,
-            provider_container_id=row.provider_container_id,
-            created_at=now,
-            pending_since=now,
-            expires_at=row.expires_at,
-        )
-        self.db.add(record)
-        await self.db.flush()
-        return record
 
     async def reclaimable(
         self,

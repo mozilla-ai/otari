@@ -10,6 +10,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 from gateway.models.base import Base
 
 
+def new_file_id() -> str:
+    """Mint the ID of a new file, in the ``file-<hex>`` shape the Files API serves."""
+    return f"file-{uuid.uuid4().hex}"
+
+
 class FileObject(Base):
     """Uploaded file metadata for the OpenAI-compatible files API.
 
@@ -46,7 +51,7 @@ class FileObject(Base):
         ),
     )
 
-    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: f"file-{uuid.uuid4().hex}")
+    id: Mapped[str] = mapped_column(primary_key=True, default=new_file_id)
     # Always set to the authenticated user; non-null enforces the user-scoping
     # contract at the schema level. CASCADE removes a user's files on delete.
     user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)

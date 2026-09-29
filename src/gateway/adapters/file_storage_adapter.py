@@ -42,7 +42,7 @@ def _shard_key(file_id: str) -> str:
     one flat namespace (local avoids pathologically large directories; S3
     avoids a hot-prefix pattern under high request rates).
     """
-    # file ids look like ``file-<hex>``; shard on the first two hex chars.
+    # file IDs look like ``file-<hex>``; shard on the first two hex chars.
     token = file_id.split("-", 1)[-1] or file_id
     prefix = (token[:2] or "00").lower()
     return f"{prefix}/{file_id}"
@@ -70,7 +70,7 @@ class LocalDirFileStore:
     """Filesystem-backed :class:`FileStoragePort`.
 
     Files are sharded into 256 subdirectories by the first two hex characters of
-    the file id to avoid pathologically large directories. The ``storage_ref``
+    the file ID to avoid pathologically large directories. The ``storage_ref``
     is the POSIX-relative path under the root, so it survives a root relocation.
     """
 
