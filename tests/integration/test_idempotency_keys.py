@@ -727,7 +727,7 @@ async def test_the_database_clock_is_read_when_asked_not_when_the_transaction_be
 
 
 @pytest.mark.asyncio
-async def test_one_sweep_deletes_at_most_its_batch_limit(async_db: AsyncSession, test_config: GatewayConfig) -> None:
+async def test_one_sweep_drains_a_backlog_of_many_batches(async_db: AsyncSession, test_config: GatewayConfig) -> None:
     async_db.add(User(user_id=_USER))
     await async_db.commit()
     past = datetime.now(UTC) - timedelta(seconds=1)
@@ -743,13 +743,11 @@ async def test_one_sweep_deletes_at_most_its_batch_limit(async_db: AsyncSession,
             locked_until=past,
             expires_at=past,
         )
-        for index in range(5)
+        for index in range(25)
     )
     await async_db.commit()
     uow = UnitOfWork(async_db)
 
-    deleted = await IdempotencyService(uow, InferenceRepositories.on(uow), test_config).sweep(
-        batch_size=2, max_batches=2
-    )
+    deleted = await IdempotencyService(uow, InferenceRepositories.on(uow), test_config).sweep(batch_size=1)
 
-    assert deleted == 4
+    assert deleted == 25

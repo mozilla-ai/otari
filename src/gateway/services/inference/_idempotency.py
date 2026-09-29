@@ -335,22 +335,20 @@ class IdempotencyService:
         except DATABASE_ERRORS:
             logger.warning("Could not release an idempotency claim; it lapses at its lease", exc_info=True)
 
-    async def sweep(self, *, batch_size: int = 500, max_batches: int = 20) -> int:
-        """Delete up to ``max_batches`` batches of records whose retention has passed, returning how many went.
+    async def sweep(self, *, batch_size: int = 500) -> int:
+        """Delete every record whose retention has passed, returning how many went.
 
         Each batch commits on its own, so a large backlog never holds many rows locked at once.
-        A backlog larger than one sweep drains over the following sweeps.
         """
-        if batch_size < 1 or max_batches < 1:
-            raise ValueError("A sweep needs a positive batch size and batch count")
+        if batch_size < 1:
+            raise ValueError("A sweep needs a positive batch size")
         total = 0
-        for _ in range(max_batches):
+        while True:
             async with self._uow:
                 deleted = await self._keys.delete_expired(await self._keys.get_database_time(), limit=batch_size)
             total += deleted
             if deleted < batch_size:
-                break
-        return total
+                return total
 
 
 def _replay(record: IdempotencyRecord) -> Replay | None:
