@@ -155,7 +155,9 @@ class IdempotencyGuard:
             try:
                 await heartbeat
             except asyncio.CancelledError:
-                pass
+                current = asyncio.current_task()
+                if current is not None and current.cancelling():
+                    raise
             except Exception:
                 # The response is already paid for, so a failed renewal must not lose it.
                 logger.warning("Idempotency claim renewal failed", exc_info=True)

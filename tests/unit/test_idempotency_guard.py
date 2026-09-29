@@ -105,3 +105,26 @@ async def test_the_guardrail_verdict_is_stored_for_a_replay() -> None:
     await guard.complete({"ok": True}, response)
 
     assert GUARDRAILS_RESULT_HEADER in service.complete.await_args.kwargs["headers"]
+
+
+@pytest.mark.asyncio
+async def test_canceling_the_request_while_its_renewal_stops_is_not_swallowed() -> None:
+    async def slow_to_stop(request: IdempotentRequest, claimed: Claimed) -> None:
+        try:
+            await asyncio.sleep(10)
+        finally:
+            await asyncio.sleep(0.2)
+
+    service = MagicMock()
+    service.admit = AsyncMock(return_value=Claimed("token"))
+    service.release = AsyncMock()
+    guard = IdempotencyGuard(_raw_request(), service, "k", keep_alive=slow_to_stop)
+    await guard.admit(endpoint="/v1/chat/completions", user_id="u", api_key_id=None)
+    await asyncio.sleep(0)
+
+    releasing = asyncio.create_task(guard.release())
+    await asyncio.sleep(0.05)
+    releasing.cancel()
+    await asyncio.gather(releasing, return_exceptions=True)
+
+    assert releasing.cancelled()
