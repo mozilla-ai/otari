@@ -1989,7 +1989,6 @@ async def test_combined_standalone_request_domains_narrow_fetch_without_workspac
     assert [rule.value for rule in tool_ctx.web_fetch_policy.blocked] == ["private.docs.example.com"]
 
 
-@pytest.mark.xfail(strict=True, reason="the two refusals carry different details")
 @pytest.mark.asyncio
 async def test_a_disjoint_allow_list_gets_one_refusal_whether_or_not_fetch_is_declared() -> None:
     workspace = ResolvedWebSearchConfig(
