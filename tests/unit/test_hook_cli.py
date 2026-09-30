@@ -2591,6 +2591,19 @@ def _write_verifier(tmp_path: Path, name: str, body: str) -> Path:
     return script
 
 
+# A script for `_warm_verifier` exits at once when its first argument is `warm`.
+_WARM_EXIT = '[ "$1" = warm ] && exit 0\n'
+
+
+def _warm_verifier(script: Path) -> None:
+    """Run a new verifier script once, so a test that times it does not also time its first run.
+
+    The first run of a new executable can be slow on any platform.
+    macOS checks each new file, one at a time, and under parallel load that wait reaches seconds.
+    """
+    subprocess.run([str(script), "warm"], check=True)
+
+
 def test_hook_run_check_verifier_passes_on_real_exit_zero(tmp_path: Path) -> None:
     """No mocking: a real script, run as a real subprocess, exiting 0."""
     _write_verifier(tmp_path, "v.sh", "exit 0")
@@ -2672,7 +2685,7 @@ def test_hook_run_check_verifier_timeout_also_kills_a_background_child(tmp_path:
     the verifier runs in a process group of its own and the timeout kills the
     group.
     """
-    _write_verifier(tmp_path, "v.sh", "sleep 30 &\necho $! > child.pid\nsleep 5\nexit 0")
+    _warm_verifier(_write_verifier(tmp_path, "v.sh", f"{_WARM_EXIT}sleep 30 &\necho $! > child.pid\nsleep 5\nexit 0"))
     # A whole second, not the 0.05s the plain timeout test uses: the script has
     # to reach `echo $!` before the kill, or there is no recorded child to
     # assert about.
@@ -2712,13 +2725,6 @@ def test_hook_run_check_verifier_caps_detail_length(tmp_path: Path) -> None:
     assert len(detail) == hook_cli._HOOK_MAX_CHECK_DETAIL_LENGTH
 
 
-# Wall-clock, so a loaded machine can push five 0.3s subprocesses past the
-# bound while the code under test is doing exactly what it should. Measured
-# locally at roughly one failure in three under load, passing alone. Reruns
-# rather than a looser bound: the bound is the assertion, and widening it far
-# enough to never flake would stop it telling a concurrent run from a
-# sequential one.
-@pytest.mark.flaky(reruns=2, reruns_delay=1)
 def test_verifier_gates_run_concurrently_not_sequentially(tmp_path: Path) -> None:
     """Five verifier gates, each a real script sleeping ~0.3s, must finish in
     well under 5 * 0.3s: `_hook_collect_check_verdicts` runs verifiers through a
@@ -2729,7 +2735,7 @@ def test_verifier_gates_run_concurrently_not_sequentially(tmp_path: Path) -> Non
     gate_count = 5
     per_gate_seconds = 0.3
     for i in range(gate_count):
-        _write_verifier(tmp_path, f"v{i}.sh", f"sleep {per_gate_seconds}\nexit 0")
+        _warm_verifier(_write_verifier(tmp_path, f"v{i}.sh", f"{_WARM_EXIT}sleep {per_gate_seconds}\nexit 0"))
     gates_yaml = "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n" + "".join(
         f"  - id: g{i}\n    type: verifier\n    runs: [stop.verifier]\n    enforcement: required\n"
         f"    verifier: v{i}.sh\n    message: m{i}\n"
