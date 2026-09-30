@@ -138,9 +138,10 @@ warning and the regeneration still succeeds. Where branch protection requires an
 approving review, the merge stays queued until someone approves rather than
 merging unattended.
 
-**Required secret:** `SDK_CODEGEN_TOKEN`, a fine-grained PAT or GitHub App token
-with `Contents:write` and `Pull-requests:write` on the four SDK repos. The default
-`GITHUB_TOKEN` cannot push to other repositories.
+**Required secrets:** `CODEGEN_APP_ID` (the Client ID) and `CODEGEN_APP_KEY` (the
+private key) of the codegen GitHub App. The app is installed on the four SDK repos
+with `Contents:write` and `Pull-requests:write`, and each matrix leg mints a token
+for its own SDK repo. The default `GITHUB_TOKEN` cannot push to other repositories.
 
 ## Post-processing
 

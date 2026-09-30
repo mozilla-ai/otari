@@ -7,9 +7,9 @@ name: SDK Regen PR Staleness
 # repo in sync: opened/updated while any PR is flagged, closed once none are.
 #
 # Reading PRs on the SDK repos needs a token with pull-requests:read on
-# mozilla-ai/otari-sdk-{python,ts,go,rust}; the SDK_CODEGEN_TOKEN used by the
-# codegen workflow already has it. The default GITHUB_TOKEN manages the tracking
-# issue on this repo.
+# mozilla-ai/otari-sdk-{python,ts,go,rust}. The codegen GitHub App mints it from
+# CODEGEN_APP_ID and CODEGEN_APP_KEY. The default GITHUB_TOKEN manages the
+# tracking issue on this repo.
 
 on:
   schedule:
@@ -48,11 +48,21 @@ jobs:
         with:
           python-version: 3.14
 
+      - name: Generate App token for the SDK repos
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.CODEGEN_APP_ID }}
+          private-key: ${{ secrets.CODEGEN_APP_KEY }}
+          owner: mozilla-ai
+          repositories: otari-sdk-python,otari-sdk-ts,otari-sdk-go,otari-sdk-rust
+          permission-pull-requests: read
+
       - name: Check for stale regeneration PRs
         env:
           # SDK repos live outside this repo, so the cross-repo read token is
           # required; the tracking issue on this repo uses GITHUB_TOKEN.
-          GH_TOKEN: ${{ secrets.SDK_CODEGEN_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           OTARI_GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MAX_AGE_DAYS: ${{ github.event.inputs.max_age_days || '7' }}
         # The script is stdlib-only and shells out to the preinstalled gh CLI, so

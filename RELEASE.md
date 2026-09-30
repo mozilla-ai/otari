@@ -113,8 +113,9 @@ release PR body. It does not stop the release.
 
 - `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`, used by `otari-docker.yml` to push
   the image.
-- `SDK_CODEGEN_TOKEN`, used by `otari-sdk-codegen.yml` to open regeneration PRs
-  on the SDK repos.
+- `CODEGEN_APP_ID` and `CODEGEN_APP_KEY`, the Client ID and private key of the
+  codegen GitHub App. `otari-sdk-codegen.yml` uses them to open regeneration PRs
+  on the SDK repos, and `sdk-regen-staleness.yml` uses them to read those PRs.
 - `HOMEBREW_TAP_GITHUB_TOKEN`, used by `otari-homebrew.yml` to push
   `Formula/otari.rb` to `mozilla-ai/homebrew-tap`. It is the org secret mcpd
   and cq publish with, granted per repository, so an org admin has to add this
