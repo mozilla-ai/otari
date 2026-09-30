@@ -217,6 +217,7 @@ class UsageEntry(BaseModel):
     error_message: str | None
     status_code: int | None
     latency_ms: int | None
+    provider_latency_ms: int | None
     source: str
     source_label: str | None
     counts_toward_budget: bool
@@ -271,6 +272,7 @@ class UsageEntry(BaseModel):
             error_message=log.error_message,
             status_code=log.status_code,
             latency_ms=log.latency_ms,
+            provider_latency_ms=log.provider_latency_ms,
             policy_name=log.policy_name,
             selection_reason=log.selection_reason,
             attempt_position=log.attempt_position,

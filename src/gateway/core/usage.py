@@ -12,6 +12,9 @@ as plain integers (rather than relying on ``prompt_tokens_details``) lets the re
 builder forward them uniformly across providers, including Anthropic cache writes.
 """
 
+import math
+from typing import Any
+
 from any_llm.types.completion import CompletionUsage
 
 
@@ -37,6 +40,25 @@ class GatewayUsage(CompletionUsage):
     convention (see ``_compute_cost`` in ``_pipeline.py``). Defaults to ``True`` so a
     plain ``CompletionUsage`` and every OpenAI-style path need no change.
     """
+
+    @staticmethod
+    def external_extras(usage: CompletionUsage) -> dict[str, Any]:
+        """``usage.model_extra`` with any key that names a ``GatewayUsage`` field dropped.
+
+        A provider is free to put anything under ``model_extra`` (any-llm forwards
+        the wire response's extra keys verbatim), and this carrier is built by
+        splatting that dict as constructor kwargs. Without this filter, a
+        provider-supplied key that happens to share a name with one of our own
+        accounting fields (``cache_write_tokens``, ``cache_write_1h_tokens``,
+        ``cache_tokens_in_prompt``, ...) would set that field directly instead of
+        being forwarded as an inert extra, which is a billing-integrity hole, not a
+        cosmetic one. Callers that also pass explicit values for some of these
+        fields should still list them explicitly after merging this in; this only
+        strips names that could otherwise sneak through unrequested.
+        """
+        return {
+            k: v for k, v in (usage.model_extra or {}).items() if k not in GatewayUsage.model_fields
+        }
 
     @classmethod
     def from_completion_usage(
@@ -66,7 +88,12 @@ class GatewayUsage(CompletionUsage):
             cache_write_1h_tokens = cache_write_1h_tokens_of(usage)
         if cache_tokens_in_prompt is None:
             cache_tokens_in_prompt = cache_tokens_in_prompt_of(usage)
-        return cls(
+        # Forward any-llm's own extras (otari#337) so provider_latency_ms_of can
+        # still read them, minus anything that would collide with one of our own
+        # fields (see external_extras); explicit fields below are still listed so
+        # the cache counts resolved above always win regardless of the filter.
+        fields = cls.external_extras(usage)
+        fields.update(
             prompt_tokens=usage.prompt_tokens,
             completion_tokens=usage.completion_tokens,
             total_tokens=usage.total_tokens,
@@ -77,6 +104,7 @@ class GatewayUsage(CompletionUsage):
             cache_write_1h_tokens=cache_write_1h_tokens,
             cache_tokens_in_prompt=cache_tokens_in_prompt,
         )
+        return cls(**fields)
 
 
 def cache_read_tokens_of(usage: CompletionUsage) -> int:
@@ -116,3 +144,49 @@ def cache_tokens_in_prompt_of(usage: CompletionUsage) -> bool:
     if isinstance(usage, GatewayUsage):
         return usage.cache_tokens_in_prompt
     return True
+
+
+# Provider-specific field(s) any-llm leaves in ``usage.model_extra`` that sum to
+# actual compute time, and the multiplier that converts the sum's unit to
+# milliseconds (otari#337). Absent here means "not reported": most providers
+# expose no server-side timing in the response body at all.
+#
+# Ollama's own ``total_duration`` is the whole server-side request, including
+# ``load_duration`` (loading the model into memory), which dominates on a cold
+# model and is not compute time in the sense this column reports for Groq.
+# any-llm forwards ``prompt_eval_duration`` and ``eval_duration`` separately
+# (see any_llm.providers.ollama.utils._extract_ollama_timing_details); their
+# sum is Ollama's actual prompt+generation compute time, excluding load.
+_PROVIDER_LATENCY_FIELDS: dict[str, tuple[tuple[str, ...], float]] = {
+    "groq": (("total_time",), 1_000.0),  # seconds
+    "ollama": (("prompt_eval_duration", "eval_duration"), 1e-6),  # nanoseconds
+}
+
+
+def provider_latency_ms_of(usage: CompletionUsage, provider: str | None) -> int | None:
+    """Best-effort provider-reported compute time for ``provider``, in ms.
+
+    ``None`` when the provider is not in the table, any of its fields is
+    absent, negative, or not a plain finite number: this only enriches a
+    row and must never raise or affect billing.
+    """
+    if provider is None:
+        return None
+    field = _PROVIDER_LATENCY_FIELDS.get(provider)
+    if field is None:
+        return None
+    keys, to_ms = field
+    extras = usage.model_extra or {}
+    raw_values: list[int | float] = []
+    for key in keys:
+        raw = extras.get(key)
+        if isinstance(raw, bool) or not isinstance(raw, int | float) or raw < 0:
+            return None
+        raw_values.append(raw)
+    try:
+        scaled = sum(raw_values) * to_ms
+    except OverflowError:
+        return None
+    if not math.isfinite(scaled):
+        return None
+    return round(scaled)

@@ -16212,6 +16212,17 @@
             ],
             "title": "Provider"
           },
+          "provider_latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Latency Ms"
+          },
           "request_group_id": {
             "anyOf": [
               {
@@ -16323,6 +16334,7 @@
           "error_message",
           "status_code",
           "latency_ms",
+          "provider_latency_ms",
           "source",
           "source_label",
           "counts_toward_budget",
@@ -16615,6 +16627,17 @@
             ],
             "title": "Provider"
           },
+          "provider_latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Latency Ms"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -16660,7 +16683,8 @@
           "cost",
           "status",
           "error_message",
-          "latency_ms"
+          "latency_ms",
+          "provider_latency_ms"
         ],
         "title": "UsageLogResponse",
         "type": "object"
