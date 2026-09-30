@@ -610,10 +610,7 @@ class _ProviderHandler(_RecordingHandler):
 
         A tool call arrives split across fragments, with the name in the first
         and the arguments in a later one, because that is what a real provider
-        sends and what the gateway's slot accumulator has to survive. Nothing
-        walks that branch yet: the leg that does is held back by otari#1504,
-        where a streamed hybrid tool loop truncates its own stream, and lands
-        with that fix.
+        sends and what the gateway's slot accumulator has to survive.
         """
         base = {
             "id": "chatcmpl-hybrid-smoke-stream",
@@ -1731,6 +1728,47 @@ def run_streaming_completion(base_url: str, fakes: Fakes) -> None:
     log(f"A streamed completion delivered SSE, injected include_usage, and reported ttft_ms={ttft}")
 
 
+def run_streaming_tool_loop(base_url: str, fakes: Fakes) -> None:
+    """A streamed request whose tool the gateway runs, on one unbroken stream.
+
+    Chat Completions has no vocabulary for a server-side tool call, so the
+    gateway's own call is filtered out of the caller's stream (docs/tools.md).
+    The caller must therefore see the answer and no tool call at all, which is
+    the opposite of what a leaked internal turn would look like.
+    """
+    calls_before = len(fakes.mcp.recorder.all("tools/call"))
+    status, headers, raw, frames = _stream_request(
+        f"{base_url}{API_ROOT}/chat/completions",
+        headers={KEY_HEADER: USER_TOKEN_OK},
+        payload={
+            "model": f"openai:{fakes.openai_model}",
+            "messages": [{"role": "user", "content": f"Use the {MCP_TOOL} tool with term 'smoke'."}],
+            "tool_choice": {"type": "function", "function": {"name": MCP_TOOL}},
+            "mcp_servers": [{"name": "smoke", "url": fakes.mcp.mcp_url}],
+            "stream": True,
+        },
+    )
+    _expect(status, 200, f"POST {API_ROOT}/chat/completions streaming an MCP tool", frames)
+    _check("text/event-stream" in headers.get("content-type", ""), f"not an SSE response: {headers!r}")
+    _check(bool(raw) and raw[-1] == "[DONE]", f"the streamed tool loop did not terminate with [DONE]: {raw[-3:]!r}")
+    fakes.note_dispatched(headers, "the streamed MCP completion")
+
+    calls = fakes.mcp.recorder.all("tools/call")[calls_before:]
+    _check(len(calls) >= 1, "the gateway did not run the tool during the stream")
+    _check(calls[0].body.get("name") == MCP_TOOL, f"tools/call named {calls[0].body.get('name')!r}")
+
+    leaked = [
+        choice
+        for frame in frames
+        for choice in frame.get("choices") or []
+        if (choice.get("delta") or {}).get("tool_calls")
+    ]
+    _check(not leaked, f"the gateway's own tool call reached the caller's stream: {leaked!r}")
+    if not fakes.live:
+        _check(REPLY == _streamed_content(frames), f"the stream did not carry the answer: {raw!r}")
+    log("A streamed tool loop ran the tool mid-stream and kept the gateway's own call off the wire")
+
+
 def check_every_attempt_was_reported(fakes: Fakes) -> None:
     """Exactly one usage report per dispatched attempt, and none for anything else.
 
@@ -1776,6 +1814,7 @@ STEPS: tuple[Callable[[str, Fakes], None], ...] = (
     run_native_code_execution,
     run_native_web_search,
     run_streaming_completion,
+    run_streaming_tool_loop,
     lambda base_url, fakes: check_every_attempt_was_reported(fakes),
 )
 
