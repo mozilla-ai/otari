@@ -20,6 +20,7 @@ from gateway.core.addresses import normalized_address
 from gateway.core.env import otari_env
 from gateway.core.settings.budgets import BudgetSettings
 from gateway.core.settings.feedback import FeedbackSettings
+from gateway.core.settings.inference import InferenceSettings
 from gateway.core.settings.pricing import PricingSettings
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
@@ -360,7 +361,7 @@ class RelyingParty(NamedTuple):
 
 # Gotcha: fields are ordered last base first, then this class's own.
 # The settings view keeps that order, so moving a base reorders it.
-class GatewayConfig(BudgetSettings, PricingSettings, FeedbackSettings, BaseSettings):
+class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, FeedbackSettings, BaseSettings):
     """Gateway configuration with support for YAML files and environment variables."""
 
     model_config = SettingsConfigDict(

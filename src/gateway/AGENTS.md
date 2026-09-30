@@ -10,8 +10,8 @@ artifacts. [ARCHITECTURE.md](../../ARCHITECTURE.md) owns the extension boundary.
 [The modular monolith](../../ARCHITECTURE.md#the-modular-monolith) names the
 target shape and its import rules,
 [Layering](../../.github/skills/backend-standards/SKILL.md#layering) gives the
-rules for each layer, and [docs/domains.md](../../docs/domains.md) maps every
-module to its domain.
+rules for each layer, and [docs/domains.md](../../docs/domains.md) says what each
+domain owns.
 
 ## Ports and composition
 

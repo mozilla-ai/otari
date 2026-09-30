@@ -41,8 +41,9 @@ COPY pyproject.toml uv.lock ./
 COPY src ./src
 COPY cli ./cli
 # The e2b extra lets `sandbox_provider: e2b` work from the published image; the
-# adapter imports it only when that provider is selected.
-RUN uv sync --frozen --no-dev --extra e2b
+# adapter imports it only when that provider is selected. The metrics extra keeps
+# a Prometheus scrape one config flag away rather than a reinstall.
+RUN uv sync --frozen --no-dev --extra e2b --extra metrics
 
 FROM python:3.14-slim AS runtime
 

@@ -1,0 +1,18 @@
+schema_version: "1.0"
+policy:
+  id: otari/architecture/adapter-bound-without-a-factory
+  description: The composition root binds each adapter through a named factory typed as the port.
+
+gates:
+
+  - id: adapter-bound-without-a-factory
+    type: judge
+    runs: [stop.session]
+    enforcement: advisory
+    when_changed:
+      - "src/gateway/container.py"
+    rubric: >-
+      Judge only code this diff adds to src/gateway/container.py. Fail if it binds an
+      adapter in build_container without a named factory function whose return type is
+      the port. This is step 5 of "How to add a capability" in ARCHITECTURE.md. Pass if
+      the diff binds no adapter.

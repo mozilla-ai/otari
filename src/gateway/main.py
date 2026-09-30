@@ -15,7 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from typing_extensions import override
 
 from gateway import features
-from gateway.api.deps import build_file_service, set_config
+from gateway.api.deps import build_file_service, build_idempotency_service, set_config
 from gateway.api.main import register_routers
 from gateway.container import Container, build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
@@ -39,6 +39,7 @@ from gateway.services.code_execution.container_sweeper import run_sandbox_contai
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.files import run_file_sweeper
+from gateway.services.inference import run_idempotency_sweeper
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
 from gateway.services.model_catalog_service import (
@@ -191,6 +192,13 @@ def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutin
     )
 
 
+def _start_idempotency_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None]:
+    """Return the idempotency record sweep, which runs even while the header is ignored so stored records expire."""
+    return run_idempotency_sweeper(
+        config.idempotency_sweep_interval_sec, lambda uow: build_idempotency_service(uow, config)
+    )
+
+
 def _start_container_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None] | None:
     """Return the sandbox container sweep, or None when no sandbox is held past its request."""
     if not config.sandbox_configured() or config.sandbox_container_idle_ttl_sec <= 0:
@@ -257,6 +265,8 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     # The provider reclaims a held sandbox on its own timer; this drops the
     # rows that named it once nobody can resume them.
     _LifespanWorker("sandbox container sweep", _start_container_sweeper),
+    # Stored responses hold generated content, so they go once their retention passes.
+    _LifespanWorker("idempotency sweep", _start_idempotency_sweeper),
 )
 
 
@@ -351,6 +361,27 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             vary_values.add("Authorization")
             response.headers["Vary"] = ", ".join(sorted(vary_values))
         return response
+
+
+def _validate_metrics_support(config: GatewayConfig) -> None:
+    """Refuse to start when metrics are asked for but the extra is not installed.
+
+    ``prometheus-client`` is an optional extra, and without it the metric objects
+    in :mod:`gateway.metrics` fall back to no-ops. Registering ``/metrics`` on top
+    of those would answer a scrape with an empty body, which reads as a broken
+    exporter rather than a missing install, so say which it is here instead.
+    """
+    if not config.enable_metrics:
+        return
+
+    from gateway.metrics import PROMETHEUS_AVAILABLE
+
+    if not PROMETHEUS_AVAILABLE:
+        msg = (
+            "enable_metrics is set but prometheus-client is not installed. "
+            "Install it with: pip install gateway[metrics]"
+        )
+        raise ValueError(msg)
 
 
 def _validate_platform_config(config: GatewayConfig) -> None:
@@ -681,6 +712,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
     _validate_platform_config(config)
     _warn_if_hosted_has_no_data_plane(config)
+    _validate_metrics_support(config)
     # A set-but-invalid OTARI_SECRET_KEY must not silently pass startup and then
     # break provider-credential storage at request time. Fail fast here instead.
     validate_secret_key()

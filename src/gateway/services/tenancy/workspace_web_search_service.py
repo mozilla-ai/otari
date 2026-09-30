@@ -1,56 +1,34 @@
-"""A workspace's configuration over the deployment-wide web-search backend.
+"""A workspace's limits on the deployment-wide web search backend.
 
-The backend is an operator concern and stays one: ``web_search_url`` names it,
-and any credential belongs to the adapter sitting in front of it, so nothing
-here can point a workspace somewhere else. What a row decides is *who on this
-deployment may search, and how far their searches may reach*.
+The backend is an operator concern and stays one, so nothing here can point a workspace somewhere else.
+A workspace's policy decides who on this deployment may search, and how far their searches may reach.
 
-Composition follows the rule in ``src/gateway/AGENTS.md`` (#655, settled in
-#678): a workspace row may veto and may refine, never grant. So
+A policy may veto and may narrow, and it never grants.
+:func:`narrow_web_search_tool_entry` narrows one Search declaration:
 
-* ``enabled=False`` refuses ``otari_web_search`` for the workspace;
 * ``max_results`` is floored against what the request would otherwise get,
-  which is the request's own value or, failing that, the deployment's, so a
-  workspace ceiling can only shrink a search;
-* ``blocked_domains`` is *added* to the request's own block-list, and
-  ``allowed_domains`` is *intersected* with the request's, so neither list can
-  be shed by a request that sends one of its own;
-* ``purpose_hint`` fills in only when the request named none;
-* and **no row means no narrowing**, which is what makes a deployment that
-  configures nothing behave exactly as it did.
+  which is the request's own value or the deployment's default.
+* ``blocked_domains`` is added to the request's own block-list.
+* ``allowed_domains`` is intersected with the request's by domain suffix,
+  and a request whose list overlaps the workspace's nowhere is refused.
+* ``purpose_hint`` fills in only when the request named none.
 
-That parts company with the hybrid path in ``prepare_gateway_tools``, which
-treats the policy it resolves from otari.ai as a set of *defaults* a request
-overrides. The precedence there is the platform's own contract and is left
-alone; the rule above is this repository's, and it is the stricter of the two:
-under default-only precedence a request could shed a workspace's block-list
-simply by sending a block-list of its own, which is a guardrail that fails open.
+``provider_options`` is merged per key with the request winning.
+It is an opaque mapping of backend options, so no narrowing relation holds between two values of it.
 
-``provider_options`` is the one field that keeps the hybrid precedence, merged
-per key with the request winning. It is an opaque bag forwarded to the backend
-adapter rather than something this gateway enforces, so there is no narrowing
-relation between two values of it to apply.
+Reading or writing a stored policy requires an owner or admin of the workspace or of its organization.
+Reads are gated as well as writes, because the row is the workspace's posture and not one member's allowance.
 
-The CRUD half is master-key routed (``routes/workspace_web_search.py``) and
-role-gated per workspace: an organization owner/admin, or an owner/admin of the
-workspace itself, may read *and* write it. Reads are gated for the same reason
-``workspace_code_execution_policy_service`` gates them: the row is the
-workspace's posture, not one member's allowance. It is looser than the hosted
-service, which admits organization owners/admins only, because
-``authorization.require_workspace_management_access`` is the gate every other
-per-workspace surface in this repository uses.
-
-The request-path half is :func:`resolve_workspace_web_search_config` plus the
-pure :func:`narrow_web_search_tool_entry`, neither of which takes an identity:
-the caller has already authenticated, and the workspace comes off the key,
-never off a header (``services/workspace_scope``).
+:func:`resolve_workspace_web_search_config` reads a stored row.
+:func:`read_web_search_policy` reads a control plane's answer.
+None of them takes an identity, because the workspace comes from the authenticated key.
 """
 
 from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass
+from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -59,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.exceptions.tools_exceptions import WorkspaceWebSearchDomainsExcludedError
 from gateway.models.tenancy import User, Workspace
-from gateway.models.tools import WorkspaceWebSearchConfig
+from gateway.models.tools import ResolvedWebSearchConfig, WorkspaceWebSearchConfig
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.web_retrieval_backend import MAX_RESULTS_CAP
@@ -82,6 +60,7 @@ MAX_WEB_SEARCH_DOMAINS = 100
 _MAX_DOMAINS = MAX_WEB_SEARCH_DOMAINS
 _MAX_PROVIDER_OPTION_KEYS = 30
 _MAX_PROVIDER_OPTIONS_BYTES = 4096
+_MAX_PURPOSE_HINT_LENGTH = 2048
 # The longest a DNS name can be. Not a policy, just the point past which a
 # string cannot be a host and is therefore a mistake worth naming at the write.
 _MAX_DOMAIN_LENGTH = 253
@@ -176,7 +155,7 @@ class WorkspaceWebSearchConfigUpdate(BaseModel):
     )
     purpose_hint: str | None = Field(
         default=None,
-        max_length=2048,
+        max_length=_MAX_PURPOSE_HINT_LENGTH,
         description="Search only: hint used when a request declares otari_web_search without one of its own",
     )
     allowed_domains: list[str] | None = Field(
@@ -268,23 +247,6 @@ class WorkspaceWebSearchConfigPublic(BaseModel):
         )
 
 
-@dataclass(frozen=True)
-class ResolvedWebSearchConfig:
-    """What the request path reads off a stored configuration.
-
-    A value type rather than the ORM row, so the admission check cannot lazily
-    touch the session after it has moved on, and so the tool context carries no
-    ORM identity into a streaming response that outlives the request handler.
-    """
-
-    enabled: bool
-    max_results: int | None
-    purpose_hint: str | None
-    allowed_domains: tuple[str, ...] | None
-    blocked_domains: tuple[str, ...] | None
-    provider_options: dict[str, Any] | None
-
-
 async def resolve_workspace_web_search_config(
     db: AsyncSession,
     workspace_id: uuid.UUID,
@@ -305,6 +267,40 @@ async def resolve_workspace_web_search_config(
         allowed_domains=_as_tuple(config.allowed_domains, stored=True),
         blocked_domains=_as_tuple(config.blocked_domains, stored=True),
         provider_options=config.provider_options,
+        authorized_tools=None,
+    )
+
+
+def read_web_search_policy(answer: Mapping[str, Any]) -> ResolvedWebSearchConfig:
+    """Read the control plane's answer for one workspace's web search policy.
+
+    Raises ``ValueError`` when a recognized field is malformed, so a policy that cannot be read fails closed.
+    """
+    enabled = answer.get("enabled")
+    if not isinstance(enabled, bool):
+        raise ValueError("enabled must be a boolean")
+    max_results = answer.get("max_results")
+    if max_results is not None and (
+        not isinstance(max_results, int) or isinstance(max_results, bool) or not 1 <= max_results <= _MAX_RESULTS
+    ):
+        raise ValueError(f"max_results must be an integer from 1 to {_MAX_RESULTS}")
+    purpose_hint = answer.get("purpose_hint")
+    if purpose_hint is not None and (
+        not isinstance(purpose_hint, str) or len(purpose_hint) > _MAX_PURPOSE_HINT_LENGTH
+    ):
+        raise ValueError(f"purpose_hint must be a string of at most {_MAX_PURPOSE_HINT_LENGTH} characters")
+    provider_options = answer.get("provider_options")
+    if provider_options is not None and not isinstance(provider_options, dict):
+        raise ValueError("provider_options must be an object")
+    provider_options = _check_provider_options(provider_options)
+    return ResolvedWebSearchConfig(
+        enabled=enabled,
+        max_results=max_results,
+        purpose_hint=_blank_to_none(purpose_hint),
+        allowed_domains=_answer_domains(answer.get("allowed_domains"), "allowed_domains"),
+        blocked_domains=_answer_domains(answer.get("blocked_domains"), "blocked_domains"),
+        provider_options=provider_options,
+        authorized_tools=None,
     )
 
 
@@ -323,7 +319,7 @@ def narrow_web_search_tool_entry(
     the caller knows which error shape the request format wants.
 
     ``baseline_max_results`` is how many results this request would get without
-    a workspace row at all (``routes/_tools.web_search_max_results_baseline``:
+    a workspace row at all (``web_search_max_results_baseline``:
     the deployment's own setting, or the backend's built-in). The workspace
     ceiling is floored against it and not merely written in, because writing it
     in would let a workspace whose ceiling sits above the operator's *raise* the
@@ -404,6 +400,23 @@ def _as_tuple(value: list[str] | None, *, stored: bool = False) -> tuple[str, ..
             continue
         if host not in hosts:
             hosts.append(host)
+    return tuple(hosts) or None
+
+
+def _answer_domains(value: Any, field: str) -> tuple[str, ...] | None:
+    """Canonicalize a domain list from the control plane's answer, refusing any entry that cannot be enforced."""
+    if value is None:
+        return None
+    if not isinstance(value, list) or len(value) > _MAX_DOMAINS:
+        raise ValueError(f"{field} must be a list of at most {_MAX_DOMAINS} domains")
+    hosts: dict[str, None] = {}
+    for raw in value:
+        if not isinstance(raw, str):
+            raise ValueError(f"{field} must contain only strings")
+        host = _canonical_host(raw)
+        if len(host) > _MAX_DOMAIN_LENGTH:
+            raise ValueError(f"a domain may be at most {_MAX_DOMAIN_LENGTH} characters")
+        hosts.setdefault(host, None)
     return tuple(hosts) or None
 
 

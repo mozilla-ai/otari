@@ -14,7 +14,7 @@ distinction).
 
 Standalone-only, like every other non-completion router. Hybrid mode could not
 answer this honestly: there the platform owns the per-workspace tool policy
-(``_resolve_platform_web_search``), so a tool this gateway has configured may
+(``WebSearchPolicyPort``), so a tool this gateway has configured may
 still be refused with a 403 for the caller asking. Reporting ``available: true``
 from local config alone would be worse than not answering.
 """

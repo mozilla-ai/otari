@@ -4,6 +4,28 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.13.0](https://github.com/mozilla-ai/otari/releases/tag/v0.13.0) - 2026-09-29
+
+
+
+### Bug Fixes
+
+- **dashboard:** List every provider in the add-provider picker in [#1784](https://github.com/mozilla-ai/otari/pull/1784) by [@tbille](https://github.com/tbille) ([`adf42c2`](https://github.com/mozilla-ai/otari/commit/adf42c21ced030ac03196f070cd34fb96f7c8bcf))
+- **mcp:** Carry the MCP resolution cause on the error in [#1738](https://github.com/mozilla-ai/otari/pull/1738) by [@peteski22](https://github.com/peteski22) ([`6a8bd8d`](https://github.com/mozilla-ai/otari/commit/6a8bd8d15fa359cd441c2c4a73244478c9a5d6b7))
+- **tools:** Accumulate streaming tool-loop usage across rounds in [#1789](https://github.com/mozilla-ai/otari/pull/1789) by [@AloysJehwin](https://github.com/AloysJehwin) ([`e266798`](https://github.com/mozilla-ai/otari/commit/e26679887afd1334f83d9b286b6ab5e0dc970790))
+- **catalog:** Label hosted offerings hosted and BYO keys "org key" in [#1698](https://github.com/mozilla-ai/otari/pull/1698) by [@tbille](https://github.com/tbille) ([`246fee1`](https://github.com/mozilla-ai/otari/commit/246fee10c2e941ca13a4c5a625e244bd20c0ab90))
+
+
+### Features
+
+- **providers:** Deprecate calling an undeclared provider through its env var in [#1736](https://github.com/mozilla-ai/otari/pull/1736) by [@daavoo](https://github.com/daavoo) ([`23609e3`](https://github.com/mozilla-ai/otari/commit/23609e3dc28004332f7f7cd4a09ac3921b034b27))
+- **pricing:** Surface unpriced usage to operators in [#1634](https://github.com/mozilla-ai/otari/pull/1634) by [@hasangzl](https://github.com/hasangzl) ([`9085b01`](https://github.com/mozilla-ai/otari/commit/9085b014d80437f149fcc5dca57d90f74edcfe17))
+- **organizations:** Invite several members at once in [#1759](https://github.com/mozilla-ai/otari/pull/1759) by [@daavoo](https://github.com/daavoo) ([`30b8612`](https://github.com/mozilla-ai/otari/commit/30b86123475f1954fdb6239246bb32e6061cb72b))
+- **tools:** Add an Otari-Web-Search header to run a provider search keyword on the gateway in [#1642](https://github.com/mozilla-ai/otari/pull/1642) by [@daavoo](https://github.com/daavoo) ([`f360105`](https://github.com/mozilla-ai/otari/commit/f36010557d576c979afaaa1ac6f0f732cedf7dd5))
+- **dashboard:** Default a new key's expiry time to midnight in [#1791](https://github.com/mozilla-ai/otari/pull/1791) by [@tbille](https://github.com/tbille) ([`de9e119`](https://github.com/mozilla-ai/otari/commit/de9e11907383775b2f18968f3d31839e1e2e13c4))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.12.1...v0.13.0
 ## [0.12.1](https://github.com/mozilla-ai/otari/releases/tag/v0.12.1) - 2026-09-25
 
 

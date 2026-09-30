@@ -44,6 +44,11 @@ Enforces:
     gateway.cli inside a find_spec guard to attach the server commands when
     the gateway is installed too. The member lives outside src/ on purpose:
     rule 10 keeps src/ to the gateway, and this one keeps the CLI out of it.
+19. Domain names: a package in services/ or repositories/, a module in
+    schemas/ and a module in exceptions/ take their domain from their name, so
+    each name is a domain that docs/domains.md gives a section. An exceptions
+    module is named <domain>_exceptions.py. The names that do not match yet are
+    on a baseline, and the baseline only shrinks.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -54,6 +59,7 @@ Exit codes:
 """
 
 import ast
+import re
 import sys
 from pathlib import Path
 from typing import TypedDict
@@ -843,6 +849,97 @@ def check_flat_modules(src_root: Path) -> list[str]:
     return violations
 
 
+DOMAINS_DOC = "docs/domains.md"
+DOMAINS_SECTION = "## The domains"
+DOMAIN_HEADING = re.compile(r"^### (.*)$", re.MULTILINE)
+DOMAIN_NAME = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+SHARED_HEADING = "Shared"
+# These names do not match a domain yet. The baseline only shrinks, so a reviewer refuses a new entry.
+DOMAIN_NAME_BASELINE = (
+    "gateway/exceptions/budget_exceptions.py",
+    "gateway/exceptions/control_plane_exceptions.py",
+    "gateway/repositories/code_execution/",
+    "gateway/repositories/tenancy/",
+    "gateway/services/code_execution/",
+    "gateway/services/control_plane/",
+    "gateway/services/mail/",
+    "gateway/services/tenancy/",
+)
+# These modules belong to no domain. The set grows when the shared set does.
+SHARED_EXCEPTION_MODULES = ("gateway/exceptions/_base.py", "gateway/exceptions/shared_exceptions.py")
+
+
+def documented_domains(doc_text: str) -> tuple[set[str], list[str]]:
+    """Return the domains the page gives a section, and each problem with its headings."""
+    start = re.search(rf"^{DOMAINS_SECTION}$", doc_text, re.MULTILINE)
+    if start is None:
+        return set(), [f"{DOMAINS_DOC} has no '{DOMAINS_SECTION}' section"]
+    end = re.compile(r"^## ", re.MULTILINE).search(doc_text, start.end())
+    section = doc_text[start.end() : end.start() if end else len(doc_text)]
+    domains: set[str] = set()
+    violations: list[str] = []
+    for heading in DOMAIN_HEADING.findall(section):
+        if heading.casefold() == SHARED_HEADING.casefold():
+            continue
+        name = heading.replace("-", "_")
+        if not DOMAIN_NAME.fullmatch(heading):
+            violations.append(f"{DOMAINS_DOC} heading '### {heading}' is not a domain name in lower case with hyphens")
+        elif name in domains:
+            violations.append(f"{DOMAINS_DOC} names the domain '{heading}' twice")
+        domains.add(name)
+    if not domains and not violations:
+        violations.append(f"{DOMAINS_DOC} gives no domain a section")
+    return domains, violations
+
+
+def _domain_named_locations(src_root: Path) -> tuple[dict[str, str], list[str]]:
+    """Return the domain each domain package and domain module is named for, and each misnamed exceptions module."""
+    locations: dict[str, str] = {}
+    misnamed: list[str] = []
+    for layer in DOMAIN_PACKAGE_LAYERS:
+        layer_root = src_root / layer
+        if layer_root.is_dir():
+            for package in sorted(layer_root.iterdir()):
+                if (package / "__init__.py").is_file():
+                    locations[f"{layer}/{package.name}/"] = package.name
+    schemas_root = src_root / "gateway" / "schemas"
+    for module in sorted(schemas_root.glob("*.py")):
+        if module.name != "__init__.py":
+            locations[f"gateway/schemas/{module.name}"] = module.stem
+    exceptions_root = src_root / "gateway" / "exceptions"
+    for module in sorted(exceptions_root.glob("*.py")):
+        relative_path = f"gateway/exceptions/{module.name}"
+        if module.name == "__init__.py" or relative_path in SHARED_EXCEPTION_MODULES:
+            continue
+        if module.stem.endswith("_exceptions"):
+            locations[relative_path] = module.stem.removesuffix("_exceptions")
+        elif relative_path not in DOMAIN_NAME_BASELINE:
+            misnamed.append(f"{relative_path} is not named <domain>_exceptions.py")
+    return locations, misnamed
+
+
+def check_domain_names(src_root: Path, doc_path: Path) -> list[str]:
+    """Check that each domain package and domain module names a domain the domains page gives a section."""
+    if not doc_path.is_file():
+        return [f"{DOMAINS_DOC} not found; the domain names are read from its '{DOMAINS_SECTION}' section"]
+    domains, violations = documented_domains(doc_path.read_text(encoding="utf-8"))
+    locations, misnamed = _domain_named_locations(src_root)
+    violations.extend(misnamed)
+    violations.extend(
+        f"{relative_path} names no domain in {DOMAINS_DOC}; "
+        "name it for a domain there, or give the new domain a section"
+        for relative_path, name in locations.items()
+        if name not in domains and relative_path not in DOMAIN_NAME_BASELINE
+    )
+    violations.extend(
+        f"{relative_path} is on the domain name baseline but no longer exists or now names a domain; "
+        "remove it from the baseline"
+        for relative_path in DOMAIN_NAME_BASELINE
+        if not (src_root / relative_path).exists() or locations.get(relative_path) in domains
+    )
+    return violations
+
+
 def main() -> int:
     """Run the architecture checks over the gateway package, the light CLI and the OSS test suite."""
     # All must exist: silently skipping one would let its rules (including
@@ -880,6 +977,7 @@ def main() -> int:
     database_violations = check_database_imports(SRC_ROOT)
     transaction_violations = check_transaction_control(SRC_ROOT)
     unit_of_work_violations = check_unit_of_work_construction(SRC_ROOT)
+    domain_name_violations = check_domain_names(SRC_ROOT, REPO_ROOT / DOMAINS_DOC)
 
     if import_violations:
         print("❌ Architecture violations found:\n")
@@ -924,6 +1022,12 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal flat module violations: {len(flat_module_violations)}")
 
+    if domain_name_violations:
+        print("\n❌ Domain name violations:\n")
+        for violation in domain_name_violations:
+            print(f"  {violation}")
+        print(f"\nTotal domain name violations: {len(domain_name_violations)}")
+
     if (
         import_violations
         or naming_violations
@@ -932,6 +1036,7 @@ def main() -> int:
         or transaction_violations
         or unit_of_work_violations
         or flat_module_violations
+        or domain_name_violations
     ):
         print("\n💡 See ARCHITECTURE.md for the intended layering")
         return 1

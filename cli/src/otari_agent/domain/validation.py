@@ -240,14 +240,14 @@ def validate_policy(
     *,
     judge_gate_limit: int,
     verifier_gate_limit: int,
-    probe_verifier: Callable[[str], str | None] | None = None,
+    probe_verifier: Callable[[VerifierGate], str | None] | None = None,
 ) -> tuple[Finding, ...]:
     """Check a parsed guardrail for gates that run without meaning what they say.
 
-    ``probe_verifier`` is given a verifier gate's repo-relative path and
-    returns a problem to report, or ``None`` when the script is fine. Left
-    unset, verifier gates are not checked at all, which is what keeps this
-    module free of the filesystem access such a check needs.
+    ``probe_verifier`` is given a verifier gate and returns a problem to report about its script,
+    or ``None`` when the script is fine.
+    Left unset, verifier gates are not checked at all,
+    which is what keeps this module free of the filesystem access such a check needs.
 
     ``judge_gate_limit`` and ``verifier_gate_limit`` are the caller's own
     per-Stop caps on the two gate types that run something
@@ -332,7 +332,7 @@ def validate_policy(
             findings.extend(_path_gate_blind_spots(gate, spec))
 
         if isinstance(gate, VerifierGate) and probe_verifier is not None:
-            problem = probe_verifier(gate.verifier)
+            problem = probe_verifier(gate)
             if problem is not None:
                 findings.append(Finding("error", gate.id, problem))
 

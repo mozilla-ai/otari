@@ -55,8 +55,6 @@ from gateway.api.routes._passthrough import (
     resolve_passthrough_user_id,
 )
 from gateway.api.routes._pipeline import (
-    WEB_SEARCH_CONFIG_INVALID_DETAIL,
-    WEB_SEARCH_NOT_ENABLED_DETAIL,
     _elapsed_ms,
     failure_status_code,
     log_gateway_rejection,
@@ -64,6 +62,7 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.metered_pricing import quantize_cost
+from gateway.exceptions.tools_exceptions import WebSearchNotEnabledError, WebSearchPolicyResolutionFailure
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
@@ -309,24 +308,23 @@ async def _dispatch_search(
     try:
         workspace_search = await resolve_workspace_web_search_config(db, usage_workspace_id)
     except InvalidStoredWebSearchDomainError as exc:
+        invalid = WebSearchPolicyResolutionFailure.STORED_POLICY_INVALID
         await log_rejection(
-            WEB_SEARCH_CONFIG_INVALID_DETAIL,
+            invalid.message,
             row_model=tool.name,
             row_provider=tool.provider,
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=WEB_SEARCH_CONFIG_INVALID_DETAIL,
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=invalid.message) from exc
     if workspace_search is not None and not workspace_search.enabled:
+        refusal = WebSearchNotEnabledError()
         await log_rejection(
-            WEB_SEARCH_NOT_ENABLED_DETAIL,
+            refusal.message,
             row_model=tool.name,
             row_provider=tool.provider,
             status_code=status.HTTP_403_FORBIDDEN,
         )
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=WEB_SEARCH_NOT_ENABLED_DETAIL)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=refusal.message)
 
     pricing_key = f"{tool.provider}:{tool.name}"
 

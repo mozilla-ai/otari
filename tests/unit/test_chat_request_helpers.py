@@ -349,7 +349,6 @@ def _capped_context(entry: dict[str, Any] | None) -> ToolContext:
         use_sandbox=False,
         sandbox_tool_entry=None,
         code_execution_port=None,
-        sandbox_auth_token=None,
         use_web_search=True,
         web_search_tool_entry=entry,
         web_search_url="http://search.invalid",

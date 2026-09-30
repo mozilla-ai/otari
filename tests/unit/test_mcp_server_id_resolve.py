@@ -12,7 +12,7 @@ import pytest
 from conftest import InstallControlPlane
 from gateway.adapters.mcp_server_adapter import RemoteMcpServers
 from gateway.exceptions.control_plane_exceptions import ControlPlaneError, ControlPlaneRefusedError
-from gateway.exceptions.tools_exceptions import McpServerResolutionFailedError
+from gateway.exceptions.tools_exceptions import McpResolutionFailure, McpServerResolutionFailedError
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.ports.mcp_server_port import McpServerScope
 from gateway.services.tenancy.workspace_mcp_server_service import MAX_MCP_SERVERS_PER_WORKSPACE
@@ -253,24 +253,26 @@ async def test_an_explicit_empty_list_resolves_to_no_servers(
 
 
 @pytest.mark.parametrize(
-    "payload",
+    ("payload", "reason"),
     [
-        pytest.param([], id="the answer is not an object"),
-        pytest.param({}, id="the servers key is absent"),
-        pytest.param({"servers": None}, id="servers is null"),
-        pytest.param({"servers": {"a": 1}}, id="servers is an object"),
-        pytest.param({"servers": "none"}, id="servers is a string"),
+        pytest.param([], McpResolutionFailure.ANSWER_NOT_AN_OBJECT, id="the answer is not an object"),
+        pytest.param({}, McpResolutionFailure.NO_SERVER_LIST, id="the servers key is absent"),
+        pytest.param({"servers": None}, McpResolutionFailure.NO_SERVER_LIST, id="servers is null"),
+        pytest.param({"servers": {"a": 1}}, McpResolutionFailure.NO_SERVER_LIST, id="servers is an object"),
+        pytest.param({"servers": "none"}, McpResolutionFailure.NO_SERVER_LIST, id="servers is a string"),
     ],
 )
 @pytest.mark.asyncio
 async def test_an_unreadable_answer_is_a_resolution_failure(
     payload: Any,
+    reason: McpResolutionFailure,
     monkeypatch: pytest.MonkeyPatch,
     control_plane_transport: InstallControlPlane,
 ) -> None:
     """An unreadable answer never resolves to no servers.
 
     Resolving it to none would serve a request that named stored servers without any of them, and bill it.
+    The refusal carries which unreadable answer it was, because the message a caller sees cannot.
     """
 
     async def fake_post(*, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float) -> Any:
@@ -278,7 +280,9 @@ async def test_an_unreadable_answer_is_a_resolution_failure(
 
     control_plane_transport(fake_post)
 
-    with pytest.raises(McpServerResolutionFailedError):
+    with pytest.raises(McpServerResolutionFailedError) as raised:
         await RemoteMcpServers(_config()).resolve_many(
             _scope("tk"), [uuid.uuid4()]
         )
+
+    assert raised.value.reason is reason

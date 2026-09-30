@@ -46,7 +46,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum, auto
-from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar
+from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar, assert_never
 from urllib.parse import ParseResult, urlparse
 
 from any_llm import LLMProvider
@@ -67,6 +67,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import extract_credential_token, verify_api_key_or_master_key
 from gateway.api.routes._attempts import walk_attempts
 from gateway.api.routes._helpers import apply_input_guardrails, resolve_user_id
+from gateway.api.routes._idempotency import (
+    IDEMPOTENCY_KEY_IN_FLIGHT_DETAIL,
+    IDEMPOTENCY_KEY_REUSED_DETAIL,
+    INVALID_IDEMPOTENCY_KEY_DETAIL,
+    IdempotencyGuard,
+    IdempotentReplay,
+)
 from gateway.api.routes._platform import (
     _DEFAULT_STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS,
     _DEFAULT_STREAM_FIRST_CHUNK_TIMEOUT_MS,
@@ -81,7 +88,6 @@ from gateway.api.routes._platform import (
     _report_platform_usage,
     _resolve_platform_code_execution,
     _resolve_platform_credentials,
-    _resolve_platform_web_search,
     is_provider_billing_error,
     record_abandoned_attempt,
     run_platform_attempts,
@@ -116,7 +122,6 @@ from gateway.api.routes._tools import (
     provider_runs_code_natively,
     resolve_code_executor_preference,
     web_search_header_conflicts,
-    web_search_max_results_baseline,
 )
 from gateway.core.config import ATTEMPT_ID_HEADER, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, release_session
@@ -131,6 +136,9 @@ from gateway.core.usage import (
 )
 from gateway.exceptions.tools_exceptions import (
     McpServerResolutionFailedError,
+    WebAccessRefusedError,
+    WebSearchPolicyResolutionFailedError,
+    WebSearchPolicyResolutionFailure,
     WorkspaceMcpServerNotFoundError,
     WorkspaceWebSearchDomainsExcludedError,
 )
@@ -149,6 +157,7 @@ from gateway.models.usage import UsageLog
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
+from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.rate_limit import RateLimitInfo, check_rate_limit
 from gateway.services.budgets import (
     ZERO,
@@ -171,6 +180,15 @@ from gateway.services.code_execution import (
 )
 from gateway.services.files import ProviderFile, SandboxFileBridge, produced_files_for
 from gateway.services.guardrails import InProcessGuardrail
+from gateway.services.inference import (
+    BlockedCaller,
+    Claimed,
+    InvalidKey,
+    KeyReused,
+    Replay,
+    StillInFlight,
+    UnknownCaller,
+)
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_loop import (
@@ -220,19 +238,14 @@ from gateway.services.tenancy.workspace_code_execution_policy_service import (
     ResolvedCodeExecutionPolicy,
     resolve_workspace_code_execution_policy,
 )
-from gateway.services.tenancy.workspace_web_search_service import (
-    MAX_WEB_SEARCH_DOMAINS,
-    InvalidStoredWebSearchDomainError,
-    narrow_web_search_tool_entry,
-    resolve_workspace_web_search_config,
-)
+from gateway.services.tenancy.workspace_web_search_service import MAX_WEB_SEARCH_DOMAINS
 from gateway.services.tool_usage import (
     MAX_TOOL_NAMES,
     OVERFLOW_TOOL_NAME,
     TOOL_METER_NAMESPACE,
     ToolUsageTally,
 )
-from gateway.services.tools import Dialect, ToolUseBudget, native_rendering
+from gateway.services.tools import Dialect, ToolUseBudget, apply_web_access_policy, native_rendering
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.web_retrieval_backend import (
@@ -243,12 +256,9 @@ from gateway.services.web_retrieval_backend import (
     WebSearchNotReachableError,
 )
 from gateway.services.web_retrieval_policy import (
-    DisjointDomainAllowListsError,
     DomainPolicy,
     DomainRuleValidationError,
     canonicalize_domain_rules,
-    intersect_domain_allow_lists,
-    union_domain_block_lists,
 )
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
@@ -378,12 +388,7 @@ WEB_SEARCH_CONFLICT_DETAIL = (
     "otari_web_search and otari_web_fetch cannot be combined with otari_code_execution or "
     "mcp_servers in the same request yet; pick one."
 )
-WEB_SEARCH_NOT_ENABLED_DETAIL = "web search is not enabled for this workspace"
 WEB_SEARCH_MAX_USES_INVALID_DETAIL = "web_search max_uses must be a non-negative integer"
-WEB_ACCESS_NOT_ENABLED_DETAIL = "web access is not enabled for this workspace"
-MALFORMED_WEB_ACCESS_POLICY_DETAIL = "Authorization service returned a malformed web-access policy"
-WEB_ACCESS_TOOL_NOT_AUTHORIZED_DETAIL = "A requested managed web tool is not authorized for this workspace"
-WEB_ACCESS_DOMAINS_EXCLUDED_DETAIL = "The request and workspace web-access domain policies do not overlap"
 WEB_FETCH_NOT_ENABLED_DETAIL = (
     "otari_web_fetch tool requested but web fetch is disabled on this gateway. "
     "Set OTARI_WEB_FETCH_ENABLED=true on the gateway, or remove otari_web_fetch from `tools`."
@@ -404,8 +409,6 @@ SANDBOX_TOOLS_EXCLUDED_DETAIL = (
 SANDBOX_IMAGE_NOT_ALLOWED_DETAIL = "this workspace's code-execution policy pins a sandbox image that is not allowed"
 MALFORMED_CODE_EXEC_POLICY_DETAIL = "Authorization service returned a malformed code-execution policy"
 CODE_EXEC_POLICY_UNRESOLVABLE_DETAIL = "Code execution policy could not be resolved for this request"
-WEB_SEARCH_CONFIG_UNRESOLVABLE_DETAIL = "Web search configuration could not be resolved for this request"
-WEB_SEARCH_CONFIG_INVALID_DETAIL = "Web search configuration contains an invalid domain rule"
 WEB_SEARCH_REQUEST_DOMAIN_INVALID_DETAIL = (
     "Web search allowed_domains and blocked_domains must each contain at most "
     f"{MAX_WEB_SEARCH_DOMAINS} bare valid hostnames"
@@ -1731,6 +1734,33 @@ async def _resolve_keyed_user_id(
         raise
 
 
+async def _admit_idempotent(
+    guard: IdempotencyGuard, adapter: FormatAdapter[Any, Any], *, user_id: str, api_key_id: str | None
+) -> None:
+    """Claim the request's ``Idempotency-Key``, before anything is reserved against its budget.
+
+    Raises :class:`IdempotentReplay` when the key already holds this request's
+    response, which the route returns as it is.
+    """
+    match await guard.admit(endpoint=adapter.endpoint, user_id=user_id, api_key_id=api_key_id):
+        case None | Claimed():
+            return
+        case Replay() as replay:
+            raise IdempotentReplay(replay)
+        case InvalidKey():
+            raise adapter.error(400, INVALID_IDEMPOTENCY_KEY_DETAIL, ErrorKind.INVALID_REQUEST)
+        case KeyReused():
+            raise adapter.error(422, IDEMPOTENCY_KEY_REUSED_DETAIL, ErrorKind.INVALID_REQUEST)
+        case StillInFlight():
+            raise adapter.error(
+                409, IDEMPOTENCY_KEY_IN_FLIGHT_DETAIL, ErrorKind.INVALID_REQUEST, headers={"Retry-After": "5"}
+            )
+        case UnknownCaller():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User '{user_id}' not found")
+        case BlockedCaller():
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"User '{user_id}' is blocked")
+
+
 async def resolve_request_context(
     *,
     adapter: FormatAdapter[Any, Any],
@@ -1755,6 +1785,7 @@ async def resolve_request_context(
     ]
     | None = None,
     tools: list[dict[str, Any]] | None = None,
+    idempotency: IdempotencyGuard | None = None,
 ) -> RequestContext:
     """Run the shared handler preamble up to (and including) budget pre-debit.
 
@@ -2004,6 +2035,26 @@ async def resolve_request_context(
                     request_id=request_id,
                 )
                 raise adapter.error(403, not_allowed_detail, ErrorKind.PERMISSION)
+
+        if idempotency is not None and session_principal is None:
+            try:
+                await _admit_idempotent(idempotency, adapter, user_id=user_id, api_key_id=api_key_id)
+            except HTTPException as exc:
+                # Only a blocked user is logged: usage_logs.user_id is a foreign key, so an unknown user cannot be.
+                if exc.status_code == status.HTTP_403_FORBIDDEN:
+                    await log_gateway_rejection(
+                        db=db,
+                        log_writer=log_writer,
+                        api_key_id=api_key_id,
+                        user_id=user_id,
+                        model=gate_model,
+                        provider=gate_instance,
+                        endpoint=adapter.endpoint,
+                        detail=str(exc.detail),
+                        status_code=exc.status_code,
+                        started_at=started_at,
+                    )
+                raise
 
         # Derived from the workspace already resolved above, not via
         # `organization_for_key_id` (which would re-derive the same workspace
@@ -2281,7 +2332,6 @@ class ToolContext:
         use_sandbox: bool,
         sandbox_tool_entry: dict[str, Any] | None,
         code_execution_port: CodeExecutionPort | None,
-        sandbox_auth_token: str | None,
         sandbox_exec_timeout_s: int | None = None,
         sandbox_session_image: str | None = None,
         sandbox_allowed_tools: frozenset[str] | None = None,
@@ -2312,7 +2362,6 @@ class ToolContext:
         # The adapter that runs this request's code, resolved from the container
         # by the route. None outside a request, where nothing opens a sandbox.
         self.code_execution_port = code_execution_port
-        self.sandbox_auth_token = sandbox_auth_token
         # The execution budget one sandbox call gets. A workspace policy may only
         # lower it, so the deployment's default is the ceiling rather than a value
         # a policy replaces.
@@ -2377,7 +2426,6 @@ class ToolContext:
             # backend widens it (``_CALLS_PER_ROUND_ALLOWANCE``) rather than
             # taking it as the number of executions a request can make.
             max_executions=self.max_tool_iterations,
-            auth_token=self.sandbox_auth_token,
             image=self.sandbox_session_image,
             allowed_tools=self.sandbox_allowed_tools,
             tally=self.tally,
@@ -2836,55 +2884,44 @@ def _validate_managed_web_declarations(
         raise adapter.error(400, WEB_TOOL_RESERVED_NAME_DETAIL, ErrorKind.INVALID_REQUEST)
 
 
-def _policy_from_domain_values(
-    allowed: list[str] | tuple[str, ...] | None,
-    blocked: list[str] | tuple[str, ...] | None,
-) -> DomainPolicy:
-    return DomainPolicy(
-        allowed=canonicalize_domain_rules(allowed or ()),
-        blocked=canonicalize_domain_rules(blocked or ()),
-    )
+def _policy_failure_status(reason: WebSearchPolicyResolutionFailure) -> int:
+    """The HTTP status a failed web search policy resolution renders as."""
+    match reason:
+        case WebSearchPolicyResolutionFailure.ANSWER_UNREADABLE:
+            return status.HTTP_502_BAD_GATEWAY
+        case WebSearchPolicyResolutionFailure.NO_CALLER_CREDENTIAL | WebSearchPolicyResolutionFailure.NO_WORKSPACE:
+            return status.HTTP_500_INTERNAL_SERVER_ERROR
+        case WebSearchPolicyResolutionFailure.STORED_POLICY_INVALID:
+            return status.HTTP_503_SERVICE_UNAVAILABLE
+        case _:
+            assert_never(reason)
 
 
-def _combined_fetch_policy(
-    workspace_policy: DomainPolicy,
-    search_tool_entry: dict[str, Any] | None,
-) -> DomainPolicy:
-    """Let Search request filters narrow, but never replace, Fetch policy."""
-    request_allowed = None
-    request_blocked = None
-    if search_tool_entry is not None:
-        if search_tool_entry.get("allowed_domains"):
-            request_allowed = canonicalize_domain_rules(search_tool_entry["allowed_domains"])
-        if search_tool_entry.get("blocked_domains"):
-            request_blocked = canonicalize_domain_rules(search_tool_entry["blocked_domains"])
-    workspace_allowed = workspace_policy.allowed or None
-    allowed = intersect_domain_allow_lists(workspace_allowed, request_allowed) or ()
-    blocked = union_domain_block_lists(workspace_policy.blocked or None, request_blocked)
-    return DomainPolicy(allowed=allowed, blocked=blocked)
+@dataclass(frozen=True, kw_only=True)
+class DeclaredTools:
+    """The tools, servers and guardrails one request declared, in terms every wire format shares."""
+
+    code_execution_header: str | None = None
+    container_id: str | None = None
+    guardrail_text: str
+    guardrails: list[GuardrailConfig] | None
+    max_tool_iterations: int | None
+    mcp_server_ids: list[uuid.UUID] | None
+    mcp_servers: list[McpServerConfig] | None
+    tools: list[dict[str, Any]] | None
+    tools_header: str | None
+    web_search_header: str | None = None
 
 
-def _validated_hybrid_web_policy(payload: dict[str, Any]) -> tuple[bool, set[str], DomainPolicy]:
-    """Strictly validate the authorization fields supplied by the control plane."""
-    enabled = payload.get("enabled")
-    # Legacy platforms authorize Search only; an explicit null remains malformed.
-    authorized = payload.get("authorized_tools", [WEB_SEARCH_TOOL_NAME])
-    if not isinstance(enabled, bool):
-        raise ValueError("enabled must be a boolean")
-    if not isinstance(authorized, list) or any(not isinstance(value, str) for value in authorized):
-        raise ValueError("authorized_tools must be a list of strings")
-    domain_values: dict[str, list[str] | None] = {}
-    for field in ("allowed_domains", "blocked_domains"):
-        value = payload.get(field)
-        if value is not None and (
-            not isinstance(value, list)
-            or len(value) > MAX_WEB_SEARCH_DOMAINS
-            or any(not isinstance(item, str) for item in value)
-        ):
-            raise ValueError(f"{field} must be a bounded list of strings")
-        domain_values[field] = value
-    policy = _policy_from_domain_values(domain_values["allowed_domains"], domain_values["blocked_domains"])
-    return enabled, set(authorized), policy
+@dataclass(frozen=True, kw_only=True)
+class ToolBackends:
+    """What runs the tools a request may use."""
+
+    code_execution_port: CodeExecutionPort | None = None
+    mcp_server_port: McpServerPort
+    sandbox_containers: SandboxContainerRegistry | None = None
+    sandbox_files: SandboxFileBridge | None = None
+    web_search_policy_port: WebSearchPolicyPort
 
 
 async def prepare_gateway_tools(
@@ -2892,506 +2929,39 @@ async def prepare_gateway_tools(
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
     response: Response,
-    guardrails: list[GuardrailConfig] | None,
-    guardrail_text: str,
-    tools: list[dict[str, Any]] | None,
-    mcp_servers: list[McpServerConfig] | None,
-    mcp_server_ids: list[uuid.UUID] | None,
-    mcp_server_port: McpServerPort,
-    max_tool_iterations: int | None,
-    tools_header: str | None,
-    code_execution_header: str | None = None,
-    web_search_header: str | None = None,
-    sandbox_files: SandboxFileBridge | None = None,
-    code_execution_port: CodeExecutionPort | None = None,
-    container_id: str | None = None,
-    sandbox_containers: SandboxContainerRegistry | None = None,
+    declared: DeclaredTools,
+    backends: ToolBackends,
 ) -> ToolContext:
-    """Guardrails, MCP server-id resolution, and gateway-tool extraction.
+    """Admit the gateway-run tools one request declared, handling the reservation release on a refusal.
 
-    Caller-requested input guardrails run before any provider/tool dispatch.
-    ``block``-mode flags raise 403 here (provider never called);
-    ``monitor``-mode flags annotate the response header and fall through.
+    The steps run in a fixed order, so a request that breaks two rules always gets the same refusal.
+    MCP servers, the sandbox and the web tools cannot be combined in one request.
+    Every backend URL comes from the deployment and never from the request.
 
-    ``mcp_server_ids`` resolves against the platform in hybrid mode and against
-    the request's own workspace in standalone; see
-    :func:`_resolve_mcp_server_ids`. The sandbox and web_search opt-ins follow the wire shape
-    of Anthropic / OpenAI tool entries; their backend URLs are operator
-    controlled (no per-request URL override, which would be an SSRF surface).
-    The three backends are mutually exclusive for now.
-
-    Any rejection raised here (guardrail block, unresolvable MCP ids,
-    misconfigured or conflicting tool opt-ins) releases the budget
-    reservation taken by :func:`resolve_request_context` before propagating.
+    NOTE: callers must not release the budget reservation after a refusal from here.
     """
     try:
-        try:
-            requested_web_search = parse_web_search_header(web_search_header)
-        except ValueError:
-            raise adapter.error(400, WEB_SEARCH_HEADER_INVALID_DETAIL, ErrorKind.INVALID_REQUEST) from None
-        provider_search_entry = first_provider_web_search_tool(tools)
-        intercept_web_search = _web_search_intercept_enabled(ctx.config)
-        backend_configured = ctx.config.web_search_configured()
-        if (
-            provider_search_entry is not None
-            and backend_configured
-            and web_search_header_conflicts(requested_web_search, intercept=intercept_web_search)
-        ):
-            raise adapter.error(403, WEB_SEARCH_INTERCEPTED_DETAIL, ErrorKind.PERMISSION)
-        claim_web_search = claims_provider_web_search(
-            provider_search_entry,
-            requested=requested_web_search,
-            intercept=intercept_web_search,
-            backend_configured=backend_configured,
-            providers=_candidate_provider_names(ctx),
-            dialect=adapter.name,
-        )
-        _validate_managed_web_declarations(
-            adapter,
-            tools,
-            intercept_web_search=claim_web_search,
-        )
-
-        # The organization's and the policy's guardrails are merged in here
-        # rather than at each route, so every completion endpoint enforces a
-        # mandate identically and none can forget to. `guardrails` as passed is
-        # the caller's own list.
-        effective = merge_guardrail_layers(ctx, guardrails, await _resolve_organization_guardrails(adapter, ctx))
-        await apply_input_guardrails(
-            effective.configs,
-            guardrail_text,
-            response=response,
-            config=ctx.config,
-            credentials=effective.credentials,
-            mandated=effective.mandated,
-            in_process=_in_process_guardrails(ctx, effective),
-        )
-
-        # Checked per source, not over the merged list: see
-        # `_validate_mcp_server_urls` for why a stored server's rejection cannot
-        # carry the same body a caller's own does. `MCPClientPool` keys sessions by
-        # `name`, so a duplicate silently collapses two servers into one and
-        # misroutes tool calls (otari#591); each source refuses one the way it
-        # refuses an unsafe URL.
-        inline_names: set[str] = set()
-        if mcp_servers:
-            # Before the URL check, which spends a DNS lookup per server: a repeat
-            # inside the caller's own list is knowable without any of them.
-            for server in mcp_servers:
-                if server.name in inline_names:
-                    raise adapter.error(400, duplicate_mcp_server_name_detail(server.name), ErrorKind.INVALID_REQUEST)
-                inline_names.add(server.name)
-            await _validate_mcp_server_urls(adapter, mcp_servers)
-        if mcp_server_ids:
-            stored_servers = await _resolve_mcp_server_ids(adapter, ctx, mcp_server_port, mcp_server_ids)
-            await _validate_mcp_server_urls(
-                adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id
-            )
-            stored_name_counts = Counter(server.name for server in stored_servers)
-            # Only a peer's answer can hold a duplicate name, because a unique
-            # index and de-duplicated ids rule one out locally. It is workspace
-            # configuration the caller cannot fix, so the detail is fixed and the
-            # names go to the log.
-            if len(stored_name_counts) != len(stored_servers):
-                logger.error(
-                    "Stored MCP servers do not have unique names for workspace %s: %s",
-                    ctx.workspace_id,
-                    sorted(name for name, count in stored_name_counts.items() if count > 1),
-                )
-                raise adapter.error(500, MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL, ErrorKind.API)
-            # Fixed detail rather than the name: a stored name is not the caller's to
-            # read (`routes/workspace_mcp_servers` gates even the read behind the master
-            # key), so the rejection does not repeat one back. It does not pretend to
-            # close the oracle: the probe name is caller-supplied, so a caller holding a
-            # stored id still learns a name by guessing it here and reading the 400.
-            if inline_names & stored_name_counts.keys():
-                raise adapter.error(400, MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL, ErrorKind.INVALID_REQUEST)
-            mcp_servers = (mcp_servers or []) + stored_servers
-
-        # Read the effective config value (dashboard override / env / YAML), falling
-        # back to the env var so pure-env deployments are unchanged. A dashboard
-        # override mutates ctx.config, so it hot-applies on the next request.
-        # Only the hybrid-mode question below reads it now, which is whether the
-        # backend this deployment points at is the platform's own: what runs the
-        # code is the port, and a hosted provider has no URL at all.
-        sandbox_url: str | None = ctx.config.sandbox_url or otari_env("SANDBOX_URL") or None
-        # Whether code can run here is therefore the deployment's answer, not the URL.
-        sandbox_available = ctx.config.sandbox_configured()
-        try:
-            requested_executor = parse_code_execution_header(code_execution_header)
-        except ValueError:
-            raise adapter.error(400, CODE_EXECUTION_HEADER_INVALID_DETAIL, ErrorKind.INVALID_REQUEST) from None
-
-        # Two declarations can ask for code execution: the explicit gateway type,
-        # and a provider's own keyword. The first is always the gateway's to run.
-        # The second is the executor's decision, taken below once the workspace's
-        # policy has had its say, so here it is only found, not claimed.
-        sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(tools)
-        provider_code_entry = first_provider_code_execution_tool(tools_after_sandbox)
-        if sandbox_tool_entry is not None and not sandbox_available:
-            raise adapter.error(400, SANDBOX_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
-
-        # An id this gateway minted names one sandbox and the files in it, which
-        # is already a statement about where the code runs. ``auto`` follows the
-        # model, so without this a model swap between turns takes the sandbox
-        # away from a client that is replaying the id it was handed, which is how
-        # a conversation holding one is normally written. Only an id does this:
-        # ``auto`` names no sandbox, so it has nothing to pin to. Folded in as
-        # what the request asked for, so an explicit pin still wins over it, the
-        # header by being read first and a workspace policy through
-        # ``resolve_code_executor_preference``.
-        names_held_sandbox = any(
-            (_gateway_container_value(raw) or "").startswith(CONTAINER_ID_PREFIX)
-            for raw in (
-                container_id,
-                (sandbox_tool_entry or {}).get("container"),
-                (provider_code_entry or {}).get("container"),
-            )
-        )
-        # Only where there is a sandbox to pin to. With none configured no id
-        # was ever minted here, and implying the executor would answer a stale
-        # one with "the executor is not configured" rather than saying the
-        # container is not this deployment's to honor.
-        if names_held_sandbox and sandbox_available and requested_executor in (None, CodeExecutor.AUTO):
-            requested_executor = CodeExecutor.OTARI
-
-        # Forwarded to the sandbox backend as `Authorization: Bearer`. Only set in
-        # hybrid mode when the backend IS the platform (its URL is under the
-        # platform base URL the gateway already trusts this token with for resolve):
-        # the platform-hosted /api/v1/sandbox proxy authenticates the caller's workspace
-        # token and derives tenancy + per-workspace code-exec policy from it. Never
-        # leak it to a standalone exec-service an operator pointed the URL at.
-        sandbox_auth_token: str | None = None
-        sandbox_max_iterations: int | None = None
-        sandbox_exec_timeout_s: int | None = None
-        # The image the session is leased against, and the tool kinds the backend
-        # may expose. Both start at the deployment's own answer and are only ever
-        # replaced by a *narrower* workspace one below.
-        sandbox_session_image: str | None = ctx.config.effective_sandbox_image()
-        sandbox_allowed_tools: frozenset[str] | None = None
-        code_execution_executor: CodeExecutor | None = None
-        code_execution_policy: ResolvedCodeExecutionPolicy | None = None
-        sandbox_container_lease: ContainerLease | None = None
-        use_sandbox = False
-
-        # With no sandbox configured there is nothing to bring a provider's keyword
-        # to, so it is forwarded exactly as it always was and no policy is read for
-        # it: a deployment without a sandbox is a deployment the executor does not
-        # touch. (The explicit type was refused above.)
-        if sandbox_available and (sandbox_tool_entry is not None or provider_code_entry is not None):
-            deployment_executor = ctx.config.effective_code_executor()
-            native_available = provider_runs_code_natively(
-                provider_code_entry, provider=_dispatch_provider_name(ctx), dialect=adapter.name
-            )
-            if ctx.hybrid_mode:
-                # The platform's resolve answers for a workspace that may run code
-                # *here*, and refuses one that may not. So it is asked only once the
-                # decision already points here: asking it about a keyword the
-                # provider is about to serve natively would turn that request into a
-                # 403 for every workspace otari.ai has not enabled for Otari's
-                # sandbox, which today is most of them. The cost is that a
-                # platform-side pin cannot pull a natively served keyword here; that
-                # lands with the platform half of this work.
-                provisional, _ = resolve_code_executor_preference(
-                    requested=requested_executor, workspace=None, deployment=deployment_executor
-                )
-                provisional_executor = decide_code_executor(
-                    provisional, sandbox_configured=True, native_available=native_available
-                )
-                if sandbox_tool_entry is not None or provisional_executor is CodeExecutor.OTARI:
-                    code_execution_policy = await _hybrid_code_execution_policy(adapter, ctx)
-            else:
-                code_execution_policy = await _standalone_code_execution_policy(adapter, ctx)
-
-            executor_preference, executor_conflict = resolve_code_executor_preference(
-                requested=requested_executor,
-                workspace=code_execution_policy.executor if code_execution_policy is not None else None,
-                deployment=deployment_executor,
-            )
-            # Only a provider-named keyword is the pin's to decide. An explicit
-            # ``otari_code_execution`` runs here whatever the executor says (it
-            # names no provider tool to forward), so refusing the header over it
-            # would 403 a request that the same body without the header serves.
-            if executor_conflict and provider_code_entry is not None:
-                raise adapter.error(403, CODE_EXECUTOR_PINNED_DETAIL, ErrorKind.PERMISSION)
-            code_execution_executor = decide_code_executor(
-                executor_preference, sandbox_configured=True, native_available=native_available
-            )
-
-            if provider_code_entry is not None and code_execution_executor is CodeExecutor.OTARI:
-                # The keyword is claimed: it leaves ``tools[]`` and becomes the entry
-                # the sandbox is configured from, so the caller's declaration shape
-                # (and with it the native result blocks it expects back) is kept. An
-                # explicit ``otari_code_execution`` beside it is the same request said
-                # twice; it is folded in rather than refused, contributing only the
-                # hint the keyword itself cannot carry.
-                claimed, tools_after_sandbox = _extract_code_execution_tool(tools_after_sandbox, intercept=True)
-                assert claimed is not None  # ``provider_code_entry`` was found in the same list
-                if sandbox_tool_entry is not None and not claimed.get("purpose_hint"):
-                    if sandbox_tool_entry.get("purpose_hint"):
-                        claimed["purpose_hint"] = sandbox_tool_entry["purpose_hint"]
-                sandbox_tool_entry = claimed
-            elif provider_code_entry is not None and sandbox_tool_entry is not None:
-                # Two sandboxes, one request. Whichever way the gateway resolved it
-                # silently, half the caller's state would live somewhere they cannot
-                # address: the gateway sandbox's session is per-request and never
-                # named on the wire, the provider's is named by a handle the gateway
-                # would then have to route around. Refuse instead of picking.
-                raise adapter.error(400, SANDBOX_PROVIDER_TOOL_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
-            use_sandbox = sandbox_tool_entry is not None
-        elif requested_executor is CodeExecutor.OTARI and provider_code_entry is not None:
-            raise adapter.error(400, CODE_EXECUTOR_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
-
-        if use_sandbox:
-            assert sandbox_tool_entry is not None
-            if mcp_servers:
-                raise adapter.error(400, SANDBOX_MCP_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
-            if ctx.hybrid_mode:
-                assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
-                if sandbox_url is not None and url_targets_platform(sandbox_url, ctx.config.platform.get("base_url")):
-                    sandbox_auth_token = ctx.user_token
-            # The policy narrows what the deployment allows and never widens it: a
-            # veto, two ceilings applied with ``min`` further down and in
-            # ``ToolContext``, a hint that fills in only when the request gave none,
-            # a tool list that only removes, and an image that must be one the
-            # operator curated. No policy means no narrowing, which is what keeps a
-            # deployment that has configured nothing per-workspace behaving exactly
-            # as it did. The workspace came off the key that authenticated the
-            # request (standalone) or off the caller's token (hybrid), never off a
-            # header.
-            if code_execution_policy is not None:
-                if not code_execution_policy.enabled:
-                    raise adapter.error(403, SANDBOX_NOT_ENABLED_DETAIL, ErrorKind.PERMISSION)
-                if not sandbox_tool_entry.get("purpose_hint") and code_execution_policy.default_purpose_hint:
-                    sandbox_tool_entry["purpose_hint"] = code_execution_policy.default_purpose_hint
-                sandbox_max_iterations = code_execution_policy.max_iterations
-                sandbox_exec_timeout_s = code_execution_policy.exec_timeout_s
-                if code_execution_policy.tools is not None:
-                    # An intersection, so it only ever removes. Nothing left to run
-                    # is refused here rather than handed to a backend advertising an
-                    # empty tool list, which the model would answer by not calling
-                    # the tool at all: an unusable-but-successful request is the
-                    # failure mode a policy exists to make loud. Against
-                    # ``SERVED_TOOL_NAMES``, the same set ``_require_runnable_tools``
-                    # refuses a write against, so the storable rule and the
-                    # admission rule are one rule.
-                    if not code_execution_policy.tools & set(SERVED_TOOL_NAMES):
-                        raise adapter.error(403, SANDBOX_TOOLS_EXCLUDED_DETAIL, ErrorKind.PERMISSION)
-                    sandbox_allowed_tools = code_execution_policy.tools
-                if code_execution_policy.image is not None:
-                    # Re-checked against the operator's list, which the write
-                    # already checked once: an operator may shrink that list after
-                    # a workspace pinned from it, and running the un-curated image
-                    # anyway is precisely the supply-chain hole the column is
-                    # guarded for. Refuse rather than quietly serve the deployment
-                    # default, so the workspace learns its pin is dead.
-                    if code_execution_policy.image not in ctx.config.pinnable_sandbox_images():
-                        raise adapter.error(403, SANDBOX_IMAGE_NOT_ALLOWED_DETAIL, ErrorKind.PERMISSION)
-                    sandbox_session_image = code_execution_policy.image
-
-        # Whether this request's sandbox outlives it, and which one it runs in.
-        # Holding one costs the deployment for as long as it is held, so a
-        # request that says nothing gets the sandbox released with it, which is
-        # how every request behaved before reuse existed. ``auto`` asks for one
-        # to be held; an id asks for that one back.
-        sandbox_containers = sandbox_containers if use_sandbox else None
-        if use_sandbox:
-            requested_container = _requested_container(container_id) or _requested_container(
-                (sandbox_tool_entry or {}).get("container")
-            )
-            if requested_container is None:
-                # Nothing asked for, so nothing is held and no container is
-                # reported, whatever the deployment would have allowed.
-                sandbox_containers = None
-            elif requested_container != CONTAINER_AUTO:
-                # An id names a specific sandbox and its files, so a deployment
-                # that cannot honor it (hybrid mode, or reuse turned off) refuses
-                # rather than quietly handing over an empty one in its place.
-                # Resolved here, against this caller's own leases, so a request
-                # naming a sandbox it cannot have is refused before any lease.
-                gone = adapter.error(
-                    400,
-                    CONTAINER_GONE_DETAIL_TEMPLATE.format(container_id=_echoable_container_id(requested_container)),
-                    ErrorKind.INVALID_REQUEST,
-                )
-                if sandbox_containers is None:
-                    raise gone
-                try:
-                    sandbox_container_lease = await sandbox_containers.resolve(requested_container)
-                except ContainerNotFoundError:
-                    raise gone from None
-                except ContainerBusyError:
-                    # The id is good and the caller owns it: a retry works, where
-                    # the gone detail would have them throw a live sandbox away.
-                    raise adapter.error(409, CONTAINER_BUSY_DETAIL, ErrorKind.INVALID_REQUEST) from None
-            # ``auto`` against a deployment that holds nothing is best-effort, not
-            # an error: the run is exactly what it would have been, and the
-            # response names no container rather than one already gone.
-        else:
-            # The mirror of the id the sandbox path refuses. This request's code
-            # is the provider's to run, so ``container`` is theirs to read, and a
-            # value only this gateway could have named means nothing to them:
-            # forwarding it buys the caller a provider error about a word the
-            # gateway told them to send. Which executor serves a request can
-            # change under a client between turns (``auto`` follows the model),
-            # so this is reachable without them doing anything differently.
-            stray = _gateway_container_value(container_id) or _gateway_container_value(
-                (provider_code_entry or {}).get("container")
-            )
-            if stray is not None:
-                raise adapter.error(400, CONTAINER_NOT_GATEWAY_RUN_DETAIL, ErrorKind.INVALID_REQUEST)
-
-        web_search_url: str | None = ctx.config.web_search_url or otari_env("WEB_SEARCH_URL") or None
-        # A provider-named keyword is claimed only with a backend to run it on, and
-        # then as the request's header or the deployment's interception toggle says
-        # (see `claims_provider_web_search`). Otherwise it passes through.
-        web_search_tool_entry, tools_after_search = _extract_web_search_tool(
-            tools_after_sandbox,
-            intercept=claim_web_search,
-        )
-        try:
-            _read_web_search_max_uses(web_search_tool_entry)
-        except ValueError as exc:
-            raise adapter.error(400, WEB_SEARCH_MAX_USES_INVALID_DETAIL, ErrorKind.INVALID_REQUEST) from exc
-        web_fetch_tool_entry, remaining_user_tools = _extract_web_fetch_tool(tools_after_search)
-        if web_fetch_tool_entry is not None and not ctx.config.web_fetch_enabled:
-            raise adapter.error(400, WEB_FETCH_NOT_ENABLED_DETAIL, ErrorKind.INVALID_REQUEST)
-        # Forwarded to the search backend as `X-Gateway-Token`. Only set in
-        # hybrid mode, where the backend may be the platform-hosted web-search
-        # endpoint that authenticates the gateway. Standalone backends (SearXNG /
-        # self-hosted adapter) get no token and ignore the header.
-        web_search_auth_token: str | None = None
-        use_web_search = False
-        use_web_fetch = web_fetch_tool_entry is not None
-        web_fetch_policy = DomainPolicy()
-        if web_search_tool_entry is not None:
-            if not ctx.config.web_search_configured():
-                raise adapter.error(400, WEB_SEARCH_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
-            try:
-                _canonicalize_web_search_request_domains(web_search_tool_entry)
-            except DomainRuleValidationError as exc:
-                raise adapter.error(
-                    400,
-                    WEB_SEARCH_REQUEST_DOMAIN_INVALID_DETAIL,
-                    ErrorKind.INVALID_REQUEST,
-                ) from exc
-            use_web_search = True
-
-        if (use_web_search or use_web_fetch) and (use_sandbox or mcp_servers):
+        claim_web_search = _admit_web_declarations(adapter, ctx, declared)
+        await _admit_guardrails(adapter, ctx, response, declared)
+        mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.mcp_server_port)
+        code = await _admit_code_execution(adapter, ctx, declared, backends, mcp_servers_declared=bool(mcp_servers))
+        web = _extract_web_tools(adapter, ctx, code.tools_after_sandbox, claim_web_search=claim_web_search)
+        if web.declared_any and (code.use_sandbox or mcp_servers):
             raise adapter.error(400, WEB_SEARCH_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
-
-        if use_web_search or use_web_fetch:
-            if ctx.hybrid_mode:
-                assert ctx.user_token is not None
-                if (
-                    use_web_search
-                    and web_search_url is not None
-                    and url_targets_platform(web_search_url, ctx.config.platform.get("base_url"))
-                ):
-                    web_search_auth_token = ctx.config.platform_token
-                requested_tools = [
-                    name
-                    for name, requested in (
-                        (WEB_SEARCH_TOOL_NAME, use_web_search),
-                        (WEB_FETCH_TOOL_NAME, use_web_fetch),
-                    )
-                    if requested
-                ]
-                web_search_policy = await _resolve_platform_web_search(
-                    config=ctx.config,
-                    user_token=ctx.user_token,
-                    requested_tools=requested_tools,
-                )
-                try:
-                    enabled, authorized_tools, mandatory_policy = _validated_hybrid_web_policy(web_search_policy)
-                except (ValueError, DomainRuleValidationError) as exc:
-                    raise adapter.error(502, MALFORMED_WEB_ACCESS_POLICY_DETAIL, ErrorKind.API) from exc
-                if not enabled:
-                    detail = WEB_ACCESS_NOT_ENABLED_DETAIL if use_web_fetch else WEB_SEARCH_NOT_ENABLED_DETAIL
-                    raise adapter.error(403, detail, ErrorKind.PERMISSION)
-                if not set(requested_tools) <= authorized_tools:
-                    raise adapter.error(403, WEB_ACCESS_TOOL_NOT_AUTHORIZED_DETAIL, ErrorKind.PERMISSION)
-                try:
-                    web_fetch_policy = _combined_fetch_policy(
-                        mandatory_policy,
-                        web_search_tool_entry if use_web_fetch else None,
-                    )
-                except DisjointDomainAllowListsError as exc:
-                    raise adapter.error(403, WEB_ACCESS_DOMAINS_EXCLUDED_DETAIL, ErrorKind.PERMISSION) from exc
-                if web_search_tool_entry is not None:
-                    # Search keeps the platform contract's historical defaults
-                    # precedence. Fetch separately retains mandatory domains above.
-                    for key in ("max_results", "allowed_domains", "blocked_domains", "purpose_hint"):
-                        resolved_value = web_search_policy.get(key)
-                        if not web_search_tool_entry.get(key) and resolved_value is not None:
-                            web_search_tool_entry[key] = resolved_value
-                    workspace_options = web_search_policy.get("provider_options")
-                    if isinstance(workspace_options, dict):
-                        request_options = web_search_tool_entry.get("provider_options")
-                        web_search_tool_entry["provider_options"] = (
-                            {**workspace_options, **request_options}
-                            if isinstance(request_options, dict)
-                            else workspace_options
-                        )
-            else:
-                if ctx.db is None or ctx.workspace_id is None:
-                    raise adapter.error(500, WEB_SEARCH_CONFIG_UNRESOLVABLE_DETAIL, ErrorKind.API)
-                try:
-                    workspace_search = await resolve_workspace_web_search_config(ctx.db, ctx.workspace_id)
-                except InvalidStoredWebSearchDomainError as exc:
-                    raise adapter.error(503, WEB_SEARCH_CONFIG_INVALID_DETAIL, ErrorKind.API) from exc
-                mandatory_policy = DomainPolicy()
-                if workspace_search is not None:
-                    if not workspace_search.enabled:
-                        detail = WEB_ACCESS_NOT_ENABLED_DETAIL if use_web_fetch else WEB_SEARCH_NOT_ENABLED_DETAIL
-                        raise adapter.error(403, detail, ErrorKind.PERMISSION)
-                    mandatory_policy = _policy_from_domain_values(
-                        workspace_search.allowed_domains,
-                        workspace_search.blocked_domains,
-                    )
-                try:
-                    web_fetch_policy = _combined_fetch_policy(
-                        mandatory_policy,
-                        web_search_tool_entry if use_web_fetch else None,
-                    )
-                except DisjointDomainAllowListsError as exc:
-                    raise adapter.error(403, WEB_ACCESS_DOMAINS_EXCLUDED_DETAIL, ErrorKind.PERMISSION) from exc
-                if workspace_search is not None and web_search_tool_entry is not None:
-                    try:
-                        web_search_tool_entry = narrow_web_search_tool_entry(
-                            web_search_tool_entry,
-                            workspace_search,
-                            baseline_max_results=web_search_max_results_baseline(ctx.config),
-                        )
-                    except WorkspaceWebSearchDomainsExcludedError as exc:
-                        raise adapter.error(403, exc.message, ErrorKind.PERMISSION) from exc
-
-        # Inside the try so a rejection releases the budget reservation the
-        # request already took, like every other admission failure here.
+        web_access = await _admit_web_access(adapter, ctx, web, backends.web_search_policy_port)
         await _require_tool_pricing(
             adapter,
             ctx,
-            use_sandbox=use_sandbox,
-            use_web_search=use_web_search,
-            use_web_fetch=use_web_fetch,
+            use_sandbox=code.use_sandbox,
+            use_web_search=web.search_tool_entry is not None,
+            use_web_fetch=web.fetch_tool_entry is not None,
         )
     except HTTPException:
         await release_reservation(ctx)
         raise
     except DATABASE_ERRORS:
-        # Five reads in this block touch the database (the organization's
-        # guardrails, the workspace MCP servers, the workspace code-execution
-        # policy and the workspace web-search configuration above, and
-        # `_require_tool_pricing`), and a failure in any of them is not an
-        # `HTTPException`, so without this arm it would leave `users.reserved`
-        # holding the estimate until the reservation sweep reclaims it. That sweep
-        # is the only thing that ever does: the budget reset zeroes spend and
-        # leaves the hold where it is. The rollback comes first because a failed
-        # statement leaves the session unusable and `release_reservation` writes:
-        # releasing on a poisoned session raises `PendingRollbackError` and the
-        # hold survives anyway. Both calls are best-effort so a database that is
-        # still refusing work re-raises the original failure rather than a
-        # confusing second one.
+        # A database failure is not an HTTPException, so the reservation is released here too.
+        # The rollback comes first, because a failed statement leaves the session unusable for the release.
         if ctx.db is not None:
             with contextlib.suppress(*DATABASE_ERRORS):
                 await ctx.db.rollback()
@@ -3399,40 +2969,415 @@ async def prepare_gateway_tools(
             await release_reservation(ctx)
         raise
 
-    # Last statement of the preamble: everything after this is the provider
-    # call. See :func:`gateway.core.database.release_session` for why the
-    # connection must not be held across it.
+    # Gotcha: the connection must not be held across the provider call that follows.
     await release_session(ctx.db)
 
     return ToolContext(
         config=ctx.config,
         mcp_server_configs=mcp_servers,
-        use_sandbox=use_sandbox,
-        sandbox_tool_entry=sandbox_tool_entry,
-        code_execution_port=code_execution_port,
-        sandbox_auth_token=sandbox_auth_token,
-        sandbox_exec_timeout_s=sandbox_exec_timeout_s,
-        sandbox_session_image=sandbox_session_image,
-        sandbox_allowed_tools=sandbox_allowed_tools,
-        code_execution_executor=code_execution_executor,
-        sandbox_container_lease=sandbox_container_lease,
-        sandbox_containers=sandbox_containers,
-        use_web_search=use_web_search,
-        web_search_tool_entry=web_search_tool_entry,
-        web_search_url=web_search_url,
-        web_search_auth_token=web_search_auth_token,
-        use_web_fetch=use_web_fetch,
-        web_fetch_tool_entry=web_fetch_tool_entry,
-        web_fetch_policy=web_fetch_policy,
-        remaining_user_tools=remaining_user_tools,
+        use_sandbox=code.use_sandbox,
+        sandbox_tool_entry=code.tool_entry,
+        code_execution_port=backends.code_execution_port,
+        sandbox_exec_timeout_s=code.exec_timeout_s,
+        sandbox_session_image=code.session_image,
+        sandbox_allowed_tools=code.allowed_tools,
+        code_execution_executor=code.executor,
+        sandbox_container_lease=code.container_lease,
+        sandbox_containers=code.containers,
+        use_web_search=web.search_tool_entry is not None,
+        web_search_tool_entry=web_access.search_tool_entry,
+        web_search_url=web_access.search_url,
+        web_search_auth_token=web_access.search_auth_token,
+        use_web_fetch=web.fetch_tool_entry is not None,
+        web_fetch_tool_entry=web.fetch_tool_entry,
+        web_fetch_policy=web_access.fetch_policy,
+        remaining_user_tools=web.remaining_user_tools,
         max_tool_iterations=min(
-            max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
+            declared.max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
             MAX_TOOL_ITERATIONS_CAP,
             # The workspace's code-exec max_iterations bounds the loop too (no-op when unset).
-            sandbox_max_iterations or MAX_TOOL_ITERATIONS_CAP,
+            code.max_iterations or MAX_TOOL_ITERATIONS_CAP,
         ),
-        tools_header=tools_header,
-        sandbox_files=sandbox_files,
+        tools_header=declared.tools_header,
+        sandbox_files=backends.sandbox_files,
+    )
+
+
+async def _admit_guardrails(
+    adapter: FormatAdapter[Any, Any], ctx: RequestContext, response: Response, declared: DeclaredTools
+) -> None:
+    """Run the request's input guardrails, with its organization's and its policy's merged in.
+
+    A ``block`` flag refuses the request, and a ``monitor`` flag annotates ``response``.
+    """
+    # Merged here rather than in each route, so no completion endpoint can skip a mandate.
+    effective = merge_guardrail_layers(
+        ctx, declared.guardrails, await _resolve_organization_guardrails(adapter, ctx)
+    )
+    await apply_input_guardrails(
+        effective.configs,
+        declared.guardrail_text,
+        response=response,
+        config=ctx.config,
+        credentials=effective.credentials,
+        mandated=effective.mandated,
+        in_process=_in_process_guardrails(ctx, effective),
+    )
+
+
+async def _admit_mcp_servers(
+    adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools, port: McpServerPort
+) -> list[McpServerConfig] | None:
+    """The MCP servers the request may reach: its own, then the stored ones its IDs name."""
+    mcp_servers = declared.mcp_servers
+    # Each source is checked on its own, because a stored server's refusal carries a fixed detail.
+    # A duplicate name collapses two servers into one client session, so each source refuses one.
+    inline_names: set[str] = set()
+    if mcp_servers:
+        # Before the URL check, which resolves DNS for each server.
+        for server in mcp_servers:
+            if server.name in inline_names:
+                raise adapter.error(400, duplicate_mcp_server_name_detail(server.name), ErrorKind.INVALID_REQUEST)
+            inline_names.add(server.name)
+        await _validate_mcp_server_urls(adapter, mcp_servers)
+    if declared.mcp_server_ids:
+        stored_servers = await _resolve_mcp_server_ids(adapter, ctx, port, declared.mcp_server_ids)
+        await _validate_mcp_server_urls(
+            adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id
+        )
+        stored_name_counts = Counter(server.name for server in stored_servers)
+        # Only a peer's answer can repeat a name. The caller cannot fix it, so the names go to the log.
+        if len(stored_name_counts) != len(stored_servers):
+            logger.error(
+                "Stored MCP servers do not have unique names for workspace %s: %s",
+                ctx.workspace_id,
+                sorted(name for name, count in stored_name_counts.items() if count > 1),
+            )
+            raise adapter.error(500, MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL, ErrorKind.API)
+        # Gotcha: the detail does not repeat a stored name, but a caller can still guess one by probing.
+        if inline_names & stored_name_counts.keys():
+            raise adapter.error(400, MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL, ErrorKind.INVALID_REQUEST)
+        mcp_servers = (mcp_servers or []) + stored_servers
+    return mcp_servers
+
+
+def _admit_web_declarations(adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools) -> bool:
+    """Refuse an ambiguous managed web declaration before any network or database work.
+
+    Returns whether the gateway claims a provider's own web search keyword.
+    """
+    try:
+        requested_web_search = parse_web_search_header(declared.web_search_header)
+    except ValueError:
+        raise adapter.error(400, WEB_SEARCH_HEADER_INVALID_DETAIL, ErrorKind.INVALID_REQUEST) from None
+    provider_search_entry = first_provider_web_search_tool(declared.tools)
+    intercept_web_search = _web_search_intercept_enabled(ctx.config)
+    backend_configured = ctx.config.web_search_configured()
+    if (
+        provider_search_entry is not None
+        and backend_configured
+        and web_search_header_conflicts(requested_web_search, intercept=intercept_web_search)
+    ):
+        raise adapter.error(403, WEB_SEARCH_INTERCEPTED_DETAIL, ErrorKind.PERMISSION)
+    claim_web_search = claims_provider_web_search(
+        provider_search_entry,
+        requested=requested_web_search,
+        intercept=intercept_web_search,
+        backend_configured=backend_configured,
+        providers=_candidate_provider_names(ctx),
+        dialect=adapter.name,
+    )
+    _validate_managed_web_declarations(
+        adapter,
+        declared.tools,
+        intercept_web_search=claim_web_search,
+    )
+    return claim_web_search
+
+
+@dataclass(frozen=True)
+class _DeclaredWebTools:
+    """The managed web tools one request declared, and the tools it declared besides them."""
+
+    fetch_tool_entry: dict[str, Any] | None
+    remaining_user_tools: list[dict[str, Any]] | None
+    search_tool_entry: dict[str, Any] | None
+
+    @property
+    def declared_any(self) -> bool:
+        return self.search_tool_entry is not None or self.fetch_tool_entry is not None
+
+
+@dataclass(frozen=True)
+class _AdmittedWebAccess:
+    """The web access a request may use, and where its searches go."""
+
+    fetch_policy: DomainPolicy
+    search_auth_token: str | None
+    search_tool_entry: dict[str, Any] | None
+    search_url: str | None
+
+
+def _extract_web_tools(
+    adapter: FormatAdapter[Any, Any],
+    ctx: RequestContext,
+    tools: list[dict[str, Any]] | None,
+    *,
+    claim_web_search: bool,
+) -> _DeclaredWebTools:
+    """Take the managed web tools out of ``tools``, refusing one this deployment cannot serve."""
+    # A provider-named keyword is claimed only with a backend to run it on, and
+    # then as the request's header or the deployment's interception toggle says.
+    search_tool_entry, tools_after_search = _extract_web_search_tool(tools, intercept=claim_web_search)
+    try:
+        _read_web_search_max_uses(search_tool_entry)
+    except ValueError as exc:
+        raise adapter.error(400, WEB_SEARCH_MAX_USES_INVALID_DETAIL, ErrorKind.INVALID_REQUEST) from exc
+    fetch_tool_entry, remaining_user_tools = _extract_web_fetch_tool(tools_after_search)
+    if fetch_tool_entry is not None and not ctx.config.web_fetch_enabled:
+        raise adapter.error(400, WEB_FETCH_NOT_ENABLED_DETAIL, ErrorKind.INVALID_REQUEST)
+    if search_tool_entry is not None:
+        if not ctx.config.web_search_configured():
+            raise adapter.error(400, WEB_SEARCH_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
+        try:
+            _canonicalize_web_search_request_domains(search_tool_entry)
+        except DomainRuleValidationError as exc:
+            raise adapter.error(400, WEB_SEARCH_REQUEST_DOMAIN_INVALID_DETAIL, ErrorKind.INVALID_REQUEST) from exc
+    return _DeclaredWebTools(
+        fetch_tool_entry=fetch_tool_entry,
+        remaining_user_tools=remaining_user_tools,
+        search_tool_entry=search_tool_entry,
+    )
+
+
+async def _admit_web_access(
+    adapter: FormatAdapter[Any, Any], ctx: RequestContext, web: _DeclaredWebTools, port: WebSearchPolicyPort
+) -> _AdmittedWebAccess:
+    """Narrow the declared web tools to what the workspace's web search policy permits."""
+    search_url: str | None = ctx.config.web_search_url or otari_env("WEB_SEARCH_URL") or None
+    if not web.declared_any:
+        return _AdmittedWebAccess(
+            fetch_policy=DomainPolicy(), search_auth_token=None, search_tool_entry=None, search_url=search_url
+        )
+    requested_tools = [
+        name
+        for name, entry in ((WEB_SEARCH_TOOL_NAME, web.search_tool_entry), (WEB_FETCH_TOOL_NAME, web.fetch_tool_entry))
+        if entry is not None
+    ]
+    # Forwarded to the search backend as `X-Gateway-Token`, and only where
+    # that backend is the control plane, which authenticates the gateway.
+    # A deployment without a platform token forwards none.
+    search_auth_token: str | None = None
+    if (
+        web.search_tool_entry is not None
+        and search_url is not None
+        and url_targets_platform(search_url, ctx.config.platform.get("base_url"))
+    ):
+        search_auth_token = ctx.config.platform_token
+    scope = WebSearchPolicyScope(workspace_id=ctx.workspace_id, user_token=ctx.user_token)
+    try:
+        workspace_search = await port.resolve(scope, requested_tools)
+    except WebSearchPolicyResolutionFailedError as exc:
+        raise adapter.error(_policy_failure_status(exc.reason), exc.message, ErrorKind.API) from exc
+    try:
+        grant = apply_web_access_policy(
+            workspace_search,
+            requested_tools=requested_tools,
+            search_tool_entry=web.search_tool_entry,
+            config=ctx.config,
+        )
+    except (WebAccessRefusedError, WorkspaceWebSearchDomainsExcludedError) as exc:
+        raise adapter.error(403, exc.message, ErrorKind.PERMISSION) from exc
+    return _AdmittedWebAccess(
+        fetch_policy=grant.fetch_policy,
+        search_auth_token=search_auth_token,
+        search_tool_entry=grant.search_tool_entry,
+        search_url=search_url,
+    )
+
+
+@dataclass(frozen=True)
+class _AdmittedCodeExecution:
+    """Who runs a request's code, and the sandbox it runs in when the gateway does."""
+
+    allowed_tools: frozenset[str] | None
+    container_lease: ContainerLease | None
+    containers: SandboxContainerRegistry | None
+    exec_timeout_s: int | None
+    executor: CodeExecutor | None
+    max_iterations: int | None
+    session_image: str | None
+    tool_entry: dict[str, Any] | None
+    tools_after_sandbox: list[dict[str, Any]] | None
+    use_sandbox: bool
+
+
+async def _admit_code_execution(
+    adapter: FormatAdapter[Any, Any],
+    ctx: RequestContext,
+    declared: DeclaredTools,
+    backends: ToolBackends,
+    *,
+    mcp_servers_declared: bool,
+) -> _AdmittedCodeExecution:
+    """Decide who runs the request's code, and the sandbox it runs in when the gateway does."""
+    # The deployment decides whether code can run here, because a hosted provider has no URL.
+    sandbox_available = ctx.config.sandbox_configured()
+    try:
+        requested_executor = parse_code_execution_header(declared.code_execution_header)
+    except ValueError:
+        raise adapter.error(400, CODE_EXECUTION_HEADER_INVALID_DETAIL, ErrorKind.INVALID_REQUEST) from None
+
+    # The explicit gateway type always runs here.
+    # A provider's keyword is only found here, and the executor decides it below.
+    sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(declared.tools)
+    provider_code_entry = first_provider_code_execution_tool(tools_after_sandbox)
+    if sandbox_tool_entry is not None and not sandbox_available:
+        raise adapter.error(400, SANDBOX_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
+
+    # A sandbox ID this gateway minted pins the code here, so a model change between turns keeps the sandbox.
+    # An explicit header or a workspace pin still wins over it.
+    names_held_sandbox = any(
+        (_gateway_container_value(raw) or "").startswith(CONTAINER_ID_PREFIX)
+        for raw in (
+            declared.container_id,
+            (sandbox_tool_entry or {}).get("container"),
+            (provider_code_entry or {}).get("container"),
+        )
+    )
+    # Only with a sandbox, so a stale ID gets the container refusal rather than the executor one.
+    if names_held_sandbox and sandbox_available and requested_executor in (None, CodeExecutor.AUTO):
+        requested_executor = CodeExecutor.OTARI
+
+    sandbox_max_iterations: int | None = None
+    sandbox_exec_timeout_s: int | None = None
+    # A workspace policy below may only narrow the image and the tool kinds from the deployment's defaults.
+    sandbox_session_image: str | None = ctx.config.effective_sandbox_image()
+    sandbox_allowed_tools: frozenset[str] | None = None
+    code_execution_executor: CodeExecutor | None = None
+    code_execution_policy: ResolvedCodeExecutionPolicy | None = None
+    sandbox_container_lease: ContainerLease | None = None
+    use_sandbox = False
+
+    # Without a sandbox, a provider's keyword is forwarded and no policy is read.
+    if sandbox_available and (sandbox_tool_entry is not None or provider_code_entry is not None):
+        deployment_executor = ctx.config.effective_code_executor()
+        native_available = provider_runs_code_natively(
+            provider_code_entry, provider=_dispatch_provider_name(ctx), dialect=adapter.name
+        )
+        if ctx.hybrid_mode:
+            # Gotcha: the control plane refuses a workspace that may not run code here.
+            # It is asked only when the code will run here, so a natively served keyword is not refused.
+            provisional, _ = resolve_code_executor_preference(
+                requested=requested_executor, workspace=None, deployment=deployment_executor
+            )
+            provisional_executor = decide_code_executor(
+                provisional, sandbox_configured=True, native_available=native_available
+            )
+            if sandbox_tool_entry is not None or provisional_executor is CodeExecutor.OTARI:
+                code_execution_policy = await _hybrid_code_execution_policy(adapter, ctx)
+        else:
+            code_execution_policy = await _standalone_code_execution_policy(adapter, ctx)
+
+        executor_preference, executor_conflict = resolve_code_executor_preference(
+            requested=requested_executor,
+            workspace=code_execution_policy.executor if code_execution_policy is not None else None,
+            deployment=deployment_executor,
+        )
+        # A pin decides only a provider's keyword. The explicit type runs here whatever the pin says.
+        if executor_conflict and provider_code_entry is not None:
+            raise adapter.error(403, CODE_EXECUTOR_PINNED_DETAIL, ErrorKind.PERMISSION)
+        code_execution_executor = decide_code_executor(
+            executor_preference, sandbox_configured=True, native_available=native_available
+        )
+
+        if provider_code_entry is not None and code_execution_executor is CodeExecutor.OTARI:
+            # The claimed keyword keeps the caller's declaration shape, and so the result blocks it expects.
+            # An explicit type beside it is folded in and adds only its hint.
+            claimed, tools_after_sandbox = _extract_code_execution_tool(tools_after_sandbox, intercept=True)
+            assert claimed is not None  # ``provider_code_entry`` was found in the same list
+            if sandbox_tool_entry is not None and not claimed.get("purpose_hint"):
+                if sandbox_tool_entry.get("purpose_hint"):
+                    claimed["purpose_hint"] = sandbox_tool_entry["purpose_hint"]
+            sandbox_tool_entry = claimed
+        elif provider_code_entry is not None and sandbox_tool_entry is not None:
+            # Two sandboxes would split the caller's state across two places, so the request is refused.
+            raise adapter.error(400, SANDBOX_PROVIDER_TOOL_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
+        use_sandbox = sandbox_tool_entry is not None
+    elif requested_executor is CodeExecutor.OTARI and provider_code_entry is not None:
+        raise adapter.error(400, CODE_EXECUTOR_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
+
+    if use_sandbox:
+        assert sandbox_tool_entry is not None
+        if mcp_servers_declared:
+            raise adapter.error(400, SANDBOX_MCP_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
+        # The policy only narrows what the deployment allows. No policy means no narrowing.
+        if code_execution_policy is not None:
+            if not code_execution_policy.enabled:
+                raise adapter.error(403, SANDBOX_NOT_ENABLED_DETAIL, ErrorKind.PERMISSION)
+            if not sandbox_tool_entry.get("purpose_hint") and code_execution_policy.default_purpose_hint:
+                sandbox_tool_entry["purpose_hint"] = code_execution_policy.default_purpose_hint
+            sandbox_max_iterations = code_execution_policy.max_iterations
+            sandbox_exec_timeout_s = code_execution_policy.exec_timeout_s
+            if code_execution_policy.tools is not None:
+                # An empty intersection is refused, because a tool with nothing to run fails silently.
+                # It uses the same served set as the check on a policy write.
+                if not code_execution_policy.tools & set(SERVED_TOOL_NAMES):
+                    raise adapter.error(403, SANDBOX_TOOLS_EXCLUDED_DETAIL, ErrorKind.PERMISSION)
+                sandbox_allowed_tools = code_execution_policy.tools
+            if code_execution_policy.image is not None:
+                # Re-checked because an operator may remove an image after a workspace pinned it.
+                if code_execution_policy.image not in ctx.config.pinnable_sandbox_images():
+                    raise adapter.error(403, SANDBOX_IMAGE_NOT_ALLOWED_DETAIL, ErrorKind.PERMISSION)
+                sandbox_session_image = code_execution_policy.image
+
+    # A request that names no container has its sandbox released with it.
+    # ``auto`` asks to hold one, and an ID asks for that one back.
+    sandbox_containers = backends.sandbox_containers if use_sandbox else None
+    if use_sandbox:
+        requested_container = _requested_container(declared.container_id) or _requested_container(
+            (sandbox_tool_entry or {}).get("container")
+        )
+        if requested_container is None:
+            # Nothing asked for, so nothing is held.
+            sandbox_containers = None
+        elif requested_container != CONTAINER_AUTO:
+            # An ID names one sandbox and its files, so a deployment that cannot honor it refuses.
+            # It resolves against this caller's own leases before any new lease.
+            gone = adapter.error(
+                400,
+                CONTAINER_GONE_DETAIL_TEMPLATE.format(container_id=_echoable_container_id(requested_container)),
+                ErrorKind.INVALID_REQUEST,
+            )
+            if sandbox_containers is None:
+                raise gone
+            try:
+                sandbox_container_lease = await sandbox_containers.resolve(requested_container)
+            except ContainerNotFoundError:
+                raise gone from None
+            except ContainerBusyError:
+                # The caller owns this ID, so a retry can succeed.
+                raise adapter.error(409, CONTAINER_BUSY_DETAIL, ErrorKind.INVALID_REQUEST) from None
+        # ``auto`` without container reuse is not an error, and the response names no container.
+    else:
+        # The provider runs this code, so a container ID that only this gateway mints is refused.
+        # ``auto`` can change the executor between turns, so a client can send one unchanged.
+        stray = _gateway_container_value(declared.container_id) or _gateway_container_value(
+            (provider_code_entry or {}).get("container")
+        )
+        if stray is not None:
+            raise adapter.error(400, CONTAINER_NOT_GATEWAY_RUN_DETAIL, ErrorKind.INVALID_REQUEST)
+    return _AdmittedCodeExecution(
+        allowed_tools=sandbox_allowed_tools,
+        container_lease=sandbox_container_lease,
+        containers=sandbox_containers,
+        exec_timeout_s=sandbox_exec_timeout_s,
+        executor=code_execution_executor,
+        max_iterations=sandbox_max_iterations,
+        session_image=sandbox_session_image,
+        tool_entry=sandbox_tool_entry,
+        tools_after_sandbox=tools_after_sandbox,
+        use_sandbox=use_sandbox,
     )
 
 

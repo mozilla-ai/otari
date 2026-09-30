@@ -255,6 +255,7 @@ A repository with more concerns than one file holds keeps a directory instead:
     architecture/
       layer-rules.yml
   verifiers/
+    check-architecture.sh
     no-conflict-markers.sh
     no-stranded-docblocks.py
 ```
@@ -268,10 +269,11 @@ partway through splitting one file into several.
 between files rather than migrating them, so there is no cost to starting there.
 Group a directory by concern rather than by gate type: a file is the unit
 someone shares or lifts out of another repository. Otari's own repository keeps
-eight.
+nineteen, and eleven of them hold one architecture rule each.
 
 Every file parses on its own, a gate id is unique across the whole set, and one
-unparseable file yields no guardrail rather than a partial one. The rules that
+unparseable file yields none of the repository's gates rather than a partial set.
+Your own files in `~/.otari/` are the exception, as the next section explains. The rules that
 apply once there is more than one file are under
 [Composing several files](agent-guardrails-reference.md#composing-several-files).
 
@@ -283,6 +285,37 @@ convention, not a requirement.
 A repository still carrying `.otari-guardrails.yml` at its root is enforcing no
 gates: nothing reads that path. Move the file to `.otari/guardrails.yml`
 unchanged. `otari hook` reports this on every event until it moves.
+
+## Your own guardrail in `~/.otari/`
+
+Some rules belong to a person, not to a repository: no `git reset --hard`, no reading `.env` files, run the linter before stopping. Put them in your home directory, in the same two shapes a repository uses:
+
+```
+~/.otari/
+  guardrails.yml
+  guardrails/
+    git-safety.yml
+  verifiers/
+    lint-before-stop.sh
+```
+
+`otari hook` composes these files with the repository's own, under the rules in [Composing several files](agent-guardrails-reference.md#composing-several-files). Your gates apply in every repository where the hook runs, and nobody else gets them.
+
+- The hook puts `user:` in front of every gate ID from `~/.otari/`, so `no-force-push` in your file is `user:no-force-push` in every message and in `otari guardrails validate`. A repository gate can therefore use the same ID as yours without a clash. A repository gate whose ID itself starts with `user:` can still clash, and the clash is an error that names both files.
+- A repository cannot turn off your gates. When the combined set cannot load, because of a clash, a broken file, or too many files, the hook enforces your gates alone and says that the repository's gates are off each time it reports anything. When your own files are the broken ones, it enforces the repository's gates alone. Only when neither side loads does it enforce no gate.
+- A `verifier` gate in a file under `~/.otari/` names its script relative to your home directory, for example `verifier: .otari/verifiers/lint-before-stop.sh`. The script must be inside `~/.otari/verifiers/`. It runs with the repository root as its working directory, so it checks the repository the session changed.
+- When a gate from `~/.otari/` fails, the message shows its `user:` ID. When more than one file composes, it also names the file, for example `[~/.otari/guardrails/git-safety.yml]`.
+- `otari guardrails validate` checks your files with the repository's, and lists which gates come from `~/.otari/` and which come from the repository. `--repo-only` checks the repository's files alone, so a warning in one of your own files cannot fail `--strict`.
+
+A repository checked out at your home directory owns `~/.otari/` itself, so its files are read once, as the repository's.
+
+### Running your guardrail in every repository
+
+`otari hook setup` registers the hook in one repository only. To make your own gates apply in every repository, register the hook once in your user-level Claude Code settings, `~/.claude/settings.json`, with the same entries `setup` writes (see [Registering it by hand](agent-guardrails-reference.md#registering-it-by-hand)). Use the widest `PreToolUse` matcher, `Edit|Write|NotebookEdit|Read|Bash`, because one entry now serves the gates of every repository.
+
+Register the hook in one place only. A repository that also has the hook in its own `.claude/settings.local.json` can run it twice for each event. Remove the per-repository entry, or skip the user-level one for that machine.
+
+`otari hook setup` does not write the user-level entry yet, so this step is by hand.
 
 ## Checking a guardrail before it runs
 
@@ -420,9 +453,7 @@ repository, and both supported harnesses read the same files.
 ## Status and known gaps
 
 Five gate types are available, both harness integrations are installed commands,
-and there are no reusable packs: a guardrail is written in the repository it
-guards, and a `verifier` script is always a path inside that repository. Sharing
-gates or verifiers across repositories is deferred.
+and there are no reusable packs. A guardrail is written in the repository it guards, or in `~/.otari/` for one person's own rules (see [Your own guardrail in `~/.otari/`](#your-own-guardrail-in-otari)). Sharing gates or verifiers across a team's repositories is deferred. `otari hook setup` registers the hook per repository only, so running your own gates in every repository needs a hand-written user-level entry.
 
 A blocking `Stop` gate has a finite budget. Claude Code overrides a `Stop` hook
 after eight consecutive blocks without progress and ends the turn with a warning

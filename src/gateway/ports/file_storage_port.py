@@ -2,11 +2,13 @@
 
 The seam between an upload and whatever holds its blob.
 A file's metadata stays in this deployment's database and only the bytes cross
-here, keyed by an opaque ``storage_ref`` the store itself mints, so a large
-upload can live on a filesystem or an object store while the relational store
-stays lean.
+here, keyed by an opaque ``storage_ref`` the store mints, so a large upload can
+live on a filesystem or an object store while the relational store stays lean.
 The port owns no search: nothing above it asks the store to find a file, only
 to hold one, hand it back and drop it.
+
+``allocate`` mints a ref without writing, and ``put`` and ``put_stream`` write
+at a ref they are given, so a ref can exist before its bytes do.
 
 The same bytes move in two shapes.
 ``put`` and ``get`` are the full-buffer pair, for a caller that needs the whole
@@ -38,22 +40,29 @@ __all__ = ["FileStoragePort"]
 class FileStoragePort(Protocol):
     """What a build must answer to keep the bytes behind an uploaded file."""
 
-    async def put(self, file_id: str, data: bytes) -> str:
-        """Persist ``data`` for ``file_id`` and return an opaque storage ref."""
+    async def allocate(self, file_id: str) -> str:
+        """Mint the opaque ref ``file_id``'s bytes will be written at.
+
+        An implementation must create nothing in the store here, because a ref
+        can be minted for a write that never happens.
+        """
+        ...
+
+    async def put(self, storage_ref: str, data: bytes) -> None:
+        """Persist ``data`` at ``storage_ref``."""
         ...
 
     async def get(self, storage_ref: str) -> bytes:
         """Return the bytes stored under ``storage_ref``."""
         ...
 
-    async def put_stream(self, file_id: str, chunks: AsyncIterator[bytes]) -> tuple[str, int]:
-        """Persist ``chunks`` for ``file_id``, and report the ref and the bytes written.
+    async def put_stream(self, storage_ref: str, chunks: AsyncIterator[bytes]) -> int:
+        """Persist ``chunks`` at ``storage_ref``, and report the bytes written.
 
         No size ceiling of its own: the cap belongs to whoever produces
         ``chunks``, and this stores whatever it is given.
-        An adapter makes a best-effort attempt to remove what a failed or
-        abandoned stream wrote, because no ref comes back for a caller to clean
-        up with. A caller must not assume nothing landed.
+        An adapter removes what a failed or abandoned stream wrote where it can.
+        That removal is best effort, so bytes may remain at ``storage_ref``.
         """
         ...
 

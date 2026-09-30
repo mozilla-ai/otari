@@ -10,7 +10,7 @@ into a validated :class:`PolicySpec`.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any, Literal, cast
 
@@ -551,10 +551,28 @@ class PolicyFile:
     ``name`` is for a reader, not for resolution: nothing here opens a file,
     and a caller that composed a directory passes repo-relative paths so an
     error, and later a failing gate, names something findable.
+
+    ``gate_id_prefix`` goes in front of every gate ID the file declares.
+    It keeps the gates of files with different owners apart, so they cannot collide by accident.
     """
 
     name: str
     body: str
+    gate_id_prefix: str = ""
+
+
+def parse_policy_file(file: PolicyFile) -> PolicySpec:
+    """Parse one guardrail file, with every gate ID under the file's ``gate_id_prefix``."""
+    spec = parse_policy(file.body, source=file.name)
+    if not file.gate_id_prefix:
+        return spec
+    gates = tuple(replace(gate, id=f"{file.gate_id_prefix}{gate.id}") for gate in spec.gates)
+    for gate in gates:
+        if len(gate.id) > MAX_GATE_ID_LENGTH:
+            raise PolicyError(
+                f"{file.name}: gate id {gate.id!r} is longer than {MAX_GATE_ID_LENGTH} characters with its prefix."
+            )
+    return replace(spec, gates=gates)
 
 
 def compose_policy(files: Sequence[PolicyFile], *, policy_id: str) -> PolicySpec:
@@ -592,7 +610,7 @@ def compose_policy(files: Sequence[PolicyFile], *, policy_id: str) -> PolicySpec
             "Group related gates into fewer files."
         )
 
-    parsed = [(file, parse_policy(file.body, source=file.name)) for file in files]
+    parsed = [(file, parse_policy_file(file)) for file in files]
     schema_file, first = parsed[0]
     for file, spec in parsed[1:]:
         if spec.schema_version != first.schema_version:

@@ -25,6 +25,7 @@ from typing import Any
 
 import pytest
 from fastapi import FastAPI
+from pydantic import ValidationError
 
 from gateway import main as gateway_main
 from gateway.container import build_container
@@ -279,3 +280,16 @@ async def test_the_container_sweeper_stops_without_a_sandbox_or_without_reuse(
 
     assert "sandbox container sweep" not in names
     assert names == [worker.name for worker in _LIFESPAN_WORKERS if worker.name != "sandbox container sweep"]
+
+
+@pytest.mark.asyncio
+async def test_the_idempotency_sweep_runs_while_the_header_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Records stored before the header was turned off still hold generated content, so they must still expire."""
+    names, _called = await _started_worker_names(_full_config(idempotency_retention_sec=0), monkeypatch)
+
+    assert "idempotency sweep" in names
+
+
+def test_the_idempotency_sweep_cannot_be_turned_off() -> None:
+    with pytest.raises(ValidationError):
+        GatewayConfig(idempotency_sweep_interval_sec=0)

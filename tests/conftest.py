@@ -1,4 +1,5 @@
 import argparse
+import os
 import re
 import shutil
 import sys
@@ -172,6 +173,23 @@ def _start_new_sqlite_databases_migrated(monkeypatch: pytest.MonkeyPatch, _migra
         run_migrations(database_url)
 
     monkeypatch.setattr(database, "_run_migrations", run_migrations_from_template)
+
+
+@pytest.fixture
+def isolated_home(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """An empty home directory, so neither a test nor a subprocess it runs reads the developer's own files."""
+    home = tmp_path_factory.mktemp("home")
+    # Windows reads USERPROFILE, not HOME.
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(home))
+    return home
+
+
+@pytest.fixture
+def no_otari_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unset every ``OTARI_*`` variable, so the developer's shell cannot switch a mode or put a key in test output."""
+    for name in [name for name in os.environ if name.startswith("OTARI_")]:
+        monkeypatch.delenv(name)
 
 
 @pytest.fixture

@@ -11,12 +11,14 @@ from typing import cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.files_exceptions import FileStorageError
 from gateway.models.files import FileObject
 from gateway.ports.file_storage_port import FileStoragePort
-from gateway.repositories.files import FileRepositories, FileRepository, OutputFileRow
+from gateway.repositories.files import FileRepositories, FileRepository
 from gateway.services.files import FileService, NewOutput, SweepBatch, _sweeper
 
 
@@ -45,6 +47,21 @@ def _service(uow: _Transactions, repo: Mock, store: Mock) -> FileService:
         GatewayConfig(),
         AsyncMock(side_effect=AssertionError("Workspace resolution is not expected")),
     )
+
+
+def _output() -> NewOutput:
+    return NewOutput("file-1", "user-1", uuid.uuid4(), "out.txt", "text/plain", "user_data", None)
+
+
+async def _chunks(*parts: bytes) -> AsyncIterator[bytes]:
+    for part in parts:
+        yield part
+
+
+def _store() -> Mock:
+    store = Mock(spec=FileStoragePort)
+    store.allocate.return_value = "blob-1"
+    return store
 
 
 @pytest.mark.asyncio
@@ -84,43 +101,52 @@ async def test_sweep_transfers_outside_transactions(delete_error: OSError | None
 @pytest.mark.asyncio
 @pytest.mark.parametrize("during_commit", [False, True])
 @pytest.mark.parametrize(
-    "error_type",
-    [asyncio.CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit, RuntimeError, ConnectionError, TimeoutError],
+    "error_type", [asyncio.CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit, RuntimeError, ConnectionError]
 )
-async def test_output_failure_cleanup(during_commit: bool, error_type: type[BaseException]) -> None:
+async def test_a_reservation_that_fails_writes_no_bytes(during_commit: bool, error_type: type[BaseException]) -> None:
+    """The row comes before the bytes, so a failed reservation has nothing to undo."""
     error = error_type()
     uow = _Transactions(commit_error=error if during_commit else None)
     repo = Mock(spec=FileRepository)
-    store = Mock(spec=FileStoragePort)
+    store = _store()
 
-    async def record(row: OutputFileRow) -> None:
+    async def add(record: FileObject) -> None:
         assert uow.depth == 1
         if not during_commit:
             raise error
 
-    async def delete(storage_ref: str) -> None:
-        assert uow.depth == 0
-        assert storage_ref == "blob-1"
-
-    repo.record_output.side_effect = record
-    store.delete.side_effect = delete
-    output = NewOutput("file-1", "user-1", uuid.uuid4(), "out.txt", "text/plain", 1, "user_data", "blob-1", None)
+    repo.add.side_effect = add
     with pytest.raises(error_type) as raised:
-        await _service(uow, repo, store).record_output(output)
+        await _service(uow, repo, store).store_produced(_output(), _chunks(b"x"))
     assert raised.value is error
     assert uow.depth == 0
-    if during_commit:
-        store.delete.assert_not_awaited()
-    else:
-        store.delete.assert_awaited_once_with("blob-1")
+    store.put_stream.assert_not_awaited()
+    store.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_type", [SQLAlchemyError, TimeoutError])
+async def test_a_reservation_the_database_refuses_is_a_storage_error(error_type: type[BaseException]) -> None:
+    uow = _Transactions()
+    repo = Mock(spec=FileRepository)
+    store = _store()
+    repo.add.side_effect = error_type()
+
+    with pytest.raises(FileStorageError):
+        await _service(uow, repo, store).store_produced(_output(), _chunks(b"x"))
+
+    assert uow.depth == 0
+    store.put_stream.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", [None, "anthropic"])
-async def test_output_maps_service_input_to_repository_row(provider: str | None) -> None:
+async def test_a_produced_file_is_reserved_from_its_output(provider: str | None) -> None:
     uow = _Transactions()
     repo = Mock(spec=FileRepository)
-    store = Mock(spec=FileStoragePort)
+    store = _store()
+    store.put_stream.return_value = 3
+    repo.mark_stored.return_value = True
     workspace_id = uuid.uuid4()
     expires_at = datetime.now(UTC)
     instance = "primary" if provider else None
@@ -131,38 +157,28 @@ async def test_output_maps_service_input_to_repository_row(provider: str | None)
         workspace_id=workspace_id,
         filename="out.txt",
         mime_type="text/plain",
-        bytes=42,
         purpose="user_data",
-        storage_ref="blob-1",
         expires_at=expires_at,
         provider=provider,
         provider_instance=instance,
         provider_container_id=container,
     )
+    added: list[FileObject] = []
 
-    async def record(row: OutputFileRow) -> None:
+    async def add(record: FileObject) -> None:
         assert uow.depth == 1
-        assert type(row) is OutputFileRow
-        assert row == OutputFileRow(
-            file_id="file-1",
-            user_id="user-1",
-            workspace_id=workspace_id,
-            filename="out.txt",
-            mime_type="text/plain",
-            bytes=42,
-            purpose="user_data",
-            storage_ref="blob-1",
-            expires_at=expires_at,
-            provider=provider,
-            provider_instance=instance,
-            provider_container_id=container,
-        )
+        added.append(record)
 
-    repo.record_output.side_effect = record
-    await _service(uow, repo, store).record_output(output)
+    repo.add.side_effect = add
+    size = await _service(uow, repo, store).store_produced(output, _chunks(b"abc"))
 
-    repo.record_output.assert_awaited_once()
-    assert uow.blocks == 1
+    (record,) = added
+    assert size == 3
+    assert (record.id, record.user_id, record.workspace_id) == ("file-1", "user-1", workspace_id)
+    assert (record.filename, record.mime_type, record.purpose) == ("out.txt", "text/plain", "user_data")
+    assert (record.storage_ref, record.bytes, record.expires_at) == ("blob-1", 0, expires_at)
+    assert (record.provider, record.provider_instance, record.provider_container_id) == (provider, instance, container)
+    assert record.pending_since is not None
     assert uow.depth == 0
     store.delete.assert_not_awaited()
 

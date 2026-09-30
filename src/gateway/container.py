@@ -39,6 +39,7 @@ from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAda
 from gateway.adapters.mcp_server_adapter import build_mcp_server_port
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
+from gateway.adapters.web_search_policy_adapter import build_web_search_policy_port
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
@@ -51,6 +52,7 @@ from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
+from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 
 T = TypeVar("T")
 
@@ -344,6 +346,22 @@ def _mcp_server_port_factory(config: GatewayConfig | None) -> PortFactory[McpSer
     return factory
 
 
+def _web_search_policy_port_factory(config: GatewayConfig | None) -> PortFactory[WebSearchPolicyPort]:
+    """The core ``WebSearchPolicyPort`` factory, closed over this app's config.
+
+    Built per resolve rather than once, because the implementation that reads
+    rows needs the request's own session.
+    """
+
+    def factory(session: AsyncSession | None) -> WebSearchPolicyPort:
+        if config is None:
+            msg = "the web search policy needs the deployment config; build the container with it"
+            raise ContainerError(msg)
+        return build_web_search_policy_port(config, session)
+
+    return factory
+
+
 def build_container(bootstrap_selector: str | None = None, config: GatewayConfig | None = None) -> Container:
     """Build the composition-root container for this deployment.
 
@@ -399,6 +417,10 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
     # where it holds them, and asks its peer where it does not. An overlay
     # binds a source of its own and changes nothing above the port.
     container.bind(McpServerPort, _mcp_server_port_factory(config))
+    # A workspace's web search policy: the base reads this deployment's own
+    # rows where it holds them, and asks its peer where it does not. An overlay
+    # binds a source of its own and changes nothing above the port.
+    container.bind(WebSearchPolicyPort, _web_search_policy_port_factory(config))
     if config is not None:
         # Asked once, at build, rather than per request: selecting a hosted
         # provider is itself what publishes code execution on ``/v1/tools``, in

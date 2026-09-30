@@ -13,6 +13,8 @@ from click.testing import CliRunner, Result
 
 import otari_agent.hook as hook_cli
 
+pytestmark = pytest.mark.usefixtures("isolated_home", "no_otari_env")
+
 
 def _guardrail_path(root: Path) -> Path:
     """`.otari/guardrails.yml` under `root`, with its parent directory created."""
@@ -484,3 +486,110 @@ def test_the_single_file_composes_before_the_directory(repo: Path) -> None:
     result = _invoke("--path", "from-the-file.txt")
     assert result.exit_code == 0, result.output
     assert "fires      from-the-file (required) in .otari/guardrails.yml" in result.output
+
+
+def test_user_level_gates_are_checked_with_the_repo_and_listed_apart(repo: Path, isolated_home: Path) -> None:
+    _write_into(repo, ".otari/guardrails.yml", _one_gate("team"))
+    _write_into(isolated_home, ".otari/guardrails/mine.yml", _one_gate("personal"))
+    result = _invoke()
+    assert result.exit_code == 0, result.output
+    assert "composed from 2 files" in result.output
+    assert "from ~/.otari/: user:personal" in result.output
+    assert "from .otari/: team" in result.output
+
+
+def test_a_repo_alone_lists_no_origins(repo: Path) -> None:
+    _write_into(repo, ".otari/guardrails/a.yml", _one_gate("a1"))
+    _write_into(repo, ".otari/guardrails/b.yml", _one_gate("b1"))
+    result = _invoke()
+    assert result.exit_code == 0, result.output
+    assert "from .otari/:" not in result.output
+
+
+def test_a_user_level_guardrail_alone_is_enough_to_validate(repo: Path, isolated_home: Path) -> None:
+    _write_into(isolated_home, ".otari/guardrails.yml", _one_gate("personal"))
+    result = _invoke("--path", "personal.txt")
+    assert result.exit_code == 0, result.output
+    assert "~/.otari/guardrails.yml" in result.output
+    assert "fires      user:personal (required)" in result.output
+
+
+def test_a_repo_gate_that_copies_the_user_prefix_is_reported(repo: Path, isolated_home: Path) -> None:
+    _write_into(repo, ".otari/guardrails.yml", _one_gate("user:shared"))
+    _write_into(isolated_home, ".otari/guardrails.yml", _one_gate("shared"))
+    result = _invoke()
+    assert result.exit_code != 0
+    assert "both .otari/guardrails.yml and ~/.otari/guardrails.yml" in result.output
+
+
+def test_a_user_level_verifier_is_probed_under_home(repo: Path, isolated_home: Path) -> None:
+    verifiers = isolated_home / ".otari/verifiers"
+    verifiers.mkdir(parents=True)
+    (verifiers / "check.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    _write_into(
+        isolated_home,
+        ".otari/guardrails.yml",
+        _HEADER + "  - id: g\n    type: verifier\n    runs: [stop.verifier]\n"
+        "    enforcement: required\n    verifier: .otari/verifiers/check.sh\n    message: m\n",
+    )
+    result = _invoke()
+    assert result.exit_code == 1, result.output
+    assert "`chmod +x ~/.otari/verifiers/check.sh`" in result.output
+
+
+def test_a_user_level_file_named_directly_is_checked_as_the_users(repo: Path, isolated_home: Path) -> None:
+    """Named with `--guardrail-file`, a file under `~/.otari/` is still probed and prefixed as the hook would."""
+    verifiers = isolated_home / ".otari/verifiers"
+    verifiers.mkdir(parents=True)
+    (verifiers / "check.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    personal = isolated_home / ".otari/guardrails.yml"
+    _write_into(
+        isolated_home,
+        ".otari/guardrails.yml",
+        _HEADER + "  - id: g\n    type: verifier\n    runs: [stop.verifier]\n"
+        "    enforcement: required\n    verifier: .otari/verifiers/check.sh\n    message: m\n",
+    )
+    result = _invoke("--guardrail-file", str(personal))
+    assert result.exit_code == 1, result.output
+    assert "user:g" in result.output
+    assert "`chmod +x ~/.otari/verifiers/check.sh`" in result.output
+
+
+def test_a_draft_under_otari_home_that_the_hook_never_reads_is_checked_as_a_repo_file(
+    repo: Path, isolated_home: Path
+) -> None:
+    """Only `~/.otari/guardrails.yml` and `~/.otari/guardrails/` are the user's, so a draft elsewhere keeps its IDs."""
+    draft = isolated_home / ".otari/draft.yml"
+    _write_into(isolated_home, ".otari/draft.yml", _one_gate("draft-gate"))
+    result = _invoke("--guardrail-file", str(draft), "--path", "draft-gate.txt")
+    assert result.exit_code == 0, result.output
+    assert "fires      draft-gate (required)" in result.output
+    assert "user:draft-gate" not in result.output
+
+
+def test_repo_only_leaves_out_the_users_gates_and_their_warnings(repo: Path, isolated_home: Path) -> None:
+    """A personal warning must not fail `--strict` when the repo's own guardrail is clean."""
+    _write_into(repo, ".otari/guardrails.yml", _one_gate("team"))
+    _write_into(isolated_home, ".otari/guardrails.yml", _FOOTGUNS)
+    assert _invoke("--strict").exit_code == 1
+
+    result = _invoke("--strict", "--repo-only")
+    assert result.exit_code == 0, result.output
+    assert "user:" not in result.output
+    assert "from ~/.otari/" not in result.output
+    assert "0 error(s), 0 warning(s)" in result.output
+
+
+def test_repo_only_with_no_repo_guardrail_says_so(repo: Path, isolated_home: Path) -> None:
+    _write_into(isolated_home, ".otari/guardrails.yml", _one_gate("personal"))
+    result = _invoke("--repo-only")
+    assert result.exit_code != 0
+    assert hook_cli.GUARDRAIL_DIR in result.output
+    assert "~/.otari/" not in result.output
+
+
+def test_repo_only_and_guardrail_file_cannot_be_combined(repo: Path) -> None:
+    _write_into(repo, ".otari/guardrails.yml", _one_gate("team"))
+    result = _invoke("--repo-only", "--guardrail-file", str(repo / hook_cli.GUARDRAIL_FILE))
+    assert result.exit_code == 2
+    assert "--repo-only and --guardrail-file cannot be combined" in result.output

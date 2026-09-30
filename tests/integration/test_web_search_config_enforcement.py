@@ -636,7 +636,7 @@ def test_a_config_read_that_fails_releases_the_budget_reservation(
         raise SQLAlchemyError("connection lost mid-admission")
 
     monkeypatch.setattr(
-        "gateway.api.routes._pipeline.resolve_workspace_web_search_config",
+        "gateway.adapters.web_search_policy_adapter.resolve_workspace_web_search_config",
         failing_resolve,
     )
     # TestClient re-raises a server exception rather than rendering a 500, so the

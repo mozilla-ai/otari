@@ -16,6 +16,8 @@ from click.testing import CliRunner
 import otari_agent.hook as hook_cli
 from otari_agent.settings import HookSettings
 
+pytestmark = pytest.mark.usefixtures("isolated_home", "no_otari_env")
+
 
 def _guardrail_path(root: Path) -> Path:
     """`.otari/guardrails.yml` under `root`, with its parent directory created."""
@@ -76,6 +78,14 @@ def test_fails_outside_a_git_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert "Not inside a Git repository" in result.output
 
 
+def test_declining_the_starter_policy_says_the_user_level_gates_still_run(repo: Path, isolated_home: Path) -> None:
+    _guardrail_path(isolated_home).write_text(_COMMAND_GATES, encoding="utf-8")
+    result = _invoke("--api-key", "k", input="n\n")
+    assert result.exit_code == 0, result.output
+    assert "every gate check passes" not in result.output
+    assert "your own gates in ~/.otari/" in result.output
+
+
 def test_declining_the_starter_policy_still_registers_the_hook(repo: Path) -> None:
     result = _invoke("--api-key", "k", input="n\n")
     assert result.exit_code == 0, result.output
@@ -126,6 +136,24 @@ def test_an_existing_read_policy_adds_read_to_the_matcher(repo: Path) -> None:
     assert result.exit_code == 0, result.output
     settings = _read_settings(repo)
     assert settings["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Read"
+
+
+def test_a_user_level_read_gate_adds_read_to_the_matcher(repo: Path, isolated_home: Path) -> None:
+    """The hook composes the user's own gates in this repo, so the matcher has to reach them too."""
+    _guardrail_path(repo).write_text(_PATH_ONLY_GATES, encoding="utf-8")
+    _guardrail_path(isolated_home).write_text(_READ_GATES.replace("id: g\n", "id: personal\n"), encoding="utf-8")
+    result = _invoke("--api-key", "k")
+    assert result.exit_code == 0, result.output
+    assert _read_settings(repo)["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Read"
+
+
+def test_a_broken_repo_file_still_leaves_the_user_level_gates_in_the_matcher(repo: Path, isolated_home: Path) -> None:
+    """The hook still enforces the user's gates when the repo's files fail, so it must still be called for them."""
+    _guardrail_path(repo).write_text("gates: [", encoding="utf-8")
+    _guardrail_path(isolated_home).write_text(_COMMAND_GATES, encoding="utf-8")
+    result = _invoke("--api-key", "k")
+    assert result.exit_code == 0, result.output
+    assert _read_settings(repo)["hooks"]["PreToolUse"][0]["matcher"] == "Edit|Write|NotebookEdit|Bash"
 
 
 def test_a_policy_with_no_read_gate_keeps_read_out_of_the_matcher(repo: Path) -> None:

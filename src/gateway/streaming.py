@@ -196,8 +196,8 @@ async def streaming_generator(
             before emitting it. Standalone callers leave this false.
         is_cost_carrier: Identifies a provider object that can carry cost. The last
             match in the stream wins, so a predicate that also matches a non-terminal
-            object (a chat tool loop forwards one usage chunk per iteration) costs no
-            buffering beyond the chunks between that match and the next one.
+            object costs no buffering beyond the chunks between that match and the
+            next one.
         attach_settlement: Mutates that carrier with the opaque settlement value.
         on_first_chunk: Called synchronously, at most once, the moment the first
             non-keepalive chunk is about to be formatted and yielded. Lets the
@@ -248,12 +248,10 @@ async def streaming_generator(
                     has_usage = True
 
                 if settle_before_done and is_cost_carrier is not None and is_cost_carrier(chunk):
-                    # A later carrier supersedes an earlier one. A chat tool loop
-                    # forwards one ``include_usage`` chunk per iteration, so the
-                    # first one is not terminal; flushing here keeps the next
-                    # iteration's answer streaming instead of holding it behind a
-                    # carrier that is not the last, and leaves cost on the chunk
-                    # that really ends the stream.
+                    # A later carrier supersedes an earlier one: flushing here keeps
+                    # the stream flowing instead of holding it behind a carrier that
+                    # is not the last, and leaves cost on the chunk that really ends
+                    # the stream.
                     for buffered_chunk in terminal_buffer:
                         yield _format_and_mark_first(buffered_chunk)
                     terminal_buffer.clear()

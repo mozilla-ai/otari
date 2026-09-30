@@ -4,7 +4,15 @@ import pytest
 
 import otari_agent.domain.policy as policy_module
 from otari_agent.domain.check import check_policy
-from otari_agent.domain.policy import MAX_POLICY_FILES, PolicyError, PolicyFile, compose_policy, parse_policy
+from otari_agent.domain.policy import (
+    MAX_GATE_ID_LENGTH,
+    MAX_POLICY_FILES,
+    PolicyError,
+    PolicyFile,
+    compose_policy,
+    parse_policy,
+    parse_policy_file,
+)
 from otari_agent.domain.types import JudgeGate, VerifierGate, by_priority
 
 
@@ -49,6 +57,24 @@ def test_a_gate_id_repeated_across_files_is_an_error_naming_both() -> None:
     message = str(excinfo.value)
     assert "'shared'" in message
     assert "a.yml" in message and "b.yml" in message
+
+
+def test_a_file_prefix_keeps_its_gate_ids_apart_from_another_files() -> None:
+    mine = PolicyFile(name="~/mine.yml", body=_file("m", "shared").body, gate_id_prefix="user:")
+    spec = compose_policy([_file("a.yml", "shared"), mine], policy_id="x")
+    assert [gate.id for gate in spec.gates] == ["shared", "user:shared"]
+    assert spec.gate_sources == {"shared": "a.yml", "user:shared": "~/mine.yml"}
+
+
+def test_a_single_file_takes_its_prefix_too() -> None:
+    spec = parse_policy_file(PolicyFile(name="~/mine.yml", body=_file("m", "a1").body, gate_id_prefix="user:"))
+    assert [gate.id for gate in spec.gates] == ["user:a1"]
+
+
+def test_a_prefixed_gate_id_still_fits_the_id_limit() -> None:
+    long_id = "g" * MAX_GATE_ID_LENGTH
+    with pytest.raises(PolicyError, match="~/mine.yml"):
+        parse_policy_file(PolicyFile(name="~/mine.yml", body=_file("m", long_id).body, gate_id_prefix="user:"))
 
 
 def test_a_file_that_does_not_parse_fails_the_whole_composition() -> None:

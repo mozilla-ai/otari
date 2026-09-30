@@ -10,8 +10,8 @@ from collections.abc import AsyncIterator
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.log_config import logger
+from gateway.models.files import new_file_id
 from gateway.ports.file_storage_port import FileStoragePort
-from gateway.services.files._cleanup import discard_output_bytes
 from gateway.services.files._metadata import expiry_for, guess_mime_type
 from gateway.services.files._provider_files import (
     FileOverBudgetError,
@@ -84,29 +84,22 @@ class SandboxFileBridge:
     async def store_output(self, filename: str, chunks: AsyncIterator[bytes]) -> str | None:
         """Persist ``chunks`` as a new file and return its ``file_id``, or ``None`` when empty.
 
-        Streams into the store, so a produced file is never held whole. Whatever
-        stops the row from landing, the blob goes with it, so nothing sits in the
-        store that no row and no sweep can reach.
+        Streams into the store, so a produced file is never held whole.
         """
-        file_id = f"file-{uuid.uuid4().hex}"
-        storage_ref, size = await self._file_store.put_stream(file_id, chunks)
-        if size == 0:
-            await self._file_store.delete(storage_ref)
-            return None
-        await self._files.record_output(
+        file_id = new_file_id()
+        size = await self._files.store_produced(
             NewOutput(
                 file_id=file_id,
                 user_id=self._user_id,
                 workspace_id=self._workspace_id,
                 filename=filename,
                 mime_type=guess_mime_type(filename),
-                bytes=size,
                 purpose=CODE_EXECUTION_OUTPUT_PURPOSE,
-                storage_ref=storage_ref,
                 expires_at=expiry_for(self._config),
-            )
+            ),
+            chunks,
         )
-        return file_id
+        return file_id if size else None
 
     async def copy_provider_files(self, files: list[ProviderFile], *, provider: str, provider_instance: str) -> None:
         """Copy the files a provider's own sandbox produced into the store, each under the provider's ID.
@@ -177,29 +170,24 @@ class SandboxFileBridge:
                 self._provider_bytes_left -= size
 
     async def _copy_provider_file(self, client: ProviderFileClient, file: ProviderFile, budget: int) -> int:
-        """Copy one file into the store and record its row, returning its size."""
-        # A blob key of Otari's own, so two copies of one provider ID never share a blob.
-        blob_key = f"file-{uuid.uuid4().hex}"
+        """Copy one file into the store and record its row, returning its size.
+
+        The name is resolved before the read, so the row is complete before a
+        byte arrives. A copy that fails or arrives empty is not recorded, so a
+        later request can try the same file again.
+        """
+        filename = file.filename or await client.get_filename(file.file_id) or file.file_id
+        output = NewOutput(
+            file_id=file.file_id,
+            user_id=self._user_id,
+            workspace_id=self._workspace_id,
+            filename=filename,
+            mime_type=guess_mime_type(filename),
+            purpose=CODE_EXECUTION_OUTPUT_PURPOSE,
+            expires_at=expiry_for(self._config),
+            provider=client.provider,
+            provider_instance=client.provider_instance,
+            provider_container_id=file.container_id,
+        )
         async with contextlib.aclosing(client.read(file, budget_bytes=budget)) as chunks:
-            storage_ref, size = await self._file_store.put_stream(blob_key, chunks)
-        try:
-            filename = file.filename or await client.get_filename(file.file_id) or file.file_id
-            output = NewOutput(
-                file_id=file.file_id,
-                user_id=self._user_id,
-                workspace_id=self._workspace_id,
-                filename=filename,
-                mime_type=guess_mime_type(filename),
-                bytes=size,
-                purpose=CODE_EXECUTION_OUTPUT_PURPOSE,
-                storage_ref=storage_ref,
-                expires_at=expiry_for(self._config),
-                provider=client.provider,
-                provider_instance=client.provider_instance,
-                provider_container_id=file.container_id,
-            )
-        except BaseException:
-            await discard_output_bytes(self._file_store, storage_ref)
-            raise
-        await self._files.record_output(output)
-        return size
+            return await self._files.store_produced(output, chunks)

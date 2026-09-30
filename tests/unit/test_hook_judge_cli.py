@@ -22,6 +22,8 @@ import otari_agent.hook as hook_cli
 from otari_agent.domain.policy import parse_policy
 from otari_agent.settings import HookSettings
 
+pytestmark = pytest.mark.usefixtures("isolated_home", "no_otari_env")
+
 
 def _guardrail_path(root: Path) -> Path:
     """`.otari/guardrails.yml` under `root`, with its parent directory created."""
@@ -76,6 +78,8 @@ def repo(tmp_path: Path) -> Path:
 def _git_status_and_diff_run() -> Callable[..., subprocess.CompletedProcess[str]]:
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")

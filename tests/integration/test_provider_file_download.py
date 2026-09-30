@@ -242,7 +242,11 @@ def test_a_file_the_provider_will_not_serve_is_not_recorded(
     tmp_file_store: None,
     anthropic: _StubAnthropic,
 ) -> None:
-    """The reply stands, and Otari does not claim a file it holds no bytes for."""
+    """The reply stands, and Otari does not claim a file it holds no bytes for.
+
+    The row reserved before the failed read is given back, so a later request
+    can try the same file again.
+    """
     _run_natively(client, api_key_header, "file_01missing")
 
     assert client.get(f"{API_ROOT}/files/file_01missing", headers=api_key_header).status_code == 404

@@ -23,7 +23,10 @@ from click.testing import CliRunner
 import otari_agent.hook as hook_cli
 from otari_agent.domain.check import PolicyCheckError
 from otari_agent.domain.policy import parse_policy
+from otari_agent.domain.types import PolicySpec
 from otari_agent.settings import HookSettings
+
+pytestmark = pytest.mark.usefixtures("isolated_home", "no_otari_env")
 
 
 def _guardrail_path(root: Path) -> Path:
@@ -1273,6 +1276,8 @@ def _git_status_and_diff_run(git_status_stdout: str = "", git_diff_stdout: str =
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=git_status_stdout, stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=git_diff_stdout, stderr="")
         raise AssertionError(f"unexpected subprocess.run call before claude -p: {cmd}")
@@ -1285,6 +1290,8 @@ def test_stop_event_submits_a_judge_verdict_from_claude_p(
 ) -> None:
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="+ changed line\n", stderr="")
@@ -1360,6 +1367,8 @@ def test_stop_event_locally_evaluates_a_judge_verdict_and_warns(
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="+ changed line\n", stderr="")
         if cmd[0] == "/usr/bin/claude":
@@ -1385,6 +1394,8 @@ def test_stop_event_locally_evaluates_a_judge_verdict_and_warns(
 def test_judge_model_is_overridable_via_flag(monkeypatch: pytest.MonkeyPatch, judge_repo: Path) -> None:
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
@@ -1417,6 +1428,8 @@ def test_judge_dry_run_never_calls_claude_but_still_counts_and_logs(
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="+ changed line\n", stderr="")
@@ -1466,6 +1479,8 @@ def test_stop_event_parses_a_verdict_wrapped_in_a_markdown_code_fence(
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
@@ -1526,6 +1541,8 @@ def test_stop_event_reports_error_when_claude_p_output_is_not_valid_json(
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[0] == "/usr/bin/claude":
@@ -1555,6 +1572,8 @@ def test_stop_event_warns_when_the_diff_is_truncated(monkeypatch: pytest.MonkeyP
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=oversize_diff, stderr="")
@@ -1586,6 +1605,8 @@ def test_stop_event_warns_when_the_transcript_is_truncated(
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
@@ -1671,6 +1692,8 @@ def test_stop_event_bounds_judge_reasoning_and_a_required_gate_still_blocks(
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[0] == "/usr/bin/claude":
@@ -1732,6 +1755,8 @@ def test_stop_event_survives_a_judge_setup_failure_and_still_blocks(
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         raise AssertionError(f"unexpected subprocess.run call: {cmd}")
@@ -1783,6 +1808,8 @@ def test_stop_event_never_calls_the_model_when_diff_collection_fails(
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         nonlocal claude_call_count
         if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=1, stdout="", stderr="fatal: bad revision")
@@ -1842,6 +1869,8 @@ def test_stop_event_retries_the_judge_diff_only_when_the_prompt_is_too_long(
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="+ changed line\n", stderr="")
         if cmd[0] == "/usr/bin/claude":
@@ -1894,6 +1923,8 @@ def test_stop_event_does_not_retry_when_there_is_no_transcript_to_drop(
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         nonlocal claude_call_count
         if cmd[:2] == ["git", "status"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="+ changed line\n", stderr="")
@@ -1963,6 +1994,8 @@ def test_stop_event_bounds_total_judge_time_so_a_required_gate_still_reaches_the
         nonlocal claude_call_count
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=" M CHANGELOG.md\0", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[0] == "/usr/bin/claude":
@@ -2143,6 +2176,8 @@ def test_stop_event_caps_the_number_of_judge_gates_evaluated(monkeypatch: pytest
         nonlocal claude_call_count
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[0] == "/usr/bin/claude":
@@ -2229,6 +2264,8 @@ def test_stop_event_runs_a_when_changed_judge_gate_that_applies(
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         if cmd[:2] == ["git", "status"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=" M src/module.py\0", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[:2] == ["git", "diff"]:
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
         if cmd[0] == "/usr/bin/claude":
@@ -2550,6 +2587,10 @@ def test_a_first_stop_block_does_not_mention_the_budget(monkeypatch: pytest.Monk
     assert "already blocked once" not in result.output
 
 
+def _repo_origins(spec: PolicySpec) -> dict[str, hook_cli.GuardrailOrigin]:
+    return {gate.id: hook_cli.GuardrailOrigin.REPO for gate in spec.gates}
+
+
 def _write_verifier(tmp_path: Path, name: str, body: str) -> Path:
     script = tmp_path / name
     script.write_text(f"#!/usr/bin/env bash\n{body}\n", encoding="utf-8")
@@ -2557,17 +2598,34 @@ def _write_verifier(tmp_path: Path, name: str, body: str) -> Path:
     return script
 
 
+# A script for `_warm_verifier` exits at once when its first argument is `warm`.
+_WARM_EXIT = '[ "$1" = warm ] && exit 0\n'
+
+
+def _warm_verifier(script: Path) -> None:
+    """Run a new verifier script once, so a test that times it does not also time its first run.
+
+    The first run of a new executable can be slow on any platform.
+    macOS checks each new file, one at a time, and under parallel load that wait reaches seconds.
+    """
+    subprocess.run([str(script), "warm"], check=True)
+
+
 def test_hook_run_check_verifier_passes_on_real_exit_zero(tmp_path: Path) -> None:
     """No mocking: a real script, run as a real subprocess, exiting 0."""
     _write_verifier(tmp_path, "v.sh", "exit 0")
-    outcome, detail = hook_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
+    outcome, detail = hook_cli._hook_run_check_verifier(
+        tmp_path, "v.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 10
+    )
     assert outcome == "pass"
     assert detail == ""
 
 
 def test_hook_run_check_verifier_fails_on_real_exit_one_and_captures_stdout(tmp_path: Path) -> None:
     _write_verifier(tmp_path, "v.sh", 'echo "conflicted.txt:2"\nexit 1')
-    outcome, detail = hook_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
+    outcome, detail = hook_cli._hook_run_check_verifier(
+        tmp_path, "v.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 10
+    )
     assert outcome == "fail"
     assert detail == "conflicted.txt:2\n"
 
@@ -2575,12 +2633,16 @@ def test_hook_run_check_verifier_fails_on_real_exit_one_and_captures_stdout(tmp_
 @pytest.mark.parametrize("exit_code", [2, 7, 255])
 def test_hook_run_check_verifier_errors_on_other_exit_codes(tmp_path: Path, exit_code: int) -> None:
     _write_verifier(tmp_path, "v.sh", f"exit {exit_code}")
-    outcome, _detail = hook_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
+    outcome, _detail = hook_cli._hook_run_check_verifier(
+        tmp_path, "v.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 10
+    )
     assert outcome == "error"
 
 
 def test_hook_run_check_verifier_errors_when_the_script_does_not_exist(tmp_path: Path) -> None:
-    outcome, detail = hook_cli._hook_run_check_verifier(tmp_path, "does-not-exist.sh", deadline=time.monotonic() + 10)
+    outcome, detail = hook_cli._hook_run_check_verifier(
+        tmp_path, "does-not-exist.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 10
+    )
     assert outcome == "error"
     assert "does not exist" in detail
 
@@ -2589,7 +2651,9 @@ def test_hook_run_check_verifier_errors_when_the_script_is_not_executable(tmp_pa
     script = tmp_path / "v.sh"
     script.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     # Deliberately not chmod +x: exec must raise PermissionError (an OSError).
-    outcome, detail = hook_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
+    outcome, detail = hook_cli._hook_run_check_verifier(
+        tmp_path, "v.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 10
+    )
     assert outcome == "error"
     assert "v.sh" in detail
 
@@ -2608,14 +2672,18 @@ def test_hook_run_check_verifier_rejects_a_verifier_that_resolves_outside_the_re
     outside.chmod(0o755)
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    outcome, detail = hook_cli._hook_run_check_verifier(repo_root, f"../{outside.name}", deadline=time.monotonic() + 10)
+    outcome, detail = hook_cli._hook_run_check_verifier(
+        repo_root, f"../{outside.name}", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 10
+    )
     assert outcome == "error"
     assert "outside the repo root" in detail
 
 
 def test_hook_run_check_verifier_errors_when_the_deadline_has_already_passed(tmp_path: Path) -> None:
     _write_verifier(tmp_path, "v.sh", "exit 0")
-    outcome, detail = hook_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() - 1)
+    outcome, detail = hook_cli._hook_run_check_verifier(
+        tmp_path, "v.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() - 1
+    )
     assert outcome == "error"
     assert "budget exhausted" in detail
 
@@ -2624,7 +2692,9 @@ def test_hook_run_check_verifier_times_out_on_a_real_slow_script(tmp_path: Path)
     _write_verifier(tmp_path, "v.sh", "sleep 5\nexit 0")
     # A near-zero remaining budget forces subprocess.run's own `timeout=` well
     # under the script's real 5s sleep, without waiting for _HOOK_CHECK_TIMEOUT_SECONDS.
-    outcome, detail = hook_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 0.05)
+    outcome, detail = hook_cli._hook_run_check_verifier(
+        tmp_path, "v.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 0.05
+    )
     assert outcome == "error"
     assert "did not respond" in detail
 
@@ -2638,11 +2708,13 @@ def test_hook_run_check_verifier_timeout_also_kills_a_background_child(tmp_path:
     the verifier runs in a process group of its own and the timeout kills the
     group.
     """
-    _write_verifier(tmp_path, "v.sh", "sleep 30 &\necho $! > child.pid\nsleep 5\nexit 0")
+    _warm_verifier(_write_verifier(tmp_path, "v.sh", f"{_WARM_EXIT}sleep 30 &\necho $! > child.pid\nsleep 5\nexit 0"))
     # A whole second, not the 0.05s the plain timeout test uses: the script has
     # to reach `echo $!` before the kill, or there is no recorded child to
     # assert about.
-    outcome, detail = hook_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 1)
+    outcome, detail = hook_cli._hook_run_check_verifier(
+        tmp_path, "v.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 1
+    )
     assert outcome == "error"
     assert "did not respond" in detail
 
@@ -2665,7 +2737,9 @@ def test_hook_run_check_verifier_replaces_undecodable_output(tmp_path: Path) -> 
     escape and take every other gate in the policy down with it.
     """
     _write_verifier(tmp_path, "v.sh", r"""printf 'bad: \xff\xfe'""" + "\nexit 1")
-    outcome, detail = hook_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
+    outcome, detail = hook_cli._hook_run_check_verifier(
+        tmp_path, "v.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 10
+    )
     assert outcome == "fail"
     assert detail.startswith("bad: ")
     assert "\ufffd" in detail
@@ -2673,18 +2747,13 @@ def test_hook_run_check_verifier_replaces_undecodable_output(tmp_path: Path) -> 
 
 def test_hook_run_check_verifier_caps_detail_length(tmp_path: Path) -> None:
     _write_verifier(tmp_path, "v.sh", 'printf "%0.sx" {1..10000}\nexit 1')
-    outcome, detail = hook_cli._hook_run_check_verifier(tmp_path, "v.sh", deadline=time.monotonic() + 10)
+    outcome, detail = hook_cli._hook_run_check_verifier(
+        tmp_path, "v.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 10
+    )
     assert outcome == "fail"
     assert len(detail) == hook_cli._HOOK_MAX_CHECK_DETAIL_LENGTH
 
 
-# Wall-clock, so a loaded machine can push five 0.3s subprocesses past the
-# bound while the code under test is doing exactly what it should. Measured
-# locally at roughly one failure in three under load, passing alone. Reruns
-# rather than a looser bound: the bound is the assertion, and widening it far
-# enough to never flake would stop it telling a concurrent run from a
-# sequential one.
-@pytest.mark.flaky(reruns=2, reruns_delay=1)
 def test_verifier_gates_run_concurrently_not_sequentially(tmp_path: Path) -> None:
     """Five verifier gates, each a real script sleeping ~0.3s, must finish in
     well under 5 * 0.3s: `_hook_collect_check_verdicts` runs verifiers through a
@@ -2695,15 +2764,16 @@ def test_verifier_gates_run_concurrently_not_sequentially(tmp_path: Path) -> Non
     gate_count = 5
     per_gate_seconds = 0.3
     for i in range(gate_count):
-        _write_verifier(tmp_path, f"v{i}.sh", f"sleep {per_gate_seconds}\nexit 0")
+        _warm_verifier(_write_verifier(tmp_path, f"v{i}.sh", f"{_WARM_EXIT}sleep {per_gate_seconds}\nexit 0"))
     gates_yaml = "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n" + "".join(
         f"  - id: g{i}\n    type: verifier\n    runs: [stop.verifier]\n    enforcement: required\n"
         f"    verifier: v{i}.sh\n    message: m{i}\n"
         for i in range(gate_count)
     )
+    spec = parse_policy(gates_yaml, source="test.yml")
 
     start = time.monotonic()
-    results = hook_cli._hook_collect_check_verdicts(parse_policy(gates_yaml, source="test.yml"), tmp_path, [])
+    results = hook_cli._hook_collect_check_verdicts(spec, tmp_path, [], _repo_origins(spec))
     elapsed = time.monotonic() - start
 
     assert [result["gate_id"] for result in results] == [f"g{i}" for i in range(gate_count)]
@@ -2887,7 +2957,7 @@ def test_collect_check_verdicts_skips_gates_over_the_per_run_limit(tmp_path: Pat
     )
     spec = parse_policy("\n".join(gates_yaml) + "\n", source="test.yml")
 
-    results = hook_cli._hook_collect_check_verdicts(spec, tmp_path, [])
+    results = hook_cli._hook_collect_check_verdicts(spec, tmp_path, [], _repo_origins(spec))
     assert len(results) == hook_cli._HOOK_CHECK_MAX_GATES_PER_RUN
     assert {r["outcome"] for r in results} == {"pass"}
 
@@ -2910,7 +2980,7 @@ def test_collect_check_verdicts_keeps_the_highest_priority_gates_over_the_limit(
     )
     spec = parse_policy("\n".join(gates_yaml) + "\n", source="test.yml")
 
-    results = hook_cli._hook_collect_check_verdicts(spec, tmp_path, [])
+    results = hook_cli._hook_collect_check_verdicts(spec, tmp_path, [], _repo_origins(spec))
     ran = [result["gate_id"] for result in results]
     assert ran[0] == f"g{over_the_limit - 1}"
     assert len(ran) == hook_cli._HOOK_CHECK_MAX_GATES_PER_RUN
@@ -3279,6 +3349,249 @@ def test_an_oversize_composed_guardrail_does_not_block_the_turn(
     )
     assert result.exit_code == 0, result.output
     assert "no gate is being enforced" in json.loads(result.stdout)["systemMessage"]
+
+
+def _edit_payload(repo: Path, target: str) -> dict[str, Any]:
+    return {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(repo / target)},
+    }
+
+
+def test_discovery_reads_the_user_level_after_the_repo(tmp_path: Path, isolated_home: Path) -> None:
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(tmp_path, ".otari/guardrails.yml", "r")
+    _write_guardrail(isolated_home, ".otari/guardrails.yml", "u")
+    _write_guardrail(isolated_home, ".otari/guardrails/git/safety.yml", "s")
+
+    found = [(file.path, file.origin) for file in hook_cli._hook_guardrail_files(tmp_path)]
+    assert found == [
+        (tmp_path / ".otari/guardrails.yml", hook_cli.GuardrailOrigin.REPO),
+        (isolated_home / ".otari/guardrails.yml", hook_cli.GuardrailOrigin.USER),
+        (isolated_home / ".otari/guardrails/git/safety.yml", hook_cli.GuardrailOrigin.USER),
+    ]
+
+
+def test_discovery_reads_a_home_directory_repo_only_once(isolated_home: Path) -> None:
+    """A repo checked out at the home directory owns `~/.otari/`, so its files are not read twice."""
+    (isolated_home / ".git").mkdir()
+    _write_guardrail(isolated_home, ".otari/guardrails.yml", "r")
+
+    found = [(file.path, file.origin) for file in hook_cli._hook_guardrail_files(isolated_home)]
+    assert found == [(isolated_home / ".otari/guardrails.yml", hook_cli.GuardrailOrigin.REPO)]
+
+
+def test_discovery_reads_a_user_file_the_repo_links_to_once_as_the_users(tmp_path: Path, isolated_home: Path) -> None:
+    """A repo link to a file in `~/.otari/` does not make the file the repo's, or the repo could turn it off."""
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(isolated_home, ".otari/guardrails/mine.yml", "personal")
+    linked = tmp_path / ".otari/guardrails/personal/mine.yml"
+    linked.parent.mkdir(parents=True)
+    linked.symlink_to(isolated_home / ".otari/guardrails/mine.yml")
+
+    found = [(file.path, file.origin) for file in hook_cli._hook_guardrail_files(tmp_path)]
+    assert found == [(isolated_home / ".otari/guardrails/mine.yml", hook_cli.GuardrailOrigin.USER)]
+
+
+@pytest.mark.parametrize("error", [RuntimeError("no home"), PermissionError("unreadable home")])
+def test_a_home_directory_that_cannot_be_found_leaves_the_repo_gates_on(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, error: Exception
+) -> None:
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(tmp_path, ".otari/guardrails.yml", "team")
+
+    def no_home() -> Path:
+        raise error
+
+    monkeypatch.setattr(Path, "home", no_home)
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "team.txt")))
+    assert result.exit_code == 2, result.output
+    assert "team is forbidden" in result.output
+
+
+def test_a_user_level_gate_blocks_in_a_repo_with_no_guardrail(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(isolated_home, ".otari/guardrails.yml", "personal")
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "personal.txt")))
+    assert result.exit_code == 2, result.output
+    assert "personal is forbidden" in result.output
+
+
+def test_a_user_level_gate_composes_with_the_repo_and_names_its_home_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(tmp_path, ".otari/guardrails.yml", "shared")
+    _write_guardrail(isolated_home, ".otari/guardrails/mine.yml", "personal")
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "personal.txt")))
+    assert result.exit_code == 2, result.output
+    assert "personal is forbidden" in result.output
+    assert "[~/.otari/guardrails/mine.yml]" in result.output
+
+
+def test_a_user_gate_and_a_repo_gate_may_share_an_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
+) -> None:
+    """The user's gate IDs carry a prefix, so a repo cannot collide with one by accident."""
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(tmp_path, ".otari/guardrails.yml", "shared")
+    _write_guardrail(isolated_home, ".otari/guardrails.yml", "shared")
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "shared.txt")))
+    assert result.exit_code == 2, result.output
+    assert "[x] shared: shared is forbidden (shared.txt) [.otari/guardrails.yml]" in result.output
+    assert "[x] user:shared: shared is forbidden (shared.txt) [~/.otari/guardrails.yml]" in result.output
+    assert "only the gates in" not in result.output
+
+
+def test_a_repo_gate_that_copies_the_user_prefix_keeps_the_user_gates_on(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
+) -> None:
+    """A repo can still collide on purpose, and the fallback keeps the user's gates on."""
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(tmp_path, ".otari/guardrails.yml", "user:shared", "team")
+    _write_guardrail(isolated_home, ".otari/guardrails.yml", "shared")
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "shared.txt")))
+    assert result.exit_code == 2, result.output
+    assert "shared is forbidden" in result.output
+    assert "both .otari/guardrails.yml and ~/.otari/guardrails.yml" in result.output
+    assert "only the gates in ~/.otari/ are being enforced" in result.output
+
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "team.txt")))
+    assert result.exit_code == 0, result.output
+    assert "only the gates in ~/.otari/ are being enforced" in _system_message(result)
+
+
+def test_remote_mode_sends_the_user_prefix_on_the_wire(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
+) -> None:
+    """A single user file is not sent verbatim, or the gateway would see IDs without their prefix."""
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(isolated_home, ".otari/guardrails.yml", "personal")
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = _invoke(_edit_payload(tmp_path, "personal.txt"))
+    assert result.exit_code == 0, result.output
+    submitted = parse_policy(captured["json"]["policy_yaml"], source="submitted")
+    assert [gate.id for gate in submitted.gates] == ["user:personal"]
+
+
+def test_a_malformed_repo_file_keeps_the_user_gates_on(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".otari").mkdir()
+    (tmp_path / ".otari/guardrails.yml").write_text("gates: [", encoding="utf-8")
+    _write_guardrail(isolated_home, ".otari/guardrails.yml", "personal")
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "personal.txt")))
+    assert result.exit_code == 2, result.output
+    assert "personal is forbidden" in result.output
+    assert "only the gates in ~/.otari/ are being enforced" in result.output
+
+
+def test_a_repo_that_links_to_a_user_file_cannot_turn_it_off_with_a_broken_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(isolated_home, ".otari/guardrails.yml", "personal")
+    linked = tmp_path / ".otari/guardrails/linked.yml"
+    linked.parent.mkdir(parents=True)
+    linked.symlink_to(isolated_home / ".otari/guardrails.yml")
+    (tmp_path / ".otari/guardrails/broken.yml").write_text("gates: [", encoding="utf-8")
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "personal.txt")))
+    assert result.exit_code == 2, result.output
+    assert "personal is forbidden" in result.output
+    assert "only the gates in ~/.otari/ are being enforced" in result.output
+
+
+def test_a_malformed_user_file_keeps_the_repo_gates_on(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
+) -> None:
+    (tmp_path / ".git").mkdir()
+    _write_guardrail(tmp_path, ".otari/guardrails.yml", "team")
+    (isolated_home / ".otari").mkdir()
+    (isolated_home / ".otari/guardrails.yml").write_text("gates: [", encoding="utf-8")
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "team.txt")))
+    assert result.exit_code == 2, result.output
+    assert "team is forbidden" in result.output
+    assert "only the gates in .otari/ are being enforced" in result.output
+
+
+def test_malformed_files_on_both_sides_enforce_no_gate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
+) -> None:
+    for home in (tmp_path, isolated_home):
+        (home / ".otari").mkdir()
+        (home / ".otari/guardrails.yml").write_text("gates: [", encoding="utf-8")
+    (tmp_path / ".git").mkdir()
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "any.txt")))
+    assert result.exit_code == 0, result.output
+    assert "no gate is being enforced" in _system_message(result)
+
+
+def test_a_user_level_verifier_runs_from_home_against_the_repo(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
+) -> None:
+    """The script lives in `~/.otari/verifiers/`, and it checks the repo it runs in."""
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (isolated_home / ".otari/verifiers").mkdir(parents=True)
+    _write_verifier(isolated_home / ".otari/verifiers", "check.sh", "pwd\nexit 1")
+    (isolated_home / ".otari/guardrails.yml").write_text(
+        _CHECK_GATES_YAML_TEMPLATE.format(verifier=".otari/verifiers/check.sh"), encoding="utf-8"
+    )
+
+    monkeypatch.setattr(subprocess, "run", _git_status_only_run())
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
+    result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps({"hook_event_name": "Stop", "cwd": str(repo)}))
+    assert result.exit_code == 2, result.output
+    assert str(repo.resolve()) in result.output
+
+
+def test_a_user_level_verifier_outside_the_verifiers_directory_is_refused(tmp_path: Path, isolated_home: Path) -> None:
+    """Home is not a repo root: only `~/.otari/verifiers/` holds scripts a user-level gate may run."""
+    (isolated_home / ".otari").mkdir()
+    _write_verifier(isolated_home / ".otari", "elsewhere.sh", "exit 0")
+    outcome, detail = hook_cli._hook_run_check_verifier(
+        tmp_path, ".otari/elsewhere.sh", origin=hook_cli.GuardrailOrigin.USER, deadline=time.monotonic() + 10
+    )
+    assert outcome == "error"
+    assert "resolves outside ~/.otari/verifiers/" in detail
+
+
+def test_a_repo_verifier_does_not_resolve_against_home(tmp_path: Path, isolated_home: Path) -> None:
+    (isolated_home / ".otari/verifiers").mkdir(parents=True)
+    _write_verifier(isolated_home / ".otari/verifiers", "check.sh", "exit 0")
+    outcome, detail = hook_cli._hook_run_check_verifier(
+        tmp_path, ".otari/verifiers/check.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 10
+    )
+    assert outcome == "error"
+    assert "does not exist" in detail
 
 
 def test_a_terminal_stdin_shows_help_instead_of_blocking(monkeypatch: pytest.MonkeyPatch) -> None:

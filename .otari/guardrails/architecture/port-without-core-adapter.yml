@@ -1,0 +1,20 @@
+schema_version: "1.0"
+policy:
+  id: otari/architecture/port-without-core-adapter
+  description: Every port has a working core adapter bound in the composition root.
+
+gates:
+
+  - id: port-without-core-adapter
+    type: judge
+    runs: [stop.session]
+    enforcement: advisory
+    when_changed:
+      - "src/gateway/adapters/**"
+      - "src/gateway/container.py"
+      - "src/gateway/ports/**"
+    rubric: >-
+      Judge only code this diff adds. Fail if it adds a port, which is a Protocol under
+      src/gateway/ports/, and no working core adapter for it bound in build_container in
+      src/gateway/container.py. A real lightweight adapter or an honest Null Object both
+      count. This is cardinal rule 3 in ARCHITECTURE.md. Pass if the diff adds no port.

@@ -59,7 +59,7 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
 ## Lint / Typecheck
 - Prefer a `make` target to the tool it wraps, and read `make help` before reaching past one: the target list grows, so something that had no target last time may have one now. A target bundles checks the bare tool skips, which is how a check goes unrun when the tool is called directly. Where `make help` offers nothing, call the tool; formatting (`uv run ruff format`) and the dashboard's own checks (pnpm, below) are the gaps today.
 - Run lint checks with `make lint`; it runs the architecture check and then Ruff. **Ruff alone is not equivalent.**
-- The architecture check (`scripts/check_architecture.py`, also `make check-architecture`) enforces the `src/gateway/` layer rules: services must not import the API layer, repositories must not import services or the API layer, schemas must not import services, repositories, exceptions, the API layer or the composition root, API routes must not import `sqlalchemy.orm`, `gateway/main.py` must not import a route module, a service or a route must not import the feature registry (`gateway/features.py`), nothing under `gateway/` imports an entry-point discovery module (`importlib.metadata`, `importlib_metadata`, `pkg_resources`), repository modules end in `_repository.py` (a module that bundles a domain's repositories, in `_repositories.py`), `src/` holds no top-level package but `gateway`, nothing under `cli/src/otari_agent` imports the gateway or the server stack it drags in (uvicorn, any-llm, SQLAlchemy, pydantic, FastAPI), and nothing under `services/` or `api/routes/` imports `sqlalchemy` or `sqlmodel` unless it is on that layer's baseline of modules that still do. Both baselines only shrink: an entry that stops importing either fails the check until it is removed. `services/` and `repositories/` gain no top-level module unless it is on the check's baseline of flat modules that exist, so new code goes in its domain's package. An entry whose module no longer exists fails the check until it is removed. Only the Unit of Work calls `commit()` or `rollback()`, unless the module is on the check's baseline of modules that still call either, only `repositories/` imports `session_for`, and only `get_unit_of_work` or a worker factory in `core/unit_of_work.py` constructs a `UnitOfWork`.
+- The architecture check (`scripts/check_architecture.py`, also `make check-architecture`) enforces the `src/gateway/` layer rules: services must not import the API layer, repositories must not import services or the API layer, schemas must not import services, repositories, exceptions, the API layer or the composition root, API routes must not import `sqlalchemy.orm`, `gateway/main.py` must not import a route module, a service or a route must not import the feature registry (`gateway/features.py`), nothing under `gateway/` imports an entry-point discovery module (`importlib.metadata`, `importlib_metadata`, `pkg_resources`), repository modules end in `_repository.py` (a module that bundles a domain's repositories, in `_repositories.py`), `src/` holds no top-level package but `gateway`, nothing under `cli/src/otari_agent` imports the gateway or the server stack it drags in (uvicorn, any-llm, SQLAlchemy, pydantic, FastAPI), and nothing under `services/` or `api/routes/` imports `sqlalchemy` or `sqlmodel` unless it is on that layer's baseline of modules that still do. Both baselines only shrink: an entry that stops importing either fails the check until it is removed. `services/` and `repositories/` gain no top-level module unless it is on the check's baseline of flat modules that exist, so new code goes in its domain's package. An entry whose module no longer exists fails the check until it is removed. Only the Unit of Work calls `commit()` or `rollback()`, unless the module is on the check's baseline of modules that still call either, only `repositories/` imports `session_for`, and only `get_unit_of_work` or a worker factory in `core/unit_of_work.py` constructs a `UnitOfWork`. Every package in `services/` or `repositories/` and every module in `schemas/` or `exceptions/` is named for a domain that `docs/domains.md` gives a section, unless it is on the check's baseline of names that do not match yet.
 - **`make lint` does not touch the dashboard.** `pnpm --dir web run lint` is its counterpart (Biome: formatting, recommended rules, and the `web/src/` layer boundaries), run separately in CI. See [web/AGENTS.md](web/AGENTS.md) for what those boundaries are and why the config mirrors `otari-ai/frontend`.
 - If introducing a formatter/linter, keep changes in a separate PR unless requested.
 
@@ -85,7 +85,7 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   (httpx, pyyaml) gives that up. `scripts/hybrid_edition_smoke.py` is its hybrid
   sibling in the same workflow: the packaged CLI booted with a platform token
   against standard-library fakes of the control plane, an OpenAI/Anthropic
-  provider and an MCP server, asserting on the requests the fakes recorded
+  provider, an MCP server, a search service and a code-execution sandbox, asserting on the requests the fakes recorded
   (resolve bodies, tokens, usage reports) as well as the responses. Same rules:
   standard library only, run under `--no-dev`, and no database, because a hybrid
   gateway runs none. `--image <tag>` runs the same walk against the built
@@ -172,10 +172,11 @@ unlike the artifacts above, so a reader finds the drift rather than CI.
 
 Some pages bind code rather than describe it:
 
-- [docs/domains.md](docs/domains.md) is the backend's target shape. It assigns every
-  module under `services/`, `api/routes/`, `models/` and `repositories/` to one domain
-  and gives what each layer holds. New backend code goes where that page puts its
-  domain, not beside the code it most resembles.
+- [docs/domains.md](docs/domains.md) is the backend's target shape: what each layer
+  holds and what each domain owns. New backend code goes in its domain's target
+  location, not beside the code it most resembles. A new domain needs a section there
+  before it gets a package or a schemas or exceptions module, or the architecture check
+  fails.
 - [docs/hybrid-mode-protocol.md](docs/hybrid-mode-protocol.md) and
   [docs/code-execution-protocol.md](docs/code-execution-protocol.md) are the wire
   contracts a peer implements. They are normative for the semantics a schema cannot
@@ -203,7 +204,7 @@ Some pages bind code rather than describe it:
   against [Cardinal rules for contributors](ARCHITECTURE.md#cardinal-rules-for-contributors)
   and run `make lint`.
 - If you changed behavior a docs page describes, update that page in the same PR (see Docs
-  above). A new backend module owes [docs/domains.md](docs/domains.md) its domain.
+  above). A new domain owes [docs/domains.md](docs/domains.md) a section.
 
 ## Writing style
 

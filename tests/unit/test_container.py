@@ -24,6 +24,7 @@ from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAda
 from gateway.adapters.mcp_server_adapter import RemoteMcpServers
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
+from gateway.adapters.web_search_policy_adapter import RemoteWebSearchPolicy
 from gateway.container import (
     BootstrapError,
     Container,
@@ -43,6 +44,7 @@ from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
+from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 
 # The core adapters ignore the session, so a placeholder stands in for one; a
 # unit test of the wiring has no database and needs none.
@@ -153,6 +155,21 @@ def test_mcp_servers_need_no_session_where_a_peer_holds_the_rows() -> None:
     container = build_container(config=GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}))
 
     assert isinstance(container.resolve(McpServerPort, NO_SESSION), RemoteMcpServers)
+
+
+def test_web_search_policy_refuses_a_deployment_that_holds_the_rows_and_has_no_session() -> None:
+    """A deployment reading its own policy rows cannot do so without the request's session."""
+    container = build_container(config=GatewayConfig())
+
+    with pytest.raises(ValueError, match="a session is required"):
+        container.resolve(WebSearchPolicyPort, NO_SESSION)
+
+
+def test_web_search_policy_needs_no_session_where_a_peer_holds_the_rows() -> None:
+    """A deployment with a peer reads no rows of its own, so it is built without one."""
+    container = build_container(config=GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}))
+
+    assert isinstance(container.resolve(WebSearchPolicyPort, NO_SESSION), RemoteWebSearchPolicy)
 
 
 def test_resolve_refuses_a_port_nothing_bound() -> None:

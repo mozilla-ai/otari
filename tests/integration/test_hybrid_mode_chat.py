@@ -1,9 +1,10 @@
 import json
-from collections.abc import AsyncIterator, Generator
+from collections.abc import AsyncIterator, Callable, Generator
 from pathlib import Path
 from typing import Any
 
 import httpx
+import httpx2
 import pytest
 from any_llm.types.completion import (
     ChatCompletion,
@@ -2043,8 +2044,7 @@ def test_hybrid_mode_web_search_merges_workspace_config(
     monkeypatch: pytest.MonkeyPatch,
     control_plane_transport: InstallControlPlane,
 ) -> None:
-    """When enabled, the resolved workspace config is merged into the tool
-    entry with per-request values winning over workspace defaults."""
+    """A request value that narrows a workspace limit survives, and the workspace fills what the request left blank."""
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://searxng:8080")
     _FakeWebSearchBackend.last_tool_entry = None
     _FakeWebSearchBackend.last_auth_token = None
@@ -2093,7 +2093,7 @@ def test_hybrid_mode_web_search_merges_workspace_config(
         json={
             "model": "anything",
             "messages": [{"role": "user", "content": "hi"}],
-            # Per-request max_results=3 must win over the workspace default 9.
+            # 3 is below the workspace's ceiling of 9, so it survives.
             "tools": [{"type": "otari_web_search", "max_results": 3}],
         },
         headers={"Authorization": "Bearer user_test_token"},
@@ -2102,15 +2102,141 @@ def test_hybrid_mode_web_search_merges_workspace_config(
     assert response.status_code == 200
     merged = _FakeWebSearchBackend.last_tool_entry
     assert merged is not None
-    # Per-request value wins.
     assert merged["max_results"] == 3
-    # Workspace defaults fill in the unset keys.
+    # The workspace fills what the request left blank.
     assert merged["allowed_domains"] == ["docs.python.org"]
     assert merged["purpose_hint"] == "workspace hint"
     assert merged["provider_options"] == {"search_depth": "advanced"}
     # The backend here is searxng (NOT the platform base URL), so the gateway
     # must NOT leak the platform token to it.
     assert _FakeWebSearchBackend.last_auth_token is None
+
+
+WebSearchCall = Callable[[dict[str, Any], dict[str, Any]], httpx2.Response]
+
+
+@pytest.fixture
+def post_web_search(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> WebSearchCall:
+    """Return a function that sends one hybrid completion declaring web search.
+
+    The control plane answers with the policy the call passes.
+    """
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://searxng:8080")
+    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_retrieval_backend", _FakeWebSearchBackend)
+    _FakeWebSearchBackend.last_tool_entry = None
+
+    async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
+        return ChatCompletion(
+            id="cmpl-ws-ceiling",
+            object="chat.completion",
+            created=0,
+            model="openai:gpt-4o-mini",
+            choices=[
+                Choice(
+                    finish_reason="stop",
+                    index=0,
+                    message=ChatCompletionMessage(role="assistant", content="answer"),
+                )
+            ],
+            usage=CompletionUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
+        )
+
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    def post(workspace: dict[str, Any], request_entry: dict[str, Any]) -> httpx2.Response:
+        async def fake_post_platform(
+            url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+        ) -> httpx.Response:
+            if url.endswith("/gateway/provider-keys/resolve"):
+                return _single_attempt_resolve_response(request_id="ws-req-ceiling")
+            if url.endswith("/gateway/web-search/resolve"):
+                return httpx.Response(200, json={"enabled": True, "authorized_tools": ["web_search"], **workspace})
+            return httpx.Response(204)
+
+        control_plane_transport(fake_post_platform)
+        return platform_client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": "anything",
+                "messages": [{"role": "user", "content": "hi"}],
+                "tools": [{"type": "otari_web_search", **request_entry}],
+            },
+            headers={"Authorization": "Bearer user_test_token"},
+        )
+
+    return post
+
+
+@pytest.mark.parametrize(
+    ("workspace", "request_entry", "expected"),
+    [
+        pytest.param(
+            {"max_results": 9},
+            {"max_results": 50},
+            {"max_results": 9},
+            id="max-results",
+        ),
+        pytest.param(
+            {"blocked_domains": ["spam.example"]},
+            {"blocked_domains": ["other.example"]},
+            {"blocked_domains": ["other.example", "spam.example"]},
+            id="blocked-domains",
+        ),
+        pytest.param(
+            {"allowed_domains": ["example.com"]},
+            {"allowed_domains": ["docs.example.com"]},
+            {"allowed_domains": ["docs.example.com"]},
+            id="allowed-domains",
+        ),
+    ],
+)
+def test_hybrid_mode_web_search_workspace_limits_are_a_ceiling(
+    post_web_search: WebSearchCall,
+    workspace: dict[str, Any],
+    request_entry: dict[str, Any],
+    expected: dict[str, Any],
+) -> None:
+    """A request narrows the workspace's web search limits and never widens them."""
+    response = post_web_search(workspace, request_entry)
+
+    assert response.status_code == 200, response.text
+    merged = _FakeWebSearchBackend.last_tool_entry
+    assert merged is not None
+    for key, value in expected.items():
+        assert merged[key] == value
+
+
+@pytest.mark.parametrize(
+    ("workspace_max", "expected"),
+    [pytest.param(9, 5, id="above-the-deployment"), pytest.param(3, 3, id="below-the-deployment")],
+)
+def test_hybrid_mode_web_search_workspace_max_results_never_raises_the_deployment_default(
+    post_web_search: WebSearchCall,
+    monkeypatch: pytest.MonkeyPatch,
+    workspace_max: int,
+    expected: int,
+) -> None:
+    """With no request value, the lower of the workspace's ceiling and the deployment's default applies."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_MAX_RESULTS", "5")
+
+    response = post_web_search({"max_results": workspace_max}, {})
+
+    assert response.status_code == 200, response.text
+    merged = _FakeWebSearchBackend.last_tool_entry
+    assert merged is not None
+    assert merged["max_results"] == expected
+
+
+def test_hybrid_mode_web_search_refuses_an_allow_list_outside_the_workspace(post_web_search: WebSearchCall) -> None:
+    """A request allow-list that shares nothing with the workspace's is refused, not substituted."""
+    response = post_web_search({"allowed_domains": ["docs.python.org"]}, {"allowed_domains": ["evil.example"]})
+
+    assert response.status_code == 403, response.text
+    assert _FakeWebSearchBackend.last_tool_entry is None
 
 
 def test_hybrid_mode_web_search_forwards_token_to_platform_backend(

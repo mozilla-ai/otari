@@ -8,7 +8,6 @@ from any_llm.types.responses import Response as ResponsesResponse
 from any_llm.types.responses import ResponsesParams, ResponseStreamEvent
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi import Response as FastAPIResponse
-from fastapi.responses import StreamingResponse
 from openai.types.responses import ResponseUsage
 from openresponses_types.types import Usage as OpenResponsesUsage
 from pydantic import ConfigDict, Field
@@ -19,6 +18,7 @@ from gateway.api.deps import (
     McpServerPortDep,
     ModelProviderPortDep,
     OptionalFileServiceDep,
+    WebSearchPolicyPortDep,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     get_config,
@@ -27,11 +27,14 @@ from gateway.api.deps import (
     get_unit_of_work_if_needed,
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_text, text_from_content
+from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     NO_RESOLVABLE_PROVIDER_DETAIL,
     PROVIDER_ERROR_DETAIL,
+    DeclaredTools,
     ErrorKind,
+    ToolBackends,
     _flush_pending_usage_reports,
     _PendingUsageReport,
     classify_provider_error,
@@ -521,7 +524,9 @@ async def create_response(
     model_provider: ModelProviderPortDep,
     code_execution_port: CodeExecutionPortDep,
     mcp_server_port: McpServerPortDep,
-) -> dict[str, Any] | StreamingResponse:
+    web_search_policy_port: WebSearchPolicyPortDep,
+    idempotency: IdempotencyGuardDep,
+) -> dict[str, Any] | FastAPIResponse:
     """OpenAI-compatible Responses endpoint.
 
     Supports MCP tool-use loops, sandboxed code execution, and SearXNG
@@ -573,26 +578,31 @@ async def create_response(
         chars = len(str(request_body.input)) + len(str(getattr(request_body, "instructions", "") or ""))
         return chars, stats.vision_usage()
 
-    ctx = await resolve_request_context(
-        adapter=_ADAPTER,
-        raw_request=raw_request,
-        response=response,
-        db=db,
-        uow=uow,
-        config=config,
-        log_writer=log_writer,
-        model=request_body.model,
-        user_id_from_request=request_body.user,
-        estimate_prompt_chars=len(str(request_body.input)) + len(str(getattr(request_body, "instructions", "") or "")),
-        estimate_max_output_tokens=max_output_tokens,
-        master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
-        user_forbidden_detail=_USER_FORBIDDEN,
-        routing_signal=lambda: routing_signal_from_text(
-            _routing_text(request_body), raw_request, has_tools=bool(request_body.tools)
-        ),
-        normalize_messages=_normalize,
-        tools=request_body.tools,
-    )
+    try:
+        ctx = await resolve_request_context(
+            adapter=_ADAPTER,
+            raw_request=raw_request,
+            response=response,
+            db=db,
+            uow=uow,
+            config=config,
+            log_writer=log_writer,
+            model=request_body.model,
+            user_id_from_request=request_body.user,
+            estimate_prompt_chars=len(str(request_body.input))
+            + len(str(getattr(request_body, "instructions", "") or "")),
+            estimate_max_output_tokens=max_output_tokens,
+            master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
+            user_forbidden_detail=_USER_FORBIDDEN,
+            routing_signal=lambda: routing_signal_from_text(
+                _routing_text(request_body), raw_request, has_tools=bool(request_body.tools)
+            ),
+            normalize_messages=_normalize,
+            tools=request_body.tools,
+            idempotency=None if bool(request_body.stream) else idempotency,
+        )
+    except IdempotentReplay as replay:
+        return replay.response()
 
     # Provider-support guard: an unsupported provider would just fail
     # downstream, so surface a clearer 400 upfront. In hybrid mode validate
@@ -647,31 +657,36 @@ async def create_response(
         adapter=_ADAPTER,
         ctx=ctx,
         response=response,
-        guardrails=request_body.guardrails,
-        guardrail_text=_responses_input_text(request_body.input),
-        tools=request_body.tools,
-        mcp_servers=request_body.mcp_servers,
-        mcp_server_ids=request_body.mcp_server_ids,
-        max_tool_iterations=request_body.max_tool_iterations,
-        tools_header=request_body.tools_header,
-        code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-        web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
-        code_execution_port=code_execution_port,
-        mcp_server_port=mcp_server_port,
-        sandbox_containers=build_sandbox_container_registry(
-            config=config,
-            uow=ctx.uow,
-            user_id=ctx.user_id,
-            workspace_id=ctx.workspace_id,
-            port=code_execution_port,
+        declared=DeclaredTools(
+            guardrails=request_body.guardrails,
+            guardrail_text=_responses_input_text(request_body.input),
+            tools=request_body.tools,
+            mcp_servers=request_body.mcp_servers,
+            mcp_server_ids=request_body.mcp_server_ids,
+            max_tool_iterations=request_body.max_tool_iterations,
+            tools_header=request_body.tools_header,
+            code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+            web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
         ),
-        sandbox_files=build_sandbox_file_bridge(
-            raw_request=raw_request,
-            config=config,
-            uow=ctx.uow,
-            user_id=ctx.user_id,
-            workspace_id=ctx.workspace_id,
-            inputs=sandbox_inputs,
+        backends=ToolBackends(
+            code_execution_port=code_execution_port,
+            mcp_server_port=mcp_server_port,
+            web_search_policy_port=web_search_policy_port,
+            sandbox_containers=build_sandbox_container_registry(
+                config=config,
+                uow=ctx.uow,
+                user_id=ctx.user_id,
+                workspace_id=ctx.workspace_id,
+                port=code_execution_port,
+            ),
+            sandbox_files=build_sandbox_file_bridge(
+                raw_request=raw_request,
+                config=config,
+                uow=ctx.uow,
+                user_id=ctx.user_id,
+                workspace_id=ctx.workspace_id,
+                inputs=sandbox_inputs,
+            ),
         ),
     )
 
@@ -788,4 +803,6 @@ async def create_response(
         base_request_fields=base_request_fields,
     )
 
-    return result.model_dump(exclude_none=True)
+    body = result.model_dump(exclude_none=True)
+    await idempotency.complete(body, response)
+    return body

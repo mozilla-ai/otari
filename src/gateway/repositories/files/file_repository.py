@@ -6,9 +6,11 @@ import uuid
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Never
+from typing import Any, Never, cast
 
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import and_, delete, or_, select, update
+from sqlalchemy.engine import CursorResult
+from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.sql.elements import ColumnElement
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -47,24 +49,6 @@ def _past(key: tuple[datetime, str], *, ascending: bool) -> ColumnElement[bool]:
         FileObject.created_at < created_at,
         and_(FileObject.created_at == created_at, FileObject.id < file_id),
     )
-
-
-@dataclass(frozen=True)
-class OutputFileRow:
-    """Metadata for a produced file whose bytes have already been stored."""
-
-    file_id: str
-    user_id: str
-    workspace_id: uuid.UUID
-    filename: str
-    mime_type: str
-    bytes: int
-    purpose: str
-    storage_ref: str
-    expires_at: datetime | None
-    provider: str | None = None
-    provider_instance: str | None = None
-    provider_container_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -127,12 +111,14 @@ class FileRepository(BaseRepository[FileObject, Never, Never]):
         """Return the row this caller owns under ``file_id``, served or not.
 
         A paging cursor names a position rather than a file, so a row deleted or
-        expired between two pages still says where the next page starts. A value
-        that could not name a file names no row rather than reaching the query.
+        expired between two pages still says where the next page starts. A row
+        whose bytes never landed names nothing, because it was never served.
+        A value that could not name a file names no row rather than reaching
+        the query.
         """
         if not could_name_a_file(file_id):
             return None
-        conditions = [FileObject.id == file_id, FileObject.user_id == user_id]
+        conditions = [FileObject.id == file_id, FileObject.user_id == user_id, FileObject.pending_since.is_(None)]
         if workspace_id is not None:
             conditions.append(FileObject.workspace_id == workspace_id)
         return (await self.db.execute(select(FileObject).where(*conditions))).scalar_one_or_none()
@@ -148,6 +134,7 @@ class FileRepository(BaseRepository[FileObject, Never, Never]):
         """
         stmt = select(FileObject).where(
             FileObject.user_id == query.user_id,
+            FileObject.pending_since.is_(None),
             FileObject.deleted_at.is_(None),
             or_(FileObject.expires_at.is_(None), FileObject.expires_at >= datetime.now(UTC)),
         )
@@ -162,6 +149,34 @@ class FileRepository(BaseRepository[FileObject, Never, Never]):
         stmt = stmt.order_by(*_ordering(ascending=query.ascending)).limit(query.limit)
         return list((await self.db.execute(stmt)).scalars().all())
 
+    async def mark_stored(self, record: FileObject, size: int) -> bool:
+        """Stage the file as served, and report whether a reservation was still there to serve.
+
+        False says the reservation is gone or claimed, so the bytes in the store
+        are named by nothing. An ORM attribute write cannot report that: it
+        updates no row and raises nothing.
+        """
+        result = cast(
+            "CursorResult[Any]",
+            await self.db.execute(
+                update(FileObject)
+                .where(
+                    FileObject.id == record.id,
+                    FileObject.pending_since.is_not(None),
+                    FileObject.deleted_at.is_(None),
+                )
+                .values(bytes=size, pending_since=None)
+                .execution_options(synchronize_session=False)
+            ),
+        )
+        if result.rowcount != 1:
+            return False
+        # The statement bypasses the identity map, so the caller's instance
+        # would otherwise keep saying the file is still pending.
+        set_committed_value(record, "bytes", size)
+        set_committed_value(record, "pending_since", None)
+        return True
+
     async def soft_delete(self, record: FileObject, at: datetime) -> None:
         """Stage the file's removal from every read, leaving the row for the sweep."""
         record.deleted_at = at
@@ -170,6 +185,8 @@ class FileRepository(BaseRepository[FileObject, Never, Never]):
     async def existing_ids(self, file_ids: Collection[str]) -> set[str]:
         """Which of ``file_ids`` already have a row, recorded or uploaded.
 
+        A reserved row counts: it has claimed the ID whether or not its bytes
+        landed, so a second write under that ID would collide with it.
         An ID that could not name a file has no row and is left out of the
         query, so one unusable ID in a batch costs only itself rather than
         failing the lookup the whole batch depends on.
@@ -180,47 +197,50 @@ class FileRepository(BaseRepository[FileObject, Never, Never]):
         result = await self.db.execute(select(FileObject.id).where(FileObject.id.in_(usable)))
         return set(result.scalars())
 
-    async def record_output(self, row: OutputFileRow) -> None:
-        """Stage the row for a file a run wrote."""
-        self.db.add(
-            FileObject(
-                id=row.file_id,
-                user_id=row.user_id,
-                workspace_id=row.workspace_id,
-                filename=row.filename,
-                mime_type=row.mime_type,
-                bytes=row.bytes,
-                purpose=row.purpose,
-                storage_ref=row.storage_ref,
-                provider=row.provider,
-                provider_instance=row.provider_instance,
-                provider_container_id=row.provider_container_id,
-                created_at=datetime.now(UTC),
-                expires_at=row.expires_at,
-            )
-        )
-        await self.db.flush()
-
     async def reclaimable(
         self,
         *,
         batch_size: int,
+        pending_before: datetime,
         after: tuple[datetime, str] | None = None,
         now: datetime | None = None,
     ) -> Sequence[FileObject]:
-        """One batch of soft-deleted or expired rows, in ``(created_at, id)`` order.
+        """One batch of rows whose bytes can be given back, in ``(created_at, id)`` order.
 
+        Three kinds qualify: soft-deleted, served and expired, and pending since
+        before ``pending_before``. A pending row is reclaimed only through its own
+        grace and never through expiry, because it may still be receiving its
+        bytes. ``pending_before`` has no default for the same reason.
         ``after`` is the previous batch's last key: paging by key rather than from
         the top is what keeps a row whose blob keeps failing to delete from parking
         at the head and hiding everything behind it.
         """
         stmt = select(FileObject).where(
-            or_(FileObject.deleted_at.is_not(None), FileObject.expires_at < (now or datetime.now(UTC)))
+            or_(
+                FileObject.deleted_at.is_not(None),
+                and_(FileObject.pending_since.is_(None), FileObject.expires_at < (now or datetime.now(UTC))),
+                FileObject.pending_since < pending_before,
+            )
         )
         if after is not None:
             stmt = stmt.where(_past(after, ascending=True))
         stmt = stmt.order_by(*_ordering(ascending=True)).limit(batch_size)
         return (await self.db.execute(stmt)).scalars().all()
+
+    async def claim(self, file_ids: Collection[str], at: datetime) -> None:
+        """Stage the sweep's claim on these rows, so no write can complete one it has selected.
+
+        A claimed row is out of every read, which is what ``deleted_at`` already
+        means, and it stays reclaimable if its bytes will not go on this pass.
+        """
+        if not file_ids:
+            return
+        await self.db.execute(
+            update(FileObject)
+            .where(FileObject.id.in_(list(file_ids)), FileObject.deleted_at.is_(None))
+            .values(deleted_at=at)
+            .execution_options(synchronize_session=False)
+        )
 
     async def remove_all(self, file_ids: Collection[str]) -> None:
         """Stage the deletion of the rows whose blobs are gone."""

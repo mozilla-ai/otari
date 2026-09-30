@@ -19,6 +19,8 @@ from click.testing import CliRunner
 import otari_agent.hook as hook_cli
 from otari_agent.domain.policy import MAX_POLICY_FILES, parse_policy
 
+pytestmark = pytest.mark.usefixtures("isolated_home", "no_otari_env")
+
 
 def _guardrail_path(root: Path) -> Path:
     """`.otari/guardrails.yml` under `root`, with its parent directory created."""
@@ -752,6 +754,23 @@ def test_generate_refuses_the_file_that_would_break_the_composition(
     assert not (repo / hook_cli.GUARDRAIL_DIR / "generated.yml").exists()
 
 
+def test_the_file_limit_refusal_counts_the_user_level_files_apart(
+    repo: Path, isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for index in range(MAX_POLICY_FILES - 1):
+        path = repo / hook_cli.GUARDRAIL_DIR / f"f{index}.yml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_EXISTING_GATES_WITH_COMMENT.replace("no-force-push", f"g{index}"), encoding="utf-8")
+    personal = isolated_home / hook_cli.GUARDRAIL_FILE
+    personal.parent.mkdir(parents=True)
+    personal.write_text(_EXISTING_GATES_WITH_COMMENT, encoding="utf-8")
+    _stub_claude_only(monkeypatch)
+
+    result = _invoke(monkeypatch)
+    assert result.exit_code != 0
+    assert f"{MAX_POLICY_FILES - 1} in this repo and 1 in ~/.otari/" in result.output
+
+
 def test_generate_still_appends_to_an_existing_file_at_the_limit(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The escape hatch the refusal names: appending adds no file, so it stays legal."""
     for index in range(MAX_POLICY_FILES):
@@ -836,3 +855,50 @@ def test_the_file_limit_holds_however_the_target_is_spelled(
     assert result.exit_code != 0, result.output
     assert "stop being enforced" in result.output
     assert not (repo / hook_cli.GUARDRAIL_DIR / "new.yml").exists()
+
+
+def test_an_id_used_in_a_user_level_file_is_still_free_in_the_repo(
+    repo: Path, isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A user-level gate ID carries a prefix, so the same ID is free for a repo gate."""
+    personal = isolated_home / hook_cli.GUARDRAIL_FILE
+    personal.parent.mkdir(parents=True)
+    personal.write_text(_EXISTING_GATES_WITH_COMMENT, encoding="utf-8")
+    _stub_claude_only(monkeypatch)
+    _stub_cli_output(monkeypatch, json.dumps([{**_VALID_PROPOSAL, "id": "no-force-push"}]))
+
+    result = _invoke(monkeypatch, keys="yn")
+    assert result.exit_code == 0, result.output
+    assert "Skipping 'no-force-push'" not in result.output
+    assert "Add this gate?" in result.output
+
+
+def test_appending_to_a_user_level_file_checks_the_prefixed_id(
+    repo: Path, isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A gate added to `~/.otari/` takes the `user:` prefix, so that is the ID that has to be free."""
+    personal = isolated_home / hook_cli.GUARDRAIL_FILE
+    personal.parent.mkdir(parents=True)
+    personal.write_text(_EXISTING_GATES_WITH_COMMENT, encoding="utf-8")
+    _stub_claude_only(monkeypatch)
+    _stub_cli_output(monkeypatch, json.dumps([{**_VALID_PROPOSAL, "id": "no-force-push"}]))
+
+    result = _invoke(monkeypatch, "--guardrail-file", str(personal))
+    assert result.exit_code == 0, result.output
+    assert "Skipping 'no-force-push': already in ~/.otari/guardrails.yml." in result.output
+
+
+def test_a_broken_user_level_file_does_not_stop_generating_for_the_repo(
+    repo: Path, isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The hook still enforces the repo's gates when a user-level file is broken, so generate still runs."""
+    personal = isolated_home / hook_cli.GUARDRAIL_FILE
+    personal.parent.mkdir(parents=True)
+    personal.write_text("gates: [", encoding="utf-8")
+    _stub_claude_only(monkeypatch)
+    _stub_cli_output(monkeypatch, json.dumps([_VALID_PROPOSAL]))
+
+    result = _invoke(monkeypatch, keys="yn")
+    assert result.exit_code == 0, result.output
+    assert "~/.otari/guardrails.yml does not parse" in result.output
+    assert "Add this gate?" in result.output

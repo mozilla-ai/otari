@@ -1,9 +1,10 @@
-"""ORM table for asynchronous batch jobs."""
+"""ORM tables for asynchronous batch jobs and idempotent completion requests."""
 
 import uuid
 from datetime import UTC, datetime
+from enum import StrEnum
 
-from sqlalchemy import DateTime, ForeignKey, Uuid
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base
@@ -56,3 +57,47 @@ class BatchRecord(Base):
     # NULL until the first completed results retrieval accounts the batch; the
     # atomic NULL -> now transition is the idempotency gate for billing/logging.
     results_accounted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+IDEMPOTENCY_TABLE = "idempotency_keys"
+
+
+class IdempotencyState(StrEnum):
+    """Where the request holding an idempotency key has got to."""
+
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+
+
+class IdempotencyRecord(Base):
+    """One ``Idempotency-Key`` a caller sent, and the response it produced.
+
+    A row is claimed ``in_progress`` before the provider is called and becomes
+    ``completed`` with the response once the request succeeds. A request that
+    fails deletes its claim, so a retry runs it again: a failed request is not
+    billed, so running it again is not billing twice.
+    """
+
+    __tablename__ = IDEMPOTENCY_TABLE
+
+    # Who may reuse the key: ``key:<api key id>``, or ``master:<user id>`` for the
+    # master key. Two callers can never see each other's responses.
+    scope: Mapped[str] = mapped_column(String(255), primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    # SHA-256 of the endpoint and the canonical request body, so a key reused
+    # for a different request is refused rather than answered with another result.
+    request_hash: Mapped[str] = mapped_column(String(64))
+    # Changes on every claim, so a request whose claim was taken over cannot
+    # complete or delete the claim that replaced it.
+    claim_token: Mapped[str] = mapped_column(String(36))
+    state: Mapped[str] = mapped_column(String(16))
+    # CASCADE: the scope dies with the user or key it names.
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    api_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="CASCADE"), index=True)
+    status_code: Mapped[int | None] = mapped_column(Integer)
+    response_body: Mapped[str | None] = mapped_column(Text)
+    response_headers: Mapped[dict[str, str] | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    # Past this, an ``in_progress`` claim is presumed abandoned and a retry may take it over.
+    locked_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

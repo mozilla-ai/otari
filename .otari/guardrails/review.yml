@@ -1,7 +1,7 @@
 schema_version: "1.0"
 policy:
   id: otari/review
-  description: Model verdicts against a rubric. Advisory by construction.
+  description: A model judges each rubric, so every gate here is advisory.
 
 gates:
 
@@ -9,9 +9,7 @@ gates:
     type: judge
     runs: [stop.session]
     enforcement: advisory
-    # A judge gate costs one real model call per applicable Stop event, so
-    # this is scoped to source, not every path in the repo: a session that
-    # only touches docs, config, or generated files pays nothing.
+    # Each judge gate costs a model call, so this one runs only when source changes.
     when_changed: ["src/gateway/**", "cli/src/otari_agent/**", "web/src/**"]
     rubric: >-
       Check whether this diff adds or rewrites a comment or docstring that
@@ -32,19 +30,12 @@ gates:
       WHY (see AGENTS.md, "Repository Conventions"): that belongs in the
       commit message, not left in the code.
 
-  # Merged from two separately generated gates (no-em-dash-prose,
-  # use-us-english-spelling): both are the same AGENTS.md "Writing style"
-  # section, and each applicable judge gate still costs its own model call
-  # even though otari hook runs them concurrently (_hook_collect_judge_verdicts
-  # in cli.py). One rubric checking both is one call instead of two for a
-  # session touching the same files.
+  # One rubric covers both writing rules, so a turn pays for one model call.
   - id: writing-style-violations
     type: judge
     runs: [stop.session]
     enforcement: advisory
-    # Both Markdown spellings, for the reason no-hand-edited-claude-md above
-    # gives: `**` consumes at least one path segment, so `**/*.md` alone
-    # reaches docs/ and web/ but never README.md at the root.
+    # `**/*.md` does not match a file at the repo root, so `*.md` is listed too.
     when_changed: ["*.md", "**/*.md", "src/gateway/**", "cli/src/otari_agent/**", "web/src/**"]
     rubric: >-
       Flag two things in prose (README, docs, doc comments, docstrings,
@@ -67,6 +58,8 @@ gates:
     type: judge
     runs: [stop.session]
     enforcement: advisory
+    # A security finding outranks every style and architecture finding when a turn caps its judge gates.
+    priority: 10
     when_changed: ["src/gateway/**", "cli/src/otari_agent/**"]
     rubric: Flag any log statement, error message, or public-facing error response that
       includes a secret, token, or raw API key, or that otherwise leaks internal details

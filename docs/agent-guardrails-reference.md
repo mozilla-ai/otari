@@ -97,6 +97,7 @@ meets all of them for free.
   make easy to get wrong and no single file can show, which is why
   `otari guardrails validate` composes by default.
 - **Every file declares the same `schema_version`.**
+- **Your own files compose too.** `~/.otari/guardrails.yml` and every file under `~/.otari/guardrails/` compose after the repository's files, under these same rules. The hook puts `user:` in front of every gate ID from `~/.otari/`, so those IDs cannot clash with the repository's unless a repository ID also starts with `user:`. When the combined set cannot load, the hook enforces your files alone, or the repository's alone when yours are the broken ones, and says which. See [Your own guardrail in `~/.otari/`](agent-guardrails.md#your-own-guardrail-in-otari).
 - **Order is not contract.** Files compose in repo-relative path order, and
   that order is only ever a tiebreak. What decides which `judge` and
   `verifier` gates survive their per-run caps is `priority` on the gate
@@ -556,13 +557,38 @@ what "no `--judge-model`/`OTARI_HOOK_JUDGE_MODEL` given" defaults to:
   for a later `Stop` event's own transcript scan to mistake for real session
   evidence.
 
+The diff covers tracked changes (`git diff HEAD`) and every untracked file
+the ignore rules do not exclude, each appended as a `new file` hunk. Both
+halves are needed, because a rule about what a change adds is mostly a rule
+about files Git has never seen, and a tracked-only diff shows a judge the
+edits while hiding the new code. An untracked file is rendered directly
+rather than through `git diff --no-index /dev/null <path>`, which would cost
+one subprocess per file and whose `/dev/null` operand Git for Windows does
+not resolve. Each one is capped on its own
+(`_HOOK_JUDGE_MAX_UNTRACKED_FILE_CHARS`) so a single generated artifact
+cannot crowd out every other new file, and a binary is reported by name with
+its content omitted.
+
+A symlink is rendered as its link text and its target is never opened, which
+is also what Git stores for one. The ignore rules filter the link's own path
+and say nothing about where it points, so following one would read a file
+outside the repository entirely into a prompt that leaves the machine. A
+file that exists but cannot be read is likewise named with its content left
+out rather than dropped, since dropping it would shorten the change a judge
+rules on without saying so.
+
+Failing to list the untracked files at all (`git ls-files` timing out or
+erroring) is a collection failure, not an empty result: a tree with nothing
+untracked and a tree whose untracked files could not be listed would
+otherwise produce the same evidence, which for a change made entirely of new
+files is no evidence.
+
 A diff `otari hook` could not collect at all (`git diff HEAD` failing: no
 `HEAD` yet, a timeout, `git` itself missing) is kept distinct from one it
-collected and found genuinely empty (a new, untracked file matching
-`when_changed`, whose content this diff does not cover either way; see
-above): the former skips the model call entirely and reports `error`
-directly, rather than asking the model to judge a change it cannot see,
-which a real call confirmed can still come back `pass`.
+collected and found genuinely empty: the former skips the model call
+entirely and reports `error` directly, rather than asking the model to judge
+a change it cannot see, which a real call confirmed can still come back
+`pass`.
 
 The diff and transcript are each capped independently (`_HOOK_JUDGE_MAX_DIFF_CHARS`,
 `_HOOK_JUDGE_MAX_TRANSCRIPT_CHARS` in `cli.py`), sized against a real
@@ -576,7 +602,8 @@ headroom. The caps keep the worst case near that validated-safe size.
 
 `git diff HEAD`'s own bytes are a tracked file's real content, not
 necessarily valid UTF-8 (a Latin-1-encoded file, a binary blob committed by
-mistake, ...); collecting it decodes leniently (`errors="replace"`) and
+mistake, ...); collecting it decodes leniently (`errors="replace"`, which an
+untracked file's own bytes also get) and
 catches a timeout or a missing `git` binary, rather than letting either
 crash `otari hook` outright before it ever reaches the evaluator and takes
 every gate in the guardrail, mechanical and required ones included, down with
@@ -646,6 +673,8 @@ reproducible the way a glob or phrase match is, not a model's opinion, so a
       (<<<<<<</=======/>>>>>>>). Resolve the conflict and remove the
       markers before finishing.
 ```
+
+A `verifier` gate in a file under `~/.otari/` names its script relative to the home directory instead, and the script must be inside `~/.otari/verifiers/`. The hook refuses a path that resolves anywhere else, and still runs the script with the repository root as its working directory.
 
 `when_changed` is optional, the same repo-relative POSIX glob grammar
 `judge`'s own field of that name uses. Omitted (the default), the gate always
@@ -1035,6 +1064,8 @@ the fix there is the standalone install.
 whether a given machine runs the hook is not a repository-wide decision. Otari's
 own repository gitignores it specifically.
 
+The same entries in `~/.claude/settings.json` run the hook in every repository, which is how gates in `~/.otari/` apply everywhere. Use the full matcher, `Edit|Write|NotebookEdit|Read|Bash`, since one entry serves every repository's gates. Keep the hook in one settings file only, or a repository that also registers it can run it twice for each event.
+
 ## Registering it for Codex
 
 `otari hook setup --harness codex` writes the same pair of hook blocks into
@@ -1097,12 +1128,15 @@ otari guardrails validate
 otari guardrails validate --command "npm install lodash"
 otari guardrails validate --path CHANGELOG.md
 otari guardrails validate --guardrail-file somebody-elses-snippet.yml
+otari guardrails validate --repo-only --strict
 ```
 
 With no `--guardrail-file` it composes everything the hook composes, which is
 what finds a gate id declared in two files and a judge-gate total no one file
 shows. `--guardrail-file` narrows it to one file, which is how a snippet
 from somewhere else is checked before it is dropped in.
+
+`--repo-only` leaves out your own files in `~/.otari/` and checks the repository's guardrail alone. Use it to check a repository's rules before you commit a change to them, so a warning in one of your own files cannot fail `--strict`. It cannot be combined with `--guardrail-file`.
 
 An **error** is a gate that provably cannot do its job, whatever the session
 does. Everything `parse_policy` already refuses (an unsupported

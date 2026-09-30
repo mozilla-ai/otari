@@ -1176,7 +1176,6 @@ dependencies = [
     { name = "opentelemetry-proto", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "otari-agent", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "pillow", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
-    { name = "prometheus-client", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "psycopg2-binary", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "pydantic-settings", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "pypdfium2", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
@@ -1198,6 +1197,9 @@ e2b = [
 fsspec = [
     { name = "fsspec", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
 ]
+metrics = [
+    { name = "prometheus-client", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+]
 ocr = [
     { name = "numpy", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "rapidocr-onnxruntime", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
@@ -1213,6 +1215,7 @@ dev = [
     { name = "moto", extra = ["s3"], marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "mypy", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "packaging", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
+    { name = "prometheus-client", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "pytest", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "pytest-asyncio", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "pytest-cov", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
@@ -1252,7 +1255,7 @@ requires-dist = [
     { name = "opentelemetry-proto", specifier = ">=1.39.1" },
     { name = "otari-agent", editable = "cli" },
     { name = "pillow", specifier = ">=12.3.0" },
-    { name = "prometheus-client", specifier = ">=0.20.0" },
+    { name = "prometheus-client", marker = "extra == 'metrics'", specifier = ">=0.20.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.9" },
     { name = "pydantic-settings", specifier = ">=2.14.2" },
     { name = "pypdfium2", specifier = ">=4.30.0" },
@@ -1266,7 +1269,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
     { name = "webauthn", specifier = ">=2.5.0" },
 ]
-provides-extras = ["ocr", "s3", "fsspec", "e2b"]
+provides-extras = ["ocr", "s3", "fsspec", "e2b", "metrics"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1275,6 +1278,7 @@ dev = [
     { name = "moto", extras = ["s3"], specifier = ">=5.0.0" },
     { name = "mypy" },
     { name = "packaging", specifier = ">=24.0" },
+    { name = "prometheus-client", specifier = ">=0.20.0" },
     { name = "pytest", specifier = ">=9.0.3,<10" },
     { name = "pytest-asyncio", specifier = ">=0.26.0" },
     { name = "pytest-cov", specifier = ">=6.2.1,<8" },
