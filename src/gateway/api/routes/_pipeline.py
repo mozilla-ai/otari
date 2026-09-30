@@ -2930,7 +2930,6 @@ async def prepare_gateway_tools(
     misconfigured or conflicting tool opt-ins) releases the budget
     reservation taken by :func:`resolve_request_context` before propagating.
     """
-    mcp_servers = declared.mcp_servers
     try:
         try:
             requested_web_search = parse_web_search_header(declared.web_search_header)
@@ -2961,48 +2960,7 @@ async def prepare_gateway_tools(
 
         await _admit_guardrails(adapter, ctx, response, declared)
 
-        # Checked per source, not over the merged list: see
-        # `_validate_mcp_server_urls` for why a stored server's rejection cannot
-        # carry the same body a caller's own does. `MCPClientPool` keys sessions by
-        # `name`, so a duplicate silently collapses two servers into one and
-        # misroutes tool calls (otari#591); each source refuses one the way it
-        # refuses an unsafe URL.
-        inline_names: set[str] = set()
-        if mcp_servers:
-            # Before the URL check, which spends a DNS lookup per server: a repeat
-            # inside the caller's own list is knowable without any of them.
-            for server in mcp_servers:
-                if server.name in inline_names:
-                    raise adapter.error(400, duplicate_mcp_server_name_detail(server.name), ErrorKind.INVALID_REQUEST)
-                inline_names.add(server.name)
-            await _validate_mcp_server_urls(adapter, mcp_servers)
-        if declared.mcp_server_ids:
-            stored_servers = await _resolve_mcp_server_ids(
-                adapter, ctx, backends.mcp_server_port, declared.mcp_server_ids
-            )
-            await _validate_mcp_server_urls(
-                adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id
-            )
-            stored_name_counts = Counter(server.name for server in stored_servers)
-            # Only a peer's answer can hold a duplicate name, because a unique
-            # index and de-duplicated ids rule one out locally. It is workspace
-            # configuration the caller cannot fix, so the detail is fixed and the
-            # names go to the log.
-            if len(stored_name_counts) != len(stored_servers):
-                logger.error(
-                    "Stored MCP servers do not have unique names for workspace %s: %s",
-                    ctx.workspace_id,
-                    sorted(name for name, count in stored_name_counts.items() if count > 1),
-                )
-                raise adapter.error(500, MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL, ErrorKind.API)
-            # Fixed detail rather than the name: a stored name is not the caller's to
-            # read (`routes/workspace_mcp_servers` gates even the read behind the master
-            # key), so the rejection does not repeat one back. It does not pretend to
-            # close the oracle: the probe name is caller-supplied, so a caller holding a
-            # stored id still learns a name by guessing it here and reading the 400.
-            if inline_names & stored_name_counts.keys():
-                raise adapter.error(400, MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL, ErrorKind.INVALID_REQUEST)
-            mcp_servers = (mcp_servers or []) + stored_servers
+        mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.mcp_server_port)
 
         # Whether code can run here is the deployment's answer rather than a URL:
         # what runs the code is the port, and a hosted provider has no URL at all.
@@ -3379,6 +3337,42 @@ async def _admit_guardrails(
         mandated=effective.mandated,
         in_process=_in_process_guardrails(ctx, effective),
     )
+
+
+async def _admit_mcp_servers(
+    adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools, port: McpServerPort
+) -> list[McpServerConfig] | None:
+    """The MCP servers the request may reach: its own, then the stored ones its IDs name."""
+    mcp_servers = declared.mcp_servers
+    # Each source is checked on its own, because a stored server's refusal carries a fixed detail.
+    # A duplicate name collapses two servers into one client session, so each source refuses one.
+    inline_names: set[str] = set()
+    if mcp_servers:
+        # Before the URL check, which resolves DNS for each server.
+        for server in mcp_servers:
+            if server.name in inline_names:
+                raise adapter.error(400, duplicate_mcp_server_name_detail(server.name), ErrorKind.INVALID_REQUEST)
+            inline_names.add(server.name)
+        await _validate_mcp_server_urls(adapter, mcp_servers)
+    if declared.mcp_server_ids:
+        stored_servers = await _resolve_mcp_server_ids(adapter, ctx, port, declared.mcp_server_ids)
+        await _validate_mcp_server_urls(
+            adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id
+        )
+        stored_name_counts = Counter(server.name for server in stored_servers)
+        # Only a peer's answer can repeat a name. The caller cannot fix it, so the names go to the log.
+        if len(stored_name_counts) != len(stored_servers):
+            logger.error(
+                "Stored MCP servers do not have unique names for workspace %s: %s",
+                ctx.workspace_id,
+                sorted(name for name, count in stored_name_counts.items() if count > 1),
+            )
+            raise adapter.error(500, MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL, ErrorKind.API)
+        # Gotcha: the detail does not repeat a stored name, but a caller can still guess one by probing.
+        if inline_names & stored_name_counts.keys():
+            raise adapter.error(400, MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL, ErrorKind.INVALID_REQUEST)
+        mcp_servers = (mcp_servers or []) + stored_servers
+    return mcp_servers
 
 
 def _caller_workspace_id(api_key: APIKey | None, session_principal: SessionPrincipal | None) -> uuid.UUID | None:
