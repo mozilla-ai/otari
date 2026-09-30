@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -23,10 +24,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_KEY_HEADER, API_ROOT
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.files_exceptions import ProviderCopyNotRecordedError
 from gateway.models.files import FileObject, FileProviderCopy
+from gateway.models.users import User
 from gateway.repositories.files import FileProviderCopyRepository
 
 _CODE_TOOL = {"type": "code_execution_20250825", "name": "code_execution"}
@@ -252,6 +254,75 @@ def test_file_understanding_off_still_runs_code_that_attaches_nothing(
     assert response.status_code == 200, response.text
     assert forwarded[0][0]["content"] == "Compute 2 + 2."
     assert anthropic_files.uploads == []
+
+
+@pytest.fixture
+def priced_model(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """A price for the model, so a request reserves a nonzero estimate against the budget."""
+    response = client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": _MODEL, "input_price_per_million": 3.0, "output_price_per_million": 15.0},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+
+
+@pytest.fixture
+def budgeted_key_header(client: TestClient, master_key_header: dict[str, str]) -> dict[str, str]:
+    """A key for a user with a budget, so a request holds a reservation against it."""
+    budget = client.post(
+        f"{API_ROOT}/budgets", json={"max_budget": 100.0, "budget_duration_sec": 86400}, headers=master_key_header
+    )
+    assert budget.status_code == 200, budget.text
+    user = client.post(
+        f"{API_ROOT}/users",
+        json={"user_id": "budgeted-user", "budget_id": budget.json()["budget_id"]},
+        headers=master_key_header,
+    )
+    assert user.status_code == 200, user.text
+    key = client.post(
+        f"{API_ROOT}/keys", json={"key_name": "budgeted", "user_id": "budgeted-user"}, headers=master_key_header
+    )
+    assert key.status_code == 200, key.text
+    return {API_KEY_HEADER: f"Bearer {key.json()['key']}"}
+
+
+def _reserved(db_session: Session) -> Decimal:
+    db_session.expire_all()
+    return sum((user.reserved for user in db_session.scalars(select(User)).all()), Decimal("0"))
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_a_refusal_releases_the_reservation_and_answers_in_the_anthropic_envelope(
+    client: TestClient,
+    budgeted_key_header: dict[str, str],
+    db_session: Session,
+    tmp_file_store: None,
+    anthropic_files: _StubAnthropicFiles,
+    priced_model: None,
+    monkeypatch: pytest.MonkeyPatch,
+    stream: bool,
+) -> None:
+    file_id = _upload_file(client, budgeted_key_header)
+    monkeypatch.setattr(cast(Any, client.app).state.config, "files_provider_upload_enabled", False, raising=True)
+    body = {
+        "model": _MODEL,
+        "messages": [{"role": "user", "content": [{"type": "container_upload", "file_id": file_id}]}],
+        "max_tokens": 100,
+        "tools": [_CODE_TOOL],
+        "stream": stream,
+    }
+
+    provider = AsyncMock()
+    with patch("gateway.api.routes.messages.amessages", new=provider):
+        response = client.post(f"{API_ROOT}/messages", json=body, headers=budgeted_key_header)
+
+    assert response.status_code == 400, response.text
+    envelope = response.json()["detail"]
+    assert envelope["type"] == "error"
+    assert envelope["error"]["message"] == "This deployment does not upload attached files to a provider"
+    provider.assert_not_awaited()
+    assert _reserved(db_session) == Decimal("0")
 
 
 def _pending(file_id: str, workspace_id: uuid.UUID, *, since: datetime | None = None) -> FileProviderCopy:

@@ -14,7 +14,7 @@ import pytest
 from any_llm import LLMProvider
 from pydantic import ValidationError
 
-from gateway.api.routes._normalize import sandbox_requested
+from gateway.api.routes._normalize import provider_container_requested, sandbox_requested
 from gateway.api.routes._tools import (
     CODE_EXECUTION_HEADER,
     _extract_code_execution_tool,
@@ -333,3 +333,47 @@ def test_no_sandbox_means_nothing_is_staged() -> None:
         )
         is False
     )
+
+
+def _provider_runs(
+    tools: list[dict[str, Any]],
+    *,
+    provider: str | None,
+    header: str | None = None,
+    pin: CodeExecutor | None = None,
+    sandbox: bool = True,
+    **config: Any,
+) -> bool:
+    return provider_container_requested(
+        tools,
+        config=GatewayConfig(sandbox_url="http://sandbox:8080" if sandbox else None, **config),
+        provider=LLMProvider(provider) if provider else None,
+        dialect=Dialect.MESSAGES,
+        code_execution_header=header,
+        workspace_executor=pin,
+    )
+
+
+def test_a_natively_served_declaration_runs_in_the_providers_container() -> None:
+    assert _provider_runs([ANTHROPIC_DATED], provider="anthropic") is True
+    assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", sandbox=False) is True
+
+
+def test_the_explicit_type_never_runs_in_the_providers_container() -> None:
+    assert _provider_runs([{"type": "otari_code_execution"}, ANTHROPIC_DATED], provider="anthropic") is False
+
+
+def test_a_declaration_the_provider_cannot_run_is_not_its_container() -> None:
+    assert _provider_runs([ANTHROPIC_DATED], provider="mistral") is False
+    assert _provider_runs([BARE], provider="anthropic") is False
+    assert _provider_runs([], provider="anthropic") is False
+
+
+def test_the_header_the_pin_and_the_default_can_each_bring_the_code_to_the_sandbox() -> None:
+    assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", header="otari") is False
+    assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", pin=CodeExecutor.OTARI) is False
+    assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", code_execution_executor="otari") is False
+
+
+def test_a_header_outside_the_vocabulary_decides_nothing() -> None:
+    assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", header="somewhere-else") is False
