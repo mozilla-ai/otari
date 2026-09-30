@@ -43,7 +43,8 @@ It walks:
 8. Provider-native code execution is forwarded untouched under the default
    executor, although a sandbox is configured: Anthropic's dated tool on
    Messages, OpenAI's ``code_interpreter`` on Responses, each answered in its
-   own native result blocks, with no code-execution resolve and no sandbox call.
+   own native result blocks. The workspace's policy is still asked for each,
+   because its executor could bring the code here, and no sandbox is called.
 
 9. Provider-native web search is forwarded the same way (``web_search_intercept``
    is off by default): Anthropic's ``web_search_20250305`` on Messages, OpenAI's
@@ -1619,11 +1620,10 @@ def run_native_code_execution(base_url: str, fakes: Fakes) -> None:
         _check(len(responses) == 1, f"expected one Responses call, got {len(responses)}")
         forwarded = {tool.get("type") for tool in responses[0].body.get("tools") or [] if isinstance(tool, dict)}
         _check("code_interpreter" in forwarded, f"the declaration did not reach OpenAI: {forwarded!r}")
-    # The provider runs these natively, so the gateway has nothing to ask the
-    # control plane and nothing to run.
+    # The policy is asked before the executor decision, so each native call asks once.
     _check(
-        len(fakes.control_plane.recorder.all("code-execution/resolve")) == code_resolves,
-        "a native declaration was resolved",
+        len(fakes.control_plane.recorder.all("code-execution/resolve")) == code_resolves + 2,
+        "a native declaration was not resolved before the executor decision",
     )
     _check(len(fakes.sandbox.recorder.all()) == sandbox_calls, "a native declaration reached the gateway's sandbox")
     where = "against the real APIs" if fakes.live else "and answered natively"

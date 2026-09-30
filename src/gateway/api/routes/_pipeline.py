@@ -3248,16 +3248,7 @@ async def _admit_code_execution(
             provider_code_entry, provider=_dispatch_provider_name(ctx), dialect=adapter.name
         )
         if ctx.hybrid_mode:
-            # Gotcha: the control plane refuses a workspace that may not run code here.
-            # It is asked only when the code will run here, so a natively served keyword is not refused.
-            provisional, _ = resolve_code_executor_preference(
-                requested=requested_executor, workspace=None, deployment=deployment_executor
-            )
-            provisional_executor = decide_code_executor(
-                provisional, sandbox_configured=True, native_available=native_available
-            )
-            if sandbox_tool_entry is not None or provisional_executor is CodeExecutor.OTARI:
-                code_execution_policy = await _hybrid_code_execution_policy(adapter, ctx)
+            code_execution_policy = await _hybrid_code_execution_policy(adapter, ctx)
         else:
             code_execution_policy = await _standalone_code_execution_policy(adapter, ctx)
 
