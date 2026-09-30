@@ -3438,15 +3438,13 @@ async def _hybrid_code_execution_policy(
     """The control plane's answer for the caller's workspace, in the standalone shape.
 
     A malformed answer is a contract break rather than a denial, so it is refused with a 502 and no code runs.
-    The tool allow-list and the execution timeout are not applied.
     """
     assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
     answer = await _resolve_platform_code_execution(config=ctx.config, user_token=ctx.user_token)
     try:
-        policy = read_code_execution_policy(answer)
+        return read_code_execution_policy(answer)
     except ValueError:
         raise adapter.error(502, MALFORMED_CODE_EXEC_POLICY_DETAIL, ErrorKind.API) from None
-    return replace(policy, tools=None, exec_timeout_s=None)
 
 
 def _implementation_for(ctx: RequestContext, instance: str) -> LLMProvider | None:

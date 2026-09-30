@@ -2504,6 +2504,7 @@ class _FakeSandboxBackend:
     last_purpose_hint: str | None = None
     last_image: str | None = None
     last_allowed_tools: frozenset[str] | None = None
+    last_timeout_s: float | None = None
 
     def __init__(
         self,
@@ -2525,6 +2526,7 @@ class _FakeSandboxBackend:
         type(self).last_purpose_hint = purpose_hint
         type(self).last_image = image
         type(self).last_allowed_tools = allowed_tools
+        type(self).last_timeout_s = timeout_s
         self._tally = tally
 
     async def __aenter__(self) -> "_FakeSandboxBackend":
@@ -2686,23 +2688,20 @@ def test_platform_mode_sandbox_applies_workspace_default_purpose_hint(
     assert _FakeSandboxBackend.last_purpose_hint == "workspace hint"
 
 
-def test_platform_mode_sandbox_uses_the_deployments_own_image_and_no_tool_allow_list(
+def test_platform_mode_sandbox_applies_the_workspace_tools_and_timeout(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     control_plane_transport: InstallControlPlane,
 ) -> None:
-    """Hybrid keeps its own arrangement for the two columns #740 added.
+    """The tool list and timeout are ceilings, as on a data plane with its own rows.
 
-    ``image`` still comes from this gateway's config, because a hybrid gateway
-    may be pointed at a sandbox of its own and the platform's resolve carries no
-    image. ``tools`` comes back on that resolve but is deliberately *not*
-    enforced here: the /v1/sandbox proxy re-enforces the allow-list, and
-    enforcing it twice would let this gateway refuse a tool the platform admits.
+    The image stays the deployment's, because the resolve carries no image.
     """
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:8080")
     monkeypatch.setenv("OTARI_SANDBOX_SESSION_IMAGE", "mzdotai/otari-sandbox-container:latest")
     _FakeSandboxBackend.last_image = None
-    _FakeSandboxBackend.last_allowed_tools = frozenset()
+    _FakeSandboxBackend.last_allowed_tools = None
+    _FakeSandboxBackend.last_timeout_s = None
 
     async def fake_post_platform(
         url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
@@ -2710,7 +2709,7 @@ def test_platform_mode_sandbox_uses_the_deployments_own_image_and_no_tool_allow_
         if url.endswith("/gateway/provider-keys/resolve"):
             return _single_attempt_resolve_response(request_id="sbx-image")
         if url.endswith("/gateway/code-execution/resolve"):
-            return httpx.Response(200, json={"enabled": True, "tools": ["code_execution"]})
+            return httpx.Response(200, json={"enabled": True, "tools": ["code_execution"], "exec_timeout_s": 7})
         return httpx.Response(204)
 
     async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
@@ -2732,7 +2731,40 @@ def test_platform_mode_sandbox_uses_the_deployments_own_image_and_no_tool_allow_
 
     assert response.status_code == 200
     assert _FakeSandboxBackend.last_image == "mzdotai/otari-sandbox-container:latest"
-    assert _FakeSandboxBackend.last_allowed_tools is None
+    assert _FakeSandboxBackend.last_allowed_tools == frozenset({"code_execution"})
+    assert _FakeSandboxBackend.last_timeout_s == 7
+
+
+def test_platform_mode_sandbox_403_when_the_workspace_tools_leave_nothing_to_run(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:8080")
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="sbx-no-tools")
+        if url.endswith("/gateway/code-execution/resolve"):
+            return httpx.Response(200, json={"enabled": True, "tools": ["bash_code_execution"]})
+        return httpx.Response(204)
+
+    control_plane_transport(fake_post_platform)
+
+    response = platform_client.post(
+        f"{API_ROOT}/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "otari_code_execution"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 403
+    assert "excludes every tool kind" in response.json()["detail"]
 
 
 def test_platform_mode_streaming_sandbox_gets_the_same_image(
