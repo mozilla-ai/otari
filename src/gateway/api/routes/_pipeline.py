@@ -2913,39 +2913,23 @@ async def prepare_gateway_tools(
     declared: DeclaredTools,
     backends: ToolBackends,
 ) -> ToolContext:
-    """Guardrails, MCP server-id resolution, and gateway-tool extraction.
+    """Admit the gateway-run tools one request declared, handling the reservation release on a refusal.
 
-    Caller-requested input guardrails run before any provider/tool dispatch.
-    ``block``-mode flags raise 403 here (provider never called);
-    ``monitor``-mode flags annotate the response header and fall through.
+    The steps run in a fixed order, so a request that breaks two rules always gets the same refusal.
+    MCP servers, the sandbox and the web tools cannot be combined in one request.
+    Every backend URL comes from the deployment and never from the request.
 
-    ``mcp_server_ids`` resolves against the platform in hybrid mode and against
-    the request's own workspace in standalone; see
-    :func:`_resolve_mcp_server_ids`. The sandbox and web_search opt-ins follow the wire shape
-    of Anthropic / OpenAI tool entries; their backend URLs are operator
-    controlled (no per-request URL override, which would be an SSRF surface).
-    The three backends are mutually exclusive for now.
-
-    Any rejection raised here (guardrail block, unresolvable MCP ids,
-    misconfigured or conflicting tool opt-ins) releases the budget
-    reservation taken by :func:`resolve_request_context` before propagating.
+    NOTE: callers must not release the budget reservation after a refusal from here.
     """
     try:
         claim_web_search = _admit_web_declarations(adapter, ctx, declared)
-
         await _admit_guardrails(adapter, ctx, response, declared)
-
         mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.mcp_server_port)
-
         code = await _admit_code_execution(adapter, ctx, declared, backends, mcp_servers_declared=bool(mcp_servers))
-
         web = _extract_web_tools(adapter, ctx, code.tools_after_sandbox, claim_web_search=claim_web_search)
         if web.declared_any and (code.use_sandbox or mcp_servers):
             raise adapter.error(400, WEB_SEARCH_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
         web_access = await _admit_web_access(adapter, ctx, web, backends.web_search_policy_port)
-
-        # Inside the try so a rejection releases the budget reservation the
-        # request already took, like every other admission failure here.
         await _require_tool_pricing(
             adapter,
             ctx,
@@ -2957,19 +2941,8 @@ async def prepare_gateway_tools(
         await release_reservation(ctx)
         raise
     except DATABASE_ERRORS:
-        # Five reads in this block touch the database (the organization's
-        # guardrails, the workspace MCP servers, the workspace code-execution
-        # policy and the workspace web-search configuration above, and
-        # `_require_tool_pricing`), and a failure in any of them is not an
-        # `HTTPException`, so without this arm it would leave `users.reserved`
-        # holding the estimate until the reservation sweep reclaims it. That sweep
-        # is the only thing that ever does: the budget reset zeroes spend and
-        # leaves the hold where it is. The rollback comes first because a failed
-        # statement leaves the session unusable and `release_reservation` writes:
-        # releasing on a poisoned session raises `PendingRollbackError` and the
-        # hold survives anyway. Both calls are best-effort so a database that is
-        # still refusing work re-raises the original failure rather than a
-        # confusing second one.
+        # A database failure is not an HTTPException, so the reservation is released here too.
+        # The rollback comes first, because a failed statement leaves the session unusable for the release.
         if ctx.db is not None:
             with contextlib.suppress(*DATABASE_ERRORS):
                 await ctx.db.rollback()
@@ -2977,9 +2950,7 @@ async def prepare_gateway_tools(
             await release_reservation(ctx)
         raise
 
-    # Last statement of the preamble: everything after this is the provider
-    # call. See :func:`gateway.core.database.release_session` for why the
-    # connection must not be held across it.
+    # Gotcha: the connection must not be held across the provider call that follows.
     await release_session(ctx.db)
 
     return ToolContext(
