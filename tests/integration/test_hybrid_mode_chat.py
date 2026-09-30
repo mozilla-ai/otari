@@ -15,8 +15,9 @@ from any_llm.types.completion import (
     PromptTokensDetails,
 )
 from fastapi.testclient import TestClient
+from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
-from conftest import InstallControlPlane
+from conftest import InstallControlPlane, TaskGroupMcpTransport
 from gateway.api.deps import reset_config
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
@@ -1864,6 +1865,144 @@ def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     assert response.headers["Otari-Attempt-ID"] == "tool-att-openai"
     assert calls == ["anthropic:claude-haiku-4-5", "openai:gpt-4o-mini"]
     assert "hello" in response.text
+
+
+class _FakeMcpSession:
+    """Enough of an MCP ``ClientSession`` to list one tool and run it."""
+
+    def __init__(self, *args: Any) -> None:
+        pass
+
+    async def __aenter__(self) -> "_FakeMcpSession":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    async def initialize(self) -> None:
+        return None
+
+    async def list_tools(self) -> ListToolsResult:
+        return ListToolsResult(tools=[Tool(name="remote_search", inputSchema={"type": "object"})])
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
+        return CallToolResult(content=[TextContent(type="text", text="tool ran")])
+
+
+def test_hybrid_mode_tool_loop_streaming_ends_the_stream_and_reports_usage(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+    mcp_task_group_transport: TaskGroupMcpTransport,
+) -> None:
+    """A streamed MCP tool loop ends with its usage and ``[DONE]``, and bills every round.
+
+    Each round ends as OpenAI streams it: a finish chunk, then a usage chunk with no choices.
+    """
+    usage_reports: list[dict[str, Any]] = []
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "tool-stream-usage-req",
+                    "fallback_enabled": False,
+                    "attempts": [
+                        {
+                            "attempt_id": "tool-stream-usage-att",
+                            "position": 0,
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "api_key": "sk-openai-real",
+                            "managed": False,
+                        }
+                    ],
+                },
+            )
+        usage_reports.append(body)
+        return httpx.Response(204)
+
+    def _chunk(payload: dict[str, Any]) -> ChatCompletionChunk:
+        return ChatCompletionChunk.model_validate(
+            {"id": "c", "object": "chat.completion.chunk", "created": 0, "model": "gpt-4o-mini", **payload}
+        )
+
+    def _delta(delta: dict[str, Any], finish: str | None = None) -> ChatCompletionChunk:
+        return _chunk({"choices": [{"index": 0, "delta": delta, "finish_reason": finish}]})
+
+    def _usage(prompt: int, completion: int) -> ChatCompletionChunk:
+        usage = {"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": prompt + completion}
+        return _chunk({"choices": [], "usage": usage})
+
+    rounds = 0
+
+    async def fake_loop_acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        nonlocal rounds
+        rounds += 1
+        first_round = rounds == 1
+
+        async def _stream() -> AsyncIterator[ChatCompletionChunk]:
+            yield _delta({"role": "assistant"})
+            if first_round:
+                yield _delta(
+                    {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {"name": "remote_search", "arguments": ""},
+                            }
+                        ]
+                    }
+                )
+                yield _delta({"tool_calls": [{"index": 0, "function": {"arguments": "{}"}}]})
+                yield _delta({}, "tool_calls")
+                yield _usage(10, 2)
+            else:
+                yield _delta({"content": "hybrid-"})
+                yield _delta({"content": "smoke-ok"})
+                yield _delta({}, "stop")
+                yield _usage(20, 3)
+
+        return _stream()
+
+    transport = mcp_task_group_transport
+    control_plane_transport(fake_post_platform)
+    monkeypatch.setattr("gateway.services.mcp_client.ClientSession", _FakeMcpSession)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    response = platform_client.post(
+        f"{API_ROOT}/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+            "mcp_servers": [{"name": "test", "url": "https://93.184.216.34/mcp"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    payloads = [line.removeprefix("data: ") for line in response.text.splitlines() if line.startswith("data: ")]
+    assert payloads[-1] == "[DONE]", response.text
+    frames = [json.loads(payload) for payload in payloads[:-1]]
+    assert not [frame for frame in frames if "error" in frame], response.text
+    choices = [choice for frame in frames for choice in frame["choices"]]
+    assert "".join(choice["delta"].get("content") or "" for choice in choices) == "hybrid-smoke-ok"
+    assert [choice["finish_reason"] for choice in choices if choice["finish_reason"]] == ["stop"]
+    assert not [choice for choice in choices if choice["delta"].get("tool_calls")]
+    usage_frames = [frame["usage"] for frame in frames if not frame["choices"]]
+    assert [(usage["prompt_tokens"], usage["completion_tokens"]) for usage in usage_frames] == [(30, 5)]
+    assert transport.exited_in == [transport.entered_in]
+    successes = [report for report in usage_reports if report.get("status") == "success"]
+    assert len(successes) == 1, usage_reports
+    assert successes[0]["correlation_id"] == "tool-stream-usage-att"
+    assert successes[0]["usage"]["prompt_tokens"] == 30
+    assert successes[0]["usage"]["completion_tokens"] == 5
 
 
 # ---------------------------------------------------------------------------

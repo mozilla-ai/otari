@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ import httpx
 import pytest
 from mcp.types import CallToolResult, TextContent
 
+from conftest import TaskGroupMcpTransport
 from gateway.models.mcp import McpServerConfig
 from gateway.services.mcp_client import MCPClientPool, _ConnectedServer
 
@@ -304,3 +306,58 @@ async def test_unsafe_redirect_is_blocked_before_sending(
 
     assert len(seen) == 1
     assert seen[0].url.host == "93.184.216.34"
+
+
+# --------------------------------------------------------------------------- #
+# Task ownership
+# --------------------------------------------------------------------------- #
+
+
+_TASK_GROUP_CONFIG = McpServerConfig(name="tools", url="https://93.184.216.34/mcp")
+
+
+@pytest.fixture
+def transport(
+    mcp_task_group_transport: TaskGroupMcpTransport,
+    monkeypatch: pytest.MonkeyPatch,
+) -> TaskGroupMcpTransport:
+    monkeypatch.setattr("gateway.services.mcp_client.ClientSession", _FakeSession)
+    return mcp_task_group_transport
+
+
+@pytest.mark.asyncio
+async def test_pool_closes_from_a_task_other_than_the_one_that_opened_it(transport: TaskGroupMcpTransport) -> None:
+    """A streamed response opens the pool in one task and closes it in another."""
+    pool = MCPClientPool([_TASK_GROUP_CONFIG])
+
+    await asyncio.create_task(pool.__aenter__())
+    await asyncio.create_task(pool.__aexit__(None, None, None))
+
+    assert transport.exited_in == [transport.entered_in]
+
+
+@pytest.mark.asyncio
+async def test_pool_finishes_closing_when_the_closing_task_is_canceled(transport: TaskGroupMcpTransport) -> None:
+    pool = MCPClientPool([_TASK_GROUP_CONFIG])
+    await pool.__aenter__()
+    transport.may_close.clear()
+
+    closing = asyncio.create_task(pool.__aexit__(None, None, None))
+    await asyncio.sleep(0)
+    closing.cancel()
+    await asyncio.sleep(0)
+    transport.may_close.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+    assert transport.exited_in == [transport.entered_in]
+
+
+@pytest.mark.asyncio
+async def test_pool_raises_a_close_failure_to_the_closing_task(transport: TaskGroupMcpTransport) -> None:
+    transport.close_error = RuntimeError("transport failed to close")
+    pool = MCPClientPool([_TASK_GROUP_CONFIG])
+    await pool.__aenter__()
+
+    with pytest.raises(RuntimeError, match="transport failed to close"):
+        await asyncio.create_task(pool.__aexit__(None, None, None))
