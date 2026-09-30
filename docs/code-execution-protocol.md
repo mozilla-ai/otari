@@ -320,9 +320,10 @@ be exposed to an untrusted one.
 
 Authentication is therefore a property of the deployment, not of the contract. A
 client MAY be configured to present a bearer credential on every operation, and
-a backend (or a proxy in front of one) MAY require it. In Otari's hybrid mode
-this is how the platform's authenticated proxy admits the request and derives
-tenancy from the caller's workspace, so the backend behind it never has to.
+a backend (or a proxy in front of one) MAY require it. Otari presents none
+today, in either mode, so a backend it reaches must not depend on one. A
+credential scoped to one workspace's sandbox is proposed in
+[#1603](https://github.com/mozilla-ai/otari/issues/1603).
 
 Tenancy, when a backend is multi-tenant, is injected by whichever component
 authenticates the caller. A backend that expects tenancy MUST fail closed when

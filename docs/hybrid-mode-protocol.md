@@ -428,10 +428,9 @@ fail a request: `default_purpose_hint` is used when it is a non-empty string,
 known executor. Anything else narrows nothing.
 
 `tools` and `exec_timeout_s` are accepted and **not** applied by Otari today.
-When `OTARI_SANDBOX_URL` names the control plane, the control plane enforces
-both on every sandbox call. Any other sandbox runs without them, so a workspace
-limit on tools or timeout does not reach it. Whether a data plane should
-enforce them itself is
+No sandbox can apply them either, because Otari sends a sandbox no caller
+credential to look the workspace up by. A workspace limit on tools or timeout
+therefore has no effect. Whether a data plane should enforce them itself is
 [#1726](https://github.com/mozilla-ai/otari/issues/1726).
 
 A policy narrows what the deployment already allows and never widens it. A
@@ -451,12 +450,13 @@ This endpoint answers policy only. It returns no sandbox address and no
 credential, because the sandbox is deployment-wide configuration
 (`OTARI_SANDBOX_URL`) rather than a per-workspace fact.
 
-Today that setting may name the control plane itself, and Otari then forwards
-the caller's token to it, which is what makes the control plane a proxy for
-sandbox traffic. That arrangement is under review in
-[#1688](https://github.com/mozilla-ai/otari/issues/1688) and
-[#1603](https://github.com/mozilla-ai/otari/issues/1603). This section records
-the contract as it stands rather than as it should be.
+Otari sends the sandbox no caller credential, whatever that setting names. A
+control plane that serves the sandbox itself therefore cannot tell which
+workspace a call is for. How a data plane should reach the sandbox, and with
+what credential, is
+[#1603](https://github.com/mozilla-ai/otari/issues/1603).
+[#1688](https://github.com/mozilla-ai/otari/issues/1688) covers a control plane
+carrying data plane traffic at all.
 
 ## Usage report
 
