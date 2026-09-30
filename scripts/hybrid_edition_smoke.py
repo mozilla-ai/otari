@@ -134,6 +134,7 @@ MCP_TOOL = "smoke_lookup"
 MCP_RESULT = "hybrid-smoke-mcp-result"
 MCP_SERVER_ID = "8f2c1a1e-0000-4000-8000-000000000001"
 CODE_STDOUT = "hybrid-smoke-code-stdout"
+SANDBOX_STDOUT = "hybrid-smoke-sandbox-stdout"
 # Delivered before the first frame so the gateway's time-to-first-token is a
 # measurable number rather than a rounding artifact.
 STREAM_FIRST_FRAME_DELAY_SECONDS = 0.05
@@ -828,6 +829,93 @@ class _SearchHandler(_RecordingHandler):
                 ]
             },
         )
+
+
+class FakeSandbox(_FakeServer):
+    """A backend speaking docs/code-execution-protocol.md.
+
+    It serves the three required operations and records each under its contract name.
+    """
+
+    def __init__(self, bind_host: str = LOOPBACK) -> None:
+        super().__init__(_SandboxHandler, bind_host)
+        self._sessions: set[str] = set()
+        self._created = 0
+        self._lock = threading.Lock()
+
+    def create_session(self) -> str:
+        with self._lock:
+            self._created += 1
+            session_id = f"sbx_{self._created:04d}"
+            self._sessions.add(session_id)
+        return session_id
+
+    def has_session(self, session_id: str) -> bool:
+        with self._lock:
+            return session_id in self._sessions
+
+    def destroy_session(self, session_id: str) -> None:
+        with self._lock:
+            self._sessions.discard(session_id)
+
+    @property
+    def open_sessions(self) -> int:
+        with self._lock:
+            return len(self._sessions)
+
+
+class _SandboxHandler(_RecordingHandler):
+    server: FakeSandbox
+
+    def _session_route(self) -> tuple[str, str] | None:
+        """The session id and the operation suffix, for a path under ``/sessions/``."""
+        parts = self._path().split("/")
+        if len(parts) < 3 or parts[1] != "sessions":
+            return None
+        return parts[2], "/".join(parts[3:])
+
+    def do_POST(self) -> None:  # noqa: N802
+        body = self._read_json()
+        if self._path() == "/sessions":
+            self._record("CreateSession", body)
+            self._respond(201, {"session_id": self.server.create_session()})
+            return
+        route = self._session_route()
+        if route is None or route[1] != "exec":
+            self._respond(404, {"detail": f"fake sandbox has no POST {self._path()}"})
+            return
+        session_id, _ = route
+        self._record("Execute", body)
+        if not self.server.has_session(session_id):
+            self._respond(404, {"detail": "unknown session"})
+            return
+        tool_use_id = (body.get("tool_use_id") if isinstance(body, dict) else None) or "toolu_hybrid_smoke"
+        self._respond(
+            200,
+            {
+                "tool_use_id": tool_use_id,
+                "result_block": {
+                    "type": "code_execution_tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": {
+                        "type": "code_execution_result",
+                        "stdout": SANDBOX_STDOUT,
+                        "stderr": "",
+                        "return_code": 0,
+                        "content": [],
+                    },
+                },
+            },
+        )
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        route = self._session_route()
+        if route is None or route[1]:
+            self._respond(404)
+            return
+        self._record("DestroySession", None)
+        self.server.destroy_session(route[0])
+        self._respond(204)
 
 
 # --------------------------------------------------------------------------- #

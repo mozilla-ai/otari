@@ -21,6 +21,7 @@ import pytest
 import yaml
 
 from gateway.core.config import API_ROOT, PLATFORM_TOKEN_ENV_VAR
+from gateway.types.code_execution import ExecResponse, SessionHandle
 
 _SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "hybrid_edition_smoke.py"
 
@@ -353,6 +354,35 @@ def test_the_search_service_answers_the_searxng_path(search_service: Any) -> Non
 
 def test_the_search_service_answers_no_other_path(search_service: Any) -> None:
     assert _call("GET", f"{search_service.base_url}/gateway/web-search/search")[0] == 404
+
+
+@pytest.fixture
+def sandbox() -> Iterator[Any]:
+    with smoke.serve(smoke.FakeSandbox(), "test-sandbox") as server:
+        yield server
+
+
+def test_sandbox_answers_in_the_shapes_the_gateway_validates(sandbox: Any) -> None:
+    status, created = _call("POST", f"{sandbox.base_url}/sessions", body={})
+    assert status == 201
+    session_id = SessionHandle.model_validate(created).session_id
+
+    status, executed = _call(
+        "POST",
+        f"{sandbox.base_url}/sessions/{session_id}/exec",
+        body={"tool": "code_execution", "input": {"code": "print('x')"}},
+    )
+    assert status == 200
+    assert ExecResponse.model_validate(executed).result_block.content.stdout == smoke.SANDBOX_STDOUT
+
+    assert _call("DELETE", f"{sandbox.base_url}/sessions/{session_id}")[0] == 204
+    assert sandbox.open_sessions == 0
+    assert [item.route for item in sandbox.recorder.all()] == ["CreateSession", "Execute", "DestroySession"]
+
+
+def test_sandbox_refuses_to_execute_in_a_session_it_did_not_create(sandbox: Any) -> None:
+    status, _ = _call("POST", f"{sandbox.base_url}/sessions/sbx_unknown/exec", body={"tool": "code_execution"})
+    assert status == 404
 
 
 # --------------------------------------------------------------------------- #
