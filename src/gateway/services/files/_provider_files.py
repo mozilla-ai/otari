@@ -1,4 +1,4 @@
-"""The files a provider holds, and the client that reads and writes them.
+"""The files a provider's own code execution produced, as its response announces them.
 
 A provider-native code execution keeps what it wrote in the provider's container
 and answers with the provider's file ID.
@@ -7,53 +7,18 @@ The provider does not keep it for long: OpenAI discards a container 20 minutes a
 
 from __future__ import annotations
 
-import uuid
-from collections.abc import AsyncGenerator, AsyncIterator, Iterable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from dataclasses import dataclass
+from collections.abc import Iterable
 from datetime import timedelta
-from functools import cached_property
 from typing import Any
-from urllib.parse import quote
 
-import httpx
-from anthropic import AnthropicError
-from any_llm import AnyLLM, LLMProvider
-from any_llm.exceptions import AnyLLMError
-from any_llm.types.files import AsyncFileDownload, FileMetadata
-from pydantic import ValidationError
+from any_llm import LLMProvider
 
-from gateway.core.config import GatewayConfig
-from gateway.exceptions.files_exceptions import ProviderUploadFailedError
-from gateway.log_config import logger
-from gateway.services.provider_kwargs import effective_credential, get_provider_kwargs
-from gateway.types.provider_account import ResolvedCredential
-
-OPENAI_BASE = "https://api.openai.com/v1"
-
-# How long to wait on the provider for a connection or for the next chunk.
-_TIMEOUT = httpx.Timeout(30.0)
-
-# The providers a produced file can be read back from.
-_FILE_PROVIDERS = frozenset({LLMProvider.ANTHROPIC, LLMProvider.OPENAI})
+from gateway.types.provider_file import ProviderFile
 
 # The shortest life a provider will give a file it stores. Anthropic's Files
 # API takes an expiry between one hour and 90 days, so a copy cannot be asked
 # for less than an hour. A provider absent here sets no floor of its own.
 _MINIMUM_COPY_LIFETIMES = {LLMProvider.ANTHROPIC: timedelta(hours=1)}
-
-# How a file call fails. any-llm raises its own error, or re-raises the provider
-# SDK's while unified exceptions are off, and the OpenAI container read is httpx.
-_FILE_CALL_ERRORS = (AnyLLMError, AnthropicError, httpx.HTTPError, ValidationError)
-
-
-@dataclass(frozen=True)
-class ProviderFile:
-    """One file a provider's sandbox produced, as its response announced it."""
-
-    file_id: str
-    filename: str | None = None
-    container_id: str | None = None
 
 
 def _anthropic_files_in(blocks: list[Any]) -> list[ProviderFile]:
@@ -145,211 +110,3 @@ def produced_files_for(dialect: str, obj: Any) -> list[ProviderFile]:
 def minimum_copy_lifetime(provider: LLMProvider) -> timedelta:
     """The shortest life ``provider`` will give a file it stores, or zero where it sets no floor."""
     return _MINIMUM_COPY_LIFETIMES.get(provider, timedelta(0))
-
-
-def serves_files(provider: str) -> bool:
-    """Whether Otari knows how to fetch a produced file back from ``provider``."""
-    try:
-        return LLMProvider(provider) in _FILE_PROVIDERS
-    except ValueError:
-        return False
-
-
-class FileOverBudgetError(Exception):
-    """A file ran past the bytes the reply may still store."""
-
-
-class ProviderFileUnavailableError(Exception):
-    """The provider cannot serve a file now: it refused, the connection failed, or the file names no container."""
-
-
-def _declared_size(download: AsyncFileDownload) -> int:
-    """The size the provider announced, or ``0`` when it announced none.
-
-    ``AsyncFileDownload`` promises a plain mapping, so the name is matched
-    case-insensitively rather than relying on HTTP-aware header lookup.
-    """
-    for name, value in download.headers.items():
-        if name.lower() == "content-length" and value.isdigit():
-            return int(value)
-    return 0
-
-
-def _container_file_request(file: ProviderFile, credential: ResolvedCredential) -> tuple[str, dict[str, str]]:
-    """The URL and headers that read ``file``'s bytes out of its OpenAI container.
-
-    Raises :class:`ProviderFileUnavailableError` for a file that names no container.
-    """
-    # OpenAI keys a container file on its container as well as its ID.
-    if not file.container_id:
-        raise ProviderFileUnavailableError(f"openai file {file.file_id} names no container to read it from")
-    base = (credential.api_base or OPENAI_BASE).rstrip("/")
-    return (
-        f"{base}/containers/{quote(file.container_id, safe='')}/files/{quote(file.file_id, safe='')}/content",
-        {"Authorization": f"Bearer {credential.api_key}"},
-    )
-
-
-class ProviderFileClient:
-    """Reads and writes one provider instance's files, with that instance's credential.
-
-    Owns the connection its calls run on, so a caller closes it with
-    :meth:`aclose` once it has read everything it wants.
-    """
-
-    def __init__(self, *, provider: LLMProvider, provider_instance: str, credential: ResolvedCredential) -> None:
-        if provider not in _FILE_PROVIDERS:
-            raise LookupError(f"otari cannot read files back from provider '{provider.value}'")
-        self._provider = provider
-        self._provider_instance = provider_instance
-        self._credential = credential
-        # Handing this client to the provider SDK replaces the one it would have
-        # built, whose own default is to follow the redirect a download can answer with.
-        self._connection = httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True)
-
-    @classmethod
-    def for_run(
-        cls, config: GatewayConfig, *, provider: str, provider_instance: str, workspace_id: uuid.UUID | None
-    ) -> ProviderFileClient:
-        """The client for the configured instance a run was dispatched through.
-
-        Raises ``LookupError`` for a provider whose files Otari cannot read, and
-        when the deployment holds no credential for one it can.
-        """
-        member = LLMProvider(provider)
-        kwargs = get_provider_kwargs(config, member, provider_instance, workspace_id=workspace_id)
-        return cls(
-            provider=member, provider_instance=provider_instance, credential=effective_credential(member, kwargs)
-        )
-
-    @property
-    def provider(self) -> str:
-        return self._provider.value
-
-    @property
-    def provider_instance(self) -> str:
-        return self._provider_instance
-
-    @cached_property
-    def _llm(self) -> AnyLLM:
-        """The any-llm instance this client's file operations run on."""
-        return AnyLLM.create(
-            self._provider.value,
-            **{
-                **self._credential.client_args,
-                "api_key": self._credential.api_key,
-                "api_base": self._credential.api_base,
-                # The connection and the budget a read runs under belong to this
-                # client, so an instance's own transport settings do not reach
-                # them. A caller shares one deadline across every file it reads,
-                # so a retry or a longer wait here spends the time the files
-                # after this one need.
-                "http_client": self._connection,
-                "timeout": _TIMEOUT,
-                "max_retries": 0,
-            },
-        )
-
-    async def aclose(self) -> None:
-        """Release the connection this client reads over.
-
-        A release that fails is logged rather than raised, because the caller has
-        already read whatever it came for and can do nothing about it.
-        """
-        try:
-            await self._connection.aclose()
-        except (httpx.HTTPError, RuntimeError):
-            logger.exception("Could not release the %s connection", self.provider)
-
-    async def upload(self, data: bytes, *, filename: str, mime_type: str, expires_in: int) -> FileMetadata:
-        """Store ``data`` at the provider for ``expires_in`` seconds, and return what it recorded.
-
-        The provider expires the copy itself, which is what keeps Otari's store
-        the one place a file is kept indefinitely.
-
-        Raises:
-            ProviderUploadFailedError: the provider refused the copy, has no
-                files API, or could not be reached.
-        """
-        try:
-            return await self._llm.aupload_file(data, filename=filename, mime_type=mime_type, expires_in=expires_in)
-        except (*_FILE_CALL_ERRORS, NotImplementedError) as exc:
-            # The class and status only: a provider's error body can echo what it was sent.
-            logger.warning(
-                "Provider %s refused a copy of %s: %s (status %s)",
-                self.provider,
-                filename,
-                type(exc).__name__,
-                getattr(exc, "status_code", None),
-            )
-            raise ProviderUploadFailedError from exc
-
-    async def discard(self, file_id: str) -> bool:
-        """Remove a file this client put at the provider, and say whether it is gone.
-
-        False rather than raising, because every caller is already refusing the
-        request that made the file and has nothing better to do with a failure
-        than say so.
-        """
-        try:
-            await self._llm.adelete_file(file_id)
-        except (*_FILE_CALL_ERRORS, NotImplementedError) as exc:
-            logger.warning("Could not remove %s file %s: %s", self.provider, file_id, exc)
-            return False
-        return True
-
-    async def get_filename(self, file_id: str) -> str | None:
-        """The file's name, from Anthropic's file metadata.
-
-        Anthropic's result block leaves the name out.
-        ``None`` for any other provider, or when the lookup fails.
-        """
-        if self._provider is not LLMProvider.ANTHROPIC:
-            return None
-        try:
-            metadata = await self._llm.aretrieve_file(file_id)
-        except _FILE_CALL_ERRORS as exc:
-            logger.warning("Could not read %s metadata for %s: %s", self.provider, file_id, exc)
-            return None
-        except Exception:  # noqa: BLE001 - a missing name is not a failure, so no exception escapes
-            logger.exception("Unexpected failure reading %s metadata for %s", self.provider, file_id)
-            return None
-        return metadata.filename or None
-
-    async def read(self, file: ProviderFile, *, budget_bytes: int) -> AsyncGenerator[bytes, None]:
-        """Stream one file's bytes, raising :class:`FileOverBudgetError` past ``budget_bytes``.
-
-        A declared size past the budget is refused before a byte is read, when the provider sends one.
-        Raises :class:`ProviderFileUnavailableError` when the provider cannot serve the file.
-        """
-        try:
-            async with self._open(file) as download:
-                if _declared_size(download) > budget_bytes:
-                    raise FileOverBudgetError
-                total = 0
-                async for chunk in download:
-                    total += len(chunk)
-                    if total > budget_bytes:
-                        raise FileOverBudgetError
-                    yield chunk
-        except _FILE_CALL_ERRORS as exc:
-            raise ProviderFileUnavailableError(f"{self.provider} could not serve file {file.file_id}") from exc
-
-    def _open(self, file: ProviderFile) -> AbstractAsyncContextManager[AsyncFileDownload]:
-        if self._provider is LLMProvider.ANTHROPIC:
-            return self._llm.adownload_file(file.file_id)
-        return self._open_container_file(file)
-
-    @asynccontextmanager
-    async def _open_container_file(self, file: ProviderFile) -> AsyncIterator[AsyncFileDownload]:
-        """Open an OpenAI container file's download, which any-llm has no call for.
-
-        Stopgap: read it through any-llm once that can reach a container's files
-        (mozilla-ai/any-llm#1419, tracked in #1480).
-        """
-        url, headers = _container_file_request(file, self._credential)
-        async with self._connection.stream("GET", url, headers=headers) as response:
-            response.raise_for_status()
-            yield AsyncFileDownload(
-                status_code=response.status_code, headers=response.headers, chunks=response.aiter_bytes()
-            )

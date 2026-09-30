@@ -16,20 +16,21 @@ import pytest
 from any_llm import LLMProvider
 from any_llm.types.files import AsyncFileDownload
 
-from gateway.services.files._provider_files import (
+from gateway.adapters.provider_file_adapter import (
     _TIMEOUT,
-    FileOverBudgetError,
-    ProviderFile,
-    ProviderFileClient,
-    ProviderFileUnavailableError,
+    AnyLlmProviderFiles,
+    _AnyLlmFileSession,
     _container_file_request,
     _declared_size,
+)
+from gateway.exceptions.files_exceptions import FileOverBudgetError, ProviderFileUnavailableError
+from gateway.services.files._provider_files import (
     anthropic_produced_files,
     produced_files_for,
     responses_produced_files,
-    serves_files,
 )
 from gateway.types.provider_account import ResolvedCredential
+from gateway.types.provider_file import ProviderFile
 
 
 def _anthropic_reply(*outputs: list[dict[str, str]]) -> SimpleNamespace:
@@ -97,9 +98,9 @@ def test_responses_citations_carry_the_container_and_the_name() -> None:
 
 
 def test_only_providers_otari_can_read_back_are_recorded() -> None:
-    assert serves_files("anthropic")
-    assert serves_files("openai")
-    assert not serves_files("nebius")
+    assert AnyLlmProviderFiles().serves(LLMProvider.ANTHROPIC)
+    assert AnyLlmProviderFiles().serves(LLMProvider.OPENAI)
+    assert not AnyLlmProviderFiles().serves(LLMProvider.NEBIUS)
 
 
 def test_openai_download_is_keyed_on_the_container() -> None:
@@ -187,10 +188,10 @@ async def test_an_anthropic_id_that_could_escape_its_path_reaches_no_provider(
 
 
 def test_a_provider_whose_files_otari_cannot_read_is_refused() -> None:
-    # serves_files names the set; refusing here is what stops a third provider's
+    # The adapter names the set it serves; refusing here is what stops a third provider's
     # credential reaching OpenAI's container endpoint.
     with pytest.raises(LookupError, match="nebius"):
-        ProviderFileClient(
+        _AnyLlmFileSession(
             provider=LLMProvider.NEBIUS, provider_instance="nebius", credential=ResolvedCredential(api_key="sk-test")
         )
 
@@ -274,10 +275,10 @@ def _serving(monkeypatch: pytest.MonkeyPatch, handler: Any) -> list[httpx.Reques
 
 def _client(
     provider: str = "anthropic", api_base: str | None = None, client_args: dict[str, Any] | None = None
-) -> ProviderFileClient:
+) -> _AnyLlmFileSession:
     member = LLMProvider(provider)
     credential = ResolvedCredential(api_key="sk-test", api_base=api_base, client_args=client_args or {})
-    return ProviderFileClient(provider=member, provider_instance=provider, credential=credential)
+    return _AnyLlmFileSession(provider=member, provider_instance=provider, credential=credential)
 
 
 def _metadata(filename: str = "bar_plot.png") -> dict[str, Any]:
@@ -412,42 +413,32 @@ async def test_read_refuses_an_openai_file_with_no_container() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_filename_reads_anthropic_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_filename_of_reads_anthropic_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = _serving(monkeypatch, lambda request: httpx.Response(200, json=_metadata()))
 
-    assert await _client().get_filename("file_01abc") == "bar_plot.png"
+    assert await _client().filename_of("file_01abc") == "bar_plot.png"
     assert seen[0].url.path == "/v1/files/file_01abc"
 
 
 @pytest.mark.asyncio
-async def test_get_filename_is_none_when_the_lookup_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_filename_of_is_none_when_the_lookup_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     _serving(monkeypatch, lambda request: httpx.Response(404))
 
-    assert await _client().get_filename("file_01abc") is None
+    assert await _client().filename_of("file_01abc") is None
 
 
 @pytest.mark.asyncio
-async def test_get_filename_is_none_when_the_metadata_is_not_an_object(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_filename_of_is_none_when_the_metadata_is_not_an_object(monkeypatch: pytest.MonkeyPatch) -> None:
     # A body no reader expects costs the caller the name, never the file it holds.
     _serving(monkeypatch, lambda request: httpx.Response(200, json=["bar_plot.png"]))
 
-    assert await _client().get_filename("file_01abc") is None
+    assert await _client().filename_of("file_01abc") is None
 
 
 @pytest.mark.asyncio
-async def test_get_filename_asks_nothing_of_openai(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_filename_of_asks_nothing_of_openai(monkeypatch: pytest.MonkeyPatch) -> None:
     # OpenAI's citation already names the file, so there is no metadata call to make.
     seen = _serving(monkeypatch, lambda request: httpx.Response(200, json=_metadata()))
 
-    assert await _client("openai").get_filename("cfile_1") is None
+    assert await _client("openai").filename_of("cfile_1") is None
     assert seen == []
-
-
-def test_for_run_needs_a_credential(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
-        monkeypatch.delenv(name, raising=False)
-    config: Any = SimpleNamespace()
-    monkeypatch.setattr("gateway.services.files._provider_files.get_provider_kwargs", lambda *args, **kwargs: {})
-
-    with pytest.raises(LookupError):
-        ProviderFileClient.for_run(config, provider="anthropic", provider_instance="anthropic", workspace_id=None)

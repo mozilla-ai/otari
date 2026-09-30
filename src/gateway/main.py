@@ -29,6 +29,7 @@ from gateway.log_config import logger
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.rate_limit import RateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
@@ -38,7 +39,7 @@ from gateway.services.catalog_selectors import reset_selector_index
 from gateway.services.code_execution.container_sweeper import run_sandbox_container_sweeper
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.feedback import new_feedback_rate_limiter
-from gateway.services.files import run_file_sweeper
+from gateway.services.files import FileBackends, run_file_sweeper
 from gateway.services.inference import run_idempotency_sweeper
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
@@ -186,9 +187,11 @@ def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutin
     """
     if not config.files_enabled or config.files_sweep_interval_sec <= 0:
         return None
-    file_store = container.resolve(FileStoragePort, None)
+    backends = FileBackends(
+        storage=container.resolve(FileStoragePort, None), provider_files=container.resolve(ProviderFilePort, None)
+    )
     return run_file_sweeper(
-        config.files_sweep_interval_sec, lambda uow: build_file_service(uow, file_store, config)
+        config.files_sweep_interval_sec, lambda uow: build_file_service(uow, backends, config)
     )
 
 
@@ -619,6 +622,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # The retention sweep below resolves this same port, so both it and
             # the request path use whatever store this build bound.
             app.state.file_store = container.resolve(FileStoragePort, None)
+            app.state.provider_files = container.resolve(ProviderFilePort, None)
             workers = _start_lifespan_workers(config, container)
             # Workers of the enabled features. Same supervisor as the registry
             # above: created here, cancelled together in ``finally`` under one

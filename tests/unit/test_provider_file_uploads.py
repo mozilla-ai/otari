@@ -15,7 +15,6 @@ from typing import Any, cast
 
 import pytest
 from any_llm import LLMProvider
-from any_llm.types.files import FileMetadata
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -26,10 +25,12 @@ from gateway.exceptions.files_exceptions import (
 )
 from gateway.models.files import FileProviderCopy
 from gateway.ports.file_storage_port import FileStoragePort
+from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.repositories.files import FileProviderCopyRepository
-from gateway.services.files import StagedFile, _provider_uploads
+from gateway.services.files import FileBackends, StagedFile
 from gateway.services.files._provider_uploads import ProviderCopies
 from gateway.types.provider_account import ProviderAccount, ResolvedCredential
+from gateway.types.provider_file import ProviderCopyReceipt
 
 _STAGED = StagedFile(file_id="file-1", filename="report.csv", mime_type="text/csv", storage_ref="ref-1")
 _WORKSPACE = uuid.uuid4()
@@ -108,7 +109,7 @@ class _Client:
 
     def __init__(
         self,
-        metadata: FileMetadata | None = None,
+        metadata: ProviderCopyReceipt | None = None,
         error: Exception | None = None,
         accept_delay: timedelta | None = None,
     ) -> None:
@@ -120,16 +121,16 @@ class _Client:
         self.closed = False
         self.provider = "anthropic"
 
-    async def upload(self, data: bytes, *, filename: str, mime_type: str, expires_in: int) -> FileMetadata:
+    async def upload(self, data: bytes, *, filename: str, mime_type: str, expires_in: int) -> ProviderCopyReceipt:
         self.uploads.append({"data": data, "filename": filename, "mime_type": mime_type, "expires_in": expires_in})
         if self._error is not None:
             raise self._error
         if self._accept_delay is not None:
             accepted = datetime.now(UTC) + self._accept_delay
-            return FileMetadata(id="file_new", expires_at=accepted + timedelta(seconds=expires_in))
+            return ProviderCopyReceipt(file_id="file_new", expires_at=accepted + timedelta(seconds=expires_in))
         if self._metadata is not None:
             return self._metadata
-        return FileMetadata(id=f"file_new_{len(self.uploads)}")
+        return ProviderCopyReceipt(file_id=f"file_new_{len(self.uploads)}")
 
     async def discard(self, provider_file_id: str) -> bool:
         self.discarded.append(provider_file_id)
@@ -161,12 +162,19 @@ def _copies_service(
     config: GatewayConfig | None = None,
 ) -> ProviderCopies:
     ready = client or _Client()
-    monkeypatch.setattr(_provider_uploads, "ProviderFileClient", lambda **_kwargs: ready)
+
+    class _ProviderFiles:
+        def serves(self, provider: LLMProvider) -> bool:
+            return True
+
+        def open_session(self, **_kwargs: object) -> _Client:
+            return ready
+
+    backends = FileBackends(
+        storage=cast(FileStoragePort, store or _Store()), provider_files=cast(ProviderFilePort, _ProviderFiles())
+    )
     return ProviderCopies(
-        cast(UnitOfWork, _Uow()),
-        cast(FileProviderCopyRepository, copies),
-        cast(FileStoragePort, store or _Store()),
-        config or GatewayConfig(),
+        cast(UnitOfWork, _Uow()), cast(FileProviderCopyRepository, copies), backends, config or GatewayConfig()
     )
 
 
@@ -190,7 +198,7 @@ async def test_a_copy_with_time_left_in_the_same_account_is_reused(monkeypatch: 
 async def test_a_copy_in_another_account_is_not_reused(monkeypatch: pytest.MonkeyPatch) -> None:
     """A changed credential names another account, so its copy is made again there."""
     copies = _Copies(_confirmed(datetime.now(UTC) + timedelta(hours=1), identity="a0"))
-    client = _Client(FileMetadata(id="file_new"))
+    client = _Client(ProviderCopyReceipt(file_id="file_new"))
 
     ids = await _file_ids(_copies_service(monkeypatch, copies=copies, client=client))
 
@@ -201,7 +209,7 @@ async def test_a_copy_in_another_account_is_not_reused(monkeypatch: pytest.Monke
 @pytest.mark.asyncio
 async def test_a_copy_about_to_expire_is_replaced(monkeypatch: pytest.MonkeyPatch) -> None:
     copies = _Copies(_confirmed(datetime.now(UTC) + timedelta(minutes=1)))
-    client = _Client(FileMetadata(id="file_new"))
+    client = _Client(ProviderCopyReceipt(file_id="file_new"))
 
     ids = await _file_ids(_copies_service(monkeypatch, copies=copies, client=client))
 
@@ -211,7 +219,7 @@ async def test_a_copy_about_to_expire_is_replaced(monkeypatch: pytest.MonkeyPatc
 @pytest.mark.asyncio
 async def test_a_copy_is_reserved_before_it_is_uploaded_and_confirmed_after(monkeypatch: pytest.MonkeyPatch) -> None:
     copies = _Copies()
-    client = _Client(FileMetadata(id="file_new"))
+    client = _Client(ProviderCopyReceipt(file_id="file_new"))
 
     await _file_ids(_copies_service(monkeypatch, copies=copies, client=client))
 
@@ -236,7 +244,7 @@ async def test_several_files_are_looked_up_at_once(monkeypatch: pytest.MonkeyPat
 
 @pytest.mark.asyncio
 async def test_an_upload_asks_for_the_configured_lifetime(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _Client(FileMetadata(id="file_new"))
+    client = _Client(ProviderCopyReceipt(file_id="file_new"))
     config = GatewayConfig(files_provider_upload_ttl_hours=6)
 
     await _file_ids(_copies_service(monkeypatch, copies=_Copies(), client=client, config=config))
@@ -250,7 +258,7 @@ async def test_the_row_keeps_an_earlier_expiry_the_provider_reported(monkeypatch
     """A provider is free to hold a copy for less time, and the row follows what it said."""
     copies = _Copies()
     reported = datetime.now(UTC) + timedelta(minutes=30)
-    client = _Client(FileMetadata(id="file_new", expires_at=reported))
+    client = _Client(ProviderCopyReceipt(file_id="file_new", expires_at=reported))
 
     await _file_ids(_copies_service(monkeypatch, copies=copies, client=client))
 
@@ -287,7 +295,7 @@ async def test_a_provider_that_will_not_take_the_copy_leaves_no_reservation(monk
 @pytest.mark.asyncio
 async def test_a_reservation_reclaimed_before_it_is_confirmed_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
     copies = _Copies(confirms=False)
-    client = _Client(FileMetadata(id="file_new"))
+    client = _Client(ProviderCopyReceipt(file_id="file_new"))
 
     with pytest.raises(ProviderUploadFailedError):
         await _file_ids(_copies_service(monkeypatch, copies=copies, client=client))
@@ -297,7 +305,7 @@ async def test_a_reservation_reclaimed_before_it_is_confirmed_refuses(monkeypatc
 
 @pytest.mark.asyncio
 async def test_a_copy_never_outlives_the_files_expiry(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _Client(FileMetadata(id="file_new"))
+    client = _Client(ProviderCopyReceipt(file_id="file_new"))
     staged = replace(_STAGED, expires_at=datetime.now(UTC) + timedelta(hours=2))
     config = GatewayConfig(files_provider_upload_ttl_hours=48)
 
@@ -356,7 +364,7 @@ async def test_one_file_expiring_too_soon_leaves_no_copy_of_the_others(monkeypat
 async def test_a_provider_holding_the_copy_too_long_has_it_taken_back(monkeypatch: pytest.MonkeyPatch) -> None:
     """Otari cannot make a provider honor an expiry, so a copy that outlives the file is removed."""
     copies = _Copies()
-    client = _Client(FileMetadata(id="file_new", expires_at=datetime.now(UTC) + timedelta(days=30)))
+    client = _Client(ProviderCopyReceipt(file_id="file_new", expires_at=datetime.now(UTC) + timedelta(days=30)))
     staged = replace(_STAGED, expires_at=datetime.now(UTC) + timedelta(hours=2))
 
     with pytest.raises(ProviderUploadFailedError):

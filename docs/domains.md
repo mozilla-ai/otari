@@ -135,8 +135,8 @@ Routing policies, their compiled plans and the router backends.
 Uploaded files: the Files API, the `file_objects` table, and a file's
 lifecycle, including its expiry and the sweep that gives its storage back.
 The bytes sit in a pluggable blob backend. The row holds the metadata and
-the reference to them. The domain owns `ports/file_storage_port.py` and
-`adapters/file_storage_adapter.py`.
+the reference to them. The domain owns `ports/file_storage_port.py`,
+`ports/provider_file_port.py` and their adapters.
 
 `file_provider_copies` is the second table. A provider-native feature reads an
 attached file only under an ID that provider issued, so a copy is put there with

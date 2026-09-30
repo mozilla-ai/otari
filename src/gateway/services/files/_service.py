@@ -21,6 +21,7 @@ from gateway.exceptions.files_exceptions import (
 from gateway.log_config import logger
 from gateway.models.files import FileObject, new_file_id
 from gateway.ports.file_storage_port import FileStoragePort
+from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.repositories.files import FilePageQuery, FileRepositories
 from gateway.services.files._file_ids import file_id_in, page_token
 from gateway.services.files._metadata import expiry_for, guess_mime_type
@@ -132,6 +133,14 @@ class FileContent:
 
 
 @dataclass(frozen=True)
+class FileBackends:
+    """Where the files domain keeps bytes, and how it reaches the files a provider holds."""
+
+    storage: FileStoragePort
+    provider_files: ProviderFilePort
+
+
+@dataclass(frozen=True)
 class SweepBatch:
     """One cleanup batch and the key that resumes scanning after it."""
 
@@ -158,17 +167,17 @@ class FileService:
         self,
         uow: UnitOfWork,
         repositories: FileRepositories,
-        file_store: FileStoragePort,
+        backends: FileBackends,
         config: GatewayConfig,
         default_workspace: DefaultWorkspace,
     ) -> None:
         self._uow = uow
         self._files = repositories.files
         self._copies = repositories.provider_copies
-        self._file_store = file_store
+        self._file_store = backends.storage
         self._config = config
         self._default_workspace = default_workspace
-        self._provider_copies = ProviderCopies(uow, repositories.provider_copies, file_store, config)
+        self._provider_copies = ProviderCopies(uow, repositories.provider_copies, backends, config)
 
     async def store(self, upload: NewFile) -> FileObject:
         """Store an upload's bytes and record the file, and return the row.

@@ -30,13 +30,14 @@ from gateway.exceptions.files_exceptions import (
 )
 from gateway.models.files import FileObject
 from gateway.ports.file_storage_port import FileStoragePort
+from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.repositories.files import (
     FilePageQuery,
     FileProviderCopyRepository,
     FileRepositories,
     FileRepository,
 )
-from gateway.services.files import FileDialect, FileListing, FileScope, FileService, NewFile
+from gateway.services.files import FileBackends, FileDialect, FileListing, FileScope, FileService, NewFile
 
 _WORKSPACE = uuid.uuid4()
 _DEFAULT_WORKSPACE = uuid.uuid4()
@@ -161,7 +162,7 @@ def _service(
     return FileService(
         cast(UnitOfWork, _FakeUnitOfWork()),
         FileRepositories(files=cast(FileRepository, files), provider_copies=cast(FileProviderCopyRepository, None)),
-        cast(FileStoragePort, store),
+        FileBackends(storage=cast(FileStoragePort, store), provider_files=cast(ProviderFilePort, None)),
         GatewayConfig(**config),
         _default_workspace,
     )
@@ -266,7 +267,8 @@ async def test_output_builder_requires_explicit_workspace_for_uploads(
         files=cast(FileRepository, files), provider_copies=cast(FileProviderCopyRepository, None)
     )
     monkeypatch.setattr(FileRepositories, "on", Mock(return_value=repositories))
-    service = build_file_service(cast(UnitOfWork, _FakeUnitOfWork()), cast(FileStoragePort, store), GatewayConfig())
+    backends = FileBackends(storage=cast(FileStoragePort, store), provider_files=cast(ProviderFilePort, None))
+    service = build_file_service(cast(UnitOfWork, _FakeUnitOfWork()), backends, GatewayConfig())
 
     if workspace_id is None:
         with pytest.raises(

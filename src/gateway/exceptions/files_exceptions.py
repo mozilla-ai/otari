@@ -129,3 +129,11 @@ class ProviderUploadFailedError(ProviderAttachmentError):
 
 class ProviderCopyNotRecordedError(Exception):
     """The database refused a provider copy's row, most often because another request recorded one first."""
+
+
+class FileOverBudgetError(Exception):
+    """A file ran past the bytes the reply may still store."""
+
+
+class ProviderFileUnavailableError(Exception):
+    """The provider cannot serve a file now: it refused, the connection failed, or the file names no container."""

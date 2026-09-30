@@ -19,13 +19,14 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
+from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.files_exceptions import FileNotServedError, FileStorageError, UploadTooLargeError
 from gateway.models.files import FileObject
 from gateway.models.users import User as SpendUser
 from gateway.repositories.files import FileRepositories
-from gateway.services.files import FileScope, FileService, NewFile, SweepBatch
+from gateway.services.files import FileBackends, FileScope, FileService, NewFile, SweepBatch
 
 from .tenancy_helpers import create_member, create_organization, create_workspace
 
@@ -91,7 +92,8 @@ def _service(db: AsyncSession, store: _LeakyStore, config: GatewayConfig) -> Fil
     async def no_default_workspace() -> uuid.UUID:
         raise AssertionError("This upload names its own workspace")
 
-    return FileService(uow, FileRepositories.on(uow), store, config, no_default_workspace)
+    backends = FileBackends(storage=store, provider_files=AnyLlmProviderFiles())
+    return FileService(uow, FileRepositories.on(uow), backends, config, no_default_workspace)
 
 
 def _oversized_upload(workspace_id: uuid.UUID) -> NewFile:
