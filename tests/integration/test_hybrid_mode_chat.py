@@ -1889,15 +1889,18 @@ class _FakeMcpSession:
         return CallToolResult(content=[TextContent(type="text", text="tool ran")])
 
 
+@pytest.mark.parametrize("close_error", [None, RuntimeError("the MCP server hung up")], ids=["closes", "close-fails"])
 def test_hybrid_mode_tool_loop_streaming_ends_the_stream_and_reports_usage(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     control_plane_transport: InstallControlPlane,
     mcp_task_group_transport: TaskGroupMcpTransport,
+    close_error: Exception | None,
 ) -> None:
     """A streamed MCP tool loop ends with its usage and ``[DONE]``, and bills every round.
 
     Each round ends as OpenAI streams it: a finish chunk, then a usage chunk with no choices.
+    A pool that fails to close must not change what the caller receives.
     """
     usage_reports: list[dict[str, Any]] = []
 
@@ -1971,6 +1974,7 @@ def test_hybrid_mode_tool_loop_streaming_ends_the_stream_and_reports_usage(
         return _stream()
 
     transport = mcp_task_group_transport
+    transport.close_error = close_error
     control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.services.mcp_client.ClientSession", _FakeMcpSession)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
