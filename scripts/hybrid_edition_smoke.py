@@ -11,11 +11,11 @@ gateway **sends**: a request body the deployed peer would reject merges green.
 
 This is that gate. It boots the packaged CLI as a subprocess with a platform
 token set, so hybrid mode is selected the way a deployment selects it, and
-stands up four standard-library fakes: the control plane, an OpenAI- and
-Anthropic-compatible provider, a streamable-HTTP MCP server, and a search
-service. Every fake records what it was asked, and the assertions are on those
-records as much as on the responses, because the record is the half of the wire
-contract no other test reads.
+stands up five standard-library fakes: the control plane, an OpenAI- and
+Anthropic-compatible provider, a streamable-HTTP MCP server, a search service,
+and a sandbox speaking the code-execution protocol. Every fake records what it
+was asked, and the assertions are on those records as much as on the responses,
+because the record is the half of the wire contract no other test reads.
 
 It walks:
 
@@ -35,9 +35,10 @@ It walks:
 6. MCP through the managed tool loop, inline and by workspace id: the id resolve
    carries the ids, the server sees initialize, tools/list and tools/call, and
    the tool result feeds the model's second turn.
-7. Provider-native code execution is forwarded untouched when no sandbox is
-   configured: Anthropic's dated tool on Messages, OpenAI's ``code_interpreter``
-   on Responses, each answered in its own native result blocks.
+7. Provider-native code execution is forwarded untouched under the default
+   executor, although a sandbox is configured: Anthropic's dated tool on
+   Messages, OpenAI's ``code_interpreter`` on Responses, each answered in its
+   own native result blocks, with no code-execution resolve and no sandbox call.
 
 8. Provider-native web search is forwarded the same way (``web_search_intercept``
    is off by default): Anthropic's ``web_search_20250305`` on Messages, OpenAI's
@@ -952,6 +953,7 @@ class PeerUrls:
     """Where the gateway reaches each peer it depends on."""
 
     platform_base_url: str
+    sandbox_url: str
     search_base_url: str
 
 
@@ -962,9 +964,8 @@ def hybrid_config(
 ) -> dict[str, Any]:
     """The config a hybrid deployment writes: a platform block and no providers.
 
-    No ``database_url``: a hybrid gateway runs no database. No ``sandbox_url``,
-    so a provider-native code-execution declaration is forwarded untouched,
-    which is the path step 7 proves.
+    No ``database_url``: a hybrid gateway runs no database. ``sandbox_url`` names
+    a sandbox outside the control plane, which answers policy only.
     ``web_search_url`` names a service of its own, so a search query carries no Otari credential.
     A ``port`` of ``None`` leaves out ``host`` and ``port``, for a gateway whose
     environment sets its listen address, as the published image does.
@@ -973,6 +974,7 @@ def hybrid_config(
         "platform": {"base_url": peers.platform_base_url, "resolve_timeout_ms": 5000},
         # The gateway appends /search itself.
         "web_search_url": peers.search_base_url,
+        "sandbox_url": peers.sandbox_url,
     }
     if port is not None:
         config["host"] = LOOPBACK
@@ -1215,6 +1217,7 @@ class Fakes:
     provider: MockProvider
     mcp: FakeMcpServer
     search: FakeSearchService
+    sandbox: FakeSandbox
     # Real providers: the mock provider records nothing, and prompts force tools.
     live: LiveProviders | None = None
     # Otari-Attempt-ID of every 200 the caller received: the attempts that were
@@ -1476,6 +1479,8 @@ def run_mcp(base_url: str, fakes: Fakes) -> None:
 
 def run_native_code_execution(base_url: str, fakes: Fakes) -> None:
     """A provider-native code-execution declaration is forwarded and answered natively."""
+    code_resolves = len(fakes.control_plane.recorder.all("code-execution/resolve"))
+    sandbox_calls = len(fakes.sandbox.recorder.all())
     # Anthropic's dated server tool on Messages.
     prompt = "Use the code execution tool to compute 2**10 in Python and report the printed result."
     status, body, headers = _request(
@@ -1530,6 +1535,13 @@ def run_native_code_execution(base_url: str, fakes: Fakes) -> None:
         _check(len(responses) == 1, f"expected one Responses call, got {len(responses)}")
         forwarded = {tool.get("type") for tool in responses[0].body.get("tools") or [] if isinstance(tool, dict)}
         _check("code_interpreter" in forwarded, f"the declaration did not reach OpenAI: {forwarded!r}")
+    # The provider runs these natively, so the gateway has nothing to ask the
+    # control plane and nothing to run.
+    _check(
+        len(fakes.control_plane.recorder.all("code-execution/resolve")) == code_resolves,
+        "a native declaration was resolved",
+    )
+    _check(len(fakes.sandbox.recorder.all()) == sandbox_calls, "a native declaration reached the gateway's sandbox")
     where = "against the real APIs" if fakes.live else "and answered natively"
     log(f"Provider-native code execution was forwarded on Messages and Responses {where}")
 
@@ -1725,12 +1737,21 @@ def main(argv: list[str] | None = None) -> int:
                 serve(MockProvider(bind_host), "mock-provider") as provider,
                 serve(FakeMcpServer(bind_host), "fake-mcp") as mcp,
                 serve(FakeSearchService(bind_host), "fake-search") as search,
+                serve(FakeSandbox(bind_host), "fake-sandbox") as sandbox,
             ):
                 state = ControlPlaneState(provider_base_url=provider.base_url, mcp_url=mcp.mcp_url, live=live)
                 with serve(FakeControlPlane(state, bind_host), "fake-control-plane") as control_plane:
-                    fakes = Fakes(control_plane=control_plane, provider=provider, mcp=mcp, search=search, live=live)
+                    fakes = Fakes(
+                        control_plane=control_plane,
+                        provider=provider,
+                        mcp=mcp,
+                        search=search,
+                        sandbox=sandbox,
+                        live=live,
+                    )
                     peers = PeerUrls(
                         platform_base_url=f"{control_plane.base_url}{PLATFORM_PREFIX}",
+                        sandbox_url=sandbox.base_url,
                         search_base_url=search.base_url,
                     )
                     config = hybrid_config(

@@ -37,7 +37,11 @@ def _load() -> ModuleType:
 
 smoke = _load()
 
-_PEERS = smoke.PeerUrls(platform_base_url="http://cp.test/api/v1", search_base_url="http://search.test")
+_PEERS = smoke.PeerUrls(
+    platform_base_url="http://cp.test/api/v1",
+    sandbox_url="http://sandbox.test",
+    search_base_url="http://search.test",
+)
 
 
 def _call(method: str, url: str, *, headers: dict[str, str] | None = None, body: Any = None) -> tuple[int, Any]:
@@ -91,7 +95,7 @@ def test_config_is_a_hybrid_deployment_and_nothing_else() -> None:
     assert config["platform"]["base_url"] == _PEERS.platform_base_url
     assert "providers" not in config, "local providers are refused in hybrid mode"
     assert "database_url" not in config, "a hybrid gateway runs no database"
-    assert "sandbox_url" not in config, "no sandbox is what makes native code execution pass through"
+    assert config["sandbox_url"] == _PEERS.sandbox_url
     # The gateway appends /search itself.
     assert config["web_search_url"] == _PEERS.search_base_url
 
