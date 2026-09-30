@@ -119,6 +119,8 @@ USER_TOKEN_OK = f"tk_ok_{secrets.token_hex(8)}"
 USER_TOKEN_BROKE = f"tk_broke_{secrets.token_hex(8)}"
 USER_TOKEN_THROTTLED = f"tk_throttled_{secrets.token_hex(8)}"
 USER_TOKEN_UNKNOWN = f"tk_unknown_{secrets.token_hex(8)}"
+USER_TOKEN_CODE_DISABLED = f"tk_code_disabled_{secrets.token_hex(8)}"
+USER_TOKEN_CODE_MALFORMED = f"tk_code_malformed_{secrets.token_hex(8)}"
 
 OPENAI_KEY = f"sk-hybrid-smoke-{secrets.token_hex(8)}"
 ANTHROPIC_KEY = f"sk-ant-hybrid-smoke-{secrets.token_hex(8)}"
@@ -141,6 +143,14 @@ STREAM_FIRST_FRAME_DELAY_SECONDS = 0.05
 
 RETRY_AFTER_SECONDS = "7"
 BROKE_DETAIL = "Wallet is empty"
+CODE_PURPOSE_HINT = "hybrid-smoke-workspace-purpose-hint"
+# Each workspace's code-execution policy. A token missing here is unknown to the control plane.
+CODE_EXECUTION_POLICIES: dict[str, dict[str, Any]] = {
+    USER_TOKEN_OK: {"enabled": True, "default_purpose_hint": CODE_PURPOSE_HINT, "max_iterations": 4},
+    USER_TOKEN_CODE_DISABLED: {"enabled": False},
+    # Not a boolean, so the gateway must fail closed rather than read it as disabled.
+    USER_TOKEN_CODE_MALFORMED: {"enabled": "yes"},
+}
 
 # Read by the script before the environment is scrubbed for the gateway, so a
 # key reaches the gateway only the way a deployment's would: in a resolve answer.
@@ -403,7 +413,8 @@ class _ControlPlaneHandler(_RecordingHandler):
         if user_token == USER_TOKEN_THROTTLED:
             self._respond(429, {"detail": "Too many requests"}, {"Retry-After": RETRY_AFTER_SECONDS})
             return
-        if user_token != USER_TOKEN_OK:
+        code_execution_policy = CODE_EXECUTION_POLICIES.get(user_token or "")
+        if code_execution_policy is None:
             self._respond(401, {"detail": "unknown user token"})
             return
 
@@ -431,6 +442,8 @@ class _ControlPlaneHandler(_RecordingHandler):
                     ]
                 },
             )
+        elif route == "code-execution/resolve":
+            self._respond(200, code_execution_policy)
         else:
             self._respond(404, {"detail": f"fake control plane has no route {route}"})
 

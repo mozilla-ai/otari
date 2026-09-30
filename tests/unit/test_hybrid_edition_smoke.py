@@ -191,6 +191,32 @@ def test_web_access_resolve_authorizes_search_only(control_plane: Any) -> None:
     assert body["authorized_tools"] == ["web_search"]
 
 
+@pytest.mark.parametrize(
+    ("token_name", "enabled"),
+    [
+        ("USER_TOKEN_OK", True),
+        ("USER_TOKEN_CODE_DISABLED", False),
+        ("USER_TOKEN_CODE_MALFORMED", "yes"),
+    ],
+)
+def test_code_execution_resolve_answers_per_workspace(control_plane: Any, token_name: str, enabled: Any) -> None:
+    status, body = _call(
+        "POST",
+        f"{control_plane.base_url}{smoke.PLATFORM_PREFIX}/gateway/code-execution/resolve",
+        headers=_tokens(getattr(smoke, token_name)),
+        body={},
+    )
+    assert status == 200
+    assert body["enabled"] == enabled
+
+
+def test_workspaces_with_a_code_execution_policy_can_still_resolve_a_model(control_plane: Any) -> None:
+    """A refusal leg needs the request to get past the credential resolve first."""
+    for token in (smoke.USER_TOKEN_CODE_DISABLED, smoke.USER_TOKEN_CODE_MALFORMED):
+        status, _ = _call("POST", _resolve_url(control_plane), headers=_tokens(token), body={"model": "m"})
+        assert status == 200
+
+
 def test_the_control_plane_carries_no_search_traffic(control_plane: Any) -> None:
     """A search backend is deployment infrastructure, so the control plane does not serve it."""
     url = f"{control_plane.base_url}{smoke.PLATFORM_PREFIX}/gateway/web-search/search?q=x&format=json"
