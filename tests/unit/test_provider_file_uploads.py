@@ -287,9 +287,12 @@ async def test_a_provider_that_will_not_take_the_copy_leaves_no_reservation(monk
 @pytest.mark.asyncio
 async def test_a_reservation_reclaimed_before_it_is_confirmed_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
     copies = _Copies(confirms=False)
+    client = _Client(FileMetadata(id="file_new"))
 
     with pytest.raises(ProviderUploadFailedError):
-        await _file_ids(_copies_service(monkeypatch, copies=copies, client=_Client(FileMetadata(id="file_new"))))
+        await _file_ids(_copies_service(monkeypatch, copies=copies, client=client))
+
+    assert client.discarded == ["file_new"], "the provider kept a copy nothing names"
 
 
 @pytest.mark.asyncio

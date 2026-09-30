@@ -86,8 +86,8 @@ class FileProviderCopyRepository(BaseRepository[FileProviderCopy, Never, Never])
     async def remove_stale_pending(self, *, pending_before: datetime, limit: int) -> int:
         """Stage the removal of up to ``limit`` copies pending since before ``pending_before``.
 
-        Such a copy never had a provider ID recorded, so there is nothing at the
-        provider this row could still be used to reach.
+        Such a row never had a provider ID recorded, so it cannot name a copy
+        the provider holds.
         """
         stale = (
             select(FileProviderCopy.id)

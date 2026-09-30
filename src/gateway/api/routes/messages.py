@@ -75,6 +75,7 @@ from gateway.api.routes._tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
+from gateway.exceptions.files_exceptions import ProviderUploadFailedError
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
@@ -941,7 +942,11 @@ async def create_message(
         request_fields.pop("container", None)
 
     prepare_kwargs = None
-    if container_inputs and files is not None and ctx.workspace_id is not None:
+    if container_inputs:
+        if files is None or ctx.workspace_id is None:
+            # The blocks still name Otari's files, which no provider account holds.
+            await release_reservation(ctx)
+            raise domain_error(_ADAPTER, ProviderUploadFailedError())
         prepare_kwargs = container_copies_step(
             files=files,
             inputs=container_inputs,

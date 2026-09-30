@@ -269,7 +269,7 @@ def effective_credential(provider: LLMProvider, kwargs: Mapping[str, Any]) -> Re
     """The credential a call made with ``kwargs`` authenticates with.
 
     That is the key the kwargs carry, or else the provider SDK's own environment
-    variable, which is where any-llm looks next.
+    variable, which a call carrying no key authenticates with.
 
     Raises:
         LookupError: neither holds a key.

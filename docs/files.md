@@ -147,10 +147,9 @@ A candidate whose provider cannot hold a copy is passed over, in the policy's
 order, and the request is refused when no candidate can.
 
 Each copy is recorded before it is uploaded and confirmed once the provider
-holds it, so every copy Otari makes is named by a row. Two requests copying one
-file at the same moment each make and record a copy. A copy whose upload was cut
-off before it was confirmed is left for the provider to expire, and the file
-sweep removes its row.
+holds it. Two requests copying one file at the same moment each make and record
+a copy. A copy whose upload or confirmation was cut off is left unnamed for the
+provider to expire, and the file sweep removes its unconfirmed row.
 
 **A copy never outlives the file's expiry.** Where `files_retention_hours` is
 set, the copy's expiry is cut back to whatever the file itself has left, less a

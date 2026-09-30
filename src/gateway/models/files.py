@@ -72,7 +72,9 @@ class FileObject(Base):
     provider: Mapped[str | None] = mapped_column(nullable=True)
     provider_instance: Mapped[str | None] = mapped_column(nullable=True)
     provider_container_id: Mapped[str | None] = mapped_column(nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
+    )
     # Set when the row is reserved and cleared once its bytes land. No read
     # serves a pending row, and the sweep reclaims one once it is stale.
     pending_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

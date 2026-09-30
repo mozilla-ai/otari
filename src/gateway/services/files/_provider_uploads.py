@@ -7,8 +7,9 @@ A provider that answers with a longer expiry than it was asked for has the copy
 taken back, because the rule is about what exists rather than what was asked.
 
 Each copy is reserved as a pending row before it is uploaded, confirmed once
-the provider holds it, and canceled when it does not, so a copy Otari makes is
-always named by a row that deletion can reach.
+the provider holds it, and canceled when it does not.
+A copy whose upload or confirmation is cut off can be left unnamed, and the
+provider expires it on its own.
 """
 
 from __future__ import annotations
@@ -148,8 +149,11 @@ class ProviderCopies:
             logger.warning("Could not confirm the copy of file %s: %s", staged.file_id, exc)
             raise ProviderUploadFailedError from exc
         if not confirmed:
+            removed = await client.discard(provider_file_id)
             logger.warning(
-                "The reservation for the copy of file %s was reclaimed before it was confirmed", staged.file_id
+                "The reservation for the copy of file %s was gone before it was confirmed; %s",
+                staged.file_id,
+                "removed the copy" if removed else "the copy could not be removed",
             )
             raise ProviderUploadFailedError
         return provider_file_id

@@ -459,8 +459,8 @@ async def _normalize_block(
                 # Resolved, but to no stored file, so there is nothing to copy.
                 # Falling back would show the model contents its code cannot open.
                 raise AttachedFileUnavailableError
-            # The block keeps naming the upload. Each candidate is sent the ID of
-            # a copy in its own account, which only dispatch knows.
+            # The block keeps naming the upload, because the account whose copy
+            # it must name is not known until a candidate is chosen.
             stats.hold_for_container(src.staged)
             return {**block, "file_id": src.staged.file_id}
         src.kind = _DOCUMENT
