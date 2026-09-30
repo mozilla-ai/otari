@@ -41,11 +41,11 @@ import time
 import uuid
 from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable, Sequence
-from contextlib import AsyncExitStack
+from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
-from enum import Enum, auto
+from enum import Enum, StrEnum, auto
 from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar, assert_never
 from urllib.parse import ParseResult, urlparse
 
@@ -200,6 +200,7 @@ from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
     ToolBackend,
 )
+from gateway.services.mcp_stateless import failure_class
 from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
 from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.pricing_service import (
@@ -280,6 +281,7 @@ from gateway.types.session_principal import SessionPrincipal
 
 ResultT = TypeVar("ResultT")
 ChunkT = TypeVar("ChunkT")
+BackendT = TypeVar("BackendT")
 _P = ParamSpec("_P")
 
 TOKENS = PrometheusCounter(
@@ -4344,6 +4346,49 @@ async def dispatch_non_stream(
         )
 
 
+class _ToolBackendKind(StrEnum):
+    """The kind of tool backend a streamed request holds open, as its log lines name it."""
+
+    MCP = "MCP"
+    SANDBOX = "sandbox"
+    WEB_RETRIEVAL = "web retrieval"
+
+    @classmethod
+    def of(cls, tool_ctx: ToolContext) -> _ToolBackendKind:
+        if tool_ctx.mcp_server_configs:
+            return cls.MCP
+        return cls.SANDBOX if tool_ctx.use_sandbox else cls.WEB_RETRIEVAL
+
+
+async def _close_tool_backend(closing: Awaitable[object], kind: _ToolBackendKind) -> None:
+    """Await a tool backend's close, logging an ordinary failure rather than raising it.
+
+    A failed close must not replace or cut off what the stream produced, but a cancellation still propagates.
+    """
+    try:
+        await closing
+    except BaseExceptionGroup as group:
+        ordinary, fatal = group.split(Exception)
+        if ordinary is not None:
+            logger.warning("The %s tool backend failed to close: %s", kind, failure_class(ordinary))
+        if fatal is not None:
+            raise fatal from None
+    except Exception as exc:
+        logger.warning("The %s tool backend failed to close: %s", kind, failure_class(exc))
+
+
+@contextlib.asynccontextmanager
+async def _held_tool_backend(
+    backend: AbstractAsyncContextManager[BackendT], kind: _ToolBackendKind
+) -> AsyncIterator[BackendT]:
+    """Enter ``backend`` for the block, and close it through :func:`_close_tool_backend`."""
+    entered = await backend.__aenter__()
+    try:
+        yield entered
+    finally:
+        await _close_tool_backend(backend.__aexit__(None, None, None), kind)
+
+
 async def _lazy_mcp_stream(
     adapter: FormatAdapter[Any, ChunkT],
     kwargs: dict[str, Any],
@@ -4353,7 +4398,7 @@ async def _lazy_mcp_stream(
     # The MCP pool is entered lazily inside the generator: a dial failure
     # surfaces once the client starts pulling events. Sandbox / web_search use
     # the eager-open path below for a pre-200 HTTP error instead.
-    async with MCPClientPool(configs, tally=tool_ctx.tally) as pool:
+    async with _held_tool_backend(MCPClientPool(configs, tally=tool_ctx.tally), _ToolBackendKind.MCP) as pool:
         hinted = adapter.inject_hints(kwargs, pool.purpose_hints(), header=tool_ctx.tools_header)
         async for event in adapter.open_tool_loop_stream(hinted, pool, tool_ctx.max_tool_iterations):
             yield event
@@ -4379,7 +4424,7 @@ async def _eager_backend_stream(
         ):
             yield event
     finally:
-        await backend.__aexit__(None, None, None)
+        await _close_tool_backend(backend.__aexit__(None, None, None), _ToolBackendKind.of(tool_ctx))
 
 
 async def open_stream(
@@ -5093,6 +5138,7 @@ async def run_streaming_with_fallback(
         has_forwarded_tools=bool(tool_ctx.remaining_user_tools),
     )
 
+    # Only tool backends go on this stack, because a failure to close it is logged rather than raised.
     backend_stack = AsyncExitStack()
     pool_for_loop: Any = None
     try:
@@ -5208,7 +5254,7 @@ async def run_streaming_with_fallback(
 
     stream_to_return: AsyncIterator[ChunkT] = stream
     if pool_for_loop is not None:
-        stream_to_return = _stream_with_stack_cleanup(stream, backend_stack)
+        stream_to_return = _stream_with_stack_cleanup(stream, backend_stack, _ToolBackendKind.of(tool_ctx))
 
     return build_streaming_response(
         adapter=adapter,
@@ -5232,12 +5278,13 @@ async def run_streaming_with_fallback(
 async def _stream_with_stack_cleanup(
     stream: AsyncIterator[ChunkT],
     backend_stack: AsyncExitStack,
+    kind: _ToolBackendKind,
 ) -> AsyncIterator[ChunkT]:
     try:
         async for chunk in stream:
             yield chunk
     finally:
-        await backend_stack.aclose()
+        await _close_tool_backend(backend_stack.aclose(), kind)
 
 
 def _sandbox_error(
