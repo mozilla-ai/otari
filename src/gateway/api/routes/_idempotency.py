@@ -118,11 +118,6 @@ class IdempotencyGuard:
         self._claimed: Claimed | None = None
         self._heartbeat: asyncio.Task[None] | None = None
 
-    @property
-    def active(self) -> bool:
-        """Whether this request carries a key this deployment honors."""
-        return self._service is not None and self._key is not None
-
     async def admit(self, *, endpoint: str, user_id: str, api_key_id: str | None) -> Admission | InvalidKey | None:
         """Claim the key for this caller, or say what the request already holding it produced.
 

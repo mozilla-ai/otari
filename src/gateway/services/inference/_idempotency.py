@@ -130,7 +130,7 @@ class KeyReused:
 
 @dataclass(frozen=True)
 class StillInFlight:
-    """The request holding the key did not finish within the wait."""
+    """Another request with this key and body is still running."""
 
 
 @dataclass(frozen=True)
