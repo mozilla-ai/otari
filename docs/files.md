@@ -314,6 +314,9 @@ of uploads that never completed.
 a copy of an attached file may be stored at the provider that runs a request's
 code, and how long that copy lives (see
 [A file the provider's own code execution reads](#a-file-the-providers-own-code-execution-reads)).
+- `OTARI_PROVIDER_ACCOUNT_PEPPER`: the key for the digest that names the provider
+account a copy is in. Required while `files_provider_upload_enabled` is on (see
+[Provider copies](configuration.md#provider-copies)).
 - `file_understanding_enabled`: master switch for content normalization.
 - `vision_strategy` (`describe` | `ocr` | `off`) and `vision_describe_model`:
 how images are handled for text-only models. The describe model may be a local

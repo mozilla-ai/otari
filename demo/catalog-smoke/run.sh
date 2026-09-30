@@ -47,8 +47,12 @@ fi
 if [ ! -f "$STATE/secret-key" ]; then
   (cd "$ROOT" && uv run otari gen-secret-key) > "$STATE/secret-key"
 fi
+if [ ! -f "$STATE/provider-account-pepper" ]; then
+  (cd "$ROOT" && uv run otari gen-provider-account-pepper) > "$STATE/provider-account-pepper"
+fi
 MASTER_KEY="$(cat "$STATE/master-key")"
 export OTARI_SECRET_KEY="$(cat "$STATE/secret-key")"
+export OTARI_PROVIDER_ACCOUNT_PEPPER="$(cat "$STATE/provider-account-pepper")"
 # A stale platform token in the shell would boot this as a hybrid gateway with
 # no management API at all; the smoke is the standalone edition.
 unset OTARI_AI_TOKEN

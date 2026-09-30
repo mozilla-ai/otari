@@ -55,6 +55,11 @@ projects:
               # value, which is a valid Fernet key.
               - key: OTARI_SECRET_KEY
                 generateValue: true
+              # Key naming the provider account a copy of an attached file is in.
+              # Otari refuses to start without it while provider copies are on,
+              # and a second generated value is independent of the one above.
+              - key: OTARI_PROVIDER_ACCOUNT_PEPPER
+                generateValue: true
 
         databases:
           - name: otari-db

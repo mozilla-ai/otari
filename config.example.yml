@@ -61,6 +61,8 @@ providers:
 
 # Provider and search credentials stored through the dashboard require
 # OTARI_SECRET_KEY in the process environment.
+# Provider copies of attached files, on by default, require
+# OTARI_PROVIDER_ACCOUNT_PEPPER: its own random value of at least 32 characters.
 
 # Optional email delivery. public_base_url is also used by passkeys and OAuth.
 # public_base_url: "https://otari.example.com"

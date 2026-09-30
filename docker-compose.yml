@@ -72,6 +72,11 @@ services:
       # the browser); unset is fine when providers live in config.yml. Generate
       # one with `docker run --rm mzdotai/otari:latest otari gen-secret-key`.
       - OTARI_SECRET_KEY=${OTARI_SECRET_KEY:-}
+      # Key that names the provider account a copy of an attached file is in.
+      # Required while provider copies are on, which they are by default, and
+      # it must differ from OTARI_SECRET_KEY. Generate one with
+      # `openssl rand -base64 32`.
+      - OTARI_PROVIDER_ACCOUNT_PEPPER=${OTARI_PROVIDER_ACCOUNT_PEPPER:?set OTARI_PROVIDER_ACCOUNT_PEPPER, for example to the output of openssl rand -base64 32}
       # Local llamafile (open-weight model) endpoint. host.docker.internal
       # routes from Otari container back to a llamafile running on
       # the macOS/Windows host. Override if you run the model elsewhere.

@@ -26,6 +26,7 @@ GIF_OUT="assets/otari-demo.gif"
 # Throwaway Fernet key so provider credentials can be encrypted at rest for the
 # demo. Not a secret: the DB is ephemeral and holds only fake provider keys.
 export OTARI_SECRET_KEY="${OTARI_SECRET_KEY:-wdhWKyd1gwpMjxj9h4EbpW9B6pilzfrNTe0wTnwqPHg=}"
+export OTARI_PROVIDER_ACCOUNT_PEPPER="${OTARI_PROVIDER_ACCOUNT_PEPPER:-demo-provider-account-pepper-not-a-secret}"
 # Playwright ships no native arm64 Linux Chromium, so on arm64 force its Ubuntu
 # 24.04 arm64 build and skip the host-requirements re-check. On x86_64 (or any
 # other arch) leave Playwright's native detection and host checks alone, so the
