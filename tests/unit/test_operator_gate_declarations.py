@@ -30,6 +30,7 @@ from gateway.api.deps import (
     verify_api_key_or_master_key,
     verify_catalog_reader,
     verify_catalog_reader_or_public,
+    verify_forwarded_api_key,
     verify_master_key,
 )
 from gateway.api.routes import (
@@ -38,6 +39,7 @@ from gateway.api.routes import (
     budgets,
     catalog,
     hooks,
+    key_identity,
     keys,
     mail,
     maintenance_mode,
@@ -96,6 +98,7 @@ _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("tools", tools.router, verify_catalog_reader),
     ("usage.ingest", usage.ingest_router, verify_api_key_or_master_key),
     ("hooks", hooks.router, hooks.verify_hook_caller),
+    ("key_identity", key_identity.router, verify_forwarded_api_key),
 ]
 
 
@@ -148,6 +151,7 @@ _ROUTER_LEVEL_GATES: frozenset[Callable[..., Any]] = frozenset(
         verify_api_key_or_master_key,
         verify_catalog_reader,
         verify_catalog_reader_or_public,
+        verify_forwarded_api_key,
         verify_master_key,
     }
 )

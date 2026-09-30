@@ -550,7 +550,7 @@ def _service(async_db: AsyncSession) -> BudgetService:
         uow,
         BudgetRepositories.on(uow),
         OrganizationService(async_db, membership_listener=None),
-        ApiKeyService(ApiKeyRepository(uow)),
+        ApiKeyService(uow, ApiKeyRepository(uow)),
     )
 
 

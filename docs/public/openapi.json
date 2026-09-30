@@ -6610,6 +6610,49 @@
         "title": "JudgeVerdictRequest",
         "type": "object"
       },
+      "KeyIdentity": {
+        "description": "The key a caller presented, who owns it, and the tenancy it belongs to, every id as a string.\n\n`user_id` is null for a key with no owner, which the schema allows although every mint path attaches one.\n`organization_id` is null only for a workspace that resolves to no organization, a state no write path\nproduces; it is reported rather than refused, because the key itself is live.",
+        "properties": {
+          "api_key_id": {
+            "title": "Api Key Id",
+            "type": "string"
+          },
+          "organization_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Organization Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "workspace_id": {
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "api_key_id",
+          "user_id",
+          "workspace_id",
+          "organization_id"
+        ],
+        "title": "KeyIdentity",
+        "type": "object"
+      },
       "KeyInfo": {
         "description": "Response model for key information.",
         "properties": {
@@ -22495,6 +22538,42 @@
         "summary": "Validate Invitation",
         "tags": [
           "invitations"
+        ]
+      }
+    },
+    "/api/v1/key-identity": {
+      "get": {
+        "description": "Validate a workspace API key and return who owns it.\n\nEvery refusal is the same 401: a key that is missing, malformed, unknown,\ninactive, expired or another deployment's, and a key whose owner is\ndeleted or blocked. A 503 means the key was not judged.",
+        "operationId": "key-identity-read_key_identity",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyIdentity"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "The key is not live, or its owner may not use it."
+          },
+          "503": {
+            "description": "The key could not be checked. Retry."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Read Key Identity",
+        "tags": [
+          "key-identity"
         ]
       }
     },

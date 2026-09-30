@@ -433,6 +433,41 @@ async def verify_api_key(
     return await _verify_and_update_api_key(db, token, _api_key_format(request, db))
 
 
+FORWARDED_KEY_REFUSED = "Could not validate credentials."
+
+
+async def verify_forwarded_api_key(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> APIKey:
+    """As :func:`verify_api_key`, with every refusal of the key answered as one 401.
+
+    For a service that received a workspace API key from its own caller and
+    forwards it here to learn whose it is. A caller holding a guess learns
+    nothing from which check failed, and the forwarding service has one answer
+    to map to its own refusal. That includes the 421 for a key another
+    deployment minted: it tells an end caller where to go instead, but the
+    forwarding service serves one deployment and has nowhere to send its caller.
+
+    A 5xx is left alone, because it means retry rather than a bad key. The
+    master key is refused like any unknown key, since it is looked up as one:
+    it is the deployment's credential and names no key to identify. A dashboard
+    session is never read.
+
+    Raises:
+        HTTPException: 401 if the key is missing, malformed, unknown, inactive,
+            expired or another deployment's; 503 if the database is unavailable.
+
+    """
+    try:
+        return await verify_api_key(request, db, config)
+    except HTTPException as refusal:
+        if refusal.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
+            raise
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=FORWARDED_KEY_REFUSED) from refusal
+
+
 async def verify_master_key(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -974,11 +1009,19 @@ def get_budget_service(
         uow,
         BudgetRepositories.on(uow),
         OrganizationService(db, membership_listener=None),
-        ApiKeyService(ApiKeyRepository(uow)),
+        ApiKeyService(uow, ApiKeyRepository(uow)),
     )
 
 
 BudgetServiceDep = Annotated[BudgetService, Depends(get_budget_service)]
+
+
+def get_api_key_service(uow: Annotated[UnitOfWork, Depends(get_unit_of_work)]) -> ApiKeyService:
+    """Build the request's api-keys service on the request's Unit of Work."""
+    return ApiKeyService(uow, ApiKeyRepository(uow))
+
+
+ApiKeyServiceDep = Annotated[ApiKeyService, Depends(get_api_key_service)]
 
 
 def get_organization_guardrail_definition_service(

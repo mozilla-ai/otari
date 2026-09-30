@@ -555,7 +555,7 @@ def _budget_service(db: AsyncSession, organizations: OrganizationService | None 
         uow,
         BudgetRepositories.on(uow),
         organizations or OrganizationService(db, membership_listener=None),
-        ApiKeyService(ApiKeyRepository(uow)),
+        ApiKeyService(uow, ApiKeyRepository(uow)),
     )
 
 

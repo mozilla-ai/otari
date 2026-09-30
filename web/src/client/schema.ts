@@ -1368,6 +1368,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/key-identity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Key Identity
+         * @description Validate a workspace API key and return who owns it.
+         *
+         *     Every refusal is the same 401: a key that is missing, malformed, unknown,
+         *     inactive, expired or another deployment's, and a key whose owner is
+         *     deleted or blocked. A 503 means the key was not judged.
+         */
+        get: operations["key-identity-read_key_identity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/keys": {
         parameters: {
             query?: never;
@@ -8544,6 +8568,24 @@ export interface components {
              * @default
              */
             reasoning: string;
+        };
+        /**
+         * KeyIdentity
+         * @description The key a caller presented, who owns it, and the tenancy it belongs to, every id as a string.
+         *
+         *     `user_id` is null for a key with no owner, which the schema allows although every mint path attaches one.
+         *     `organization_id` is null only for a workspace that resolves to no organization, a state no write path
+         *     produces; it is reported rather than refused, because the key itself is live.
+         */
+        KeyIdentity: {
+            /** Api Key Id */
+            api_key_id: string;
+            /** Organization Id */
+            organization_id: string | null;
+            /** User Id */
+            user_id: string | null;
+            /** Workspace Id */
+            workspace_id: string;
         };
         /**
          * KeyInfo
@@ -15979,6 +16021,40 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    "key-identity-read_key_identity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyIdentity"];
+                };
+            };
+            /** @description The key is not live, or its owner may not use it. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The key could not be checked. Retry. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -298,7 +298,7 @@ async def test_list_in_scopes_matches_what_the_organization_surface_lists(async_
         uow,
         BudgetRepositories.on(uow),
         OrganizationService(async_db, membership_listener=None),
-        ApiKeyService(ApiKeyRepository(uow)),
+        ApiKeyService(uow, ApiKeyRepository(uow)),
     )
     surface = await service.list_organization_ceilings(user=acme_owner)
 

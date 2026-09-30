@@ -47,6 +47,7 @@ keys and management APIs are not used.
 | Other inference APIs | Yes | No | No |
 | `/api/v1/models` | Yes | Yes | No |
 | Management APIs | Yes | Yes | No |
+| `/api/v1/key-identity` | Yes | Yes | No |
 
 Hosted mode is a control plane. Its inference paths return a descriptive `404`
 and, when configured, the data-plane URL to use instead. See [Modes](modes.md).
@@ -183,6 +184,42 @@ safety, and its own execution bounds.
 reverse proxy or service mesh: an `outcome_unknown` response means the tool may
 already have run. See [MCP](mcp.md#caller-orchestrated-mcp) for the request
 shapes, the error and execution-state contract, and the limits.
+
+## Key identity
+
+`GET /api/v1/key-identity` lets another service validate a workspace API key it
+was handed and learn whose it is. A service that accepts Otari keys from its
+own callers (a router or an aggregator running beside Otari, for example)
+forwards the key unchanged, in any of the header forms under
+[Authentication](#authentication), and gets back:
+
+```json
+{
+  "api_key_id": "3f0c...",
+  "user_id": "alice",
+  "workspace_id": "8b1e...",
+  "organization_id": "c42d..."
+}
+```
+
+Every id is a string. `user_id` is `null` for a key with no owner, and
+`organization_id` is the organization that owns the key's workspace.
+
+| Status | Meaning |
+| --- | --- |
+| `200` | The key is live and its owner may use it. |
+| `401` | The key is missing, malformed, unknown, inactive, expired, or minted for another deployment (a `421` on other routes), or its owner is deleted or blocked. Every cause returns the same body, `{"detail": "Could not validate credentials."}`. |
+| `503` | The database was unavailable and the key was not judged. Retry. |
+
+Only a workspace API key is accepted: the master key names no key and is
+refused, and a dashboard session cookie is never read. Responses carry
+`Cache-Control: private, no-store`. The lookup reserves no budget and writes no
+usage row; the only write is the throttled `last_used_at` stamp every key
+verification makes. It has no rate limit of its own, so a service that forwards
+keys from untrusted callers throttles them on its own side.
+
+It is served wherever the key table lives, in standalone and hosted mode. A
+hybrid gateway holds no keys and does not serve it.
 
 ## Keeping generated clients current
 

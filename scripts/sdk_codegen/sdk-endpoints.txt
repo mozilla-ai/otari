@@ -423,3 +423,7 @@ DELETE /api/v1/workspaces/{workspace_id}/mcp-servers/{server_id}              # 
 # token; an application reaches the same search through the otari_web_search
 # tool on a completion request.
 GET /api/v1/web-search/search                                                 # gateway-to-gateway
+# Key identity: a service that was handed a workspace API key by its own caller
+# asks whose it is. An application holding the key already knows, so there is
+# nothing here for an SDK to wrap.
+GET /api/v1/key-identity                                                      # service-to-service
