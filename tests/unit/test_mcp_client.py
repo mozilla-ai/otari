@@ -9,11 +9,13 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
+import anyio
 import httpx
 import pytest
 from mcp.types import CallToolResult, TextContent
 
 from conftest import TaskGroupMcpTransport
+from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
 from gateway.models.mcp import McpServerConfig
 from gateway.services.mcp_client import MCPClientPool, _ConnectedServer
 
@@ -361,3 +363,156 @@ async def test_pool_raises_a_close_failure_to_the_closing_task(transport: TaskGr
 
     with pytest.raises(RuntimeError, match="transport failed to close"):
         await asyncio.create_task(pool.__aexit__(None, None, None))
+
+
+def _capture_warnings(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        "gateway.services.mcp_client.logger.warning",
+        lambda message, *args: warnings.append(message % args),
+    )
+    return warnings
+
+
+@pytest.mark.asyncio
+async def test_pool_close_canceled_by_an_anyio_scope_waits_once_and_passes_the_cancellation_on(
+    transport: TaskGroupMcpTransport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An anyio scope redelivers its cancellation on every loop pass until the task finishes."""
+    pool = MCPClientPool([_TASK_GROUP_CONFIG])
+    await pool.__aenter__()
+    transport.may_close.clear()
+    owner_waits = 0
+    real_wait = asyncio.wait
+
+    async def counting_wait(tasks: Any, *args: Any, **kwargs: Any) -> Any:
+        nonlocal owner_waits
+        if pool._owner in tasks:  # noqa: SLF001
+            owner_waits += 1
+        return await real_wait(tasks, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "wait", counting_wait)
+    observed: list[type[BaseException]] = []
+
+    async def close() -> None:
+        try:
+            await pool.__aexit__(None, None, None)
+        except BaseException as exc:
+            observed.append(type(exc))
+            raise
+
+    async def release_after_many_passes() -> None:
+        for _ in range(50):
+            await asyncio.sleep(0)
+        transport.may_close.set()
+
+    releasing = asyncio.create_task(release_after_many_passes())
+    async with anyio.create_task_group() as task_group:
+        task_group.start_soon(close)
+        await asyncio.sleep(0)
+        task_group.cancel_scope.cancel()
+    await releasing
+
+    assert transport.exited_in == [transport.entered_in]
+    assert owner_waits == 1
+    assert observed == [asyncio.CancelledError]
+
+
+@pytest.mark.asyncio
+async def test_pool_canceled_while_opening_leaves_its_owner_done(transport: TaskGroupMcpTransport) -> None:
+    transport.may_open.clear()
+    pool = MCPClientPool([_TASK_GROUP_CONFIG])
+
+    opening = asyncio.create_task(pool.__aenter__())
+    await asyncio.sleep(0)
+    opening.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await opening
+    assert pool._owner is not None and pool._owner.done()  # noqa: SLF001
+    assert transport.entered_in is None
+
+
+@pytest.mark.asyncio
+async def test_pool_canceled_while_opening_ends_an_owner_that_ignores_the_cancellation(
+    transport: TaskGroupMcpTransport,
+) -> None:
+    transport.may_open.clear()
+    transport.ignore_cancel = True
+    pool = MCPClientPool([_TASK_GROUP_CONFIG])
+
+    opening = asyncio.create_task(pool.__aenter__())
+    await asyncio.sleep(0)
+    opening.cancel()
+    await asyncio.sleep(0)
+    transport.may_open.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(opening, timeout=2)
+    assert pool._owner is not None and pool._owner.done()  # noqa: SLF001
+    assert transport.exited_in == [transport.entered_in]
+
+
+@pytest.mark.asyncio
+async def test_pool_refuses_to_open_twice(transport: TaskGroupMcpTransport) -> None:
+    pool = MCPClientPool([_TASK_GROUP_CONFIG])
+    async with pool:
+        with pytest.raises(RuntimeError, match="only once"):
+            await pool.__aenter__()
+    with pytest.raises(RuntimeError, match="only once"):
+        await pool.__aenter__()
+    assert transport.exited_in == [transport.entered_in]
+
+
+@pytest.mark.asyncio
+async def test_pool_whose_owner_is_canceled_while_opening_raises_an_mcp_error(
+    transport: TaskGroupMcpTransport,
+) -> None:
+    transport.may_open.clear()
+    pool = MCPClientPool([_TASK_GROUP_CONFIG])
+
+    opening = asyncio.create_task(pool.__aenter__())
+    await asyncio.sleep(0)
+    assert pool._owner is not None  # noqa: SLF001
+    pool._owner.cancel()  # noqa: SLF001
+
+    with pytest.raises(McpSessionsInterruptedError):
+        await opening
+
+
+@pytest.mark.asyncio
+async def test_pool_whose_owner_is_canceled_closes_without_passing_the_cancellation_on(
+    transport: TaskGroupMcpTransport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    warnings = _capture_warnings(monkeypatch)
+    pool = MCPClientPool([_TASK_GROUP_CONFIG])
+    await pool.__aenter__()
+    assert pool._owner is not None  # noqa: SLF001
+    pool._owner.cancel()  # noqa: SLF001
+    await asyncio.sleep(0)
+
+    await asyncio.create_task(pool.__aexit__(None, None, None))
+
+    assert warnings == ["MCP sessions were canceled before they closed"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ignore_cancel", [False, True], ids=["owner-honors-cancel", "owner-ignores-cancel"])
+async def test_pool_close_that_hangs_ends_after_the_close_timeout(
+    transport: TaskGroupMcpTransport, monkeypatch: pytest.MonkeyPatch, ignore_cancel: bool
+) -> None:
+    monkeypatch.setattr("gateway.services.mcp_client.CLOSE_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr("gateway.services.mcp_client._CANCEL_GRACE_SECONDS", 0.05)
+    warnings = _capture_warnings(monkeypatch)
+    pool = MCPClientPool([_TASK_GROUP_CONFIG])
+    await pool.__aenter__()
+    transport.may_close.clear()
+    transport.ignore_cancel = ignore_cancel
+
+    await asyncio.wait_for(pool.__aexit__(None, None, None), timeout=2)
+
+    assert warnings == ["MCP sessions did not close within 0.05 seconds"]
+    assert pool._owner is not None  # noqa: SLF001
+    assert pool._owner.done() is not ignore_cancel  # noqa: SLF001
+    transport.may_close.set()
+    await asyncio.wait((pool._owner,))  # noqa: SLF001
