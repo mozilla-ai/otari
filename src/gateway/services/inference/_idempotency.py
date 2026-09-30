@@ -209,9 +209,7 @@ class IdempotencyService:
         # retention does.
         stale_at = record.locked_until if record.state == IdempotencyState.IN_PROGRESS else record.expires_at
         if _as_utc(stale_at) <= now:
-            taken = await self._keys.take_over(
-                request.scope, request.key, previous_token=record.claim_token, values=claim
-            )
+            taken = await self._keys.take_over(record, now=now, values=claim)
             return Claimed(token) if taken else _RETRY
         if record.request_hash != request.request_hash:
             return KeyReused()
@@ -219,9 +217,7 @@ class IdempotencyService:
             replay = _replay(record)
             if replay is not None:
                 return replay
-            taken = await self._keys.take_over(
-                request.scope, request.key, previous_token=record.claim_token, values=claim
-            )
+            taken = await self._keys.take_over(record, now=now, values=claim)
             return Claimed(token) if taken else _RETRY
         return StillInFlight()
 

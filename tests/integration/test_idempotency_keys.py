@@ -12,6 +12,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Generator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -798,3 +799,63 @@ async def test_one_sweep_drains_a_backlog_of_many_batches(async_db: AsyncSession
     deleted = await IdempotencyService(uow, InferenceRepositories.on(uow), test_config).sweep(batch_size=1)
 
     assert deleted == 25
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("original_then", ["completes", "renews"])
+async def test_a_retry_does_not_take_over_a_claim_that_changed_after_it_looked(
+    postgres_url: str, clean_database: None, test_config: GatewayConfig, original_then: str
+) -> None:
+    """A retry saw the claim lapsed, but the original stored its response or renewed before the retry acted."""
+    engine = create_async_engine(_to_async_url(postgres_url))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    request = IdempotentRequest(
+        scope=f"master:{_USER}", key="raced", request_hash="0" * 64, user_id=_USER, api_key_id=None
+    )
+    try:
+        async with sessions() as original_db, sessions() as retry_db:
+            original_db.add(User(user_id=_USER))
+            await original_db.commit()
+            original_uow, retry_uow = UnitOfWork(original_db), UnitOfWork(retry_db)
+            original = IdempotencyService(original_uow, InferenceRepositories.on(original_uow), test_config)
+            retry_repositories = InferenceRepositories.on(retry_uow)
+            retry = IdempotencyService(retry_uow, retry_repositories, test_config)
+            claimed = await original.admit(request)
+            assert isinstance(claimed, Claimed)
+            if original_then == "completes":
+                await original.complete(request, claimed, status_code=200, body='{"ok":true}', headers={})
+            else:
+                assert await original.renew(request, claimed)
+
+            lapsed = datetime.now(UTC) - timedelta(seconds=1)
+            seen_before_the_change = SimpleNamespace(
+                scope=request.scope,
+                idempotency_key=request.key,
+                request_hash=request.request_hash,
+                claim_token=claimed.token,
+                state=IdempotencyState.IN_PROGRESS,
+                locked_until=lapsed,
+                expires_at=lapsed,
+                response_body=None,
+                status_code=None,
+                response_headers=None,
+            )
+            keys = retry_repositories.idempotency
+            read_the_row = keys.find
+            looks: list[str] = []
+
+            async def stale_first(scope: str, idempotency_key: str) -> Any:
+                looks.append(idempotency_key)
+                if len(looks) == 1:
+                    return seen_before_the_change
+                return await read_the_row(scope, idempotency_key)
+
+            with patch.object(keys, "find", side_effect=stale_first):
+                outcome = await retry.admit(request)
+
+        if original_then == "completes":
+            assert outcome == Replay(status_code=200, body='{"ok":true}', headers={})
+        else:
+            assert isinstance(outcome, StillInFlight)
+    finally:
+        await engine.dispose()

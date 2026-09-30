@@ -63,23 +63,24 @@ class IdempotencyRepository(BaseRepository[IdempotencyRecord, Never, Never]):
         )
         return result.scalar_one_or_none()
 
-    async def take_over(self, scope: str, idempotency_key: str, *, previous_token: str, values: dict[str, Any]) -> bool:
-        """Replace the claim ``previous_token`` names, returning whether this caller got it.
+    async def take_over(self, seen: IdempotencyRecord, *, now: datetime, values: dict[str, Any]) -> bool:
+        """Replace the claim this caller saw, returning whether this caller got it.
 
-        One conditional update, so two retries racing for an abandoned or expired
-        key cannot both win.
+        The claim is replaced only while it is still as seen: the same claim, in the same state,
+        and for a running claim, with its lease still lapsed at ``now``.
+        A claim that completed or renewed since it was read is left alone, and so is one another retry took.
         """
+        unchanged = [
+            IdempotencyRecord.scope == seen.scope,
+            IdempotencyRecord.idempotency_key == seen.idempotency_key,
+            IdempotencyRecord.claim_token == seen.claim_token,
+            IdempotencyRecord.state == seen.state,
+        ]
+        if seen.state == IdempotencyState.IN_PROGRESS:
+            unchanged.append(IdempotencyRecord.locked_until <= now)
         result = cast(
             "CursorResult[Any]",
-            await self.db.execute(
-                update(IdempotencyRecord)
-                .where(
-                    IdempotencyRecord.scope == scope,
-                    IdempotencyRecord.idempotency_key == idempotency_key,
-                    IdempotencyRecord.claim_token == previous_token,
-                )
-                .values(**values)
-            ),
+            await self.db.execute(update(IdempotencyRecord).where(*unchanged).values(**values)),
         )
         await self.db.flush()
         return bool(result.rowcount)
