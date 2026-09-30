@@ -858,7 +858,6 @@ def hybrid_config(
     *,
     peers: PeerUrls,
     port: int | None,
-    tavily_key: str | None = None,
 ) -> dict[str, Any]:
     """The config a hybrid deployment writes: a platform block and no providers.
 
@@ -866,7 +865,6 @@ def hybrid_config(
     so a provider-native code-execution declaration is forwarded untouched,
     which is the path step 7 proves.
     ``web_search_url`` names a service of its own, so a search query carries no Otari credential.
-    A live run adds Tavily, which the backend prefers over the URL.
     A ``port`` of ``None`` leaves out ``host`` and ``port``, for a gateway whose
     environment sets its listen address, as the published image does.
     """
@@ -878,12 +876,20 @@ def hybrid_config(
     if port is not None:
         config["host"] = LOOPBACK
         config["port"] = port
-    if tavily_key:
-        config["web_search_provider"] = "tavily"
-        config["web_search_provider_api_key"] = tavily_key
-        # Real pages are retrieved through the pinned transport; keep it short.
-        config["web_search_max_results"] = 2
     return config
+
+
+def get_tavily_settings(api_key: str) -> dict[str, Any]:
+    """The settings that send managed search to Tavily.
+
+    The backend prefers a provider over ``web_search_url``, so a config keeps its URL.
+    """
+    return {
+        "web_search_provider": "tavily",
+        "web_search_provider_api_key": api_key,
+        # Real pages are retrieved through the pinned transport; keep it short.
+        "web_search_max_results": 2,
+    }
 
 
 def write_config(path: Path, config: dict[str, Any]) -> None:
@@ -1629,8 +1635,9 @@ def main(argv: list[str] | None = None) -> int:
                     config = hybrid_config(
                         peers=peers,
                         port=None if args.image else port,
-                        tavily_key=live.tavily_key if live else None,
                     )
+                    if live is not None and live.tavily_key:
+                        config.update(get_tavily_settings(live.tavily_key))
                     write_config(config_path, config)
                     # World-readable: the container runs as its own user and has
                     # to read the mount. The file holds this run's fixtures.

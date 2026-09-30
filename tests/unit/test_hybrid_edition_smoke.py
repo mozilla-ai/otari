@@ -395,13 +395,12 @@ def test_live_keys_are_scrubbed_from_the_gateway_environment() -> None:
     assert not any(name in env for name in _LIVE_ENV)
 
 
-def test_live_config_puts_tavily_ahead_of_the_search_url() -> None:
-    config = smoke.hybrid_config(peers=_PEERS, port=8123, tavily_key="tvly-live")
-    assert config["web_search_provider"] == "tavily"
-    assert config["web_search_provider_api_key"] == "tvly-live"
-    assert "web_search_url" in config, "the URL stays; the backend prefers the provider"
-    bare = smoke.hybrid_config(peers=_PEERS, port=8123)
-    assert "web_search_provider" not in bare
+def test_tavily_settings_select_the_provider_and_keep_the_search_url() -> None:
+    settings = smoke.get_tavily_settings("tvly-live")
+    assert settings["web_search_provider"] == "tavily"
+    assert settings["web_search_provider_api_key"] == "tvly-live"
+    assert "web_search_url" not in settings, "the URL stays; the backend prefers the provider"
+    assert "web_search_provider" not in smoke.hybrid_config(peers=_PEERS, port=8123)
 
 
 def test_live_resolve_carries_the_real_key_and_no_api_base() -> None:
