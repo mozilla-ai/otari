@@ -11,7 +11,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, MembershipListenerDep, UnitOfWorkDep, get_db, verify_master_key
 from gateway.api.routes.organizations import Message
 from gateway.core.surface import Surface
 from gateway.models.tenancy import (
@@ -23,7 +23,6 @@ from gateway.models.tenancy import (
     WorkspacesPublic,
     WorkspaceUpdate,
 )
-from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.tenancy import WorkspaceService
 
 # Auth is declared on the router, not left to arrive through `CurrentIdentity`:
@@ -40,9 +39,13 @@ SURFACE = Surface("workspaces")
 WORKSPACE_ROLE_DESCRIPTION = "Role to assign in this workspace."
 
 
-def get_workspace_service(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceService:
+def get_workspace_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
+    membership_listener: MembershipListenerDep,
+) -> WorkspaceService:
     """Build the workspace service on the request's session."""
-    return WorkspaceService(db, membership_listener=WorkspaceBudgetDefaultService(db))
+    return WorkspaceService(db, uow=uow, membership_listener=membership_listener)
 
 
 WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]

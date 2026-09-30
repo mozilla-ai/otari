@@ -113,6 +113,13 @@ class WorkspaceBudgetDefaultRepository(BaseRepository[WorkspaceBudgetDefault, Ne
         )
         return list(result.scalars().all()), count_result.scalar_one()
 
+    async def set_budget(self, policy: WorkspaceBudgetDefault, budget_id: str) -> WorkspaceBudgetDefault:
+        """Point a policy at another budget and return it with its refreshed values."""
+        policy.budget_id = budget_id
+        await self.db.flush()
+        await self.db.refresh(policy)
+        return policy
+
     async def remove(self, policy: WorkspaceBudgetDefault) -> None:
         """Stage the deletion of a policy."""
         await self.db.delete(policy)

@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.budgets import ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
@@ -23,12 +24,12 @@ from gateway.models.tenancy import (
     WorkspaceMember,
 )
 from gateway.repositories.tenancy import UserRepository, WorkspaceMemberRepository
-from gateway.services.budgets import WorkspaceBudgetDefaultService
+from gateway.services.budgets import BudgetMembershipListener
 from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 
-from .tenancy_helpers import create_budget, create_member, create_organization, create_workspace
+from .tenancy_helpers import create_budget, create_member, create_organization, create_workspace, membership_writes
 
 pytestmark = pytest.mark.asyncio
 
@@ -64,10 +65,10 @@ async def _ceilings_for(db: AsyncSession, scope_id: uuid.UUID) -> list[ScopedBud
 
 async def test_member_joined_materializes_the_workspace_defaults(async_db: AsyncSession) -> None:
     case = await _case(async_db, slug="acme-joined")
-    listener = WorkspaceBudgetDefaultService(async_db)
+    writes = membership_writes(async_db)
 
-    await listener.member_joined(case.member)
-    await async_db.flush()
+    async with writes["uow"]:
+        await writes["membership_listener"].member_joined(case.member)
 
     ceilings = await _ceilings_for(async_db, case.member.id)
     assert [ceiling.budget_id for ceiling in ceilings] == [case.default.budget_id]
@@ -75,20 +76,21 @@ async def test_member_joined_materializes_the_workspace_defaults(async_db: Async
 
 async def test_member_removed_deletes_the_member_ceilings(async_db: AsyncSession) -> None:
     case = await _case(async_db, slug="acme-removed")
-    listener = WorkspaceBudgetDefaultService(async_db)
-    await listener.member_joined(case.member)
-    await async_db.flush()
+    writes = membership_writes(async_db)
+    async with writes["uow"]:
+        await writes["membership_listener"].member_joined(case.member)
 
-    await listener.member_removed(case.member)
-    await async_db.flush()
+    async with writes["uow"]:
+        await writes["membership_listener"].member_removed(case.member)
 
     assert await _ceilings_for(async_db, case.member.id) == []
 
 
 async def test_workspace_deleted_deletes_workspace_and_member_ceilings(async_db: AsyncSession) -> None:
     case = await _case(async_db, slug="acme-deleted")
-    listener = WorkspaceBudgetDefaultService(async_db)
-    await listener.member_joined(case.member)
+    writes = membership_writes(async_db)
+    async with writes["uow"]:
+        await writes["membership_listener"].member_joined(case.member)
     async_db.add(
         ScopedBudget(
             scope_type="workspace",
@@ -98,15 +100,15 @@ async def test_workspace_deleted_deletes_workspace_and_member_ceilings(async_db:
     )
     await async_db.flush()
 
-    await listener.workspace_deleted(case.workspace.id, [case.member.id])
-    await async_db.flush()
+    async with writes["uow"]:
+        await writes["membership_listener"].workspace_deleted(case.workspace.id, [case.member.id])
 
     assert (await async_db.execute(select(ScopedBudget))).scalars().all() == []
 
 
-def _as_listener(service: WorkspaceBudgetDefaultService) -> MembershipListener:
-    """Checked by mypy only: the service satisfies the listener contract structurally."""
-    return service
+def _as_listener(listener: BudgetMembershipListener) -> MembershipListener:
+    """Checked by mypy only: the budget listener satisfies the contract structurally."""
+    return listener
 
 
 @dataclass
@@ -140,7 +142,7 @@ async def test_add_member_announces_the_new_member(async_db: AsyncSession) -> No
     workspace = await create_workspace(async_db, organization, name="Engineering", owner=owner)
     listener = RecordingListener()
 
-    added = await WorkspaceService(async_db, membership_listener=listener).add_member(
+    added = await WorkspaceService(async_db, uow=UnitOfWork(async_db), membership_listener=listener).add_member(
         user=owner, workspace_id=workspace.id, user_id=joiner.id
     )
 
@@ -152,7 +154,7 @@ async def test_create_workspace_announces_the_creator(async_db: AsyncSession) ->
     owner = await create_member(async_db, organization, role="owner", full_name="Owner")
     listener = RecordingListener()
 
-    created = await WorkspaceService(async_db, membership_listener=listener).create_workspace(
+    created = await WorkspaceService(async_db, uow=UnitOfWork(async_db), membership_listener=listener).create_workspace(
         user=owner, workspace_create=WorkspaceCreate(name="Engineering")
     )
 
@@ -165,7 +167,7 @@ async def test_remove_member_announces_the_removal_before_the_row_goes(async_db:
     leaver = await create_member(async_db, organization, role="member", full_name="Leaver")
     workspace = await create_workspace(async_db, organization, name="Engineering", owner=owner)
     listener = RecordingListener()
-    service = WorkspaceService(async_db, membership_listener=listener)
+    service = WorkspaceService(async_db, uow=UnitOfWork(async_db), membership_listener=listener)
     added = await service.add_member(user=owner, workspace_id=workspace.id, user_id=leaver.id)
 
     await service.remove_member(user=owner, workspace_id=workspace.id, user_id=leaver.id)
@@ -181,7 +183,9 @@ async def test_delete_workspace_announces_the_workspace_and_its_members(async_db
     doomed_membership = await _membership_id(async_db, doomed.id, owner.id)
     listener = RecordingListener()
 
-    await WorkspaceService(async_db, membership_listener=listener).delete_workspace(user=owner, workspace_id=doomed.id)
+    await WorkspaceService(async_db, uow=UnitOfWork(async_db), membership_listener=listener).delete_workspace(
+        user=owner, workspace_id=doomed.id
+    )
 
     assert listener.deleted == [(doomed.id, [doomed_membership])]
 
@@ -204,7 +208,9 @@ async def test_workspace_assignment_announces_new_and_revived_members_only(async
     await async_db.commit()
     listener = RecordingListener()
 
-    await OrganizationService(async_db, membership_listener=listener).create_active_organization_member_for_user(
+    await OrganizationService(
+        async_db, uow=UnitOfWork(async_db), membership_listener=listener
+    ).create_active_organization_member_for_user(
         user=owner,
         request=ActiveOrganizationMemberCreateRequest(
             email="target@example.test",
@@ -241,7 +247,7 @@ async def test_an_organization_service_without_a_listener_refuses_membership_cha
 async def test_bootstrap_provisioning_announces_the_operator_membership(async_db: AsyncSession) -> None:
     listener = RecordingListener()
 
-    operator = await ensure_bootstrap_identity(async_db, membership_listener=listener)
+    operator = await ensure_bootstrap_identity(async_db, uow=UnitOfWork(async_db), membership_listener=listener)
 
     memberships = (
         (await async_db.execute(select(WorkspaceMember).where(col(WorkspaceMember.user_id) == operator.id)))

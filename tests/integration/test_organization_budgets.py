@@ -61,6 +61,7 @@ from gateway.schemas.budgets import (
 )
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService
+from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.organization_service import OrganizationService
 
 _BUDGETS = f"{API_ROOT}/organizations/me/budgets"
@@ -551,6 +552,7 @@ def _service(async_db: AsyncSession) -> BudgetService:
         BudgetRepositories.on(uow),
         OrganizationService(async_db, membership_listener=None),
         ApiKeyService(ApiKeyRepository(uow)),
+        WorkspaceAccess(async_db, OrganizationService(async_db, membership_listener=None)),
     )
 
 

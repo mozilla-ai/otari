@@ -5,10 +5,15 @@ start from whatever organization, workspace and membership shape it needs
 without first satisfying authorization rules it is not exercising.
 """
 
+from typing import TypedDict
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.budgets import Budget
 from gateway.models.tenancy import Organization, User, Workspace
+from gateway.repositories.api_keys import ApiKeyRepository
+from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -16,6 +21,37 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
+from gateway.services.api_keys import ApiKeyService
+from gateway.services.budgets import BudgetMembershipListener, BudgetService
+from gateway.services.tenancy.authorization import WorkspaceAccess
+from gateway.services.tenancy.membership_listener import MembershipListener
+from gateway.services.tenancy.organization_service import OrganizationService
+
+
+class MembershipWrites(TypedDict):
+    """What a service that changes membership is built with: a Unit of Work and the listener writing through it."""
+
+    uow: UnitOfWork
+    membership_listener: MembershipListener
+
+
+def membership_writes(db: AsyncSession) -> MembershipWrites:
+    """Build a Unit of Work over ``db`` and the budget listener on it, as the request path does."""
+    uow = UnitOfWork(db)
+    return {"uow": uow, "membership_listener": BudgetMembershipListener(BudgetRepositories.on(uow))}
+
+
+def budget_service(db: AsyncSession) -> BudgetService:
+    """Build the budget service over ``db``, as ``get_budget_service`` does."""
+    uow = UnitOfWork(db)
+    organizations = OrganizationService(db, membership_listener=None)
+    return BudgetService(
+        uow,
+        BudgetRepositories.on(uow),
+        organizations,
+        ApiKeyService(ApiKeyRepository(uow)),
+        WorkspaceAccess(db, organizations),
+    )
 
 
 async def create_organization(db: AsyncSession, *, slug: str) -> Organization:

@@ -16,10 +16,11 @@ import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyConflictError, TenancyValidationError
 from gateway.exceptions.organizations_exceptions import (
     InvitationAlreadyPendingError,
@@ -216,9 +217,21 @@ _BULK_INVITE_MAIL_CONCURRENCY = 5
 class OrganizationService:
     """Business logic for the organization surface."""
 
-    def __init__(self, db: AsyncSession, *, membership_listener: MembershipListener | None):
+    def __init__(
+        self,
+        db: AsyncSession,
+        *,
+        membership_listener: MembershipListener | None,
+        uow: UnitOfWork | None = None,
+    ):
+        """Build the service on a session.
+
+        A service that changes workspace membership needs a listener and a Unit of Work over the same session,
+        because the listener writes through that Unit of Work's open block. A read-only service needs neither.
+        """
         self.db = db
         self._membership_listener = membership_listener
+        self._uow = uow
         self.organizations = OrganizationRepository(db)
         self.members = OrganizationMemberRepository(db)
         self.users = UserRepository(db)
@@ -465,49 +478,38 @@ class OrganizationService:
         """
         name = _validated_organization_name(request.name)
         try:
-            organization = await self.organizations.create_organization(
-                name=name,
-                slug=_generated_slug(name),
-                created_by_user_id=user.id,
-            )
-            await self.members.create_membership(
-                organization_id=organization.id,
-                user_id=user.id,
-                role="owner",
-            )
-            workspace = await self.workspace_rows.create_workspace(
-                name=DEFAULT_WORKSPACE_NAME,
-                organization_id=organization.id,
-                created_by_user_id=user.id,
-            )
-            # Through the assignment path rather than a bare
-            # ``WorkspaceMemberRepository.create``, so this is the same
-            # create-member-then-materialize-defaults step every other
-            # ``WorkspaceMember``-creating path takes. A no-op materialization on
-            # a workspace this fresh, exactly as in
-            # ``WorkspaceService.create_workspace``, and called anyway so there
-            # is one such path rather than one plus an exception.
-            await self._apply_workspace_assignments(
-                user_id=user.id,
-                assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="owner")],
-            )
-            await self.db.commit()
+            async with self._require_unit_of_work():
+                organization = await self.organizations.create_organization(
+                    name=name,
+                    slug=_generated_slug(name),
+                    created_by_user_id=user.id,
+                )
+                await self.members.create_membership(
+                    organization_id=organization.id,
+                    user_id=user.id,
+                    role="owner",
+                )
+                workspace = await self.workspace_rows.create_workspace(
+                    name=DEFAULT_WORKSPACE_NAME,
+                    organization_id=organization.id,
+                    created_by_user_id=user.id,
+                )
+                # Through the assignment path rather than a bare
+                # ``WorkspaceMemberRepository.create``, so this is the same
+                # create-member-then-materialize-defaults step every other
+                # ``WorkspaceMember``-creating path takes. A no-op materialization on
+                # a workspace this fresh, exactly as in
+                # ``WorkspaceService.create_workspace``, and called anyway so there
+                # is one such path rather than one plus an exception.
+                await self._apply_workspace_assignments(
+                    user_id=user.id,
+                    assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="owner")],
+                )
         except IntegrityError:
             # The slug's unique index is the only one this unit of work can lose
             # to: the membership and the workspace are the first of their kind in
             # an organization that did not exist a statement ago.
-            await self.db.rollback()
             raise OrganizationSlugUnavailableError from None
-        except SQLAlchemyError:
-            # Not tidiness: SQLAlchemy leaves a session whose flush failed
-            # unusable, so a caller that reuses it gets `PendingRollbackError`
-            # from its next statement instead of the failure that actually
-            # happened. Same reasoning as
-            # ``WorkspaceWebSearchConfigService._commit``. The request path is
-            # covered either way, since ``get_db`` closes the session at
-            # teardown; a service-layer caller (every test here is one) is not.
-            await self.db.rollback()
-            raise
 
         return OrganizationPublic.model_validate(organization)
 
@@ -533,7 +535,9 @@ class OrganizationService:
         service. The caller is mid-unit-of-work: signup hashes a password and
         mints a verification token onto the row this returns, and an account
         committed here without them would be a live, password-less,
-        unverifiable identity if the rest of that call failed.
+        unverifiable identity if the rest of that call failed. The caller runs
+        this inside a block of this service's Unit of Work, which the membership
+        listener writes through.
 
         The slug carries ``_generated_slug``'s random suffix, so two people
         registering under the same name do not collide and the organization can
@@ -787,65 +791,64 @@ class OrganizationService:
 
         target = await self.users.get_by_email(email)
         try:
-            if target is None:
-                target = await self.users.create_local_identity(
-                    full_name=None,
-                    email=email,
-                    active_organization_id=organization.id,
+            async with self._require_unit_of_work():
+                if target is None:
+                    target = await self.users.create_local_identity(
+                        full_name=None,
+                        email=email,
+                        active_organization_id=organization.id,
+                    )
+
+                membership = await self.members.get_by_organization_and_user(organization.id, target.id)
+                if membership is not None and membership.status == "active":
+                    raise OrganizationMemberAlreadyExistsError(email)
+
+                if membership is None:
+                    # The same rule the revive branch gets from
+                    # `_validate_membership_update`: an admin may not mint an owner.
+                    # There is no membership to validate against yet, so the one
+                    # applicable clause is applied directly.
+                    if actor_membership.role != "owner" and request.role == "owner":
+                        raise MembershipUpdateError("Only organization owners can grant the owner role")
+                    membership = await self.members.create_membership(
+                        organization_id=organization.id,
+                        user_id=target.id,
+                        role=request.role,
+                    )
+                else:
+                    # Re-adding someone who was removed: removal suspends the
+                    # membership rather than deleting it, so this revives that row
+                    # and keeps their history attached to it.
+                    #
+                    # Through the same guard PATCH and DELETE use, because this
+                    # branch also writes a role. Without it, adding an address whose
+                    # membership is suspended lets an admin rewrite an owner's role,
+                    # which PATCH refuses; the write is the same, so the rule is.
+                    await self._validate_membership_update(
+                        actor_membership=actor_membership,
+                        target_membership=membership,
+                        update_data={"role": request.role, "status": "active"},
+                        organization_id=organization.id,
+                    )
+                    membership = await self.members.update_membership(
+                        membership,
+                        {"role": request.role, "status": "active"},
+                    )
+
+                # After both branches, not inside either: keyed on the identity's
+                # UUID, so the create path mints and the revive path finds the row it
+                # minted the first time rather than a second one.
+                attribution = await get_or_create_attribution_user(
+                    self.db,
+                    user_id=str(target.id),
+                    alias=email,
                 )
 
-            membership = await self.members.get_by_organization_and_user(organization.id, target.id)
-            if membership is not None and membership.status == "active":
-                raise OrganizationMemberAlreadyExistsError(email)
-
-            if membership is None:
-                # The same rule the revive branch gets from
-                # `_validate_membership_update`: an admin may not mint an owner.
-                # There is no membership to validate against yet, so the one
-                # applicable clause is applied directly.
-                if actor_membership.role != "owner" and request.role == "owner":
-                    raise MembershipUpdateError("Only organization owners can grant the owner role")
-                membership = await self.members.create_membership(
-                    organization_id=organization.id,
-                    user_id=target.id,
-                    role=request.role,
-                )
-            else:
-                # Re-adding someone who was removed: removal suspends the
-                # membership rather than deleting it, so this revives that row
-                # and keeps their history attached to it.
-                #
-                # Through the same guard PATCH and DELETE use, because this
-                # branch also writes a role. Without it, adding an address whose
-                # membership is suspended lets an admin rewrite an owner's role,
-                # which PATCH refuses; the write is the same, so the rule is.
-                await self._validate_membership_update(
-                    actor_membership=actor_membership,
-                    target_membership=membership,
-                    update_data={"role": request.role, "status": "active"},
-                    organization_id=organization.id,
-                )
-                membership = await self.members.update_membership(
-                    membership,
-                    {"role": request.role, "status": "active"},
-                )
-
-            # After both branches, not inside either: keyed on the identity's
-            # UUID, so the create path mints and the revive path finds the row it
-            # minted the first time rather than a second one.
-            attribution = await get_or_create_attribution_user(
-                self.db,
-                user_id=str(target.id),
-                alias=email,
-            )
-
-            await self._apply_workspace_assignments(user_id=target.id, assignments=assignments)
-            await self.db.commit()
+                await self._apply_workspace_assignments(user_id=target.id, assignments=assignments)
         except IntegrityError:
             # Two admins adding the same address at once: the unique index on
             # email, or on (organization, user), decides, and the loser reports
             # the conflict rather than a 500.
-            await self.db.rollback()
             raise OrganizationMemberAlreadyExistsError(email) from None
 
         return ActiveOrganizationMemberCreateResultPublic(
@@ -921,6 +924,12 @@ class OrganizationService:
             raise RuntimeError(msg)
         return self._membership_listener
 
+    def _require_unit_of_work(self) -> UnitOfWork:
+        if self._uow is None:
+            msg = "This organization service cannot change workspace membership"
+            raise RuntimeError(msg)
+        return self._uow
+
     async def _apply_workspace_assignments(
         self,
         *,
@@ -965,7 +974,7 @@ class OrganizationService:
             member.workspace_id: member for member in await members.get_by_workspaces_and_user(wanted, user_id)
         }
         for workspace_id, role in sorted(wanted.items(), key=lambda item: str(item[0])):
-            # Serialized against a concurrent `WorkspaceBudgetDefaultService.create_default`
+            # Serialized against a concurrent `BudgetService.create_member_policy`
             # on this workspace; see `WorkspaceService.add_member`'s identical lock
             # for why.
             await workspaces.lock(workspace_id)
@@ -1397,29 +1406,29 @@ class OrganizationService:
         Callers resolve the invitation and take the organization's lock first;
         this only writes.
         """
-        membership = await self.members.update_membership(membership, {"status": "active"})
-        assignments = [
-            WorkspaceAssignmentRequest.model_validate(assignment) for assignment in invitation.workspace_assignments
-        ]
-        # Re-checked rather than trusted: these ids were validated against the
-        # organization at invite time, but acceptance can arrive up to
-        # invitation_expiry_hours later (seven days by default), and a
-        # workspace named in them may have been deleted since. Dropped rather
-        # than refused: see _drop_vanished_workspace_assignments for why a
-        # 404 here would be both wrong (it would leak a workspace id to an
-        # unauthenticated caller) and worse than useless (it would leave the
-        # invitation permanently stuck pending).
-        assignments = await self._drop_vanished_workspace_assignments(organization, assignments)
-        await self._apply_workspace_assignments(user_id=membership.user_id, assignments=assignments)
-        # Same as the immediate-add path: keyed on the identity's UUID, so an
-        # address invited and later re-invited (revoke, then re-add) finds the
-        # row it minted the first time rather than a second one. Without this,
-        # an accepted invitee's roster row would carry no attribution_user_id
-        # and could never be offered as a key owner, unlike a member added
-        # directly through POST /me/members.
-        await get_or_create_attribution_user(self.db, user_id=str(membership.user_id), alias=invitation.email)
-        await self.invitations.update_status(invitation, {"status": "accepted"})
-        await self.db.commit()
+        async with self._require_unit_of_work():
+            membership = await self.members.update_membership(membership, {"status": "active"})
+            assignments = [
+                WorkspaceAssignmentRequest.model_validate(assignment) for assignment in invitation.workspace_assignments
+            ]
+            # Re-checked rather than trusted: these ids were validated against the
+            # organization at invite time, but acceptance can arrive up to
+            # invitation_expiry_hours later (seven days by default), and a
+            # workspace named in them may have been deleted since. Dropped rather
+            # than refused: see _drop_vanished_workspace_assignments for why a
+            # 404 here would be both wrong (it would leak a workspace id to an
+            # unauthenticated caller) and worse than useless (it would leave the
+            # invitation permanently stuck pending).
+            assignments = await self._drop_vanished_workspace_assignments(organization, assignments)
+            await self._apply_workspace_assignments(user_id=membership.user_id, assignments=assignments)
+            # Same as the immediate-add path: keyed on the identity's UUID, so an
+            # address invited and later re-invited (revoke, then re-add) finds the
+            # row it minted the first time rather than a second one. Without this,
+            # an accepted invitee's roster row would carry no attribution_user_id
+            # and could never be offered as a key owner, unlike a member added
+            # directly through POST /me/members.
+            await get_or_create_attribution_user(self.db, user_id=str(membership.user_id), alias=invitation.email)
+            await self.invitations.update_status(invitation, {"status": "accepted"})
 
         return AcceptInvitationResultPublic(organization_name=organization.name, role=membership.role)
 

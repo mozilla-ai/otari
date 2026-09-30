@@ -18,20 +18,23 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_db
+from gateway.api.deps import MembershipListenerDep, UnitOfWorkDep, get_db
 from gateway.models.tenancy import (
     AcceptInvitationRequest,
     AcceptInvitationResultPublic,
     InvitationPreviewPublic,
     ValidateInvitationRequest,
 )
-from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.tenancy import OrganizationService
 
 router = APIRouter(prefix="/invitations", tags=["invitations"])
 
 
-def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganizationService:
+def get_organization_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
+    membership_listener: MembershipListenerDep,
+) -> OrganizationService:
     """Build the organization service on the request's session.
 
     A separate copy of the same tiny factory `organizations.py` declares: the
@@ -39,7 +42,7 @@ def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Or
     public, one is master-key gated), and importing the dependency alone
     across that boundary is not worth it for one function.
     """
-    return OrganizationService(db, membership_listener=WorkspaceBudgetDefaultService(db))
+    return OrganizationService(db, membership_listener=membership_listener, uow=uow)
 
 
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
