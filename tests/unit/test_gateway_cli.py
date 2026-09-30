@@ -183,3 +183,13 @@ def test_gen_secret_key_prints_a_usable_fernet_key() -> None:
     # Round-trips through Fernet, so it is a valid key the secret box can use.
     box = Fernet(key.encode())
     assert box.decrypt(box.encrypt(b"x")) == b"x"
+
+
+def test_gen_provider_account_pepper_prints_a_pepper_the_gateway_accepts() -> None:
+    first = CliRunner().invoke(gateway_cli.cli, ["gen-provider-account-pepper"])
+    second = CliRunner().invoke(gateway_cli.cli, ["gen-provider-account-pepper"])
+
+    assert first.exit_code == 0
+    pepper = first.output.strip()
+    assert GatewayConfig(provider_account_pepper=pepper).provider_account_pepper == pepper
+    assert pepper != second.output.strip()
