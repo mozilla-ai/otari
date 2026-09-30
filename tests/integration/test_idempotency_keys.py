@@ -322,6 +322,21 @@ def test_an_unknown_user_is_refused_before_the_key_is_claimed(
         assert db.execute(select(func.count()).select_from(IdempotencyRecord)).scalar_one() == 0
 
 
+def test_a_deleted_user_is_not_given_the_stored_response(
+    client: TestClient, master_key_header: dict[str, str], user: None
+) -> None:
+    provider = AsyncMock(return_value=_completion())
+    headers = _keyed(master_key_header, "deleted-later")
+    assert _post_chat(client, headers, provider).status_code == 200
+
+    deleted = client.delete(f"{API_ROOT}/users/{_USER}", headers=master_key_header)
+    assert deleted.status_code in (200, 204), deleted.text
+    retried = _post_chat(client, headers, provider)
+
+    assert retried.status_code == 404, retried.text
+    assert IDEMPOTENT_REPLAYED_HEADER not in retried.headers
+
+
 def test_a_malformed_key_is_refused_before_the_user_is_looked_up(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:

@@ -15,7 +15,6 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.inference import IdempotencyRecord, IdempotencyState
 from gateway.models.users import User
 from gateway.repositories.base_repository import BaseRepository
-from gateway.repositories.users_repository import get_active_user
 
 
 class IdempotencyRepository(BaseRepository[IdempotencyRecord, Never, Never]):
@@ -35,8 +34,9 @@ class IdempotencyRepository(BaseRepository[IdempotencyRecord, Never, Never]):
         return cast("datetime", (await self.db.execute(select(func.clock_timestamp()))).scalar_one())
 
     async def get_caller(self, user_id: str) -> User | None:
-        """Return the user a key is claimed for, or None when no such user exists."""
-        return await get_active_user(self.db, user_id)
+        """Return the user a key is claimed for, or None when no such user exists or it was deleted."""
+        result = await self.db.execute(select(User).where(User.user_id == user_id, User.deleted_at.is_(None)))
+        return result.scalar_one_or_none()
 
     async def insert_claim(self, values: dict[str, Any]) -> bool:
         """Insert a fresh ``in_progress`` claim, returning False when the key is already held.
