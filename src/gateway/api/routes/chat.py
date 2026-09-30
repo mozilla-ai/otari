@@ -18,6 +18,7 @@ from gateway.api.deps import (
     McpServerPortDep,
     ModelProviderPortDep,
     OptionalFileServiceDep,
+    WebSearchPolicyPortDep,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     get_config,
@@ -61,6 +62,7 @@ from gateway.models.tools import CodeExecutor
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.services.files import FileService, StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import (
@@ -403,6 +405,7 @@ async def chat_completions(
     model_provider: ModelProviderPortDep,
     code_execution_port: CodeExecutionPortDep,
     mcp_server_port: McpServerPortDep,
+    web_search_policy_port: WebSearchPolicyPortDep,
     idempotency: IdempotencyGuardDep,
 ) -> ChatCompletion | Response:
     """OpenAI-compatible chat completions endpoint.
@@ -428,6 +431,7 @@ async def chat_completions(
         model_provider=model_provider,
         code_execution_port=code_execution_port,
         mcp_server_port=mcp_server_port,
+        web_search_policy_port=web_search_policy_port,
         idempotency=idempotency,
     )
 
@@ -446,6 +450,7 @@ async def run_chat_completion(
     model_provider: ModelProviderPort,
     code_execution_port: CodeExecutionPort | None,
     mcp_server_port: McpServerPort,
+    web_search_policy_port: WebSearchPolicyPort,
     session_principal: SessionPrincipal | None = None,
     idempotency: IdempotencyGuard | None = None,
 ) -> ChatCompletion | Response:
@@ -554,6 +559,7 @@ async def run_chat_completion(
         web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
         code_execution_port=code_execution_port,
         mcp_server_port=mcp_server_port,
+        web_search_policy_port=web_search_policy_port,
         sandbox_containers=build_sandbox_container_registry(
             config=config,
             uow=ctx.uow,

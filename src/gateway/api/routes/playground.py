@@ -67,6 +67,7 @@ from gateway.api.deps import (
     FileServiceDep,
     McpServerPortDep,
     ModelProviderPortDep,
+    WebSearchPolicyPortDep,
     get_config,
     get_db,
     get_log_writer,
@@ -185,6 +186,7 @@ async def playground_chat_completions(
     model_provider: ModelProviderPortDep,
     code_execution_port: CodeExecutionPortDep,
     mcp_server_port: McpServerPortDep,
+    web_search_policy_port: WebSearchPolicyPortDep,
     key_format: ApiKeyFormatPortDep,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
 ) -> ChatCompletion | Response:
@@ -228,6 +230,7 @@ async def playground_chat_completions(
     return await run_chat_completion(
         code_execution_port=code_execution_port,
         mcp_server_port=mcp_server_port,
+        web_search_policy_port=web_search_policy_port,
         raw_request=raw_request,
         response=response,
         background_tasks=background_tasks,

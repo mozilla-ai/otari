@@ -18,6 +18,7 @@ from gateway.api.deps import (
     McpServerPortDep,
     ModelProviderPortDep,
     OptionalFileServiceDep,
+    WebSearchPolicyPortDep,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     get_config,
@@ -521,6 +522,7 @@ async def create_response(
     model_provider: ModelProviderPortDep,
     code_execution_port: CodeExecutionPortDep,
     mcp_server_port: McpServerPortDep,
+    web_search_policy_port: WebSearchPolicyPortDep,
     idempotency: IdempotencyGuardDep,
 ) -> dict[str, Any] | FastAPIResponse:
     """OpenAI-compatible Responses endpoint.
@@ -664,6 +666,7 @@ async def create_response(
         web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
         code_execution_port=code_execution_port,
         mcp_server_port=mcp_server_port,
+        web_search_policy_port=web_search_policy_port,
         sandbox_containers=build_sandbox_container_registry(
             config=config,
             uow=ctx.uow,

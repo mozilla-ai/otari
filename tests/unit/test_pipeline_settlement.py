@@ -20,7 +20,7 @@ import logging
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
@@ -43,6 +43,7 @@ from sqlalchemy.exc import SQLAlchemyError
 import gateway.api.routes._pipeline as pipeline
 import gateway.streaming as streaming
 from conftest import InstallControlPlane
+from gateway.adapters.web_search_policy_adapter import RemoteWebSearchPolicy
 from gateway.api.routes import chat, messages, responses
 from gateway.api.routes._pipeline import (
     LoggedUsage,
@@ -62,12 +63,14 @@ from gateway.core.config import GatewayConfig
 from gateway.exceptions.tools_exceptions import (
     WebAccessToolNotAuthorizedError,
     WebSearchNotEnabledError,
+    WebSearchPolicyResolutionFailure,
     WorkspaceMcpServerNotFoundError,
 )
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.tools import ResolvedWebSearchConfig
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
+from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.rate_limit import RateLimitInfo
 from gateway.services.budgets import ReservationHandle
 from gateway.services.pricing_service import ResolvedPricing
@@ -130,6 +133,20 @@ class _Servers(McpServerPort):
 
     async def resolve_one(self, scope: McpServerScope, server_id: uuid.UUID) -> ResolvedMcpServer | None:
         return None
+
+
+class _Policy(WebSearchPolicyPort):
+    """A port that answers every resolve with ``policy``, and records each scope it was asked about."""
+
+    def __init__(self, policy: ResolvedWebSearchConfig | None = None) -> None:
+        self._policy = policy
+        self.asked: list[WebSearchPolicyScope] = []
+
+    async def resolve(
+        self, scope: WebSearchPolicyScope, requested_tools: Sequence[str]
+    ) -> ResolvedWebSearchConfig | None:
+        self.asked.append(scope)
+        return self._policy
 
 
 def _answer_web_access(install: InstallControlPlane, answer: Any) -> list[dict[str, Any]]:
@@ -1571,6 +1588,7 @@ async def _call_prepare_gateway_tools(ctx: RequestContext, **overrides: Any) -> 
         "mcp_servers": None,
         "mcp_server_ids": None,
         "mcp_server_port": _Servers(_resolves_to_nothing),
+        "web_search_policy_port": _Policy(),
         "max_tool_iterations": None,
         "tools_header": None,
     }
@@ -1621,8 +1639,7 @@ async def test_tool_misconfiguration_400_releases_reservation(monkeypatch: pytes
 
 
 @pytest.mark.asyncio
-async def test_fetch_only_admission_needs_no_search_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(pipeline, "resolve_workspace_web_search_config", AsyncMock(return_value=None))
+async def test_fetch_only_admission_needs_no_search_backend() -> None:
     db = AsyncMock()
     ctx = _ctx(
         GatewayConfig(require_pricing=False, web_fetch_enabled=True),
@@ -1643,8 +1660,7 @@ async def test_disabled_fetch_releases_reservation_before_workspace_policy_io(
 ) -> None:
     settlement = _Settlement()
     settlement.install(monkeypatch)
-    resolve = AsyncMock(return_value=None)
-    monkeypatch.setattr(pipeline, "resolve_workspace_web_search_config", resolve)
+    policy = _Policy()
     ctx = _ctx(
         GatewayConfig(require_pricing=False),
         db=cast(Any, AsyncMock()),
@@ -1653,12 +1669,12 @@ async def test_disabled_fetch_releases_reservation_before_workspace_policy_io(
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        await _call_prepare_gateway_tools(ctx, tools=[{"type": "otari_web_fetch"}])
+        await _call_prepare_gateway_tools(ctx, tools=[{"type": "otari_web_fetch"}], web_search_policy_port=policy)
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == pipeline.WEB_FETCH_NOT_ENABLED_DETAIL
     assert settlement.refunded == 1
-    resolve.assert_not_awaited()
+    assert policy.asked == []
 
 
 @pytest.mark.asyncio
@@ -1712,10 +1728,8 @@ async def test_invalid_managed_web_declarations_release_reservation(
     ],
 )
 async def test_intercepted_search_declarations_must_be_unique(
-    monkeypatch: pytest.MonkeyPatch,
     tools: list[dict[str, Any]],
 ) -> None:
-    monkeypatch.setattr(pipeline, "resolve_workspace_web_search_config", AsyncMock(return_value=None))
     ctx = _ctx(
         GatewayConfig(
             require_pricing=False,
@@ -1757,14 +1771,7 @@ async def test_invalid_web_declaration_is_rejected_before_policy_io(monkeypatch:
 
 
 @pytest.mark.asyncio
-async def test_combined_standalone_request_domains_narrow_fetch_without_workspace_row(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        pipeline,
-        "resolve_workspace_web_search_config",
-        AsyncMock(return_value=None),
-    )
+async def test_combined_standalone_request_domains_narrow_fetch_without_workspace_row() -> None:
     ctx = _ctx(
         GatewayConfig(
             require_pricing=False,
@@ -1792,7 +1799,7 @@ async def test_combined_standalone_request_domains_narrow_fetch_without_workspac
 
 
 @pytest.mark.asyncio
-async def test_combined_standalone_policy_narrows_fetch_domains(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_combined_standalone_policy_narrows_fetch_domains() -> None:
     workspace = ResolvedWebSearchConfig(
         enabled=True,
         max_results=None,
@@ -1801,11 +1808,6 @@ async def test_combined_standalone_policy_narrows_fetch_domains(monkeypatch: pyt
         blocked_domains=("blocked.example.com",),
         provider_options=None,
         authorized_tools=None,
-    )
-    monkeypatch.setattr(
-        pipeline,
-        "resolve_workspace_web_search_config",
-        AsyncMock(return_value=workspace),
     )
     ctx = _ctx(
         GatewayConfig(
@@ -1823,6 +1825,7 @@ async def test_combined_standalone_policy_narrows_fetch_domains(monkeypatch: pyt
             {"type": "otari_web_search", "allowed_domains": ["docs.example.com"]},
             {"type": "otari_web_fetch"},
         ],
+        web_search_policy_port=_Policy(workspace),
     )
 
     assert [rule.value for rule in tool_ctx.web_fetch_policy.allowed] == ["docs.example.com"]
@@ -1847,14 +1850,18 @@ async def test_hybrid_legacy_policy_preserves_search(
     )
 
     if enabled:
-        tool_ctx = await _call_prepare_gateway_tools(ctx, tools=[{"type": "otari_web_search"}])
+        tool_ctx = await _call_prepare_gateway_tools(
+            ctx, tools=[{"type": "otari_web_search"}], web_search_policy_port=RemoteWebSearchPolicy(ctx.config)
+        )
         assert tool_ctx.use_web_search is True
         assert tool_ctx.use_web_fetch is False
         assert tool_ctx.web_search_tool_entry is not None
         assert tool_ctx.web_search_tool_entry["allowed_domains"] == ["example.com"]
     else:
         with pytest.raises(HTTPException) as exc_info:
-            await _call_prepare_gateway_tools(ctx, tools=[{"type": "otari_web_search"}])
+            await _call_prepare_gateway_tools(
+                ctx, tools=[{"type": "otari_web_search"}], web_search_policy_port=RemoteWebSearchPolicy(ctx.config)
+            )
         assert exc_info.value.status_code == 403
         assert exc_info.value.detail == WebSearchNotEnabledError().message
     assert len(requests) == 1
@@ -1896,7 +1903,7 @@ async def test_hybrid_fetch_requires_explicit_authorization(
         requested_tools.insert(0, "web_search")
 
     with pytest.raises(HTTPException) as exc_info:
-        await _call_prepare_gateway_tools(ctx, tools=tools)
+        await _call_prepare_gateway_tools(ctx, tools=tools, web_search_policy_port=RemoteWebSearchPolicy(ctx.config))
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == WebAccessToolNotAuthorizedError().message
@@ -1924,7 +1931,9 @@ async def test_hybrid_fetch_only_needs_no_search_backend(control_plane_transport
         user_token="tk_user",
     )
 
-    tool_ctx = await _call_prepare_gateway_tools(ctx, tools=[{"type": "otari_web_fetch"}])
+    tool_ctx = await _call_prepare_gateway_tools(
+        ctx, tools=[{"type": "otari_web_fetch"}], web_search_policy_port=RemoteWebSearchPolicy(ctx.config)
+    )
 
     assert tool_ctx.use_web_fetch is True
     assert tool_ctx.use_web_search is False
@@ -1964,10 +1973,12 @@ async def test_hybrid_web_tools_fail_closed_on_malformed_policy(
 
     ctx.config.web_search_url = "https://search.example"
     with pytest.raises(HTTPException) as exc_info:
-        await _call_prepare_gateway_tools(ctx, tools=[{"type": tool_type}])
+        await _call_prepare_gateway_tools(
+            ctx, tools=[{"type": tool_type}], web_search_policy_port=RemoteWebSearchPolicy(ctx.config)
+        )
 
     assert exc_info.value.status_code == 502
-    assert exc_info.value.detail == pipeline.MALFORMED_WEB_ACCESS_POLICY_DETAIL
+    assert exc_info.value.detail == WebSearchPolicyResolutionFailure.ANSWER_UNREADABLE.message
 
 
 @pytest.mark.asyncio

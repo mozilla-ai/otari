@@ -91,6 +91,48 @@ class WebSearchNotEnabledError(WebAccessRefusedError):
         super().__init__("web search is not enabled for this workspace")
 
 
+class WebSearchPolicyResolutionFailure(StrEnum):
+    """Why a workspace's web search policy could not be resolved.
+
+    A member carries the message a caller sees.
+    Its value names the cause, which a caller never sees.
+    """
+
+    def __new__(cls, cause: str, message: str) -> "WebSearchPolicyResolutionFailure":
+        member = str.__new__(cls, cause)
+        member._value_ = cause
+        member.message = message
+        return member
+
+    message: str
+
+    ANSWER_UNREADABLE = (
+        "the answer could not be read",
+        "Authorization service returned a malformed web-access policy",
+    )
+    NO_CALLER_CREDENTIAL = (
+        "the request carried no caller credential",
+        "Web search configuration could not be resolved for this request",
+    )
+    NO_WORKSPACE = (
+        "the request named no workspace",
+        "Web search configuration could not be resolved for this request",
+    )
+    STORED_POLICY_INVALID = (
+        "a stored domain rule is invalid",
+        "Web search configuration contains an invalid domain rule",
+    )
+
+
+class WebSearchPolicyResolutionFailedError(Exception):
+    """A workspace's web search policy could not be resolved."""
+
+    def __init__(self, reason: WebSearchPolicyResolutionFailure) -> None:
+        super().__init__(reason.message)
+        self.message = reason.message
+        self.reason = reason
+
+
 class WorkspaceWebSearchDomainsExcludedError(TenancyForbiddenError):
     """A request's search allow-list shares no domain with its workspace's.
 
@@ -174,6 +216,8 @@ __all__ = [
     "WebAccessRefusedError",
     "WebAccessToolNotAuthorizedError",
     "WebSearchNotEnabledError",
+    "WebSearchPolicyResolutionFailedError",
+    "WebSearchPolicyResolutionFailure",
     "WorkspaceMcpServerAlreadyExistsError",
     "WorkspaceMcpServerLimitReachedError",
     "WorkspaceMcpServerNotFoundError",

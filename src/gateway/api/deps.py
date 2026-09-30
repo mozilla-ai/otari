@@ -29,6 +29,7 @@ from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
+from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.api_keys import ApiKeyRepository
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.files import FileRepositories
@@ -929,6 +930,11 @@ def get_telemetry_storage_port(
     return container.resolve(TelemetryStoragePort, db)
 
 
+def get_web_search_policy_port(db: PortSessionDep, container: ContainerDep) -> WebSearchPolicyPort:
+    """Resolve the web search policy adapter this build bound at startup."""
+    return container.resolve(WebSearchPolicyPort, db)
+
+
 def get_overview_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OverviewService:
     """Build the dashboard overview's summary service on the request's session.
 
@@ -1045,6 +1051,7 @@ def get_org_provider_model_service(
 
 OrgProviderModelServiceDep = Annotated[OrgProviderModelService, Depends(get_org_provider_model_service)]
 TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_storage_port)]
+WebSearchPolicyPortDep = Annotated[WebSearchPolicyPort, Depends(get_web_search_policy_port)]
 
 
 def require_capability(capability: str) -> Callable[[EntitlementPort], Awaitable[None]]:
@@ -1171,6 +1178,7 @@ __all__ = [
     "ModelProviderPortDep",
     "OrgProviderModelServiceDep",
     "TelemetryStoragePortDep",
+    "WebSearchPolicyPortDep",
     "get_config",
     "get_container",
     "get_telemetry_storage_port",
