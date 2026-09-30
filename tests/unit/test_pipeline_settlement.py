@@ -59,7 +59,11 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, SettledCost
 from gateway.core.config import GatewayConfig
-from gateway.exceptions.tools_exceptions import WorkspaceMcpServerNotFoundError
+from gateway.exceptions.tools_exceptions import (
+    WebAccessToolNotAuthorizedError,
+    WebSearchNotEnabledError,
+    WorkspaceMcpServerNotFoundError,
+)
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.tools import ResolvedWebSearchConfig
@@ -1852,7 +1856,7 @@ async def test_hybrid_legacy_policy_preserves_search(
         with pytest.raises(HTTPException) as exc_info:
             await _call_prepare_gateway_tools(ctx, tools=[{"type": "otari_web_search"}])
         assert exc_info.value.status_code == 403
-        assert exc_info.value.detail == pipeline.WEB_SEARCH_NOT_ENABLED_DETAIL
+        assert exc_info.value.detail == WebSearchNotEnabledError().message
     assert len(requests) == 1
     assert requests[0]["url"].endswith("/gateway/web-search/resolve")
     assert requests[0]["headers"]["X-User-Token"] == "tk_user"
@@ -1895,7 +1899,7 @@ async def test_hybrid_fetch_requires_explicit_authorization(
         await _call_prepare_gateway_tools(ctx, tools=tools)
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == pipeline.WEB_ACCESS_TOOL_NOT_AUTHORIZED_DETAIL
+    assert exc_info.value.detail == WebAccessToolNotAuthorizedError().message
     assert [request["body"] for request in requests] == [{"requested_tools": requested_tools}]
 
 

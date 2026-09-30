@@ -4,16 +4,14 @@ The backend is an operator concern and stays one, so nothing here can point a wo
 A workspace's policy decides who on this deployment may search, and how far their searches may reach.
 
 A policy may veto and may narrow, and it never grants.
-The same rule applies to a stored row and to the control plane's answer:
+:func:`narrow_web_search_tool_entry` narrows one Search declaration:
 
-* ``enabled=False`` refuses web access for the workspace.
 * ``max_results`` is floored against what the request would otherwise get,
   which is the request's own value or the deployment's default.
 * ``blocked_domains`` is added to the request's own block-list.
 * ``allowed_domains`` is intersected with the request's by domain suffix,
   and a request whose list overlaps the workspace's nowhere is refused.
 * ``purpose_hint`` fills in only when the request named none.
-* No stored row means no narrowing.
 
 ``provider_options`` is merged per key with the request winning.
 It is an opaque mapping of backend options, so no narrowing relation holds between two values of it.
@@ -21,8 +19,8 @@ It is an opaque mapping of backend options, so no narrowing relation holds betwe
 Reading or writing a stored policy requires an owner or admin of the workspace or of its organization.
 Reads are gated as well as writes, because the row is the workspace's posture and not one member's allowance.
 
-The request path reads a policy with :func:`resolve_workspace_web_search_config` or :func:`read_web_search_policy`.
-It applies the policy with the pure :func:`narrow_web_search_tool_entry`.
+:func:`resolve_workspace_web_search_config` reads a stored row.
+:func:`read_web_search_policy` reads a control plane's answer.
 None of them takes an identity, because the workspace comes from the authenticated key.
 """
 

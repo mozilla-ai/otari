@@ -55,6 +55,42 @@ class WorkspaceMcpServerLimitReachedError(TenancyValidationError):
         super().__init__(f"Workspace {workspace_id} already has the maximum of {limit} MCP servers")
 
 
+class WebAccessRefusedError(Exception):
+    """A workspace's web search policy refuses the web access a request declared."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+class WebAccessDomainsExcludedError(WebAccessRefusedError):
+    """A request's Fetch domains share nothing with its workspace's."""
+
+    def __init__(self) -> None:
+        super().__init__("The request and workspace web-access domain policies do not overlap")
+
+
+class WebAccessNotEnabledError(WebAccessRefusedError):
+    """A workspace with web access turned off refuses a request that declares Fetch."""
+
+    def __init__(self) -> None:
+        super().__init__("web access is not enabled for this workspace")
+
+
+class WebAccessToolNotAuthorizedError(WebAccessRefusedError):
+    """A request declared a web tool its workspace's policy does not authorize."""
+
+    def __init__(self) -> None:
+        super().__init__("A requested managed web tool is not authorized for this workspace")
+
+
+class WebSearchNotEnabledError(WebAccessRefusedError):
+    """A workspace with web access turned off refuses a request that declares Search alone."""
+
+    def __init__(self) -> None:
+        super().__init__("web search is not enabled for this workspace")
+
+
 class WorkspaceWebSearchDomainsExcludedError(TenancyForbiddenError):
     """A request's search allow-list shares no domain with its workspace's.
 
@@ -133,6 +169,11 @@ __all__ = [
     "McpServerResolutionFailedError",
     "SandboxImageNotAllowedError",
     "SandboxToolsUnrunnableError",
+    "WebAccessDomainsExcludedError",
+    "WebAccessNotEnabledError",
+    "WebAccessRefusedError",
+    "WebAccessToolNotAuthorizedError",
+    "WebSearchNotEnabledError",
     "WorkspaceMcpServerAlreadyExistsError",
     "WorkspaceMcpServerLimitReachedError",
     "WorkspaceMcpServerNotFoundError",
