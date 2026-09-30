@@ -1813,6 +1813,35 @@ async def test_combined_standalone_request_domains_narrow_fetch_without_workspac
     assert [rule.value for rule in tool_ctx.web_fetch_policy.blocked] == ["private.docs.example.com"]
 
 
+@pytest.mark.xfail(strict=True, reason="the two refusals carry different details")
+@pytest.mark.asyncio
+async def test_a_disjoint_allow_list_gets_one_refusal_whether_or_not_fetch_is_declared() -> None:
+    workspace = ResolvedWebSearchConfig(
+        enabled=True,
+        max_results=None,
+        purpose_hint=None,
+        allowed_domains=("example.com",),
+        blocked_domains=None,
+        provider_options=None,
+        authorized_tools=None,
+    )
+    ctx = _ctx(
+        GatewayConfig(require_pricing=False, web_fetch_enabled=True, web_search_url="https://search.example"),
+        db=cast(Any, AsyncMock()),
+        workspace_id=uuid.uuid4(),
+    )
+    search = {"type": "otari_web_search", "allowed_domains": ["elsewhere.example"]}
+
+    refusals = []
+    for tools in ([dict(search)], [dict(search), {"type": "otari_web_fetch"}]):
+        with pytest.raises(HTTPException) as exc_info:
+            await _call_prepare_gateway_tools(ctx, tools=tools, web_search_policy_port=_Policy(workspace))
+        refusals.append((exc_info.value.status_code, exc_info.value.detail))
+
+    assert refusals[0] == refusals[1]
+    assert refusals[0][0] == 403
+
+
 @pytest.mark.asyncio
 async def test_combined_standalone_policy_narrows_fetch_domains() -> None:
     workspace = ResolvedWebSearchConfig(
