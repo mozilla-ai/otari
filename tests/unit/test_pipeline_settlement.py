@@ -15,6 +15,7 @@ platform-fallback streaming paths. These tests pin that contract:
 """
 
 import asyncio
+import dataclasses
 import json
 import logging
 import re
@@ -46,6 +47,7 @@ from conftest import InstallControlPlane
 from gateway.adapters.web_search_policy_adapter import RemoteWebSearchPolicy
 from gateway.api.routes import chat, messages, responses
 from gateway.api.routes._pipeline import (
+    DeclaredTools,
     LoggedUsage,
     RequestContext,
     ToolContext,
@@ -1575,22 +1577,29 @@ def _chunk_id(part: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+_DECLARED_FIELDS = frozenset(field.name for field in dataclasses.fields(DeclaredTools))
+
+
 async def _call_prepare_gateway_tools(ctx: RequestContext, **overrides: Any) -> ToolContext:
     from fastapi import Response
 
-    kwargs: dict[str, Any] = {
-        "adapter": chat._ADAPTER,
-        "ctx": ctx,
-        "response": Response(),
+    declared: dict[str, Any] = {
         "guardrails": None,
         "guardrail_text": "",
         "tools": None,
         "mcp_servers": None,
         "mcp_server_ids": None,
-        "mcp_server_port": _Servers(_resolves_to_nothing),
-        "web_search_policy_port": _Policy(),
         "max_tool_iterations": None,
         "tools_header": None,
+    }
+    declared.update({name: overrides.pop(name) for name in list(overrides) if name in _DECLARED_FIELDS})
+    kwargs: dict[str, Any] = {
+        "adapter": chat._ADAPTER,
+        "ctx": ctx,
+        "response": Response(),
+        "declared": DeclaredTools(**declared),
+        "mcp_server_port": _Servers(_resolves_to_nothing),
+        "web_search_policy_port": _Policy(),
     }
     kwargs.update(overrides)
     # Stubbed rather than fed a session: every case here is about a *different*

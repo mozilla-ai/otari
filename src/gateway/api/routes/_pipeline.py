@@ -2878,25 +2878,32 @@ def _policy_failure_status(reason: WebSearchPolicyResolutionFailure) -> int:
             assert_never(reason)
 
 
+@dataclass(frozen=True, kw_only=True)
+class DeclaredTools:
+    """The tools, servers and guardrails one request declared, in terms every wire format shares."""
+
+    code_execution_header: str | None = None
+    container_id: str | None = None
+    guardrail_text: str
+    guardrails: list[GuardrailConfig] | None
+    max_tool_iterations: int | None
+    mcp_server_ids: list[uuid.UUID] | None
+    mcp_servers: list[McpServerConfig] | None
+    tools: list[dict[str, Any]] | None
+    tools_header: str | None
+    web_search_header: str | None = None
+
+
 async def prepare_gateway_tools(
     *,
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
     response: Response,
-    guardrails: list[GuardrailConfig] | None,
-    guardrail_text: str,
-    tools: list[dict[str, Any]] | None,
-    mcp_servers: list[McpServerConfig] | None,
-    mcp_server_ids: list[uuid.UUID] | None,
+    declared: DeclaredTools,
     mcp_server_port: McpServerPort,
     web_search_policy_port: WebSearchPolicyPort,
-    max_tool_iterations: int | None,
-    tools_header: str | None,
-    code_execution_header: str | None = None,
-    web_search_header: str | None = None,
     sandbox_files: SandboxFileBridge | None = None,
     code_execution_port: CodeExecutionPort | None = None,
-    container_id: str | None = None,
     sandbox_containers: SandboxContainerRegistry | None = None,
 ) -> ToolContext:
     """Guardrails, MCP server-id resolution, and gateway-tool extraction.
@@ -2916,12 +2923,13 @@ async def prepare_gateway_tools(
     misconfigured or conflicting tool opt-ins) releases the budget
     reservation taken by :func:`resolve_request_context` before propagating.
     """
+    mcp_servers = declared.mcp_servers
     try:
         try:
-            requested_web_search = parse_web_search_header(web_search_header)
+            requested_web_search = parse_web_search_header(declared.web_search_header)
         except ValueError:
             raise adapter.error(400, WEB_SEARCH_HEADER_INVALID_DETAIL, ErrorKind.INVALID_REQUEST) from None
-        provider_search_entry = first_provider_web_search_tool(tools)
+        provider_search_entry = first_provider_web_search_tool(declared.tools)
         intercept_web_search = _web_search_intercept_enabled(ctx.config)
         backend_configured = ctx.config.web_search_configured()
         if (
@@ -2940,7 +2948,7 @@ async def prepare_gateway_tools(
         )
         _validate_managed_web_declarations(
             adapter,
-            tools,
+            declared.tools,
             intercept_web_search=claim_web_search,
         )
 
@@ -2948,10 +2956,12 @@ async def prepare_gateway_tools(
         # rather than at each route, so every completion endpoint enforces a
         # mandate identically and none can forget to. `guardrails` as passed is
         # the caller's own list.
-        effective = merge_guardrail_layers(ctx, guardrails, await _resolve_organization_guardrails(adapter, ctx))
+        effective = merge_guardrail_layers(
+            ctx, declared.guardrails, await _resolve_organization_guardrails(adapter, ctx)
+        )
         await apply_input_guardrails(
             effective.configs,
-            guardrail_text,
+            declared.guardrail_text,
             response=response,
             config=ctx.config,
             credentials=effective.credentials,
@@ -2974,8 +2984,8 @@ async def prepare_gateway_tools(
                     raise adapter.error(400, duplicate_mcp_server_name_detail(server.name), ErrorKind.INVALID_REQUEST)
                 inline_names.add(server.name)
             await _validate_mcp_server_urls(adapter, mcp_servers)
-        if mcp_server_ids:
-            stored_servers = await _resolve_mcp_server_ids(adapter, ctx, mcp_server_port, mcp_server_ids)
+        if declared.mcp_server_ids:
+            stored_servers = await _resolve_mcp_server_ids(adapter, ctx, mcp_server_port, declared.mcp_server_ids)
             await _validate_mcp_server_urls(
                 adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id
             )
@@ -3004,7 +3014,7 @@ async def prepare_gateway_tools(
         # what runs the code is the port, and a hosted provider has no URL at all.
         sandbox_available = ctx.config.sandbox_configured()
         try:
-            requested_executor = parse_code_execution_header(code_execution_header)
+            requested_executor = parse_code_execution_header(declared.code_execution_header)
         except ValueError:
             raise adapter.error(400, CODE_EXECUTION_HEADER_INVALID_DETAIL, ErrorKind.INVALID_REQUEST) from None
 
@@ -3012,7 +3022,7 @@ async def prepare_gateway_tools(
         # and a provider's own keyword. The first is always the gateway's to run.
         # The second is the executor's decision, taken below once the workspace's
         # policy has had its say, so here it is only found, not claimed.
-        sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(tools)
+        sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(declared.tools)
         provider_code_entry = first_provider_code_execution_tool(tools_after_sandbox)
         if sandbox_tool_entry is not None and not sandbox_available:
             raise adapter.error(400, SANDBOX_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
@@ -3029,7 +3039,7 @@ async def prepare_gateway_tools(
         names_held_sandbox = any(
             (_gateway_container_value(raw) or "").startswith(CONTAINER_ID_PREFIX)
             for raw in (
-                container_id,
+                declared.container_id,
                 (sandbox_tool_entry or {}).get("container"),
                 (provider_code_entry or {}).get("container"),
             )
@@ -3171,7 +3181,7 @@ async def prepare_gateway_tools(
         # to be held; an id asks for that one back.
         sandbox_containers = sandbox_containers if use_sandbox else None
         if use_sandbox:
-            requested_container = _requested_container(container_id) or _requested_container(
+            requested_container = _requested_container(declared.container_id) or _requested_container(
                 (sandbox_tool_entry or {}).get("container")
             )
             if requested_container is None:
@@ -3210,7 +3220,7 @@ async def prepare_gateway_tools(
             # gateway told them to send. Which executor serves a request can
             # change under a client between turns (``auto`` follows the model),
             # so this is reachable without them doing anything differently.
-            stray = _gateway_container_value(container_id) or _gateway_container_value(
+            stray = _gateway_container_value(declared.container_id) or _gateway_container_value(
                 (provider_code_entry or {}).get("container")
             )
             if stray is not None:
@@ -3345,12 +3355,12 @@ async def prepare_gateway_tools(
         web_fetch_policy=web_fetch_policy,
         remaining_user_tools=remaining_user_tools,
         max_tool_iterations=min(
-            max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
+            declared.max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
             MAX_TOOL_ITERATIONS_CAP,
             # The workspace's code-exec max_iterations bounds the loop too (no-op when unset).
             sandbox_max_iterations or MAX_TOOL_ITERATIONS_CAP,
         ),
-        tools_header=tools_header,
+        tools_header=declared.tools_header,
         sandbox_files=sandbox_files,
     )
 
