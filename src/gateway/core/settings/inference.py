@@ -29,14 +29,6 @@ class InferenceSettings(BaseModel):
             "stays blocked after the worker running its request dies, not how long a request may take."
         ),
     )
-    idempotency_wait_sec: Annotated[int, OMITTED] = Field(
-        default=60,
-        ge=0,
-        description=(
-            "How long a retry waits for the in-flight request holding its Idempotency-Key to "
-            "finish before it is answered 409 with Retry-After."
-        ),
-    )
     idempotency_sweep_interval_sec: Annotated[int, OMITTED] = Field(
         default=3600,
         ge=1,

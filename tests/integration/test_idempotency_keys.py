@@ -466,22 +466,16 @@ def _json_bytes(body: dict[str, Any]) -> bytes:
     return json.dumps(body).encode()
 
 
-@pytest.fixture
-def no_wait_client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
-    yield from build_test_client(test_config.model_copy(update={"idempotency_wait_sec": 0}))
-
-
 def test_a_retry_while_the_original_is_in_flight_is_told_to_come_back(
-    no_wait_client: TestClient,
+    client: TestClient,
     master_key_header: dict[str, str],
+    user: None,
     db_session_factory: Callable[[], Session],
 ) -> None:
-    response = no_wait_client.post(f"{API_ROOT}/users", json={"user_id": _USER}, headers=master_key_header)
-    assert response.status_code == 200
     _hold_key(db_session_factory, "in-flight", locked_until=datetime.now(UTC) + timedelta(minutes=10))
     provider = AsyncMock(return_value=_completion())
 
-    response = _post_chat(no_wait_client, _keyed(master_key_header, "in-flight"), provider)
+    response = _post_chat(client, _keyed(master_key_header, "in-flight"), provider)
 
     assert response.status_code == 409, response.text
     assert response.headers["Retry-After"]
@@ -559,10 +553,10 @@ async def test_the_sweep_deletes_only_expired_records(async_db: AsyncSession, te
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("original_succeeds", [True, False])
-async def test_a_retry_waits_for_the_original_request(
+async def test_a_retry_after_the_original_ends_gets_its_outcome(
     postgres_url: str, clean_database: None, test_config: GatewayConfig, original_succeeds: bool
 ) -> None:
-    """The retry joins the in-flight original: its response if it succeeds, the key if it fails."""
+    """A retry during the original is told it is still running; after it, the response or the key."""
     engine = create_async_engine(_to_async_url(postgres_url))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     request = IdempotentRequest(
@@ -578,15 +572,13 @@ async def test_a_retry_waits_for_the_original_request(
 
             claimed = await original.admit(request)
             assert isinstance(claimed, Claimed)
-            waiting = asyncio.create_task(retry.admit(request))
-            await asyncio.sleep(0.5)
-            assert not waiting.done()
+            assert isinstance(await retry.admit(request), StillInFlight)
 
             if original_succeeds:
                 await original.complete(request, claimed, status_code=200, body='{"ok":true}', headers={})
             else:
                 await original.release(request, claimed)
-            outcome = await asyncio.wait_for(waiting, timeout=5)
+            outcome = await retry.admit(request)
 
         if original_succeeds:
             assert outcome == Replay(status_code=200, body='{"ok":true}', headers={})
@@ -658,9 +650,7 @@ async def test_a_running_claim_outlives_its_retention(
     postgres_url: str, clean_database: None, test_config: GatewayConfig
 ) -> None:
     """Only a lapsed lease frees a running claim, so a request slower than the retention is not run twice."""
-    config = test_config.model_copy(
-        update={"idempotency_retention_sec": 1, "idempotency_lease_sec": 60, "idempotency_wait_sec": 0}
-    )
+    config = test_config.model_copy(update={"idempotency_retention_sec": 1, "idempotency_lease_sec": 60})
     engine = create_async_engine(_to_async_url(postgres_url))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     request = IdempotentRequest(
@@ -690,7 +680,6 @@ async def test_a_gateway_whose_clock_runs_ahead_does_not_take_over_a_live_claim(
     postgres_url: str, clean_database: None, test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Leases are timed by the database, so clock skew between gateways cannot free a running claim."""
-    config = test_config.model_copy(update={"idempotency_wait_sec": 0})
     engine = create_async_engine(_to_async_url(postgres_url))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     request = IdempotentRequest(
@@ -701,8 +690,8 @@ async def test_a_gateway_whose_clock_runs_ahead_does_not_take_over_a_live_claim(
             original_db.add(User(user_id=_USER))
             await original_db.commit()
             original_uow, retry_uow = UnitOfWork(original_db), UnitOfWork(retry_db)
-            original = IdempotencyService(original_uow, InferenceRepositories.on(original_uow), config)
-            retry = IdempotencyService(retry_uow, InferenceRepositories.on(retry_uow), config)
+            original = IdempotencyService(original_uow, InferenceRepositories.on(original_uow), test_config)
+            retry = IdempotencyService(retry_uow, InferenceRepositories.on(retry_uow), test_config)
             assert isinstance(await original.admit(request), Claimed)
 
             class _FastClock(datetime):

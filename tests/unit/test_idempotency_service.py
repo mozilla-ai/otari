@@ -1,16 +1,15 @@
 """The idempotency service's decisions that need no database."""
 
 import asyncio
-import itertools
-import random
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from gateway.core.config import GatewayConfig
+from gateway.models.inference import IdempotencyState
 from gateway.services.inference import IdempotencyService, IdempotentRequest, StillInFlight
-from gateway.services.inference._idempotency import _CHANGES_BEFORE_WAITING, _MAX_POLL_SEC, _poll_delays
+from gateway.services.inference._idempotency import _CHANGES_BEFORE_CONFLICT
 from gateway.services.secret_box import generate_secret_key
 
 
@@ -39,16 +38,6 @@ class _NoUnitOfWork:
         return None
 
 
-def test_waiting_retries_back_off_up_to_a_cap_with_jitter() -> None:
-    delays = list(itertools.islice(_poll_delays(random.Random(1)), 12))
-    other = list(itertools.islice(_poll_delays(random.Random(2)), 12))
-
-    assert delays[:5] == sorted(delays[:5])
-    assert delays[-1] > delays[0] * 8
-    assert max(delays) <= _MAX_POLL_SEC
-    assert delays != other
-
-
 @pytest.mark.asyncio
 async def test_a_claim_that_keeps_changing_does_not_spin() -> None:
     """A key that vanishes between the insert and the read every time is looked at a bounded number of times."""
@@ -60,14 +49,14 @@ async def test_a_claim_that_keeps_changing_does_not_spin() -> None:
     service = IdempotencyService(
         _NoUnitOfWork(),  # type: ignore[arg-type]
         MagicMock(idempotency=keys),
-        GatewayConfig(idempotency_wait_sec=0),
+        GatewayConfig(),
     )
     request = IdempotentRequest(scope="master:u", key="k", request_hash="0" * 64, user_id="u", api_key_id=None)
 
     outcome = await asyncio.wait_for(service.admit(request), timeout=2)
 
     assert isinstance(outcome, StillInFlight)
-    assert keys.find.await_count == _CHANGES_BEFORE_WAITING
+    assert keys.find.await_count == _CHANGES_BEFORE_CONFLICT
 
 
 @pytest.mark.asyncio
@@ -81,3 +70,32 @@ async def test_a_sweep_needs_a_positive_batch_size(batch_size: int) -> None:
 
     with pytest.raises(ValueError, match="batch"):
         await asyncio.wait_for(service.sweep(batch_size=batch_size), timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_a_retry_of_a_running_request_is_answered_at_once() -> None:
+    """A retry does not wait for the original, as the IETF Idempotency-Key draft and Stripe's API answer 409."""
+    now = datetime.now(UTC)
+    running = MagicMock(
+        state=IdempotencyState.IN_PROGRESS,
+        request_hash="0" * 64,
+        claim_token="original",
+        locked_until=now + timedelta(minutes=1),
+        expires_at=now + timedelta(days=1),
+    )
+    keys = MagicMock()
+    keys.get_caller = AsyncMock(return_value=MagicMock(blocked=False))
+    keys.get_database_time = AsyncMock(return_value=now)
+    keys.insert_claim = AsyncMock(return_value=False)
+    keys.find = AsyncMock(return_value=running)
+    service = IdempotencyService(
+        _NoUnitOfWork(),  # type: ignore[arg-type]
+        MagicMock(idempotency=keys),
+        GatewayConfig(),
+    )
+    request = IdempotentRequest(scope="master:u", key="k", request_hash="0" * 64, user_id="u", api_key_id=None)
+
+    outcome = await asyncio.wait_for(service.admit(request), timeout=1)
+
+    assert isinstance(outcome, StillInFlight)
+    keys.find.assert_awaited_once()

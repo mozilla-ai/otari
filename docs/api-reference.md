@@ -98,8 +98,8 @@ printable ASCII characters; a UUID is the usual choice. A retry with the same ke
 and the same body then gets the original response, with its original
 `Otari-Request-ID` and `usage.cost_usd`, and an `Otari-Idempotent-Replayed: true`
 header, without calling the provider or billing again. While the original is
-still running the retry waits for it, and if the original fails the retry runs
-in its place.
+still running, a retry is answered 409 with `Retry-After`, and if the original
+fails the next retry runs in its place.
 
 - A key belongs to the API key that sent it (or, for the master key, to the
   billed user), so two callers never see each other's responses.
@@ -110,9 +110,9 @@ in its place.
   or different values for those headers is refused with 422, so send a new key
   for a new request. Key order and whitespace in the JSON body do not count as a
   difference.
-- A retry that waits longer than `idempotency_wait_sec` for the original is
-  answered 409 with `Retry-After`; retry again with the same key. A waiting
-  retry checks on the original less often the longer it waits.
+- A retry that arrives while the original is still running is answered 409
+  with `Retry-After` at once, as the IETF `Idempotency-Key` draft and Stripe's
+  API do. Retry again later with the same key, backing off exponentially.
 - The request holding a key renews its claim while it runs, so a retry does not
   run it a second time however long it takes. If the worker running it dies, its
   key frees up within `idempotency_lease_sec` (a minute by default).

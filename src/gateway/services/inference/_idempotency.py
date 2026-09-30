@@ -3,8 +3,9 @@
 A retry of a request whose response was lost (a dropped connection, a client
 timeout) would otherwise call the provider again and be billed again. The first
 request claims the key before it is dispatched; a retry with the same key and
-body gets the stored response, or waits for the claim holder to finish. Only a
-success is stored: a failed request is refunded, so a retry of it runs again.
+body gets the stored response, or is told the original is still running, as
+the IETF Idempotency-Key draft and Stripe's API do. Only a success is stored: a
+failed request is refunded, so a retry of it runs again.
 
 The stored body is the generated content, so it is encrypted with
 ``OTARI_SECRET_KEY``. A deployment without that key stores nothing, and a body
@@ -13,13 +14,10 @@ that no configured key can decrypt is treated as missing and runs again.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
-import random
-import time
 import uuid
-from collections.abc import Awaitable, Callable, Iterator, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
@@ -38,11 +36,9 @@ from gateway.services.secret_box import (
     secret_box_configured,
 )
 
-_FIRST_POLL_SEC = 0.1
-_MAX_POLL_SEC = 2.0
 # A claim can change between the insert and the read.
-# After this many changes in a row, the retry waits, and the count starts again after the wait.
-_CHANGES_BEFORE_WAITING = 3
+# After this many changes in a row, the retry is answered as still in flight.
+_CHANGES_BEFORE_CONFLICT = 3
 # A response larger than this is not stored, so a retry of it runs again.
 _MAX_STORED_BODY_BYTES = 8 * 1024 * 1024
 
@@ -157,14 +153,6 @@ class _Retry:
 _RETRY = _Retry()
 
 
-def _poll_delays(rng: random.Random) -> Iterator[float]:
-    """Yield the delays between looks at a claim, which double up to a cap and carry jitter so retries spread out."""
-    base = _FIRST_POLL_SEC
-    while True:
-        yield base / 2 + rng.uniform(0, base / 2)
-        base = min(base * 2, _MAX_POLL_SEC)
-
-
 def _as_utc(value: datetime) -> datetime:
     """Read a naive stored timestamp (SQLite) as UTC."""
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
@@ -178,13 +166,10 @@ class IdempotencyService:
         uow: UnitOfWork,
         repositories: InferenceRepositories,
         config: GatewayConfig,
-        *,
-        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self._uow = uow
         self._keys = repositories.idempotency
         self._config = config
-        self._sleep = sleep
 
     @staticmethod
     def is_enabled(config: GatewayConfig) -> bool:
@@ -194,9 +179,7 @@ class IdempotencyService:
     async def admit(self, request: IdempotentRequest) -> Admission:
         """Claim the key, or answer with what the request already holding it produced.
 
-        While another request with the same key and body is in flight this waits
-        for it, for at most ``idempotency_wait_sec``, rather than running the
-        request a second time.
+        While another request with the same key and body is in flight, this answers StillInFlight at once.
         An unknown or blocked user is refused before any key is read or claimed.
         """
         async with self._uow:
@@ -205,25 +188,14 @@ class IdempotencyService:
             return UnknownCaller()
         if caller.blocked:
             return BlockedCaller()
-        deadline = time.monotonic() + self._config.idempotency_wait_sec
-        delays = _poll_delays(random.Random())
-        changes = 0
-        while True:
+        for _ in range(_CHANGES_BEFORE_CONFLICT):
             async with self._uow:
                 outcome = await self._try_admit(request)
-            if isinstance(outcome, _Retry):
-                changes += 1
-                if changes < _CHANGES_BEFORE_WAITING:
-                    continue
-            elif outcome is not None:
+            if not isinstance(outcome, _Retry):
                 return outcome
-            changes = 0
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return StillInFlight()
-            await self._sleep(min(next(delays), remaining))
+        return StillInFlight()
 
-    async def _try_admit(self, request: IdempotentRequest) -> Admission | _Retry | None:
+    async def _try_admit(self, request: IdempotentRequest) -> Admission | _Retry:
         now = await self._keys.get_database_time()
         token = str(uuid.uuid4())
         claim = self._claim_values(request, token, now)
@@ -251,7 +223,7 @@ class IdempotencyService:
                 request.scope, request.key, previous_token=record.claim_token, values=claim
             )
             return Claimed(token) if taken else _RETRY
-        return None
+        return StillInFlight()
 
     def _claim_values(self, request: IdempotentRequest, token: str, now: datetime) -> dict[str, Any]:
         lease = timedelta(seconds=self._config.idempotency_lease_sec)

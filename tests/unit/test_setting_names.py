@@ -67,7 +67,6 @@ _SETTING_NAMES = frozenset(
         "idempotency_lease_sec",
         "idempotency_retention_sec",
         "idempotency_sweep_interval_sec",
-        "idempotency_wait_sec",
         "invitation_expiry_hours",
         "log_writer_strategy",
         "mail_from_email",
