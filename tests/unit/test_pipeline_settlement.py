@@ -25,6 +25,7 @@ from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from any_llm import LLMProvider
 from any_llm.types.completion import (
@@ -41,6 +42,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 import gateway.api.routes._pipeline as pipeline
 import gateway.streaming as streaming
+from conftest import InstallControlPlane
 from gateway.api.routes import chat, messages, responses
 from gateway.api.routes._pipeline import (
     LoggedUsage,
@@ -124,6 +126,20 @@ class _Servers(McpServerPort):
 
     async def resolve_one(self, scope: McpServerScope, server_id: uuid.UUID) -> ResolvedMcpServer | None:
         return None
+
+
+def _answer_web_access(install: InstallControlPlane, answer: Any) -> list[dict[str, Any]]:
+    """Answer every control plane call with ``answer``, and record each request."""
+    requests: list[dict[str, Any]] = []
+
+    async def post(
+        *, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        requests.append({"url": url, "headers": headers, "body": body})
+        return httpx.Response(200, json=answer)
+
+    install(post)
+    return requests
 
 
 def _ctx(
@@ -1810,9 +1826,10 @@ async def test_combined_standalone_policy_narrows_fetch_domains(monkeypatch: pyt
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("enabled", [True, False])
-async def test_hybrid_legacy_policy_preserves_search(monkeypatch: pytest.MonkeyPatch, enabled: bool) -> None:
-    resolve = AsyncMock(return_value={"enabled": enabled, "allowed_domains": ["example.com"]})
-    monkeypatch.setattr(pipeline, "_resolve_platform_web_search", resolve)
+async def test_hybrid_legacy_policy_preserves_search(
+    control_plane_transport: InstallControlPlane, enabled: bool
+) -> None:
+    requests = _answer_web_access(control_plane_transport, {"enabled": enabled, "allowed_domains": ["example.com"]})
     ctx = _ctx(
         GatewayConfig(
             mode="hybrid",
@@ -1835,7 +1852,10 @@ async def test_hybrid_legacy_policy_preserves_search(monkeypatch: pytest.MonkeyP
             await _call_prepare_gateway_tools(ctx, tools=[{"type": "otari_web_search"}])
         assert exc_info.value.status_code == 403
         assert exc_info.value.detail == pipeline.WEB_SEARCH_NOT_ENABLED_DETAIL
-    resolve.assert_awaited_once_with(config=ctx.config, user_token="tk_user", requested_tools=["web_search"])
+    assert len(requests) == 1
+    assert requests[0]["url"].endswith("/gateway/web-search/resolve")
+    assert requests[0]["headers"]["X-User-Token"] == "tk_user"
+    assert requests[0]["body"] == {"requested_tools": ["web_search"]}
 
 
 @pytest.mark.asyncio
@@ -1849,10 +1869,9 @@ async def test_hybrid_legacy_policy_preserves_search(monkeypatch: pytest.MonkeyP
     ],
 )
 async def test_hybrid_fetch_requires_explicit_authorization(
-    monkeypatch: pytest.MonkeyPatch, response: dict[str, Any], combined: bool
+    control_plane_transport: InstallControlPlane, response: dict[str, Any], combined: bool
 ) -> None:
-    resolve = AsyncMock(return_value=response)
-    monkeypatch.setattr(pipeline, "_resolve_platform_web_search", resolve)
+    requests = _answer_web_access(control_plane_transport, response)
     ctx = _ctx(
         GatewayConfig(
             mode="hybrid",
@@ -1876,20 +1895,19 @@ async def test_hybrid_fetch_requires_explicit_authorization(
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == pipeline.WEB_ACCESS_TOOL_NOT_AUTHORIZED_DETAIL
-    assert resolve.await_args is not None
-    assert resolve.await_args.kwargs["requested_tools"] == requested_tools
+    assert [request["body"] for request in requests] == [{"requested_tools": requested_tools}]
 
 
 @pytest.mark.asyncio
-async def test_hybrid_fetch_only_needs_no_search_backend(monkeypatch: pytest.MonkeyPatch) -> None:
-    resolve = AsyncMock(
-        return_value={
+async def test_hybrid_fetch_only_needs_no_search_backend(control_plane_transport: InstallControlPlane) -> None:
+    requests = _answer_web_access(
+        control_plane_transport,
+        {
             "enabled": True,
             "authorized_tools": ["web_fetch"],
             "allowed_domains": ["example.com"],
-        }
+        },
     )
-    monkeypatch.setattr(pipeline, "_resolve_platform_web_search", resolve)
     ctx = _ctx(
         GatewayConfig(
             mode="hybrid",
@@ -1906,7 +1924,7 @@ async def test_hybrid_fetch_only_needs_no_search_backend(monkeypatch: pytest.Mon
     assert tool_ctx.use_web_fetch is True
     assert tool_ctx.use_web_search is False
     assert [rule.value for rule in tool_ctx.web_fetch_policy.allowed] == ["example.com"]
-    resolve.assert_awaited_once()
+    assert len(requests) == 1
 
 
 @pytest.mark.asyncio
@@ -1923,11 +1941,11 @@ async def test_hybrid_fetch_only_needs_no_search_backend(monkeypatch: pytest.Mon
 )
 @pytest.mark.parametrize("tool_type", ["otari_web_search", "otari_web_fetch"])
 async def test_hybrid_web_tools_fail_closed_on_malformed_policy(
-    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
     response: dict[str, Any],
     tool_type: str,
 ) -> None:
-    monkeypatch.setattr(pipeline, "_resolve_platform_web_search", AsyncMock(return_value=response))
+    _answer_web_access(control_plane_transport, response)
     ctx = _ctx(
         GatewayConfig(
             mode="hybrid",
