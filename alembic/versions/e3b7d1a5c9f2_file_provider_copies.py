@@ -28,6 +28,7 @@ _TABLE = "file_provider_copies"
 _ACCOUNT_INDEX = "ix_file_provider_copies_file_account"
 _WORKSPACE_INDEX = "ix_file_provider_copies_credential_workspace_id"
 _PENDING_INDEX = "ix_file_provider_copies_pending_since"
+_EXPIRY_INDEX = "ix_file_provider_copies_expires_at"
 
 
 def upgrade() -> None:
@@ -61,9 +62,17 @@ def upgrade() -> None:
         postgresql_where=sa.text("pending_since IS NOT NULL"),
         sqlite_where=sa.text("pending_since IS NOT NULL"),
     )
+    op.create_index(
+        _EXPIRY_INDEX,
+        _TABLE,
+        ["expires_at"],
+        postgresql_where=sa.text("pending_since IS NULL"),
+        sqlite_where=sa.text("pending_since IS NULL"),
+    )
 
 
 def downgrade() -> None:
+    op.drop_index(_EXPIRY_INDEX, table_name=_TABLE)
     op.drop_index(_PENDING_INDEX, table_name=_TABLE)
     op.drop_index(_WORKSPACE_INDEX, table_name=_TABLE)
     op.drop_index(_ACCOUNT_INDEX, table_name=_TABLE)

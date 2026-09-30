@@ -429,3 +429,35 @@ async def test_the_sweep_removes_only_stale_reservations(
     remaining = db_session.scalars(select(FileProviderCopy.id).where(FileProviderCopy.file_id == stored.id)).all()
     assert removed == 1
     assert remaining == [fresh.id]
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_removes_only_expired_copies(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    db_session: Session,
+    tmp_file_store: None,
+    async_db: AsyncSession,
+) -> None:
+    stored = _stored_file(db_session, client, api_key_header)
+    uow = UnitOfWork(async_db)
+    repository = FileProviderCopyRepository(uow)
+    now = datetime.now(UTC)
+    expired, live, pending = (
+        _pending(stored.id, stored.workspace_id),
+        _pending(stored.id, stored.workspace_id),
+        _pending(stored.id, stored.workspace_id),
+    )
+
+    async with uow:
+        for copy in (expired, live, pending):
+            await repository.reserve(copy)
+    async with uow:
+        await repository.confirm(expired.id, provider_file_id="file_old", expires_at=now - timedelta(minutes=1))
+        await repository.confirm(live.id, provider_file_id="file_live", expires_at=now + timedelta(hours=1))
+    async with uow:
+        removed = await repository.remove_expired(expired_before=now, limit=10)
+
+    remaining = set(db_session.scalars(select(FileProviderCopy.id).where(FileProviderCopy.file_id == stored.id)).all())
+    assert removed == 1
+    assert remaining == {live.id, pending.id}

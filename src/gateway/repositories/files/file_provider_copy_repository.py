@@ -83,6 +83,24 @@ class FileProviderCopyRepository(BaseRepository[FileProviderCopy, Never, Never])
         """Stage the removal of a copy the provider will not hold."""
         await self.db.execute(delete(FileProviderCopy).where(FileProviderCopy.id == copy_id))
 
+    async def remove_expired(self, *, expired_before: datetime, limit: int) -> int:
+        """Stage the removal of up to ``limit`` confirmed copies that expired before ``expired_before``.
+
+        The provider has already let such a copy go, so its row names nothing
+        a request could use or a deletion could reach.
+        """
+        expired = (
+            select(FileProviderCopy.id)
+            .where(FileProviderCopy.pending_since.is_(None), FileProviderCopy.expires_at < expired_before)
+            .order_by(FileProviderCopy.expires_at)
+            .limit(limit)
+        )
+        result = cast(
+            "CursorResult[Any]",
+            await self.db.execute(delete(FileProviderCopy).where(FileProviderCopy.id.in_(expired))),
+        )
+        return result.rowcount
+
     async def remove_stale_pending(self, *, pending_before: datetime, limit: int) -> int:
         """Stage the removal of up to ``limit`` copies pending since before ``pending_before``.
 

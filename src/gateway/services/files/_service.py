@@ -358,6 +358,7 @@ class FileService:
         now = datetime.now(UTC)
         async with self._uow:
             await self._copies.remove_stale_pending(pending_before=now - _PENDING_GRACE, limit=batch_size)
+            await self._copies.remove_expired(expired_before=now, limit=batch_size)
             records = await self._files.reclaimable(
                 batch_size=batch_size, pending_before=now - _PENDING_GRACE, after=after
             )

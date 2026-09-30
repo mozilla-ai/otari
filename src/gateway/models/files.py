@@ -118,6 +118,12 @@ class FileProviderCopy(Base):
             postgresql_where=text("pending_since IS NOT NULL"),
             sqlite_where=text("pending_since IS NOT NULL"),
         ),
+        Index(
+            "ix_file_provider_copies_expires_at",
+            "expires_at",
+            postgresql_where=text("pending_since IS NULL"),
+            sqlite_where=text("pending_since IS NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
