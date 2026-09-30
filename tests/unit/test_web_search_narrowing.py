@@ -44,7 +44,7 @@ def _config(**overrides: object) -> ResolvedWebSearchConfig:
 
 
 # What a request would get with no workspace row: the deployment's own setting,
-# or the backend's built-in. `routes/_tools.web_search_max_results_baseline`
+# or the backend's built-in. `web_search_max_results_baseline`
 # answers it for real; the cases below vary it to say which one is in play.
 _BASELINE = 5
 

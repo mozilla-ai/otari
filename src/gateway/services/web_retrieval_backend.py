@@ -62,9 +62,7 @@ MAX_WEB_RETRIEVAL_CALLS = 10
 _RESERVED_SEARCH_PARAMS = frozenset({"q", "format", "engines"})
 
 _DEFAULT_SEARCH_TIMEOUT_S = 15.0
-# Public alongside the cap below: `routes/_tools.web_search_max_results_baseline`
-# needs the value a request gets when neither the deployment nor the request
-# names one, because that is what a workspace ceiling is floored against.
+# Public because the tools package falls back to it when neither the deployment nor the request names one.
 DEFAULT_MAX_RESULTS = 5
 # Public because a workspace's stored web-search ceiling is validated against it
 # (`services/tenancy/workspace_web_search_service.py`): a value above what this

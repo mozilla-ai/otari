@@ -123,7 +123,6 @@ from gateway.api.routes._tools import (
     provider_runs_code_natively,
     resolve_code_executor_preference,
     web_search_header_conflicts,
-    web_search_max_results_baseline,
 )
 from gateway.core.config import ATTEMPT_ID_HEADER, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, release_session
@@ -250,7 +249,7 @@ from gateway.services.tool_usage import (
     TOOL_METER_NAMESPACE,
     ToolUsageTally,
 )
-from gateway.services.tools import Dialect, ToolUseBudget, native_rendering
+from gateway.services.tools import Dialect, ToolUseBudget, native_rendering, web_search_max_results_baseline
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.web_retrieval_backend import (

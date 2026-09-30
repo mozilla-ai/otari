@@ -337,7 +337,7 @@ def narrow_web_search_tool_entry(
     the caller knows which error shape the request format wants.
 
     ``baseline_max_results`` is how many results this request would get without
-    a workspace row at all (``routes/_tools.web_search_max_results_baseline``:
+    a workspace row at all (``web_search_max_results_baseline``:
     the deployment's own setting, or the backend's built-in). The workspace
     ceiling is floored against it and not merely written in, because writing it
     in would let a workspace whose ceiling sits above the operator's *raise* the
