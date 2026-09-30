@@ -9,7 +9,7 @@ the same "the request's own token is the whole proof" shape as
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,13 +52,14 @@ class ResetPasswordRequest(BaseModel):
 async def request_reset(
     body: RequestPasswordResetRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> RequestPasswordResetResponse:
     """Mail a password-reset link, or do nothing: the response never says which."""
     throttle_public_auth(request)
     try:
-        await request_password_reset(db, config, email=body.email)
+        await request_password_reset(db, config, background_tasks=background_tasks, email=body.email)
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None
     return RequestPasswordResetResponse(message=_RESET_REQUEST_MESSAGE)
