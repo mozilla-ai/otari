@@ -61,9 +61,6 @@ _MAX_DOMAINS = MAX_WEB_SEARCH_DOMAINS
 _MAX_PROVIDER_OPTION_KEYS = 30
 _MAX_PROVIDER_OPTIONS_BYTES = 4096
 _MAX_PURPOSE_HINT_LENGTH = 2048
-# The longest a DNS name can be. Not a policy, just the point past which a
-# string cannot be a host and is therefore a mistake worth naming at the write.
-_MAX_DOMAIN_LENGTH = 253
 
 
 class InvalidStoredWebSearchDomainError(ValueError):
@@ -84,31 +81,41 @@ def _canonical_host(raw: str) -> str:
     return canonicalize_domain_rule(candidate).value
 
 
-def _normalize_domains(value: list[str] | None) -> list[str] | None:
-    """Canonicalize, drop empty entries, and de-duplicate a domain list.
+def _read_domains(value: object) -> tuple[str, ...] | None:
+    """Canonicalize and bound one domain list, whichever source it came from.
 
-    An all-blank list becomes ``None``.
+    ``None`` and an empty list both mean no list.
+    Duplicates collapse, and the first occurrence keeps its place.
+
+    Raises ``ValueError`` naming the first problem: a value that is not a list, more than ``_MAX_DOMAINS`` entries,
+    or an entry that is not a bare hostname.
     """
     if value is None:
         return None
-    seen: dict[str, None] = {}
+    if not isinstance(value, list):
+        raise ValueError("a domain list must be a list of hostnames")
+    if len(value) > _MAX_DOMAINS:
+        raise ValueError(f"at most {_MAX_DOMAINS} domains are allowed")
+    hosts: dict[str, None] = {}
     for raw in value:
-        if not raw.strip():
-            continue
+        if not isinstance(raw, str):
+            raise ValueError("a domain list must be a list of hostnames")
         try:
-            host = _canonical_host(raw)
+            hosts.setdefault(_canonical_host(raw), None)
         except DomainRuleValidationError as exc:
             raise ValueError(
                 f"{raw.strip()!r} is not a bare valid hostname; give a domain such as 'example.com', "
                 "with no scheme, port or path"
             ) from exc
-        if len(host) > _MAX_DOMAIN_LENGTH:
-            raise ValueError(f"a domain may be at most {_MAX_DOMAIN_LENGTH} characters")
-        seen.setdefault(host, None)
-    cleaned = list(seen)
-    if len(cleaned) > _MAX_DOMAINS:
-        raise ValueError(f"at most {_MAX_DOMAINS} domains are allowed")
-    return cleaned or None
+    return tuple(hosts) or None
+
+
+def _normalize_domains(value: list[str] | None) -> list[str] | None:
+    """Read a domain list a caller wrote, where a blank entry is an empty form field and is dropped."""
+    if value is None:
+        return None
+    hosts = _read_domains([raw for raw in value if not (isinstance(raw, str) and not raw.strip())])
+    return list(hosts) if hosts else None
 
 
 def _check_provider_options(value: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -264,8 +271,8 @@ async def resolve_workspace_web_search_config(
         enabled=config.enabled,
         max_results=config.max_results,
         purpose_hint=config.purpose_hint,
-        allowed_domains=_as_tuple(config.allowed_domains, stored=True),
-        blocked_domains=_as_tuple(config.blocked_domains, stored=True),
+        allowed_domains=_stored_domains(config.allowed_domains),
+        blocked_domains=_stored_domains(config.blocked_domains),
         provider_options=config.provider_options,
         authorized_tools=None,
     )
@@ -297,8 +304,8 @@ def read_web_search_policy(answer: Mapping[str, Any]) -> ResolvedWebSearchConfig
         enabled=enabled,
         max_results=max_results,
         purpose_hint=_blank_to_none(purpose_hint),
-        allowed_domains=_answer_domains(answer.get("allowed_domains"), "allowed_domains"),
-        blocked_domains=_answer_domains(answer.get("blocked_domains"), "blocked_domains"),
+        allowed_domains=_read_domains(answer.get("allowed_domains")),
+        blocked_domains=_read_domains(answer.get("blocked_domains")),
         provider_options=provider_options,
         authorized_tools=None,
     )
@@ -376,48 +383,12 @@ def narrow_web_search_tool_entry(
     return narrowed
 
 
-def _as_tuple(value: list[str] | None, *, stored: bool = False) -> tuple[str, ...] | None:
-    """Read and canonicalize a JSON domain list without silently dropping rules."""
-    if value is None:
-        return None
-    if not isinstance(value, list):
-        if stored:
-            raise InvalidStoredWebSearchDomainError("stored web-search domain list is invalid")
-        return None
-    if not value:
-        return None
-    hosts: list[str] = []
-    for raw in value:
-        if not isinstance(raw, str) or not raw.strip():
-            if stored:
-                raise InvalidStoredWebSearchDomainError("stored web-search domain rule is invalid")
-            continue
-        try:
-            host = _canonical_host(raw)
-        except DomainRuleValidationError as exc:
-            if stored:
-                raise InvalidStoredWebSearchDomainError("stored web-search domain rule is invalid") from exc
-            continue
-        if host not in hosts:
-            hosts.append(host)
-    return tuple(hosts) or None
-
-
-def _answer_domains(value: Any, field: str) -> tuple[str, ...] | None:
-    """Canonicalize a domain list from the control plane's answer, refusing any entry that cannot be enforced."""
-    if value is None:
-        return None
-    if not isinstance(value, list) or len(value) > _MAX_DOMAINS:
-        raise ValueError(f"{field} must be a list of at most {_MAX_DOMAINS} domains")
-    hosts: dict[str, None] = {}
-    for raw in value:
-        if not isinstance(raw, str):
-            raise ValueError(f"{field} must contain only strings")
-        host = _canonical_host(raw)
-        if len(host) > _MAX_DOMAIN_LENGTH:
-            raise ValueError(f"a domain may be at most {_MAX_DOMAIN_LENGTH} characters")
-        hosts.setdefault(host, None)
-    return tuple(hosts) or None
+def _stored_domains(value: object) -> tuple[str, ...] | None:
+    """Read a stored row's domain list, refusing one that cannot be enforced."""
+    try:
+        return _read_domains(value)
+    except ValueError as exc:
+        raise InvalidStoredWebSearchDomainError("stored web-search domain list is invalid") from exc
 
 
 def _entry_domains(value: Any) -> list[str] | None:
