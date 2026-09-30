@@ -132,12 +132,25 @@ Otari's store stays the source of truth and the copy is a cache. The copy
 carries an expiry, `files_provider_upload_ttl_hours` (1 hour by default, up to
 the 90 days Anthropic accepts), and the provider deletes it when that passes. A
 copy with time left is reused, so attaching the same file on every turn of a
-conversation uploads it once. The copy is recorded against the file, with the
-provider, the configured instance and the workspace that made it, because a
-provider file ID exists only inside the account of the credential that uploaded
-it, and both the instance and the workspace's organization can supply that
-credential. A request resolving a different credential makes a copy of its own
-rather than naming one its account does not hold.
+conversation uploads it once.
+
+A provider file ID exists only inside the account of the credential that
+uploaded it, so a copy is recorded against the account it is in. Otari names the
+account by a digest of the credential the request is dispatched with, never by
+the credential itself. A request whose credential changed, because a key was
+rotated or an organization added its own, therefore makes a fresh copy rather
+than naming one its account does not hold.
+
+The copy is made for each candidate as it is dispatched. A routing policy that
+falls over to a model on another key sends that model a copy in its own account.
+A candidate whose provider cannot hold a copy is passed over, in the policy's
+order, and the request is refused when no candidate can.
+
+Each copy is recorded before it is uploaded and confirmed once the provider
+holds it, so every copy Otari makes is named by a row. Two requests copying one
+file at the same moment each make and record a copy. A copy whose upload was cut
+off before it was confirmed is left for the provider to expire, and the file
+sweep removes its row.
 
 **A copy never outlives the file's expiry.** Where `files_retention_hours` is
 set, the copy's expiry is cut back to whatever the file itself has left, less a
@@ -155,15 +168,19 @@ where provider-side code execution is wanted. Deleting a
 file early is the one case this does not cover: see the note at the end of this
 section.
 
-Four things refuse the request rather than answering without the file, because
-the request asked for code over that file:
+These refuse the request rather than answering without the file, because the
+request asked for code over that file:
 
-- a `file_id` this deployment does not hold, which also keeps a provider file ID
-  of the caller's choosing from reaching the provider, whose files are scoped to
-  the account rather than to the caller;
-- a file with too little left for a copy to expire no later than it does;
-- `files_provider_upload_enabled` set to `false`;
-- a provider that would not take the copy.
+- 400: a `file_id` this deployment does not hold, which also keeps a provider
+  file ID of the caller's choosing from reaching the provider, whose files are
+  scoped to the account rather than to the caller;
+- 400: a file with too little left for a copy to expire no later than it does;
+- 400: `files_provider_upload_enabled` set to `false`;
+- 400: `file_understanding_enabled` set to `false`, because nothing then reads
+  the block;
+- 400: a routing policy with no candidate whose provider can hold a copy;
+- 502: a provider that would not take the copy. A routing policy tries its next
+  candidate first.
 
 `files_provider_upload_enabled` does not decide whether a file's contents reach
 the provider, which they do either way, inline in the request. It decides
