@@ -21,6 +21,7 @@ import pytest
 import yaml
 
 from gateway.core.config import API_ROOT, PLATFORM_TOKEN_ENV_VAR
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.types.code_execution import ExecResponse, SessionHandle
 
 _SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "hybrid_edition_smoke.py"
@@ -68,6 +69,10 @@ def _call(method: str, url: str, *, headers: dict[str, str] | None = None, body:
 def test_the_gate_walks_the_root_the_app_actually_serves() -> None:
     """The gate carries its own copy of the API root so it can stay standard-library only."""
     assert smoke.API_ROOT == API_ROOT
+
+
+def test_the_gate_expects_the_sandbox_tool_the_app_offers() -> None:
+    assert smoke.SANDBOX_TOOL == CODE_EXECUTION_TOOL_NAME
 
 
 def test_the_gate_sets_the_token_the_app_reads() -> None:
@@ -266,6 +271,19 @@ def test_chat_calls_the_offered_tool_first_and_then_answers(provider: Any) -> No
         body={"messages": [{"role": "user", "content": "q"}, {"role": "tool", "content": "r"}], "tools": tools},
     )
     assert second["choices"][0]["message"]["content"] == smoke.REPLY
+
+
+def test_chat_calls_the_sandbox_tool_with_the_smoke_code(provider: Any) -> None:
+    tools = [{"type": "function", "function": {"name": smoke.SANDBOX_TOOL, "parameters": {}}}]
+    _, body = _call(
+        "POST",
+        f"{provider.base_url}/openai/v1/chat/completions",
+        headers={"Authorization": f"Bearer {smoke.OPENAI_KEY}"},
+        body={"messages": [{"role": "user", "content": "q"}], "tools": tools},
+    )
+    call = body["choices"][0]["message"]["tool_calls"][0]["function"]
+    assert call["name"] == smoke.SANDBOX_TOOL
+    assert json.loads(call["arguments"]) == {"code": smoke.SANDBOX_CODE}
 
 
 def test_provider_rejects_a_key_the_control_plane_did_not_issue(provider: Any) -> None:

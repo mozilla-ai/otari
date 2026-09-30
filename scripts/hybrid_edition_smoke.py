@@ -35,15 +35,20 @@ It walks:
 6. MCP through the managed tool loop, inline and by workspace id: the id resolve
    carries the ids, the server sees initialize, tools/list and tools/call, and
    the tool result feeds the model's second turn.
-7. Provider-native code execution is forwarded untouched under the default
+7. Code execution in the gateway's sandbox: the control plane is asked whether
+   the workspace may run code, the code runs in the sandbox with no caller
+   token on it, and the output feeds the model's second turn. A workspace the
+   control plane refuses gets a 403, and one whose policy is malformed gets a
+   502, and neither reaches the provider or the sandbox.
+8. Provider-native code execution is forwarded untouched under the default
    executor, although a sandbox is configured: Anthropic's dated tool on
    Messages, OpenAI's ``code_interpreter`` on Responses, each answered in its
    own native result blocks, with no code-execution resolve and no sandbox call.
 
-8. Provider-native web search is forwarded the same way (``web_search_intercept``
+9. Provider-native web search is forwarded the same way (``web_search_intercept``
    is off by default): Anthropic's ``web_search_20250305`` on Messages, OpenAI's
    ``web_search_preview`` on Responses, each answered in its own result blocks.
-9. A streamed completion, which is how most callers actually read a model: the
+10. A streamed completion, which is how most callers actually read a model: the
    gateway injects ``stream_options.include_usage`` so a cost can be settled, the
    frames reach the caller as ``text/event-stream``, and the usage report carries
    the ``ttft_ms`` that only a streamed attempt produces.
@@ -138,6 +143,10 @@ MCP_RESULT = "hybrid-smoke-mcp-result"
 MCP_SERVER_ID = "8f2c1a1e-0000-4000-8000-000000000001"
 CODE_STDOUT = "hybrid-smoke-code-stdout"
 SANDBOX_STDOUT = "hybrid-smoke-sandbox-stdout"
+# The function the gateway offers the model for its own sandbox. A unit test pins
+# it against the app's constant.
+SANDBOX_TOOL = "code_execution"
+SANDBOX_CODE = "print('hybrid smoke')"
 # Delivered before the first frame so the gateway's time-to-first-token is a
 # measurable number rather than a rounding artifact.
 STREAM_FIRST_FRAME_DELAY_SECONDS = 0.05
@@ -548,6 +557,8 @@ class _ProviderHandler(_RecordingHandler):
             return {"name": "web_search", "arguments": json.dumps({"query": SEARCH_QUERY})}
         if MCP_TOOL in names:
             return {"name": MCP_TOOL, "arguments": json.dumps({"term": "smoke"})}
+        if SANDBOX_TOOL in names:
+            return {"name": SANDBOX_TOOL, "arguments": json.dumps({"code": SANDBOX_CODE})}
         return None
 
     @classmethod
@@ -1477,6 +1488,79 @@ def run_mcp(base_url: str, fakes: Fakes) -> None:
     log("MCP ran through the managed loop, inline and by workspace id, with the id resolve as documented")
 
 
+def run_gateway_code_execution(base_url: str, fakes: Fakes) -> None:
+    """The code-execution resolve, the sandbox run, and the two ways the control plane stops it."""
+    chats_before = len(fakes.provider.recorder.all("chat"))
+    resolves_before = len(fakes.control_plane.recorder.all("code-execution/resolve"))
+    sandbox_before = len(fakes.sandbox.recorder.all())
+    destroyed_before = len(fakes.sandbox.recorder.all("DestroySession"))
+    status, body, headers = _request(
+        "POST",
+        f"{base_url}{API_ROOT}/chat/completions",
+        headers={KEY_HEADER: USER_TOKEN_OK},
+        payload={
+            "model": f"openai:{fakes.openai_model}",
+            "messages": [{"role": "user", "content": f"Use the {SANDBOX_TOOL} tool to run: {SANDBOX_CODE}"}],
+            "tools": [{"type": "otari_code_execution"}],
+            "tool_choice": {"type": "function", "function": {"name": SANDBOX_TOOL}},
+        },
+    )
+    _expect(status, 200, "a completion declaring otari_code_execution", body)
+    fakes.note_dispatched(headers, "the sandbox-assisted completion")
+    _check(bool(_content_of(body).strip()), f"the sandbox-assisted completion came back empty: {body!r}")
+
+    resolves = fakes.control_plane.recorder.all("code-execution/resolve")[resolves_before:]
+    _check(len(resolves) == 1, f"expected one code-execution resolve, got {len(resolves)}")
+    _check(resolves[0].body == {}, f"code-execution resolve body: {resolves[0].body!r}")
+    _check(resolves[0].headers.get("x-gateway-token") == GATEWAY_TOKEN, "code-execution resolve had no gateway token")
+    _check(resolves[0].headers.get("x-user-token") == USER_TOKEN_OK, "code-execution resolve had no user token")
+
+    sandbox_run = fakes.sandbox.recorder.all()[sandbox_before:]
+    executions = [item for item in sandbox_run if item.route == "Execute"]
+    created = [item for item in sandbox_run if item.route == "CreateSession"]
+    _check(len(created) == 1, "the sandbox did not see exactly one session")
+    _check(len(executions) >= 1, "the sandbox never ran the code")
+    _check(executions[0].body.get("tool") == SANDBOX_TOOL, f"the sandbox was asked for {executions[0].body!r}")
+    fakes.sandbox.recorder.wait_for("DestroySession", destroyed_before + 1)
+    _check(fakes.sandbox.open_sessions == 0, "the sandbox session outlived its request")
+    for item in fakes.sandbox.recorder.all()[sandbox_before:]:
+        sent = json.dumps(item.headers)
+        _check(USER_TOKEN_OK not in sent and GATEWAY_TOKEN not in sent, "a platform token reached the sandbox")
+
+    if not fakes.live:
+        _check(len(executions) == 1, f"expected one sandbox run, got {len(executions)}")
+        _check(executions[0].body.get("input") == {"code": SANDBOX_CODE}, f"sandbox input: {executions[0].body!r}")
+        _check(REPLY in _content_of(body), f"the sandbox-assisted completion did not finish: {body!r}")
+        chats = fakes.provider.recorder.all("chat")[chats_before:]
+        _check(len(chats) == 2, f"expected two model turns around the sandbox run, got {len(chats)}")
+        _check(CODE_PURPOSE_HINT in json.dumps(chats[0].body), "the workspace's purpose hint did not reach the model")
+        _check(SANDBOX_STDOUT in json.dumps(chats[1].body.get("messages")), "the sandbox output missed the model")
+
+    provider_calls = len(fakes.provider.recorder.all())
+    sandbox_calls = len(fakes.sandbox.recorder.all())
+    for token, expected, what in (
+        (USER_TOKEN_CODE_DISABLED, 403, "a workspace the control plane does not let run code"),
+        (USER_TOKEN_CODE_MALFORMED, 502, "a workspace whose code-execution policy is malformed"),
+    ):
+        status, body, _ = _request(
+            "POST",
+            f"{base_url}{API_ROOT}/chat/completions",
+            headers={KEY_HEADER: token},
+            payload={
+                "model": f"openai:{fakes.openai_model}",
+                "messages": [{"role": "user", "content": "run some code"}],
+                "tools": [{"type": "otari_code_execution"}],
+            },
+        )
+        _expect(status, expected, what, body)
+        code_resolves = fakes.control_plane.recorder.all("code-execution/resolve")
+        asked = [item.headers.get("x-user-token") for item in code_resolves]
+        _check(token in asked, f"{what} was refused without asking the control plane")
+    _check(len(fakes.provider.recorder.all()) == provider_calls, "a refused sandbox request still reached the provider")
+    _check(len(fakes.sandbox.recorder.all()) == sandbox_calls, "a refused sandbox request still reached the sandbox")
+    log("Code execution resolved its policy, ran in the sandbox with no caller token, and fed the model; refusals held")
+
+
 def run_native_code_execution(base_url: str, fakes: Fakes) -> None:
     """A provider-native code-execution declaration is forwarded and answered natively."""
     code_resolves = len(fakes.control_plane.recorder.all("code-execution/resolve"))
@@ -1688,6 +1772,7 @@ STEPS: tuple[Callable[[str, Fakes], None], ...] = (
     run_web_search,
     check_web_fetch_is_off_by_default,
     run_mcp,
+    run_gateway_code_execution,
     run_native_code_execution,
     run_native_web_search,
     run_streaming_completion,
