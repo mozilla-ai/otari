@@ -2959,22 +2959,7 @@ async def prepare_gateway_tools(
             intercept_web_search=claim_web_search,
         )
 
-        # The organization's and the policy's guardrails are merged in here
-        # rather than at each route, so every completion endpoint enforces a
-        # mandate identically and none can forget to. `guardrails` as passed is
-        # the caller's own list.
-        effective = merge_guardrail_layers(
-            ctx, declared.guardrails, await _resolve_organization_guardrails(adapter, ctx)
-        )
-        await apply_input_guardrails(
-            effective.configs,
-            declared.guardrail_text,
-            response=response,
-            config=ctx.config,
-            credentials=effective.credentials,
-            mandated=effective.mandated,
-            in_process=_in_process_guardrails(ctx, effective),
-        )
+        await _admit_guardrails(adapter, ctx, response, declared)
 
         # Checked per source, not over the merged list: see
         # `_validate_mcp_server_urls` for why a stored server's rejection cannot
@@ -3371,6 +3356,28 @@ async def prepare_gateway_tools(
         ),
         tools_header=declared.tools_header,
         sandbox_files=backends.sandbox_files,
+    )
+
+
+async def _admit_guardrails(
+    adapter: FormatAdapter[Any, Any], ctx: RequestContext, response: Response, declared: DeclaredTools
+) -> None:
+    """Run the request's input guardrails, with its organization's and its policy's merged in.
+
+    A ``block`` flag refuses the request, and a ``monitor`` flag annotates ``response``.
+    """
+    # Merged here rather than in each route, so no completion endpoint can skip a mandate.
+    effective = merge_guardrail_layers(
+        ctx, declared.guardrails, await _resolve_organization_guardrails(adapter, ctx)
+    )
+    await apply_input_guardrails(
+        effective.configs,
+        declared.guardrail_text,
+        response=response,
+        config=ctx.config,
+        credentials=effective.credentials,
+        mandated=effective.mandated,
+        in_process=_in_process_guardrails(ctx, effective),
     )
 
 
