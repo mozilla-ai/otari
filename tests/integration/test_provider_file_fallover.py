@@ -70,24 +70,27 @@ class _AccountFiles:
         self.uploads: list[str] = []
 
     def handle(self, request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and "/v1/files/" in request.url.path:
+            return httpx.Response(200, json=self._metadata(request.url.path.rsplit("/", 1)[-1]))
         if request.method != "POST" or not request.url.path.endswith("/v1/files"):
             return httpx.Response(404)
         key = request.headers.get("x-api-key", "")
         self.uploads.append(key)
+        return httpx.Response(200, json=self._metadata(f"file_copy_for_{key}"))
+
+    @staticmethod
+    def _metadata(file_id: str) -> dict[str, Any]:
         now = datetime.now(UTC)
-        return httpx.Response(
-            200,
-            json={
-                "id": f"file_copy_for_{key}",
-                "type": "file",
-                "filename": "data.csv",
-                "mime_type": "text/csv",
-                "size_bytes": 8,
-                "created_at": now.isoformat(),
-                "expires_at": (now + timedelta(hours=1)).isoformat(),
-                "downloadable": False,
-            },
-        )
+        return {
+            "id": file_id,
+            "type": "file",
+            "filename": "data.csv",
+            "mime_type": "text/csv",
+            "size_bytes": 8,
+            "created_at": now.isoformat(),
+            "expires_at": (now + timedelta(hours=1)).isoformat(),
+            "downloadable": False,
+        }
 
 
 @pytest.fixture

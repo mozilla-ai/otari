@@ -96,14 +96,7 @@ class ProviderCopies:
         # Every file is checked before any is uploaded, so a refusal leaves no copy behind.
         for staged in files:
             self._lifetime(staged, account, datetime.now(UTC))
-        ids = {
-            file_id: copy.provider_file_id
-            for file_id, copy in (await self._usable(files, account)).items()
-            if copy.provider_file_id is not None
-        }
-        missing = [staged for staged in files if staged.file_id not in ids]
-        if not missing:
-            return ids
+        recorded = await self._usable(files, account)
         try:
             client = self._provider_files.open_session(
                 provider=account.provider, instance=account.instance, credential=credential
@@ -111,8 +104,20 @@ class ProviderCopies:
         except LookupError as exc:
             logger.warning("Provider %s cannot hold copies of attached files: %s", account.provider.value, exc)
             raise ProviderUploadFailedError from exc
+        ids: dict[str, str] = {}
         try:
-            for staged in missing:
+            for staged in files:
+                copy = recorded.get(staged.file_id)
+                if copy is not None and copy.provider_file_id is not None:
+                    if await client.holds(copy.provider_file_id):
+                        ids[staged.file_id] = copy.provider_file_id
+                        continue
+                    # The provider dropped the copy before its expiry. One fresh
+                    # copy replaces it, and the file itself is still valid.
+                    logger.info(
+                        "Provider %s no longer holds the copy of file %s", account.provider.value, staged.file_id
+                    )
+                    await self._cancel(copy.id, staged)
                 ids[staged.file_id] = await self._copy(client, staged, account)
         finally:
             await client.aclose()

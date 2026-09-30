@@ -47,27 +47,36 @@ class _StubAnthropicFiles:
     def __init__(self) -> None:
         self.uploads: list[bytes] = []
         self.accepting = True
+        self.dropped: set[str] = set()
 
     def handle(self, request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and "/v1/files/" in request.url.path:
+            file_id = request.url.path.rsplit("/", 1)[-1]
+            if file_id in self.dropped:
+                return httpx.Response(
+                    404, json={"type": "error", "error": {"type": "not_found_error", "message": "File not found"}}
+                )
+            return httpx.Response(200, json=self._metadata(file_id))
         if request.method != "POST" or not request.url.path.endswith("/v1/files"):
             return httpx.Response(404)
         if not self.accepting:
             return httpx.Response(500, json={"type": "error", "error": {"type": "api_error", "message": "nope"}})
         self.uploads.append(request.content)
+        return httpx.Response(200, json=self._metadata(_PROVIDER_FILE_ID))
+
+    @staticmethod
+    def _metadata(file_id: str) -> dict[str, Any]:
         now = datetime.now(UTC)
-        return httpx.Response(
-            200,
-            json={
-                "id": _PROVIDER_FILE_ID,
-                "type": "file",
-                "filename": "data.csv",
-                "mime_type": "text/csv",
-                "size_bytes": 12,
-                "created_at": now.isoformat(),
-                "expires_at": (now + timedelta(hours=1)).isoformat(),
-                "downloadable": False,
-            },
-        )
+        return {
+            "id": file_id,
+            "type": "file",
+            "filename": "data.csv",
+            "mime_type": "text/csv",
+            "size_bytes": 12,
+            "created_at": now.isoformat(),
+            "expires_at": (now + timedelta(hours=1)).isoformat(),
+            "downloadable": False,
+        }
 
 
 @pytest.fixture
@@ -173,6 +182,27 @@ def test_a_second_request_reuses_the_copy(
     assert response.status_code == 200, response.text
     assert forwarded[0][0]["content"][0]["file_id"] == _PROVIDER_FILE_ID
     assert len(anthropic_files.uploads) == 1, "the same file was uploaded twice"
+
+
+def test_a_copy_the_provider_dropped_is_made_again(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    db_session: Session,
+    tmp_file_store: None,
+    anthropic_files: _StubAnthropicFiles,
+) -> None:
+    file_id = _upload_file(client, api_key_header)
+    first, _ = _run(client, api_key_header, file_id)
+    assert first.status_code == 200, first.text
+    anthropic_files.dropped.add(_PROVIDER_FILE_ID)
+
+    response, forwarded = _run(client, api_key_header, file_id)
+
+    assert response.status_code == 200, response.text
+    assert forwarded[0][0]["content"][0]["file_id"] == _PROVIDER_FILE_ID
+    assert len(anthropic_files.uploads) == 2, "the dropped copy was not replaced"
+    rows = db_session.scalars(select(FileProviderCopy).where(FileProviderCopy.file_id == file_id)).all()
+    assert len(rows) == 1, "the dropped copy's row was kept beside its replacement"
 
 
 def test_a_file_the_deployment_does_not_hold_is_refused(

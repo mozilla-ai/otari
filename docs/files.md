@@ -132,7 +132,9 @@ Otari's store stays the source of truth and the copy is a cache. The copy
 carries an expiry, `files_provider_upload_ttl_hours` (1 hour by default, up to
 the 90 days Anthropic accepts), and the provider deletes it when that passes. A
 copy with time left is reused, so attaching the same file on every turn of a
-conversation uploads it once.
+conversation uploads it once. Otari asks the provider whether it still holds a
+recorded copy before using it, and makes one fresh copy where the provider has
+dropped it early. A lookup that fails for another reason keeps the copy in use.
 
 A provider file ID exists only inside the account of the credential that
 uploaded it, so a copy is recorded against the account it is in. Otari names the

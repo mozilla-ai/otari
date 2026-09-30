@@ -42,6 +42,8 @@ _FILE_PROVIDERS = frozenset({LLMProvider.ANTHROPIC, LLMProvider.OPENAI})
 # SDK's while unified exceptions are off, and the OpenAI container read is httpx.
 _FILE_CALL_ERRORS = (AnyLLMError, AnthropicError, httpx.HTTPError, ValidationError)
 
+_NOT_FOUND = 404
+
 
 class AnyLlmProviderFiles(ProviderFilePort):
     """Opens any-llm sessions over the files of Anthropic and OpenAI accounts."""
@@ -173,6 +175,16 @@ class _AnyLlmFileSession:
         except (*_FILE_CALL_ERRORS, NotImplementedError) as exc:
             logger.warning("Could not remove %s file %s: %s", self.provider, file_id, exc)
             return False
+        return True
+
+    async def holds(self, file_id: str) -> bool:
+        """Whether the provider still holds ``file_id``, which only a not-found answer denies."""
+        try:
+            await self._llm.aretrieve_file(file_id)
+        except (*_FILE_CALL_ERRORS, NotImplementedError) as exc:
+            if getattr(exc, "status_code", None) == _NOT_FOUND:
+                return False
+            logger.warning("Could not ask %s whether it holds %s: %s", self.provider, file_id, type(exc).__name__)
         return True
 
     async def filename_of(self, file_id: str) -> str | None:

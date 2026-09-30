@@ -42,6 +42,14 @@ class ProviderFileSession(Protocol):
         """Remove a file this session put at the provider, and say whether it is gone."""
         ...
 
+    async def holds(self, file_id: str) -> bool:
+        """Whether the provider still holds ``file_id``.
+
+        False only when the provider says it does not, so a lookup that fails
+        for any other reason leaves a recorded copy in use.
+        """
+        ...
+
     async def filename_of(self, file_id: str) -> str | None:
         """The name the provider holds ``file_id`` under, or None where it does not say."""
         ...

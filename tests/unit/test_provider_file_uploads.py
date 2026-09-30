@@ -118,6 +118,8 @@ class _Client:
         self._accept_delay = accept_delay
         self.uploads: list[dict[str, Any]] = []
         self.discarded: list[str] = []
+        self.gone: set[str] = set()
+        self.asked_held: list[str] = []
         self.closed = False
         self.provider = "anthropic"
 
@@ -135,6 +137,10 @@ class _Client:
     async def discard(self, provider_file_id: str) -> bool:
         self.discarded.append(provider_file_id)
         return True
+
+    async def holds(self, provider_file_id: str) -> bool:
+        self.asked_held.append(provider_file_id)
+        return provider_file_id not in self.gone
 
     async def aclose(self) -> None:
         self.closed = True
@@ -372,3 +378,30 @@ async def test_a_provider_holding_the_copy_too_long_has_it_taken_back(monkeypatc
 
     assert client.discarded == ["file_new"], "the copy was left at the provider"
     assert copies.events == ["reserve", "cancel"]
+
+
+@pytest.mark.asyncio
+async def test_a_recorded_copy_is_checked_with_the_provider_before_it_is_used(monkeypatch: pytest.MonkeyPatch) -> None:
+    copies = _Copies(_confirmed(datetime.now(UTC) + timedelta(hours=1)))
+    client = _Client()
+
+    ids = await _file_ids(_copies_service(monkeypatch, copies=copies, client=client))
+
+    assert ids == {"file-1": "file_old"}
+    assert client.asked_held == ["file_old"]
+    assert client.uploads == []
+
+
+@pytest.mark.asyncio
+async def test_a_copy_the_provider_no_longer_holds_is_made_again_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    old = _confirmed(datetime.now(UTC) + timedelta(hours=1))
+    copies = _Copies(old)
+    client = _Client(ProviderCopyReceipt(file_id="file_new"))
+    client.gone = {"file_old"}
+
+    ids = await _file_ids(_copies_service(monkeypatch, copies=copies, client=client))
+
+    assert ids == {"file-1": "file_new"}
+    assert copies.events == ["cancel", "reserve", "confirm"]
+    assert [row.provider_file_id for row in copies.rows] == ["file_new"]
+    assert len(client.uploads) == 1

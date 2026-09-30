@@ -442,3 +442,26 @@ async def test_filename_of_asks_nothing_of_openai(monkeypatch: pytest.MonkeyPatc
 
     assert await _client("openai").filename_of("cfile_1") is None
     assert seen == []
+
+
+@pytest.mark.asyncio
+async def test_a_file_the_provider_returns_is_held(monkeypatch: pytest.MonkeyPatch) -> None:
+    _serving(monkeypatch, lambda request: httpx.Response(200, json=_metadata()))
+
+    assert await _client().holds("file_01abc") is True
+
+
+@pytest.mark.asyncio
+async def test_a_file_the_provider_does_not_find_is_not_held(monkeypatch: pytest.MonkeyPatch) -> None:
+    error = {"type": "error", "error": {"type": "not_found_error", "message": "File not found"}}
+    _serving(monkeypatch, lambda request: httpx.Response(404, json=error))
+
+    assert await _client().holds("file_01gone") is False
+
+
+@pytest.mark.asyncio
+async def test_a_lookup_that_fails_otherwise_keeps_the_file_held(monkeypatch: pytest.MonkeyPatch) -> None:
+    error = {"type": "error", "error": {"type": "api_error", "message": "unavailable"}}
+    _serving(monkeypatch, lambda request: httpx.Response(500, json=error))
+
+    assert await _client().holds("file_01abc") is True
