@@ -8,7 +8,6 @@ import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.tools_exceptions import (
-    WebAccessDomainsExcludedError,
     WebAccessNotEnabledError,
     WebAccessToolNotAuthorizedError,
     WebSearchNotEnabledError,
@@ -88,7 +87,7 @@ def test_search_domains_narrow_the_workspace_fetch_domains() -> None:
 
 
 def test_fetch_domains_that_share_nothing_with_the_workspace_are_refused() -> None:
-    with pytest.raises(WebAccessDomainsExcludedError):
+    with pytest.raises(WorkspaceWebSearchDomainsExcludedError):
         apply_web_access_policy(
             _policy(allowed_domains=("example.com",)),
             requested_tools=["web_search", "web_fetch"],
