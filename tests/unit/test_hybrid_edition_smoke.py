@@ -86,7 +86,7 @@ def test_the_platform_token_is_the_one_setting_put_back() -> None:
 
 
 def test_config_is_a_hybrid_deployment_and_nothing_else() -> None:
-    config = smoke.hybrid_config(port=8123, peers=_PEERS)
+    config = smoke.hybrid_config(peers=_PEERS, port=8123)
     assert config["platform"]["base_url"] == _PEERS.platform_base_url
     assert "providers" not in config, "local providers are refused in hybrid mode"
     assert "database_url" not in config, "a hybrid gateway runs no database"
@@ -97,7 +97,7 @@ def test_config_is_a_hybrid_deployment_and_nothing_else() -> None:
 
 def test_config_file_is_loadable_as_yaml(tmp_path: Path) -> None:
     path = tmp_path / "hybrid.yml"
-    config = smoke.hybrid_config(port=8123, peers=_PEERS)
+    config = smoke.hybrid_config(peers=_PEERS, port=8123)
     smoke.write_config(path, config)
     assert yaml.safe_load(path.read_text(encoding="utf-8")) == config
 
@@ -396,11 +396,11 @@ def test_live_keys_are_scrubbed_from_the_gateway_environment() -> None:
 
 
 def test_live_config_puts_tavily_ahead_of_the_search_url() -> None:
-    config = smoke.hybrid_config(port=8123, peers=_PEERS, tavily_key="tvly-live")
+    config = smoke.hybrid_config(peers=_PEERS, port=8123, tavily_key="tvly-live")
     assert config["web_search_provider"] == "tavily"
     assert config["web_search_provider_api_key"] == "tvly-live"
     assert "web_search_url" in config, "the URL stays; the backend prefers the provider"
-    bare = smoke.hybrid_config(port=8123, peers=_PEERS)
+    bare = smoke.hybrid_config(peers=_PEERS, port=8123)
     assert "web_search_provider" not in bare
 
 
@@ -433,10 +433,10 @@ def test_container_config_leaves_the_listen_address_to_the_image() -> None:
     how the first container run failed: the gateway listened on the image's 8000
     while the smoke polled a port of its own.
     """
-    config = smoke.hybrid_config(port=8123, peers=_PEERS, in_container=True)
+    config = smoke.hybrid_config(peers=_PEERS, port=None)
     assert "host" not in config
     assert "port" not in config
-    source = smoke.hybrid_config(port=8123, peers=_PEERS)
+    source = smoke.hybrid_config(peers=_PEERS, port=8123)
     assert (source["host"], source["port"]) == (smoke.LOOPBACK, 8123)
 
 

@@ -856,10 +856,9 @@ class PeerUrls:
 
 def hybrid_config(
     *,
-    port: int,
     peers: PeerUrls,
+    port: int | None,
     tavily_key: str | None = None,
-    in_container: bool = False,
 ) -> dict[str, Any]:
     """The config a hybrid deployment writes: a platform block and no providers.
 
@@ -868,15 +867,15 @@ def hybrid_config(
     which is the path step 7 proves.
     ``web_search_url`` names a service of its own, so a search query carries no Otari credential.
     A live run adds Tavily, which the backend prefers over the URL.
-    ``in_container`` leaves out ``host`` and ``port``, which the image's own
-    environment owns and a config file cannot override.
+    A ``port`` of ``None`` leaves out ``host`` and ``port``, for a gateway whose
+    environment sets its listen address, as the published image does.
     """
     config: dict[str, Any] = {
         "platform": {"base_url": peers.platform_base_url, "resolve_timeout_ms": 5000},
         # The gateway appends /search itself.
         "web_search_url": peers.search_base_url,
     }
-    if not in_container:
+    if port is not None:
         config["host"] = LOOPBACK
         config["port"] = port
     if tavily_key:
@@ -1628,10 +1627,9 @@ def main(argv: list[str] | None = None) -> int:
                         search_base_url=search.base_url,
                     )
                     config = hybrid_config(
-                        port=port,
                         peers=peers,
+                        port=None if args.image else port,
                         tavily_key=live.tavily_key if live else None,
-                        in_container=bool(args.image),
                     )
                     write_config(config_path, config)
                     # World-readable: the container runs as its own user and has
