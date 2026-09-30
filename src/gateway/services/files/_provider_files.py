@@ -142,12 +142,9 @@ def produced_files_for(dialect: str, obj: Any) -> list[ProviderFile]:
     return []
 
 
-def minimum_copy_lifetime(provider: str) -> timedelta:
+def minimum_copy_lifetime(provider: LLMProvider) -> timedelta:
     """The shortest life ``provider`` will give a file it stores, or zero where it sets no floor."""
-    try:
-        return _MINIMUM_COPY_LIFETIMES.get(LLMProvider(provider), timedelta(0))
-    except ValueError:
-        return timedelta(0)
+    return _MINIMUM_COPY_LIFETIMES.get(provider, timedelta(0))
 
 
 def serves_files(provider: str) -> bool:
@@ -277,6 +274,14 @@ class ProviderFileClient:
         try:
             return await self._llm.aupload_file(data, filename=filename, mime_type=mime_type, expires_in=expires_in)
         except (*_FILE_CALL_ERRORS, NotImplementedError) as exc:
+            # The class and status only: a provider's error body can echo what it was sent.
+            logger.warning(
+                "Provider %s refused a copy of %s: %s (status %s)",
+                self.provider,
+                filename,
+                type(exc).__name__,
+                getattr(exc, "status_code", None),
+            )
             raise ProviderUploadFailedError from exc
 
     async def discard(self, file_id: str) -> bool:

@@ -5,12 +5,19 @@ A copy carries an expiry the provider enforces, never outlives the file's own,
 and is reused while it has enough life left for the request that finds it.
 A provider that answers with a longer expiry than it was asked for has the copy
 taken back, because the rule is about what exists rather than what was asked.
+
+Each copy is reserved as a pending row before it is uploaded, confirmed once
+the provider holds it, and canceled when it does not, so a copy Otari makes is
+always named by a row that deletion can reach.
 """
 
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+
+from any_llm import LLMProvider
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
@@ -24,9 +31,10 @@ from gateway.exceptions.files_exceptions import (
 from gateway.log_config import logger
 from gateway.models.files import FileProviderCopy
 from gateway.ports.file_storage_port import FileStoragePort
-from gateway.repositories.files import FileRepositories
+from gateway.repositories.files import FileProviderCopyRepository
 from gateway.services.files._provider_files import ProviderFileClient, minimum_copy_lifetime
 from gateway.services.files._staging import StagedFile
+from gateway.types.provider_account import ProviderAccount, ResolvedCredential
 
 # How much of a copy's life must be left for a request to use it. A copy that
 # expires while the model's code is still running leaves that code without its
@@ -37,98 +45,150 @@ _REUSE_MARGIN = timedelta(minutes=5)
 # from acceptance, so a copy capped by its file's expiry is asked for this much less.
 _ACCEPT_SLACK = timedelta(minutes=1)
 
+# The providers whose own code execution reads a file only under an ID from
+# their own files API, and which accept an expiry on that file.
+_COPY_PROVIDERS = frozenset({LLMProvider.ANTHROPIC})
+
+_RESERVE_ERRORS: tuple[type[BaseException], ...] = (ProviderCopyNotRecordedError, *DATABASE_ERRORS)
+
+
+def provider_holds_copies(provider: LLMProvider) -> bool:
+    """Whether ``provider``'s own code execution can be given an attached file as a copy."""
+    return provider in _COPY_PROVIDERS
+
 
 def _as_utc(value: datetime) -> datetime:
     """``value`` in UTC, reading an offset-less timestamp as UTC, which is what providers report."""
     return value.astimezone(UTC) if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-class ProviderFileUploader:
-    """Gives the provider running a request's code an ID for an upload the request attached.
-
-    Built for one request, so the provider instance and the workspace whose
-    credential the copy is made with are fixed for every file it is asked about.
-    """
+class ProviderCopies:
+    """Gives a provider account an ID for each upload a request attached."""
 
     def __init__(
-        self,
-        uow: UnitOfWork,
-        repositories: FileRepositories,
-        file_store: FileStoragePort,
-        config: GatewayConfig,
-        *,
-        provider: str,
-        provider_instance: str,
-        workspace_id: uuid.UUID | None,
+        self, uow: UnitOfWork, copies: FileProviderCopyRepository, file_store: FileStoragePort, config: GatewayConfig
     ) -> None:
         self._uow = uow
-        self._copies = repositories.provider_copies
+        self._copies = copies
         self._file_store = file_store
         self._config = config
-        self._provider = provider
-        self._provider_instance = provider_instance
-        self._workspace_id = workspace_id
 
-    async def file_id_for(self, staged: StagedFile) -> str:
-        """The provider's ID for a copy of ``staged``, uploading one when no usable copy exists.
+    async def file_ids_for(
+        self, files: Sequence[StagedFile], account: ProviderAccount, credential: ResolvedCredential
+    ) -> dict[str, str]:
+        """The provider's ID for a copy of each file in ``account``, uploading one where none is usable.
 
         Raises:
             ProviderUploadDisabledError: the deployment makes no provider copies.
-            AttachedFileExpiresTooSoonError: the copy would outlive the file.
-            ProviderUploadFailedError: the copy could not be made or recorded.
+            AttachedFileExpiresTooSoonError: a copy would outlive its file.
+            ProviderUploadFailedError: a copy could not be made or recorded.
         """
         if not self._config.files_provider_upload_enabled:
             raise ProviderUploadDisabledError
-        workspace_id = self._workspace_id
-        if workspace_id is None:
-            # Unreachable from the request path, which always resolves a workspace:
-            # a key carries one and a master key falls back to the default. Kept
-            # because a copy cannot be keyed without it, so there is nothing to
-            # record or reuse, and answering without the file is not an option.
-            logger.warning("No workspace resolved to make a copy of file %s", staged.file_id)
-            raise ProviderUploadFailedError
-        now = datetime.now(UTC)
-        existing = await self._recorded_copy(staged, workspace_id)
-        if existing is not None and existing.expires_at > now + _REUSE_MARGIN:
-            return existing.provider_file_id
-
-        copy = await self._upload(staged, workspace_id)
+        if not files:
+            return {}
+        # Every file is checked before any is uploaded, so a refusal leaves no copy behind.
+        for staged in files:
+            self._lifetime(staged, account, datetime.now(UTC))
+        ids = {
+            file_id: copy.provider_file_id
+            for file_id, copy in (await self._usable(files, account)).items()
+            if copy.provider_file_id is not None
+        }
+        missing = [staged for staged in files if staged.file_id not in ids]
+        if not missing:
+            return ids
         try:
-            async with self._uow:
-                await self._copies.record(copy)
-        except ProviderCopyNotRecordedError as exc:
-            # Another request recorded a copy in the same account first. This
-            # one is just as usable and expires on its own at the provider.
-            if await self._recorded_copy(staged, workspace_id) is None:
-                logger.warning("Could not record the copy of file %s: %s", staged.file_id, exc)
-                raise ProviderUploadFailedError from exc
-        except DATABASE_ERRORS as exc:
-            # The copy is at the provider and nothing names it, so it is
-            # unreachable until its own expiry. Refusing stops this request
-            # adding a second; a retry while the database is down adds another.
-            logger.warning("Could not record the copy of file %s: %s", staged.file_id, exc)
+            client = ProviderFileClient(
+                provider=account.provider, provider_instance=account.instance, credential=credential
+            )
+        except LookupError as exc:
+            logger.warning("Provider %s cannot hold copies of attached files: %s", account.provider.value, exc)
             raise ProviderUploadFailedError from exc
-        return copy.provider_file_id
+        try:
+            for staged in missing:
+                ids[staged.file_id] = await self._copy(client, staged, account)
+        finally:
+            await client.aclose()
+        return ids
 
-    async def _recorded_copy(self, staged: StagedFile, workspace_id: uuid.UUID) -> FileProviderCopy | None:
-        """The copy recorded for ``staged`` in this request's provider account, or None.
+    async def _usable(self, files: Sequence[StagedFile], account: ProviderAccount) -> dict[str, FileProviderCopy]:
+        """The recorded copies of ``files`` in ``account`` with enough life left, by file ID.
 
         Raises:
             ProviderUploadFailedError: the copies could not be read.
         """
         try:
             async with self._uow:
-                return await self._copies.in_account(
-                    staged.file_id,
-                    provider=self._provider,
-                    provider_instance=self._provider_instance,
-                    credential_workspace_id=workspace_id,
+                return await self._copies.usable(
+                    [staged.file_id for staged in files],
+                    account.identity,
+                    expiring_after=datetime.now(UTC) + _REUSE_MARGIN,
                 )
         except DATABASE_ERRORS as exc:
-            logger.warning("Could not read the copies of file %s: %s", staged.file_id, exc)
+            logger.warning("Could not read the provider copies of %d file(s): %s", len(files), exc)
             raise ProviderUploadFailedError from exc
 
-    def _lifetime(self, staged: StagedFile, now: datetime) -> timedelta:
+    async def _copy(self, client: ProviderFileClient, staged: StagedFile, account: ProviderAccount) -> str:
+        """Reserve, upload and confirm one copy of ``staged``, and return the provider's ID for it."""
+        copy_id = await self._reserve(staged, account)
+        try:
+            provider_file_id, expires_at = await self._upload(client, staged, account)
+        except BaseException:
+            await self._cancel(copy_id, staged)
+            raise
+        try:
+            async with self._uow:
+                confirmed = await self._copies.confirm(
+                    copy_id, provider_file_id=provider_file_id, expires_at=expires_at
+                )
+        except DATABASE_ERRORS as exc:
+            # The provider holds a copy that only a pending row names. The row
+            # stays pending until it is stale, and the copy expires on its own.
+            logger.warning("Could not confirm the copy of file %s: %s", staged.file_id, exc)
+            raise ProviderUploadFailedError from exc
+        if not confirmed:
+            logger.warning(
+                "The reservation for the copy of file %s was reclaimed before it was confirmed", staged.file_id
+            )
+            raise ProviderUploadFailedError
+        return provider_file_id
+
+    async def _reserve(self, staged: StagedFile, account: ProviderAccount) -> uuid.UUID:
+        """Record a pending copy of ``staged`` in ``account``, before anything is uploaded.
+
+        Raises:
+            ProviderUploadFailedError: the reservation could not be recorded.
+        """
+        copy = FileProviderCopy(
+            id=uuid.uuid4(),
+            file_id=staged.file_id,
+            account_identity=account.identity,
+            provider=account.provider.value,
+            provider_instance=account.instance,
+            credential_workspace_id=account.workspace_id,
+            pending_since=datetime.now(UTC),
+        )
+        try:
+            async with self._uow:
+                await self._copies.reserve(copy)
+        except _RESERVE_ERRORS as exc:
+            logger.warning("Could not reserve a copy of file %s: %s", staged.file_id, exc)
+            raise ProviderUploadFailedError from exc
+        return copy.id
+
+    async def _cancel(self, copy_id: uuid.UUID, staged: StagedFile) -> None:
+        """Remove a reservation whose copy the provider does not hold, best effort.
+
+        A reservation that cannot be removed now stays pending until it is stale.
+        """
+        try:
+            async with self._uow:
+                await self._copies.cancel(copy_id)
+        except DATABASE_ERRORS as exc:
+            logger.warning("Could not cancel the reserved copy of file %s: %s", staged.file_id, exc)
+
+    def _lifetime(self, staged: StagedFile, account: ProviderAccount, now: datetime) -> timedelta:
         """How long the copy may live: the configured life, never past the file's own.
 
         A copy that outlived its file would leave the provider holding something
@@ -142,19 +202,41 @@ class ProviderFileUploader:
         ttl = timedelta(hours=self._config.files_provider_upload_ttl_hours)
         if staged.expires_at is not None:
             ttl = min(ttl, _as_utc(staged.expires_at) - now - _ACCEPT_SLACK)
-        if ttl < minimum_copy_lifetime(self._provider) or ttl <= _REUSE_MARGIN:
+        if ttl < minimum_copy_lifetime(account.provider) or ttl <= _REUSE_MARGIN:
             logger.warning(
                 "File %s has less life left than provider %s will hold a copy for; "
                 "files_retention_hours must exceed that floor for a copy to be possible",
                 staged.file_id,
-                self._provider,
+                account.provider.value,
             )
             raise AttachedFileExpiresTooSoonError
         return ttl
 
-    def _refuse_a_file_expiring_too_soon(self, staged: StagedFile) -> None:
-        """Raise where no copy of ``staged`` can be made that expires no later than it does."""
-        self._lifetime(staged, datetime.now(UTC))
+    async def _upload(
+        self, client: ProviderFileClient, staged: StagedFile, account: ProviderAccount
+    ) -> tuple[str, datetime]:
+        """Put ``staged``'s bytes at the provider, and return the copy's ID and expiry.
+
+        Raises:
+            ProviderUploadFailedError: the bytes could not be read, the provider
+                refused them, or it would hold them past the file's own expiry.
+        """
+        try:
+            data = await self._file_store.get(staged.storage_ref)
+        except OSError as exc:
+            logger.warning("Could not read file %s to copy it to provider %s: %s", staged.file_id, client.provider, exc)
+            raise ProviderUploadFailedError from exc
+        # Measured after the blob read, because the provider starts the copy's
+        # life when it accepts the upload.
+        now = datetime.now(UTC)
+        ttl = self._lifetime(staged, account, now)
+        metadata = await client.upload(
+            data, filename=staged.filename, mime_type=staged.mime_type, expires_in=int(ttl.total_seconds())
+        )
+        expires_at = _as_utc(metadata.expires_at) if metadata.expires_at else now + ttl
+        if staged.expires_at is not None and expires_at > _as_utc(staged.expires_at):
+            await self._discard_an_overlong_copy(client, staged, metadata.id, expires_at)
+        return metadata.id, expires_at
 
     async def _discard_an_overlong_copy(
         self, client: ProviderFileClient, staged: StagedFile, provider_file_id: str, expires_at: datetime
@@ -162,10 +244,7 @@ class ProviderFileUploader:
         """Remove a copy the provider will hold past the file's own expiry, and refuse.
 
         Otari asks for an expiry and cannot make a provider honor it, so a copy
-        that would outlive the file is taken back rather than recorded. Refusing
-        either way, because a copy left behind is the thing this promises not to
-        do. The comparison is against the file rather than against the life
-        asked for, which the provider starts counting a round trip later.
+        that would outlive the file is taken back rather than recorded.
 
         Raises:
             ProviderUploadFailedError: always.
@@ -173,52 +252,9 @@ class ProviderFileUploader:
         removed = await client.discard(provider_file_id)
         logger.warning(
             "Provider %s would hold its copy of file %s until %s, past the file's own expiry; %s",
-            self._provider,
+            client.provider,
             staged.file_id,
             expires_at.isoformat(),
             "removed it" if removed else "it could not be removed",
         )
         raise ProviderUploadFailedError
-
-    async def _upload(self, staged: StagedFile, workspace_id: uuid.UUID) -> FileProviderCopy:
-        """Put ``staged``'s bytes at the provider and describe the copy that came back."""
-        # Refused before a byte is read, so a file too close to its own expiry
-        # costs nothing. The life the provider is told is measured again below.
-        self._refuse_a_file_expiring_too_soon(staged)
-        try:
-            data = await self._file_store.get(staged.storage_ref)
-            client = ProviderFileClient.for_run(
-                self._config,
-                provider=self._provider,
-                provider_instance=self._provider_instance,
-                workspace_id=workspace_id,
-            )
-            try:
-                # Measured here rather than before the blob read, because the
-                # provider starts the copy's life when it accepts the upload.
-                now = datetime.now(UTC)
-                ttl = self._lifetime(staged, now)
-                metadata = await client.upload(
-                    data,
-                    filename=staged.filename,
-                    mime_type=staged.mime_type,
-                    expires_in=int(ttl.total_seconds()),
-                )
-                expires_at = _as_utc(metadata.expires_at) if metadata.expires_at else now + ttl
-                if staged.expires_at is not None and expires_at > _as_utc(staged.expires_at):
-                    await self._discard_an_overlong_copy(client, staged, metadata.id, expires_at)
-            finally:
-                await client.aclose()
-        except (LookupError, OSError, ValueError) as exc:
-            # No credential for the instance, or bytes that could not be read.
-            logger.warning("Could not give provider %s a copy of file %s: %s", self._provider, staged.file_id, exc)
-            raise ProviderUploadFailedError from exc
-        return FileProviderCopy(
-            file_id=staged.file_id,
-            provider=self._provider,
-            provider_instance=self._provider_instance,
-            credential_workspace_id=workspace_id,
-            provider_file_id=metadata.id,
-            expires_at=expires_at,
-            created_at=now,
-        )

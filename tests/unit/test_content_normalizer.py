@@ -16,7 +16,7 @@ from any_llm.types.completion import CompletionUsage
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.files_exceptions import AttachedFileUnavailableError, ProviderUploadFailedError
 from gateway.services import content_normalizer as cn
-from gateway.services.content_normalizer import normalize_messages
+from gateway.services.content_normalizer import name_container_copies, normalize_messages
 from gateway.services.file_extractors import ExtractionResult
 from gateway.services.files import FileScope, StagedFile
 from gateway.services.model_capabilities import Capabilities
@@ -399,23 +399,11 @@ async def test_two_uploads_named_alike_are_both_staged_and_the_model_learns_both
     assert "data.csv" in markers[2] and "data-2" not in markers[2]
 
 
-class _Uploader:
-    """The provider copy an attached file gets, with the upload stubbed."""
-
-    def __init__(self, provider_file_id: str = "file_011Cq") -> None:
-        self._provider_file_id = provider_file_id
-        self.asked: list[str] = []
-
-    async def file_id_for(self, staged: StagedFile) -> str:
-        self.asked.append(staged.file_id)
-        return self._provider_file_id
-
-
 @pytest.mark.asyncio
-async def test_container_upload_names_the_provider_copy_when_the_provider_runs_the_code() -> None:
+async def test_container_upload_is_held_for_the_providers_container() -> None:
     files = _files(_stored(), data=b"a,b\n1,2\n")
-    uploader = _Uploader()
-    msgs = [{"role": "user", "content": [{"type": "container_upload", "file_id": "file-csv"}]}]
+    block = {"type": "container_upload", "file_id": "file-csv"}
+    msgs = [{"role": "user", "content": [block, dict(block)]}]
 
     out, stats = await normalize_messages(
         msgs,
@@ -424,15 +412,32 @@ async def test_container_upload_names_the_provider_copy_when_the_provider_runs_t
         fmt="anthropic",
         files=files,
         user_id="u",
-        container_uploads=cast(Any, uploader),
+        provider_container=True,
     )
 
-    # The provider's own id reaches the provider, and the model is shown nothing:
-    # the block is for its container. The blob is never loaded here either.
-    assert out[0]["content"][0] == {"type": "container_upload", "file_id": "file_011Cq"}
-    assert uploader.asked == ["file-csv"]
+    # The block keeps naming the upload, which each candidate is sent a copy of
+    # in its own account. The model is shown nothing, and the blob is not read.
+    assert out[0]["content"] == [block, block]
+    assert [staged.file_id for staged in stats.container_inputs] == ["file-csv"]
     assert stats.files_extracted == 0
     assert files.reads == []
+
+
+def test_container_copies_are_named_without_changing_the_request() -> None:
+    msgs: list[dict[str, Any]] = [
+        {
+            "role": "user",
+            "content": [{"type": "container_upload", "file_id": "file-csv"}, {"type": "text", "text": "x"}],
+        },
+        {"role": "assistant", "content": "plain"},
+    ]
+
+    named = name_container_copies(msgs, {"file-csv": "file_011Cq"})
+
+    assert named[0]["content"][0] == {"type": "container_upload", "file_id": "file_011Cq"}
+    assert named[0]["content"][1] == {"type": "text", "text": "x"}
+    assert named[1] == {"role": "assistant", "content": "plain"}
+    assert msgs[0]["content"][0]["file_id"] == "file-csv"
 
 
 @pytest.mark.asyncio
@@ -448,7 +453,7 @@ async def test_container_upload_naming_an_unknown_file_refuses() -> None:
             fmt="anthropic",
             files=_files(_stored()),
             user_id="u",
-            container_uploads=cast(Any, _Uploader()),
+            provider_container=True,
         )
 
 
@@ -474,5 +479,5 @@ async def test_a_container_upload_whose_lookup_fails_refuses(monkeypatch: pytest
             fmt="anthropic",
             files=cast(Any, _Broken()),
             user_id="u",
-            container_uploads=cast(Any, _Uploader()),
+            provider_container=True,
         )

@@ -24,7 +24,9 @@ from gateway.ports.file_storage_port import FileStoragePort
 from gateway.repositories.files import FilePageQuery, FileRepositories
 from gateway.services.files._file_ids import file_id_in, page_token
 from gateway.services.files._metadata import expiry_for, guess_mime_type
+from gateway.services.files._provider_uploads import ProviderCopies
 from gateway.services.files._staging import StagedFile
+from gateway.types.provider_account import ProviderAccount, ResolvedCredential
 
 # Resolves the workspace a deployment-wide write lands in. It belongs to the
 # organizations domain, so files receives it rather than looking it up.
@@ -162,9 +164,11 @@ class FileService:
     ) -> None:
         self._uow = uow
         self._files = repositories.files
+        self._copies = repositories.provider_copies
         self._file_store = file_store
         self._config = config
         self._default_workspace = default_workspace
+        self._provider_copies = ProviderCopies(uow, repositories.provider_copies, file_store, config)
 
     async def store(self, upload: NewFile) -> FileObject:
         """Store an upload's bytes and record the file, and return the row.
@@ -333,10 +337,27 @@ class FileService:
         record = await self._reserve_produced(output, storage_ref)
         return await self._write(record, chunks)
 
+    async def provider_file_ids(
+        self, files: Sequence[StagedFile], account: ProviderAccount, credential: ResolvedCredential
+    ) -> dict[str, str]:
+        """The provider's ID for a copy of each file in ``account``, keyed by the file's own ID.
+
+        A copy with enough life left is reused, and one is uploaded where none
+        is. ``credential`` must be the one the request dispatches with, because
+        a copy exists only in the account that credential reaches.
+
+        Raises:
+            ProviderUploadDisabledError: the deployment makes no provider copies.
+            AttachedFileExpiresTooSoonError: a copy would outlive its file.
+            ProviderUploadFailedError: a copy could not be made or recorded.
+        """
+        return await self._provider_copies.file_ids_for(files, account, credential)
+
     async def sweep(self, *, batch_size: int, after: tuple[datetime, str] | None = None) -> SweepBatch:
         """Delete expired, revoked and abandoned bytes between short database transactions."""
         now = datetime.now(UTC)
         async with self._uow:
+            await self._copies.remove_stale_pending(pending_before=now - _PENDING_GRACE, limit=batch_size)
             records = await self._files.reclaimable(
                 batch_size=batch_size, pending_before=now - _PENDING_GRACE, after=after
             )

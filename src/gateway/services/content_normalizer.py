@@ -24,8 +24,9 @@ from __future__ import annotations
 import base64
 import binascii
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from any_llm.types.completion import CompletionUsage
 
@@ -36,9 +37,6 @@ from gateway.services.file_extractors import extract_text_from_file, ocr_image, 
 from gateway.services.files import FileScope, FileService, StagedFile, sandbox_path_for
 from gateway.services.model_capabilities import Capabilities
 from gateway.services.vision import describe_image
-
-if TYPE_CHECKING:
-    from gateway.services.files import ProviderFileUploader
 
 WireFormat = Literal["openai", "anthropic", "responses"]
 
@@ -68,6 +66,15 @@ class NormalizationStats:
     # Uploads the request referenced for the code-execution sandbox, in message
     # order and without repeats. Only filled when the caller said a sandbox runs.
     sandbox_inputs: list[StagedFile] = field(default_factory=list)
+    # Uploads a ``container_upload`` block named for the provider's own
+    # container, in message order and without repeats. Only filled when the
+    # caller said the provider runs the code.
+    container_inputs: list[StagedFile] = field(default_factory=list)
+
+    def hold_for_container(self, staged: StagedFile) -> None:
+        """Record ``staged`` as a file the provider's own container must be given."""
+        if all(existing.file_id != staged.file_id for existing in self.container_inputs):
+            self.container_inputs.append(staged)
 
     def stage(self, staged: StagedFile) -> StagedFile:
         """Record ``staged`` for the sandbox and return it under its session name.
@@ -373,6 +380,26 @@ def _is_container_block(block: dict[str, Any], fmt: WireFormat) -> bool:
     return fmt == "anthropic" and block.get("type") == _CONTAINER
 
 
+def name_container_copies(messages: list[dict[str, Any]], copies: Mapping[str, str]) -> list[dict[str, Any]]:
+    """``messages`` with each ``container_upload`` block naming the copy ``copies`` maps its upload to.
+
+    The messages passed in are left as they are, so one request can be named
+    for several accounts in turn.
+    """
+
+    def _named(block: Any) -> Any:
+        if isinstance(block, dict) and _is_container_block(block, "anthropic") and block.get("file_id") in copies:
+            return {**block, "file_id": copies[block["file_id"]]}
+        return block
+
+    return [
+        {**message, "content": [_named(block) for block in message["content"]]}
+        if isinstance(message, dict) and isinstance(message.get("content"), list)
+        else message
+        for message in messages
+    ]
+
+
 def has_container_blocks(messages: Any, fmt: WireFormat) -> bool:
     """Whether any message carries a block naming a file for a code-execution container."""
     if not isinstance(messages, list):
@@ -396,7 +423,7 @@ async def _normalize_block(
     user_id: str | None,
     workspace_id: uuid.UUID | None,
     sandbox_requested: bool = False,
-    container_uploads: ProviderFileUploader | None = None,
+    provider_container: bool = False,
 ) -> Any:
     if not isinstance(block, dict):
         return block
@@ -408,17 +435,17 @@ async def _normalize_block(
             user_id=user_id,
             workspace_id=workspace_id,
             sandbox_requested=sandbox_requested,
-            provider_container=container_uploads is not None,
+            provider_container=provider_container,
         )
     except Exception as exc:  # noqa: BLE001 — never fail the request over a block
         logger.warning("content normalizer: failed to classify block: %s", exc)
-        if container_uploads is not None and _is_container_block(block, fmt):
+        if provider_container and _is_container_block(block, fmt):
             # The file may well exist. Saying it does not would blame the caller
             # for a store or database failure, so this reads as an upstream fault.
             raise ProviderUploadFailedError from exc
         return block
     if src is None:
-        if container_uploads is not None and _is_container_block(block, fmt):
+        if provider_container and _is_container_block(block, fmt):
             raise AttachedFileUnavailableError
         return block
 
@@ -427,14 +454,15 @@ async def _normalize_block(
         if staged is not None:
             # The sandbox gets the bytes; the model gets told where they are.
             return _text_block(fmt, f"[File available in the code execution sandbox: {staged.filename}]")
-        if container_uploads is not None and _is_container_block(block, fmt):
+        if provider_container and _is_container_block(block, fmt):
             if src.staged is None:
                 # Resolved, but to no stored file, so there is nothing to copy.
                 # Falling back would show the model contents its code cannot open.
                 raise AttachedFileUnavailableError
-            # The provider's own container reads only its provider's file ids,
-            # so the block names the copy rather than the upload.
-            return {**block, "file_id": await container_uploads.file_id_for(src.staged)}
+            # The block keeps naming the upload. Each candidate is sent the ID of
+            # a copy in its own account, which only dispatch knows.
+            stats.hold_for_container(src.staged)
+            return {**block, "file_id": src.staged.file_id}
         src.kind = _DOCUMENT
 
     native = caps.image if src.kind == _IMAGE else caps.pdf
@@ -489,7 +517,7 @@ async def normalize_messages(
     user_id: str | None,
     workspace_id: uuid.UUID | None = None,
     sandbox_requested: bool = False,
-    container_uploads: ProviderFileUploader | None = None,
+    provider_container: bool = False,
 ) -> tuple[list[dict[str, Any]], NormalizationStats]:
     """Return (possibly-rewritten messages, stats).
 
@@ -502,10 +530,10 @@ async def normalize_messages(
     ``stats.sandbox_inputs`` for the sandbox to seed, and ``container_upload``
     blocks are staged instead of read.
 
-    ``container_uploads`` says the provider runs the code in a container of its
-    own, and is what gives a ``container_upload`` block the provider's ID for the
-    upload it names. A block this cannot resolve refuses the request rather than
-    reaching the provider.
+    ``provider_container`` says the provider runs the code in a container of its
+    own. A ``container_upload`` block then keeps naming the upload, which is
+    recorded on ``stats.container_inputs``, and a block naming no upload this
+    caller holds refuses the request rather than reaching the provider.
 
     Messages whose ``content`` is a plain string are returned untouched (the
     common, zero-overhead path). Only list-content messages are walked, plus, on
@@ -530,7 +558,7 @@ async def normalize_messages(
             user_id=user_id,
             workspace_id=workspace_id,
             sandbox_requested=sandbox_requested,
-            container_uploads=container_uploads,
+            provider_container=provider_container,
         )
 
     out: list[dict[str, Any]] = []

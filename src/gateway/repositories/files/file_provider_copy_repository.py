@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import uuid
-from typing import Never
+from collections.abc import Collection
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Never, cast
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.files_exceptions import ProviderCopyNotRecordedError
 from gateway.models.files import FileProviderCopy
 from gateway.repositories.base_repository import BaseRepository
+
+if TYPE_CHECKING:
+    from sqlalchemy.engine import CursorResult
 
 
 class FileProviderCopyRepository(BaseRepository[FileProviderCopy, Never, Never]):
@@ -20,35 +25,78 @@ class FileProviderCopyRepository(BaseRepository[FileProviderCopy, Never, Never])
     def __init__(self, uow: UnitOfWork) -> None:
         super().__init__(uow, FileProviderCopy)
 
-    async def in_account(
-        self, file_id: str, *, provider: str, provider_instance: str, credential_workspace_id: uuid.UUID
-    ) -> FileProviderCopy | None:
-        """The copy this file has in one provider account, or None.
+    async def usable(
+        self, file_ids: Collection[str], account_identity: str, *, expiring_after: datetime
+    ) -> dict[str, FileProviderCopy]:
+        """The confirmed copy with the most life left for each file, in one account.
 
-        Every part of the key is required, because a copy found under a
-        different one names a file that account does not hold.
+        A file whose copies all expire by ``expiring_after`` is left out, and so
+        is a pending copy, which has no provider ID to name yet.
         """
+        if not file_ids:
+            return {}
         result = await self.db.execute(
-            select(FileProviderCopy).where(
-                FileProviderCopy.file_id == file_id,
-                FileProviderCopy.provider == provider,
-                FileProviderCopy.provider_instance == provider_instance,
-                FileProviderCopy.credential_workspace_id == credential_workspace_id,
+            select(FileProviderCopy)
+            .where(
+                FileProviderCopy.file_id.in_(list(file_ids)),
+                FileProviderCopy.account_identity == account_identity,
+                FileProviderCopy.pending_since.is_(None),
+                FileProviderCopy.expires_at > expiring_after,
             )
+            .order_by(FileProviderCopy.expires_at.desc())
         )
-        return result.scalar_one_or_none()
+        copies: dict[str, FileProviderCopy] = {}
+        for copy in result.scalars():
+            copies.setdefault(copy.file_id, copy)
+        return copies
 
-    async def record(self, copy: FileProviderCopy) -> None:
-        """Stage ``copy`` as the one copy its file has in that provider account.
-
-        A copy the provider has since expired is replaced rather than kept
-        beside the new one, which is what the primary key already says.
+    async def reserve(self, copy: FileProviderCopy) -> None:
+        """Stage ``copy`` as pending, before the provider holds it.
 
         Raises:
             ProviderCopyNotRecordedError: the database refused the row.
         """
-        await self.db.merge(copy)
+        self.db.add(copy)
         try:
             await self.db.flush()
         except IntegrityError as exc:
             raise ProviderCopyNotRecordedError from exc
+
+    async def confirm(self, copy_id: uuid.UUID, *, provider_file_id: str, expires_at: datetime) -> bool:
+        """Stage a pending copy as held by the provider, and report whether it was still pending.
+
+        False says the reservation is gone, so nothing names the copy the
+        provider now holds.
+        """
+        result = cast(
+            "CursorResult[Any]",
+            await self.db.execute(
+                update(FileProviderCopy)
+                .where(FileProviderCopy.id == copy_id, FileProviderCopy.pending_since.is_not(None))
+                .values(provider_file_id=provider_file_id, expires_at=expires_at, pending_since=None)
+                .execution_options(synchronize_session=False)
+            ),
+        )
+        return result.rowcount == 1
+
+    async def cancel(self, copy_id: uuid.UUID) -> None:
+        """Stage the removal of a copy the provider will not hold."""
+        await self.db.execute(delete(FileProviderCopy).where(FileProviderCopy.id == copy_id))
+
+    async def remove_stale_pending(self, *, pending_before: datetime, limit: int) -> int:
+        """Stage the removal of up to ``limit`` copies pending since before ``pending_before``.
+
+        Such a copy never had a provider ID recorded, so there is nothing at the
+        provider this row could still be used to reach.
+        """
+        stale = (
+            select(FileProviderCopy.id)
+            .where(FileProviderCopy.pending_since < pending_before)
+            .order_by(FileProviderCopy.pending_since)
+            .limit(limit)
+        )
+        result = cast(
+            "CursorResult[Any]",
+            await self.db.execute(delete(FileProviderCopy).where(FileProviderCopy.id.in_(stale))),
+        )
+        return result.rowcount

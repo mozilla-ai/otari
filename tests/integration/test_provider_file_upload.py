@@ -18,6 +18,7 @@ import httpx
 import pytest
 from any_llm.types.messages import MessageResponse, TextBlock
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -147,9 +148,11 @@ def test_an_attached_file_reaches_the_providers_container(
     assert len(anthropic_files.uploads) == 1
     stored = db_session.get(FileObject, file_id)
     assert stored is not None
-    row = db_session.get(FileProviderCopy, (file_id, "anthropic", "anthropic", stored.workspace_id))
-    assert row is not None, "the copy was not recorded under the workspace whose credential made it"
+    [row] = db_session.scalars(select(FileProviderCopy).where(FileProviderCopy.file_id == file_id)).all()
+    assert row.pending_since is None, "the copy was never confirmed"
+    assert row.credential_workspace_id == stored.workspace_id
     assert row.provider_file_id == _PROVIDER_FILE_ID
+    assert row.expires_at is not None
     assert row.expires_at > datetime.now(UTC)
 
 
@@ -251,18 +254,107 @@ def test_file_understanding_off_still_runs_code_that_attaches_nothing(
     assert anthropic_files.uploads == []
 
 
-@pytest.mark.asyncio
-async def test_a_copy_row_the_database_refuses_is_reported_as_not_recorded(async_db: AsyncSession) -> None:
-    uow = UnitOfWork(async_db)
-    copy = FileProviderCopy(
-        file_id="file-that-does-not-exist",
+def _pending(file_id: str, workspace_id: uuid.UUID, *, since: datetime | None = None) -> FileProviderCopy:
+    return FileProviderCopy(
+        id=uuid.uuid4(),
+        file_id=file_id,
+        account_identity="account-1",
         provider="anthropic",
         provider_instance="anthropic",
-        credential_workspace_id=uuid.uuid4(),
-        provider_file_id=_PROVIDER_FILE_ID,
-        expires_at=datetime.now(UTC) + timedelta(hours=1),
+        credential_workspace_id=workspace_id,
+        pending_since=since or datetime.now(UTC),
     )
+
+
+@pytest.mark.asyncio
+async def test_a_copy_of_a_file_that_does_not_exist_is_not_reserved(async_db: AsyncSession) -> None:
+    uow = UnitOfWork(async_db)
 
     with pytest.raises(ProviderCopyNotRecordedError):
         async with uow:
-            await FileProviderCopyRepository(uow).record(copy)
+            await FileProviderCopyRepository(uow).reserve(_pending("file-that-does-not-exist", uuid.uuid4()))
+
+
+def _stored_file(db_session: Session, client: TestClient, headers: dict[str, str]) -> FileObject:
+    stored = db_session.get(FileObject, _upload_file(client, headers))
+    assert stored is not None
+    return stored
+
+
+@pytest.mark.asyncio
+async def test_only_a_confirmed_copy_in_the_same_account_is_usable(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    db_session: Session,
+    tmp_file_store: None,
+    async_db: AsyncSession,
+) -> None:
+    stored = _stored_file(db_session, client, api_key_header)
+    uow = UnitOfWork(async_db)
+    repository = FileProviderCopyRepository(uow)
+    later = datetime.now(UTC) + timedelta(hours=2)
+    confirmed, pending = _pending(stored.id, stored.workspace_id), _pending(stored.id, stored.workspace_id)
+
+    async with uow:
+        await repository.reserve(confirmed)
+        await repository.reserve(pending)
+    async with uow:
+        assert await repository.confirm(confirmed.id, provider_file_id="file_a", expires_at=later)
+    async with uow:
+        found = await repository.usable([stored.id], "account-1", expiring_after=datetime.now(UTC))
+        elsewhere = await repository.usable([stored.id], "account-2", expiring_after=datetime.now(UTC))
+
+    assert found[stored.id].provider_file_id == "file_a"
+    assert elsewhere == {}
+
+
+@pytest.mark.asyncio
+async def test_a_copy_is_confirmed_once(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    db_session: Session,
+    tmp_file_store: None,
+    async_db: AsyncSession,
+) -> None:
+    stored = _stored_file(db_session, client, api_key_header)
+    uow = UnitOfWork(async_db)
+    repository = FileProviderCopyRepository(uow)
+    copy = _pending(stored.id, stored.workspace_id)
+    later = datetime.now(UTC) + timedelta(hours=1)
+
+    async with uow:
+        await repository.reserve(copy)
+    async with uow:
+        first = await repository.confirm(copy.id, provider_file_id="file_a", expires_at=later)
+    async with uow:
+        second = await repository.confirm(copy.id, provider_file_id="file_b", expires_at=later)
+
+    assert (first, second) == (True, False)
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_removes_only_stale_reservations(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    db_session: Session,
+    tmp_file_store: None,
+    async_db: AsyncSession,
+) -> None:
+    stored = _stored_file(db_session, client, api_key_header)
+    uow = UnitOfWork(async_db)
+    repository = FileProviderCopyRepository(uow)
+    now = datetime.now(UTC)
+    stale, fresh = (
+        _pending(stored.id, stored.workspace_id, since=now - timedelta(hours=3)),
+        _pending(stored.id, stored.workspace_id, since=now),
+    )
+
+    async with uow:
+        await repository.reserve(stale)
+        await repository.reserve(fresh)
+    async with uow:
+        removed = await repository.remove_stale_pending(pending_before=now - timedelta(hours=1), limit=10)
+
+    remaining = db_session.scalars(select(FileProviderCopy.id).where(FileProviderCopy.file_id == stored.id)).all()
+    assert removed == 1
+    assert remaining == [fresh.id]

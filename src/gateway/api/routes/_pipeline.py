@@ -65,7 +65,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import extract_credential_token, verify_api_key_or_master_key
-from gateway.api.routes._attempts import walk_attempts
+from gateway.api.routes._attempts import CandidateCannotServe, PrepareKwargs, walk_attempts
 from gateway.api.routes._helpers import apply_input_guardrails, resolve_user_id
 from gateway.api.routes._idempotency import (
     IDEMPOTENCY_KEY_IN_FLIGHT_DETAIL,
@@ -134,6 +134,7 @@ from gateway.core.usage import (
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
 )
+from gateway.exceptions import TenancyError
 from gateway.exceptions.tools_exceptions import (
     McpServerResolutionFailedError,
     WebAccessRefusedError,
@@ -919,6 +920,26 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         """Adjust the ``run_platform_attempts``-shaped kwargs for the format's
         provider call (the responses format re-splits ``provider:model``)."""
         ...
+
+
+_DOMAIN_ERROR_KINDS = {
+    status.HTTP_403_FORBIDDEN: ErrorKind.PERMISSION,
+    status.HTTP_404_NOT_FOUND: ErrorKind.NOT_FOUND,
+}
+
+
+def domain_error(adapter: FormatAdapter[Any, Any], exc: TenancyError) -> HTTPException:
+    """``exc`` in the error envelope of ``adapter``'s dialect.
+
+    A 4xx message is written for the caller and is sent as it is.
+    A 5xx message describes the deployment, so it goes to the log instead.
+    """
+    if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
+        logger.error("Request failed: %s", exc.message)
+        return adapter.error(exc.status_code, "Internal server error", ErrorKind.API)
+    return adapter.error(
+        exc.status_code, exc.message, _DOMAIN_ERROR_KINDS.get(exc.status_code, ErrorKind.INVALID_REQUEST)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2234,6 +2255,9 @@ async def resolve_request_context(
             except HTTPException:
                 await refund_reservation(db, reservation)
                 raise
+            except TenancyError as exc:
+                await refund_reservation(db, reservation)
+                raise domain_error(adapter, exc) from exc
             except Exception as exc:
                 await refund_reservation(db, reservation)
                 logger.error("Request setup failed after reservation: %s", exc)
@@ -4809,6 +4833,24 @@ def stream_final_attempt_extra_seconds(
 # ---------------------------------------------------------------------------
 
 
+async def _prepared(
+    adapter: FormatAdapter[Any, Any], prepare_kwargs: PrepareKwargs | None, instance: str, call_kwargs: dict[str, Any]
+) -> dict[str, Any]:
+    """What the only candidate of a request with no fallover is sent.
+
+    Raises:
+        HTTPException: the candidate cannot serve the request, or it was refused.
+    """
+    if prepare_kwargs is None:
+        return call_kwargs
+    try:
+        return await prepare_kwargs(instance, call_kwargs)
+    except CandidateCannotServe as exc:
+        raise exc.refusal from exc
+    except TenancyError as exc:
+        raise domain_error(adapter, exc) from exc
+
+
 async def run_single_attempt_stream(
     *,
     adapter: FormatAdapter[Any, ChunkT],
@@ -4821,6 +4863,7 @@ async def run_single_attempt_stream(
     session_label: str | None = None,
     display_model: str | None = None,
     base_request_fields: dict[str, Any] | None = None,
+    prepare_kwargs: PrepareKwargs | None = None,
 ) -> StreamingResponse:
     """Open a single-attempt stream and wrap it with settlement callbacks.
 
@@ -4870,6 +4913,7 @@ async def run_single_attempt_stream(
                     max_tool_iterations=tool_ctx.max_tool_iterations,
                     policy_name=ctx.plan.policy_name,
                     build_kwargs=adapter.local_attempt_kwargs,
+                    prepare_kwargs=prepare_kwargs,
                     on_absorbed=_absorbed,
                     on_terminal=stopped_on.append,
                 )
@@ -4881,6 +4925,7 @@ async def run_single_attempt_stream(
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
             stream_attribution = _attribution_for(ctx, chosen)
         else:
+            call_kwargs = await _prepared(adapter, prepare_kwargs, provider, call_kwargs)
             stream = await open_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
             # A single-candidate policy still names a policy and a reason, and
             # both belong on the row.
@@ -5501,6 +5546,7 @@ async def run_standalone_non_stream(
     model: str,
     display_model: str | None = None,
     base_request_fields: dict[str, Any] | None = None,
+    prepare_kwargs: PrepareKwargs | None = None,
 ) -> ResultT:
     """Standalone-mode non-streaming dispatch with reservation settlement.
 
@@ -5556,6 +5602,7 @@ async def run_standalone_non_stream(
                     max_tool_iterations=tool_ctx.max_tool_iterations,
                     policy_name=ctx.plan.policy_name,
                     build_kwargs=adapter.local_attempt_kwargs,
+                    prepare_kwargs=prepare_kwargs,
                     on_absorbed=_absorbed,
                     on_terminal=stopped_on.append,
                 )
@@ -5567,6 +5614,7 @@ async def run_standalone_non_stream(
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
             attribution = _attribution_for(ctx, chosen)
         else:
+            call_kwargs = await _prepared(adapter, prepare_kwargs, provider, call_kwargs)
             result = await dispatch_non_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
             # A single-candidate policy still has a name and a selection reason, and
             # both belong on the row: "served by its default target" is the answer to

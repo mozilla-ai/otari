@@ -71,30 +71,47 @@ class ProviderAttachmentError(TenancyError):
     Each of these refuses the request rather than answering without the file,
     because the request asked for code to be run over that file and the code
     would not find it.
+    The status is each subclass's own.
     """
 
-    status_code = status.HTTP_400_BAD_REQUEST
+
+class ProviderAttachmentRefusedError(TenancyValidationError, ProviderAttachmentError):
+    """What the request asked for cannot be done here, whatever the provider says."""
 
 
-class AttachedFileUnavailableError(ProviderAttachmentError):
+class AttachedFileUnavailableError(ProviderAttachmentRefusedError):
     """The deployment holds no usable file under the ID the request attached."""
 
     def __init__(self) -> None:
         super().__init__("An attached file does not exist, or holds no bytes here")
 
 
-class AttachedFileExpiresTooSoonError(ProviderAttachmentError):
+class AttachedFileExpiresTooSoonError(ProviderAttachmentRefusedError):
     """The file has too little left for a provider to hold a copy no longer than Otari does."""
 
     def __init__(self) -> None:
         super().__init__("An attached file expires too soon to be copied to the provider")
 
 
-class ProviderUploadDisabledError(ProviderAttachmentError):
+class AttachedFilesNotReadError(ProviderAttachmentRefusedError):
+    """The deployment does not read attached files, so it cannot resolve the one attached."""
+
+    def __init__(self) -> None:
+        super().__init__("This deployment does not read attached files")
+
+
+class ProviderUploadDisabledError(ProviderAttachmentRefusedError):
     """The deployment does not upload a copy of an attached file to a provider."""
 
     def __init__(self) -> None:
         super().__init__("This deployment does not upload attached files to a provider")
+
+
+class NoCandidateHoldsCopiesError(ProviderAttachmentRefusedError):
+    """No model the request may reach runs code over a file copied to its provider."""
+
+    def __init__(self) -> None:
+        super().__init__("No model this request may use can run code over an attached file")
 
 
 class ProviderUploadFailedError(ProviderAttachmentError):

@@ -17,11 +17,13 @@ provider carrying a file ID of the caller's choosing.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable, Sequence
 from typing import Any
 
-from any_llm import LLMProvider
+from any_llm import AnyLLM, LLMProvider
 from fastapi import HTTPException
 
+from gateway.api.routes._attempts import CandidateCannotServe, PrepareKwargs
 from gateway.api.routes._tools import (
     _extract_code_execution_tool,
     decide_code_executor,
@@ -31,9 +33,12 @@ from gateway.api.routes._tools import (
     resolve_code_executor_preference,
 )
 from gateway.core.config import GatewayConfig
+from gateway.exceptions import TenancyError
 from gateway.exceptions.files_exceptions import (
+    AttachedFilesNotReadError,
+    NoCandidateHoldsCopiesError,
     ProviderAttachmentError,
-    ProviderUploadDisabledError,
+    ProviderAttachmentRefusedError,
     ProviderUploadFailedError,
 )
 from gateway.log_config import logger
@@ -42,10 +47,12 @@ from gateway.services.content_normalizer import (
     NormalizationStats,
     WireFormat,
     has_container_blocks,
+    name_container_copies,
     normalize_messages,
 )
-from gateway.services.files import FileService, ProviderFileUploader
+from gateway.services.files import FileService, StagedFile, provider_holds_copies
 from gateway.services.model_capabilities import resolve_capabilities
+from gateway.services.provider_kwargs import effective_credential, provider_account
 from gateway.services.tools import Dialect
 
 
@@ -145,7 +152,7 @@ async def normalize_request_messages(
     instance: str | None = None,
     workspace_id: uuid.UUID | None = None,
     sandbox_requested: bool = False,
-    container_uploads: ProviderFileUploader | None = None,
+    provider_container: bool = False,
 ) -> tuple[list[dict[str, Any]], NormalizationStats]:
     """Normalize ``messages`` for the resolved ``provider/model``.
 
@@ -153,28 +160,23 @@ async def normalize_request_messages(
     code-execution tool; the normalizer then records referenced uploads on the
     stats for the sandbox backend to seed (see ``NormalizationStats.sandbox_inputs``).
 
-    ``container_uploads`` is set where the provider runs the code in a container
-    of its own, and gives an attached file the provider's own ID.
+    ``provider_container`` is set where the provider runs the code in a container
+    of its own. The uploads its ``container_upload`` blocks name are then
+    recorded on ``NormalizationStats.container_inputs``, and a block naming none
+    refuses the request.
 
     An attachment the model reads never fails the request, because this runs
     after the budget reservation and a refusal here would lose it.
     The input is returned untouched instead, which is also the answer where file
     understanding is off or the provider could not be parsed.
 
-    An attachment the provider's container reads does fail the request when it
-    cannot be given, which is why ``container_uploads`` is the one thing that
-    turns any of this into a raise.
-
     Raises:
-        HTTPException: only where ``container_uploads`` is set, carrying the
-            status the files domain gave the refusal.
+        ProviderAttachmentError: only where ``provider_container`` is set.
     """
-    if container_uploads is not None and not config.file_understanding_enabled and has_container_blocks(messages, fmt):
+    if provider_container and not config.file_understanding_enabled and has_container_blocks(messages, fmt):
         # Nothing below would examine the blocks, so a `container_upload` would
         # reach the provider naming a file of the caller's choosing.
-        raise HTTPException(
-            status_code=ProviderUploadDisabledError.status_code, detail=str(ProviderUploadDisabledError())
-        )
+        raise AttachedFilesNotReadError
     if provider is None or not config.file_understanding_enabled:
         return messages, NormalizationStats()
     try:
@@ -188,21 +190,50 @@ async def normalize_request_messages(
             user_id=user_id,
             workspace_id=workspace_id,
             sandbox_requested=sandbox_requested,
-            container_uploads=container_uploads,
+            provider_container=provider_container,
         )
-    except ProviderAttachmentError as exc:
-        # Rendered here rather than left to the tenancy handler, because each
-        # completion dialect answers in its own error envelope and the handler
-        # knows only one. The status and the wording are the error's own.
-        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
-    except Exception as exc:  # noqa: BLE001 — never fail the request / leak the reservation
-        if container_uploads is not None:
+    except ProviderAttachmentError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - never fail the request or leak the reservation
+        if provider_container:
             # An aborted pass leaves the payload as it arrived, container blocks
             # and all, so forwarding it would hand the provider the caller's own
             # file ids. That is what this path exists to stop.
             logger.warning("content normalization failed for a provider container: %s", exc)
-            raise HTTPException(
-                status_code=ProviderUploadFailedError.status_code, detail=str(ProviderUploadFailedError())
-            ) from exc
+            raise ProviderUploadFailedError from exc
         logger.warning("content normalization failed; forwarding messages unchanged: %s", exc)
         return messages, NormalizationStats()
+
+
+def container_copies_step(
+    *,
+    files: FileService,
+    inputs: Sequence[StagedFile],
+    workspace_id: uuid.UUID,
+    render: Callable[[TenancyError], HTTPException],
+) -> PrepareKwargs:
+    """The step that sends each candidate the IDs of copies in its own provider account.
+
+    A candidate whose provider cannot hold a copy cannot serve the request.
+    A refusal is rendered with ``render``, the dialect's own envelope.
+    A copy that could not be made raises :class:`ProviderUploadFailedError`,
+    which is that candidate's own failure rather than a refusal of the request.
+    """
+
+    async def _prepare(instance: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        provider, _ = AnyLLM.split_model_provider(kwargs["model"])
+        if not isinstance(provider, LLMProvider) or not provider_holds_copies(provider):
+            raise CandidateCannotServe(render(NoCandidateHoldsCopiesError()))
+        try:
+            credential = effective_credential(provider, kwargs)
+        except LookupError as exc:
+            logger.warning("No credential to copy attached files to %s: %s", instance, exc)
+            raise ProviderUploadFailedError from exc
+        account = provider_account(provider, instance, workspace_id, credential)
+        try:
+            copies = await files.provider_file_ids(inputs, account, credential)
+        except ProviderAttachmentRefusedError as exc:
+            raise render(exc) from exc
+        return {**kwargs, "messages": name_container_copies(kwargs["messages"], copies)}
+
+    return _prepare

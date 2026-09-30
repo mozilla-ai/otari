@@ -57,6 +57,22 @@ ALL_ATTEMPTS_TIMED_OUT_DETAIL = "All upstream providers timed out"
 EMPTY_PLAN_DETAIL = "Routing produced no candidate to try"
 
 
+# Turns one candidate's call kwargs into what it is sent. It takes the
+# candidate's instance and its kwargs as they would be dispatched.
+PrepareKwargs = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+
+
+class CandidateCannotServe(Exception):
+    """The candidate cannot serve this request, which says nothing about its provider.
+
+    ``refusal`` is what the request is answered with when no candidate can.
+    """
+
+    def __init__(self, refusal: HTTPException) -> None:
+        super().__init__(refusal.detail)
+        self.refusal = refusal
+
+
 class AttemptFailure(NamedTuple):
     """One failed attempt, for the exhaustion log line."""
 
@@ -94,6 +110,7 @@ async def walk_attempts(
     policy_name: str | None = None,
     classify_error: Callable[[BaseException], tuple[bool, str]] = classify_local_attempt_error,
     build_kwargs: Callable[[Attempt, dict[str, Any]], dict[str, Any]] | None = None,
+    prepare_kwargs: PrepareKwargs | None = None,
     on_absorbed: Callable[[Attempt, BaseException, int], Awaitable[None]] | None = None,
     on_terminal: Callable[[Attempt], None] | None = None,
 ) -> tuple[Attempt, T]:
@@ -122,6 +139,12 @@ async def walk_attempts(
     and rebuilds its Codex extra-body per provider), so the transformation happens
     for the candidate being tried rather than for the one that failed.
 
+    ``prepare_kwargs`` then turns those kwargs into what the candidate is sent,
+    for work that depends on the account a candidate's credential reaches.
+    It may raise :class:`CandidateCannotServe`, which skips the candidate without
+    counting it as a provider failure and without reordering the plan. When no
+    candidate is left, the request is answered with the last one's refusal.
+
     Lock-in semantics, matching the hybrid walker: once ``mark_locked_in`` has
     fired, a later failure on that attempt terminates the request instead of
     falling through, because a tool-use loop's intermediate state (provider
@@ -146,6 +169,7 @@ async def walk_attempts(
     make_kwargs = build_kwargs or (lambda attempt, fields: attempt.call_kwargs(fields))
     failures: list[AttemptFailure] = []
     last_exc: BaseException | None = None
+    cannot_serve: CandidateCannotServe | None = None
 
     for attempt in attempts:
         locked_in = False
@@ -162,7 +186,21 @@ async def walk_attempts(
             )
 
         try:
-            result = await run_attempt(attempt, make_kwargs(attempt, base_request_fields), _mark_locked_in)
+            call_kwargs = make_kwargs(attempt, base_request_fields)
+            if prepare_kwargs is not None:
+                call_kwargs = await prepare_kwargs(attempt.instance, call_kwargs)
+            result = await run_attempt(attempt, call_kwargs, _mark_locked_in)
+        except CandidateCannotServe as exc:
+            logger.info(
+                "Candidate cannot serve the request policy=%s position=%d instance=%s model=%s reason=%s",
+                policy_name,
+                attempt.position,
+                attempt.instance,
+                attempt.model,
+                exc,
+            )
+            cannot_serve = exc
+            continue
         except HTTPException:
             # A gateway-side refusal for this candidate (a refused reservation
             # top-up, an unpriced fallback under `require_pricing`), not a provider
@@ -231,6 +269,11 @@ async def walk_attempts(
                 attempt.model,
             )
         return attempt, result
+
+    if cannot_serve is not None and not failures:
+        if on_terminal is not None:
+            on_terminal(attempts[-1])
+        raise cannot_serve.refusal
 
     logger.error("All attempts failed policy=%s failures=%s", policy_name, failures)
     # Exhaustion did reach the end of the plan, so the last candidate is the one
