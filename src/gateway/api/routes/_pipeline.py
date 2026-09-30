@@ -3443,10 +3443,8 @@ async def _hybrid_code_execution_policy(
     502 and never runs. The other fields are read leniently: an unusable one
     narrows nothing rather than failing a request over a default.
 
-    The tool allow-list and the execution timeout the payload also carries are
-    deliberately not applied here: the platform's sandbox proxy re-enforces both
-    on every call, and enforcing them twice would let this gateway refuse a tool
-    the platform admits.
+    The tool allow-list and the execution timeout the payload also carries are not applied.
+    No sandbox receives them either, so neither limit takes effect in hybrid mode.
     """
     assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
     policy = await _resolve_platform_code_execution(config=ctx.config, user_token=ctx.user_token)
