@@ -36,6 +36,8 @@ def _load() -> ModuleType:
 
 smoke = _load()
 
+_PEERS = smoke.PeerUrls(platform_base_url="http://cp.test/api/v1", search_base_url="http://search.test")
+
 
 def _call(method: str, url: str, *, headers: dict[str, str] | None = None, body: Any = None) -> tuple[int, Any]:
     data = json.dumps(body).encode() if body is not None else None
@@ -84,22 +86,18 @@ def test_the_platform_token_is_the_one_setting_put_back() -> None:
 
 
 def test_config_is_a_hybrid_deployment_and_nothing_else() -> None:
-    config = smoke.hybrid_config(
-        port=8123, platform_base_url="http://127.0.0.1:9000/api/v1", search_base_url="http://search.test"
-    )
-    assert config["platform"]["base_url"] == "http://127.0.0.1:9000/api/v1"
+    config = smoke.hybrid_config(port=8123, peers=_PEERS)
+    assert config["platform"]["base_url"] == _PEERS.platform_base_url
     assert "providers" not in config, "local providers are refused in hybrid mode"
     assert "database_url" not in config, "a hybrid gateway runs no database"
     assert "sandbox_url" not in config, "no sandbox is what makes native code execution pass through"
     # The gateway appends /search itself.
-    assert config["web_search_url"] == "http://search.test"
+    assert config["web_search_url"] == _PEERS.search_base_url
 
 
 def test_config_file_is_loadable_as_yaml(tmp_path: Path) -> None:
     path = tmp_path / "hybrid.yml"
-    config = smoke.hybrid_config(
-        port=8123, platform_base_url="http://127.0.0.1:9000/api/v1", search_base_url="http://search.test"
-    )
+    config = smoke.hybrid_config(port=8123, peers=_PEERS)
     smoke.write_config(path, config)
     assert yaml.safe_load(path.read_text(encoding="utf-8")) == config
 
@@ -398,16 +396,11 @@ def test_live_keys_are_scrubbed_from_the_gateway_environment() -> None:
 
 
 def test_live_config_puts_tavily_ahead_of_the_search_url() -> None:
-    config = smoke.hybrid_config(
-        port=8123,
-        platform_base_url="http://cp/api/v1",
-        search_base_url="http://search.test",
-        tavily_key="tvly-live",
-    )
+    config = smoke.hybrid_config(port=8123, peers=_PEERS, tavily_key="tvly-live")
     assert config["web_search_provider"] == "tavily"
     assert config["web_search_provider_api_key"] == "tvly-live"
     assert "web_search_url" in config, "the URL stays; the backend prefers the provider"
-    bare = smoke.hybrid_config(port=8123, platform_base_url="http://cp/api/v1", search_base_url="http://search.test")
+    bare = smoke.hybrid_config(port=8123, peers=_PEERS)
     assert "web_search_provider" not in bare
 
 
@@ -440,12 +433,10 @@ def test_container_config_leaves_the_listen_address_to_the_image() -> None:
     how the first container run failed: the gateway listened on the image's 8000
     while the smoke polled a port of its own.
     """
-    config = smoke.hybrid_config(
-        port=8123, platform_base_url="http://cp/api/v1", search_base_url="http://search.test", in_container=True
-    )
+    config = smoke.hybrid_config(port=8123, peers=_PEERS, in_container=True)
     assert "host" not in config
     assert "port" not in config
-    source = smoke.hybrid_config(port=8123, platform_base_url="http://cp/api/v1", search_base_url="http://search.test")
+    source = smoke.hybrid_config(port=8123, peers=_PEERS)
     assert (source["host"], source["port"]) == (smoke.LOOPBACK, 8123)
 
 

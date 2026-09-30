@@ -846,11 +846,18 @@ def hybrid_env(base_env: dict[str, str]) -> dict[str, str]:
     return env
 
 
+@dataclass(frozen=True, kw_only=True)
+class PeerUrls:
+    """Where the gateway reaches each peer it depends on."""
+
+    platform_base_url: str
+    search_base_url: str
+
+
 def hybrid_config(
     *,
     port: int,
-    platform_base_url: str,
-    search_base_url: str,
+    peers: PeerUrls,
     tavily_key: str | None = None,
     in_container: bool = False,
 ) -> dict[str, Any]:
@@ -865,9 +872,9 @@ def hybrid_config(
     environment owns and a config file cannot override.
     """
     config: dict[str, Any] = {
-        "platform": {"base_url": platform_base_url, "resolve_timeout_ms": 5000},
+        "platform": {"base_url": peers.platform_base_url, "resolve_timeout_ms": 5000},
         # The gateway appends /search itself.
-        "web_search_url": search_base_url,
+        "web_search_url": peers.search_base_url,
     }
     if not in_container:
         config["host"] = LOOPBACK
@@ -1616,11 +1623,13 @@ def main(argv: list[str] | None = None) -> int:
                 state = ControlPlaneState(provider_base_url=provider.base_url, mcp_url=mcp.mcp_url, live=live)
                 with serve(FakeControlPlane(state, bind_host), "fake-control-plane") as control_plane:
                     fakes = Fakes(control_plane=control_plane, provider=provider, mcp=mcp, search=search, live=live)
-                    platform_base_url = f"{control_plane.base_url}{PLATFORM_PREFIX}"
+                    peers = PeerUrls(
+                        platform_base_url=f"{control_plane.base_url}{PLATFORM_PREFIX}",
+                        search_base_url=search.base_url,
+                    )
                     config = hybrid_config(
                         port=port,
-                        platform_base_url=platform_base_url,
-                        search_base_url=search.base_url,
+                        peers=peers,
                         tavily_key=live.tavily_key if live else None,
                         in_container=bool(args.image),
                     )
