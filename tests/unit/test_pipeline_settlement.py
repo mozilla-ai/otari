@@ -62,11 +62,11 @@ from gateway.core.config import GatewayConfig
 from gateway.exceptions.tools_exceptions import WorkspaceMcpServerNotFoundError
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.pricing import ModelPricing, PriceSource
+from gateway.models.tools import ResolvedWebSearchConfig
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.rate_limit import RateLimitInfo
 from gateway.services.budgets import ReservationHandle
 from gateway.services.pricing_service import ResolvedPricing
-from gateway.services.tenancy.workspace_web_search_service import ResolvedWebSearchConfig
 from gateway.services.tool_usage import ToolUsageTally
 
 ADAPTERS = [
@@ -1796,6 +1796,7 @@ async def test_combined_standalone_policy_narrows_fetch_domains(monkeypatch: pyt
         allowed_domains=("example.com",),
         blocked_domains=("blocked.example.com",),
         provider_options=None,
+        authorized_tools=None,
     )
     monkeypatch.setattr(
         pipeline,

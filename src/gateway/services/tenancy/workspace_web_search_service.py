@@ -31,7 +31,6 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -40,7 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.exceptions.tools_exceptions import WorkspaceWebSearchDomainsExcludedError
 from gateway.models.tenancy import User, Workspace
-from gateway.models.tools import WorkspaceWebSearchConfig
+from gateway.models.tools import ResolvedWebSearchConfig, WorkspaceWebSearchConfig
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.web_retrieval_backend import MAX_RESULTS_CAP
@@ -250,23 +249,6 @@ class WorkspaceWebSearchConfigPublic(BaseModel):
         )
 
 
-@dataclass(frozen=True)
-class ResolvedWebSearchConfig:
-    """What the request path reads off a workspace's web search policy.
-
-    A value type rather than the ORM row, so the admission check cannot lazily
-    touch the session after it has moved on, and so the tool context carries no
-    ORM identity into a streaming response that outlives the request handler.
-    """
-
-    enabled: bool
-    max_results: int | None
-    purpose_hint: str | None
-    allowed_domains: tuple[str, ...] | None
-    blocked_domains: tuple[str, ...] | None
-    provider_options: dict[str, Any] | None
-
-
 async def resolve_workspace_web_search_config(
     db: AsyncSession,
     workspace_id: uuid.UUID,
@@ -287,6 +269,7 @@ async def resolve_workspace_web_search_config(
         allowed_domains=_as_tuple(config.allowed_domains, stored=True),
         blocked_domains=_as_tuple(config.blocked_domains, stored=True),
         provider_options=config.provider_options,
+        authorized_tools=None,
     )
 
 
@@ -319,6 +302,7 @@ def read_web_search_policy(answer: Mapping[str, Any]) -> ResolvedWebSearchConfig
         allowed_domains=_answer_domains(answer.get("allowed_domains"), "allowed_domains"),
         blocked_domains=_answer_domains(answer.get("blocked_domains"), "blocked_domains"),
         provider_options=provider_options,
+        authorized_tools=None,
     )
 
 

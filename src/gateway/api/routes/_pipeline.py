@@ -150,7 +150,7 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
 from gateway.models.pricing import ModelPricing, PriceSource
-from gateway.models.tools import CodeExecutor
+from gateway.models.tools import CodeExecutor, ResolvedWebSearchConfig
 from gateway.models.usage import UsageLog
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
@@ -238,7 +238,6 @@ from gateway.services.tenancy.workspace_code_execution_policy_service import (
 from gateway.services.tenancy.workspace_web_search_service import (
     MAX_WEB_SEARCH_DOMAINS,
     InvalidStoredWebSearchDomainError,
-    ResolvedWebSearchConfig,
     narrow_web_search_tool_entry,
     read_web_search_policy,
     resolve_workspace_web_search_config,
@@ -2907,16 +2906,16 @@ def _combined_fetch_policy(
     return DomainPolicy(allowed=allowed, blocked=blocked)
 
 
-def _read_hybrid_web_policy(payload: dict[str, Any]) -> tuple[set[str], ResolvedWebSearchConfig]:
-    """Read the tool names the control plane authorizes and the workspace's web search policy.
+def _read_hybrid_web_policy(payload: dict[str, Any]) -> ResolvedWebSearchConfig:
+    """Read the control plane's web search policy, with the tool names it authorizes.
 
     Raises ``ValueError`` when the answer is malformed, so an unreadable answer fails closed.
     """
-    # Legacy platforms authorize Search only; an explicit null remains malformed.
+    # An answer without the field predates per-tool authorization and authorizes Search alone.
     authorized = payload.get("authorized_tools", [WEB_SEARCH_TOOL_NAME])
     if not isinstance(authorized, list) or any(not isinstance(value, str) for value in authorized):
         raise ValueError("authorized_tools must be a list of strings")
-    return set(authorized), read_web_search_policy(payload)
+    return replace(read_web_search_policy(payload), authorized_tools=frozenset(authorized))
 
 
 async def prepare_gateway_tools(
@@ -3305,8 +3304,6 @@ async def prepare_gateway_tools(
                 if requested
             ]
             workspace_search: ResolvedWebSearchConfig | None
-            # A stored workspace row carries no per-tool authorization.
-            authorized_tools: set[str] | None = None
             if ctx.hybrid_mode:
                 assert ctx.user_token is not None
                 if (
@@ -3321,7 +3318,7 @@ async def prepare_gateway_tools(
                     requested_tools=requested_tools,
                 )
                 try:
-                    authorized_tools, workspace_search = _read_hybrid_web_policy(web_search_policy)
+                    workspace_search = _read_hybrid_web_policy(web_search_policy)
                 except (ValueError, DomainRuleValidationError) as exc:
                     raise adapter.error(502, MALFORMED_WEB_ACCESS_POLICY_DETAIL, ErrorKind.API) from exc
             else:
@@ -3340,6 +3337,7 @@ async def prepare_gateway_tools(
                     workspace_search.allowed_domains,
                     workspace_search.blocked_domains,
                 )
+            authorized_tools = workspace_search.authorized_tools if workspace_search is not None else None
             if authorized_tools is not None and not set(requested_tools) <= authorized_tools:
                 raise adapter.error(403, WEB_ACCESS_TOOL_NOT_AUTHORIZED_DETAIL, ErrorKind.PERMISSION)
             try:

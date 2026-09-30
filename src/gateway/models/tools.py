@@ -1,6 +1,7 @@
-"""ORM tables for gateway-run tools, and the vocabulary the executor column is closed to."""
+"""ORM tables for gateway-run tools, the executor column's vocabulary, and the web search policy a request reads."""
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -319,6 +320,23 @@ class WorkspaceWebSearchConfig(Base):
         onupdate=lambda: datetime.now(UTC),
         server_default=func.now(),
     )
+
+
+@dataclass(frozen=True)
+class ResolvedWebSearchConfig:
+    """A workspace's web search policy, as the request path reads it.
+
+    A value type rather than the ORM row, so it holds no ORM identity.
+    ``authorized_tools`` is ``None`` where the policy authorizes no tool by name, so no per-tool check applies.
+    """
+
+    enabled: bool
+    max_results: int | None
+    purpose_hint: str | None
+    allowed_domains: tuple[str, ...] | None
+    blocked_domains: tuple[str, ...] | None
+    provider_options: dict[str, Any] | None
+    authorized_tools: frozenset[str] | None
 
 
 class SandboxContainer(Base):

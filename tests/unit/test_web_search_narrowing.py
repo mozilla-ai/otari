@@ -17,11 +17,11 @@ from typing import Any
 import pytest
 
 from gateway.exceptions.tools_exceptions import WorkspaceWebSearchDomainsExcludedError
+from gateway.models.tools import ResolvedWebSearchConfig
 from gateway.services.tenancy.workspace_web_search_service import (
     _MAX_DOMAINS,
     _MAX_RESULTS,
     InvalidStoredWebSearchDomainError,
-    ResolvedWebSearchConfig,
     _as_tuple,
     _normalize_domains,
     narrow_web_search_tool_entry,
@@ -38,6 +38,7 @@ def _config(**overrides: object) -> ResolvedWebSearchConfig:
         "allowed_domains": None,
         "blocked_domains": None,
         "provider_options": None,
+        "authorized_tools": None,
     }
     values.update(overrides)
     return ResolvedWebSearchConfig(**values)  # type: ignore[arg-type]
@@ -310,6 +311,7 @@ def test_a_control_plane_answer_reads_into_the_same_value_as_a_stored_row() -> N
         allowed_domains=("docs.python.org",),
         blocked_domains=None,
         provider_options={"search_depth": "advanced"},
+        authorized_tools=None,
     )
 
 
