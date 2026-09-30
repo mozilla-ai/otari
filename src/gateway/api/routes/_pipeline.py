@@ -236,6 +236,7 @@ from gateway.services.tenancy.organization_guardrail_service import (
 from gateway.services.tenancy.workspace_code_execution_policy_service import (
     SERVED_TOOL_NAMES,
     ResolvedCodeExecutionPolicy,
+    read_code_execution_policy,
     resolve_workspace_code_execution_policy,
 )
 from gateway.services.tenancy.workspace_web_search_service import MAX_WEB_SEARCH_DOMAINS
@@ -3434,43 +3435,18 @@ async def _hybrid_code_execution_policy(
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
 ) -> ResolvedCodeExecutionPolicy:
-    """The platform's answer for the caller's workspace, in the standalone shape.
+    """The control plane's answer for the caller's workspace, in the standalone shape.
 
-    The platform owns the per-workspace policy: ``enabled`` is its veto, the
-    hint and the loop ceiling its defaults (per-request values win), and
-    ``executor`` its pin where it sends one. A malformed ``enabled`` is a
-    cross-service contract break, not a "disabled" signal, so it surfaces as a
-    502 and never runs. The other fields are read leniently: an unusable one
-    narrows nothing rather than failing a request over a default.
-
-    The tool allow-list and the execution timeout the payload also carries are not applied.
-    No sandbox receives them either, so neither limit takes effect in hybrid mode.
+    A malformed answer is a contract break rather than a denial, so it is refused with a 502 and no code runs.
+    The tool allow-list and the execution timeout are not applied.
     """
     assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
-    policy = await _resolve_platform_code_execution(config=ctx.config, user_token=ctx.user_token)
-    enabled = policy.get("enabled")
-    if not isinstance(enabled, bool):
-        raise adapter.error(502, MALFORMED_CODE_EXEC_POLICY_DETAIL, ErrorKind.API)
-    hint = policy.get("default_purpose_hint")
-    return ResolvedCodeExecutionPolicy(
-        enabled=enabled,
-        default_purpose_hint=hint if isinstance(hint, str) and hint else None,
-        max_iterations=_positive_int(policy.get("max_iterations")),
-        exec_timeout_s=None,
-        image=None,
-        tools=None,
-        executor=CodeExecutor.parse(policy.get("executor")),
-    )
-
-
-def _positive_int(value: Any) -> int | None:
-    """``value`` when it is a positive integer, else ``None``.
-
-    ``bool`` is an ``int`` subclass and is excluded so a JSON ``true`` is not read as 1.
-    """
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        return None
-    return int(value)
+    answer = await _resolve_platform_code_execution(config=ctx.config, user_token=ctx.user_token)
+    try:
+        policy = read_code_execution_policy(answer)
+    except ValueError:
+        raise adapter.error(502, MALFORMED_CODE_EXEC_POLICY_DETAIL, ErrorKind.API) from None
+    return replace(policy, tools=None, exec_timeout_s=None)
 
 
 def _implementation_for(ctx: RequestContext, instance: str) -> LLMProvider | None:

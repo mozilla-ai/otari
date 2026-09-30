@@ -2594,6 +2594,58 @@ def test_platform_mode_sandbox_403_when_disabled(
     assert response.json() == {"detail": "code execution is not enabled for this workspace"}
 
 
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {"enabled": "yes"},
+        {"enabled": True, "max_iterations": "4"},
+        {"enabled": True, "exec_timeout_s": 0},
+        {"enabled": True, "tools": "code_execution"},
+        {"enabled": True, "executor": "sometimes"},
+    ],
+)
+def test_platform_mode_sandbox_502_when_the_policy_is_malformed(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+    answer: dict[str, Any],
+) -> None:
+    """A malformed field is a contract break, so no code runs and nothing reaches the provider."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:8080")
+    provider_called = False
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="sbx-malformed")
+        if url.endswith("/gateway/code-execution/resolve"):
+            return httpx.Response(200, json=answer)
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        nonlocal provider_called
+        provider_called = True
+        raise AssertionError("a request with a malformed policy reached the provider")
+
+    control_plane_transport(fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        f"{API_ROOT}/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "otari_code_execution"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Authorization service returned a malformed code-execution policy"}
+    assert provider_called is False
+
+
 def test_platform_mode_sandbox_applies_workspace_default_purpose_hint(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
