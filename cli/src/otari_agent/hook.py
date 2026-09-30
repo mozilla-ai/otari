@@ -3714,11 +3714,17 @@ def _guardrails_dry_run(
     multiple=True,
     help="Dry run this repo-relative path against the guardrail. Repeatable.",
 )
+@click.option(
+    "--repo-only",
+    is_flag=True,
+    help=f"Check this repo's guardrail alone, without your own in {GuardrailOrigin.USER.directory}.",
+)
 @click.option("--strict", is_flag=True, help="Exit non-zero on a warning too, not only on an error.")
 def guardrails_validate(
     guardrail_file_option: Path | None,
     dry_run_commands: tuple[str, ...],
     dry_run_paths: tuple[str, ...],
+    repo_only: bool,
     strict: bool,
 ) -> None:
     """Check this repo's guardrail without running it, and try it against a command or a path.
@@ -3732,6 +3738,7 @@ def guardrails_validate(
     set, or more judge gates in total than one Stop event will run.
     `--guardrail-file` narrows it back to one file, which is how a snippet
     from somewhere else is checked before being dropped in.
+    `--repo-only` leaves out the files under `~/.otari/`, so a personal warning cannot fail `--strict` on a repo.
 
     Offline and gateway-free: it parses the guardrail the same way a
     submitted one is parsed, then reports what running it would have taught
@@ -3756,6 +3763,8 @@ def guardrails_validate(
     root = _hook_find_repo_root(Path.cwd())
     if root is None:
         raise click.ClickException("Not inside a Git repository.")
+    if repo_only and guardrail_file_option is not None:
+        raise click.UsageError("--repo-only and --guardrail-file cannot be combined.")
 
     if guardrail_file_option is not None:
         if not guardrail_file_option.is_file():
@@ -3764,14 +3773,14 @@ def guardrails_validate(
             )
         files = [GuardrailFile(guardrail_file_option, _guardrail_file_origin(guardrail_file_option, root))]
     else:
-        files = _hook_guardrail_files(root)
+        files = [file for file in _hook_guardrail_files(root) if not repo_only or file.origin is GuardrailOrigin.REPO]
         if not files:
-            moved = _guardrail_moved_notice(root)
+            where = "" if repo_only else f", and nothing in {GuardrailOrigin.USER.directory}"
             raise click.ClickException(
-                moved
+                _guardrail_moved_notice(root)
                 or (
-                    f"No guardrail in {root}: no {GUARDRAIL_FILE}, nothing under {GUARDRAIL_DIR}/, "
-                    f"and nothing in {GuardrailOrigin.USER.directory}. `otari hook setup` starts one."
+                    f"No guardrail in {root}: no {GUARDRAIL_FILE}, nothing under {GUARDRAIL_DIR}/{where}. "
+                    "`otari hook setup` starts one."
                 )
             )
 

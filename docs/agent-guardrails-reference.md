@@ -1128,12 +1128,15 @@ otari guardrails validate
 otari guardrails validate --command "npm install lodash"
 otari guardrails validate --path CHANGELOG.md
 otari guardrails validate --guardrail-file somebody-elses-snippet.yml
+otari guardrails validate --repo-only --strict
 ```
 
 With no `--guardrail-file` it composes everything the hook composes, which is
 what finds a gate id declared in two files and a judge-gate total no one file
 shows. `--guardrail-file` narrows it to one file, which is how a snippet
 from somewhere else is checked before it is dropped in.
+
+`--repo-only` leaves out your own files in `~/.otari/` and checks the repository's guardrail alone. Use it to check a repository's rules before you commit a change to them, so a warning in one of your own files cannot fail `--strict`. It cannot be combined with `--guardrail-file`.
 
 An **error** is a gate that provably cannot do its job, whatever the session
 does. Everything `parse_policy` already refuses (an unsupported

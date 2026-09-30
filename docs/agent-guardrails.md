@@ -305,7 +305,7 @@ Some rules belong to a person, not to a repository: no `git reset --hard`, no re
 - A repository cannot turn off your gates. When the combined set cannot load, because of a clash, a broken file, or too many files, the hook enforces your gates alone and says that the repository's gates are off each time it reports anything. When your own files are the broken ones, it enforces the repository's gates alone. Only when neither side loads does it enforce no gate.
 - A `verifier` gate in a file under `~/.otari/` names its script relative to your home directory, for example `verifier: .otari/verifiers/lint-before-stop.sh`. The script must be inside `~/.otari/verifiers/`. It runs with the repository root as its working directory, so it checks the repository the session changed.
 - When a gate from `~/.otari/` fails, the message shows its `user:` ID. When more than one file composes, it also names the file, for example `[~/.otari/guardrails/git-safety.yml]`.
-- `otari guardrails validate` checks your files with the repository's, and lists which gates come from `~/.otari/` and which come from the repository.
+- `otari guardrails validate` checks your files with the repository's, and lists which gates come from `~/.otari/` and which come from the repository. `--repo-only` checks the repository's files alone, so a warning in one of your own files cannot fail `--strict`.
 
 A repository checked out at your home directory owns `~/.otari/` itself, so its files are read once, as the repository's.
 

@@ -565,3 +565,31 @@ def test_a_draft_under_otari_home_that_the_hook_never_reads_is_checked_as_a_repo
     assert result.exit_code == 0, result.output
     assert "fires      draft-gate (required)" in result.output
     assert "user:draft-gate" not in result.output
+
+
+def test_repo_only_leaves_out_the_users_gates_and_their_warnings(repo: Path, isolated_home: Path) -> None:
+    """A personal warning must not fail `--strict` when the repo's own guardrail is clean."""
+    _write_into(repo, ".otari/guardrails.yml", _one_gate("team"))
+    _write_into(isolated_home, ".otari/guardrails.yml", _FOOTGUNS)
+    assert _invoke("--strict").exit_code == 1
+
+    result = _invoke("--strict", "--repo-only")
+    assert result.exit_code == 0, result.output
+    assert "user:" not in result.output
+    assert "from ~/.otari/" not in result.output
+    assert "0 error(s), 0 warning(s)" in result.output
+
+
+def test_repo_only_with_no_repo_guardrail_says_so(repo: Path, isolated_home: Path) -> None:
+    _write_into(isolated_home, ".otari/guardrails.yml", _one_gate("personal"))
+    result = _invoke("--repo-only")
+    assert result.exit_code != 0
+    assert hook_cli.GUARDRAIL_DIR in result.output
+    assert "~/.otari/" not in result.output
+
+
+def test_repo_only_and_guardrail_file_cannot_be_combined(repo: Path) -> None:
+    _write_into(repo, ".otari/guardrails.yml", _one_gate("team"))
+    result = _invoke("--repo-only", "--guardrail-file", str(repo / hook_cli.GUARDRAIL_FILE))
+    assert result.exit_code == 2
+    assert "--repo-only and --guardrail-file cannot be combined" in result.output
