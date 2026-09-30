@@ -127,10 +127,10 @@ async def walk_attempts(
     tool-iteration cap can stop the walk early. In those cases, attributing the
     failure to the end of the plan would name a provider that was never called.
 
-    ``on_absorbed`` is awaited for each provider failure the walk *recovers* from
-    with another candidate left to try. It exists so the caller can
-    record the failure without it counting as a request error, since the request
-    itself is still going to be served. It is not called for a terminal failure: that
+    ``on_absorbed`` is awaited for each provider failure the walk *recovers* from,
+    once the next candidate is about to be sent the request. It exists so the
+    caller can record the failure without it counting as a request error, since
+    the request itself is still going to be served. It is not called for a terminal failure: that
     one is the request's outcome and the caller logs it as such.
 
     ``build_kwargs`` builds each candidate's call kwargs, defaulting to
@@ -157,7 +157,7 @@ async def walk_attempts(
     every attempt equally, so trying the next candidate cannot help.
 
     On exhaustion: 504 when the last failure was a timeout, the classified status
-    when there was only one candidate (so a single-candidate policy answers
+    when only one candidate was called (so a single-candidate policy answers
     exactly as naming that model directly would), and a generic 502 for a
     multi-candidate fallthrough, which aggregates heterogeneous failures and must
     not attribute one provider's status to the whole plan.
@@ -170,6 +170,9 @@ async def walk_attempts(
     failures: list[AttemptFailure] = []
     last_exc: BaseException | None = None
     cannot_serve: CandidateCannotServe | None = None
+    # A failure is absorbed only once another candidate is sent the request.
+    unabsorbed: tuple[Attempt, BaseException] | None = None
+    last_failed: Attempt | None = None
 
     for attempt in attempts:
         locked_in = False
@@ -189,6 +192,9 @@ async def walk_attempts(
             call_kwargs = make_kwargs(attempt, base_request_fields)
             if prepare_kwargs is not None:
                 call_kwargs = await prepare_kwargs(attempt.instance, call_kwargs)
+            if unabsorbed is not None and on_absorbed is not None:
+                await on_absorbed(*unabsorbed, len(attempts))
+            unabsorbed = None
             result = await run_attempt(attempt, call_kwargs, _mark_locked_in)
         except CandidateCannotServe as exc:
             logger.info(
@@ -245,6 +251,7 @@ async def walk_attempts(
                 locked_in,
             )
             last_exc = exc
+            last_failed = attempt
             if not locked_in:
                 reason = "timeout" if error_class == "timeout" else "upstream_error"
                 record_abandoned_attempt(attempt.instance, attempt.model, reason, attempt.position)
@@ -253,10 +260,7 @@ async def walk_attempts(
                     on_terminal(attempt)
                 raise _provider_failure_http_exc(exc, fallback_detail="LLM provider error") from exc
             failures.append(AttemptFailure(attempt.position, attempt.instance, attempt.model, error_class))
-            # Only a failure with somewhere left to go is "absorbed"; the last one is
-            # the request's own outcome and is logged by the caller as an error.
-            if on_absorbed is not None and attempt.position < len(attempts):
-                await on_absorbed(attempt, exc, len(attempts))
+            unabsorbed = (attempt, exc)
             continue
 
         if failures:
@@ -276,11 +280,11 @@ async def walk_attempts(
         raise cannot_serve.refusal
 
     logger.error("All attempts failed policy=%s failures=%s", policy_name, failures)
-    # Exhaustion did reach the end of the plan, so the last candidate is the one
-    # that failed last.
+    # A candidate that could not serve was never called, so the last one that
+    # failed is the one to name, and the status rule counts only the ones called.
     if on_terminal is not None:
-        on_terminal(attempts[-1])
-    single = len(attempts) <= 1
+        on_terminal(last_failed or attempts[-1])
+    single = len(failures) <= 1
     if last_exc is not None and upstream_exception_shape(last_exc)[0] == "timeout":
         detail = "LLM provider timeout" if single else ALL_ATTEMPTS_TIMED_OUT_DETAIL
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=detail) from last_exc

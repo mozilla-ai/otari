@@ -25,6 +25,7 @@ from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.files import FileProviderCopy
 from gateway.models.routing import RoutingConfig
+from gateway.models.usage import UsageLog
 
 _CODE_TOOL = {"type": "code_execution_20250825", "name": "code_execution"}
 _MODEL = "claude-sonnet-4-5"
@@ -160,6 +161,7 @@ def test_a_fallover_to_another_key_is_sent_a_copy_in_that_keys_account(
 def test_a_fallover_to_a_provider_that_cannot_hold_a_copy_is_not_sent_the_request(
     client: TestClient,
     api_key_header: dict[str, str],
+    db_session: Session,
     file_store: None,
     account_files: _AccountFiles,
 ) -> None:
@@ -170,3 +172,7 @@ def test_a_fallover_to_a_provider_that_cannot_hold_a_copy_is_not_sent_the_reques
 
     assert response.status_code == 502, response.text
     assert provider.await_count == 1, "the request reached a candidate that cannot open the file"
+    rows = db_session.scalars(select(UsageLog)).all()
+    assert [(row.provider, row.status) for row in rows] == [("claude-a", "error")], (
+        "the failure was not recorded against the only provider called"
+    )

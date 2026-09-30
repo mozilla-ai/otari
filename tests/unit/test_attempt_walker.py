@@ -567,3 +567,79 @@ async def test_a_provider_failure_while_preparing_a_candidate_falls_over() -> No
     chosen, _ = await _walk_prepared(attempts, prepare)
 
     assert chosen.instance == "second"
+
+
+async def _walk_recording(
+    attempts: list[Attempt], prepare: Any, behaviors: list[Any]
+) -> tuple[list[Attempt], list[Attempt], BaseException | None]:
+    terminal: list[Attempt] = []
+    absorbed: list[Attempt] = []
+
+    async def run_attempt(attempt: Attempt, call_kwargs: dict[str, Any], mark_locked_in: Any) -> Any:
+        behavior = behaviors[attempt.position - 1]
+        if isinstance(behavior, BaseException):
+            raise behavior
+        return behavior
+
+    async def on_absorbed(attempt: Attempt, exc: BaseException, total: int) -> None:
+        absorbed.append(attempt)
+
+    try:
+        await walk_attempts(
+            attempts=attempts,
+            base_request_fields={"messages": []},
+            run_attempt=run_attempt,
+            max_tool_iterations=10,
+            prepare_kwargs=prepare,
+            on_absorbed=on_absorbed,
+            on_terminal=terminal.append,
+        )
+    except BaseException as exc:  # noqa: BLE001 - the test inspects what the walk raised
+        return terminal, absorbed, exc
+    return terminal, absorbed, None
+
+
+def _cannot_serve(*instances: str) -> Any:
+    async def prepare(instance: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        if instance in instances:
+            raise CandidateCannotServe(HTTPException(status_code=400, detail="no"))
+        return kwargs
+
+    return prepare
+
+
+@pytest.mark.asyncio
+async def test_a_failure_before_a_candidate_that_cannot_serve_is_the_requests_outcome() -> None:
+    attempts = [_attempt(1, "a", instance="first"), _attempt(2, "b", instance="second")]
+
+    terminal, absorbed, exc = await _walk_recording(attempts, _cannot_serve("second"), [_http_error(429), "ok"])
+
+    assert [attempt.instance for attempt in terminal] == ["first"]
+    assert absorbed == [], "the only provider called was recorded as a failure the request recovered from"
+    assert isinstance(exc, HTTPException)
+    assert exc.status_code == 429, "one candidate ran, so its own status is the answer"
+
+
+@pytest.mark.asyncio
+async def test_a_failure_after_a_candidate_that_cannot_serve_names_the_candidate_that_ran() -> None:
+    attempts = [_attempt(1, "a", instance="first"), _attempt(2, "b", instance="second")]
+
+    terminal, absorbed, exc = await _walk_recording(attempts, _cannot_serve("first"), ["ok", _http_error(429)])
+
+    assert [attempt.instance for attempt in terminal] == ["second"]
+    assert absorbed == []
+    assert isinstance(exc, HTTPException)
+    assert exc.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_a_failure_is_absorbed_once_another_candidate_is_sent_the_request() -> None:
+    attempts = [_attempt(1, "a", instance="first"), _attempt(2, "b"), _attempt(3, "c", instance="third")]
+
+    terminal, absorbed, exc = await _walk_recording(
+        attempts, _cannot_serve("openai"), [_http_error(503), "unused", "ok"]
+    )
+
+    assert exc is None
+    assert [attempt.instance for attempt in absorbed] == ["first"]
+    assert terminal == []
