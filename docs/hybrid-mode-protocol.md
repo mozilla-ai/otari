@@ -385,11 +385,11 @@ For Fetch, allowed and blocked domains form a mandatory policy that request-supp
 
 ## Code execution resolution
 
-Called when a request declares `otari_code_execution` and the deployment has
-decided the sandbox will run it. It is asked after that decision rather than
-before it, because the answer authorizes a workspace to run code here and
-refuses one that may not, so asking earlier would refuse every workspace the
-platform has not enabled.
+Called when the deployment has a sandbox and a request declares code
+execution: `otari_code_execution`, or a provider's own code-execution tool. It
+is asked before Otari decides who runs a provider's tool, because the answer's
+`executor` can decide that. It is asked at the same point in every request,
+whether the data plane holds the policy or its control plane does.
 
 ### Request
 
@@ -413,25 +413,32 @@ question is what this workspace may do, not what this request asked for.
   "default_purpose_hint": "Data analysis",
   "max_iterations": 4,
   "executor": "otari",
-  "tools": ["python"],
+  "tools": ["code_execution"],
   "exec_timeout_s": 30
 }
 ```
 
-`enabled` is the platform's veto and must be a JSON boolean. A missing or
-malformed value is a contract break rather than a denial, so it fails closed
-with `502` and no code runs.
+`enabled` is the platform's veto and must be a JSON boolean. A workspace that
+may not run code is answered with `200` and `"enabled": false`, not refused, so
+a request whose code would not run here is unaffected by it. A `403` is only for
+a caller the platform does not accept, as on `provider-keys/resolve`.
 
-The remaining fields are read leniently, because an unusable default must not
-fail a request: `default_purpose_hint` is used when it is a non-empty string,
-`max_iterations` when it is a positive integer, and `executor` when it names a
-known executor. Anything else narrows nothing.
+Every other field is optional, and `null` means the same as absent:
 
-`tools` and `exec_timeout_s` are accepted and **not** applied by Otari today.
-No sandbox can apply them either, because Otari sends a sandbox no caller
-credential to look the workspace up by. A workspace limit on tools or timeout
-therefore has no effect. Whether a data plane should enforce them itself is
-[#1726](https://github.com/mozilla-ai/otari/issues/1726).
+| Field | Type | Meaning |
+|---|---|---|
+| `default_purpose_hint` | string | The hint used when a request gives none. An empty string means none. |
+| `max_iterations` | positive integer | A ceiling on the tool loop's iterations. |
+| `exec_timeout_s` | positive integer | A ceiling on one execution's runtime, in seconds. |
+| `tools` | list of strings | The code-execution tool kinds the workspace may use: `code_execution`, `bash_code_execution`, `text_editor_code_execution`. |
+| `executor` | `auto`, `otari` or `provider` | Who runs a provider's code-execution tool for this workspace. |
+
+Otari applies every field, as it does a policy it holds itself. The two
+ceilings only lower the deployment's own limits, so a larger value changes
+nothing. `tools` intersects the tool kinds the sandbox serves, and a list that
+leaves none is refused with `403`. A field of the wrong type, or an `executor`
+Otari does not know, is a contract break: it fails closed with `502` and no code
+runs.
 
 A policy narrows what the deployment already allows and never widens it. A
 response that resolves to nothing leaves the deployment's own settings in force.
