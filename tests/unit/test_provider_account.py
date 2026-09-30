@@ -5,14 +5,15 @@ import uuid
 import pytest
 from any_llm import LLMProvider
 
-from gateway.services.provider_kwargs import effective_credential, provider_account
+from gateway.services.provider_kwargs import ProviderAccounts, effective_credential
 from gateway.types.provider_account import ResolvedCredential
 
 _WORKSPACE = uuid.uuid4()
+_ACCOUNTS = ProviderAccounts(pepper="p" * 32, workspace_id=_WORKSPACE)
 
 
 def _account(credential: ResolvedCredential, *, instance: str = "anthropic") -> str:
-    return provider_account(LLMProvider.ANTHROPIC, instance, _WORKSPACE, credential).identity
+    return _ACCOUNTS.name(LLMProvider.ANTHROPIC, instance, credential).identity
 
 
 def test_the_credential_is_the_one_the_dispatch_carries(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -63,7 +64,7 @@ def test_renaming_the_instance_keeps_the_account() -> None:
 
 def test_neither_the_account_nor_the_credential_shows_the_key() -> None:
     credential = ResolvedCredential(api_key="sk-secret-value")
-    account = provider_account(LLMProvider.ANTHROPIC, "anthropic", _WORKSPACE, credential)
+    account = _ACCOUNTS.name(LLMProvider.ANTHROPIC, "anthropic", credential)
 
     assert "sk-secret-value" not in account.identity
     assert "sk-secret-value" not in repr(account)

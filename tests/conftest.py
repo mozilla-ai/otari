@@ -54,6 +54,11 @@ def parse_shard(value: str) -> Shard:
     return Shard(index=int(match[1]), count=int(match[2]))
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    # Apps start with provider copies on, which refuses to boot without a pepper of its own.
+    os.environ["OTARI_PROVIDER_ACCOUNT_PEPPER"] = "test-provider-account-pepper-0000"
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--shard",

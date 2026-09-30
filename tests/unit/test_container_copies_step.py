@@ -13,6 +13,7 @@ from gateway.api.routes._normalize import container_copies_step
 from gateway.exceptions import TenancyError
 from gateway.exceptions.files_exceptions import ProviderUploadDisabledError, ProviderUploadFailedError
 from gateway.services.files import FileService, StagedFile
+from gateway.services.provider_kwargs import ProviderAccounts
 from gateway.types.provider_account import ProviderAccount, ResolvedCredential
 
 _STAGED = StagedFile(file_id="file-1", filename="report.csv", mime_type="text/csv", storage_ref="ref-1")
@@ -39,7 +40,10 @@ def _render(exc: TenancyError) -> HTTPException:
 
 def _step(files: _Files) -> Any:
     return container_copies_step(
-        files=cast(FileService, files), inputs=[_STAGED], workspace_id=_WORKSPACE, render=_render
+        files=cast(FileService, files),
+        inputs=[_STAGED],
+        accounts=ProviderAccounts(pepper="p" * 32, workspace_id=_WORKSPACE),
+        render=_render,
     )
 
 

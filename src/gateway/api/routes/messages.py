@@ -90,6 +90,7 @@ from gateway.services.mcp_loop_messages import (
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
+from gateway.services.provider_kwargs import ProviderAccounts
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
 from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX, Dialect, ToolUseBudget
@@ -943,14 +944,15 @@ async def create_message(
 
     prepare_kwargs = None
     if container_inputs:
-        if files is None or ctx.workspace_id is None:
+        pepper = config.provider_account_pepper
+        if files is None or ctx.workspace_id is None or pepper is None:
             # The blocks still name Otari's files, which no provider account holds.
             await release_reservation(ctx)
             raise domain_error(_ADAPTER, ProviderUploadFailedError())
         prepare_kwargs = container_copies_step(
             files=files,
             inputs=container_inputs,
-            workspace_id=ctx.workspace_id,
+            accounts=ProviderAccounts(pepper=pepper, workspace_id=ctx.workspace_id),
             render=partial(domain_error, _ADAPTER),
         )
 

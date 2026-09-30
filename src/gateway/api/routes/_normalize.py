@@ -52,7 +52,7 @@ from gateway.services.content_normalizer import (
 )
 from gateway.services.files import FileService, StagedFile, provider_holds_copies
 from gateway.services.model_capabilities import resolve_capabilities
-from gateway.services.provider_kwargs import effective_credential, provider_account
+from gateway.services.provider_kwargs import ProviderAccounts, effective_credential
 from gateway.services.tools import Dialect
 
 
@@ -209,7 +209,7 @@ def container_copies_step(
     *,
     files: FileService,
     inputs: Sequence[StagedFile],
-    workspace_id: uuid.UUID,
+    accounts: ProviderAccounts,
     render: Callable[[TenancyError], HTTPException],
 ) -> PrepareKwargs:
     """The step that sends each candidate the IDs of copies in its own provider account.
@@ -229,7 +229,7 @@ def container_copies_step(
         except LookupError as exc:
             logger.warning("No credential to copy attached files to %s: %s", instance, exc)
             raise ProviderUploadFailedError from exc
-        account = provider_account(provider, instance, workspace_id, credential)
+        account = accounts.name(provider, instance, credential)
         try:
             copies = await files.provider_file_ids(inputs, account, credential)
         except ProviderAttachmentRefusedError as exc:

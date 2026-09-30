@@ -97,6 +97,7 @@ _SETTING_NAMES = frozenset(
         "pricing_refresh",
         "pricing_refresh_interval_seconds",
         "privacy_url",
+        "provider_account_pepper",
         "provider_allow_private_hosts",
         "providers",
         "public_base_url",

@@ -30,6 +30,7 @@ one workspace at all.
 """
 
 import hashlib
+import hmac
 import json
 import os
 import uuid
@@ -287,26 +288,36 @@ def effective_credential(provider: LLMProvider, kwargs: Mapping[str, Any]) -> Re
     )
 
 
-def provider_account(
-    provider: LLMProvider, instance: str, workspace_id: uuid.UUID, credential: ResolvedCredential
-) -> ProviderAccount:
-    """The account ``credential`` reaches, named by a digest rather than by the credential.
+class ProviderAccounts:
+    """Names the provider accounts one workspace's dispatch credentials reach.
 
-    Derived rather than stored, so a changed credential names a different
+    The name is a keyed digest, HMAC-SHA256 under a pepper kept for this one
+    purpose, so a copy of the database cannot confirm a guessed credential.
+    It is derived rather than stored, so a changed credential names a different
     account at once and nothing has to notice the change.
-    The instance is left out, because renaming one does not move its account.
     """
-    canonical = json.dumps(
-        {"provider": provider.value, "api_base": credential.api_base, "api_key": credential.api_key},
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return ProviderAccount(
-        provider=provider,
-        instance=instance,
-        workspace_id=workspace_id,
-        identity=hashlib.sha256(canonical.encode()).hexdigest(),
-    )
+
+    def __init__(self, *, pepper: str, workspace_id: uuid.UUID) -> None:
+        self._pepper = pepper.encode()
+        self._workspace_id = workspace_id
+
+    def name(self, provider: LLMProvider, instance: str, credential: ResolvedCredential) -> ProviderAccount:
+        """The account ``credential`` reaches.
+
+        The instance is left out of the digest, because renaming one does not
+        move its account.
+        """
+        canonical = json.dumps(
+            {"provider": provider.value, "api_base": credential.api_base, "api_key": credential.api_key},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return ProviderAccount(
+            provider=provider,
+            instance=instance,
+            workspace_id=self._workspace_id,
+            identity=hmac.new(self._pepper, canonical.encode(), hashlib.sha256).hexdigest(),
+        )
 
 
 @dataclass(frozen=True)
