@@ -29,8 +29,11 @@ organization, not every organization the gateway holds. See
 one workspace at all.
 """
 
+import hashlib
+import json
 import os
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -44,6 +47,7 @@ from gateway.services.alias_service import resolve_effective_alias
 from gateway.services.catalog_selectors import resolve_catalog_selector
 from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.tenancy.org_provider_key_service import cached_org_provider_kwargs
+from gateway.types.provider_account import ProviderAccount, ResolvedCredential
 
 # Keys that describe an instance to otari but are not credentials any-llm
 # understands, so they must be stripped before the provider call.
@@ -259,6 +263,50 @@ def get_provider_kwargs(
         kwargs["api_key"] = placeholder
 
     return kwargs
+
+
+def effective_credential(provider: LLMProvider, kwargs: Mapping[str, Any]) -> ResolvedCredential:
+    """The credential a call made with ``kwargs`` authenticates with.
+
+    That is the key the kwargs carry, or else the provider SDK's own environment
+    variable, which is where any-llm looks next.
+
+    Raises:
+        LookupError: neither holds a key.
+    """
+    api_key = kwargs.get("api_key")
+    if not api_key:
+        api_key = next(
+            (value for name in provider_credential_env_names(provider.value) or () if (value := os.getenv(name))),
+            None,
+        )
+    if not api_key:
+        raise LookupError(f"no credential configured for provider '{provider.value}'")
+    return ResolvedCredential(
+        api_key=str(api_key), api_base=kwargs.get("api_base"), client_args=dict(kwargs.get("client_args") or {})
+    )
+
+
+def provider_account(
+    provider: LLMProvider, instance: str, workspace_id: uuid.UUID, credential: ResolvedCredential
+) -> ProviderAccount:
+    """The account ``credential`` reaches, named by a digest rather than by the credential.
+
+    Derived rather than stored, so a changed credential names a different
+    account at once and nothing has to notice the change.
+    The instance is left out, because renaming one does not move its account.
+    """
+    canonical = json.dumps(
+        {"provider": provider.value, "api_base": credential.api_base, "api_key": credential.api_key},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return ProviderAccount(
+        provider=provider,
+        instance=instance,
+        workspace_id=workspace_id,
+        identity=hashlib.sha256(canonical.encode()).hexdigest(),
+    )
 
 
 @dataclass(frozen=True)

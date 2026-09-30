@@ -19,7 +19,6 @@ from any_llm.types.files import AsyncFileDownload
 from gateway.services.files._provider_files import (
     _TIMEOUT,
     FileOverBudgetError,
-    ProviderCredential,
     ProviderFile,
     ProviderFileClient,
     ProviderFileUnavailableError,
@@ -30,6 +29,7 @@ from gateway.services.files._provider_files import (
     responses_produced_files,
     serves_files,
 )
+from gateway.types.provider_account import ResolvedCredential
 
 
 def _anthropic_reply(*outputs: list[dict[str, str]]) -> SimpleNamespace:
@@ -104,7 +104,7 @@ def test_only_providers_otari_can_read_back_are_recorded() -> None:
 
 def test_openai_download_is_keyed_on_the_container() -> None:
     url, headers = _container_file_request(
-        ProviderFile(file_id="cfile_1", container_id="cntr_1"), ProviderCredential(api_key="sk-test")
+        ProviderFile(file_id="cfile_1", container_id="cntr_1"), ResolvedCredential(api_key="sk-test")
     )
 
     assert url == "https://api.openai.com/v1/containers/cntr_1/files/cfile_1/content"
@@ -115,7 +115,7 @@ def test_an_openai_file_with_no_container_cannot_be_read() -> None:
     # The download is keyed on the container, so a row without one has no URL
     # to build; refusing here is what keeps ``containers/None/...`` off the wire.
     with pytest.raises(ProviderFileUnavailableError, match="names no container"):
-        _container_file_request(ProviderFile(file_id="cfile_1"), ProviderCredential(api_key="sk-test"))
+        _container_file_request(ProviderFile(file_id="cfile_1"), ResolvedCredential(api_key="sk-test"))
 
 
 def test_a_streamed_messages_result_block_names_its_files() -> None:
@@ -166,7 +166,7 @@ def test_a_citation_field_that_is_not_text_is_dropped() -> None:
 
 def test_an_id_stays_one_path_segment() -> None:
     url, _ = _container_file_request(
-        ProviderFile(file_id="../cfile_1", container_id="cntr/1"), ProviderCredential(api_key="sk-test")
+        ProviderFile(file_id="../cfile_1", container_id="cntr/1"), ResolvedCredential(api_key="sk-test")
     )
 
     assert url == "https://api.openai.com/v1/containers/cntr%2F1/files/..%2Fcfile_1/content"
@@ -191,7 +191,7 @@ def test_a_provider_whose_files_otari_cannot_read_is_refused() -> None:
     # credential reaching OpenAI's container endpoint.
     with pytest.raises(LookupError, match="nebius"):
         ProviderFileClient(
-            provider=LLMProvider.NEBIUS, provider_instance="nebius", credential=ProviderCredential(api_key="sk-test")
+            provider=LLMProvider.NEBIUS, provider_instance="nebius", credential=ResolvedCredential(api_key="sk-test")
         )
 
 
@@ -276,7 +276,7 @@ def _client(
     provider: str = "anthropic", api_base: str | None = None, client_args: dict[str, Any] | None = None
 ) -> ProviderFileClient:
     member = LLMProvider(provider)
-    credential = ProviderCredential(api_key="sk-test", api_base=api_base, client_args=client_args or {})
+    credential = ResolvedCredential(api_key="sk-test", api_base=api_base, client_args=client_args or {})
     return ProviderFileClient(provider=member, provider_instance=provider, credential=credential)
 
 

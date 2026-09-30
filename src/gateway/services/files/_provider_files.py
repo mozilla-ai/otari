@@ -7,11 +7,10 @@ The provider does not keep it for long: OpenAI discards a container 20 minutes a
 
 from __future__ import annotations
 
-import os
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Iterable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import timedelta
 from functools import cached_property
 from typing import Any
@@ -24,10 +23,11 @@ from any_llm.exceptions import AnyLLMError
 from any_llm.types.files import AsyncFileDownload, FileMetadata
 from pydantic import ValidationError
 
-from gateway.core.config import GatewayConfig, provider_credential_env_names
+from gateway.core.config import GatewayConfig
 from gateway.exceptions.files_exceptions import ProviderUploadFailedError
 from gateway.log_config import logger
-from gateway.services.provider_kwargs import get_provider_kwargs
+from gateway.services.provider_kwargs import effective_credential, get_provider_kwargs
+from gateway.types.provider_account import ResolvedCredential
 
 OPENAI_BASE = "https://api.openai.com/v1"
 
@@ -158,40 +158,6 @@ def serves_files(provider: str) -> bool:
         return False
 
 
-@dataclass(frozen=True)
-class ProviderCredential:
-    """What one configured provider instance calls its provider with."""
-
-    api_key: str
-    api_base: str | None = None
-    client_args: dict[str, Any] = field(default_factory=dict)
-
-
-def _credentials(
-    config: GatewayConfig, provider: LLMProvider, instance: str | None, workspace_id: uuid.UUID | None
-) -> ProviderCredential:
-    """What ``provider`` is called with to read its files.
-
-    ``instance`` is the configured entry the run dispatched through, so a named
-    instance's own settings are the ones used to read back what it produced.
-    Falls back to the provider SDK's own environment variable for the key, which
-    is how a config with an empty provider stanza is credentialed for dispatch
-    too.
-    """
-    kwargs = get_provider_kwargs(config, provider, instance, workspace_id=workspace_id)
-    api_key = kwargs.get("api_key")
-    if not api_key:
-        for name in provider_credential_env_names(provider.value) or ():
-            if value := os.environ.get(name):
-                api_key = value
-                break
-    if not api_key:
-        raise LookupError(f"no credential configured for provider '{provider.value}'")
-    return ProviderCredential(
-        api_key=str(api_key), api_base=kwargs.get("api_base"), client_args=dict(kwargs.get("client_args") or {})
-    )
-
-
 class FileOverBudgetError(Exception):
     """A file ran past the bytes the reply may still store."""
 
@@ -212,7 +178,7 @@ def _declared_size(download: AsyncFileDownload) -> int:
     return 0
 
 
-def _container_file_request(file: ProviderFile, credential: ProviderCredential) -> tuple[str, dict[str, str]]:
+def _container_file_request(file: ProviderFile, credential: ResolvedCredential) -> tuple[str, dict[str, str]]:
     """The URL and headers that read ``file``'s bytes out of its OpenAI container.
 
     Raises :class:`ProviderFileUnavailableError` for a file that names no container.
@@ -234,7 +200,7 @@ class ProviderFileClient:
     :meth:`aclose` once it has read everything it wants.
     """
 
-    def __init__(self, *, provider: LLMProvider, provider_instance: str, credential: ProviderCredential) -> None:
+    def __init__(self, *, provider: LLMProvider, provider_instance: str, credential: ResolvedCredential) -> None:
         if provider not in _FILE_PROVIDERS:
             raise LookupError(f"otari cannot read files back from provider '{provider.value}'")
         self._provider = provider
@@ -254,8 +220,10 @@ class ProviderFileClient:
         when the deployment holds no credential for one it can.
         """
         member = LLMProvider(provider)
-        credential = _credentials(config, member, provider_instance, workspace_id)
-        return cls(provider=member, provider_instance=provider_instance, credential=credential)
+        kwargs = get_provider_kwargs(config, member, provider_instance, workspace_id=workspace_id)
+        return cls(
+            provider=member, provider_instance=provider_instance, credential=effective_credential(member, kwargs)
+        )
 
     @property
     def provider(self) -> str:
