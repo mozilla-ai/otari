@@ -45,6 +45,7 @@ from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageA
 from gateway.adapters.web_search_policy_adapter import LocalWebSearchPolicy, RemoteWebSearchPolicy
 from gateway.core.config import GatewayConfig
 from gateway.core.deployment import Plane, deployment_for
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
@@ -60,8 +61,9 @@ from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
+from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import UserRepository
-from gateway.services.budgets import WorkspaceBudgetDefaultService
+from gateway.services.budgets import BudgetMembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
 
 T = TypeVar("T")
@@ -80,6 +82,10 @@ PortKey = Callable[..., T]
 # see ``gateway.main``) and its control plane lives at the other end of the
 # resolve protocol, so an adapter that needs one must say what it does without.
 PortFactory = Callable[[AsyncSession | None], T]
+# A port whose adapter writes workspace membership also needs the request's Unit
+# of Work, because the membership listener writes through its open block and only
+# ``get_unit_of_work`` may construct one.
+UnitOfWorkPortFactory = Callable[[AsyncSession | None, UnitOfWork | None], T]
 Register = Callable[["Container"], None]
 
 
@@ -142,7 +148,8 @@ class Container:
     """
 
     def __init__(self) -> None:
-        self._factories: dict[Any, PortFactory[Any]] = {}
+        self._factories: dict[Any, PortFactory[Any] | UnitOfWorkPortFactory[Any]] = {}
+        self._unit_of_work_ports: set[Any] = set()
         self._router_contributions: list[RouterContribution] = []
         # One line naming what this container was built from, logged by
         # build_container and asserted on by tests.
@@ -154,8 +161,14 @@ class Container:
         A later bind for the same port replaces an earlier one.
         """
         self._factories[port] = factory
+        self._unit_of_work_ports.discard(port)
 
-    def bindings(self) -> ItemsView[Any, PortFactory[Any]]:
+    def bind_with_unit_of_work(self, port: PortKey[T], factory: UnitOfWorkPortFactory[T]) -> None:
+        """Bind ``port`` to a factory that also receives the request's Unit of Work."""
+        self._factories[port] = factory
+        self._unit_of_work_ports.add(port)
+
+    def bindings(self) -> ItemsView[Any, PortFactory[Any] | UnitOfWorkPortFactory[Any]]:
         """Return a snapshot of the (port, factory) pairs bound so far.
 
         A snapshot rather than a live view, so iterating it stays safe while a
@@ -165,8 +178,10 @@ class Container:
         """
         return dict(self._factories).items()
 
-    def resolve(self, port: PortKey[T], session: AsyncSession | None) -> T:
+    def resolve(self, port: PortKey[T], session: AsyncSession | None, *, uow: UnitOfWork | None = None) -> T:
         """Return the adapter bound to ``port``, built for this request's session.
+
+        ``uow`` reaches only a factory bound with :meth:`bind_with_unit_of_work`.
 
         Raises:
             PortNotBoundError: If no adapter has been bound to ``port``.
@@ -175,7 +190,9 @@ class Container:
         factory = self._factories.get(port)
         if factory is None:
             raise PortNotBoundError(port)
-        return cast(T, factory(session))
+        if port in self._unit_of_work_ports:
+            return cast(UnitOfWorkPortFactory[T], factory)(session, uow)
+        return cast(PortFactory[T], factory)(session)
 
     def contribute_router(self, contribution: RouterContribution) -> None:
         """Record a router this build mounts on top of Otari's own."""
@@ -236,17 +253,25 @@ def _growth_signal_adapter(session: AsyncSession | None) -> GrowthSignalPort:
     return NullGrowthSignalAdapter(session)
 
 
-def _identity_provider_adapter_factory(config: GatewayConfig | None) -> PortFactory[IdentityProviderPort]:
-    """Build the core ``IdentityProviderPort`` factory, bound to this app's ``open_signup`` setting."""
+def _identity_provider_adapter_factory(config: GatewayConfig | None) -> UnitOfWorkPortFactory[IdentityProviderPort]:
+    """Build the core ``IdentityProviderPort`` factory, bound to this app's ``open_signup`` setting.
 
-    def build(session: AsyncSession) -> IdentityProviderPort:
+    An open signup creates a workspace membership, so the adapter needs the request's Unit of Work too.
+    """
+
+    def build(session: AsyncSession | None, uow: UnitOfWork | None) -> IdentityProviderPort:
+        if session is None or uow is None:
+            msg = f"a session and a unit of work are required to build {_port_name(IdentityProviderPort)}"
+            raise ContainerError(msg)
         return DeploymentIdentityProviderAdapter(
             UserRepository(session),
-            OrganizationService(session, membership_listener=WorkspaceBudgetDefaultService(session)),
+            OrganizationService(
+                session, membership_listener=BudgetMembershipListener(BudgetRepositories.on(uow)), uow=uow
+            ),
             open_signup=bool(config and config.open_signup),
         )
 
-    return _with_session(IdentityProviderPort, build)
+    return build
 
 
 def _provider_file_adapter(session: AsyncSession | None) -> ProviderFilePort:
@@ -459,7 +484,7 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
     # overlay binds a scale-out store behind the same port.
     container.bind(TelemetryStoragePort, _telemetry_storage_adapter)
     # OAuth sign-in: the base applies this deployment's `open_signup` setting.
-    container.bind(IdentityProviderPort, _identity_provider_adapter_factory(config))
+    container.bind_with_unit_of_work(IdentityProviderPort, _identity_provider_adapter_factory(config))
     # API key format: the base mints the open-source shape and checks every
     # presented key against its own rows. A hosted overlay binds a format that
     # carries a region and a checksum, and routes a key minted elsewhere away.

@@ -37,6 +37,7 @@ from gateway.container import (
     build_container,
 )
 from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
@@ -106,7 +107,10 @@ def test_core_defaults_are_bound_for_every_port() -> None:
     assert isinstance(container.resolve(ModelProviderPort, NO_SESSION), SelfHostedModelProviderAdapter)
     assert isinstance(container.resolve(GrowthSignalPort, NO_SESSION), NullGrowthSignalAdapter)
     assert isinstance(container.resolve(TelemetryStoragePort, NO_SESSION), DatabaseTelemetryStorageAdapter)
-    assert isinstance(container.resolve(IdentityProviderPort, A_SESSION), DeploymentIdentityProviderAdapter)
+    assert isinstance(
+        container.resolve(IdentityProviderPort, A_SESSION, uow=UnitOfWork(A_SESSION)),
+        DeploymentIdentityProviderAdapter,
+    )
     assert isinstance(container.resolve(ApiKeyFormatPort, NO_SESSION), DefaultApiKeyFormatAdapter)
     assert isinstance(container.resolve(ProviderFilePort, NO_SESSION), AnyLlmProviderFiles)
 
@@ -148,8 +152,24 @@ def test_file_storage_refuses_a_container_built_without_config() -> None:
 def test_the_identity_provider_refuses_to_build_without_a_session() -> None:
     container = build_container(config=GatewayConfig())
 
-    with pytest.raises(ContainerError, match="a session is required"):
+    with pytest.raises(ContainerError, match="a session and a unit of work are required"):
         container.resolve(IdentityProviderPort, NO_SESSION)
+
+
+def test_the_identity_provider_refuses_to_build_without_a_unit_of_work() -> None:
+    container = build_container(config=GatewayConfig())
+
+    with pytest.raises(ContainerError, match="a session and a unit of work are required"):
+        container.resolve(IdentityProviderPort, A_SESSION)
+
+
+def test_a_plain_bind_replaces_a_unit_of_work_binding() -> None:
+    """An overlay that rebinds the port with ``bind`` gets a session-only call, as every other port does."""
+    container = build_container(config=GatewayConfig())
+    adapter = object()
+    container.bind(IdentityProviderPort, lambda session: adapter)
+
+    assert container.resolve(IdentityProviderPort, A_SESSION, uow=UnitOfWork(A_SESSION)) is adapter
 
 
 def test_mcp_servers_refuse_a_deployment_that_holds_the_rows_and_has_no_session() -> None:

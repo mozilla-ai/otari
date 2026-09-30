@@ -56,6 +56,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     CurrentPasswordIncorrectError,
     EmailAlreadyInUseError,
@@ -254,6 +255,10 @@ async def update_full_name(db: AsyncSession, identity: User, *, full_name: str |
     return identity
 
 
+class _SignupRaceLostError(Exception):
+    """Another write claimed this address first, so the signup's block rolls back and answers as a no-op."""
+
+
 async def create_user_for_signup(
     db: AsyncSession,
     config: GatewayConfig,
@@ -261,6 +266,7 @@ async def create_user_for_signup(
     background_tasks: BackgroundTasks,
     email: str,
     password: str,
+    uow: UnitOfWork,
     membership_listener: MembershipListener,
     full_name: str | None = None,
     terms_accepted: bool = False,
@@ -315,44 +321,47 @@ async def create_user_for_signup(
         # address with no stored hash.
         await verify_absent_password_async(password)
         return None
-    if identity is None:
-        if not config.open_signup:
-            # The same bcrypt cost as the branch above, for the same reason: an
-            # address this deployment will not register has to answer in about
-            # the time one it would register takes.
-            await verify_absent_password_async(password)
-            return None
-        # The registration, the password and the verification token below are committed together.
-        registration = await OrganizationService(db, membership_listener=membership_listener).provision_signup_tenancy(
-            email=address, full_name=full_name
-        )
-        if not registration.created:
-            # This answers like every other enumeration-safe refusal.
-            await verify_absent_password_async(password)
-            return None
-        identity = registration.identity
 
-    token = generate_token()
-    values: dict[str, str | datetime | None] = {
-        "full_name": identity.full_name or full_name,
-        "email_verification_token_hash": hash_token(token),
-        "email_verification_token_expires_at": datetime.now(UTC)
-        + timedelta(hours=config.email_verification_expiry_hours),
-    }
-    if terms_accepted:
-        values["terms_accepted_at"] = datetime.now(UTC)
-    # NOTE: A provider sign-in or another first password can commit after the check above.
-    # The condition in this write decides.
-    claimed = await UserRepository(db).claim_first_password(
-        identity.id,
-        hashed_password=await hash_password_async(password),
-        require_unverified=True,
-        values=values,
-    )
-    if not claimed:
-        await db.rollback()
+    try:
+        async with uow:
+            if identity is None:
+                if not config.open_signup:
+                    # The same bcrypt cost as the branch above, for the same reason: an
+                    # address this deployment will not register has to answer in about
+                    # the time one it would register takes.
+                    await verify_absent_password_async(password)
+                    return None
+                # The registration, the password and the verification token below are committed together.
+                registration = await OrganizationService(
+                    db, membership_listener=membership_listener, uow=uow
+                ).provision_signup_tenancy(email=address, full_name=full_name)
+                if not registration.created:
+                    # This answers like every other enumeration-safe refusal.
+                    await verify_absent_password_async(password)
+                    raise _SignupRaceLostError
+                identity = registration.identity
+
+            token = generate_token()
+            values: dict[str, str | datetime | None] = {
+                "full_name": identity.full_name or full_name,
+                "email_verification_token_hash": hash_token(token),
+                "email_verification_token_expires_at": datetime.now(UTC)
+                + timedelta(hours=config.email_verification_expiry_hours),
+            }
+            if terms_accepted:
+                values["terms_accepted_at"] = datetime.now(UTC)
+            # NOTE: A provider sign-in or another first password can commit after the check above.
+            # The condition in this write decides.
+            claimed = await UserRepository(db).claim_first_password(
+                identity.id,
+                hashed_password=await hash_password_async(password),
+                require_unverified=True,
+                values=values,
+            )
+            if not claimed:
+                raise _SignupRaceLostError
+    except _SignupRaceLostError:
         return None
-    await db.commit()
     await db.refresh(identity)
 
     background_tasks.add_task(

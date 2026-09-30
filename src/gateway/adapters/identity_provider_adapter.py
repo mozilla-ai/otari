@@ -17,7 +17,8 @@ from gateway.services.tenancy.organization_service import OrganizationService
 class DeploymentIdentityProviderAdapter(IdentityProviderPort):
     """Applies this deployment's ``open_signup`` setting to an OAuth sign-in.
 
-    The adapter leaves its changes for the caller to commit.
+    The adapter leaves its changes for the caller to commit, except a new account's tenancy,
+    which ``OrganizationService.provision_signup_tenancy`` commits in its own Unit of Work block.
     """
 
     def __init__(self, users: UserRepository, organizations: OrganizationService, *, open_signup: bool) -> None:
@@ -38,11 +39,11 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         The provider must have verified the email address.
         If the provider sent no address, or did not verify it, the sign-in is refused and no account is created.
 
-        If ``open_signup`` is enabled and there is no existing account for the address, a new account is created.
-        The new account has its own organization and workspace.
+        If ``open_signup`` is enabled and there is no existing account for the address, a new account is created
+        and committed. The new account has its own organization and workspace.
         No verification email is sent, because the provider has already verified the address.
 
-        A successful call stages these changes on the account and commits none of them:
+        A successful call then stages these changes on the account and commits none of them:
 
         - It records ``provider`` if the account names none.
           An account that already names a provider keeps it.

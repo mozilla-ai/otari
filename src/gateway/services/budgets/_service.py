@@ -1,3 +1,5 @@
+import uuid
+
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User
@@ -11,17 +13,23 @@ from gateway.schemas.budgets import (
     OrganizationScopedBudgetPublic,
     OrganizationScopedBudgetsPublic,
     OrganizationScopedBudgetUpdate,
+    WorkspaceMemberBudgetPoliciesPublic,
+    WorkspaceMemberBudgetPolicyCreate,
+    WorkspaceMemberBudgetPolicyPublic,
+    WorkspaceMemberBudgetPolicyUpdate,
 )
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets._deployment_surface import _DeploymentSurface
 from gateway.services.budgets._end_users import _EndUsers
+from gateway.services.budgets._member_policies import _MemberPolicies
 from gateway.services.budgets._organization_surface import _OrganizationSurface
 from gateway.services.budgets._scopes import ScopeOwnership
+from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.organization_service import OrganizationService
 
 
 class BudgetService:
-    """The budgets domain's use cases: an organization's budgets and the spend ceilings that enforce them.
+    """The budgets domain's use cases: budgets, the spend ceilings that enforce them, and member budget policies.
 
     Each public method is one business step, run in a block of the Unit of Work it was built on.
     """
@@ -32,11 +40,20 @@ class BudgetService:
         repositories: BudgetRepositories,
         organizations: OrganizationService,
         api_keys: ApiKeyService,
+        workspace_access: WorkspaceAccess,
     ) -> None:
         self._uow = uow
         self._organization = _OrganizationSurface(repositories, ScopeOwnership(organizations, api_keys), organizations)
         self._end_users = _EndUsers(repositories)
         self._deployment = _DeploymentSurface(repositories)
+        self._member_policies = _MemberPolicies(repositories, organizations, workspace_access)
+
+    async def create_member_policy(
+        self, *, user: User, workspace_id: uuid.UUID, request: WorkspaceMemberBudgetPolicyCreate
+    ) -> WorkspaceMemberBudgetPolicyPublic:
+        """Give every active member of a workspace a ceiling on one budget, now and whenever a member joins."""
+        async with self._uow:
+            return await self._member_policies.create_policy(user=user, workspace_id=workspace_id, request=request)
 
     async def create_organization_budget(
         self, *, user: User, request: OrganizationBudgetCreate
@@ -57,6 +74,11 @@ class BudgetService:
         async with self._uow:
             await self._deployment.delete_budget(budget_id)
 
+    async def delete_member_policy(self, *, user: User, workspace_id: uuid.UUID, policy_id: str) -> None:
+        """Stop handing a workspace's new members a ceiling. The ceilings already handed out stay."""
+        async with self._uow:
+            await self._member_policies.delete_policy(user=user, workspace_id=workspace_id, policy_id=policy_id)
+
     async def delete_organization_budget(self, *, user: User, budget_id: str) -> None:
         """Delete a budget the caller's organization owns, unless something still names it."""
         async with self._uow:
@@ -66,6 +88,15 @@ class BudgetService:
         """Remove a ceiling inside the caller's organization."""
         async with self._uow:
             await self._organization.delete_ceiling(user=user, ceiling_id=ceiling_id)
+
+    async def list_member_policies(
+        self, *, user: User, workspace_id: uuid.UUID, skip: int = 0, limit: int = 100
+    ) -> WorkspaceMemberBudgetPoliciesPublic:
+        """Return a page of a workspace's member budget policies."""
+        async with self._uow:
+            return await self._member_policies.list_policies(
+                user=user, workspace_id=workspace_id, skip=skip, limit=limit
+            )
 
     async def list_organization_budgets(
         self, *, user: User, skip: int = 0, limit: int = 100
@@ -96,6 +127,20 @@ class BudgetService:
         """
         async with self._uow:
             return await self._end_users.resolve(api_key, external_id)
+
+    async def update_member_policy(
+        self,
+        *,
+        user: User,
+        workspace_id: uuid.UUID,
+        policy_id: str,
+        request: WorkspaceMemberBudgetPolicyUpdate,
+    ) -> WorkspaceMemberBudgetPolicyPublic:
+        """Point a member budget policy at another budget, for members who join from now on."""
+        async with self._uow:
+            return await self._member_policies.update_policy(
+                user=user, workspace_id=workspace_id, policy_id=policy_id, request=request
+            )
 
     async def update_organization_budget(
         self, *, user: User, budget_id: str, request: OrganizationBudgetUpdate
