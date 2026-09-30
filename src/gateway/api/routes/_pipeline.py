@@ -2894,17 +2894,24 @@ class DeclaredTools:
     web_search_header: str | None = None
 
 
+@dataclass(frozen=True, kw_only=True)
+class ToolBackends:
+    """What runs the tools a request may use."""
+
+    code_execution_port: CodeExecutionPort | None = None
+    mcp_server_port: McpServerPort
+    sandbox_containers: SandboxContainerRegistry | None = None
+    sandbox_files: SandboxFileBridge | None = None
+    web_search_policy_port: WebSearchPolicyPort
+
+
 async def prepare_gateway_tools(
     *,
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
     response: Response,
     declared: DeclaredTools,
-    mcp_server_port: McpServerPort,
-    web_search_policy_port: WebSearchPolicyPort,
-    sandbox_files: SandboxFileBridge | None = None,
-    code_execution_port: CodeExecutionPort | None = None,
-    sandbox_containers: SandboxContainerRegistry | None = None,
+    backends: ToolBackends,
 ) -> ToolContext:
     """Guardrails, MCP server-id resolution, and gateway-tool extraction.
 
@@ -2985,7 +2992,9 @@ async def prepare_gateway_tools(
                 inline_names.add(server.name)
             await _validate_mcp_server_urls(adapter, mcp_servers)
         if declared.mcp_server_ids:
-            stored_servers = await _resolve_mcp_server_ids(adapter, ctx, mcp_server_port, declared.mcp_server_ids)
+            stored_servers = await _resolve_mcp_server_ids(
+                adapter, ctx, backends.mcp_server_port, declared.mcp_server_ids
+            )
             await _validate_mcp_server_urls(
                 adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id
             )
@@ -3179,7 +3188,7 @@ async def prepare_gateway_tools(
         # request that says nothing gets the sandbox released with it, which is
         # how every request behaved before reuse existed. ``auto`` asks for one
         # to be held; an id asks for that one back.
-        sandbox_containers = sandbox_containers if use_sandbox else None
+        sandbox_containers = backends.sandbox_containers if use_sandbox else None
         if use_sandbox:
             requested_container = _requested_container(declared.container_id) or _requested_container(
                 (sandbox_tool_entry or {}).get("container")
@@ -3281,7 +3290,7 @@ async def prepare_gateway_tools(
                 web_search_auth_token = ctx.config.platform_token
             scope = WebSearchPolicyScope(workspace_id=ctx.workspace_id, user_token=ctx.user_token)
             try:
-                workspace_search = await web_search_policy_port.resolve(scope, requested_tools)
+                workspace_search = await backends.web_search_policy_port.resolve(scope, requested_tools)
             except WebSearchPolicyResolutionFailedError as exc:
                 raise adapter.error(_policy_failure_status(exc.reason), exc.message, ErrorKind.API) from exc
             try:
@@ -3339,7 +3348,7 @@ async def prepare_gateway_tools(
         mcp_server_configs=mcp_servers,
         use_sandbox=use_sandbox,
         sandbox_tool_entry=sandbox_tool_entry,
-        code_execution_port=code_execution_port,
+        code_execution_port=backends.code_execution_port,
         sandbox_exec_timeout_s=sandbox_exec_timeout_s,
         sandbox_session_image=sandbox_session_image,
         sandbox_allowed_tools=sandbox_allowed_tools,
@@ -3361,7 +3370,7 @@ async def prepare_gateway_tools(
             sandbox_max_iterations or MAX_TOOL_ITERATIONS_CAP,
         ),
         tools_header=declared.tools_header,
-        sandbox_files=sandbox_files,
+        sandbox_files=backends.sandbox_files,
     )
 
 

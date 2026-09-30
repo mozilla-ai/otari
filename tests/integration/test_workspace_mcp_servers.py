@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.adapters.mcp_server_adapter import build_mcp_server_port
 from gateway.adapters.web_search_policy_adapter import build_web_search_policy_port
 from gateway.api.routes import chat, messages
-from gateway.api.routes._pipeline import DeclaredTools, RequestContext, prepare_gateway_tools
+from gateway.api.routes._pipeline import DeclaredTools, RequestContext, ToolBackends, prepare_gateway_tools
 from gateway.api.routes.chat import ChatCompletionRequest
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -668,8 +668,10 @@ async def test_prepare_gateway_tools_hands_the_tool_loop_the_workspaces_servers(
     tool_ctx = await prepare_gateway_tools(
         adapter=chat._ADAPTER,
         ctx=_request_context(async_db, workspace.id, organization.id),
-        mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
-        web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+        backends=ToolBackends(
+            mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
+            web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+        ),
         response=Response(),
         declared=DeclaredTools(
             guardrails=None,
@@ -699,8 +701,10 @@ async def test_prepare_gateway_tools_merges_stored_servers_after_inline_ones(asy
     tool_ctx = await prepare_gateway_tools(
         adapter=chat._ADAPTER,
         ctx=_request_context(async_db, workspace.id, organization.id),
-        mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
-        web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+        backends=ToolBackends(
+            mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
+            web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+        ),
         response=Response(),
         declared=DeclaredTools(
             guardrails=None,
@@ -731,8 +735,10 @@ async def test_prepare_gateway_tools_is_unchanged_when_nothing_is_configured(asy
     tool_ctx = await prepare_gateway_tools(
         adapter=chat._ADAPTER,
         ctx=_request_context(async_db, workspace.id, organization.id),
-        mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
-        web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+        backends=ToolBackends(
+            mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
+            web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+        ),
         response=Response(),
         declared=DeclaredTools(
             guardrails=None,
@@ -787,8 +793,10 @@ async def test_a_stored_servers_unsafe_url_is_not_named_to_the_caller(
         await prepare_gateway_tools(
             adapter=chat._ADAPTER,
             ctx=_request_context(async_db, workspace.id, organization.id),
+            backends=ToolBackends(
             mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
-        web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+            web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+        ),
             response=Response(),
             declared=DeclaredTools(
                 guardrails=None,
@@ -816,8 +824,10 @@ async def test_prepare_gateway_tools_refuses_an_unknown_id(async_db: AsyncSessio
         await prepare_gateway_tools(
             adapter=chat._ADAPTER,
             ctx=_request_context(async_db, workspace.id, organization.id),
+            backends=ToolBackends(
             mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
-        web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+            web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+        ),
             response=Response(),
             declared=DeclaredTools(
                 guardrails=None,
@@ -843,8 +853,10 @@ async def test_the_anthropic_envelope_names_an_unknown_id_as_not_found(async_db:
         await prepare_gateway_tools(
             adapter=messages._ADAPTER,
             ctx=_request_context(async_db, workspace.id, organization.id),
+            backends=ToolBackends(
             mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
-        web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+            web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+        ),
             response=Response(),
             declared=DeclaredTools(
                 guardrails=None,

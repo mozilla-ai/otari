@@ -41,6 +41,7 @@ from gateway.api.routes._pipeline import (
     DeclaredTools,
     ErrorKind,
     RequestContext,
+    ToolBackends,
     _requested_container,
     classify_provider_error,
     default_attempt_kwargs,
@@ -883,23 +884,25 @@ async def create_message(
             # leases; the provider never sees it when the sandbox runs the code.
             container_id=request.container,
         ),
-        code_execution_port=code_execution_port,
-        mcp_server_port=mcp_server_port,
-        web_search_policy_port=web_search_policy_port,
-        sandbox_containers=build_sandbox_container_registry(
-            config=config,
-            uow=ctx.uow,
-            user_id=ctx.user_id,
-            workspace_id=ctx.workspace_id,
-            port=code_execution_port,
-        ),
-        sandbox_files=build_sandbox_file_bridge(
-            raw_request=raw_request,
-            config=config,
-            uow=ctx.uow,
-            user_id=ctx.user_id,
-            workspace_id=ctx.workspace_id,
-            inputs=sandbox_inputs,
+        backends=ToolBackends(
+            code_execution_port=code_execution_port,
+            mcp_server_port=mcp_server_port,
+            web_search_policy_port=web_search_policy_port,
+            sandbox_containers=build_sandbox_container_registry(
+                config=config,
+                uow=ctx.uow,
+                user_id=ctx.user_id,
+                workspace_id=ctx.workspace_id,
+                port=code_execution_port,
+            ),
+            sandbox_files=build_sandbox_file_bridge(
+                raw_request=raw_request,
+                config=config,
+                uow=ctx.uow,
+                user_id=ctx.user_id,
+                workspace_id=ctx.workspace_id,
+                inputs=sandbox_inputs,
+            ),
         ),
     )
 

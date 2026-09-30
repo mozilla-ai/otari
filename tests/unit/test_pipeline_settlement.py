@@ -50,6 +50,7 @@ from gateway.api.routes._pipeline import (
     DeclaredTools,
     LoggedUsage,
     RequestContext,
+    ToolBackends,
     ToolContext,
     build_streaming_response,
     log_usage,
@@ -1577,6 +1578,7 @@ def _chunk_id(part: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+_BACKEND_FIELDS = frozenset(field.name for field in dataclasses.fields(ToolBackends))
 _DECLARED_FIELDS = frozenset(field.name for field in dataclasses.fields(DeclaredTools))
 
 
@@ -1593,13 +1595,17 @@ async def _call_prepare_gateway_tools(ctx: RequestContext, **overrides: Any) -> 
         "tools_header": None,
     }
     declared.update({name: overrides.pop(name) for name in list(overrides) if name in _DECLARED_FIELDS})
+    backends: dict[str, Any] = {
+        "mcp_server_port": _Servers(_resolves_to_nothing),
+        "web_search_policy_port": _Policy(),
+    }
+    backends.update({name: overrides.pop(name) for name in list(overrides) if name in _BACKEND_FIELDS})
     kwargs: dict[str, Any] = {
         "adapter": chat._ADAPTER,
         "ctx": ctx,
         "response": Response(),
         "declared": DeclaredTools(**declared),
-        "mcp_server_port": _Servers(_resolves_to_nothing),
-        "web_search_policy_port": _Policy(),
+        "backends": ToolBackends(**backends),
     }
     kwargs.update(overrides)
     # Stubbed rather than fed a session: every case here is about a *different*
