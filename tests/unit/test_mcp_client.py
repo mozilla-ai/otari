@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -516,3 +517,38 @@ async def test_pool_close_that_hangs_ends_after_the_close_timeout(
     assert pool._owner.done() is not ignore_cancel  # noqa: SLF001
     transport.may_close.set()
     await asyncio.wait((pool._owner,))  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_pool_abandoned_owner_that_fails_later_is_logged_by_type_only(
+    transport: TaskGroupMcpTransport, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """asyncio logs an unread task exception in full, and its message can hold the server URL or credential."""
+    monkeypatch.setattr("gateway.services.mcp_client.CLOSE_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr("gateway.services.mcp_client._CANCEL_GRACE_SECONDS", 0.05)
+    warnings = _capture_warnings(monkeypatch)
+    loop = asyncio.get_running_loop()
+    unhandled: list[dict[str, Any]] = []
+    loop.set_exception_handler(lambda _loop, context: unhandled.append(context))
+    pool = MCPClientPool([_TASK_GROUP_CONFIG])
+    await pool.__aenter__()
+    transport.may_close.clear()
+    transport.ignore_cancel = True
+    transport.close_error = RuntimeError("https://mcp.example/?token=secret refused the close")
+
+    await pool.__aexit__(None, None, None)
+    owner = pool._owner  # noqa: SLF001
+    assert owner is not None
+    transport.may_close.set()
+    await asyncio.wait((owner,))
+    await asyncio.sleep(0)
+    # NOTE: asyncio reports an unread exception only once the task is freed, so every reference to it goes.
+    transport.entered_in = None
+    transport.exited_in.clear()
+    transport.close_error = None
+    del owner, pool
+    gc.collect()
+    loop.set_exception_handler(None)
+
+    assert [context["message"] for context in unhandled] == []
+    assert warnings[-1] == "Abandoned MCP sessions failed to close: RuntimeError"
