@@ -138,6 +138,9 @@ export function RequestDetail({
         <DetailField label="1h cache writes">
           {formatTokenCount(entry.cache_write_1h_tokens ?? null)}
         </DetailField>
+        <DetailField label="Reasoning tokens">
+          {formatTokenCount(entry.reasoning_tokens ?? null)}
+        </DetailField>
         <DetailField label="Total time">
           {formatLatencyCell(entry.latency_ms)}
         </DetailField>

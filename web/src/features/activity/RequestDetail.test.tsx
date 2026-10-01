@@ -60,6 +60,29 @@ describe("RequestDetail", () => {
     ).toHaveTextContent("1,200")
   })
 
+  it("shows the reasoning tokens, and a dash for a row that never recorded them", async () => {
+    mockApi()
+    const { unmount } = renderPage(
+      <RequestDetail
+        entry={entry({ reasoning_tokens: 1234 })}
+        onPriceModel={null}
+      />,
+    )
+    await flushRouter()
+
+    expect(
+      screen.getByText("Reasoning tokens").parentElement,
+    ).toHaveTextContent("1,234")
+    unmount()
+
+    renderPage(<RequestDetail entry={entry()} onPriceModel={null} />)
+    await flushRouter()
+
+    expect(
+      screen.getByText("Reasoning tokens").parentElement,
+    ).toHaveTextContent("—")
+  })
+
   it("names a row's tool calls and what they cost", async () => {
     mockApi()
     renderPage(
