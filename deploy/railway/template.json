@@ -46,6 +46,11 @@
           "isOptional": false,
           "description": "Key that names the provider account a copy of an attached file is in. Otari refuses to start without it while provider copies are on. Auto-generated on deploy, independent of OTARI_SECRET_KEY; losing it only makes the next request copy each file again."
         },
+        "OTARI_FORWARDED_ALLOW_IPS": {
+          "defaultValue": "*",
+          "isOptional": false,
+          "description": "Trust X-Forwarded-For from any peer, so the per-IP sign-in and public-catalog limits see the real client instead of Railway's ingress. Safe here because the ingress is the only path to the container. Without it every visitor shares a few ingress addresses, and ten wrong passwords from anyone lock the dashboard for everyone for a minute."
+        },
         "PORT": {
           "defaultValue": "8000",
           "isOptional": false,
