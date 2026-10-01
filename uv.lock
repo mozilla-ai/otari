@@ -2759,7 +2759,6 @@ source = { editable = "cli" }
 dependencies = [
     { name = "click" },
     { name = "httpx" },
-    { name = "python-dotenv" },
     { name = "pyyaml" },
 ]
 
@@ -2767,7 +2766,6 @@ dependencies = [
 requires-dist = [
     { name = "click", specifier = ">=8.1.0" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
 

@@ -261,6 +261,12 @@ files = ["src", "cli/src", "tests", "scripts"]
 exclude = ["scripts/web-search-[^/]+-adapter/"]
 
 [[tool.mypy.overrides]]
+# setuptools-scm writes otari_agent/_version.py at build time, so it is absent
+# from a source tree nothing has built yet; __init__.py falls back when it is.
+module = ["otari_agent._version"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = ["testcontainers.*"]
 ignore_missing_imports = true
 

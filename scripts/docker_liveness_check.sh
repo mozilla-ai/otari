@@ -29,10 +29,11 @@ cleanup() {
 
 trap cleanup EXIT
 
-# The image installs the CLI from the tree, where otari_agent.__version__ is the
-# unstamped 0.0.0, so `otari --version` has to fall back to OTARI_VERSION: the
-# image's own ENV, and the value the gateway reports. Compared inside the
-# container, so the script needs no copy of the build argument.
+# The build context excludes .git (.dockerignore), so setuptools-scm has no tag
+# to read and otari_agent.__version__ is its 0.0.0 fallback; `otari --version`
+# reports OTARI_VERSION instead, the image's own ENV and the value the gateway
+# reports. Compared inside the container, so the script needs no copy of the
+# build argument.
 echo "Testing otari --version reports the image version..."
 docker run --rm "$IMAGE_TAG" sh -c '
     expected="otari, version $OTARI_VERSION"

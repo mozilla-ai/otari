@@ -51,21 +51,18 @@ jobs:
         with:
           ref: ${{ steps.ver.outputs.tag }}
           persist-credentials: false
+          # setuptools-scm reads the version off the tag, so the build needs
+          # the tags rather than the single commit a shallow checkout fetches.
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.14"
 
-      # The tree carries 0.0.0 (RELEASE.md: the version comes from the tag).
-      # The lock records the member's version as dynamic, so stamping it here
-      # does not invalidate --frozen.
-      - name: Stamp the release version into the light CLI
-        env:
-          VERSION: ${{ steps.ver.outputs.version }}
-        run: |
-          sed -i "s/^__version__ = \"0.0.0\"$/__version__ = \"${VERSION}\"/" cli/src/otari_agent/__init__.py
-          grep -q "^__version__ = \"${VERSION}\"$" cli/src/otari_agent/__init__.py
-
+      # setuptools-scm takes the version from the tag checked out above
+      # (RELEASE.md: the version comes from the tag) and writes it into the
+      # sdist, so there is nothing to stamp here. The lock records the member's
+      # version as dynamic, so that does not invalidate --frozen.
       - name: Build the sdist and export its pinned closure
         run: |
           uv build --package otari-agent --sdist -o dist
