@@ -3358,20 +3358,54 @@ def test_a_closed_stdin_stays_a_quiet_no_op(monkeypatch: pytest.MonkeyPatch) -> 
     assert hook_cli._stdin_is_a_terminal() is False
 
 
-@pytest.mark.parametrize("flag", ["--url", "--api-key", "--config"])
-def test_the_hook_server_flags_are_gone(monkeypatch: pytest.MonkeyPatch, flag: str) -> None:
-    """The flags that pointed this command at a gateway are rejected, not merely hidden.
+@pytest.mark.parametrize("flag", ["--url", "--api-key", "--config", "-c"])
+def test_a_hook_registered_with_the_old_gateway_flags_still_enforces(repo: Path, flag: str) -> None:
+    """A command line an older `otari hook setup` wrote still checks the guardrail.
 
-    Rejected rather than accepted-and-ignored on purpose: a hook registered
-    with one of them still in its command line must fail loudly at the next
-    tool call, not go on checking nothing while looking like it works.
+    Those registrations pass `--api-key <value>` on every tool call. Click
+    exits 2 on an option it does not know and both harnesses read 2 as
+    "block", so rejecting one here would leave an upgraded install unable to
+    act at all until its registration was refreshed. They are accepted and
+    ignored instead, which evaluates in process: what the credential was
+    buying anyway.
+    """
+    _guardrail_path(repo).write_text(
+        'schema_version: "1.0"\npolicy:\n  id: test\ngates:\n'
+        "  - id: g\n    type: path\n"
+        "    runs: [pre_tool_use.edit_target]\n    enforcement: required\n"
+        '    forbidden: ["CHANGELOG.md"]\n    message: forbidden\n',
+        encoding="utf-8",
+    )
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
+    }
+
+    result = CliRunner().invoke(hook_cli.hook, [flag, "whatever"], input=json.dumps(payload))
+
+    assert result.exit_code == 2, result.output
+    assert "forbidden" in result.output, "blocked by the gate, not by a usage error"
+    assert "No such option" not in result.output
+
+
+def test_the_old_gateway_flags_are_not_advertised(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tolerated for an old registration, never offered to a new one.
+
+    `setup` rejects `--api-key` rather than tolerating it, unlike `hook`
+    itself: nothing is registered yet, so a person typing it should be told
+    it is gone rather than have it quietly do nothing.
     """
     monkeypatch.setattr(hook_cli, "_stdin_is_a_terminal", lambda: False)
 
-    result = CliRunner().invoke(hook_cli.hook, [flag, "x"], input="{}")
+    result = CliRunner().invoke(hook_cli.hook, ["--help"])
 
-    assert result.exit_code == 2, result.output
-    assert f"No such option: {flag}" in result.output
+    assert result.exit_code == 0, result.output
+    for flag in ("--url", "--api-key", "--config"):
+        assert flag not in result.output
 
+    setup_help = CliRunner().invoke(hook_cli.hook, ["setup", "--help"])
+    assert "--api-key" not in setup_help.output
     setup_result = CliRunner().invoke(hook_cli.hook, ["setup", "--api-key", "x"])
     assert setup_result.exit_code == 2, setup_result.output

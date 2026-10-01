@@ -1976,6 +1976,20 @@ def _stdin_is_a_terminal() -> bool:
     show_default=True,
     help="Agent integration sending this callback.",
 )
+# Accepted and ignored, not rejected. A hook registered by an older `otari
+# hook setup` still passes `--api-key <value>` on every tool call, and Click
+# exits 2 on an option it does not know, which both supported harnesses read
+# as "block". Rejecting these would turn an upgrade into an agent that cannot
+# act at all until its registration is refreshed, which is the one failure
+# this command is built never to cause. Ignoring them evaluates the guardrail
+# in process, which is what the credential was buying anyway. `otari hook
+# setup` rewrites the stale command in place (_merge_hook_entry matches on
+# the binary and "hook", before any flag), so a re-run clears them.
+@click.option("--api-key", hidden=True, expose_value=False, help="Ignored; an older hook registration may pass it.")
+@click.option("--url", hidden=True, expose_value=False, help="Ignored; an older hook registration may pass it.")
+@click.option(
+    "--config", "-c", hidden=True, expose_value=False, help="Ignored; an older hook registration may pass it."
+)
 @click.option(
     "--judge-model",
     envvar="OTARI_HOOK_JUDGE_MODEL",
