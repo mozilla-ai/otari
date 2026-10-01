@@ -6,7 +6,7 @@
     "otari": {
       "name": "otari",
       "source": {
-        "image": "docker.io/mzdotai/otari:latest"
+        "image": "docker.io/mzdotai/otari:0.14.1"
       },
       "deploy": {
         "startCommand": null,

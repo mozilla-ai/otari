@@ -13,7 +13,7 @@ The template stands up two services:
 
 | Service | Source | Notes |
 | --- | --- | --- |
-| **otari** | `docker.io/mzdotai/otari:latest` | Target port `8000`, healthcheck `/api/v1/health`. Pulls the published image; builds nothing. |
+| **otari** | `docker.io/mzdotai/otari:0.14.1` | Target port `8000`, healthcheck `/api/v1/health`. Pulls the published image; builds nothing. |
 | **Postgres** | Railway managed | Durable storage for keys, users, budgets, and usage. |
 
 Otari is a good fit for a one-click deploy: the app is stateless, its only
