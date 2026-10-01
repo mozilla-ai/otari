@@ -5,7 +5,11 @@ from pathlib import Path
 import click
 
 from otari_agent.claude_code_import import parse_since, scan_transcripts
-from otari_agent.settings import API_ROOT
+
+# Mirrors gateway.core.config.API_ROOT. A literal rather than an import: this
+# command talks to a gateway over HTTP that may be a different build.
+# tests/unit/test_claude_code_import.py pins the two equal.
+API_ROOT = "/api/v1"
 
 # The per-request cap of POST /api/v1/usage/external-events. It lives in the
 # distribution both sides depend on, and the gateway's external_usage_service

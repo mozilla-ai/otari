@@ -193,7 +193,8 @@ evidence. The evaluator is pure policy code with no database, so the domain has
 a service package and no repository.
 
 Its evaluator is `otari_agent.domain`, in the `otari-agent` workspace member
-(`cli/`), so `otari hook` can run without the gateway.
+(`cli/`), so `otari hook` can run without the gateway, which is what it does:
+the hook evaluates in process and never calls this route.
 
 ### usage-and-telemetry
 

@@ -305,9 +305,10 @@ rather than in the gateway so `otari hook` installs without the server;
 `routes/hooks.py` imports it from there. `otari_agent.domain.check`'s
 `run_policy_check` is the shared orchestration (parse, budget-guard,
 dispatch to each gate's evaluator): `otari hook` (`cli.py`) calls it in
-process by default, needing no running gateway, and the Hook Server
-(`POST /api/v1/hooks/check`, `routes/hooks.py`) calls the same function for
-whoever opts a hook into checking against a gateway over HTTP instead. See
+process, needing no running gateway and no credential, and the Hook Server
+(`POST /api/v1/hooks/check`, `routes/hooks.py`) calls the same function for a
+caller that wants a gateway to evaluate over HTTP. Otari ships no such caller;
+the route's rework is tracked in #1699. See
 [docs/agent-guardrails.md](../../docs/agent-guardrails.md).
 
 ## Logging
