@@ -147,6 +147,7 @@ def serve(
             app,
             host=gateway_config.host,
             port=gateway_config.port,
+            forwarded_allow_ips=gateway_config.forwarded_allow_ips,
         )
     except KeyboardInterrupt:
         logger.info("\nShutting down Otari...")

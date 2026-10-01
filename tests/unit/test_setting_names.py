@@ -63,6 +63,7 @@ _SETTING_NAMES = frozenset(
         "files_storage_options",
         "files_sweep_interval_sec",
         "files_url",
+        "forwarded_allow_ips",
         "guardrail_thread_pool_size",
         "guardrails_url",
         "host",

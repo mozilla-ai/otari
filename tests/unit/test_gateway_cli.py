@@ -3,7 +3,7 @@ import os
 import subprocess
 import sys
 import textwrap
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -20,6 +20,8 @@ class ServeCapture:
 
     log_level: int | None = None
     uvicorn_calls: int = 0
+    uvicorn_kwargs: dict[str, object] = field(default_factory=dict)
+    config: GatewayConfig = field(default_factory=lambda: GatewayConfig(master_key="test-master-key"))
 
 
 @pytest.fixture
@@ -33,7 +35,7 @@ def serve_stubs(monkeypatch: pytest.MonkeyPatch) -> ServeCapture:
     captured = ServeCapture()
 
     def fake_load_config(config_path: str | None = None) -> GatewayConfig:
-        return GatewayConfig(master_key="test-master-key")
+        return captured.config
 
     def fake_setup_logger(level: int) -> None:
         captured.log_level = level
@@ -43,6 +45,7 @@ def serve_stubs(monkeypatch: pytest.MonkeyPatch) -> ServeCapture:
 
     def fake_uvicorn_run(*args: object, **kwargs: object) -> None:
         captured.uvicorn_calls += 1
+        captured.uvicorn_kwargs = kwargs
 
     monkeypatch.setattr(gateway_cli, "load_config", fake_load_config)
     monkeypatch.setattr(gateway_cli, "setup_logger", fake_setup_logger)
@@ -88,6 +91,19 @@ def test_serve_workers_greater_than_one_is_rejected(serve_stubs: ServeCapture) -
     assert result.exit_code != 0
     assert "does not support running more than one worker" in result.output
     assert serve_stubs.uvicorn_calls == 0
+
+
+def test_serve_leaves_forwarded_allow_ips_to_uvicorn_when_unset(serve_stubs: ServeCapture) -> None:
+    result = CliRunner().invoke(gateway_cli.serve, [])
+    assert result.exit_code == 0, result.output
+    assert serve_stubs.uvicorn_kwargs["forwarded_allow_ips"] is None
+
+
+def test_serve_passes_forwarded_allow_ips_to_uvicorn(serve_stubs: ServeCapture) -> None:
+    serve_stubs.config = GatewayConfig(master_key="test-master-key", forwarded_allow_ips="*")
+    result = CliRunner().invoke(gateway_cli.serve, [])
+    assert result.exit_code == 0, result.output
+    assert serve_stubs.uvicorn_kwargs["forwarded_allow_ips"] == "*"
 
 
 def test_main_invokes_cli(monkeypatch: pytest.MonkeyPatch) -> None:

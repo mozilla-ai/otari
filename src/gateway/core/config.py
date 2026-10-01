@@ -379,6 +379,17 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
         default="0.0.0.0", description="Host to bind the server to"
     )  # noqa: S104
     port: Annotated[int, Shown(SettingsGroup.SERVER)] = Field(default=8000, description="Port to bind the server to")
+    forwarded_allow_ips: Annotated[str | None, Shown(SettingsGroup.SERVER)] = Field(
+        default=None,
+        description=(
+            "Comma-separated addresses or networks of the proxies whose X-Forwarded-For and "
+            "X-Forwarded-Proto headers `otari serve` trusts, or '*' for any peer. The per-IP sign-in "
+            "and public-catalog limits key on the address these headers resolve to, so behind a "
+            "proxy that is not listed every visitor shares the proxy's address. Use '*' only where "
+            "the proxy is the sole path to the server, as on Railway. Unset leaves it to uvicorn: "
+            "FORWARDED_ALLOW_IPS if set, otherwise 127.0.0.1."
+        ),
+    )
 
     database_url: Annotated[str, Shown(SettingsGroup.SERVER)] = Field(
         default="sqlite:///./otari.db",
