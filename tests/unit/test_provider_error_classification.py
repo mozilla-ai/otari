@@ -17,7 +17,7 @@ import asyncio
 import httpx
 import pytest
 from anthropic import APITimeoutError as AnthropicAPITimeoutError
-from any_llm.exceptions import UnsupportedParameterError
+from any_llm.exceptions import InvalidRequestError, UnsupportedParameterError
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from gateway.api.routes._pipeline import (
@@ -723,3 +723,87 @@ def test_failure_status_code_keeps_the_upstream_status_for_billing() -> None:
     of my error rate is an empty wallet" stays answerable even though the caller
     saw a 502."""
     assert failure_status_code(_ParamError(400, None, _ANTHROPIC_BILLING_MSG)) == 400
+
+
+# ---------------------------------------------------------------------------
+# InvalidRequestError with no HTTP status maps to 400 (Fixes #989)
+# ---------------------------------------------------------------------------
+
+
+def test_status_less_invalid_request_error_maps_to_400() -> None:
+    """A bare InvalidRequestError with no HTTP status (as raised by gemini,
+    bedrock, and anthropic for bad request shapes) must map to HTTP 400 with
+    the provider's own explanation, not fall through to the generic 502."""
+    exc = InvalidRequestError("max_tokens exceeds context window for this model")
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert "max_tokens" in mapping.detail
+
+
+class _StatusLessWrapper(Exception):
+    """A wrapper carrying no status of its own, holding the real failure on
+    ``original_exception``. ``_WrappedError`` cannot model this: it requires a
+    status, and a failure that carries one is classified by that status."""
+
+    def __init__(self, original: BaseException) -> None:
+        super().__init__("Invalid request")
+        self.status_code = None
+        self.original_exception = original
+
+
+def test_status_less_invalid_request_error_survives_wrapped_error() -> None:
+    """The InvalidRequestError type check fires when it lives on
+    ``original_exception`` rather than on the failure itself."""
+    original = InvalidRequestError("invalid message role: 'system'")
+    mapping = classify_provider_error(_StatusLessWrapper(original))
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert "invalid message role" in mapping.detail
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_status"),
+    [(401, 502), (403, 502), (429, 429)],
+)
+def test_a_carried_status_wins_over_an_invalid_request_error_in_the_chain(
+    status_code: int, expected_status: int
+) -> None:
+    """A failure that carries its own status keeps it, even when a status-less
+    InvalidRequestError sits anywhere on ``original_exception``.
+
+    Guarding per-link rather than on the failure's own status turned all of
+    these into a client 400, which is how a rejected credential's message would
+    have reached the caller."""
+    wrapped = _WrappedError(status_code, InvalidRequestError("upstream text"))
+    mapping = classify_provider_error(wrapped)
+    assert mapping is not None
+    assert mapping.status_code == expected_status
+
+
+def test_a_credential_failure_keeps_its_fixed_detail_over_a_chained_invalid_request() -> None:
+    """The 401 case specifically: its detail is fixed precisely so an upstream
+    message never reaches the caller, which is the invariant
+    ``redact_upstream_message`` documents about itself."""
+    wrapped = _WrappedError(401, InvalidRequestError("sk-ant-would-leak-here"))
+    mapping = classify_provider_error(wrapped)
+    assert mapping is not None
+    assert mapping.detail == PROVIDER_CREDENTIALS_DETAIL
+    assert "sk-ant" not in mapping.detail
+
+
+def test_status_less_invalid_request_error_is_recorded_as_400() -> None:
+    """failure_status_code records 400 for a status-less InvalidRequestError so
+    the usage log reflects the real classification, not the generic 502."""
+    exc = InvalidRequestError("unknown parameter 'response_format'")
+    assert failure_status_code(exc) == 400
+
+
+def test_invalid_request_error_with_status_is_classified_by_status() -> None:
+    """An InvalidRequestError that already carries an HTTP status must not be
+    rerouted by the type-based branch; the status branch handles it as usual."""
+    exc = InvalidRequestError("bad request shape")
+    exc.status_code = 400
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.status_code == 400
