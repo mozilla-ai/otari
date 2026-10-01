@@ -13,7 +13,7 @@ The template stands up two services:
 
 | Service | Source | Notes |
 | --- | --- | --- |
-| **otari** | `docker.io/mzdotai/otari:0.14.1` | Target port `8000`, healthcheck `/api/v1/health`. Pulls the published image; builds nothing. |
+| **otari** | `docker.io/mzdotai/otari:0.14.1` | Target port `8000`, healthcheck `/api/v1/health`. Pulls the published image, pinned to a release; builds nothing. See [Upgrade](#upgrade). |
 | **Postgres** | Railway managed | Durable storage for keys, users, budgets, and usage. |
 
 Otari is a good fit for a one-click deploy: the app is stateless, its only
@@ -100,6 +100,34 @@ curl "$OTARI_URL/api/v1/chat/completions" \
 Use a provider you added (for example `anthropic:...`, `mistral:...`, or
 `gemini:...`).
 
+## Upgrade
+
+The template pins the Otari image to a release tag, not `latest`. Otari runs
+its migrations on startup, and Railway redeploys on its own (a crash restart, a
+host move, a variable change). On a moving tag, any of those could pull a newer
+release and migrate your schema without you choosing to upgrade. Migrations
+only go forward, so going back needs a database restore.
+
+To upgrade:
+
+1. Back up Postgres. Railway's Postgres service has a **Backups** tab; or run
+   `pg_dump` against its public URL.
+2. Read the [release notes](https://github.com/mozilla-ai/otari/releases) for
+   every release between yours and the target.
+3. On the otari service, open Settings → Source and change the image tag to the
+   target release (for example `0.15.0`). Railway
+   redeploys, and Otari migrates the schema on startup.
+4. Check `/api/v1/health` and make one real request, as in [Verify](#verify).
+
+To take patch releases without doing this by hand, turn on Railway's
+[Image Auto Updates](https://docs.railway.com/deployments/image-auto-updates):
+on the otari service, open Settings → Source → **Configure Auto Updates**,
+choose **Patches only**, and pick a maintenance window. Railway then moves the
+pinned tag within its minor line (`0.14.1` to `0.14.2`) and notifies workspace
+admins. Avoid **Minor updates and patches**: a minor release can migrate the
+schema, and the backup Railway takes before an update covers the otari
+service's volumes, not the Postgres service.
+
 ## Maintaining the template
 
 A Railway multi-service template (the Postgres service, the env-var input form,
@@ -115,7 +143,10 @@ When changing the template:
    that the bootstrapped key works.
 2. Update [`template.json`](template.json) in the same change so the snapshot
    matches the live config (services, variables, defaults, target port).
-3. If the deploy link changes, update the **Deploy on Railway** button here, in
+3. To move a new deploy to a newer release, change the image tag on the live
+   template and in `template.json`. This does not touch existing deploys: each
+   keeps the tag it was deployed with until its operator upgrades.
+4. If the deploy link changes, update the **Deploy on Railway** button here, in
    the project root `README.md`, and in `docs/deployment.md`.
 
 Listing the template in Railway's public marketplace is optional: the deploy
