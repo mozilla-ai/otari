@@ -5,9 +5,12 @@ Installed on its own (Homebrew) this is the whole program. Installed beside the
 server commands, which `gateway.cli.register` attaches; see `otari_agent.cli`.
 """
 
-# Stamped by the release workflow (a sed on this line) right before
-# `uv build --package otari-agent`. A literal, not importlib.metadata: it costs
-# nothing at import and is correct from a source tree.
-__version__ = "0.0.0"
+# Written at build time by setuptools-scm from the repository's Git tag (see
+# cli/pyproject.toml). Absent only in a source tree nothing has built yet,
+# where there is no version to report.
+try:
+    from otari_agent._version import __version__
+except ImportError:
+    __version__ = "0.0.0"
 
 __all__ = ["__version__"]

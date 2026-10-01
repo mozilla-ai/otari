@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
+from otari_agent import usage_import
 from otari_agent.claude_code_import import (
     normalize_model,
     parse_since,
@@ -604,3 +605,10 @@ def test_a_transcript_that_vanishes_mid_scan_does_not_abort_the_run(
     result = scan_transcripts(tmp_path, label_prefix="host", since=datetime.now(timezone.utc) - timedelta(days=1))
 
     assert [event.source_event_id for event in result.events] == ["msg_02"]
+
+
+def test_api_root_matches_the_gateway() -> None:
+    """The import endpoint's prefix is spelled twice, once per side; they must agree."""
+    from gateway.core.config import API_ROOT
+
+    assert usage_import.API_ROOT == API_ROOT

@@ -47,8 +47,9 @@ Three workflows react to the published Release:
 - **`otari-sdk-codegen.yml`** regenerates each SDK's typed core, stamps the
   release version into the core, and opens a regeneration PR on each SDK repo.
 - **`otari-homebrew.yml`** ships the agent-side CLI (`cli/`, distribution
-  `otari-agent`) to `mozilla-ai/homebrew-tap`. It stamps the version into the
-  package, builds its sdist, renders `Formula/otari.rb` from
+  `otari-agent`) to `mozilla-ai/homebrew-tap`. It builds its sdist, whose
+  version setuptools-scm takes from the tag being released, renders
+  `Formula/otari.rb` from
   `packaging/homebrew/otari.rb.tmpl` and the lock (`scripts/homebrew_formula.py`),
   uploads the sdist, the pinned requirements and the formula to the Release,
   installs and `brew test`s the formula on a macOS runner, then commits it to

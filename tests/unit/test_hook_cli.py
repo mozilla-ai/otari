@@ -1,9 +1,10 @@
 """Unit tests for `otari hook`, the native hook-protocol transport.
 
-Mocks the network boundary (httpx.post) and the Git boundary (subprocess.run)
-so these run with no server and no real repository; otari_agent.domain's
-own evaluation is covered separately in tests/unit/agent_gates/ and
-tests/integration/test_hooks_route.py.
+Mocks the evaluation boundary (`check_policy`) and the Git boundary
+(subprocess.run) so these run with no real repository: what is under test is
+the payload the harness sends, the evidence collected from it and the answer
+written back, not the evaluation itself, which is covered in
+tests/unit/agent_gates/.
 """
 
 import json
@@ -14,17 +15,15 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-import httpx
 import pytest
 from click.testing import CliRunner
 
 import otari_agent.hook as hook_cli
-from otari_agent.domain.check import PolicyCheckError
+from otari_agent.domain.check import PolicyCheckError, PolicyCheckResult
 from otari_agent.domain.policy import parse_policy
-from otari_agent.domain.types import PolicySpec
-from otari_agent.settings import HookSettings
+from otari_agent.domain.types import CheckVerdict, Enforcement, GateResult, JudgeVerdict, Outcome, PolicySpec
 
 pytestmark = pytest.mark.usefixtures("isolated_home", "no_otari_env")
 
@@ -51,15 +50,24 @@ _GATES_YAML = (
 )
 
 
-class _FakeResponse:
-    def __init__(self, payload: dict[str, Any]) -> None:
-        self._payload = payload
-
-    def raise_for_status(self) -> None:
-        pass
-
-    def json(self) -> dict[str, Any]:
-        return self._payload
+def _verdict(payload: dict[str, Any]) -> PolicyCheckResult:
+    """A `check_policy` result built from the gate dicts a test declares."""
+    return PolicyCheckResult(
+        policy_id="test",
+        schema_version="1.0",
+        results=tuple(
+            GateResult(
+                gate_id=gate["gate_id"],
+                enforcement=cast(Enforcement, gate["enforcement"]),
+                outcome=Outcome(gate["outcome"]),
+                message=gate.get("message", ""),
+                detail=gate.get("detail"),
+                source=gate.get("source"),
+            )
+            for gate in payload["results"]
+        ),
+        blocked=payload["blocked"],
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -75,16 +83,8 @@ def repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-@pytest.fixture
-def config_stub(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_load_settings(config_path: str | None = None) -> HookSettings:
-        return HookSettings(master_key="test-master-key")
-
-    monkeypatch.setattr(hook_cli, "load_settings", fake_load_settings)
-
-
 def _invoke(payload: dict[str, Any], **extra_args: str) -> Any:
-    args = ["--api-key", "test-key"]
+    args: list[str] = []
     for key, value in extra_args.items():
         args += [f"--{key.replace('_', '-')}", value]
     return CliRunner().invoke(hook_cli.hook, args, input=json.dumps(payload))
@@ -97,9 +97,9 @@ def _system_message(result: Any) -> str:
 
 def test_pretooluse_blocks_a_forbidden_edit(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     monkeypatch.setattr(
-        httpx,
-        "post",
-        lambda *a, **k: _FakeResponse(
+        hook_cli,
+        "check_policy",
+        lambda *a, **k: _verdict(
             {
                 "blocked": True,
                 "results": [{"gate_id": "g", "enforcement": "required", "outcome": "fail", "message": "no"}],
@@ -118,7 +118,7 @@ def test_pretooluse_blocks_a_forbidden_edit(monkeypatch: pytest.MonkeyPatch, rep
 
 
 def test_pretooluse_allows_when_not_blocked(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: _FakeResponse({"blocked": False, "results": []}))
+    monkeypatch.setattr(hook_cli, "check_policy", lambda *a, **k: _verdict({"blocked": False, "results": []}))
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(repo),
@@ -132,12 +132,12 @@ def test_pretooluse_allows_when_not_blocked(monkeypatch: pytest.MonkeyPatch, rep
 def test_pretooluse_ignores_unhandled_tools(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     called = False
 
-    def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
+    def fake_check(*args: object, **kwargs: Any) -> PolicyCheckResult:
         nonlocal called
         called = True
-        return _FakeResponse({"blocked": False, "results": []})
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(repo),
@@ -164,12 +164,12 @@ def test_pretooluse_does_not_gate_the_narrow_search_tools(
     """
     called = False
 
-    def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
+    def fake_check(*args: object, **kwargs: Any) -> PolicyCheckResult:
         nonlocal called
         called = True
-        return _FakeResponse({"blocked": False, "results": []})
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(repo),
@@ -190,9 +190,9 @@ def test_pretooluse_submits_a_read_target_as_its_own_moment(monkeypatch: pytest.
     """
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse(
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict(
             {
                 "blocked": True,
                 "results": [
@@ -201,7 +201,7 @@ def test_pretooluse_submits_a_read_target_as_its_own_moment(monkeypatch: pytest.
             }
         )
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(repo),
@@ -210,21 +210,21 @@ def test_pretooluse_submits_a_read_target_as_its_own_moment(monkeypatch: pytest.
     }
     result = _invoke(payload)
     assert result.exit_code == 2, result.output
-    assert captured["json"]["paths"] == [".env"]
-    assert captured["json"]["path_source"] == "pre_tool_use.read_target"
-    assert captured["json"]["commands"] == []
+    assert captured["paths"] == [".env"]
+    assert captured["path_source"] == "pre_tool_use.read_target"
+    assert captured["commands"] == []
 
 
 def test_a_read_outside_the_repo_submits_nothing(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     """Mirrors the edit branch: a path no repo-relative glob can name is not evidence."""
     called = False
 
-    def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
+    def fake_check(*args: object, **kwargs: Any) -> PolicyCheckResult:
         nonlocal called
         called = True
-        return _FakeResponse({"blocked": False, "results": []})
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     # The `repo` fixture is tmp_path itself, so "outside" has to climb above
     # it rather than sit beside anything in it.
     outside = repo.parent / "elsewhere.env"
@@ -243,9 +243,9 @@ def test_a_read_outside_the_repo_submits_nothing(monkeypatch: pytest.MonkeyPatch
 def test_pretooluse_submits_a_bash_command_for_command(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse(
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict(
             {
                 "blocked": True,
                 "results": [
@@ -254,7 +254,7 @@ def test_pretooluse_submits_a_bash_command_for_command(monkeypatch: pytest.Monke
             }
         )
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(repo),
@@ -263,8 +263,8 @@ def test_pretooluse_submits_a_bash_command_for_command(monkeypatch: pytest.Monke
     }
     result = _invoke(payload)
     assert result.exit_code == 2, result.output
-    assert captured["json"]["commands"] == ["git push --force"]
-    assert captured["json"]["paths"] == []
+    assert captured["commands"] == ["git push --force"]
+    assert captured["paths"] == []
 
 
 def test_an_oversize_bash_command_is_truncated_rather_than_rejected(
@@ -277,11 +277,11 @@ def test_an_oversize_bash_command_is_truncated_rather_than_rejected(
     """
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     command = "npm install " + "x" * 8000
     payload = {
         "hook_event_name": "PreToolUse",
@@ -291,56 +291,21 @@ def test_an_oversize_bash_command_is_truncated_rather_than_rejected(
     }
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    sent = captured["json"]["commands"]
+    sent = captured["commands"]
     assert len(sent[0]) == hook_cli._HOOK_MAX_COMMAND_LENGTH
     assert sent[0].startswith("npm install ")
     assert "checking only the first" in result.output
 
 
-def test_a_rejected_check_does_not_block_and_does_not_blame_the_network(
-    monkeypatch: pytest.MonkeyPatch, repo: Path
-) -> None:
-    """A 4xx means the request arrived and was answered. Reporting it as
-    "could not reach" sends whoever debugs it to the network rather than to
-    the status and body that say what was actually wrong.
-    """
-
-    class _RejectingResponse:
-        status_code = 422
-        text = "commands entry exceeds 4096 characters."
-
-        def raise_for_status(self) -> None:
-            request = httpx.Request("POST", "http://gw.test/api/v1/hooks/check")
-            response = httpx.Response(422, text=self.text, request=request)
-            raise httpx.HTTPStatusError("422", request=request, response=response)
-
-        def json(self) -> dict[str, Any]:  # pragma: no cover - never reached
-            raise AssertionError("json() must not be called on a rejected check")
-
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: _RejectingResponse())
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "cwd": str(repo),
-        "tool_name": "Bash",
-        "tool_input": {"command": "npm install"},
-    }
-    result = _invoke(payload)
-    assert result.exit_code == 0, result.output
-    message = _system_message(result)
-    assert "rejected the check (422" in message
-    assert "could not reach" not in message
-    assert "--api-key was given" in message
-
-
 def test_pretooluse_ignores_a_bash_call_with_no_command(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
     called = False
 
-    def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
+    def fake_check(*args: object, **kwargs: Any) -> PolicyCheckResult:
         nonlocal called
         called = True
-        return _FakeResponse({"blocked": False, "results": []})
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {"hook_event_name": "PreToolUse", "cwd": str(repo), "tool_name": "Bash", "tool_input": {}}
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
@@ -355,31 +320,29 @@ def test_stop_event_blocks_on_git_status(monkeypatch: pytest.MonkeyPatch, repo: 
     monkeypatch.setattr(subprocess, "run", fake_run)
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse(
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict(
             {
                 "blocked": True,
                 "results": [{"gate_id": "g", "enforcement": "required", "outcome": "fail", "message": "no"}],
             }
         )
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {"hook_event_name": "Stop", "cwd": str(repo)}
     result = _invoke(payload)
     assert result.exit_code == 2, result.output
-    assert captured["json"]["paths"] == ["CHANGELOG.md"]
+    assert captured["paths"] == ["CHANGELOG.md"]
 
 
 def test_stop_event_evaluates_locally_and_blocks_on_git_status(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    """The default, no-flag path's own full Stop-event pipeline: real Git
+    """The full Stop-event pipeline: real Git evidence collection feeding the
 
-    evidence collection feeding the real `run_policy_check`, not a mocked
-    `httpx.post` standing in for the evaluator. Every other Stop-event test
-    in this module opts into the remote mode (`--api-key`) and mocks the
-    network boundary instead; this is the only one that proves the default
-    path's evidence collection and evaluation are wired together correctly
-    end to end.
+    real `run_policy_check`, with no `check_policy` stub standing in. Every
+    other Stop-event test in this module mocks that seam to reach the
+    transport behavior it is about; this one proves evidence collection and
+    evaluation are wired together end to end.
     """
     _guardrail_path(repo).write_text(
         'schema_version: "1.0"\npolicy:\n  id: test\ngates:\n'
@@ -393,7 +356,6 @@ def test_stop_event_evaluates_locally_and_blocks_on_git_status(monkeypatch: pyte
         return subprocess.CompletedProcess(args=[], returncode=0, stdout=" M CHANGELOG.md\0", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     payload = {"hook_event_name": "Stop", "cwd": str(repo)}
     result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(payload))
     assert result.exit_code == 2, result.output
@@ -463,15 +425,15 @@ def test_stop_event_submits_commands_collected_from_the_transcript(
     )
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["commands"] == ["make postman", "git status"]
+    assert captured["commands"] == ["make postman", "git status"]
 
 
 def test_stop_event_excludes_sidechain_commands(monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path) -> None:
@@ -494,15 +456,15 @@ def test_stop_event_excludes_sidechain_commands(monkeypatch: pytest.MonkeyPatch,
     )
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["commands"] == ["make postman"]
+    assert captured["commands"] == ["make postman"]
 
 
 def test_stop_event_excludes_a_command_a_pretooluse_hook_denied(
@@ -538,15 +500,15 @@ def test_stop_event_excludes_a_command_a_pretooluse_hook_denied(
     )
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["commands"] == ["pnpm install"]
+    assert captured["commands"] == ["pnpm install"]
 
 
 def test_stop_event_excludes_a_command_that_ran_before_a_later_edit(
@@ -575,15 +537,15 @@ def test_stop_event_excludes_a_command_that_ran_before_a_later_edit(
     )
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["commands"] == []
+    assert captured["commands"] == []
 
 
 def test_stop_event_includes_a_command_that_ran_after_the_last_edit(
@@ -608,15 +570,15 @@ def test_stop_event_includes_a_command_that_ran_after_the_last_edit(
     )
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["commands"] == ["make lint"]
+    assert captured["commands"] == ["make lint"]
 
 
 def test_stop_event_does_not_let_a_denied_edit_invalidate_prior_evidence(
@@ -650,15 +612,15 @@ def test_stop_event_does_not_let_a_denied_edit_invalidate_prior_evidence(
     )
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["commands"] == ["make lint"]
+    assert captured["commands"] == ["make lint"]
 
 
 def test_stop_event_includes_a_command_that_ran_but_exited_nonzero(
@@ -688,15 +650,15 @@ def test_stop_event_includes_a_command_that_ran_but_exited_nonzero(
     )
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["commands"] == ["npm install"]
+    assert captured["commands"] == ["npm install"]
 
 
 def test_stop_event_submits_no_commands_when_aggregate_evidence_is_oversize(
@@ -724,15 +686,15 @@ def test_stop_event_submits_no_commands_when_aggregate_evidence_is_oversize(
     transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["commands"] is None
+    assert captured["commands"] is None
     assert "submitting no command evidence" in result.output
 
 
@@ -756,15 +718,15 @@ def test_stop_event_submits_no_commands_when_there_are_too_many(
     transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["commands"] is None
+    assert captured["commands"] is None
     assert "submitting no command evidence" in result.output
 
 
@@ -779,15 +741,15 @@ def test_stop_event_submits_no_commands_when_transcript_path_is_missing(
     monkeypatch.setattr(subprocess, "run", fake_run)
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {"hook_event_name": "Stop", "cwd": str(repo)}
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["commands"] is None
+    assert captured["commands"] is None
 
 
 def test_stop_event_submits_no_commands_when_transcript_is_unreadable(
@@ -799,16 +761,16 @@ def test_stop_event_submits_no_commands_when_transcript_is_unreadable(
     monkeypatch.setattr(subprocess, "run", fake_run)
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     missing_transcript = tmp_path / "does-not-exist.jsonl"
     payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(missing_transcript)}
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["commands"] is None
+    assert captured["commands"] is None
 
 
 def test_stop_event_skips_a_malformed_transcript_line(
@@ -824,15 +786,15 @@ def test_stop_event_skips_a_malformed_transcript_line(
     )
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["commands"] == ["make postman"]
+    assert captured["commands"] == ["make postman"]
 
 
 def test_stop_event_skips_a_bash_call_whose_input_is_not_a_mapping(
@@ -864,15 +826,15 @@ def test_stop_event_skips_a_bash_call_whose_input_is_not_a_mapping(
     transcript.write_text("\n".join([malformed, _transcript_line(command="make postman")]) + "\n", encoding="utf-8")
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["commands"] == ["make postman"]
+    assert captured["commands"] == ["make postman"]
 
 
 def test_pretooluse_submits_a_posix_relative_path(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -890,11 +852,11 @@ def test_pretooluse_submits_a_posix_relative_path(monkeypatch: pytest.MonkeyPatc
     nested.write_text("x", encoding="utf-8")
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(repo),
@@ -903,7 +865,7 @@ def test_pretooluse_submits_a_posix_relative_path(monkeypatch: pytest.MonkeyPatc
     }
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    submitted = captured["json"]["paths"]
+    submitted = captured["paths"]
     assert submitted == ["docs/guide/page.md"]
     assert "\\" not in submitted[0]
 
@@ -915,15 +877,15 @@ def test_stop_event_parses_a_rename_as_its_new_path(monkeypatch: pytest.MonkeyPa
     def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args=[], returncode=0, stdout="R  renamed.txt\0original.txt\0", stderr="")
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)})
     assert result.exit_code == 0, result.output
-    assert captured["json"]["paths"] == ["renamed.txt"]
+    assert captured["paths"] == ["renamed.txt"]
 
 
 def test_stop_event_does_not_misparse_a_filename_containing_an_arrow(
@@ -940,15 +902,15 @@ def test_stop_event_does_not_misparse_a_filename_containing_an_arrow(
     def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args=[], returncode=0, stdout="?? weird -> name.txt\0", stderr="")
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)})
     assert result.exit_code == 0, result.output
-    assert captured["json"]["paths"] == ["weird -> name.txt"]
+    assert captured["paths"] == ["weird -> name.txt"]
 
 
 def test_stop_event_reports_a_non_ascii_filename_unescaped(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -958,15 +920,15 @@ def test_stop_event_reports_a_non_ascii_filename_unescaped(monkeypatch: pytest.M
     def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args=[], returncode=0, stdout="?? café.txt\0", stderr="")
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)})
     assert result.exit_code == 0, result.output
-    assert captured["json"]["paths"] == ["café.txt"]
+    assert captured["paths"] == ["café.txt"]
 
 
 def test_stop_event_does_not_block_when_git_status_fails(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -999,8 +961,8 @@ def test_a_non_utf8_policy_file_does_not_block(tmp_path: Path) -> None:
     """`gates_file.is_file()` does not guarantee the read right after it succeeds
 
     (a race, a permissions change, a non-UTF-8 file): an uncaught
-    `UnicodeDecodeError` there used to exit `otari hook` nonzero before it
-    ever reached `httpx.post`, breaking the fail-open contract every other
+    `UnicodeDecodeError` there used to exit `otari hook` nonzero before any
+    gate was evaluated, breaking the fail-open contract every other
     evidence-collection failure in this command already has.
     """
     (tmp_path / ".git").mkdir()
@@ -1016,23 +978,17 @@ def test_outside_a_git_repo_is_a_no_op(tmp_path: Path) -> None:
 
 
 def test_malformed_stdin_is_a_no_op() -> None:
-    result = CliRunner().invoke(hook_cli.hook, ["--api-key", "test-key"], input="not json")
+    result = CliRunner().invoke(hook_cli.hook, [], input="not json")
     assert result.exit_code == 0, result.output
 
 
-def test_no_flags_evaluates_locally_with_no_credential_needed(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    """No `--api-key`/`--url` is the default now, not a missing-setup case:
+def test_a_required_gate_blocks_with_no_server_and_no_credential(repo: Path) -> None:
+    """The one test here that evaluates for real, with no `check_policy` stub.
 
-    `otari hook` evaluates `.otari/guardrails.yml` in process
-    (`otari_agent.domain.check.run_policy_check`) and calls `httpx.post`
-    only when either flag opts into the other, HTTP-backed mode. A required
-    gate still blocks with no credential, no config, and no server at all.
+    Every other test in this module mocks that seam to reach the transport
+    behavior it is about; this one walks the whole path, so the default mode
+    is covered end to end rather than only through its mock.
     """
-
-    def fail_if_called(*args: object, **kwargs: object) -> None:
-        raise AssertionError("httpx.post should not be called for the default, local evaluation path")
-
-    monkeypatch.setattr(httpx, "post", fail_if_called)
     _guardrail_path(repo).write_text(
         'schema_version: "1.0"\npolicy:\n  id: test\ngates:\n'
         "  - id: g\n    type: path\n"
@@ -1057,7 +1013,6 @@ def test_malformed_local_policy_does_not_block(monkeypatch: pytest.MonkeyPatch, 
     build cannot parse must report and exit 0, the same as every other
     evidence-collection failure this command handles, not raise.
     """
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     _guardrail_path(repo).write_text("not: valid: yaml: at: all:\n  - [", encoding="utf-8")
     payload = {
         "hook_event_name": "PreToolUse",
@@ -1070,210 +1025,17 @@ def test_malformed_local_policy_does_not_block(monkeypatch: pytest.MonkeyPatch, 
     assert "could not load" in result.output
 
 
-def test_url_alone_without_a_resolvable_credential_does_not_block(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    """The opt-in remote mode still needs a credential from somewhere:
+def test_a_gate_dict_missing_display_fields_does_not_crash() -> None:
+    """Formatting a failing gate reads fields the step that built it did not.
 
-    `--url` alone opts in, but with no `--api-key` and no configured
-    `master_key`, there is nothing to authenticate the request with, and
-    that must fail open rather than block.
+    A field added where `failing` is built but missed here would raise
+    KeyError outside this command's fail-open protection, surfacing as a
+    traceback in place of the message it promises.
     """
+    summary = hook_cli._failing_summary([{"outcome": "fail"}])
 
-    def fake_load_settings(config_path: str | None = None) -> HookSettings:
-        return HookSettings(master_key=None)
-
-    monkeypatch.setattr(hook_cli, "load_settings", fake_load_settings)
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "cwd": str(repo),
-        "tool_name": "Edit",
-        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
-    }
-    result = CliRunner().invoke(hook_cli.hook, ["--url", "http://gw.example:9000"], input=json.dumps(payload))
-    assert result.exit_code == 0, result.output
-    message = _system_message(result)
-    assert "no API key or master key resolved" in message
-    assert "--url was given" in message
-
-
-def test_invalid_config_does_not_block(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    """load_settings raises ValueError on an unreadable or malformed config file.
-
-    That is a setup problem, not a required gate failing, so it must fail
-    open like every other setup failure this command handles, not surface as
-    an unhandled traceback.
-    """
-
-    def fake_load_settings(config_path: str | None = None) -> HookSettings:
-        raise ValueError("Hybrid mode (legacy value 'platform') requires OTARI_AI_TOKEN to be set.")
-
-    monkeypatch.setattr(hook_cli, "load_settings", fake_load_settings)
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "cwd": str(repo),
-        "tool_name": "Edit",
-        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
-    }
-    result = _invoke(payload)
-    assert result.exit_code == 0, result.output
-    assert "could not load config" in _system_message(result)
-
-
-@pytest.mark.parametrize(
-    ("body", "case"),
-    [
-        (ValueError("Expecting value: line 1 column 1 (char 0)"), "not JSON at all"),
-        ({"results": [{"gate_id": "g", "outcome": "fail"}]}, "JSON with no 'blocked'"),
-        ({"blocked": True}, "JSON with no 'results'"),
-        ({"results": "not-a-list", "blocked": True}, "'results' of the wrong type"),
-    ],
-)
-def test_unreadable_response_does_not_block(
-    monkeypatch: pytest.MonkeyPatch, repo: Path, body: object, case: str
-) -> None:
-    """A response this command cannot read fails open like an unreachable one.
-
-    The command's contract is that it blocks on a required gate failing and on
-    nothing else. A body that is not JSON, or JSON of an unexpected shape, used
-    to escape the ``httpx.HTTPError`` handler as a bare ValueError/KeyError and
-    surface as a traceback.
-    """
-
-    class _Unreadable:
-        def raise_for_status(self) -> None:
-            pass
-
-        def json(self) -> Any:
-            if isinstance(body, Exception):
-                raise body
-            return body
-
-    monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: _Unreadable())
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "cwd": str(repo),
-        "tool_name": "Edit",
-        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
-    }
-    result = _invoke(payload)
-    assert result.exit_code == 0, f"{case}: {result.output}"
-    assert "unreadable response" in _system_message(result), case
-
-
-def test_a_gate_result_missing_display_fields_does_not_crash(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    """The try/except around reading the response only covers what builds
-
-    `failing` (result["results"], gate["outcome"]); it does not, on its own,
-    cover the later step that formats each failing gate for display, which
-    reads gate['enforcement']/['gate_id']/['message']. A gate result that is
-    well-formed enough to build `failing` (has 'outcome') but is missing one
-    of those other fields, as an older or otherwise mismatched otari serve
-    behind --url might send, must not raise KeyError there and surface as a
-    traceback instead of this command's own fail-open contract.
-    """
-    monkeypatch.setattr(
-        httpx,
-        "post",
-        lambda *a, **k: _FakeResponse({"blocked": True, "results": [{"outcome": "fail"}]}),
-    )
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "cwd": str(repo),
-        "tool_name": "Edit",
-        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
-    }
-    result = _invoke(payload)
-    assert result.exit_code == 2, result.output
-    assert result.exception is None or isinstance(result.exception, SystemExit)
-
-
-def test_unreachable_gateway_does_not_block(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
-        raise httpx.ConnectError("connection refused")
-
-    monkeypatch.setattr(httpx, "post", fake_post)
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "cwd": str(repo),
-        "tool_name": "Edit",
-        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
-    }
-    result = _invoke(payload)
-    assert result.exit_code == 0, result.output
-    message = _system_message(result)
-    assert "could not reach" in message
-    assert "no gate is being enforced" in message
-    assert "--api-key was given" in message
-
-
-def test_an_exported_otari_url_is_named_when_its_gateway_is_unreachable(
-    monkeypatch: pytest.MonkeyPatch, repo: Path, config_stub: None
-) -> None:
-    """`OTARI_URL` alone switches to remote mode. A shell that exports it for
-    some other reason must hear which variable did it and how to get out.
-    """
-
-    def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
-        raise httpx.ConnectError("connection refused")
-
-    monkeypatch.setattr(httpx, "post", fake_post)
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "cwd": str(repo),
-        "tool_name": "Edit",
-        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
-    }
-    result = CliRunner().invoke(
-        hook_cli.hook, [], input=json.dumps(payload), env={"OTARI_URL": "http://localhost:1", "OTARI_API_KEY": None}
-    )
-    assert result.exit_code == 0, result.output
-    message = _system_message(result)
-    assert "OTARI_URL is set" in message
-    assert "unset OTARI_URL" in message
-
-
-def test_every_setting_that_keeps_remote_mode_on_is_named(
-    monkeypatch: pytest.MonkeyPatch, repo: Path, config_stub: None
-) -> None:
-    """Either setting alone keeps remote mode on, so clearing only the first one named would not get out of it."""
-
-    def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
-        raise httpx.ConnectError("connection refused")
-
-    monkeypatch.setattr(httpx, "post", fake_post)
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "cwd": str(repo),
-        "tool_name": "Edit",
-        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
-    }
-    result = CliRunner().invoke(
-        hook_cli.hook,
-        ["--url", "http://localhost:1"],
-        input=json.dumps(payload),
-        env={"OTARI_URL": None, "OTARI_API_KEY": "exported-key"},
-    )
-    assert result.exit_code == 0, result.output
-    message = _system_message(result)
-    assert "--url was given and OTARI_API_KEY is set" in message
-    assert "drop --url and unset OTARI_API_KEY" in message
-
-
-def test_credentials_in_the_gateway_url_are_not_shown(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        raise httpx.ConnectError(f"could not connect to {url}")
-
-    monkeypatch.setattr(httpx, "post", fake_post)
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "cwd": str(repo),
-        "tool_name": "Edit",
-        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
-    }
-    result = _invoke(payload, url="https://alice:hunter2@gw.example")
-    assert result.exit_code == 0, result.output
-    assert "hunter2" not in result.output
-    assert "hunter2" not in result.stderr
-    assert "https://***@gw.example" in _system_message(result)
+    assert "?" in summary
+    assert "(no message)" in summary
 
 
 def test_a_local_evaluation_error_does_not_block_and_says_so(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -1294,66 +1056,6 @@ def test_a_local_evaluation_error_does_not_block_and_says_so(monkeypatch: pytest
     message = _system_message(result)
     assert "could not evaluate" in message
     assert "no gate is being enforced" in message
-
-
-def test_api_key_alone_opts_into_remote_and_falls_back_to_configured_localhost(
-    monkeypatch: pytest.MonkeyPatch, repo: Path, config_stub: None
-) -> None:
-    """`--api-key` with no `--url` is enough to opt into the HTTP-backed mode:
-
-    the credential is the given one, but the gateway's own URL still falls
-    back to the configured host/port, exactly as it did before local
-    evaluation existed.
-    """
-    captured: dict[str, Any] = {}
-
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["url"] = url
-        captured["headers"] = kwargs.get("headers")
-        return _FakeResponse({"blocked": False, "results": []})
-
-    monkeypatch.setattr(httpx, "post", fake_post)
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "cwd": str(repo),
-        "tool_name": "Edit",
-        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
-    }
-    result = CliRunner().invoke(hook_cli.hook, ["--api-key", "given-key"], input=json.dumps(payload))
-    assert result.exit_code == 0, result.output
-    assert captured["url"] == "http://localhost:8000/api/v1/hooks/check"
-    assert captured["headers"]["Otari-Key"] == "given-key"
-
-
-def test_url_alone_opts_into_remote_and_falls_back_to_configured_master_key(
-    monkeypatch: pytest.MonkeyPatch, repo: Path, config_stub: None
-) -> None:
-    """`--url` with no `--api-key` is likewise enough to opt in: the URL is
-
-    the given one, but the credential still falls back to the configured
-    ``master_key``.
-    """
-    captured: dict[str, Any] = {}
-
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["url"] = url
-        captured["headers"] = kwargs.get("headers")
-        return _FakeResponse({"blocked": False, "results": []})
-
-    monkeypatch.setattr(httpx, "post", fake_post)
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "cwd": str(repo),
-        "tool_name": "Edit",
-        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
-    }
-    result = CliRunner().invoke(hook_cli.hook, ["--url", "http://gw.example:9000"], input=json.dumps(payload))
-    assert result.exit_code == 0, result.output
-    assert captured["url"] == "http://gw.example:9000/api/v1/hooks/check"
-    # The bare token, not a ``Bearer `` prefix: deps.extract_credential_token
-    # tolerates the prefix for back-compat, but a header named for the key
-    # carries the raw token.
-    assert captured["headers"]["Otari-Key"] == "test-master-key"
 
 
 def test_strip_judge_code_fence_recovers_json_wrapped_in_a_json_fence() -> None:
@@ -1447,9 +1149,9 @@ def test_stop_event_submits_a_judge_verdict_from_claude_p(
 
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse(
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict(
             {
                 "blocked": False,
                 "results": [
@@ -1463,24 +1165,23 @@ def test_stop_event_submits_a_judge_verdict_from_claude_p(
             }
         )
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {"hook_event_name": "Stop", "cwd": str(judge_repo), "transcript_path": str(transcript)}
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["judge_results"] == [
-        {"gate_id": "follows-pattern", "outcome": "fail", "reasoning": "does not match"}
+    assert captured["judge_results"] == [
+        JudgeVerdict(gate_id="follows-pattern", outcome="fail", reasoning="does not match")
     ]
 
 
 def test_stop_event_locally_evaluates_a_judge_verdict_and_warns(
     monkeypatch: pytest.MonkeyPatch, judge_repo: Path, tmp_path: Path
 ) -> None:
-    """The default path's own judge-gate flow, no `httpx.post` mock: the
+    """The judge-gate flow with no `check_policy` stub: the collected verdict
 
-    locally-collected verdict must reach `run_policy_check` and come back as
-    an advisory, non-blocking `systemMessage`, not just get built correctly
-    for a mocked network call (`test_stop_event_submits_a_judge_verdict_from_claude_p`
-    covers that half already).
+    must reach `run_policy_check` and come back as an advisory, non-blocking
+    `systemMessage`, not just get built correctly
+    (`test_stop_event_submits_a_judge_verdict_from_claude_p` covers that half).
     """
 
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -1498,7 +1199,6 @@ def test_stop_event_locally_evaluates_a_judge_verdict_and_warns(
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
 
     transcript = tmp_path / "session.jsonl"
     transcript.write_text(_transcript_line(text="did some work") + "\n", encoding="utf-8")
@@ -1527,7 +1227,7 @@ def test_judge_model_is_overridable_via_flag(monkeypatch: pytest.MonkeyPatch, ju
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: _FakeResponse({"blocked": False, "results": []}))
+    monkeypatch.setattr(hook_cli, "check_policy", lambda *a, **k: _verdict({"blocked": False, "results": []}))
 
     result = _invoke({"hook_event_name": "Stop", "cwd": str(judge_repo)}, judge_model="claude-sonnet-5")
     assert result.exit_code == 0, result.output
@@ -1563,22 +1263,22 @@ def test_judge_dry_run_never_calls_claude_but_still_counts_and_logs(
 
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
-    args = ["--api-key", "test-key", "--judge-dry-run"]
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
+    args = ["--judge-dry-run"]
     result = CliRunner().invoke(
         hook_cli.hook, args, input=json.dumps({"hook_event_name": "Stop", "cwd": str(judge_repo)})
     )
     assert result.exit_code == 0, result.output
 
-    [judge_result] = captured["json"]["judge_results"]
-    assert judge_result["gate_id"] == "follows-pattern"
-    assert judge_result["outcome"] == "error"
-    assert "--judge-dry-run" in judge_result["reasoning"]
-    assert "tokens estimated" in judge_result["reasoning"]
+    [judge_result] = captured["judge_results"]
+    assert judge_result.gate_id == "follows-pattern"
+    assert judge_result.outcome == "error"
+    assert "--judge-dry-run" in judge_result.reasoning
+    assert "tokens estimated" in judge_result.reasoning
 
     log_lines = hook_cli._hook_judge_log_path().read_text(encoding="utf-8").splitlines()
     assert sum(1 for line in log_lines if "outcome=invoking" in line) == 1
@@ -1616,19 +1316,19 @@ def test_stop_event_parses_a_verdict_wrapped_in_a_markdown_code_fence(
 
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(judge_repo)})
     assert result.exit_code == 0, result.output
-    assert captured["json"]["judge_results"] == [
-        {
-            "gate_id": "follows-pattern",
-            "outcome": "fail",
-            "reasoning": "The comment narrates the change itself rather than explaining non-obvious logic.",
-        }
+    assert captured["judge_results"] == [
+        JudgeVerdict(
+            gate_id="follows-pattern",
+            outcome="fail",
+            reasoning="The comment narrates the change itself rather than explaining non-obvious logic.",
+        )
     ]
 
 
@@ -1638,19 +1338,19 @@ def test_stop_event_reports_error_when_claude_is_not_on_path(monkeypatch: pytest
 
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(judge_repo)})
     assert result.exit_code == 0, result.output
-    assert captured["json"]["judge_results"] == [
-        {
-            "gate_id": "follows-pattern",
-            "outcome": "error",
-            "reasoning": "none of the configured judge CLI(s) were found on PATH: claude",
-        }
+    assert captured["judge_results"] == [
+        JudgeVerdict(
+            gate_id="follows-pattern",
+            outcome="error",
+            reasoning="none of the configured judge CLI(s) were found on PATH: claude",
+        )
     ]
 
 
@@ -1673,17 +1373,17 @@ def test_stop_event_reports_error_when_claude_p_output_is_not_valid_json(
 
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(judge_repo)})
     assert result.exit_code == 0, result.output
-    [judge_result] = captured["json"]["judge_results"]
-    assert judge_result["gate_id"] == "follows-pattern"
-    assert judge_result["outcome"] == "error"
-    assert "not return valid JSON" in judge_result["reasoning"]
+    [judge_result] = captured["judge_results"]
+    assert judge_result.gate_id == "follows-pattern"
+    assert judge_result.outcome == "error"
+    assert "not return valid JSON" in judge_result.reasoning
 
 
 def test_stop_event_warns_when_the_diff_is_truncated(monkeypatch: pytest.MonkeyPatch, judge_repo: Path) -> None:
@@ -1707,7 +1407,7 @@ def test_stop_event_warns_when_the_diff_is_truncated(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: _FakeResponse({"blocked": False, "results": []}))
+    monkeypatch.setattr(hook_cli, "check_policy", lambda *a, **k: _verdict({"blocked": False, "results": []}))
 
     result = _invoke({"hook_event_name": "Stop", "cwd": str(judge_repo)})
     assert result.exit_code == 0, result.output
@@ -1737,7 +1437,7 @@ def test_stop_event_warns_when_the_transcript_is_truncated(
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None)
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: _FakeResponse({"blocked": False, "results": []}))
+    monkeypatch.setattr(hook_cli, "check_policy", lambda *a, **k: _verdict({"blocked": False, "results": []}))
 
     result = _invoke({"hook_event_name": "Stop", "cwd": str(judge_repo), "transcript_path": str(transcript)})
     assert result.exit_code == 0, result.output
@@ -1829,9 +1529,9 @@ def test_stop_event_bounds_judge_reasoning_and_a_required_gate_still_blocks(
 
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse(
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict(
             {
                 "blocked": True,
                 "results": [
@@ -1845,12 +1545,12 @@ def test_stop_event_bounds_judge_reasoning_and_a_required_gate_still_blocks(
             }
         )
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(judge_repo)})
     assert result.exit_code == 2, result.output
 
-    [judge_result] = captured["json"]["judge_results"]
-    assert len(judge_result["reasoning"]) == hook_cli._HOOK_MAX_JUDGE_REASONING_LENGTH
+    [judge_result] = captured["judge_results"]
+    assert len(judge_result.reasoning) == hook_cli._HOOK_MAX_JUDGE_REASONING_LENGTH
 
 
 def test_stop_event_survives_a_judge_setup_failure_and_still_blocks(
@@ -1860,7 +1560,7 @@ def test_stop_event_survives_a_judge_setup_failure_and_still_blocks(
 
     subprocess launch itself can raise `OSError`, and an embedded NUL byte
     in the diff or transcript raises `ValueError`; both used to propagate
-    uncaught, exiting `otari hook` before it ever reached `httpx.post` and
+    uncaught, exiting `otari hook` before any gate was evaluated and
     taking every other gate in the same policy, mechanical and required
     ones included, down with it. Modeled the same way as the oversize-
     reasoning test above: a mocked response that still reports `blocked`
@@ -1886,9 +1586,9 @@ def test_stop_event_survives_a_judge_setup_failure_and_still_blocks(
 
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse(
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict(
             {
                 "blocked": True,
                 "results": [
@@ -1902,13 +1602,13 @@ def test_stop_event_survives_a_judge_setup_failure_and_still_blocks(
             }
         )
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(judge_repo)})
     assert result.exit_code == 2, result.output
 
-    [judge_result] = captured["json"]["judge_results"]
-    assert judge_result["outcome"] == "error"
-    assert "permission denied" in judge_result["reasoning"].lower()
+    [judge_result] = captured["judge_results"]
+    assert judge_result.outcome == "error"
+    assert "permission denied" in judge_result.reasoning.lower()
 
 
 def test_stop_event_never_calls_the_model_when_diff_collection_fails(
@@ -1944,9 +1644,9 @@ def test_stop_event_never_calls_the_model_when_diff_collection_fails(
 
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse(
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict(
             {
                 "blocked": True,
                 "results": [
@@ -1960,14 +1660,14 @@ def test_stop_event_never_calls_the_model_when_diff_collection_fails(
             }
         )
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(judge_repo)})
     assert result.exit_code == 2, result.output
 
     assert claude_call_count == 0, "a diff-collection failure must never reach claude -p"
-    [judge_result] = captured["json"]["judge_results"]
-    assert judge_result["outcome"] == "error"
-    assert "diff" in judge_result["reasoning"].lower()
+    [judge_result] = captured["judge_results"]
+    assert judge_result.outcome == "error"
+    assert "diff" in judge_result.reasoning.lower()
 
 
 def test_stop_event_retries_the_judge_diff_only_when_the_prompt_is_too_long(
@@ -2016,16 +1716,16 @@ def test_stop_event_retries_the_judge_diff_only_when_the_prompt_is_too_long(
 
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(judge_repo), "transcript_path": str(transcript)})
     assert result.exit_code == 0, result.output
     assert len(claude_calls) == 2
-    assert captured["json"]["judge_results"] == [
-        {"gate_id": "follows-pattern", "outcome": "pass", "reasoning": "diff-only ok"}
+    assert captured["judge_results"] == [
+        JudgeVerdict(gate_id="follows-pattern", outcome="pass", reasoning="diff-only ok")
     ]
 
 
@@ -2059,17 +1759,17 @@ def test_stop_event_does_not_retry_when_there_is_no_transcript_to_drop(
 
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(judge_repo)})
     assert result.exit_code == 0, result.output
     assert claude_call_count == 1
-    [judge_result] = captured["json"]["judge_results"]
-    assert judge_result["outcome"] == "error"
-    assert "prompt is too long" in judge_result["reasoning"].lower()
+    [judge_result] = captured["judge_results"]
+    assert judge_result.outcome == "error"
+    assert "prompt is too long" in judge_result.reasoning.lower()
 
 
 def test_stop_event_bounds_total_judge_time_so_a_required_gate_still_reaches_the_server(
@@ -2143,9 +1843,9 @@ def test_stop_event_bounds_total_judge_time_so_a_required_gate_still_reaches_the
 
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse(
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict(
             {
                 "blocked": True,
                 "results": [
@@ -2159,16 +1859,16 @@ def test_stop_event_bounds_total_judge_time_so_a_required_gate_still_reaches_the
             }
         )
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
     assert result.exit_code == 2, result.output
 
     assert claude_call_count == 1, "only the gate whose check ran before the deadline should call claude -p"
-    verdicts = captured["json"]["judge_results"]
-    assert sorted(entry["outcome"] for entry in verdicts) == ["error", "error", "pass"]
-    starved = [entry["reasoning"] for entry in verdicts if entry["outcome"] == "error"]
+    verdicts = captured["judge_results"]
+    assert sorted(entry.outcome for entry in verdicts) == ["error", "error", "pass"]
+    starved = [entry.reasoning for entry in verdicts if entry.outcome == "error"]
     assert all("budget" in reasoning for reasoning in starved), starved
-    assert captured["json"]["paths"] == ["CHANGELOG.md"]
+    assert captured["paths"] == ["CHANGELOG.md"]
 
 
 def test_stop_event_with_a_non_utf8_diff_still_blocks_a_required_gate(
@@ -2180,7 +1880,7 @@ def test_stop_event_with_a_non_utf8_diff_still_blocks_a_required_gate(
     repo). Real `git`, not a mocked `subprocess.run`, is the point: this
     reproduces the actual `UnicodeDecodeError` `subprocess.run(...,
     encoding="utf-8")` raises from inside itself on such a file, which used
-    to crash `otari hook` before it ever reached `httpx.post`, taking the
+    to crash `otari hook` before any gate was evaluated, taking the
     unrelated required `path` gate down with it. `--judge-dry-run`
     keeps this test from needing a real (or mocked) `claude` call: it still
     runs the real diff collection this bug lives in, only skipping the
@@ -2210,9 +1910,9 @@ def test_stop_event_with_a_non_utf8_diff_still_blocks_a_required_gate(
 
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse(
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict(
             {
                 "blocked": True,
                 "results": [
@@ -2226,17 +1926,17 @@ def test_stop_event_with_a_non_utf8_diff_still_blocks_a_required_gate(
             }
         )
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = CliRunner().invoke(
         hook_cli.hook,
-        ["--api-key", "test-key", "--judge-dry-run"],
+        ["--judge-dry-run"],
         input=json.dumps({"hook_event_name": "Stop", "cwd": str(tmp_path)}),
     )
     assert result.exit_code == 2, result.output
     # .otari/guardrails.yml itself is untracked here (written after the initial commit,
     # for a self-contained test repo) and so is real, expected changed-path evidence
     # too, alongside the two files this test cares about.
-    assert sorted(captured["json"]["paths"]) == [
+    assert sorted(captured["paths"]) == [
         ".otari/guardrails.yml",
         "CHANGELOG.md",
         "src/gateway/latin.py",
@@ -2262,14 +1962,14 @@ def test_a_policy_with_no_judge_gates_submits_no_judge_results(monkeypatch: pyte
 
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(repo)})
     assert result.exit_code == 0, result.output
-    assert captured["json"]["judge_results"] == []
+    assert captured["judge_results"] == []
 
 
 def test_stop_event_caps_the_number_of_judge_gates_evaluated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -2311,15 +2011,15 @@ def test_stop_event_caps_the_number_of_judge_gates_evaluated(monkeypatch: pytest
 
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
     assert result.exit_code == 0, result.output
 
-    submitted_ids = [entry["gate_id"] for entry in captured["json"]["judge_results"]]
+    submitted_ids = [entry.gate_id for entry in captured["judge_results"]]
     assert submitted_ids == [f"judge-{i}" for i in range(hook_cli._HOOK_JUDGE_MAX_GATES_PER_RUN)]
     assert claude_call_count == hook_cli._HOOK_JUDGE_MAX_GATES_PER_RUN
     assert "over the" in result.output
@@ -2359,14 +2059,14 @@ def test_stop_event_skips_a_when_changed_judge_gate_that_does_not_apply(
 
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
     assert result.exit_code == 0, result.output
-    assert captured["json"]["judge_results"] == []
+    assert captured["judge_results"] == []
 
 
 def test_stop_event_runs_a_when_changed_judge_gate_that_applies(
@@ -2398,14 +2098,14 @@ def test_stop_event_runs_a_when_changed_judge_gate_that_applies(
 
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
     assert result.exit_code == 0, result.output
-    assert captured["json"]["judge_results"] == [{"gate_id": "judge-src-only", "outcome": "pass", "reasoning": "ok"}]
+    assert captured["judge_results"] == [JudgeVerdict(gate_id="judge-src-only", outcome="pass", reasoning="ok")]
 
 
 def test_pretooluse_submits_no_judge_results(monkeypatch: pytest.MonkeyPatch, judge_repo: Path) -> None:
@@ -2419,11 +2119,11 @@ def test_pretooluse_submits_no_judge_results(monkeypatch: pytest.MonkeyPatch, ju
     """
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(judge_repo),
@@ -2432,7 +2132,7 @@ def test_pretooluse_submits_no_judge_results(monkeypatch: pytest.MonkeyPatch, ju
     }
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["judge_results"] is None
+    assert captured["judge_results"] is None
 
 
 def test_pretooluse_shows_no_advisory_warning_for_a_not_applicable_judge_gate(
@@ -2447,9 +2147,9 @@ def test_pretooluse_shows_no_advisory_warning_for_a_not_applicable_judge_gate(
     the server sends.
     """
     monkeypatch.setattr(
-        httpx,
-        "post",
-        lambda *a, **k: _FakeResponse(
+        hook_cli,
+        "check_policy",
+        lambda *a, **k: _verdict(
             {
                 "blocked": False,
                 "results": [
@@ -2481,9 +2181,9 @@ def test_advisory_only_failure_warns_without_blocking(monkeypatch: pytest.Monkey
     silently drop that advisory warning: it is never true on its own.
     """
     monkeypatch.setattr(
-        httpx,
-        "post",
-        lambda *a, **k: _FakeResponse(
+        hook_cli,
+        "check_policy",
+        lambda *a, **k: _verdict(
             {
                 "blocked": False,
                 "results": [
@@ -2520,9 +2220,9 @@ def test_advisory_warning_includes_the_judge_models_own_reasoning(monkeypatch: p
     hand-picked payload shape would not prove much.
     """
     monkeypatch.setattr(
-        httpx,
-        "post",
-        lambda *a, **k: _FakeResponse(
+        hook_cli,
+        "check_policy",
+        lambda *a, **k: _verdict(
             {
                 "blocked": False,
                 "results": [
@@ -2558,11 +2258,11 @@ def test_pretooluse_submits_call_scoped_evidence(monkeypatch: pytest.MonkeyPatch
     """
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(repo),
@@ -2570,7 +2270,7 @@ def test_pretooluse_submits_call_scoped_evidence(monkeypatch: pytest.MonkeyPatch
         "tool_input": {"command": "npm install"},
     }
     assert _invoke(payload).exit_code == 0
-    assert captured["json"]["command_scope"] == "call"
+    assert captured["command_scope"] == "call"
 
 
 def test_stop_event_submits_session_scoped_evidence(
@@ -2590,14 +2290,14 @@ def test_stop_event_submits_session_scoped_evidence(
     transcript.write_text(_transcript_line(command="make postman") + "\n", encoding="utf-8")
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
     assert _invoke(payload).exit_code == 0
-    assert captured["json"]["command_scope"] == "session"
+    assert captured["command_scope"] == "session"
 
 
 def test_pretooluse_labels_each_branch_with_the_moment_it_really_is(
@@ -2613,11 +2313,11 @@ def test_pretooluse_labels_each_branch_with_the_moment_it_really_is(
     """
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     cases = [
         ("Bash", {"command": "npm install"}, "pre_tool_use.command"),
         ("Write", {"file_path": str(repo / "CHANGELOG.md")}, "pre_tool_use.edit_target"),
@@ -2630,7 +2330,7 @@ def test_pretooluse_labels_each_branch_with_the_moment_it_really_is(
             "tool_input": tool_input,
         }
         assert _invoke(payload).exit_code == 0
-        assert captured["json"]["path_source"] == expected, tool_name
+        assert captured["path_source"] == expected, tool_name
 
 
 def test_stop_event_labels_its_paths_as_the_working_tree(
@@ -2646,14 +2346,14 @@ def test_stop_event_labels_its_paths_as_the_working_tree(
     transcript.write_text(_transcript_line(command="make postman") + "\n", encoding="utf-8")
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
     assert _invoke(payload).exit_code == 0
-    assert captured["json"]["path_source"] == "stop.working_tree"
+    assert captured["path_source"] == "stop.working_tree"
 
 
 def test_a_repeat_stop_block_says_the_block_is_finite(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -2669,9 +2369,9 @@ def test_a_repeat_stop_block_says_the_block_is_finite(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(
-        httpx,
-        "post",
-        lambda *a, **k: _FakeResponse(
+        hook_cli,
+        "check_policy",
+        lambda *a, **k: _verdict(
             {
                 "blocked": True,
                 "results": [{"gate_id": "g", "enforcement": "required", "outcome": "fail", "message": "no"}],
@@ -2691,9 +2391,9 @@ def test_a_first_stop_block_does_not_mention_the_budget(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(
-        httpx,
-        "post",
-        lambda *a, **k: _FakeResponse(
+        hook_cli,
+        "check_policy",
+        lambda *a, **k: _verdict(
             {
                 "blocked": True,
                 "results": [{"gate_id": "g", "enforcement": "required", "outcome": "fail", "message": "no"}],
@@ -2895,8 +2595,8 @@ def test_verifier_gates_run_concurrently_not_sequentially(tmp_path: Path) -> Non
     results = hook_cli._hook_collect_check_verdicts(spec, tmp_path, [], _repo_origins(spec))
     elapsed = time.monotonic() - start
 
-    assert [result["gate_id"] for result in results] == [f"g{i}" for i in range(gate_count)]
-    assert all(result["outcome"] == "pass" for result in results)
+    assert [result.gate_id for result in results] == [f"g{i}" for i in range(gate_count)]
+    assert all(result.outcome == "pass" for result in results)
     # gate_count * per_gate_seconds is the sleep time alone a fully
     # sequential run could not possibly finish under, real subprocess
     # spawn overhead on top of that not even counted; no fudge factor
@@ -2958,15 +2658,15 @@ def test_stop_event_submits_a_check_verdict_from_the_verifier_script(
     monkeypatch.setattr(subprocess, "run", _git_status_only_run())
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(check_repo)})
     assert result.exit_code == 0, result.output
-    assert captured["json"]["check_results"] == [
-        {"gate_id": "no-leftover-conflict-markers", "outcome": "pass", "detail": ""}
+    assert captured["check_results"] == [
+        CheckVerdict(gate_id="no-leftover-conflict-markers", outcome="pass", detail="")
     ]
 
 
@@ -2978,9 +2678,9 @@ def test_stop_event_submits_a_failing_check_verdict_and_blocks(monkeypatch: pyte
     monkeypatch.setattr(subprocess, "run", _git_status_only_run())
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse(
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict(
             {
                 "blocked": True,
                 "results": [
@@ -2995,11 +2695,11 @@ def test_stop_event_submits_a_failing_check_verdict_and_blocks(monkeypatch: pyte
             }
         )
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
     assert result.exit_code == 2, result.output
-    assert captured["json"]["check_results"] == [
-        {"gate_id": "no-leftover-conflict-markers", "outcome": "fail", "detail": "conflicted.txt:2\n"}
+    assert captured["check_results"] == [
+        CheckVerdict(gate_id="no-leftover-conflict-markers", outcome="fail", detail="conflicted.txt:2\n")
     ]
 
 
@@ -3012,11 +2712,11 @@ def test_pretooluse_submits_no_check_results(monkeypatch: pytest.MonkeyPatch, ch
     """
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(check_repo),
@@ -3025,7 +2725,7 @@ def test_pretooluse_submits_no_check_results(monkeypatch: pytest.MonkeyPatch, ch
     }
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert captured["json"]["check_results"] is None
+    assert captured["check_results"] is None
 
 
 def test_stop_event_skips_verifier_gates_that_when_changed_excludes(
@@ -3056,14 +2756,14 @@ def test_stop_event_skips_verifier_gates_that_when_changed_excludes(
     monkeypatch.setattr(subprocess, "run", _git_status_only_run(git_status_stdout=" M docs/README.md\0"))
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)})
     assert result.exit_code == 0, result.output
-    assert captured["json"]["check_results"] == []
+    assert captured["check_results"] == []
 
 
 def test_collect_check_verdicts_skips_gates_over_the_per_run_limit(tmp_path: Path) -> None:
@@ -3078,7 +2778,7 @@ def test_collect_check_verdicts_skips_gates_over_the_per_run_limit(tmp_path: Pat
 
     results = hook_cli._hook_collect_check_verdicts(spec, tmp_path, [], _repo_origins(spec))
     assert len(results) == hook_cli._HOOK_CHECK_MAX_GATES_PER_RUN
-    assert {r["outcome"] for r in results} == {"pass"}
+    assert {r.outcome for r in results} == {"pass"}
 
 
 def test_collect_check_verdicts_keeps_the_highest_priority_gates_over_the_limit(tmp_path: Path) -> None:
@@ -3100,7 +2800,7 @@ def test_collect_check_verdicts_keeps_the_highest_priority_gates_over_the_limit(
     spec = parse_policy("\n".join(gates_yaml) + "\n", source="test.yml")
 
     results = hook_cli._hook_collect_check_verdicts(spec, tmp_path, [], _repo_origins(spec))
-    ran = [result["gate_id"] for result in results]
+    ran = [result.gate_id for result in results]
     assert ran[0] == f"g{over_the_limit - 1}"
     assert len(ran) == hook_cli._HOOK_CHECK_MAX_GATES_PER_RUN
     assert "g0" in ran
@@ -3139,9 +2839,9 @@ def test_a_symlink_out_of_the_repo_does_not_carry_the_gate_with_it(
     )
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse(
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict(
             {
                 "blocked": True,
                 "results": [
@@ -3150,10 +2850,10 @@ def test_a_symlink_out_of_the_repo_does_not_carry_the_gate_with_it(
             }
         )
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke(_read_payload(repo, spelling.format(repo=repo)))
     assert result.exit_code == 2, result.output
-    assert ".env" in captured["json"]["paths"]
+    assert ".env" in captured["paths"]
 
 
 def test_an_edit_through_a_symlink_out_of_the_repo_is_checked_too(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -3169,11 +2869,11 @@ def test_an_edit_through_a_symlink_out_of_the_repo_is_checked_too(monkeypatch: p
     (repo / "CHANGELOG.md").symlink_to(outside)
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(repo),
@@ -3182,7 +2882,7 @@ def test_an_edit_through_a_symlink_out_of_the_repo_is_checked_too(monkeypatch: p
     }
     result = _invoke(payload)
     assert result.exit_code == 0, result.output
-    assert "CHANGELOG.md" in captured["json"]["paths"]
+    assert "CHANGELOG.md" in captured["paths"]
 
 
 def test_an_alias_to_a_secret_is_caught_by_the_resolved_spelling(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
@@ -3196,13 +2896,13 @@ def test_an_alias_to_a_secret_is_caught_by_the_resolved_spelling(monkeypatch: py
     (repo / "notes.md").symlink_to(repo / ".env")
     captured: dict[str, Any] = {}
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        captured.update(kwargs)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     _invoke(_read_payload(repo, str(repo / "notes.md")))
-    assert set(captured["json"]["paths"]) == {"notes.md", ".env"}
+    assert set(captured["paths"]) == {"notes.md", ".env"}
 
 
 def test_a_target_outside_the_repo_under_both_spellings_submits_nothing(
@@ -3211,12 +2911,12 @@ def test_a_target_outside_the_repo_under_both_spellings_submits_nothing(
     """Neither candidate is nameable by a repo-relative glob, so there is nothing to check."""
     called = False
 
-    def fake_post(*args: object, **kwargs: object) -> _FakeResponse:
+    def fake_check(*args: object, **kwargs: Any) -> PolicyCheckResult:
         nonlocal called
         called = True
-        return _FakeResponse({"blocked": False, "results": []})
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     outside = repo.parent / "elsewhere.env"
     outside.write_text("SECRET=1\n", encoding="utf-8")
     result = _invoke(_read_payload(repo, str(outside)))
@@ -3271,7 +2971,6 @@ def test_a_composed_directory_blocks_and_names_the_file_that_did_it(
     _write_guardrail(tmp_path, ".otari/guardrails/git-safety.yml", "secrets")
     _write_guardrail(tmp_path, ".otari/guardrails/architecture/layering.yml", "layers")
 
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(tmp_path),
@@ -3292,7 +2991,6 @@ def test_a_gate_id_declared_in_two_files_fails_open_naming_both(
     _write_guardrail(tmp_path, ".otari/guardrails/a.yml", "shared")
     _write_guardrail(tmp_path, ".otari/guardrails/b.yml", "shared")
 
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(tmp_path),
@@ -3309,89 +3007,11 @@ def test_a_gate_id_declared_in_two_files_fails_open_naming_both(
     assert ".otari/guardrails/b.yml" in message
 
 
-def test_remote_mode_submits_one_merged_document_for_a_composed_guardrail(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """`POST /hooks/check` takes one body, so composition is merged back rather than changing that contract."""
-    (tmp_path / ".git").mkdir()
-    _write_guardrail(tmp_path, ".otari/guardrails/a.yml", "a1")
-    _write_guardrail(tmp_path, ".otari/guardrails/b.yml", "b1")
-    captured: dict[str, Any] = {}
-
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
-
-    monkeypatch.setattr(httpx, "post", fake_post)
-    result = _invoke(
-        {
-            "hook_event_name": "PreToolUse",
-            "cwd": str(tmp_path),
-            "tool_name": "Edit",
-            "tool_input": {"file_path": str(tmp_path / "a1.txt")},
-        }
-    )
-    assert result.exit_code == 0, result.output
-    submitted = parse_policy(captured["json"]["policy_yaml"], source="submitted")
-    assert [gate.id for gate in submitted.gates] == ["a1", "b1"]
-
-
-def test_remote_mode_sends_a_single_file_guardrail_verbatim(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    """Comments and all: the common case puts nothing on the wire that was not written by hand."""
-    captured: dict[str, Any] = {}
-
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
-
-    monkeypatch.setattr(httpx, "post", fake_post)
-    result = _invoke(
-        {
-            "hook_event_name": "PreToolUse",
-            "cwd": str(repo),
-            "tool_name": "Edit",
-            "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
-        }
-    )
-    assert result.exit_code == 0, result.output
-    assert captured["json"]["policy_yaml"] == _GATES_YAML
-
-
-def test_remote_mode_restores_the_file_name_the_route_cannot_report(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    (tmp_path / ".git").mkdir()
-    _write_guardrail(tmp_path, ".otari/guardrails/a.yml", "a1")
-    _write_guardrail(tmp_path, ".otari/guardrails/b.yml", "b1")
-
-    monkeypatch.setattr(
-        httpx,
-        "post",
-        lambda *a, **k: _FakeResponse(
-            {
-                "blocked": True,
-                "results": [{"gate_id": "b1", "enforcement": "required", "outcome": "fail", "message": "no"}],
-            }
-        ),
-    )
-    result = _invoke(
-        {
-            "hook_event_name": "PreToolUse",
-            "cwd": str(tmp_path),
-            "tool_name": "Edit",
-            "tool_input": {"file_path": str(tmp_path / "docs/README.md")},
-        }
-    )
-    assert result.exit_code == 2, result.output
-    assert "[.otari/guardrails/b.yml]" in result.output
-
-
 def test_a_single_file_guardrail_names_no_file_in_its_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A repo with one guardrail file would only be told what it already knows."""
     (tmp_path / ".git").mkdir()
     _write_guardrail(tmp_path, ".otari/guardrails/only.yml", "solo")
 
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(tmp_path),
@@ -3416,7 +3036,6 @@ def test_a_repo_still_on_the_moved_path_is_told_its_guardrail_stopped_running(
     (tmp_path / ".git").mkdir()
     (tmp_path / ".otari-guardrails.yml").write_text(_GATES_YAML, encoding="utf-8")
 
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(tmp_path),
@@ -3437,7 +3056,6 @@ def test_a_repo_still_on_the_moved_path_is_told_its_guardrail_stopped_running(
 def test_a_repo_with_no_guardrail_at_all_stays_silent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """The other half of the rule: nothing to say to a repo that never had one."""
     (tmp_path / ".git").mkdir()
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     payload = {
         "hook_event_name": "PreToolUse",
         "cwd": str(tmp_path),
@@ -3449,15 +3067,17 @@ def test_a_repo_with_no_guardrail_at_all_stays_silent(monkeypatch: pytest.Monkey
     assert result.output == ""
 
 
-def test_an_oversize_composed_guardrail_does_not_block_the_turn(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The Hook Server takes one body per request, so a set that outgrows it fails open."""
+def test_a_large_composed_guardrail_is_evaluated_rather_than_failing_open(tmp_path: Path) -> None:
+    """Thousands of composed gates still enforce; only the per-file limits bound a guardrail.
+
+    A composed set used to be merged into one request body and fail open past
+    that body's size, which made a guardrail that grew too far quietly stop
+    enforcing. Evaluated in process it has no such ceiling.
+    """
     (tmp_path / ".git").mkdir()
     for index in range(4):
         _write_guardrail(tmp_path, f".otari/guardrails/f{index}.yml", *[f"g{index}x{n}" for n in range(900)])
 
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     result = _invoke(
         {
             "hook_event_name": "PreToolUse",
@@ -3466,8 +3086,8 @@ def test_an_oversize_composed_guardrail_does_not_block_the_turn(
             "tool_input": {"file_path": str(tmp_path / "g0x0.txt")},
         }
     )
-    assert result.exit_code == 0, result.output
-    assert "no gate is being enforced" in json.loads(result.stdout)["systemMessage"]
+    assert result.exit_code == 2, result.output
+    assert "g0x0" in result.output
 
 
 def _edit_payload(repo: Path, target: str) -> dict[str, Any]:
@@ -3525,7 +3145,6 @@ def test_a_home_directory_that_cannot_be_found_leaves_the_repo_gates_on(
         raise error
 
     monkeypatch.setattr(Path, "home", no_home)
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "team.txt")))
     assert result.exit_code == 2, result.output
     assert "team is forbidden" in result.output
@@ -3537,7 +3156,6 @@ def test_a_user_level_gate_blocks_in_a_repo_with_no_guardrail(
     (tmp_path / ".git").mkdir()
     _write_guardrail(isolated_home, ".otari/guardrails.yml", "personal")
 
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "personal.txt")))
     assert result.exit_code == 2, result.output
     assert "personal is forbidden" in result.output
@@ -3550,7 +3168,6 @@ def test_a_user_level_gate_composes_with_the_repo_and_names_its_home_file(
     _write_guardrail(tmp_path, ".otari/guardrails.yml", "shared")
     _write_guardrail(isolated_home, ".otari/guardrails/mine.yml", "personal")
 
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "personal.txt")))
     assert result.exit_code == 2, result.output
     assert "personal is forbidden" in result.output
@@ -3565,7 +3182,6 @@ def test_a_user_gate_and_a_repo_gate_may_share_an_id(
     _write_guardrail(tmp_path, ".otari/guardrails.yml", "shared")
     _write_guardrail(isolated_home, ".otari/guardrails.yml", "shared")
 
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "shared.txt")))
     assert result.exit_code == 2, result.output
     assert "[x] shared: shared is forbidden (shared.txt) [.otari/guardrails.yml]" in result.output
@@ -3581,7 +3197,6 @@ def test_a_repo_gate_that_copies_the_user_prefix_keeps_the_user_gates_on(
     _write_guardrail(tmp_path, ".otari/guardrails.yml", "user:shared", "team")
     _write_guardrail(isolated_home, ".otari/guardrails.yml", "shared")
 
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "shared.txt")))
     assert result.exit_code == 2, result.output
     assert "shared is forbidden" in result.output
@@ -3593,23 +3208,26 @@ def test_a_repo_gate_that_copies_the_user_prefix_keeps_the_user_gates_on(
     assert "only the gates in ~/.otari/ are being enforced" in _system_message(result)
 
 
-def test_remote_mode_sends_the_user_prefix_on_the_wire(
+def test_a_user_file_is_evaluated_under_its_prefixed_gate_id(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
 ) -> None:
-    """A single user file is not sent verbatim, or the gateway would see IDs without their prefix."""
+    """A user-level gate carries its `user:` prefix into the evaluated policy.
+
+    The prefix is what keeps a personal gate from colliding with a repo gate
+    of the same name, so it has to survive composition, not just discovery.
+    """
     (tmp_path / ".git").mkdir()
     _write_guardrail(isolated_home, ".otari/guardrails.yml", "personal")
-    captured: dict[str, Any] = {}
+    evaluated: list[PolicySpec] = []
 
-    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
-        captured["json"] = kwargs.get("json")
-        return _FakeResponse({"blocked": False, "results": []})
+    def fake_check(spec: PolicySpec, **kwargs: Any) -> PolicyCheckResult:
+        evaluated.append(spec)
+        return _verdict({"blocked": False, "results": []})
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(hook_cli, "check_policy", fake_check)
     result = _invoke(_edit_payload(tmp_path, "personal.txt"))
     assert result.exit_code == 0, result.output
-    submitted = parse_policy(captured["json"]["policy_yaml"], source="submitted")
-    assert [gate.id for gate in submitted.gates] == ["user:personal"]
+    assert [gate.id for gate in evaluated[0].gates] == ["user:personal"]
 
 
 def test_a_malformed_repo_file_keeps_the_user_gates_on(
@@ -3620,7 +3238,6 @@ def test_a_malformed_repo_file_keeps_the_user_gates_on(
     (tmp_path / ".otari/guardrails.yml").write_text("gates: [", encoding="utf-8")
     _write_guardrail(isolated_home, ".otari/guardrails.yml", "personal")
 
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "personal.txt")))
     assert result.exit_code == 2, result.output
     assert "personal is forbidden" in result.output
@@ -3637,7 +3254,6 @@ def test_a_repo_that_links_to_a_user_file_cannot_turn_it_off_with_a_broken_file(
     linked.symlink_to(isolated_home / ".otari/guardrails.yml")
     (tmp_path / ".otari/guardrails/broken.yml").write_text("gates: [", encoding="utf-8")
 
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "personal.txt")))
     assert result.exit_code == 2, result.output
     assert "personal is forbidden" in result.output
@@ -3652,7 +3268,6 @@ def test_a_malformed_user_file_keeps_the_repo_gates_on(
     (isolated_home / ".otari").mkdir()
     (isolated_home / ".otari/guardrails.yml").write_text("gates: [", encoding="utf-8")
 
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "team.txt")))
     assert result.exit_code == 2, result.output
     assert "team is forbidden" in result.output
@@ -3667,7 +3282,6 @@ def test_malformed_files_on_both_sides_enforce_no_gate(
         (home / ".otari/guardrails.yml").write_text("gates: [", encoding="utf-8")
     (tmp_path / ".git").mkdir()
 
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps(_edit_payload(tmp_path, "any.txt")))
     assert result.exit_code == 0, result.output
     assert "no gate is being enforced" in _system_message(result)
@@ -3686,7 +3300,6 @@ def test_a_user_level_verifier_runs_from_home_against_the_repo(
     )
 
     monkeypatch.setattr(subprocess, "run", _git_status_only_run())
-    monkeypatch.setattr(httpx, "post", lambda *a, **k: pytest.fail("httpx.post should not be called"))
     result = CliRunner().invoke(hook_cli.hook, [], input=json.dumps({"hook_event_name": "Stop", "cwd": str(repo)}))
     assert result.exit_code == 2, result.output
     assert str(repo.resolve()) in result.output
@@ -3745,22 +3358,54 @@ def test_a_closed_stdin_stays_a_quiet_no_op(monkeypatch: pytest.MonkeyPatch) -> 
     assert hook_cli._stdin_is_a_terminal() is False
 
 
-def test_help_does_not_advertise_the_hook_server(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The remote mode is hidden while it is being reworked; `setup` is what the help points at.
+@pytest.mark.parametrize("flag", ["--url", "--api-key", "--config", "-c"])
+def test_a_hook_registered_with_the_old_gateway_flags_still_enforces(repo: Path, flag: str) -> None:
+    """A command line an older `otari hook setup` wrote still checks the guardrail.
 
-    The flags still work when passed deliberately (every other remote-mode
-    test in this module passes `--api-key`); they are just not offered.
+    Those registrations pass `--api-key <value>` on every tool call. Click
+    exits 2 on an option it does not know and both harnesses read 2 as
+    "block", so rejecting one here would leave an upgraded install unable to
+    act at all until its registration was refreshed. They are accepted and
+    ignored instead, which evaluates in process: what the credential was
+    buying anyway.
+    """
+    _guardrail_path(repo).write_text(
+        'schema_version: "1.0"\npolicy:\n  id: test\ngates:\n'
+        "  - id: g\n    type: path\n"
+        "    runs: [pre_tool_use.edit_target]\n    enforcement: required\n"
+        '    forbidden: ["CHANGELOG.md"]\n    message: forbidden\n',
+        encoding="utf-8",
+    )
+    payload = {
+        "hook_event_name": "PreToolUse",
+        "cwd": str(repo),
+        "tool_name": "Edit",
+        "tool_input": {"file_path": str(repo / "CHANGELOG.md")},
+    }
+
+    result = CliRunner().invoke(hook_cli.hook, [flag, "whatever"], input=json.dumps(payload))
+
+    assert result.exit_code == 2, result.output
+    assert "forbidden" in result.output, "blocked by the gate, not by a usage error"
+    assert "No such option" not in result.output
+
+
+def test_the_old_gateway_flags_are_not_advertised(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tolerated for an old registration, never offered to a new one.
+
+    `setup` rejects `--api-key` rather than tolerating it, unlike `hook`
+    itself: nothing is registered yet, so a person typing it should be told
+    it is gone rather than have it quietly do nothing.
     """
     monkeypatch.setattr(hook_cli, "_stdin_is_a_terminal", lambda: False)
 
     result = CliRunner().invoke(hook_cli.hook, ["--help"])
 
     assert result.exit_code == 0, result.output
-    assert "--url" not in result.output
-    assert "--api-key" not in result.output
-    assert "--config" not in result.output
-    assert "setup" in result.output
+    for flag in ("--url", "--api-key", "--config"):
+        assert flag not in result.output
 
     setup_help = CliRunner().invoke(hook_cli.hook, ["setup", "--help"])
-    assert setup_help.exit_code == 0, setup_help.output
     assert "--api-key" not in setup_help.output
+    setup_result = CliRunner().invoke(hook_cli.hook, ["setup", "--api-key", "x"])
+    assert setup_result.exit_code == 2, setup_result.output

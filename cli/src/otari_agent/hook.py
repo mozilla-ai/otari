@@ -1,10 +1,9 @@
 """`otari hook`, `otari hook setup` and the `otari guardrails` group: the agent-side half of Agent Guardrails.
 
 Reads one hook payload from a supported coding agent, collects the evidence it
-names, composes the repository's own guardrail files and evaluates them in
-process (or, when opted
-in, asks a gateway's Hook Server to) and answers in the harness's own exit-code
-protocol. See docs/agent-guardrails.md.
+names, composes the repository's own guardrail files, evaluates them in
+process and answers in the harness's own exit-code protocol. No server and no
+credential are involved. See docs/agent-guardrails.md.
 """
 
 import json
@@ -23,16 +22,13 @@ from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Literal, NamedTuple, cast
-from urllib.parse import urlsplit
 
 import click
 import yaml
-from click.core import ParameterSource
 
 from otari_agent.domain.check import PolicyCheckError, check_policy
 from otari_agent.domain.evaluators import matched_changed_paths
 from otari_agent.domain.policy import (
-    MAX_POLICY_BYTES,
     MAX_POLICY_FILES,
     PolicyError,
     PolicyFile,
@@ -55,7 +51,11 @@ from otari_agent.domain.types import (
     by_priority,
 )
 from otari_agent.domain.validation import validate_policy
-from otari_agent.settings import API_KEY_HEADER, API_ROOT, load_settings
+
+# What a judge or verifier gate's caller-observed outcome may be
+# (domain.types.JudgeVerdict.outcome); the gate runners produce it as a plain
+# string and the verdicts they build are typed.
+_VerdictOutcome = Literal["pass", "fail", "error"]
 
 # Claude Code's own edit tools and the tool_input field naming their target.
 _HOOK_EDIT_TOOL_PATH_FIELDS = {"Edit": "file_path", "Write": "file_path", "NotebookEdit": "notebook_path"}
@@ -163,14 +163,10 @@ def _hook_extract_patch_paths(patch_text: str) -> list[str]:
 
 
 # Mirrors the evaluator's own per-command bound
-# (otari_agent.domain.check's _MAX_COMMAND_LENGTH). A literal rather than
-# an import: the opt-in remote mode talks to a gateway over HTTP that may be
-# a different build, so the number it truncates to is its own best guess at
-# the far side's limit, not a shared constant that would imply the two are
-# always one process. The default, local mode calls the same evaluator
-# in process and would raise `PolicyCheckError` on the same bound anyway;
-# truncating here means an oversize command still gets checked, just with
-# its tail cut, rather than failing the whole check open.
+# (otari_agent.domain.check's _MAX_COMMAND_LENGTH), which raises
+# `PolicyCheckError` on anything over it. Truncating here means an oversize
+# command still gets checked, just with its tail cut, rather than failing the
+# whole check open.
 _HOOK_MAX_COMMAND_LENGTH = 4096
 
 # Mirror otari_agent.domain.check's own _MAX_COMMANDS/_MAX_TOTAL_COMMAND_CHARS,
@@ -180,16 +176,15 @@ _HOOK_MAX_COMMAND_LENGTH = 4096
 # would carry, so reaching this aggregate is a real, not pathological,
 # outcome of a long session with several long commands (501 commands
 # truncated to _HOOK_MAX_COMMAND_LENGTH each already clears 2,000,000
-# characters). Left unbounded, the evaluator (local or remote) 422s/raises
-# on the whole request, and that failure is total: it takes every gate in
-# the policy with it, path included, not just the command-evidence
-# ones.
+# characters). Left unbounded, the evaluator raises on the whole check, and
+# that failure is total: it takes every gate in the policy with it, path
+# included, not just the command-evidence ones.
 _HOOK_MAX_COMMANDS = 10_000
 _HOOK_MAX_TOTAL_COMMAND_CHARS = 2_000_000
 
 
 def _bound_commands_for_submission(commands: list[str]) -> list[str] | None:
-    """Keep a Stop event's collected commands within the Hook Server's own request-size bounds,
+    """Keep a Stop event's collected commands within the evaluator's own bounds,
     or submit no command evidence at all rather than an arbitrary subset of it.
 
     Dropping whole commands, unlike truncating one to its head
@@ -308,10 +303,10 @@ def _failing_summary(failing: list[dict[str, Any]]) -> str:
     for which one to edit. A single-file repo would only be told what it
     already knows.
 
-    `.get()`, not `[...]`: a gate dict from an older or otherwise mismatched
-    `otari serve` behind `--url` may be missing a field, and must not raise
-    KeyError outside the caller's fail-open protection and surface as a
-    traceback in place of the message this command promises.
+    `.get()`, not `[...]`: a field added to the gate dicts the caller builds
+    but missed here must not raise KeyError outside that caller's fail-open
+    protection and surface as a traceback in place of the message this
+    command promises.
     """
     return "\n".join(
         f"  [{'x' if gate.get('enforcement') == 'required' else '!'}] "
@@ -320,42 +315,6 @@ def _failing_summary(failing: list[dict[str, Any]]) -> str:
         + (f" [{gate['source']}]" if gate.get("source") else "")
         for gate in failing
     )
-
-
-def _remote_mode_reason(ctx: click.Context) -> str:
-    """Which flag or envvar turned remote mode on, and how to turn it off.
-
-    An exported `OTARI_URL` or `OTARI_API_KEY` switches the mode with nothing
-    on the command line to show for it, so a failure that does not name the
-    variable leaves no trail back to it.
-    """
-    causes: list[str] = []
-    fixes: list[str] = []
-    for param, flag, envvar in (("url", "--url", "OTARI_URL"), ("api_key", "--api-key", "OTARI_API_KEY")):
-        source = ctx.get_parameter_source(param)
-        if source is ParameterSource.ENVIRONMENT:
-            causes.append(f"{envvar} is set")
-            fixes.append(f"unset {envvar}")
-        elif source is ParameterSource.COMMANDLINE:
-            causes.append(f"{flag} was given")
-            fixes.append(f"drop {flag}")
-    if not causes:
-        return ""
-    # Either setting alone keeps remote mode on, so a fix naming only one would not get out of it.
-    return (
-        f"Remote mode is on because {' and '.join(causes)}; "
-        f"start that gateway, or {' and '.join(fixes)} to check locally."
-    )
-
-
-def _redact_url_credentials(text: str, url: str) -> str:
-    """`text` with any credentials embedded in `url` (`https://user:secret@host`) masked."""
-    parts = urlsplit(url)
-    userinfo = parts.netloc.rpartition("@")[0]
-    for secret in (userinfo, parts.password):
-        if secret:
-            text = text.replace(secret, "***")
-    return text
 
 
 def _guardrail_moved_notice(root: Path) -> str | None:
@@ -585,36 +544,6 @@ def _hook_load_one_origin(files: list[GuardrailFile], root: Path) -> tuple[Guard
         except (GuardrailReadError, PolicyError):
             continue
     return None
-
-
-def _merged_guardrail_yaml(sources: list[PolicyFile], policy_id: str) -> str:
-    """One YAML document carrying every composed file's gates, for the opt-in remote mode.
-
-    `POST /hooks/check` takes one policy body per request, so a composed
-    guardrail is merged back into one document here rather than changing that
-    contract for a mode most callers never turn on. Nothing is lost by it: the
-    gates are the already-validated mappings from each file, and which file a
-    gate came from is matched back from `PolicySpec.gate_sources`, which this
-    process holds either way.
-
-    A single-file guardrail is sent exactly as it sits on disk, comments and
-    all, so the common case puts nothing on the wire that was not written by
-    hand.
-    A file with a gate ID prefix is merged instead, so the gateway sees the same IDs this process evaluates.
-    """
-    if len(sources) == 1 and not sources[0].gate_id_prefix:
-        return sources[0].body
-    documents = [yaml.safe_load(source.body) for source in sources]
-    merged = {
-        "schema_version": documents[0]["schema_version"],
-        "policy": {"id": policy_id, "description": f"Composed from {len(sources)} guardrail files."},
-        "gates": [
-            {**gate, "id": f"{source.gate_id_prefix}{gate['id']}"}
-            for source, document in zip(sources, documents, strict=True)
-            for gate in document["gates"]
-        ],
-    }
-    return yaml.safe_dump(merged, sort_keys=False)
 
 
 def _hook_collect_changed_paths(repo_root: Path) -> list[str] | None:
@@ -939,8 +868,7 @@ _HOOK_GATE_MAX_WORKERS = 8
 # judge gate and retry in one run (_hook_collect_judge_verdicts computes one
 # deadline before its gate loop, not one budget per gate), leaving real
 # margin under the 600s default for the git evidence collection and the
-# `run_policy_check` call (or, opted in, the /hooks/check request) that
-# still has to happen afterward. A gate whose turn comes up after the
+# `run_policy_check` call that still has to happen afterward. A gate whose turn comes up after the
 # deadline has passed reports "error" without attempting the call at all,
 # the same fail-open contract a missing `claude` binary already has.
 _HOOK_JUDGE_TOTAL_BUDGET_SECONDS = 480
@@ -1188,9 +1116,8 @@ def _hook_collect_diff(repo_root: Path) -> str | None:
     fail-open sentinel: a diff collection failure must degrade this one
     judge gate's own evidence, never crash `otari hook` and take every other
     gate in the policy, mechanical and required ones included, down with it
-    before the request ever reaches the Hook Server (confirmed: an uncaught
-    `subprocess.run` exception here does exactly that, exiting nonzero
-    without ever calling `httpx.post`).
+    (confirmed: an uncaught `subprocess.run` exception here does exactly
+    that, exiting nonzero before any gate is evaluated).
 
     `errors="replace"`: `git diff` emits a tracked file's own content bytes,
     which are not necessarily valid UTF-8 (a Latin-1-encoded tracked file, a
@@ -1353,13 +1280,9 @@ def _hook_strip_judge_code_fence(raw: str) -> str:
 # this is a signal to retry smaller, not a value this command needs to carry.
 _HOOK_JUDGE_PROMPT_TOO_LONG_MARKER = "prompt is too long"
 
-# Mirrors the Hook Server's own JudgeVerdictRequest.reasoning cap
-# (routes/hooks.py, _MAX_REASONING_LENGTH): the prompt asks for "one or two
-# sentences" but nothing enforces that on the model's side, and an oversize
-# reasoning otherwise 422s the *whole* /hooks/check request, which this
-# command's own fail-open handling for a rejected request (not blocking)
-# would then silently skip every other gate in the same policy along with
-# it, mechanical and required ones included.
+# The prompt asks for "one or two sentences" but nothing enforces that on
+# the model's side, so what a judge gate carries into its verdict is bounded
+# here rather than by whatever the model chose to write.
 _HOOK_MAX_JUDGE_REASONING_LENGTH = 4_096
 
 
@@ -1417,8 +1340,8 @@ def _hook_run_judge_subprocess(argv: list[str], prompt: str, *, deadline: float,
         # raises "embedded null byte" for one in an argv element, the reason
         # the prompt goes over stdin above rather than as a trailing
         # argument). Both used to propagate uncaught, exiting `otari hook`
-        # before it ever reached `httpx.post` and skipping every other gate
-        # in the policy, mechanical and required ones included.
+        # before any gate was evaluated, mechanical and required ones
+        # included.
         return "error", f"could not run {label} ({exc})"
 
     if result.returncode != 0:
@@ -1656,7 +1579,7 @@ def _hook_collect_judge_verdicts(
     judge_dry_run: bool = False,
     harness: str = "claude-code",
     judge_cli_override: tuple[str, ...] | None = None,
-) -> list[dict[str, str]]:
+) -> list[JudgeVerdict]:
     """Run every applicable judge gate in the local policy, one model-CLI call each,
     up to `_HOOK_GATE_MAX_WORKERS` of them concurrently.
 
@@ -1667,8 +1590,8 @@ def _hook_collect_judge_verdicts(
     A judge gate with `when_changed` is skipped locally, before ever reading
     the diff/transcript or shelling out to `claude -p`, when none of
     `changed_paths` matches its globs (`domain.evaluators.matched_changed_paths`,
-    the same grammar `evaluate_judge`'s own applicability check uses
-    server-side). This is a local optimization only: submitting no verdict
+    the same grammar `evaluate_judge`'s own applicability check uses). This
+    skips work only: submitting no verdict
     for a skipped gate resolves `not_applicable` there independently, the
     same as it would if this function ran the model call and got `pass`
     anyway. A gate with no `when_changed` at all keeps its unconditional,
@@ -1753,7 +1676,7 @@ def _hook_collect_judge_verdicts(
     # Code's own outer hook timeout.
     deadline = time.monotonic() + _HOOK_JUDGE_TOTAL_BUDGET_SECONDS
 
-    def run_one(gate: JudgeGate) -> dict[str, str]:
+    def run_one(gate: JudgeGate) -> JudgeVerdict:
         # Logged before the call, not after: a hung or killed model-CLI
         # invocation must still show up in the audit trail rather than
         # silently vanishing along with the process that would have logged
@@ -1777,7 +1700,7 @@ def _hook_collect_judge_verdicts(
                 dry_run=judge_dry_run,
             )
         _hook_log_judge_call(repo_root, gate.id, outcome, detail=reasoning if judge_dry_run else None)
-        return {"gate_id": gate.id, "outcome": outcome, "reasoning": reasoning}
+        return JudgeVerdict(gate_id=gate.id, outcome=cast(_VerdictOutcome, outcome), reasoning=reasoning)
 
     with ThreadPoolExecutor(max_workers=min(len(judge_gates), _HOOK_GATE_MAX_WORKERS)) as executor:
         return list(executor.map(run_one, judge_gates))
@@ -1804,10 +1727,8 @@ _HOOK_CHECK_MAX_GATES_PER_RUN = 20
 # gates already claimed out of that same 600s in this run.
 _HOOK_CHECK_TOTAL_BUDGET_SECONDS = 60
 
-# Mirrors the Hook Server's own CheckVerdictRequest.detail cap
-# (routes/hooks.py, _MAX_CHECK_DETAIL_LENGTH): an oversize detail otherwise
-# 422s the *whole* /hooks/check request, fail-open, taking every other gate
-# in the same policy down with it.
+# What a verifier writes to stdout is unbounded, so the detail it carries
+# into its verdict is bounded here, the same way a judge gate's reasoning is.
 _HOOK_MAX_CHECK_DETAIL_LENGTH = 4_096
 
 
@@ -1875,7 +1796,7 @@ def _hook_run_check_verifier(
     own bytes can emit something that is not valid UTF-8, and strict
     decoding raises `UnicodeDecodeError` from inside `subprocess` itself,
     which would escape this function and take every other gate in the
-    policy down with it before the request ever reached the Hook Server.
+    policy down with it.
 
     The verifier leads a process group of its own (`start_new_session`) so
     that the timeout reaches its descendants too. Stopping the verifier alone
@@ -1959,7 +1880,7 @@ def _hook_collect_check_verdicts(
     repo_root: Path,
     changed_paths: list[str],
     origins: Mapping[str, GuardrailOrigin],
-) -> list[dict[str, str]]:
+) -> list[CheckVerdict]:
     """Run every applicable verifier gate's verifier locally; return check_results.
 
     `origins` says, per gate ID, whether the repo or the user owns the gate,
@@ -2017,9 +1938,9 @@ def _hook_collect_check_verdicts(
     # does not bound the total.
     deadline = time.monotonic() + _HOOK_CHECK_TOTAL_BUDGET_SECONDS
 
-    def run_one(gate: VerifierGate) -> dict[str, str]:
+    def run_one(gate: VerifierGate) -> CheckVerdict:
         outcome, detail = _hook_run_check_verifier(repo_root, gate.verifier, origin=origins[gate.id], deadline=deadline)
-        return {"gate_id": gate.id, "outcome": outcome, "detail": detail}
+        return CheckVerdict(gate_id=gate.id, outcome=cast(_VerdictOutcome, outcome), detail=detail)
 
     with ThreadPoolExecutor(max_workers=min(len(check_gates), _HOOK_GATE_MAX_WORKERS)) as executor:
         return list(executor.map(run_one, check_gates))
@@ -2055,24 +1976,20 @@ def _stdin_is_a_terminal() -> bool:
     show_default=True,
     help="Agent integration sending this callback.",
 )
-# Hidden with the two flags it serves: `load_settings` is called on the remote
-# path alone, so this resolves nothing for a local evaluation.
+# Accepted and ignored, not rejected. A hook registered by an older `otari
+# hook setup` still passes `--api-key <value>` on every tool call, and Click
+# exits 2 on an option it does not know, which both supported harnesses read
+# as "block". Rejecting these would turn an upgrade into an agent that cannot
+# act at all until its registration is refreshed, which is the one failure
+# this command is built never to cause. Ignoring them evaluates the guardrail
+# in process, which is what the credential was buying anyway. `otari hook
+# setup` rewrites the stale command in place (_merge_hook_entry matches on
+# the binary and "hook", before any flag), so a re-run clears them.
+@click.option("--api-key", hidden=True, expose_value=False, help="Ignored; an older hook registration may pass it.")
+@click.option("--url", hidden=True, expose_value=False, help="Ignored; an older hook registration may pass it.")
 @click.option(
-    "--config",
-    "-c",
-    type=click.Path(exists=True, dir_okay=False),
-    default=None,
-    hidden=True,
-    help="Path to config YAML file, used to resolve --url/--api-key when they are not given.",
+    "--config", "-c", hidden=True, expose_value=False, help="Ignored; an older hook registration may pass it."
 )
-# Hidden until the Hook Server is reworked. `POST /api/v1/hooks/check`
-# evaluates the submitted guardrail with the same `run_policy_check` this
-# command already calls in process and stores nothing, so choosing it today
-# buys a network round trip, a credential and seven fail-open exits (#1699,
-# #1720) for the verdict already in hand. Hidden, not removed: the flags and
-# their environment variables keep working for anyone already on that path.
-@click.option("--url", envvar="OTARI_URL", default=None, hidden=True, help="Base URL of the Otari gateway.")
-@click.option("--api-key", envvar="OTARI_API_KEY", default=None, hidden=True, help="Credential for the Hook Server.")
 @click.option(
     "--judge-model",
     envvar="OTARI_HOOK_JUDGE_MODEL",
@@ -2109,9 +2026,6 @@ def _stdin_is_a_terminal() -> bool:
 def hook(
     ctx: click.Context,
     harness: str,
-    config: str | None,
-    url: str | None,
-    api_key: str | None,
     judge_model: str | None,
     judge_cli: tuple[str, ...] | None,
     judge_dry_run: bool,
@@ -2199,7 +2113,6 @@ def hook(
             f"could not load {failed_name} ({exc}); only the gates in {loaded_origin.directory} are being enforced."
         )
     guardrail_name = guardrail.name
-    sources = guardrail.sources
     spec = guardrail.spec
 
     paths: list[str] = []
@@ -2225,18 +2138,18 @@ def hook(
     # _hook_collect_judge_verdicts at all, so submitting None (rather than an
     # empty list, which would mean "ran judge gates, found none applicable")
     # is what resolves every judge gate not_applicable on PreToolUse instead
-    # of unknown (see PolicyCheckRequest.judge_results, evaluate_judge). Only
+    # of unknown (see check_policy's own judge_results, evaluate_judge). Only
     # the Stop branch below ever reassigns this, to a real (possibly empty)
     # list.
-    judge_results: list[dict[str, str]] | None = None
+    judge_results: list[JudgeVerdict] | None = None
     # None, not [], by default, for exactly the same reason judge_results is:
     # a PreToolUse call has no finished session for a verifier to check yet,
     # and never runs _hook_collect_check_verdicts at all, so submitting None
     # resolves every verifier gate not_applicable rather than the
     # unknown a caller that does run verifier gates but is missing one
-    # gets (see PolicyCheckRequest.check_results, evaluate_verifier).
+    # gets (see check_policy's own check_results, evaluate_verifier).
     # Only the Stop branch below ever reassigns this.
-    check_results: list[dict[str, str]] | None = None
+    check_results: list[CheckVerdict] | None = None
     if event == "PreToolUse":
         tool_name = payload.get("tool_name", "")
         tool_input = payload.get("tool_input") or {}
@@ -2294,9 +2207,9 @@ def hook(
             command = tool_input.get(command_field)
             if not command:
                 return
-            # Truncated rather than sent whole: the Hook Server rejects an
-            # oversize command with a 422, and a 422 fails the *whole* check
-            # open, taking every path gate in the same policy with it.
+            # Truncated rather than checked whole: the evaluator raises on
+            # an oversize command, which fails the *whole* check open, taking
+            # every path gate in the same policy with it.
             # A Bash call carrying a heredoc clears this limit routinely, so
             # that is the common case rather than a pathological one. A tool
             # name is argv[0], so keeping the head is what preserves detection
@@ -2339,7 +2252,7 @@ def hook(
             # that at least one clears _HOOK_MAX_COMMAND_LENGTH (a heredoc
             # anywhere in the session, not just in the single command a
             # PreToolUse call would carry), and one oversize entry would
-            # otherwise 422 the whole check open.
+            # otherwise fail the whole check open.
             oversize = sum(1 for command in commands if len(command) > _HOOK_MAX_COMMAND_LENGTH)
             if oversize:
                 click.echo(
@@ -2364,151 +2277,34 @@ def hook(
     else:
         return  # An event this harness integration does not check yet.
 
-    # No `--url`/`--api-key` (nor their envvars): the common case, and the
-    # default now. Evaluate the local policy in process, the same pure
-    # `run_policy_check` the Hook Server route itself calls, so nothing here
-    # needs a running gateway, a credential, or the network at all.
-    if url is None and api_key is None:
-        try:
-            check_result = check_policy(
-                spec,
-                paths=paths,
-                commands=commands,
-                path_source=path_source,
-                command_scope=command_scope,
-                judge_results=(
-                    None
-                    if judge_results is None
-                    else [
-                        JudgeVerdict(
-                            gate_id=v["gate_id"],
-                            outcome=cast(Literal["pass", "fail", "error"], v["outcome"]),
-                            reasoning=v["reasoning"],
-                        )
-                        for v in judge_results
-                    ]
-                ),
-                check_results=(
-                    None
-                    if check_results is None
-                    else [
-                        CheckVerdict(
-                            gate_id=v["gate_id"],
-                            outcome=cast(Literal["pass", "fail", "error"], v["outcome"]),
-                            detail=v["detail"],
-                        )
-                        for v in check_results
-                    ]
-                ),
-            )
-        except PolicyCheckError as exc:
-            _hook_not_enforcing(f"could not evaluate {guardrail_name} ({exc}); no gate is being enforced.")
-            return
-        failing = [
-            {
-                "gate_id": gate_result.gate_id,
-                "enforcement": gate_result.enforcement,
-                "outcome": gate_result.outcome.value,
-                "message": gate_result.message,
-                "detail": gate_result.detail,
-                "source": gate_result.source,
-            }
-            for gate_result in check_result.results
-            if gate_result.outcome.value not in ("pass", "not_applicable")
-        ]
-        blocked = check_result.blocked
-    else:
-        # Explicit opt-in: check against a gateway over HTTP instead, the way
-        # every version of this command before local evaluation existed did.
-        # For whoever wants a shared/hosted gateway to be the one deciding,
-        # or a central place data about the check could eventually land.
-        import httpx
-
-        remote_reason = _remote_mode_reason(ctx)
-        policy_yaml = _merged_guardrail_yaml(sources, guardrail_name)
-        if len(policy_yaml.encode("utf-8")) > MAX_POLICY_BYTES:
-            _hook_not_enforcing(
-                f"{guardrail_name} composes to more than the {MAX_POLICY_BYTES:,} bytes the Hook Server "
-                "accepts in one request, so no gate is being enforced. Evaluate it locally "
-                "(drop --url/--api-key) or split the check across fewer gates."
-            )
-            return
-
-        try:
-            settings = load_settings(config)
-        except ValueError as exc:
-            # An unreadable or malformed config file, or a port that is not a
-            # number: a setup problem, not a required gate failing, so it falls
-            # under this command's own fail-open contract.
-            _hook_not_enforcing(f"could not load config ({exc}); no gate is being enforced. {remote_reason}")
-            return
-        # host is a bind address (0.0.0.0 is the documented default), not a
-        # connect target; a client dials localhost instead.
-        connect_host = "localhost" if settings.host == "0.0.0.0" else settings.host  # noqa: S104
-        resolved_url = url or f"http://{connect_host}:{settings.port}"
-        resolved_key = api_key or settings.master_key
-        if not resolved_key:
-            _hook_not_enforcing(f"no API key or master key resolved; no gate is being enforced. {remote_reason}")
-            return
-
-        try:
-            response = httpx.post(
-                f"{resolved_url.rstrip('/')}{API_ROOT}/hooks/check",
-                json={
-                    "policy_yaml": policy_yaml,
-                    "paths": paths,
-                    "commands": commands,
-                    "path_source": path_source,
-                    "command_scope": command_scope,
-                    "judge_results": judge_results,
-                    "check_results": check_results,
-                },
-                headers={API_KEY_HEADER: resolved_key},
-                timeout=15.0,
-            )
-            response.raise_for_status()
-            result = response.json()
-            failing = [gate for gate in result["results"] if gate["outcome"] not in ("pass", "not_applicable")]
-            # The route evaluated one merged document and has no file names to
-            # report; they are restored here from the composition this process
-            # did, so a failure reads the same whichever mode produced it.
-            for gate in failing:
-                gate["source"] = spec.gate_sources.get(str(gate.get("gate_id", "")))
-            blocked = result["blocked"]
-        except httpx.HTTPStatusError as exc:
-            # Split from the transport branch below on purpose: the request did
-            # arrive and was answered, so "could not reach" would send whoever
-            # debugs this to the network instead of to the status and body that
-            # say what was actually wrong (a policy this build cannot parse, or
-            # evidence over one of the route's limits).
-            detail = exc.response.text[:500]
-            _hook_not_enforcing(
-                _redact_url_credentials(
-                    f"{resolved_url} rejected the check ({exc.response.status_code}: {detail}); "
-                    f"no gate is being enforced. {remote_reason}",
-                    resolved_url,
-                )
-            )
-            return
-        except httpx.HTTPError as exc:
-            _hook_not_enforcing(
-                _redact_url_credentials(
-                    f"could not reach {resolved_url} ({exc}); no gate is being enforced. {remote_reason}", resolved_url
-                )
-            )
-            return
-        except (ValueError, TypeError, KeyError) as exc:
-            # A body that is not JSON, or is JSON of a shape this command does not
-            # recognize. Same fail-open contract as an unreachable gateway: this
-            # command blocks on a required gate failing and on nothing else, so a
-            # response it cannot read must not surface as a traceback.
-            _hook_not_enforcing(
-                _redact_url_credentials(
-                    f"unreadable response from {resolved_url} ({exc!r}); no gate is being enforced. {remote_reason}",
-                    resolved_url,
-                )
-            )
-            return
+    # Evaluated in process against the guardrail this repository (and the
+    # user's own `~/.otari/`) declares: no server, no credential, no network.
+    try:
+        check_result = check_policy(
+            spec,
+            paths=paths,
+            commands=commands,
+            path_source=path_source,
+            command_scope=command_scope,
+            judge_results=judge_results,
+            check_results=check_results,
+        )
+    except PolicyCheckError as exc:
+        _hook_not_enforcing(f"could not evaluate {guardrail_name} ({exc}); no gate is being enforced.")
+        return
+    failing = [
+        {
+            "gate_id": gate_result.gate_id,
+            "enforcement": gate_result.enforcement,
+            "outcome": gate_result.outcome.value,
+            "message": gate_result.message,
+            "detail": gate_result.detail,
+            "source": gate_result.source,
+        }
+        for gate_result in check_result.results
+        if gate_result.outcome.value not in ("pass", "not_applicable")
+    ]
+    blocked = check_result.blocked
 
     # `failing` mirrors Outcome's own non-blocking set (types.py), not just
     # "pass": a future gate type's not_applicable is a clean result too, and
@@ -2805,19 +2601,7 @@ _HOOK_SETUP_BY_HARNESS = {
     show_default=True,
     help="Agent integration to configure.",
 )
-# Hidden alongside `hook`'s own --url/--api-key, and for the same reason: it
-# registers the remote mode, which is the one being reworked.
-@click.option(
-    "--api-key",
-    default=None,
-    hidden=True,
-    help=(
-        "Embed this credential in the generated command, opting the registered hook into checking "
-        "against a gateway over HTTP instead of evaluating the guardrail locally. Omit for the default: "
-        "no credential, no server, evaluated in process."
-    ),
-)
-def hook_setup(harness: str, api_key: str | None) -> None:
+def hook_setup(harness: str) -> None:
     """Register otari hook in this repository, in a supported agent's own settings.
 
     Writes or updates a PreToolUse hook entry and a Stop hook entry in the
@@ -2867,20 +2651,9 @@ def hook_setup(harness: str, api_key: str | None) -> None:
         matcher_parts.append(setup.command_matcher)
     matcher = "|".join(matcher_parts)
 
-    # No credential resolution, and no prompt: `otari hook` evaluates the
-    # local policy in process by default and needs neither. `--api-key` here
-    # is the explicit opt-in to the other mode, checking against a gateway
-    # over HTTP instead (see `hook`'s own docstring); embedding it is what
-    # lets that mode work from a hook subprocess that inherits no shell
-    # environment. Given no `--api-key`, the generated command carries none,
-    # and stays that way even if a `master_key` happens to be configured
-    # somewhere on this machine: resolving one here anyway would silently
-    # decide, on this install's behalf, that gate checks should hit the
-    # network at all.
-    command_parts = [_otari_binary_path(), "hook", "--harness", harness]
-    if api_key:
-        command_parts += ["--api-key", api_key]
-    command = shlex.join(command_parts)
+    # No credential, and no prompt for one: `otari hook` evaluates the
+    # guardrail in process and has nothing to authenticate against.
+    command = shlex.join([_otari_binary_path(), "hook", "--harness", harness])
 
     settings_path = root / setup.settings_dir / setup.settings_name
     pretooluse_created = _merge_hook_entry(settings_path, "PreToolUse", command, matcher=matcher)
@@ -3095,7 +2868,7 @@ def _gates_generate_validate_gate(gate_dict: dict[str, Any]) -> None:
     """Raise PolicyError unless `gate_dict` is a well-formed gate on its own.
 
     Wraps it in a minimal policy skeleton and runs it through the exact
-    parser a submitted guardrail/Hook Server request goes through
+    parser a guardrail file itself goes through
     (`otari_agent.domain.policy.parse_policy`), so a hallucinated field,
     type, or a `judge` gate proposed as `required` is caught here, before
     this ever gets appended to the real file, not the first time the hook
