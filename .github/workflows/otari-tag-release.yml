@@ -13,6 +13,9 @@ name: Otari Release (tag + publish)
 #
 # The App token is minted in the last step rather than the first, so that it
 # does not exist while the job is running git-cliff.
+#
+# A second job announces the published Release to mozilla-ai/otari-ai with a
+# repository dispatch.
 
 on:
   pull_request:
@@ -32,6 +35,8 @@ jobs:
       github.event.pull_request.merged == true &&
       contains(github.event.pull_request.labels.*.name, 'release')
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -107,3 +112,36 @@ jobs:
             --target "$SHA" \
             --title "v$VERSION" \
             --notes-file /tmp/notes.md
+
+  # NOTE: This job runs after the Release is published, so a failed dispatch
+  # leaves the Release in place. The event reports the tag and the Release.
+  # The image workflow runs on its own, so the image can be published before or
+  # after this event.
+  notify-otari-ai:
+    name: Announce the release to otari-ai
+    needs: tag-and-release
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.PLATFORM_DISPATCH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.PLATFORM_DISPATCH_APP_PRIVATE_KEY }}
+          owner: mozilla-ai
+          repositories: otari-ai
+          # A repository dispatch needs write access to contents.
+          permission-contents: write
+
+      - name: Dispatch the release event to otari-ai
+        # An explicit shell sets pipefail, so a failed jq fails the step.
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          VERSION: ${{ needs.tag-and-release.outputs.version }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          jq -nc --arg tag "v$VERSION" --arg sha "$SHA" \
+            '{event_type:"otari-release-published",client_payload:{tag:$tag,sha:$sha}}' \
+            | gh api -X POST /repos/mozilla-ai/otari-ai/dispatches --input -
