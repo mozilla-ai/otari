@@ -45,6 +45,11 @@
           "defaultValue": "${{secret(43, \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_\")}}",
           "isOptional": false,
           "description": "Key that names the provider account a copy of an attached file is in. Otari refuses to start without it while provider copies are on. Auto-generated on deploy, independent of OTARI_SECRET_KEY; losing it only makes the next request copy each file again."
+        },
+        "PORT": {
+          "defaultValue": "8000",
+          "isOptional": false,
+          "description": "The port Railway's deploy-time healthcheck probes. Otari listens on OTARI_PORT (8000, pinned in the image) and never reads PORT, so without this the healthcheck probes nothing and the deploy fails after its timeout. Keep it equal to the target port."
         }
       }
     },
