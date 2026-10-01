@@ -117,3 +117,20 @@ def test_cli_writes_the_formula(sdist: Path, tmp_path: Path) -> None:
     output = tmp_path / "otari.rb"
     assert formula.main(["--version", "1.2.3", "--sdist", str(sdist), "--output", str(output)]) == 0
     assert output.read_text(encoding="utf-8").startswith("# Rendered by scripts/homebrew_formula.py")
+
+
+def test_a_prerelease_keeps_the_tag_in_the_url_and_the_normalized_name_in_the_asset(tmp_path: Path) -> None:
+    """A prerelease tag and the file it builds spell the version differently.
+
+    `v1.2.3-alpha1` is the Release the formula downloads from, while
+    setuptools-scm normalizes the package to PEP 440's `1.2.3a1`, which is
+    what the built file is called and what `otari --version` then reports.
+    The URL needs both halves, each from its own source; otari-homebrew.yml's
+    own smoke step compares against the file's spelling for the same reason.
+    """
+    normalized = tmp_path / "otari_agent-1.2.3a1.tar.gz"
+    normalized.write_bytes(b"not really a tarball")
+
+    rendered = formula.build_formula(version="1.2.3-alpha1", sdist=normalized)
+
+    assert "/download/v1.2.3-alpha1/otari_agent-1.2.3a1.tar.gz" in rendered
