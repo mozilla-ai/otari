@@ -117,13 +117,14 @@ through `GET /api/v1/routing/status`. `scripts/seed_routing_demo.py` provides a
 runnable example.
 
 Learned memory is scoped by user and workspace. Optional task IDs create separate
-pools. It is not learned automatically from live traffic.
+pools. It is not learned automatically from live traffic; the `smart_router` router
+below is the one that is.
 
 ### Per-request control
 
 | Header | Effect |
 | --- | --- |
-| `Otari-Router: off` | Skip learned or weighted selection and use the policy default. |
+| `Otari-Router: off` | Skip learned, smart-router or weighted selection and use the policy default. |
 | `Otari-Conversation-Id` | Reuse a learned decision for a conversation when granularity is `trace_sticky`. |
 | `Otari-Router-Task` | Use examples from one task partition. |
 
@@ -136,6 +137,76 @@ The default learned-routing settings are `k=5`, a 20-example warm-up, and
 Trace stickiness is process-local. A restart or request routed to another replica
 may choose again. The result is still valid, but prompt-cache locality is not
 guaranteed across replicas.
+
+## Let an external smart router choose
+
+The `smart_router` router asks a smart-router service which candidate should
+serve each request, and tells it afterwards what serving it cost and how good the
+answer was, so it learns from live traffic:
+
+```yaml
+smart_router_url: http://localhost:5056
+
+routing:
+  policies:
+    smart:
+      select:
+        - router: smart_router
+          candidates:
+            - openai:gpt-5-mini
+            - openai:gpt-5
+          application_id: support-bot   # optional, defaults to the policy name
+          cost_weight: 1.0              # optional, the router's lambda
+        - default: openai:gpt-5
+```
+
+| Setting | Where | Default | Meaning |
+| --- | --- | --- | --- |
+| `smart_router_url` | config or `OTARI_SMART_ROUTER_URL` | unset | Base URL of the smart-router client service. Not a dashboard setting. |
+| `smart_router_timeout_seconds` | config or `OTARI_SMART_ROUTER_TIMEOUT_SECONDS` | `3` | Per-call timeout, kept under the 5-second router deadline. |
+| `application_id` | the `smart_router` entry | the policy name | The application the service keeps this policy's statistics under. |
+| `cost_weight` | the `smart_router` entry | `1.0` | How much the service weighs cost against quality. `0` ignores cost. |
+
+`application_id` and `cost_weight` are refused on any other entry. `otari routing
+explain` and `POST /api/v1/routing/policies/explain` show the values a request
+would use, defaults included, as `router_params`.
+
+For each request the gateway sends the service the conversation (role and text of
+each turn, system prompt first; images and tool calls are left out, and a long
+conversation keeps its most recent turns) and the candidates the caller may use,
+spelled as the policy writes them. The service's pick serves first and the rest
+of the pool follows, then `on_failure`.
+
+Once the request's usage row is written, the gateway reports the outcome in the
+background: the candidate that actually served (a later one, if the pick failed),
+whether the call succeeded, its start and end time, and its tokens and cost. That
+is why every candidate should be priced; an unpriced one is reported without
+cost. One outcome is reported per request; an attempt the request recovered from
+is not reported on its own.
+
+A caller then rates the response with `POST /api/v1/routing/feedback`, naming it
+by the `Otari-Request-ID` header the response carried and giving a score from 0
+to 1. See [Rating a routed response](api-reference.md#rating-a-routed-response).
+
+```bash
+curl -s -D headers.txt http://localhost:8000/api/v1/chat/completions \
+  -H "Authorization: Bearer $OTARI_API_KEY" -H "Content-Type: application/json" \
+  -d '{"model": "smart", "messages": [{"role": "user", "content": "Reverse a string in Python"}]}'
+request_id=$(grep -i '^otari-request-id:' headers.txt | cut -d' ' -f2 | tr -d '\r')
+curl -X POST http://localhost:8000/api/v1/routing/feedback \
+  -H "Authorization: Bearer $OTARI_API_KEY" -H "Content-Type: application/json" \
+  -d "{\"request_id\": \"$request_id\", \"score\": 0.9}"
+```
+
+The policy's default target serves, and the request is not rateable, whenever the
+service cannot decide: `smart_router_url` is unset (warned once per policy), the
+service has no opinion for the request, picks a model it was not offered, answers
+with an error, does not answer within the timeout, or cannot be reached. Neither
+the outcome report nor a rating can fail or delay a completion: the report runs in
+the background and is logged and dropped on failure, and a rating the service
+refuses is a `502` on the rating call only. The report is not queued anywhere
+durable, so a gateway that stops between a response and its report loses that
+one report. `Otari-Router: off` skips the service for a request, like any router.
 
 ## Mandatory guardrails
 
