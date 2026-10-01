@@ -22,7 +22,7 @@ track usage.
 </div>
 
 <p align="center">
-  <img src="assets/otari-demo.gif" width="720" alt="Otari dashboard showing usage, providers, models, users, budgets, and API keys"/>
+  <img src="assets/otari-demo.gif" width="720" alt="Otari dashboard tour: spend overview, usage by model, a request rescued by a routing fallback, two models compared in the Playground, the model catalog, routing policies, API keys, members, budgets, and providers"/>
 </p>
 
 Otari sits between your applications and model providers. It authenticates
