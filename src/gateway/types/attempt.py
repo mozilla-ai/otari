@@ -67,6 +67,10 @@ class Attempt:
     """Correlation id when an external control plane supplied the attempt.
     ``None`` for locally resolved attempts."""
 
+    selector: str | None = None
+    """The selector a routing policy named this candidate by, as the policy wrote
+    it. What a router backend knows the candidate as. ``None`` outside a policy."""
+
     @property
     def dispatch_model(self) -> str:
         """The selector to hand to any-llm: ``<implementation>:<model>``."""

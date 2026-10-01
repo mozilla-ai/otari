@@ -20,13 +20,17 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from datetime import datetime
+from decimal import Decimal
+from typing import Any, Protocol, runtime_checkable
 
 __all__ = [
+    "LearningRouterBackend",
     "RouterBackend",
     "RouterTraits",
     "RoutingContext",
     "RoutingDecision",
+    "RoutingOutcome",
     "RoutingPort",
 ]
 
@@ -88,6 +92,11 @@ class RoutingDecision:
     unreconstructable after the fact and worth one; a load balancer's draw is one
     line per request forever, and the usage row already records what served. The
     backend decides, because only it knows how often it is asked."""
+    decision_id: str | None = None
+    """An opaque token naming this decision to the backend that made it, for a
+    backend that learns from what happened next (:class:`LearningRouterBackend`).
+    The gateway stores it on the request's usage row and hands it back unchanged
+    with the outcome and with any feedback. ``None`` for every other backend."""
 
     @classmethod
     def decline(cls, rationale: str) -> RoutingDecision:
@@ -99,6 +108,62 @@ class RouterBackend(Protocol):
     """Contract a router backend implements."""
 
     async def rank(self, ctx: RoutingContext) -> RoutingDecision: ...
+
+
+@dataclass(frozen=True)
+class RoutingOutcome:
+    """What happened to one routed request, reported once, after its usage row is written.
+
+    ``model`` is the candidate that actually served, spelled as the policy wrote
+    it, which may be a later candidate than the backend's pick when the pick
+    failed and the request fell over. A request whose every candidate failed is
+    reported once too, with ``success`` false and ``model`` the candidate it
+    stopped on. Attempts the request recovered from are not reported.
+
+    The times are wall-clock, from the start of the gateway's handling to the
+    moment the row was written. Tokens and costs are the row's, ``None`` where the
+    provider reported no usage or the model has no price; ``total_cost_usd``
+    includes gateway-run tool charges, which the other two do not.
+    """
+
+    model: str
+    success: bool
+    error: dict[str, Any] | None
+    started_at: datetime
+    completed_at: datetime
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+    prompt_cost_usd: Decimal | None
+    completion_cost_usd: Decimal | None
+    total_cost_usd: Decimal | None
+
+
+@runtime_checkable
+class LearningRouterBackend(RouterBackend, Protocol):
+    """A backend that learns from what happened after it ranked.
+
+    Optional: a backend that does not implement these is never asked them, and
+    its decisions carry no ``decision_id``. Both hooks receive the token the
+    backend put on its :class:`RoutingDecision`.
+    """
+
+    async def record_outcome(self, decision_id: str, outcome: RoutingOutcome) -> None:
+        """Learn what serving the decision cost and whether it succeeded.
+
+        Called in the background once the request's usage row is written, so it
+        never delays or fails the caller's response. A failure here is logged
+        and dropped.
+        """
+        ...
+
+    async def record_feedback(self, decision_id: str, score: float) -> None:
+        """Learn how good the served answer was, on a 0 to 1 scale, as the caller rated it.
+
+        Raises:
+            RouterFeedbackFailedError: the backend could not record the score.
+        """
+        ...
 
 
 @dataclass(frozen=True)

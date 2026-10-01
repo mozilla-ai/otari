@@ -24,7 +24,7 @@ from any_llm.exceptions import AnyLLMError
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.routing import PolicySpec
-from gateway.ports.routing_port import RoutingPort
+from gateway.ports.routing_port import LearningRouterBackend, RoutingPort
 from gateway.services.model_access import is_model_allowed
 from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.routing.backends import (
@@ -190,10 +190,16 @@ async def decide_ordering(
         decision.confidence,
         decision.ordered_models[0] if decision.ordered_models else "policy default",
     )
+    # Only a backend that learns gets its token kept, and only with the backend
+    # itself, so the outcome and any rating reach the backend that decided.
+    observer = backend if decision.decision_id is not None and isinstance(backend, LearningRouterBackend) else None
     return RouterOrdering(
         selectors=list(decision.ordered_models),
         confidence=decision.confidence,
         rationale=decision.rationale,
+        backend=backend_name,
+        decision_id=decision.decision_id if observer is not None else None,
+        observer=observer,
     )
 
 

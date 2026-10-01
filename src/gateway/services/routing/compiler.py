@@ -33,6 +33,7 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.routing import MAX_CANDIDATES, PolicySpec, WhenClause
+from gateway.ports.routing_port import LearningRouterBackend
 from gateway.services.model_access import is_model_allowed
 from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
@@ -105,6 +106,12 @@ class RouterOrdering:
     selectors: list[str]
     confidence: float = 0.0
     rationale: str = ""
+    backend: str | None = None
+    """The backend name the policy gave, as written, when a backend decided."""
+    decision_id: str | None = None
+    """The backend's token for this decision, when it learns from outcomes."""
+    observer: LearningRouterBackend | None = field(default=None, compare=False, repr=False)
+    """The backend to tell what happened, set only together with ``decision_id``."""
 
 
 @dataclass(frozen=True)
@@ -358,6 +365,7 @@ def compile_policy(
                 kwargs=resolved.kwargs,
                 display_model=policy_name,
                 selection_reason=selection_reason,
+                selector=selector,
             )
         )
 
