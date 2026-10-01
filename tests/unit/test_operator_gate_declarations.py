@@ -27,6 +27,7 @@ from fastapi.routing import APIRoute
 import gateway.api.routes
 from gateway.api.deps import (
     require_deployment_operator,
+    verify_api_key,
     verify_api_key_or_master_key,
     verify_catalog_reader,
     verify_catalog_reader_or_public,
@@ -47,6 +48,7 @@ from gateway.api.routes import (
     pricing,
     providers,
     routing,
+    routing_feedback,
     routing_memory,
     scoped_budgets,
     search_tools,
@@ -99,6 +101,7 @@ _NON_OPERATOR_ROUTERS: list[tuple[str, APIRouter, Callable[..., Any]]] = [
     ("usage.ingest", usage.ingest_router, verify_api_key_or_master_key),
     ("hooks", hooks.router, hooks.verify_hook_caller),
     ("key_identity", key_identity.router, verify_forwarded_api_key),
+    ("routing_feedback", routing_feedback.router, verify_api_key),
 ]
 
 
@@ -148,6 +151,7 @@ _ROUTER_LEVEL_GATES: frozenset[Callable[..., Any]] = frozenset(
     {
         hooks.verify_hook_caller,
         require_deployment_operator,
+        verify_api_key,
         verify_api_key_or_master_key,
         verify_catalog_reader,
         verify_catalog_reader_or_public,

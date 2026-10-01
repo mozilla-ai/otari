@@ -17,19 +17,21 @@ import uuid
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, cast
 from unittest.mock import patch
 
 import httpx
 import pytest
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.settings.pricing import PricingConfig
+from gateway.models.api_keys import APIKey
 from gateway.models.routing import RoutingConfig
+from gateway.models.tenancy import Organization, Workspace
 from gateway.models.usage import UsageLog
 
 from .conftest import build_test_client
@@ -331,3 +333,227 @@ def test_every_request_records_its_request_id(client: TestClient, test_db: Sessi
     (row,) = _rows(test_db, request_id)
     assert row.policy_name == "plain"
     assert row.routing_decision_id is None
+
+
+# -- rating a response -----------------------------------------------------
+
+FEEDBACK = f"{API_ROOT}/routing/feedback"
+
+
+def _rate(client: TestClient, key: str, request_id: str, score: Any = 0.9) -> Any:
+    return client.post(
+        FEEDBACK, json={"request_id": request_id, "score": score}, headers={API_KEY_HEADER: f"Bearer {key}"}
+    )
+
+
+def test_a_rating_reaches_the_router_after_the_completion(client: TestClient, stub: StubSmartRouter) -> None:
+    key = _key(client)
+    response, _ = _chat(client, key)
+
+    rated = _rate(client, key, response.headers[REQUEST_ID_HEADER], 0.25)
+
+    assert rated.status_code == 204, rated.text
+    assert stub.calls("/v1/feedback") == [{"sample_id": stub.samples[0], "score": 0.25}]
+    # The service counts a rating only for a sample with a completion, so the completion went first.
+    paths = [path for path, _ in stub.requests]
+    assert paths.index("/v1/completion") < paths.index("/v1/feedback")
+
+
+def test_a_request_no_learning_router_decided_cannot_be_rated(client: TestClient, stub: StubSmartRouter) -> None:
+    key = _key(client)
+    response, _ = _chat(client, key, model="plain")
+
+    rated = _rate(client, key, response.headers[REQUEST_ID_HEADER])
+
+    assert rated.status_code == 409
+    assert "not routed by a router that learns from feedback" in rated.json()["detail"]
+    assert stub.calls("/v1/feedback") == []
+
+
+def test_a_request_the_router_declined_cannot_be_rated(client: TestClient, stub: StubSmartRouter) -> None:
+    stub.route_model = None
+    key = _key(client)
+    response, _ = _chat(client, key)
+
+    assert _rate(client, key, response.headers[REQUEST_ID_HEADER]).status_code == 409
+
+
+def test_an_unknown_request_is_not_found(client: TestClient) -> None:
+    assert _rate(client, _key(client), str(uuid.uuid4())).status_code == 404
+
+
+def test_another_workspaces_request_is_not_found(client: TestClient, stub: StubSmartRouter, test_db: Session) -> None:
+    """A key from another workspace learns nothing about the request, not even that it exists."""
+    owner = _key(client)
+    response, _ = _chat(client, owner)
+    outsider_id = client.post(f"{API_ROOT}/keys", json={"key_name": "outsider"}, headers=MASTER).json()
+    organization = test_db.scalars(select(Organization)).first()
+    assert organization is not None
+    other = Workspace(name="Other", organization_id=organization.id)
+    test_db.add(other)
+    test_db.commit()
+    test_db.execute(update(APIKey).where(APIKey.id == outsider_id["id"]).values(workspace_id=other.id))
+    test_db.commit()
+
+    rated = _rate(client, outsider_id["key"], response.headers[REQUEST_ID_HEADER])
+
+    assert rated.status_code == 404
+    assert stub.calls("/v1/feedback") == []
+
+
+def test_a_rating_needs_a_workspace_api_key(client: TestClient) -> None:
+    response = client.post(FEEDBACK, json={"request_id": "x", "score": 1.0}, headers=MASTER)
+
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize("score", [-0.1, 1.5, "great"])
+def test_a_score_outside_zero_to_one_is_refused(client: TestClient, score: Any) -> None:
+    assert _rate(client, _key(client), "x", score).status_code == 422
+
+
+def test_a_rating_the_router_refuses_is_a_bad_gateway(client: TestClient, stub: StubSmartRouter) -> None:
+    stub.feedback_status = 500
+    key = _key(client)
+    response, _ = _chat(client, key)
+
+    assert _rate(client, key, response.headers[REQUEST_ID_HEADER]).status_code == 502
+
+
+# -- the other two dialects ------------------------------------------------
+
+
+def _message_response() -> Any:
+    from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock
+
+    return MessageResponse(
+        id="msg_test",
+        type="message",
+        role="assistant",
+        model="gpt-5-mini",
+        content=[TextBlock(type="text", text="ok", citations=None)],
+        stop_reason=cast(Any, "end_turn"),
+        stop_sequence=None,
+        usage=MessageUsage(
+            input_tokens=5,
+            output_tokens=2,
+            cache_creation_input_tokens=None,
+            cache_read_input_tokens=None,
+            cache_creation=None,
+            server_tool_use=None,
+            service_tier=None,
+        ),
+        container=None,
+    )
+
+
+def _responses_response() -> Any:
+    from openai.types.responses import Response as ProviderResponse
+    from openai.types.responses import ResponseUsage
+    from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
+
+    return ProviderResponse(
+        id="resp_test",
+        created_at=0.0,
+        model="gpt-5-mini",
+        object="response",
+        status=cast(Any, "completed"),
+        output=[],
+        parallel_tool_calls=False,
+        tool_choice="auto",
+        tools=[],
+        usage=ResponseUsage(
+            input_tokens=5,
+            input_tokens_details=InputTokensDetails(cached_tokens=0),
+            output_tokens=2,
+            output_tokens_details=OutputTokensDetails(reasoning_tokens=0),
+            total_tokens=7,
+        ),
+        error=None,
+        incomplete_details=None,
+        instructions=None,
+        metadata=None,
+        temperature=None,
+        top_p=None,
+    )
+
+
+def test_a_messages_request_routes_on_its_turns_and_can_be_rated(client: TestClient, stub: StubSmartRouter) -> None:
+    key = _key(client)
+
+    async def amessages(**kwargs: Any) -> Any:
+        return _message_response()
+
+    with patch("gateway.api.routes.messages.amessages", new=amessages):
+        response = client.post(
+            f"{API_ROOT}/messages",
+            json={
+                "model": "smart",
+                "max_tokens": 16,
+                "system": "Answer briefly.",
+                "messages": [{"role": "user", "content": [{"type": "text", "text": "Hi there"}]}],
+            },
+            headers={API_KEY_HEADER: f"Bearer {key}"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert stub.calls("/v1/route")[0]["inputs"] == [
+        {"role": "system", "content": "Answer briefly."},
+        {"role": "user", "content": "Hi there"},
+    ]
+    assert stub.wait_for("/v1/completion")[0]["total_tokens"] == 7
+    assert _rate(client, key, response.headers[REQUEST_ID_HEADER], 1.0).status_code == 204
+
+
+def test_a_responses_request_routes_on_its_turns_and_can_be_rated(client: TestClient, stub: StubSmartRouter) -> None:
+    key = _key(client)
+
+    async def aresponses(**kwargs: Any) -> Any:
+        return _responses_response()
+
+    with patch("gateway.api.routes.responses.aresponses", new=aresponses):
+        response = client.post(
+            f"{API_ROOT}/responses",
+            json={"model": "smart", "instructions": "Answer briefly.", "input": "Hi there"},
+            headers={API_KEY_HEADER: f"Bearer {key}"},
+        )
+
+    assert response.status_code == 200, response.text
+    assert stub.calls("/v1/route")[0]["inputs"] == [
+        {"role": "system", "content": "Answer briefly."},
+        {"role": "user", "content": "Hi there"},
+    ]
+    assert stub.wait_for("/v1/completion")[0]["total_tokens"] == 7
+    assert _rate(client, key, response.headers[REQUEST_ID_HEADER], 0.0).status_code == 204
+
+
+def test_a_streamed_chat_request_is_reported_and_can_be_rated(client: TestClient, stub: StubSmartRouter) -> None:
+    from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice
+
+    key = _key(client)
+
+    async def acompletion(**kwargs: Any) -> Any:
+        async def chunks() -> Any:
+            yield ChatCompletionChunk(
+                id="c1",
+                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason="stop")],
+                created=0,
+                model=kwargs["model"],
+                object="chat.completion.chunk",
+                usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            )
+
+        return chunks()
+
+    with patch("gateway.api.routes.chat.acompletion", new=acompletion):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": "smart", "stream": True, "messages": [{"role": "user", "content": "Hi"}]},
+            headers={API_KEY_HEADER: f"Bearer {key}"},
+        )
+        assert response.status_code == 200, response.text
+        _ = response.text
+
+    (completion,) = stub.wait_for("/v1/completion")
+    assert (completion["model_id"], completion["total_tokens"]) == (CHEAP, 15)
+    assert _rate(client, key, response.headers[REQUEST_ID_HEADER], 0.5).status_code == 204

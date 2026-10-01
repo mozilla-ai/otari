@@ -37,6 +37,7 @@ from gateway.repositories.files import FileRepositories
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.repositories.providers import OrgProviderKeyModelRepository
+from gateway.repositories.routing import RoutedRequestRepository
 from gateway.repositories.tenancy import OrganizationGuardrailDefinitionRepository, OrgProviderKeyRepository
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultService
@@ -50,7 +51,7 @@ from gateway.services.master_key_service import hash_master_key, is_generated_ma
 from gateway.services.organization_pricing_service import OrganizationPricingService
 from gateway.services.overview.overview_service import OverviewService
 from gateway.services.providers import OrgProviderModelService
-from gateway.services.routing import clear_router_backend_cache
+from gateway.services.routing import RoutingFeedbackService, clear_router_backend_cache
 from gateway.services.tenancy import OrganizationService, organization_guardrail_runner
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, refresh_org_provider_cache
@@ -1032,6 +1033,17 @@ def get_api_key_service(uow: Annotated[UnitOfWork, Depends(get_unit_of_work)]) -
 
 
 ApiKeyServiceDep = Annotated[ApiKeyService, Depends(get_api_key_service)]
+
+
+def get_routing_feedback_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    routing: Annotated[RoutingPort, Depends(get_routing_port)],
+) -> RoutingFeedbackService:
+    """Build the request's routing-feedback service on its Unit of Work and the bound ``RoutingPort``."""
+    return RoutingFeedbackService(uow, RoutedRequestRepository(uow), routing)
+
+
+RoutingFeedbackServiceDep = Annotated[RoutingFeedbackService, Depends(get_routing_feedback_service)]
 
 
 def get_organization_guardrail_definition_service(

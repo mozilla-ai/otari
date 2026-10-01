@@ -25,8 +25,12 @@ from gateway.exceptions.routing_exceptions import RouterFeedbackFailedError
 from gateway.log_config import logger
 from gateway.ports.routing_port import RoutingContext, RoutingDecision, RoutingOutcome
 
-__all__ = ["DEFAULT_COST_WEIGHT", "SmartRouterBackend"]
+__all__ = ["COMPLETION_PATH", "DEFAULT_COST_WEIGHT", "FEEDBACK_PATH", "ROUTE_PATH", "SmartRouterBackend"]
 
+# The service's own paths, under its base URL. Its wire, not this gateway's API.
+ROUTE_PATH = "/v1/route"
+COMPLETION_PATH = "/v1/completion"
+FEEDBACK_PATH = "/v1/feedback"
 DEFAULT_COST_WEIGHT = 1.0
 # How long a rating waits for the same decision's outcome report to land. The
 # service counts feedback only for a sample that has a completion, and a caller
@@ -81,7 +85,7 @@ class SmartRouterBackend:
             "allowed_model_ids": list(ctx.candidate_pool),
         }
         try:
-            response = await self._post("/v1/route", body)
+            response = await self._post(ROUTE_PATH, body)
         except httpx.TimeoutException:
             return RoutingDecision.decline("smart_router: the route call timed out")
         except httpx.HTTPError as exc:
@@ -123,7 +127,7 @@ class SmartRouterBackend:
                 self._pending.popitem(last=False)
         try:
             response = await self._post(
-                "/v1/completion",
+                COMPLETION_PATH,
                 {
                     "sample_id": decision_id,
                     "model_id": outcome.model,
@@ -143,9 +147,7 @@ class SmartRouterBackend:
             if self._pending.get(decision_id) is current:
                 self._pending.pop(decision_id, None)
         if not response.is_success:
-            logger.warning(
-                "Smart router refused the outcome for sample %s with %d", decision_id, response.status_code
-            )
+            logger.warning("Smart router refused the outcome for sample %s with %d", decision_id, response.status_code)
 
     async def record_feedback(self, decision_id: str, score: float) -> None:
         pending = self._pending.get(decision_id)
@@ -153,7 +155,7 @@ class SmartRouterBackend:
             # Let the outcome land first; a rating for a sample with no completion is not counted.
             await asyncio.wait({pending}, timeout=_OUTCOME_GRACE_SECONDS)
         try:
-            response = await self._post("/v1/feedback", {"sample_id": decision_id, "score": score})
+            response = await self._post(FEEDBACK_PATH, {"sample_id": decision_id, "score": score})
         except httpx.HTTPError as exc:
             raise RouterFeedbackFailedError(
                 f"The smart router could not be reached to record the rating ({type(exc).__name__})."

@@ -207,6 +207,7 @@ DELETE /api/v1/routing/policies/{name}              # not yet wrapped
 POST /api/v1/routing/policies/explain               # not yet wrapped
 POST /api/v1/routing/preferences/rank               # not yet wrapped
 GET /api/v1/routing/status                          # not yet wrapped
+POST /api/v1/routing/feedback                       # not yet wrapped
 # Pricing refresh workflow
 POST /api/v1/pricing/refresh                        # not yet wrapped
 POST /api/v1/pricing/refresh/confirm                # not yet wrapped

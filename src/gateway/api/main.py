@@ -51,6 +51,7 @@ from gateway.api.routes import (
     rerank,
     responses,
     routing,
+    routing_feedback,
     routing_memory,
     scoped_budgets,
     search,
@@ -226,6 +227,10 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(aliases.router, Plane.CONTROL),
     RouterMount(routing.router, Plane.CONTROL),
     RouterMount(routing_memory.router, Plane.CONTROL),
+    # Authenticated by a workspace API key rather than the operator gate the two
+    # routers above carry: a caller rates the responses it was served. It reads
+    # the local usage rows, so a hybrid gateway, which holds none, does not.
+    RouterMount(routing_feedback.router, Plane.CONTROL),
     # Both prefixed /pricing, split by who may call them; operator first, so
     # its DELETE /{model_key:path} does not sit behind the catalog catch-all.
     RouterMount(pricing.operator_router, Plane.CONTROL),

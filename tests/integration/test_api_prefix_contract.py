@@ -57,6 +57,7 @@ from gateway.main import (
 from gateway.main import (
     _under as _main_under,
 )
+from gateway.services.routing import smart_router
 
 # App-level paths that deliberately stay at the origin root. Each has a reason
 # outside this repository's control; see the spec's D8.
@@ -333,6 +334,10 @@ FROZEN_LABELS = frozenset(
 # OpenAI's Batch API names the operation each line runs by OpenAI's own path,
 # so batches.py sends this to the provider. Provider contract, not ours.
 BATCH_WIRE_VALUES = frozenset({"/v1/chat/completions"})
+# The paths of the smart-router service a `smart_router` policy calls: its wire, not a route of ours.
+SMART_ROUTER_WIRE_VALUES = frozenset(
+    {smart_router.ROUTE_PATH, smart_router.COMPLETION_PATH, smart_router.FEEDBACK_PATH}
+)
 
 _SPELLED_API_ROOT = re.compile(r"""["']/api/v1""")
 # The quoted value, up to the closing quote or the end of the line, so a
@@ -381,7 +386,7 @@ def test_no_gateway_source_spells_the_old_root() -> None:
     value. The OTLP module is read past whole, because OTel owns the
     ``/v1/{traces,logs,metrics}`` tail it declares.
     """
-    allowed = FROZEN_LABELS | BATCH_WIRE_VALUES
+    allowed = FROZEN_LABELS | BATCH_WIRE_VALUES | SMART_ROUTER_WIRE_VALUES
     stray: list[str] = []
     for path, number, line in _source_lines(GATEWAY_SRC, (".py",)):
         if path == Path("api/routes/otlp.py"):

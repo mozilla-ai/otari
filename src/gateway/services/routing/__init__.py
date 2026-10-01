@@ -14,6 +14,7 @@ compiler stays pure and synchronous, and a backend's asynchronous work
 passes the resulting order in as a value.
 """
 
+from gateway.services.routing._feedback import RoutingFeedbackService
 from gateway.services.routing.backends import (
     KNN_BACKEND,
     NOOP_BACKEND,
@@ -50,6 +51,7 @@ __all__ = [
     "RouterOrdering",
     "RoutingContext",
     "RoutingDecision",
+    "RoutingFeedbackService",
     "backend_pool_is_teachable",
     "backend_requires_pricing",
     "clear_router_backend_cache",

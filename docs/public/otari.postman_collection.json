@@ -5251,6 +5251,40 @@
           }
         },
         {
+          "name": "Rate Routed Response",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"request_id\": \"string\",\n  \"score\": 0\n}"
+            },
+            "description": "Rate one response from 0 to 1, by the ``Otari-Request-ID`` it was returned with.\n\nThe key's workspace must be the one that served the request; a request in\nany other workspace is answered as one that does not exist.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "routing",
+                "feedback"
+              ],
+              "raw": "{{baseUrl}}/api/v1/routing/feedback"
+            }
+          }
+        },
+        {
           "name": "List Policies",
           "request": {
             "description": "List every routing policy in force, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
