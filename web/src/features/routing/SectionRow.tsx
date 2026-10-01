@@ -26,7 +26,7 @@ export function SectionRow({
   modelValue: string
   children: ReactNode
 }) {
-  const { hint } = useModelCatalog(modelValue)
+  const { hint } = useModelCatalog(modelValue, "catalog")
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-end gap-3">{children}</div>

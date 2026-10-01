@@ -678,7 +678,11 @@ export function PolicyForm({
             </span>
           </div>
         ) : (
+          // Every picker in this form reads the catalog, not discovery:
+          // discovery lists only the process-wide providers, so a gateway
+          // whose credentials are organization keys offered nothing here.
           <ModelComboBox
+            source="catalog"
             label="Serves"
             value={target}
             onChange={setTarget}
@@ -759,6 +763,7 @@ export function PolicyForm({
               />
               <div className="min-w-56 flex-1">
                 <ModelComboBox
+                  source="catalog"
                   label="Use instead"
                   value={condition.target}
                   onChange={(value) =>
@@ -823,6 +828,7 @@ export function PolicyForm({
             >
               <div className="min-w-56 flex-1">
                 <ModelComboBox
+                  source="catalog"
                   label={`Model ${index + 1}`}
                   value={entry}
                   onChange={(value) =>
@@ -983,6 +989,7 @@ export function PolicyForm({
             >
               <div className="min-w-56 flex-1">
                 <ModelComboBox
+                  source="catalog"
                   label={`Fallback ${index + 1}`}
                   value={entry}
                   onChange={(value) =>
