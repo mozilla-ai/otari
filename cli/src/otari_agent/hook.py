@@ -730,6 +730,13 @@ def _hook_collect_transcript_commands(transcript_path: Path) -> list[str] | None
     excluded from evidence: it never touched the working tree, so it must
     not reset what "after the last edit" means.
 
+    Only an edit tool moves that cutoff. A `Bash` call can write to the tree
+    too, and the transcript never says which ones did, so a cutoff that
+    guessed would cost more than the gap it closes: the command these gates
+    require is frequently the writer itself (`make postman` writes the
+    collection its own gate asks for), and counting it would leave those
+    gates unsatisfiable.
+
     Returns None only when the transcript itself cannot be read (missing,
     permissions, not a file): the same fail-open sentinel
     `_hook_collect_changed_paths` uses, so the caller can tell "collected,

@@ -943,7 +943,11 @@ call is dropped from the evidence it submits: `command_if_changed` reads
 "the required command is in this list" as "the required command validated
 the current working tree", which a command run before a later edit did
 not do. Without this, running `make lint` once and then editing the file
-again with no re-run would still read as satisfied.
+again with no re-run would still read as satisfied. Only an edit tool moves
+that cutoff: a `Bash` call can write to the tree too, but the transcript
+does not say which ones did, and the command a gate requires is often the
+writer itself (`make postman` writes the collection its own gate asks for),
+so counting one would leave that gate unsatisfiable.
 If the transcript cannot be read at all, `otari hook` collects no command
 evidence at all, rather than an empty list: the difference between "collected,
 and there is none" and "could not collect" is what keeps a required
