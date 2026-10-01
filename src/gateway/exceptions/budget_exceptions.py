@@ -4,7 +4,12 @@ The surface errors carry the HTTP status each renders as.
 The repository errors are internal: a service translates each into a surface error and never renders it.
 """
 
-from gateway.exceptions import TenancyConflictError, TenancyNotFoundError
+from gateway.exceptions import (
+    TenancyConflictError,
+    TenancyForbiddenError,
+    TenancyNotFoundError,
+    TenancyValidationError,
+)
 
 
 class WorkspaceBudgetDefaultNotFoundError(TenancyNotFoundError):
@@ -130,8 +135,24 @@ class SpendCeilingAlreadyExistsError(Exception):
         super().__init__(f"A spend ceiling already exists for {scope_type} {scope_id}")
 
 
+class EndUserIdInvalidError(TenancyValidationError):
+    """A service key named an end user by an id it cannot be stored under."""
+
+    def __init__(self, max_length: int):
+        super().__init__(f"'user' must be at most {max_length} characters to name an end user")
+
+
+class EndUserOwnerUnavailableError(TenancyForbiddenError):
+    """The service key's own user is blocked or deleted, so none of its end users may spend."""
+
+    def __init__(self) -> None:
+        super().__init__("The user this key belongs to is blocked")
+
+
 __all__ = [
     "BudgetStillReferencedError",
+    "EndUserIdInvalidError",
+    "EndUserOwnerUnavailableError",
     "MemberBudgetPolicyAlreadyExistsError",
     "OrganizationBudgetHeldElsewhereError",
     "OrganizationBudgetInUseError",

@@ -2261,7 +2261,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"user_id\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"end_user_budget_id\": \"string\",\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_service_key\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"user_id\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
             },
             "description": "Create a new API key in the caller's organization.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, the key is associated with the shared \"default\" user, which is created\non first use. Keys without an explicit owner therefore share one identity, and so share budget,\nusage, and files.\n\n``workspace_id`` names a workspace in the caller's organization, and omitting\nit mints into that organization's default workspace. A key resolves that\norganization's provider credentials and bills there, so minting into another\norganization's workspace would spend its budget on its credentials.",
             "header": [
@@ -2321,7 +2321,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"end_user_budget_id\": \"string\",\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"is_service_key\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
             },
             "description": "Update an API key in the caller's organization.\n\nRequires master key authentication.",
             "header": [

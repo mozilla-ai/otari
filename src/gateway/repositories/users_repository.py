@@ -138,6 +138,20 @@ def _keyed_in(organization_id: uuid.UUID | None) -> ColumnElement[bool]:
     return condition.exists()
 
 
+def _end_user_in(organization_id: uuid.UUID) -> ColumnElement[bool]:
+    """Whether this user is an end user of an owner holding a key in ``organization_id``.
+
+    What puts an end user in scope before its first request settles, when it has
+    no usage of its own yet.
+    """
+    return (
+        select(APIKey.user_id)
+        .join(Workspace, col(Workspace.id) == APIKey.workspace_id)
+        .where(APIKey.user_id == User.parent_user_id, col(Workspace.organization_id) == organization_id)
+        .exists()
+    )
+
+
 def _spent_in(organization_id: uuid.UUID | None) -> ColumnElement[bool]:
     """Whether this user has usage in ``organization_id``, or in any.
 
@@ -180,20 +194,23 @@ def in_organization(organization_id: uuid.UUID) -> ColumnElement[bool]:
     besides: one identity's attribution row serves every organization that
     person belongs to, so a single column could not hold the answer anyway.
 
-    So the scope is derived from the three joins that do exist, any of which puts
-    a user in reach: a key, usage, or a roster row.
+    So the scope is derived from the joins that do exist, any of which puts a
+    user in reach: a key, usage, a roster row, or, for a service key's end user,
+    a key of its owner.
 
-    A user reached by none of the three, in any organization at all, is shared
-    rather than hidden. That is the shared ``default`` owner by construction, and
-    a user an operator has just created and not yet keyed, and hiding those would
-    take a freshly created user out of the page that assigns it a budget. The
-    first key written for one binds it, because the key is itself a join.
+    A user reached by none of them, in any organization at all, is shared rather
+    than hidden. That is the shared ``default`` owner by construction, and a user
+    an operator has just created and not yet keyed, and hiding those would take a
+    freshly created user out of the page that assigns it a budget. The first key
+    written for one binds it, because the key is itself a join. An end user is
+    never shared: it belongs to its owner's organization from the start.
     """
     return or_(
         _keyed_in(organization_id),
         _spent_in(organization_id),
         _on_roster_of(organization_id),
-        and_(~_keyed_in(None), ~_spent_in(None), ~_on_roster_of(None)),
+        _end_user_in(organization_id),
+        and_(User.parent_user_id.is_(None), ~_keyed_in(None), ~_spent_in(None), ~_on_roster_of(None)),
     )
 
 

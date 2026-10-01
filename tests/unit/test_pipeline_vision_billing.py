@@ -49,6 +49,7 @@ class _Recorder:
                 allowed_models=None,
                 exclude_from_budget=False,
                 reject_user_mismatch=None,
+                is_service_key=False,
                 workspace_id=uuid.uuid4(),
             ), False
 

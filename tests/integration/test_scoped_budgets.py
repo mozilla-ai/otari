@@ -1263,3 +1263,27 @@ async def test_a_refusal_names_the_axis_a_hold_would_push_past(async_db: AsyncSe
         await reserve_budget(async_db, tenancy.user_id, 0.0, estimated_tokens=200, scope=tenancy.scope())
 
     assert "token limit" in str(refusal.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_an_end_user_spends_inside_its_owners_member_ceiling(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """A member's service key cannot spend around the member's own cap by billing end users."""
+    cap = await _scoped(
+        async_db,
+        scope_type="workspace_member",
+        scope_id=str(tenancy.workspace_member_id),
+        max_budget=None,
+        request_limit=1,
+    )
+    async_db.add(cap)
+    async_db.add(User(user_id="eu_alice", parent_user_id=tenancy.user_id, external_id="alice"))
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, "eu_alice", 0.0, scope=tenancy.scope())
+    await reconcile_reservation(async_db, handle, 0.0)
+    assert await _request_counters(async_db, cap.id) == (1, 0)
+
+    with pytest.raises(HTTPException) as refusal:
+        await reserve_budget(async_db, "eu_alice", 0.0, scope=tenancy.scope())
+
+    assert refusal.value.status_code == 403

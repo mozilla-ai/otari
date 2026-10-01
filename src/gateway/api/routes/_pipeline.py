@@ -64,7 +64,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import extract_credential_token, verify_api_key_or_master_key
+from gateway.api.deps import extract_credential_token, get_budget_service, verify_api_key_or_master_key
 from gateway.api.routes._attempts import CandidateCannotServe, PrepareKwargs, walk_attempts
 from gateway.api.routes._helpers import apply_input_guardrails, resolve_user_id
 from gateway.api.routes._idempotency import (
@@ -1679,10 +1679,22 @@ async def _compile_request_plan(
         raise adapter.error(exc.status_code, exc.caller_detail, ErrorKind.PERMISSION) from exc
 
 
+def _names_end_user(api_key: APIKey | None, user_id_from_request: str | None) -> bool:
+    """Whether a request names an end user of its service key: anyone but the key's own user."""
+    return bool(
+        api_key is not None
+        and api_key.is_service_key
+        and api_key.user_id
+        and user_id_from_request
+        and user_id_from_request != api_key.user_id
+    )
+
+
 async def _resolve_keyed_user_id(
     *,
     adapter: FormatAdapter[Any, Any],
     db: AsyncSession,
+    uow: UnitOfWork | None,
     log_writer: LogWriter,
     config: GatewayConfig,
     raw_request: Request,
@@ -1701,7 +1713,19 @@ async def _resolve_keyed_user_id(
     rejection row it owes. Split out of :func:`resolve_request_context` so the
     two ways into that preamble read as two branches rather than one branch
     wrapped around thirty lines of logging.
+
+    A service key naming anyone but its own user names one of its owner's end
+    users, which is found or created here rather than checked as a mismatch.
     """
+    if api_key is not None and user_id_from_request and _names_end_user(api_key, user_id_from_request):
+        if uow is None:
+            raise adapter.error(500, DB_UNAVAILABLE_DETAIL, ErrorKind.API)
+        try:
+            return await get_budget_service(uow, db).resolve_end_user(
+                api_key=api_key, external_id=user_id_from_request
+            )
+        except TenancyError as exc:
+            raise domain_error(adapter, exc) from exc
     try:
         return resolve_user_id(
             user_id_from_request=user_id_from_request,
@@ -1899,6 +1923,7 @@ async def resolve_request_context(
         # around it.
         api_key: APIKey | None = None
         is_master_key = False
+        names_end_user = False
         if session_principal is not None:
             workspace_id = session_principal.workspace_id
             user_id = session_principal.user_id
@@ -1916,9 +1941,16 @@ async def resolve_request_context(
             # organization's keys, not every organization the deployment holds
             # (`workspace_scope.py`'s docstring).
             workspace_id = await resolve_workspace_id(db, api_key)
+            # Limited before the end user is resolved, because resolving one may
+            # create it: the limit is what bounds how fast a service key can add
+            # end users, and it is its owner's, shared by all of them.
+            names_end_user = _names_end_user(api_key, user_id_from_request)
+            if names_end_user and api_key is not None:
+                rate_limit_info = check_rate_limit(raw_request, str(api_key.user_id))
             user_id = await _resolve_keyed_user_id(
                 adapter=adapter,
                 db=db,
+                uow=uow,
                 log_writer=log_writer,
                 config=config,
                 raw_request=raw_request,
@@ -1936,7 +1968,8 @@ async def resolve_request_context(
             # over to a forbidden model would be an access-control bypass. The gate
             # itself stays where it was, so a plain model name is unaffected.
             key_allowlist = await resolve_request_allowlist(db, api_key)
-        rate_limit_info = check_rate_limit(raw_request, user_id)
+        if not names_end_user:
+            rate_limit_info = check_rate_limit(raw_request, user_id)
 
         # Tolerate an unparseable / unknown-provider selector here: the budget
         # check below and the downstream provider call surface those with

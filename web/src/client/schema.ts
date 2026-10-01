@@ -7307,6 +7307,11 @@ export interface components {
              */
             capture_agent_telemetry?: boolean | null;
             /**
+             * End User Budget Id
+             * @description Budget each end user this key creates is capped at. Null leaves end users capped only by this key's own ceiling.
+             */
+            end_user_budget_id?: string | null;
+            /**
              * Exclude From Budget
              * @description When true, requests on this key are logged with cost but never reserved, reconciled into the user's spend, or gated by budget.
              * @default false
@@ -7317,6 +7322,12 @@ export interface components {
              * @description Optional expiration timestamp
              */
             expires_at?: string | null;
+            /**
+             * Is Service Key
+             * @description When true, a request may name an end user in its 'user' field. Each end user is created on first use, owned by this key's user, and billed to its own budget, while this key's own ceiling caps all of them together.
+             * @default false
+             */
+            is_service_key: boolean;
             /**
              * Key Name
              * @description Optional name for the key
@@ -7356,6 +7367,8 @@ export interface components {
             capture_agent_telemetry: boolean | null;
             /** Created At */
             created_at: string;
+            /** End User Budget Id */
+            end_user_budget_id: string | null;
             /** Exclude From Budget */
             exclude_from_budget: boolean;
             /** Expires At */
@@ -7364,6 +7377,8 @@ export interface components {
             id: string;
             /** Is Active */
             is_active: boolean;
+            /** Is Service Key */
+            is_service_key: boolean;
             /** Key */
             key: string;
             /** Key Name */
@@ -8561,6 +8576,8 @@ export interface components {
             capture_agent_telemetry: boolean | null;
             /** Created At */
             created_at: string;
+            /** End User Budget Id */
+            end_user_budget_id: string | null;
             /** Exclude From Budget */
             exclude_from_budget: boolean;
             /** Expires At */
@@ -8569,6 +8586,8 @@ export interface components {
             id: string;
             /** Is Active */
             is_active: boolean;
+            /** Is Service Key */
+            is_service_key: boolean;
             /** Key Name */
             key_name: string | null;
             /** Key Prefix */
@@ -12585,12 +12604,16 @@ export interface components {
             allowed_models?: string[] | null;
             /** Capture Agent Telemetry */
             capture_agent_telemetry?: boolean | null;
+            /** End User Budget Id */
+            end_user_budget_id?: string | null;
             /** Exclude From Budget */
             exclude_from_budget?: boolean | null;
             /** Expires At */
             expires_at?: string | null;
             /** Is Active */
             is_active?: boolean | null;
+            /** Is Service Key */
+            is_service_key?: boolean | null;
             /** Key Name */
             key_name?: string | null;
             /** Metadata */
@@ -13329,12 +13352,16 @@ export interface components {
             current_requests: number;
             /** Current Tokens */
             current_tokens: number;
+            /** External Id */
+            external_id?: string | null;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
             };
             /** Next Budget Reset At */
             next_budget_reset_at: string | null;
+            /** Parent User Id */
+            parent_user_id?: string | null;
             /** Reserved */
             reserved: number;
             /** Reserved Requests */

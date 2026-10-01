@@ -510,6 +510,8 @@ export function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
     allowed_models: null,
     exclude_from_budget: false,
     reject_user_mismatch: null,
+    is_service_key: false,
+    end_user_budget_id: null,
     metadata: {},
     ...overrides,
   }

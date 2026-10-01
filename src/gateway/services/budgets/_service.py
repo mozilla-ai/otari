@@ -1,4 +1,5 @@
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.schemas.budgets import (
@@ -12,6 +13,7 @@ from gateway.schemas.budgets import (
     OrganizationScopedBudgetUpdate,
 )
 from gateway.services.api_keys import ApiKeyService
+from gateway.services.budgets._end_users import _EndUsers
 from gateway.services.budgets._organization_surface import _OrganizationSurface
 from gateway.services.budgets._scopes import ScopeOwnership
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -32,6 +34,7 @@ class BudgetService:
     ) -> None:
         self._uow = uow
         self._organization = _OrganizationSurface(repositories, ScopeOwnership(organizations, api_keys), organizations)
+        self._end_users = _EndUsers(repositories)
 
     async def create_organization_budget(
         self, *, user: User, request: OrganizationBudgetCreate
@@ -73,6 +76,14 @@ class BudgetService:
         """
         async with self._uow:
             return await self._organization.list_ceilings(user=user, skip=skip, limit=limit)
+
+    async def resolve_end_user(self, *, api_key: APIKey, external_id: str) -> str:
+        """Return the end user a service key named, creating it under the key's end-user budget on first use.
+
+        End users belong to the key's own user, so a key can only bill end users in its owner's scope.
+        """
+        async with self._uow:
+            return await self._end_users.resolve(api_key, external_id)
 
     async def update_organization_budget(
         self, *, user: User, budget_id: str, request: OrganizationBudgetUpdate

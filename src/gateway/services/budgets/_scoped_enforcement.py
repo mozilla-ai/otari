@@ -141,9 +141,15 @@ async def _resolve_identities(
     user_id: str,
     scope: BudgetScopeRequest,
 ) -> list[tuple[str, str]]:
-    """The ``(scope_type, scope_id)`` pairs a request bills to."""
+    """The ``(scope_type, scope_id)`` pairs a request bills to.
+
+    Membership is read off the key's owner rather than the billed user. The two
+    differ only for a service key billing an end user, and that end user spends
+    inside its owner's member ceilings, not around them.
+    """
     workspace_id = await resolve_workspace_id(db, scope.api_key)
-    identity = _identity_uuid(user_id)
+    owner = scope.api_key.user_id if scope.api_key is not None and scope.api_key.user_id else user_id
+    identity = _identity_uuid(owner)
     workspace_member_id: uuid.UUID | None = None
     org_member_id: uuid.UUID | None = None
 

@@ -4129,6 +4129,18 @@
             "description": "Per-key override of the deployment-wide capture_agent_telemetry setting: null (default) inherits it, true always stores this key's coding-agent telemetry, false always discards it. Covers both behavioral events (tool_result, tool_decision, user_prompt, api_error) from POST /otlp/v1/logs and outcome-metric data points (lines of code, commits, pull requests, active time) from POST /otlp/v1/metrics. Usage capture and billing are unaffected either way.",
             "title": "Capture Agent Telemetry"
           },
+          "end_user_budget_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Budget each end user this key creates is capped at. Null leaves end users capped only by this key's own ceiling.",
+            "title": "End User Budget Id"
+          },
           "exclude_from_budget": {
             "default": false,
             "description": "When true, requests on this key are logged with cost but never reserved, reconciled into the user's spend, or gated by budget.",
@@ -4147,6 +4159,12 @@
             ],
             "description": "Optional expiration timestamp",
             "title": "Expires At"
+          },
+          "is_service_key": {
+            "default": false,
+            "description": "When true, a request may name an end user in its 'user' field. Each end user is created on first use, owned by this key's user, and billed to its own budget, while this key's own ceiling caps all of them together.",
+            "title": "Is Service Key",
+            "type": "boolean"
           },
           "key_name": {
             "anyOf": [
@@ -4239,6 +4257,17 @@
             "title": "Created At",
             "type": "string"
           },
+          "end_user_budget_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End User Budget Id"
+          },
           "exclude_from_budget": {
             "title": "Exclude From Budget",
             "type": "boolean"
@@ -4260,6 +4289,10 @@
           },
           "is_active": {
             "title": "Is Active",
+            "type": "boolean"
+          },
+          "is_service_key": {
+            "title": "Is Service Key",
             "type": "boolean"
           },
           "key": {
@@ -4341,6 +4374,8 @@
           "exclude_from_budget",
           "reject_user_mismatch",
           "capture_agent_telemetry",
+          "is_service_key",
+          "end_user_budget_id",
           "metadata"
         ],
         "title": "CreateKeyResponse",
@@ -6649,6 +6684,17 @@
             "title": "Created At",
             "type": "string"
           },
+          "end_user_budget_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End User Budget Id"
+          },
           "exclude_from_budget": {
             "title": "Exclude From Budget",
             "type": "boolean"
@@ -6670,6 +6716,10 @@
           },
           "is_active": {
             "title": "Is Active",
+            "type": "boolean"
+          },
+          "is_service_key": {
+            "title": "Is Service Key",
             "type": "boolean"
           },
           "key_name": {
@@ -6763,6 +6813,8 @@
           "exclude_from_budget",
           "reject_user_mismatch",
           "capture_agent_telemetry",
+          "is_service_key",
+          "end_user_budget_id",
           "workspace_id",
           "metadata"
         ],
@@ -14992,6 +15044,17 @@
             ],
             "title": "Capture Agent Telemetry"
           },
+          "end_user_budget_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End User Budget Id"
+          },
           "exclude_from_budget": {
             "anyOf": [
               {
@@ -15025,6 +15088,17 @@
               }
             ],
             "title": "Is Active"
+          },
+          "is_service_key": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Service Key"
           },
           "key_name": {
             "anyOf": [
@@ -17289,6 +17363,17 @@
             "title": "Current Tokens",
             "type": "integer"
           },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
           "metadata": {
             "additionalProperties": true,
             "title": "Metadata",
@@ -17304,6 +17389,17 @@
               }
             ],
             "title": "Next Budget Reset At"
+          },
+          "parent_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent User Id"
           },
           "reserved": {
             "title": "Reserved",
