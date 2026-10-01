@@ -139,7 +139,10 @@ class CompiledPlan:
     Kept on the plan so the rationale and confidence can be logged and shown in
     the activity log. A policy with a router that declined has ``None`` here and a
     ``default`` selection reason, which is how "the router chose the strong model"
-    and "the router did not run" stay distinguishable after the fact.
+    and "the router did not run" stay distinguishable after the fact. The one
+    exception is a learning backend that declined but kept a ``decision_id`` (no
+    opinion yet): its ordering, with no selectors, stays here so it learns what the
+    default did, while the selection reason still says ``default``.
     """
 
     @property
@@ -303,6 +306,10 @@ def compile_policy(
         router_ordering=router_ordering,
     )
     routed = selected[0][1].startswith("router:")
+    # A learning backend can decline and still open a decision (no opinion yet):
+    # the plan keeps that decision so the outcome of whatever served, and any
+    # rating of it, reach the backend. The selection reason still says what served.
+    kept_decision = router_ordering is not None and router_ordering.decision_id is not None
 
     ordered: list[tuple[str, str]] = list(selected)
     ordered.extend((selector, "on_failure") for selector in spec.on_failure)
@@ -384,7 +391,7 @@ def compile_policy(
     return CompiledPlan(
         policy_name=policy_name,
         attempts=attempts,
-        router_ordering=router_ordering if routed else None,
+        router_ordering=router_ordering if routed or kept_decision else None,
         guardrails=[
             GuardrailConfig(
                 profile=guardrail.profile,

@@ -30922,7 +30922,7 @@
             "description": "No request with this id was served in the key's workspace."
           },
           "409": {
-            "description": "The request was not routed by a router that learns from ratings."
+            "description": "The request was not routed by a router that learns from ratings, or was already rated."
           },
           "422": {
             "content": {

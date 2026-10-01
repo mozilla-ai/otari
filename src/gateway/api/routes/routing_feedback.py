@@ -26,7 +26,9 @@ router = APIRouter(prefix="/routing", tags=["routing"], dependencies=[Depends(ve
     responses={
         status.HTTP_401_UNAUTHORIZED: {"description": "No valid workspace API key."},
         status.HTTP_404_NOT_FOUND: {"description": "No request with this id was served in the key's workspace."},
-        status.HTTP_409_CONFLICT: {"description": "The request was not routed by a router that learns from ratings."},
+        status.HTTP_409_CONFLICT: {
+            "description": "The request was not routed by a router that learns from ratings, or was already rated."
+        },
         status.HTTP_502_BAD_GATEWAY: {"description": "The router could not record the rating. Retry."},
     },
 )

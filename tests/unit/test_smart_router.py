@@ -18,7 +18,7 @@ import pytest
 from pydantic import ValidationError
 
 from gateway.core.config import GatewayConfig
-from gateway.exceptions.routing_exceptions import RouterFeedbackFailedError
+from gateway.exceptions.routing_exceptions import RatingAlreadyRecordedError, RouterFeedbackFailedError
 from gateway.models.routing import PolicySpec
 from gateway.ports.routing_port import LearningRouterBackend, RoutingContext, RoutingMessage, RoutingOutcome
 from gateway.services.routing.backends import (
@@ -118,7 +118,6 @@ async def test_the_policy_names_the_application_and_the_cost_weight() -> None:
 @pytest.mark.parametrize(
     ("answer", "reason"),
     [
-        (_route(None), "no opinion"),
         (_route("anthropic:claude-haiku-4-5"), "not offered"),
         (httpx.Response(503, json={"detail": "Router is not loaded yet."}), "503"),
         (httpx.Response(200, json={"unexpected": True}), "not a route decision"),
@@ -134,6 +133,16 @@ async def test_every_failure_of_the_route_call_declines(answer: httpx.Response |
     assert decision.ordered_models == []
     assert decision.decision_id is None
     assert reason in decision.rationale
+
+
+@pytest.mark.asyncio
+async def test_no_opinion_declines_but_keeps_the_sample() -> None:
+    """The default serves, and the service still learns what it did."""
+    decision = await _backend(_Service(_route(None))).rank(_ctx())
+
+    assert decision.ordered_models == []
+    assert decision.decision_id == SAMPLE
+    assert "no opinion" in decision.rationale
 
 
 @pytest.mark.asyncio
@@ -214,6 +223,12 @@ async def test_a_rating_is_posted_as_feedback() -> None:
 async def test_a_rating_the_service_does_not_take_is_an_error(answer: httpx.Response | Exception) -> None:
     with pytest.raises(RouterFeedbackFailedError):
         await _backend(_Service(answer)).record_feedback(SAMPLE, 0.8)
+
+
+@pytest.mark.asyncio
+async def test_a_second_rating_is_a_conflict_not_a_failure() -> None:
+    with pytest.raises(RatingAlreadyRecordedError):
+        await _backend(_Service(httpx.Response(409))).record_feedback(SAMPLE, 0.8)
 
 
 @pytest.mark.asyncio

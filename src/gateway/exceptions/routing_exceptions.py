@@ -29,6 +29,12 @@ class RequestNotRateableError(RoutingFeedbackError):
     status_code = status.HTTP_409_CONFLICT
 
 
+class RatingAlreadyRecordedError(RoutingFeedbackError):
+    """The router already holds a rating for this request and keeps only one."""
+
+    status_code = status.HTTP_409_CONFLICT
+
+
 class RouterFeedbackFailedError(RoutingFeedbackError):
     """The router that decided the request could not record the rating."""
 

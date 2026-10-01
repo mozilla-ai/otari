@@ -9,7 +9,10 @@ which is this backend's decision id.
 A router is an optimization, so every way the route call can fail declines:
 the service has no opinion (``model_id: null``), names a model it was not
 offered, answers with an error, is slow or is unreachable. The policy's default
-target then serves. The outcome and feedback calls never affect the response.
+target then serves. "No opinion" is the one decline that keeps its sample: the
+service asked to see the default serve, so it still gets the outcome and any
+rating, and the cluster starts accumulating statistics. The outcome and feedback
+calls never affect the response.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ from typing import Any
 
 import httpx
 
-from gateway.exceptions.routing_exceptions import RouterFeedbackFailedError
+from gateway.exceptions.routing_exceptions import RatingAlreadyRecordedError, RouterFeedbackFailedError
 from gateway.log_config import logger
 from gateway.ports.routing_port import RoutingContext, RoutingDecision, RoutingOutcome
 
@@ -100,7 +103,10 @@ class SmartRouterBackend:
         except (ValueError, KeyError, TypeError, AttributeError):
             return RoutingDecision.decline("smart_router: the service's answer was not a route decision")
         if model_id is None:
-            return RoutingDecision.decline("smart_router: no opinion for this request")
+            # No opinion yet (a cluster with no data for these models) is the service
+            # asking to see the default serve: it keeps the sample, so the outcome and
+            # any rating of the default go to it and the cluster starts learning.
+            return RoutingDecision.decline("smart_router: no opinion for this request", decision_id=sample_id)
         if model_id not in ctx.candidate_pool:
             return RoutingDecision.decline(f"smart_router: picked '{model_id}', which it was not offered")
         utility = decision.get("utility_score")
@@ -160,5 +166,9 @@ class SmartRouterBackend:
             raise RouterFeedbackFailedError(
                 f"The smart router could not be reached to record the rating ({type(exc).__name__})."
             ) from exc
+        if response.status_code == 409:
+            # The service keeps one rating per sample; a second one is the caller's
+            # conflict to see, not a router failure to retry.
+            raise RatingAlreadyRecordedError("This response has already been rated.")
         if not response.is_success:
             raise RouterFeedbackFailedError(f"The smart router refused the rating with {response.status_code}.")

@@ -176,14 +176,15 @@ curl -X POST http://localhost:8000/api/v1/routing/feedback \
 | `204` | The router recorded the rating. |
 | `401` | No valid workspace API key. The master key is not one. |
 | `404` | No request with this id was served in the key's workspace. A request in another workspace is answered the same way. |
-| `409` | The request was not routed by a router that learns from ratings: it named a plain model, a policy without such a router, or the router declined and the default target served. |
+| `409` | The request was not routed by a router that learns from ratings (it named a plain model, a policy without such a router, or the router could not decide and the default target served), or the router already holds a rating for it. |
 | `422` | The body is malformed, or `score` is outside 0 to 1. |
 | `502` | The router could not record the rating, or the gateway is no longer configured to reach it. Retry later. |
 
 Only a policy whose router learns from ratings (`router: smart_router`) makes a
 request rateable; see [Routing policies](routing.md#let-an-external-smart-router-choose).
-The rating is passed on as it is: rating the same request again is up to the
-router to accept or refuse.
+The rating is passed on as it is. The smart router keeps one rating per
+response, so rating the same request again is a `409`. A request the router had
+no opinion on, where the default target served, is still rateable.
 
 ## Provider error details
 

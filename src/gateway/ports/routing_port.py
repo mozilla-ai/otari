@@ -125,8 +125,14 @@ class RoutingDecision:
     with the outcome and with any feedback. ``None`` for every other backend."""
 
     @classmethod
-    def decline(cls, rationale: str) -> RoutingDecision:
-        return cls(ordered_models=[], confidence=0.0, rationale=rationale)
+    def decline(cls, rationale: str, *, decision_id: str | None = None) -> RoutingDecision:
+        """No ranking, so the default target serves.
+
+        A learning backend that still opened a decision passes its ``decision_id``,
+        and then learns what the default target did, and from ratings of it, the
+        same way it would for its own pick.
+        """
+        return cls(ordered_models=[], confidence=0.0, rationale=rationale, decision_id=decision_id)
 
 
 @runtime_checkable

@@ -198,13 +198,16 @@ curl -X POST http://localhost:8000/api/v1/routing/feedback \
   -d "{\"request_id\": \"$request_id\", \"score\": 0.9}"
 ```
 
-The policy's default target serves, and the request is not rateable, whenever the
-service cannot decide: `smart_router_url` is unset (warned once per policy), the
-service has no opinion for the request, picks a model it was not offered, answers
-with an error, does not answer within the timeout, or cannot be reached. Neither
-the outcome report nor a rating can fail or delay a completion: the report runs in
-the background and is logged and dropped on failure, and a rating the service
-refuses is a `502` on the rating call only. The report is not queued anywhere
+When the service has no opinion for the request (`model_id: null`, typically a
+cluster with no data yet for these models), the policy's default target serves and
+the service still gets the outcome and any rating of it, so the cluster starts
+learning. The default target also serves, and the request is not rateable, whenever
+the service cannot decide: `smart_router_url` is unset (warned once per policy), the
+service picks a model it was not offered, answers with an error, does not answer
+within the timeout, or cannot be reached. Neither the outcome report nor a rating
+can fail or delay a completion: the report runs in the background and is logged and
+dropped on failure, and a rating the service refuses is a `502` on the rating call
+only. The service keeps one rating per response, so rating it again is a `409`. The report is not queued anywhere
 durable, so a gateway that stops between a response and its report loses that
 one report. `Otari-Router: off` skips the service for a request, like any router.
 

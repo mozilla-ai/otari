@@ -293,13 +293,35 @@ def test_an_exhausted_plan_reports_one_failure(client: TestClient, stub: StubSma
     assert completion["total_tokens"] is None
 
 
-@pytest.mark.parametrize("failure", ["no_opinion", "unknown_model", "error"])
+def test_a_router_with_no_opinion_learns_from_the_default(
+    client: TestClient, stub: StubSmartRouter, test_db: Session
+) -> None:
+    stub.route_model = None
+    key = _key(client)
+
+    response, calls = _chat(client, key)
+
+    assert response.status_code == 200, response.text
+    assert calls == [STRONG]
+    (row,) = _rows(test_db, response.headers[REQUEST_ID_HEADER])
+    assert row.selection_reason == "default"
+    assert (row.routing_backend, row.routing_decision_id) == ("smart_router", stub.samples[0])
+    (completion,) = stub.wait_for("/v1/completion")
+    assert (completion["sample_id"], completion["model_id"], completion["success"]) == (
+        stub.samples[0],
+        STRONG,
+        True,
+    )
+    # and the default's answer is rateable, so the cluster starts learning
+    assert _rate(client, key, response.headers[REQUEST_ID_HEADER]).status_code == 204
+    assert stub.calls("/v1/feedback") == [{"sample_id": stub.samples[0], "score": 0.9}]
+
+
+@pytest.mark.parametrize("failure", ["unknown_model", "error"])
 def test_a_router_that_cannot_decide_serves_the_default(
     client: TestClient, stub: StubSmartRouter, test_db: Session, failure: str
 ) -> None:
-    if failure == "no_opinion":
-        stub.route_model = None
-    elif failure == "unknown_model":
+    if failure == "unknown_model":
         stub.route_model = "openai:gpt-4o"
     else:
         stub.route_status = 500
@@ -371,11 +393,24 @@ def test_a_request_no_learning_router_decided_cannot_be_rated(client: TestClient
 
 
 def test_a_request_the_router_declined_cannot_be_rated(client: TestClient, stub: StubSmartRouter) -> None:
-    stub.route_model = None
+    stub.route_model = "openai:gpt-4o"  # not offered: a decline with no decision kept
     key = _key(client)
     response, _ = _chat(client, key)
 
     assert _rate(client, key, response.headers[REQUEST_ID_HEADER]).status_code == 409
+
+
+def test_rating_a_response_twice_is_a_conflict(client: TestClient, stub: StubSmartRouter) -> None:
+    key = _key(client)
+    response, _ = _chat(client, key)
+    request_id = response.headers[REQUEST_ID_HEADER]
+    assert _rate(client, key, request_id).status_code == 204
+
+    stub.feedback_status = 409  # the service keeps one rating per sample
+    again = _rate(client, key, request_id)
+
+    assert again.status_code == 409
+    assert "already been rated" in again.json()["detail"]
 
 
 def test_an_unknown_request_is_not_found(client: TestClient) -> None:
