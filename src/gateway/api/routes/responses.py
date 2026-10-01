@@ -27,7 +27,12 @@ from gateway.api.deps import (
     get_log_writer,
     get_unit_of_work_if_needed,
 )
-from gateway.api.routes._helpers import latest_user_text, routing_signal_from_text, text_from_content
+from gateway.api.routes._helpers import (
+    latest_user_text,
+    routing_messages,
+    routing_signal_from_text,
+    text_from_content,
+)
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
@@ -61,6 +66,7 @@ from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.models.tools import CodeExecutor
+from gateway.ports.routing_port import RoutingMessage
 from gateway.services.files import StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
@@ -152,6 +158,17 @@ def _routing_text(body: Any) -> str:
         _responses_input_text(body.input),
     ]
     return "\n".join(part for part in parts if part)
+
+
+def _routing_messages(body: Any) -> tuple[RoutingMessage, ...]:
+    """A Responses request as the turns a router backend reads: ``instructions``, then ``input``.
+
+    A bare-string ``input`` is one user turn; a list keeps every item that has a
+    role and text, so function calls and their outputs drop out.
+    """
+    instructions = getattr(body, "instructions", None)
+    items = body.input if isinstance(body.input, list) else [{"role": "user", "content": body.input}]
+    return routing_messages(items, system=instructions if isinstance(instructions, str) else None)
 
 
 def _split_codex_input_metadata(value: Any) -> tuple[Any, bool]:
@@ -597,7 +614,10 @@ async def create_response(
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
             routing_signal=lambda: routing_signal_from_text(
-                _routing_text(request_body), raw_request, has_tools=bool(request_body.tools)
+                _routing_text(request_body),
+                raw_request,
+                has_tools=bool(request_body.tools),
+                messages=_routing_messages(request_body),
             ),
             normalize_messages=_normalize,
             tools=request_body.tools,

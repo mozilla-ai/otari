@@ -843,7 +843,7 @@ async def create_message(
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
             routing_signal=lambda: routing_signal_from_messages(
-                request.messages, raw_request, has_tools=bool(request.tools)
+                request.messages, raw_request, has_tools=bool(request.tools), system=request.system
             ),
             normalize_messages=_normalize,
             tools=request.tools,

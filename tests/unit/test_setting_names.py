@@ -120,6 +120,8 @@ _SETTING_NAMES = frozenset(
         "sandbox_url",
         "search_tools",
         "site_url",
+        "smart_router_timeout_seconds",
+        "smart_router_url",
         "smtp_host",
         "smtp_password",
         "smtp_port",

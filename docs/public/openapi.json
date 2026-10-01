@@ -5544,6 +5544,12 @@
             "title": "Router Candidates",
             "type": "array"
           },
+          "router_params": {
+            "additionalProperties": true,
+            "description": "For a smart_router policy, the parameters the smart router is called with, defaults filled in: `application_id` (the policy name unless the policy names one) and `cost_weight` (the router's `lambda`). Empty for every other policy.",
+            "title": "Router Params",
+            "type": "object"
+          },
           "router_weights": {
             "additionalProperties": {
               "type": "number"

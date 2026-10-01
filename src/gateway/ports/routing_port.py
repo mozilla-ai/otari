@@ -30,16 +30,30 @@ __all__ = [
     "RouterTraits",
     "RoutingContext",
     "RoutingDecision",
+    "RoutingMessage",
     "RoutingOutcome",
     "RoutingPort",
 ]
+
+
+@dataclass(frozen=True)
+class RoutingMessage:
+    """One turn of the conversation, reduced to its role and its text.
+
+    Non-text content (images, tool calls) is left out, and long turns are cut,
+    so this is what the request asks rather than a copy of it.
+    """
+
+    role: str
+    content: str
 
 
 @dataclass
 class RoutingContext:
     """Inputs a backend may use to rank candidates for a single request.
 
-    The prompt arrives as already-flattened text rather than as wire messages.
+    The prompt arrives already flattened rather than as wire messages: as text
+    signals, and as ``messages``, the conversation's turns as role and text.
     Flattening is format-specific (chat, Anthropic messages, and responses all
     shape content differently) and the API layer already does it for guardrails,
     so a backend never has to know which endpoint it is serving.
@@ -73,6 +87,18 @@ class RoutingContext:
     its parameters from the policy document rather than from the environment. Empty
     for every other backend. Kept as declared: normalizing needs ``candidate_pool``,
     which is already filtered to this caller."""
+    messages: tuple[RoutingMessage, ...] = ()
+    """The conversation as role and text, oldest first, the system prompt
+    included. Bounded by the API layer, so a long conversation keeps its most
+    recent turns."""
+    policy_name: str = ""
+    """The name the caller sent, which names the policy being routed."""
+    application_id: str | None = None
+    """The application the policy names for a backend that keeps statistics per
+    application, or ``None`` to use ``policy_name``."""
+    cost_weight: float | None = None
+    """How much the policy asks the backend to weigh cost against quality, or
+    ``None`` for the backend's default."""
 
 
 @dataclass

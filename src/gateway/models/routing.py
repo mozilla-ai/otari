@@ -41,6 +41,7 @@ from gateway.models.base import Base
 
 __all__ = [
     "MAX_CANDIDATES",
+    "SMART_ROUTER_BACKEND",
     "WEIGHTED_BACKEND",
     "PolicyGuardrail",
     "PolicySpec",
@@ -58,11 +59,13 @@ __all__ = [
 # shortened chain is a failover policy that does less than it says.
 MAX_CANDIDATES = 5
 
-# The one backend name this schema knows, because it is the only one whose
-# parameters live in the policy document (`weights`). Defined here rather than
-# imported from ``services.routing.backends`` because that module imports this
-# one; ``backends`` re-exports it, so there is still a single spelling.
+# The backend names this schema knows, because they are the ones whose
+# parameters live in the policy document (`weights`; `application_id` and
+# `cost_weight`). Defined here rather than imported from
+# ``services.routing.backends`` because that module imports this one;
+# ``backends`` re-exports them, so there is still a single spelling.
 WEIGHTED_BACKEND = "weighted"
+SMART_ROUTER_BACKEND = "smart_router"
 
 _COMPARATORS = ("gte", "gt", "lte", "lt")
 
@@ -207,6 +210,24 @@ class SelectEntry(BaseModel):
         ),
     )
 
+    application_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        description=(
+            f"For a `router: {SMART_ROUTER_BACKEND}` entry, the application the smart router keeps this "
+            "policy's statistics under. Defaults to the policy name, so two policies learn separately "
+            "unless they name the same application."
+        ),
+    )
+    cost_weight: float | None = Field(
+        default=None,
+        description=(
+            f"For a `router: {SMART_ROUTER_BACKEND}` entry, how much the smart router weighs cost against "
+            "quality (its `lambda`). 0 ignores cost; higher prefers cheaper candidates more. Defaults to 1."
+        ),
+    )
+
     @model_validator(mode="after")
     def _exactly_one_destination(self) -> SelectEntry:
         chosen = [name for name in ("target", "default", "router") if getattr(self, name) is not None]
@@ -297,6 +318,27 @@ class SelectEntry(BaseModel):
                 "every weight is 0, so this entry could never select anything and the policy would "
                 "always serve its default target. Give at least one candidate a positive weight."
             )
+        return self
+
+    @model_validator(mode="after")
+    def _smart_router_parameters_belong_to_the_smart_router(self) -> SelectEntry:
+        """``application_id`` and ``cost_weight`` are the smart router's, refused anywhere else.
+
+        Refused rather than ignored, for the reason ``weights`` is: a parameter on
+        an entry that never reads it reads as configuration and does nothing.
+        """
+        names = [name for name in ("application_id", "cost_weight") if getattr(self, name) is not None]
+        if self.router is None or self.router.strip().lower() != SMART_ROUTER_BACKEND:
+            if names:
+                raise ValueError(
+                    f"{', '.join(f'`{name}`' for name in names)} only applies to a "
+                    f"`router: {SMART_ROUTER_BACKEND}` entry: no other entry reads it."
+                )
+            return self
+        if self.application_id is not None and not self.application_id.strip():
+            raise ValueError("`application_id` must name an application, not be blank")
+        if self.cost_weight is not None and (not math.isfinite(self.cost_weight) or self.cost_weight < 0):
+            raise ValueError(f"`cost_weight` must be a finite, non-negative number; got {self.cost_weight}")
         return self
 
     @property
@@ -432,6 +474,22 @@ class PolicySpec(BaseModel):
             if entry.router is not None and entry.weights:
                 return dict(entry.weights)
         return {}
+
+    @property
+    def router_application_id(self) -> str | None:
+        """The smart router application this policy names, or ``None`` to use the policy's name."""
+        for entry in self.select:
+            if entry.router is not None:
+                return entry.application_id
+        return None
+
+    @property
+    def router_cost_weight(self) -> float | None:
+        """The cost weight this policy gives the smart router, or ``None`` for the default."""
+        for entry in self.select:
+            if entry.router is not None:
+                return entry.cost_weight
+        return None
 
     @property
     def router_candidates(self) -> list[str]:

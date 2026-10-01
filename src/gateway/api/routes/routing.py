@@ -31,7 +31,7 @@ from gateway.api.routes._helpers import resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.log_config import logger
-from gateway.models.routing import PolicySpec, RoutingPolicy
+from gateway.models.routing import SMART_ROUTER_BACKEND, PolicySpec, RoutingPolicy
 from gateway.ports.routing_port import RoutingPort
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.alias_service import all_alias_names
@@ -48,6 +48,7 @@ from gateway.services.routing import (
 from gateway.services.routing.backends import router_traits
 from gateway.services.routing.decide import explain_router_ordering
 from gateway.services.routing.knn import unpriced_router_candidates
+from gateway.services.routing.smart_router import DEFAULT_COST_WEIGHT
 
 router = APIRouter(
     prefix="/routing/policies",
@@ -206,6 +207,24 @@ class ExplainResponse(BaseModel):
             "share, not the decline path."
         ),
     )
+    router_params: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "For a smart_router policy, the parameters the smart router is called with, defaults filled "
+            "in: `application_id` (the policy name unless the policy names one) and `cost_weight` (the "
+            "router's `lambda`). Empty for every other policy."
+        ),
+    )
+
+
+def _router_params(name: str, spec: PolicySpec) -> dict[str, Any]:
+    """The smart router parameters ``explain`` reports, with the defaults the backend applies."""
+    if spec.router_backend is None or spec.router_backend.strip().lower() != SMART_ROUTER_BACKEND:
+        return {}
+    return {
+        "application_id": spec.router_application_id or name,
+        "cost_weight": spec.router_cost_weight if spec.router_cost_weight is not None else DEFAULT_COST_WEIGHT,
+    }
 
 
 def validated_spec(name: str, spec: dict[str, Any]) -> PolicySpec:
@@ -721,6 +740,7 @@ async def explain_policy(
             is_dynamic=spec.is_dynamic,
             router_backend=spec.router_backend,
             router_candidates=spec.router_candidates,
+            router_params=_router_params(name, spec),
             candidates=[],
             dropped=[
                 DroppedResponse(selector=item.selector, reason=item.reason, detail=item.detail)
@@ -736,6 +756,7 @@ async def explain_policy(
         router_backend=spec.router_backend,
         router_candidates=spec.router_candidates,
         router_weights={item.selector: round(item.share_pct, 2) for item in weighted_shares},
+        router_params=_router_params(name, spec),
         candidates=[
             CandidateResponse(
                 position=attempt.position,

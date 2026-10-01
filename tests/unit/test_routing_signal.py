@@ -16,13 +16,18 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from gateway.api.routes._helpers import (
+    ROUTING_MAX_MESSAGE_CHARS,
+    ROUTING_MAX_MESSAGES,
+    ROUTING_MAX_TOTAL_CHARS,
     conversation_opening_text,
     first_user_text,
     latest_user_text,
+    routing_messages,
     routing_opted_out,
     routing_signal_from_messages,
     routing_signal_from_text,
 )
+from gateway.ports.routing_port import RoutingMessage
 
 
 def _request(headers: dict[str, str]) -> Request:
@@ -153,3 +158,81 @@ def test_text_form_uses_one_blob_for_every_signal() -> None:
     signal = routing_signal_from_text("do the thing", _request({}), has_tools=False)
     assert signal.task_signal == signal.trace_signal == signal.trace_anchor == "do the thing"
     assert signal.is_continuation is False
+
+
+# -- the conversation as turns ---------------------------------------------
+
+
+def test_turns_keep_their_roles_and_text_in_order() -> None:
+    messages = [
+        {"role": "system", "content": "be brief"},
+        {"role": "user", "content": [{"type": "text", "text": "hi"}, {"type": "image_url", "image_url": {}}]},
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "c1"}]},
+        {"role": "tool", "content": "42"},
+    ]
+
+    assert routing_messages(messages) == (
+        RoutingMessage("system", "be brief"),
+        RoutingMessage("user", "hi"),
+        RoutingMessage("tool", "42"),
+    )
+
+
+def test_a_system_prompt_outside_the_turns_leads() -> None:
+    signal = routing_signal_from_messages(
+        [{"role": "user", "content": "hello"}],
+        _request({}),
+        has_tools=False,
+        system=[{"type": "text", "text": "you are terse"}],
+    )
+
+    assert signal.messages == (RoutingMessage("system", "you are terse"), RoutingMessage("user", "hello"))
+
+
+def test_a_long_conversation_keeps_its_most_recent_turns() -> None:
+    messages = [{"role": "user", "content": f"turn {index}"} for index in range(ROUTING_MAX_MESSAGES + 10)]
+
+    kept = routing_messages(messages)
+
+    assert len(kept) == ROUTING_MAX_MESSAGES
+    assert kept[-1].content == f"turn {ROUTING_MAX_MESSAGES + 9}"
+
+
+def test_long_turns_are_cut_and_the_total_is_bounded() -> None:
+    huge = "x" * (ROUTING_MAX_MESSAGE_CHARS * 3)
+    messages = [{"role": "user", "content": huge} for _ in range(10)]
+
+    kept = routing_messages(messages)
+
+    assert all(len(turn.content) <= ROUTING_MAX_MESSAGE_CHARS for turn in kept)
+    assert sum(len(turn.content) for turn in kept) <= ROUTING_MAX_TOTAL_CHARS
+    assert len(kept[-1].content) == ROUTING_MAX_MESSAGE_CHARS
+
+
+def test_a_text_request_is_one_user_turn() -> None:
+    signal = routing_signal_from_text("summarize this", _request({}), has_tools=False)
+
+    assert signal.messages == (RoutingMessage("user", "summarize this"),)
+
+
+def test_a_responses_request_is_its_instructions_then_its_input() -> None:
+    from types import SimpleNamespace
+
+    from gateway.api.routes.responses import _routing_messages
+
+    listed = SimpleNamespace(
+        instructions="be terse",
+        input=[
+            {"role": "user", "content": [{"type": "input_text", "text": "hi"}]},
+            {"type": "function_call", "name": "lookup", "arguments": "{}"},
+            {"role": "assistant", "content": [{"type": "output_text", "text": "hello"}]},
+        ],
+    )
+    bare = SimpleNamespace(instructions=None, input="just this")
+
+    assert _routing_messages(listed) == (
+        RoutingMessage("system", "be terse"),
+        RoutingMessage("user", "hi"),
+        RoutingMessage("assistant", "hello"),
+    )
+    assert _routing_messages(bare) == (RoutingMessage("user", "just this"),)

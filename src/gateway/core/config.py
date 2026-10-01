@@ -810,6 +810,27 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             "bound, so the store grows without limit while each decision stays bounded."
         ),
     )
+    # The smart router a policy can name via `select: [{router: smart_router}]`.
+    # Config and environment only: a URL the gateway posts prompts to is not a
+    # setting the dashboard may change (see runtime_settings_service).
+    smart_router_url: Annotated[str | None, OMITTED] = Field(
+        default=None,
+        description=(
+            "Base URL of the smart-router client service a `router: smart_router` policy asks which "
+            "candidate to serve (it answers POST /v1/route, /v1/completion and /v1/feedback). Unset, "
+            "such a policy serves its default target and the gateway warns once."
+        ),
+    )
+    smart_router_timeout_seconds: Annotated[float, OMITTED] = Field(
+        default=3.0,
+        gt=0.0,
+        lt=5.0,
+        description=(
+            "How long one call to the smart router may take before the gateway gives up on it. A route "
+            "call that times out serves the policy's default target. Kept under the 5-second deadline "
+            "every router decision already has, so the smart router declines on its own clock first."
+        ),
+    )
     search_tools: Annotated[dict[str, dict[str, Any]], OMITTED] = Field(
         default_factory=dict,
         description=(
@@ -2139,6 +2160,26 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             raise ValueError(msg)
         if parsed.username is not None or parsed.password is not None:
             msg = "ui_base_url must carry no username or password"
+            raise ValueError(msg)
+        return normalized
+
+    @field_validator("smart_router_url")
+    @classmethod
+    def _validate_smart_router_url(cls, value: str | None) -> str | None:
+        """Refuse a smart router address that is not an absolute http(s) URL, and drop a trailing slash.
+
+        The backend appends ``/v1/route`` and its siblings, so a base with a
+        trailing slash would post to ``//v1/route``. Blank reads as unset.
+        """
+        if value is None or not value.strip():
+            return None
+        normalized = value.strip().rstrip("/")
+        parsed = urlsplit(normalized)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            msg = "smart_router_url must be an absolute http(s) URL"
+            raise ValueError(msg)
+        if parsed.query or parsed.fragment:
+            msg = "smart_router_url must be a base URL, with no query string or fragment"
             raise ValueError(msg)
         return normalized
 

@@ -15,6 +15,7 @@ from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.tenancy import Workspace
+from gateway.ports.routing_port import RoutingMessage
 from gateway.services.guardrails import GuardrailsNotReachableError, InProcessGuardrail, run_input_guardrails
 from gateway.services.routing.decide import RoutingSignal
 from gateway.services.url_safety import UnsafeURLError
@@ -146,15 +147,61 @@ _ROUTER_HEADER_OFF = frozenset({"off", "false", "0", "no", "none", "disabled"})
 _ROUTER_HEADER_ON = frozenset({"on", "true", "1", "yes", "auto", "default"})
 
 
-def routing_signal_from_messages(messages: Sequence[Any], raw_request: Request, *, has_tools: bool) -> RoutingSignal:
+# Bounds on the conversation a router backend is handed. A router decides on what
+# the request asks, which the recent turns carry; the whole history of a long
+# agent session would make every routed request pay to ship it.
+ROUTING_MAX_MESSAGES = 32
+ROUTING_MAX_MESSAGE_CHARS = 8_000
+ROUTING_MAX_TOTAL_CHARS = 32_000
+
+
+def routing_messages(messages: Sequence[Any], *, system: Any = None) -> tuple[RoutingMessage, ...]:
+    """The conversation as role and text, oldest first, bounded for a router backend.
+
+    Each turn is flattened the way guardrails flatten it, so non-text parts drop
+    out and a turn with no text is skipped. ``system`` is a system prompt carried
+    outside the turn list (Anthropic's ``system``, the Responses ``instructions``)
+    and leads when present. Within the bounds above, the most recent turns win:
+    the newest turn always survives, cut to the per-turn bound, and older ones are
+    kept while the total allows.
+    """
+    turns: list[RoutingMessage] = []
+    system_text = text_from_content(system) if system is not None else ""
+    if system_text.strip():
+        turns.append(RoutingMessage(role="system", content=system_text))
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        text = text_from_content(message.get("content"))
+        if isinstance(role, str) and role and text.strip():
+            turns.append(RoutingMessage(role=role, content=text))
+
+    kept: list[RoutingMessage] = []
+    budget = ROUTING_MAX_TOTAL_CHARS
+    for turn in reversed(turns):
+        if len(kept) == ROUTING_MAX_MESSAGES or (kept and budget <= 0):
+            break
+        limit = min(ROUTING_MAX_MESSAGE_CHARS, budget) if kept else ROUTING_MAX_MESSAGE_CHARS
+        content = turn.content[:limit]
+        kept.append(RoutingMessage(role=turn.role, content=content))
+        budget -= len(content)
+    return tuple(reversed(kept))
+
+
+def routing_signal_from_messages(
+    messages: Sequence[Any], raw_request: Request, *, has_tools: bool, system: Any = None
+) -> RoutingSignal:
     """Build the router's view of a chat-shaped request.
 
     Flattens the prompt the same way guardrails do and reads the three routing
     headers. Called on every request through the endpoint, whether or not the
     model names a policy with a router, so it stays cheap: three header lookups
-    and one pass over the messages.
+    and one pass over the messages. ``system`` is a system prompt kept outside
+    ``messages`` (the Messages API's), which the turn list leads with.
     """
     return RoutingSignal(
+        messages=routing_messages(messages, system=system),
         task_signal=latest_user_text(messages),
         trace_signal=first_user_text(messages),
         trace_anchor=conversation_opening_text(messages),
@@ -169,14 +216,22 @@ def routing_signal_from_messages(messages: Sequence[Any], raw_request: Request, 
     )
 
 
-def routing_signal_from_text(text: str, raw_request: Request, *, has_tools: bool) -> RoutingSignal:
+def routing_signal_from_text(
+    text: str,
+    raw_request: Request,
+    *,
+    has_tools: bool,
+    messages: tuple[RoutingMessage, ...] = (),
+) -> RoutingSignal:
     """Build the router's view of a request with no message list (the responses API).
 
     One text blob serves as all three signals: there is no turn structure to draw
     a conversation opening from, so a routed responses request re-decides per call
-    unless the client sends a conversation id.
+    unless the client sends a conversation id. ``messages`` is the request as
+    turns, for a backend that reads them; empty, the text is the one user turn.
     """
     return RoutingSignal(
+        messages=messages or routing_messages([{"role": "user", "content": text}]),
         task_signal=text,
         trace_signal=text,
         trace_anchor=text,

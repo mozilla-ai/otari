@@ -8027,6 +8027,13 @@ export interface components {
             /** Router Candidates */
             router_candidates?: string[];
             /**
+             * Router Params
+             * @description For a smart_router policy, the parameters the smart router is called with, defaults filled in: `application_id` (the policy name unless the policy names one) and `cost_weight` (the router's `lambda`). Empty for every other policy.
+             */
+            router_params?: {
+                [key: string]: unknown;
+            };
+            /**
              * Router Weights
              * @description For a weighted policy, the percentage of traffic each candidate receives, normalized over the candidates this caller may use. Empty for every other policy, and for a weighted policy whose whole split this caller may not use: a split over no candidate is not a split, and each filtered candidate is named in `dropped` instead. A weighted split needs no request state, so unlike a learned router's ranking it is knowable here: the plan above is the real ordering by share, not the decline path.
              */

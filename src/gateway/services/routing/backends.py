@@ -20,6 +20,9 @@ this build does not have serves its default target and warns once.
 * ``weighted`` → :class:`gateway.services.routing.weighted.WeightedRouterBackend`,
   a load balancer: one candidate per request, drawn in proportion to the weights
   the policy declares.
+* ``smart_router`` → :class:`gateway.services.routing.smart_router.SmartRouterBackend`,
+  which asks an external smart-router service at ``smart_router_url`` and learns
+  from outcomes and ratings. Unavailable while that URL is unset.
 
 The request path reaches these through ``RoutingPort`` (``gateway.ports``), whose
 core adapter is the switch in :func:`get_router_backend`, so an overlay can add or
@@ -30,15 +33,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from gateway.models.routing import WEIGHTED_BACKEND
+from gateway.models.routing import SMART_ROUTER_BACKEND, WEIGHTED_BACKEND
 from gateway.ports.routing_port import RouterBackend, RouterTraits, RoutingContext, RoutingDecision
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
+    from gateway.services.routing.smart_router import SmartRouterBackend
 
 __all__ = [
     "KNN_BACKEND",
     "NOOP_BACKEND",
+    "SMART_ROUTER_BACKEND",
     "WEIGHTED_BACKEND",
     "NoOpRouterBackend",
     "RouterBackend",
@@ -49,6 +54,7 @@ __all__ = [
     "backend_pool_is_teachable",
     "backend_requires_pricing",
     "clear_router_backend_cache",
+    "close_router_backends",
     "get_router_backend",
     "known_backends",
     "owes_missing_backend_warning",
@@ -71,6 +77,9 @@ class NoOpRouterBackend:
 # stickiness across the turns of one conversation. Cached per backend-config
 # signature; cleared by clear_router_backend_cache().
 _KNN_CACHE: dict[tuple[Any, ...], RouterBackend] = {}
+# The smart router holds one pooled HTTP client and the outcome reports in
+# flight, so it is cached for the same reason, per (url, timeout).
+_SMART_ROUTER_CACHE: dict[tuple[str, float], SmartRouterBackend] = {}
 # (policy, backend name) pairs already warned about. Unbounded in principle,
 # bounded in practice: the pairs come from policy documents, so the set is the
 # size of the config rather than of the traffic.
@@ -92,12 +101,21 @@ def _knn_signature(config: GatewayConfig) -> tuple[Any, ...]:
 def clear_router_backend_cache() -> None:
     """Drop cached backend instances (test isolation; called from reset_config)."""
     _KNN_CACHE.clear()
+    _SMART_ROUTER_CACHE.clear()
     _warned_missing.clear()
+
+
+async def close_router_backends() -> None:
+    """Close the network clients cached backends hold, at shutdown. A no-op when none was built."""
+    backends = list(_SMART_ROUTER_CACHE.values())
+    _SMART_ROUTER_CACHE.clear()
+    for backend in backends:
+        await backend.aclose()
 
 
 def known_backends() -> tuple[str, ...]:
     """Backend names this build resolves, for an error message that lists them."""
-    return (KNN_BACKEND, NOOP_BACKEND, WEIGHTED_BACKEND)
+    return (KNN_BACKEND, NOOP_BACKEND, SMART_ROUTER_BACKEND, WEIGHTED_BACKEND)
 
 
 def backend_is_weighted(name: str | None) -> bool:
@@ -120,12 +138,12 @@ def backend_pool_is_teachable(name: str | None) -> bool:
     build, and treating its pool as teachable keeps the typo guard on rather than
     silently widening what ``POST /v1/routing/preferences/rank`` accepts.
 
-    False only for ``weighted``, whose split is written in the policy document. It
-    reads no examples and has no warmth to report, so counting it would report a
-    pool it never consults and would let its candidates decide which score keys a
-    user may teach.
+    False for ``weighted``, whose split is written in the policy document, and for
+    ``smart_router``, which learns in its own service. Neither reads the examples
+    or has warmth to report, so counting them would report a pool nothing consults
+    and would let their candidates decide which score keys a user may teach.
     """
-    return name is not None and not backend_is_weighted(name)
+    return name is not None and name.strip().lower() not in {WEIGHTED_BACKEND, SMART_ROUTER_BACKEND}
 
 
 def backend_requires_pricing(name: str | None) -> bool:
@@ -163,7 +181,8 @@ def get_router_backend(config: GatewayConfig, name: str) -> RouterBackend | None
     """Resolve the backend a policy named, or ``None`` if this build has no such backend.
 
     ``None`` is not an error: the caller compiles the policy without a router
-    ordering, which serves the default target. Warned once per (policy, name) by
+    ordering, which serves the default target. ``smart_router`` resolves to
+    ``None`` while ``smart_router_url`` is unset. Warned once per (policy, name) by
     the caller rather than here, because the policy name is what makes the warning
     actionable and this function does not know it.
     """
@@ -179,6 +198,17 @@ def get_router_backend(config: GatewayConfig, name: str) -> RouterBackend | None
         from gateway.services.routing.weighted import WeightedRouterBackend
 
         return WeightedRouterBackend()
+    if backend == SMART_ROUTER_BACKEND:
+        if config.smart_router_url is None:
+            return None
+        from gateway.services.routing.smart_router import SmartRouterBackend
+
+        key = (config.smart_router_url, config.smart_router_timeout_seconds)
+        smart = _SMART_ROUTER_CACHE.get(key)
+        if smart is None:
+            smart = SmartRouterBackend(config.smart_router_url, config.smart_router_timeout_seconds)
+            _SMART_ROUTER_CACHE[key] = smart
+        return smart
     if backend == KNN_BACKEND:
         # Imported lazily: the kNN backend pulls in any_llm embeddings and the
         # example store, neither of which a gateway without a learned policy needs.
