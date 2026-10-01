@@ -166,6 +166,7 @@ for name in BUDGETS:
 # gateway ``users`` row keyed by that identity's id, which is what keys, budgets,
 # and usage attach to (the Members page joins the two on it).
 gateway_user_id: dict[str, str] = {}
+gateway_users: dict[str, User] = {}
 budget_started: dict[str, datetime] = {}
 for email, (full_name, role, budget_name) in MEMBERS.items():
     identity = Identity(email=email, full_name=full_name, active_organization_id=ORGANIZATION.id)
@@ -177,33 +178,32 @@ for email, (full_name, role, budget_name) in MEMBERS.items():
     gateway_user_id[email] = uid
     started = NOW - timedelta(days=rng.randint(12, 22), hours=rng.random() * 24)
     budget_started[uid] = started
-    db.add(
-        User(
-            user_id=uid,
-            alias=full_name,
-            spend=0.0,  # set from generated usage below
-            reserved=0.0,
-            blocked=False,
-            budget_id=budgets[budget_name].budget_id,
-            budget_started_at=started,
-            next_budget_reset_at=started + timedelta(seconds=MONTH),
-        )
+    gateway_users[uid] = User(
+        user_id=uid,
+        alias=full_name,
+        spend=0.0,  # set from generated usage below
+        reserved=0.0,
+        blocked=False,
+        budget_id=budgets[budget_name].budget_id,
+        budget_started_at=started,
+        next_budget_reset_at=started + timedelta(seconds=MONTH),
     )
+    db.add(gateway_users[uid])
 
 # --- API keys ----------------------------------------------------------------
+api_keys: dict[str, APIKey] = {}
 for kname, (owner, *_rest) in KEYS.items():
-    db.add(
-        APIKey(
-            id=f"key-{kname}",
-            workspace_id=WORKSPACE.id,
-            key_hash=f"demo-hash-{kname}",
-            key_prefix="otari-",
-            key_name=kname,
-            user_id=gateway_user_id[owner],
-            is_active=True,
-            created_at=NOW - timedelta(days=rng.randint(40, 70)),
-        )
+    api_keys[kname] = APIKey(
+        id=f"key-{kname}",
+        workspace_id=WORKSPACE.id,
+        key_hash=f"demo-hash-{kname}",
+        key_prefix="otari-",
+        key_name=kname,
+        user_id=gateway_user_id[owner],
+        is_active=True,
+        created_at=NOW - timedelta(days=rng.randint(40, 70)),
     )
+    db.add(api_keys[kname])
 
 # --- Pricing -----------------------------------------------------------------
 # (model_key, effective_at) is the composite PK; anchor effective_at in the past.
@@ -228,7 +228,9 @@ last_used: dict[str, datetime] = {}
 rows = 0
 
 
-def add_row(*, ts: datetime, kname: str, model_key: str, ok: bool, status_code: int | None = None, **routing) -> None:
+def add_row(
+    *, ts: datetime, kname: str, model_key: str, ok: bool, status_code: int | None = None, **routing: str | int
+) -> None:
     global rows
     owner = gateway_user_id[KEYS[kname][0]]
     provider, model = model_key.split(":", 1)
@@ -305,7 +307,7 @@ for day in range(DAYS, -1, -1):
         group = str(uuid.uuid4())
         if rng.random() < 0.015:
             # The first provider failed and the policy's fallback served it.
-            common = {"policy_name": policy, "request_group_id": group, "attempt_count": 2}
+            common: dict[str, str | int] = {"policy_name": policy, "request_group_id": group, "attempt_count": 2}
             add_row(
                 ts=ts,
                 kname=kname,
@@ -356,20 +358,20 @@ RECENT = [
     (7.9, "coding-agent", "anthropic:claude-opus-5-5", "coding", "default"),
     (9.5, "support-bot", "openai:gpt-6-luna", "thrifty", "default"),
 ]
-for minutes, kname, model_key, policy, reason in RECENT:
+for minutes, kname, model_key, recent_policy, recent_reason in RECENT:
     ts = NOW - timedelta(minutes=minutes)
-    routing = {}
-    if policy is not None:
+    routing: dict[str, str | int] = {}
+    if recent_policy is not None and recent_reason is not None:
         routing = {
-            "policy_name": policy,
-            "selection_reason": reason,
+            "policy_name": recent_policy,
+            "selection_reason": recent_reason,
             "attempt_position": 1,
             "attempt_count": 1,
             "request_group_id": str(uuid.uuid4()),
         }
     add_row(ts=ts, kname=kname, model_key=model_key, ok=True, status_code=200, **routing)
 # OpenAI answered 503 and the policy's fallback served the request.
-rescued = {"policy_name": "smart", "request_group_id": str(uuid.uuid4()), "attempt_count": 2}
+rescued: dict[str, str | int] = {"policy_name": "smart", "request_group_id": str(uuid.uuid4()), "attempt_count": 2}
 rescued_at = NOW - timedelta(minutes=1.2)
 add_row(
     ts=rescued_at,
@@ -393,12 +395,12 @@ add_row(
 )
 
 for kname, ts in last_used.items():
-    db.get(APIKey, f"key-{kname}").last_used_at = ts
+    api_keys[kname].last_used_at = ts
 
 # Reflect each member's current-period spend on their row so the Members and
 # Budgets pages show spend-vs-budget utilization consistent with the usage rows.
 for uid, spent in period_spend.items():
-    db.get(User, uid).spend = to_usd(round(spent, 2))
+    gateway_users[uid].spend = to_usd(round(spent, 2))
 
 
 # Derive each budget's dollar limit from the highest member's spend and the

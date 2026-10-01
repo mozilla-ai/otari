@@ -13,6 +13,7 @@ import json
 import re
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 
 PORT = 8099
 
@@ -55,7 +56,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_args: object) -> None:
         pass
 
-    def _json(self, status: int, body: dict) -> None:
+    def _json(self, status: int, body: dict[str, Any]) -> None:
         data = json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -98,7 +99,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
 
-        def send(payload: dict | str) -> None:
+        def send(payload: dict[str, Any] | str) -> None:
             data = (
                 payload
                 if isinstance(payload, str)
