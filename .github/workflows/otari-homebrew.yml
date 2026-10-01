@@ -80,15 +80,19 @@ jobs:
       # Homebrew install amounts to, minus Homebrew. Run from outside the
       # checkout so `uv pip` does not pick up the workspace's constraints.
       - name: Smoke the light install
-        env:
-          VERSION: ${{ steps.ver.outputs.version }}
         run: |
           DIST="$PWD/dist"
+          # The built file's own version, not the tag's: a prerelease tag
+          # normalizes on the way into the package (v1.2.3-alpha1 builds and
+          # reports 1.2.3a1, PEP 440), so comparing against the tag would fail
+          # the release for every prerelease. The tag still names the Release
+          # the formula downloads from, which is why VERSION stays above.
+          SDIST_VERSION="$(basename "$DIST"/otari_agent-*.tar.gz .tar.gz | sed 's/^otari_agent-//')"
           cd "$(mktemp -d)"
           uv venv light --python 3.14
           uv pip install --python light/bin/python --require-hashes -r "$DIST/requirements.txt"
           uv pip install --python light/bin/python --no-deps "$DIST"/otari_agent-*.tar.gz
-          test "$(light/bin/otari --version)" = "otari, version ${VERSION}"
+          test "$(light/bin/otari --version)" = "otari, version ${SDIST_VERSION}"
           printf '{}' | light/bin/otari hook
           light/bin/otari import claude-code --dry-run --projects-dir "$(mktemp -d)" | grep -q "Nothing to import"
           ! light/bin/otari serve >/dev/null 2>&1
