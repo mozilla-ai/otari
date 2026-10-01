@@ -3913,6 +3913,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/routing/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rate Routed Response
+         * @description Rate one response from 0 to 1, by the ``Otari-Request-ID`` it was returned with.
+         *
+         *     The key's workspace must be the one that served the request; a request in
+         *     any other workspace is answered as one that does not exist.
+         */
+        post: operations["routing-rate_routed_response"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/routing/policies": {
         parameters: {
             query?: never;
@@ -8027,6 +8050,13 @@ export interface components {
             /** Router Candidates */
             router_candidates?: string[];
             /**
+             * Router Params
+             * @description For a smart_router policy, the parameters the smart router is called with, defaults filled in: `application_id` (the policy name unless the policy names one) and `cost_weight` (the router's `lambda`). Empty for every other policy.
+             */
+            router_params?: {
+                [key: string]: unknown;
+            };
+            /**
              * Router Weights
              * @description For a weighted policy, the percentage of traffic each candidate receives, normalized over the candidates this caller may use. Empty for every other policy, and for a weighted policy whose whole split this caller may not use: a split over no candidate is not a split, and each filtered candidate is named in `dropped` instead. A weighted split needs no request state, so unlike a learned router's ranking it is knowable here: the plan above is the real ordering by share, not the decline path.
              */
@@ -11883,6 +11913,22 @@ export interface components {
              * Format: uuid
              */
             workspace_id: string;
+        };
+        /**
+         * RoutingFeedbackRequest
+         * @description A caller's rating of one response, named by the ``Otari-Request-ID`` it came back with.
+         */
+        RoutingFeedbackRequest: {
+            /**
+             * Request Id
+             * @description The `Otari-Request-ID` response header of the request being rated.
+             */
+            request_id: string;
+            /**
+             * Score
+             * @description How good the response was, from 0 (worst) to 1 (best).
+             */
+            score: number;
         };
         /**
          * ScopedBudgetResponse
@@ -20297,6 +20343,65 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    "routing-rate_routed_response": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoutingFeedbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid workspace API key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No request with this id was served in the key's workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request was not routed by a router that learns from ratings. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description The router could not record the rating. Retry. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -153,7 +153,8 @@ request facts into a `CompiledPlan`. Keep database reads, embeddings, and
 router backends outside it so CLI and API explain can compile without I/O.
 
 Asynchronous router decisions live under `services/routing/` and pass a
-`RouterOrdering` into the compiler. A declined decision uses the policy
+`RouterOrdering` into the compiler. The pipeline gets a backend by name from
+`RoutingPort`, never from the backend switch directly. A declined decision uses the policy
 default. The API attempt walker executes the compiled order and owns fallback
 settlement.
 

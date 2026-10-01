@@ -52,6 +52,22 @@ providers:
 #         - default: openai:gpt-5-mini
 #       on_failure:
 #         - anthropic:claude-haiku-4-5
+#     # Let an external smart-router service pick per request, and learn from
+#     # each response's cost and its callers' ratings. Needs smart_router_url.
+#     smart:
+#       select:
+#         - router: smart_router
+#           candidates:
+#             - openai:gpt-5-mini
+#             - openai:gpt-5
+#           application_id: support-bot   # defaults to the policy name
+#           cost_weight: 1.0              # the router's lambda; 0 ignores cost
+#         - default: openai:gpt-5
+
+# The smart-router client a `router: smart_router` policy asks. Config or
+# OTARI_SMART_ROUTER_URL only; unset, such a policy serves its default target.
+# smart_router_url: "http://localhost:5056"
+# smart_router_timeout_seconds: 3
 
 # Optional server controls.
 # rate_limit_rpm: 60

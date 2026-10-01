@@ -5544,6 +5544,12 @@
             "title": "Router Candidates",
             "type": "array"
           },
+          "router_params": {
+            "additionalProperties": true,
+            "description": "For a smart_router policy, the parameters the smart router is called with, defaults filled in: `application_id` (the policy name unless the policy names one) and `cost_weight` (the router's `lambda`). Empty for every other policy.",
+            "title": "Router Params",
+            "type": "object"
+          },
           "router_weights": {
             "additionalProperties": {
               "type": "number"
@@ -13477,6 +13483,32 @@
           "policies"
         ],
         "title": "RouterStatus",
+        "type": "object"
+      },
+      "RoutingFeedbackRequest": {
+        "additionalProperties": false,
+        "description": "A caller's rating of one response, named by the ``Otari-Request-ID`` it came back with.",
+        "properties": {
+          "request_id": {
+            "description": "The `Otari-Request-ID` response header of the request being rated.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          },
+          "score": {
+            "description": "How good the response was, from 0 (worst) to 1 (best).",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "request_id",
+          "score"
+        ],
+        "title": "RoutingFeedbackRequest",
         "type": "object"
       },
       "ScopedBudgetResponse": {
@@ -30862,6 +30894,61 @@
         "summary": "Create Response",
         "tags": [
           "responses"
+        ]
+      }
+    },
+    "/api/v1/routing/feedback": {
+      "post": {
+        "description": "Rate one response from 0 to 1, by the ``Otari-Request-ID`` it was returned with.\n\nThe key's workspace must be the one that served the request; a request in\nany other workspace is answered as one that does not exist.",
+        "operationId": "routing-rate_routed_response",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutingFeedbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No valid workspace API key."
+          },
+          "404": {
+            "description": "No request with this id was served in the key's workspace."
+          },
+          "409": {
+            "description": "The request was not routed by a router that learns from ratings, or was already rated."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "description": "The router could not record the rating. Retry."
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Rate Routed Response",
+        "tags": [
+          "routing"
         ]
       }
     },

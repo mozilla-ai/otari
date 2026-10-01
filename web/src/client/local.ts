@@ -58,6 +58,11 @@ export interface PolicySelectEntry {
    *  Relative, not percentages: {a: 70, b: 30} and {a: 7, b: 3} are one split. A
    *  candidate left out takes no traffic and stays in the plan as a failover. */
   weights?: Record<string, number>
+  /** For a `router: "smart_router"` entry only: the application the smart router
+   *  keeps statistics under (the policy name when omitted), and how much it
+   *  weighs cost against quality. The form leaves such a policy read-only. */
+  application_id?: string
+  cost_weight?: number
 }
 
 export interface PolicyGuardrail {

@@ -74,6 +74,7 @@ from gateway.services.provider_store_service import (
     reset_provider_cache,
     run_provider_refresher,
 )
+from gateway.services.routing.backends import close_router_backends
 from gateway.services.runtime_settings_service import apply_overrides_from_db
 from gateway.services.search_backend import close_search_client
 from gateway.services.search_tool_store_service import (
@@ -625,6 +626,8 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # POST /api/v1/search dispatches on one pooled client for the process, so
             # shutdown owns closing it. A no-op when no search was ever served.
             await close_search_client()
+            # A smart_router policy's backend holds one pooled client to its service.
+            await close_router_backends()
             # After the log writer, whose final flush is the last thing to need
             # a session. Hybrid mode never opened an engine, so this is a no-op there.
             await dispose_db()

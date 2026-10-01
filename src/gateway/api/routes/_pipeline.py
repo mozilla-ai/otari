@@ -39,10 +39,11 @@ import json
 import re
 import time
 import uuid
-from collections import Counter
+from collections import Counter, OrderedDict
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable, Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, replace
+from dataclasses import field as dataclass_field
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum, auto
@@ -157,6 +158,7 @@ from gateway.models.usage import UsageLog
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
+from gateway.ports.routing_port import LearningRouterBackend, RoutingPort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.rate_limit import RateLimitInfo, check_rate_limit
 from gateway.services.budgets import (
@@ -218,6 +220,7 @@ from gateway.services.routing import (
     selection_consults_router,
 )
 from gateway.services.routing.decide import RoutingSignal, decide_ordering
+from gateway.services.routing.outcome import outcome_from_usage_row
 from gateway.services.sandbox_backend import (
     CODE_EXECUTION_TOOL_NAME,
     DEFAULT_EXEC_TIMEOUT_S,
@@ -952,6 +955,7 @@ class RequestContext:
         code_execution_policy: ResolvedCodeExecutionPolicy | None = None,
         code_execution_policy_loaded: bool = False,
         request_id: str | None = None,
+        started_wall: datetime | None = None,
     ) -> None:
         self.config = config
         # Sent to the client as ``Otari-Request-ID``: the platform's id in hybrid
@@ -993,6 +997,9 @@ class RequestContext:
         # Monotonic clock reading taken at the very start of the handler
         # preamble; used to compute the usage log's latency_ms at settlement.
         self.started_at = started_at
+        # The same moment on the wall clock, for a report that names a time
+        # rather than a duration (a learning router's outcome).
+        self.started_wall = started_wall
         # Standalone-only: the provider selector resolved once for the
         # pricing/budget gate in `resolve_request_context`. Route handlers
         # reuse this for dispatch instead of calling `resolve_provider_selector`
@@ -1446,6 +1453,16 @@ class RoutingAttribution:
     attempt_count: int
     request_group_id: str
     absorbed: bool = False
+    router_backend: str | None = None
+    """The learning backend that decided the request, as the policy named it."""
+    decision_id: str | None = None
+    """That backend's token for its decision; set together with ``observer``."""
+    observer: LearningRouterBackend | None = dataclass_field(default=None, compare=False, repr=False)
+    """The backend to report the request's outcome to, once its row is written."""
+    served_selector: str | None = None
+    """The candidate this row's attempt dispatched, as the policy spelled it."""
+    request_started_at: datetime | None = None
+    """Wall-clock start of the request, for the outcome report."""
 
 
 def _row_status(*, error: str | None, attribution: RoutingAttribution | None) -> str:
@@ -1583,6 +1600,7 @@ async def _compile_request_plan(
     started_at: float,
     routing_signal: Callable[[], RoutingSignal] | None = None,
     workspace_id: uuid.UUID | None = None,
+    routing: RoutingPort | None = None,
 ) -> CompiledPlan | None:
     """Compile ``model`` into a plan when it names a routing policy, else ``None``.
 
@@ -1624,6 +1642,7 @@ async def _compile_request_plan(
             allowlist=allowlist,
             signal=routing_signal() if routing_signal is not None else None,
             workspace_id=workspace_id,
+            routing=routing,
         )
 
     try:
@@ -1774,6 +1793,7 @@ async def resolve_request_context(
     | None = None,
     tools: list[dict[str, Any]] | None = None,
     idempotency: IdempotencyGuard | None = None,
+    routing: RoutingPort | None = None,
 ) -> RequestContext:
     """Run the shared handler preamble up to (and including) budget pre-debit.
 
@@ -1798,6 +1818,7 @@ async def resolve_request_context(
     endpoint knows how to flatten. A factory rather than a value because only a
     policy with a router consults it. Omit it and such a policy serves its default
     target, which is the correct behavior for a surface that has no prompt.
+    ``routing`` is the port that names the backend a policy's router entry asks.
 
     ``normalize_messages`` (standalone only) is an optional hook the file
     feature uses to resolve uploaded attachments into the wire payload before
@@ -1813,6 +1834,7 @@ async def resolve_request_context(
     # Earliest point in the shared handler preamble; anchors the request's
     # latency_ms (measured monotonically, so it is immune to wall-clock steps).
     started_at = time.monotonic()
+    started_wall = datetime.now(UTC)
     hybrid_mode = config.is_hybrid_mode
     route: ResolvedRoute | None = None
     user_token: str | None = None
@@ -1942,6 +1964,7 @@ async def resolve_request_context(
             started_at=started_at,
             routing_signal=routing_signal,
             workspace_id=workspace_id,
+            routing=routing,
         )
         if plan is not None:
             head = plan.head
@@ -2286,6 +2309,7 @@ async def resolve_request_context(
         request_group_id=str(uuid.uuid4()) if plan is not None else None,
         organization_id=organization_id,
         request_id=request_id,
+        started_wall=started_wall,
     )
 
 
@@ -3696,6 +3720,7 @@ async def record_usage(
     attribution: RoutingAttribution | None = None,
     tool_tally: ToolUsageTally | None = None,
     workspace_id: uuid.UUID | None = None,
+    request_id: str | None = None,
 ) -> LoggedUsage:
     """Log API usage to the database and return the computed cost and its source.
 
@@ -3747,6 +3772,8 @@ async def record_usage(
             ``api_key_id``) and the same un-memoized cost a master-key request
             already pays once elsewhere -- passing it explicitly here is what
             avoids paying that twice on the same request.
+        request_id: The ``Otari-Request-ID`` the caller received, stored so the
+            caller can name this request later. ``None`` where none was minted.
 
     Returns:
         The computed cost for this request, or None when usage/pricing is absent,
@@ -3774,6 +3801,9 @@ async def record_usage(
         attempt_position=attribution.position if attribution else None,
         attempt_count=attribution.attempt_count if attribution else None,
         request_group_id=attribution.request_group_id if attribution else None,
+        request_id=request_id,
+        routing_backend=attribution.router_backend if attribution else None,
+        routing_decision_id=attribution.decision_id if attribution else None,
     )
 
     usage_data = usage_override
@@ -3839,7 +3869,65 @@ async def record_usage(
         record_cost(str(provider or ""), model, float(usage_log.cost))
 
     await log_writer.put(usage_log)
+    _report_routing_outcome(attribution, usage_log)
     return LoggedUsage(usage_log.cost, pricing_source)
+
+
+# Outcome reports in flight, kept referenced so the event loop does not drop a
+# task before it finishes (the same reason ``_USAGE_REPORT_TASKS`` exists).
+_ROUTING_OUTCOME_TASKS: set[asyncio.Task[None]] = set()
+# Decisions whose outcome has been reported by this process. A request can write
+# more than one non-absorbed row on an unusual failure path, and the backend is
+# told once; bounded, because a decision is never reported again after the
+# request that made it has settled.
+_REPORTED_DECISIONS: OrderedDict[str, None] = OrderedDict()
+_REPORTED_DECISIONS_MAX = 4096
+
+
+def _claim_routing_outcome(decision_id: str) -> bool:
+    """Whether this decision's outcome is still unreported, marking it reported."""
+    if decision_id in _REPORTED_DECISIONS:
+        return False
+    _REPORTED_DECISIONS[decision_id] = None
+    while len(_REPORTED_DECISIONS) > _REPORTED_DECISIONS_MAX:
+        _REPORTED_DECISIONS.popitem(last=False)
+    return True
+
+
+def _report_routing_outcome(attribution: RoutingAttribution | None, row: UsageLog) -> None:
+    """Tell a learning router backend how the request it decided turned out, in the background.
+
+    Only the row that settles the request reports: the served attempt, or the
+    failure that ended an exhausted plan. An absorbed attempt is part of that one
+    outcome, not one of its own. Never raises and never awaits the backend, so
+    the caller's response does not wait on, or fail with, the router.
+    """
+    if attribution is None or attribution.observer is None or attribution.decision_id is None:
+        return
+    if row.status == "absorbed" or not _claim_routing_outcome(attribution.decision_id):
+        return
+    try:
+        outcome = outcome_from_usage_row(
+            row,
+            model=attribution.served_selector or (f"{row.provider}:{row.model}" if row.provider else row.model),
+            started_at=attribution.request_started_at or row.timestamp,
+        )
+        task = asyncio.create_task(attribution.observer.record_outcome(attribution.decision_id, outcome))
+    except Exception:
+        logger.warning("Could not report routing outcome decision_id=%s", attribution.decision_id, exc_info=True)
+        return
+    _ROUTING_OUTCOME_TASKS.add(task)
+    decision_id = attribution.decision_id
+
+    def _finalize(finished: asyncio.Task[None]) -> None:
+        _ROUTING_OUTCOME_TASKS.discard(finished)
+        if finished.cancelled():
+            return
+        exc = finished.exception()
+        if exc is not None:
+            logger.warning("Routing outcome report failed decision_id=%s: %s", decision_id, exc)
+
+    task.add_done_callback(_finalize)
 
 
 def _cost_only(
@@ -4141,6 +4229,7 @@ async def _log_failure_and_refund(
         attribution=attribution,
         tool_tally=tool_tally,
         workspace_id=ctx.workspace_id,
+        request_id=ctx.request_id,
     )
     if ctx.reservation is not None:
         if cost:
@@ -4534,6 +4623,7 @@ def build_streaming_response(
             attribution=attribution,
             tool_tally=tool_tally,
             workspace_id=workspace_id,
+            request_id=request_id,
         )
         if reservation is not None:
             await reconcile_reservation(
@@ -4581,6 +4671,7 @@ def build_streaming_response(
                 attribution=attribution,
                 tool_tally=tool_tally,
                 workspace_id=workspace_id,
+                request_id=request_id,
             )
             # "Free" is about the tokens the provider never reported, not about
             # tool calls the gateway definitely ran and owes for.
@@ -4609,6 +4700,7 @@ def build_streaming_response(
             attribution=attribution,
             tool_tally=tool_tally,
             workspace_id=workspace_id,
+            request_id=request_id,
         )
         # The estimate covers the unreported tokens; log_usage adds any tool cost on
         # top of it, so reconcile against the row's total rather than the estimate.
@@ -4656,6 +4748,7 @@ def build_streaming_response(
             attribution=attribution,
             tool_tally=tool_tally,
             workspace_id=workspace_id,
+            request_id=request_id,
         )
         if reservation is not None:
             # A stream that died after running searches still owes for them, and a
@@ -4692,6 +4785,7 @@ def build_streaming_response(
                 counts_toward_budget=_handle_counts_toward_budget(reservation),
                 tool_tally=tool_tally,
                 workspace_id=workspace_id,
+                request_id=request_id,
             )
             if abandoned_cost:
                 await reconcile_reservation(db, reservation, abandoned_cost)
@@ -5372,6 +5466,9 @@ def _attribution_for(ctx: RequestContext, attempt: Attempt, *, absorbed: bool = 
     """Attribution for a row produced by ``attempt``, or None when unrouted."""
     if ctx.plan is None or ctx.request_group_id is None:
         return None
+    # The decision of a backend that learns from outcomes, which every row of the request carries.
+    ordering = ctx.plan.router_ordering
+    learned = ordering if ordering is not None and ordering.observer is not None else None
     return RoutingAttribution(
         policy_name=ctx.plan.policy_name,
         selection_reason=attempt.selection_reason,
@@ -5379,6 +5476,11 @@ def _attribution_for(ctx: RequestContext, attempt: Attempt, *, absorbed: bool = 
         attempt_count=len(ctx.plan.attempts),
         request_group_id=ctx.request_group_id,
         absorbed=absorbed,
+        router_backend=learned.backend if learned else None,
+        decision_id=learned.decision_id if learned else None,
+        observer=learned.observer if learned else None,
+        served_selector=attempt.selector,
+        request_started_at=ctx.started_wall,
     )
 
 
@@ -5438,6 +5540,7 @@ async def log_exhausted_plan(
         attribution=_failure_attribution(ctx, last),
         tool_tally=tool_tally,
         workspace_id=ctx.workspace_id,
+        request_id=ctx.request_id,
     )
     ctx.tool_charge = cost or Decimal(0)
 
@@ -5478,6 +5581,7 @@ async def log_absorbed_attempt(
             counts_toward_budget=False,
             attribution=_attribution_for(ctx, attempt, absorbed=True),
             workspace_id=ctx.workspace_id,
+            request_id=ctx.request_id,
         )
     except Exception:
         logger.warning(
@@ -5596,6 +5700,7 @@ async def run_standalone_non_stream(
                     attribution=attribution,
                     tool_tally=tool_ctx.tally,
                     workspace_id=ctx.workspace_id,
+                    request_id=ctx.request_id,
                 )
             if ctx.reservation is not None:
                 await reconcile_reservation(

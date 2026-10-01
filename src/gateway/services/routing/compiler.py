@@ -33,6 +33,7 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.routing import MAX_CANDIDATES, PolicySpec, WhenClause
+from gateway.ports.routing_port import LearningRouterBackend
 from gateway.services.model_access import is_model_allowed
 from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
@@ -105,6 +106,12 @@ class RouterOrdering:
     selectors: list[str]
     confidence: float = 0.0
     rationale: str = ""
+    backend: str | None = None
+    """The backend name the policy gave, as written, when a backend decided."""
+    decision_id: str | None = None
+    """The backend's token for this decision, when it learns from outcomes."""
+    observer: LearningRouterBackend | None = field(default=None, compare=False, repr=False)
+    """The backend to tell what happened, set only together with ``decision_id``."""
 
 
 @dataclass(frozen=True)
@@ -132,7 +139,10 @@ class CompiledPlan:
     Kept on the plan so the rationale and confidence can be logged and shown in
     the activity log. A policy with a router that declined has ``None`` here and a
     ``default`` selection reason, which is how "the router chose the strong model"
-    and "the router did not run" stay distinguishable after the fact.
+    and "the router did not run" stay distinguishable after the fact. The one
+    exception is a learning backend that declined but kept a ``decision_id`` (no
+    opinion yet): its ordering, with no selectors, stays here so it learns what the
+    default did, while the selection reason still says ``default``.
     """
 
     @property
@@ -296,6 +306,10 @@ def compile_policy(
         router_ordering=router_ordering,
     )
     routed = selected[0][1].startswith("router:")
+    # A learning backend can decline and still open a decision (no opinion yet):
+    # the plan keeps that decision so the outcome of whatever served, and any
+    # rating of it, reach the backend. The selection reason still says what served.
+    kept_decision = router_ordering is not None and router_ordering.decision_id is not None
 
     ordered: list[tuple[str, str]] = list(selected)
     ordered.extend((selector, "on_failure") for selector in spec.on_failure)
@@ -358,6 +372,7 @@ def compile_policy(
                 kwargs=resolved.kwargs,
                 display_model=policy_name,
                 selection_reason=selection_reason,
+                selector=selector,
             )
         )
 
@@ -376,7 +391,7 @@ def compile_policy(
     return CompiledPlan(
         policy_name=policy_name,
         attempts=attempts,
-        router_ordering=router_ordering if routed else None,
+        router_ordering=router_ordering if routed or kept_decision else None,
         guardrails=[
             GuardrailConfig(
                 profile=guardrail.profile,

@@ -4,18 +4,17 @@ The decision half of routing. Something here decides which candidates to try and
 in what order; the API layer's attempt walker executes the result and makes no
 choices of its own.
 
-Plain core code, with no port. ``ARCHITECTURE.md`` names a ``RoutingPort`` and
-marks the routing capability line provisional, and whether that port should exist
-at all is an open maintainer decision, so this does not presume one.
-
 A policy's ``select`` may hand the ordering to a *router backend*
 (``backends.py``), which is where the learned kNN router (``knn.py``) and the
-weighted load balancer (``weighted.py``) plug in. The split is deliberate: the
+weighted load balancer (``weighted.py``) plug in. The request path reaches a
+backend through ``RoutingPort``, so an overlay can add one; the compiler and
+the conditions stay plain core code. The split is deliberate: the
 compiler stays pure and synchronous, and a backend's asynchronous work
 (embedding, reading stored examples) happens in the request pipeline, which
 passes the resulting order in as a value.
 """
 
+from gateway.services.routing._feedback import RoutingFeedbackService
 from gateway.services.routing.backends import (
     KNN_BACKEND,
     NOOP_BACKEND,
@@ -52,6 +51,7 @@ __all__ = [
     "RouterOrdering",
     "RoutingContext",
     "RoutingDecision",
+    "RoutingFeedbackService",
     "backend_pool_is_teachable",
     "backend_requires_pricing",
     "clear_router_backend_cache",

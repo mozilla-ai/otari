@@ -24,6 +24,7 @@ from any_llm.exceptions import AnyLLMError
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.routing import PolicySpec
+from gateway.ports.routing_port import LearningRouterBackend, RoutingMessage, RoutingPort
 from gateway.services.model_access import is_model_allowed
 from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.routing.backends import (
@@ -78,6 +79,9 @@ class RoutingSignal:
     the request that makes the trace-sticky decision."""
     opted_out: bool = False
     """The client sent ``Otari-Router: off`` for this request."""
+    messages: tuple[RoutingMessage, ...] = ()
+    """The conversation as role and text, oldest first, for a backend that reads
+    turns rather than one flattened prompt."""
 
 
 async def decide_ordering(
@@ -89,6 +93,7 @@ async def decide_ordering(
     allowlist: list[str] | None,
     signal: RoutingSignal | None,
     workspace_id: uuid.UUID | None = None,
+    routing: RoutingPort | None = None,
 ) -> RouterOrdering | None:
     """Ask the policy's router to rank its candidates for this request.
 
@@ -100,6 +105,10 @@ async def decide_ordering(
     Returns an *empty* :class:`RouterOrdering` when a router was asked and
     declined, or when the caller opted out. That also serves the default target,
     but deliberately without the warning: a decline is normal operation.
+
+    ``routing`` is the port the request path resolved from the container, so a
+    backend an overlay bound is the one asked. Omitted, this build's own
+    backends answer, which is what a caller with no container (a test) gets.
     """
     backend_name = spec.router_backend
     if backend_name is None:
@@ -110,22 +119,23 @@ async def decide_ordering(
     if signal.opted_out:
         return RouterOrdering([], rationale="caller sent Otari-Router: off")
 
-    backend = get_router_backend(config, backend_name)
+    backend = routing.backend(backend_name) if routing is not None else get_router_backend(config, backend_name)
     if backend is None:
-        # This build has no such backend, which is the one "no ordering" case that
-        # is a misconfiguration rather than normal operation, and the only one worth
-        # a log line. Warned here rather than in the compiler because the compiler
-        # also runs where there is no request at all (`explain`, the CLI), and
-        # warning there reported a problem that did not exist.
+        # This build has no such backend, or one it was not configured to reach,
+        # which is the one "no ordering" case that is a misconfiguration rather
+        # than normal operation, and the only one worth a log line. Warned here
+        # rather than in the compiler because the compiler also runs where there
+        # is no request at all (`explain`, the CLI), and warning there reported a
+        # problem that did not exist.
         if owes_missing_backend_warning(policy_name, backend_name):
             logger.warning(
-                "Routing policy '%s' names router backend '%s', which this build does not have, so the "
-                "policy serves '%s' on every request. Available backends: %s. Logged once per policy per "
-                "process.",
+                "Routing policy '%s' names router backend '%s', which this build does not have or has not "
+                "configured (smart_router needs smart_router_url), so the policy serves '%s' on every "
+                "request. Available backends: %s. Logged once per policy per process.",
                 policy_name,
                 backend_name,
                 spec.default_target,
-                ", ".join(known_backends()),
+                ", ".join(routing.known_backends() if routing is not None else known_backends()),
             )
         return None
 
@@ -149,6 +159,10 @@ async def decide_ordering(
         is_trace_continuation=signal.is_continuation,
         trace_key=signal.conversation_id,
         weights=spec.router_weights,
+        messages=signal.messages,
+        policy_name=policy_name,
+        application_id=spec.router_application_id,
+        cost_weight=spec.router_cost_weight,
     )
     try:
         async with asyncio.timeout(ROUTER_DEADLINE_SECONDS):
@@ -184,10 +198,16 @@ async def decide_ordering(
         decision.confidence,
         decision.ordered_models[0] if decision.ordered_models else "policy default",
     )
+    # Only a backend that learns gets its token kept, and only with the backend
+    # itself, so the outcome and any rating reach the backend that decided.
+    observer = backend if decision.decision_id is not None and isinstance(backend, LearningRouterBackend) else None
     return RouterOrdering(
         selectors=list(decision.ordered_models),
         confidence=decision.confidence,
         rationale=decision.rationale,
+        backend=backend_name,
+        decision_id=decision.decision_id if observer is not None else None,
+        observer=observer,
     )
 
 

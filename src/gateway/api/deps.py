@@ -28,6 +28,7 @@ from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.ports.routing_port import RoutingPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.api_keys import ApiKeyRepository
@@ -36,6 +37,7 @@ from gateway.repositories.files import FileRepositories
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.repositories.providers import OrgProviderKeyModelRepository
+from gateway.repositories.routing import RoutedRequestRepository
 from gateway.repositories.tenancy import OrganizationGuardrailDefinitionRepository, OrgProviderKeyRepository
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultService
@@ -49,7 +51,7 @@ from gateway.services.master_key_service import hash_master_key, is_generated_ma
 from gateway.services.organization_pricing_service import OrganizationPricingService
 from gateway.services.overview.overview_service import OverviewService
 from gateway.services.providers import OrgProviderModelService
-from gateway.services.routing import clear_router_backend_cache
+from gateway.services.routing import RoutingFeedbackService, clear_router_backend_cache
 from gateway.services.tenancy import OrganizationService, organization_guardrail_runner
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, refresh_org_provider_cache
@@ -965,6 +967,15 @@ def get_telemetry_storage_port(
     return container.resolve(TelemetryStoragePort, db)
 
 
+def get_routing_port(container: ContainerDep) -> RoutingPort:
+    """Resolve the router-backend adapter this build bound at startup.
+
+    No session: a backend opens what it reads itself, or reads over the
+    network, and which backends exist is a deployment fact.
+    """
+    return container.resolve(RoutingPort, None)
+
+
 def get_web_search_policy_port(db: PortSessionDep, container: ContainerDep) -> WebSearchPolicyPort:
     """Resolve the web search policy adapter this build bound at startup."""
     return container.resolve(WebSearchPolicyPort, db)
@@ -1024,6 +1035,17 @@ def get_api_key_service(uow: Annotated[UnitOfWork, Depends(get_unit_of_work)]) -
 ApiKeyServiceDep = Annotated[ApiKeyService, Depends(get_api_key_service)]
 
 
+def get_routing_feedback_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    routing: Annotated[RoutingPort, Depends(get_routing_port)],
+) -> RoutingFeedbackService:
+    """Build the request's routing-feedback service on its Unit of Work and the bound ``RoutingPort``."""
+    return RoutingFeedbackService(uow, RoutedRequestRepository(uow), routing)
+
+
+RoutingFeedbackServiceDep = Annotated[RoutingFeedbackService, Depends(get_routing_feedback_service)]
+
+
 def get_organization_guardrail_definition_service(
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -1065,6 +1087,7 @@ GrowthSignalPortDep = Annotated[GrowthSignalPort, Depends(get_growth_signal_port
 IdentityProviderPortDep = Annotated[IdentityProviderPort, Depends(get_identity_provider_port)]
 McpServerPortDep = Annotated[McpServerPort, Depends(get_mcp_server_port)]
 ModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_model_provider_port)]
+RoutingPortDep = Annotated[RoutingPort, Depends(get_routing_port)]
 
 
 def get_org_provider_model_service(
@@ -1220,6 +1243,7 @@ __all__ = [
     "McpServerPortDep",
     "ModelProviderPortDep",
     "OrgProviderModelServiceDep",
+    "RoutingPortDep",
     "TelemetryStoragePortDep",
     "WebSearchPolicyPortDep",
     "get_config",

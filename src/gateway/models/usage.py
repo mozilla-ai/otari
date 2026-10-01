@@ -154,6 +154,17 @@ class UsageLog(Base):
     attempt_count: Mapped[int | None] = mapped_column()
     request_group_id: Mapped[str | None] = mapped_column(index=True)
 
+    # The id the caller received as ``Otari-Request-ID``, so a caller can name the
+    # request afterwards (to rate it, say). Every row of one request carries it.
+    # Nullable: historical rows, hybrid gateways and rows written before a request
+    # id exists (an early rejection) have none.
+    request_id: Mapped[str | None] = mapped_column(index=True)
+    # Which router backend decided this request, as the policy named it, and the
+    # backend's own token for that decision. Set only for a backend that learns
+    # from outcomes, which is what makes a request rateable.
+    routing_backend: Mapped[str | None] = mapped_column()
+    routing_decision_id: Mapped[str | None] = mapped_column()
+
     # HTTP status that classifies a failure, so failures can be grouped with a
     # GROUP BY instead of substring-matching provider-specific error prose. It is
     # the status the provider returned when it sent one (an upstream 401 stays

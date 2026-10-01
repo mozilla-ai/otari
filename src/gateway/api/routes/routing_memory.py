@@ -48,15 +48,17 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, require_deployment_operator
+from gateway.api.deps import RoutingPortDep, get_config, get_db, require_deployment_operator
 from gateway.api.routes._helpers import resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.routing import RouterPreference, RoutingMemory
+from gateway.ports.routing_port import RoutingPort
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.policy_store import effective_policies
 from gateway.services.provider_kwargs import resolve_provider_selector
-from gateway.services.routing import KNN_BACKEND, backend_pool_is_teachable, get_router_backend
+from gateway.services.routing import KNN_BACKEND
+from gateway.services.routing.backends import router_traits
 from gateway.services.routing.knn import KnnRoutingMemory
 
 router = APIRouter(
@@ -207,7 +209,7 @@ class RouterStatus(BaseModel):
     policies: list[LearnedPolicy]
 
 
-def _knn(config: GatewayConfig) -> KnnRoutingMemory:
+def _knn(routing: RoutingPort) -> KnnRoutingMemory:
     """The kNN backend, or a 500 if this build somehow cannot build one.
 
     There is no "router disabled" state to report: the backend exists whenever the
@@ -215,13 +217,18 @@ def _knn(config: GatewayConfig) -> KnnRoutingMemory:
     pool before writing the policy that reads it is a legitimate order of
     operations, so these routes do not require a policy to exist.
     """
-    backend = get_router_backend(config, KNN_BACKEND)
+    backend = routing.backend(KNN_BACKEND)
     if not isinstance(backend, KnnRoutingMemory):  # pragma: no cover - defensive
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="The kNN router backend is unavailable in this build.",
         )
     return backend
+
+
+def _teachable(routing: RoutingPort | None, backend: str | None) -> bool:
+    """Whether a policy naming ``backend`` reads the pool this API teaches, as the bound port says."""
+    return (routing.traits(backend) if routing is not None else router_traits(backend)).teachable
 
 
 async def _require_user(db: AsyncSession, user_id: str) -> None:
@@ -246,7 +253,11 @@ def _canonical(
 
 
 def _validated_scores(
-    config: GatewayConfig, user_id: str, examples: list[ScoredExample], workspace_id: uuid.UUID
+    config: GatewayConfig,
+    user_id: str,
+    examples: list[ScoredExample],
+    workspace_id: uuid.UUID,
+    routing: RoutingPort | None = None,
 ) -> dict[str, str]:
     """Refuse a score key no learned policy could ever ask about, and canonicalize the rest.
 
@@ -280,7 +291,7 @@ def _validated_scores(
     """
     known: dict[str, str] = {}
     for spec in effective_policies(config, user_id, workspace_id=workspace_id).values():
-        if not backend_pool_is_teachable(spec.router_backend):
+        if not _teachable(routing, spec.router_backend):
             continue
         for selector in [*spec.router_candidates, spec.default_target]:
             canonical = _canonical(config, selector, user_id, workspace_id=workspace_id)
@@ -333,12 +344,12 @@ def _validated_scores(
 
 
 def _learned_policies(
-    config: GatewayConfig, user_id: str | None, workspace_id: uuid.UUID
+    config: GatewayConfig, user_id: str | None, workspace_id: uuid.UUID, routing: RoutingPort | None = None
 ) -> list[LearnedPolicy]:
     policies: list[LearnedPolicy] = []
     for name, spec in effective_policies(config, user_id, workspace_id=workspace_id).items():
         backend = spec.router_backend
-        if not backend_pool_is_teachable(backend) or backend is None:
+        if backend is None or not _teachable(routing, backend):
             continue
         policies.append(
             LearnedPolicy(
@@ -382,6 +393,7 @@ async def rank_candidates(
     request: RankRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    routing: RoutingPortDep,
 ) -> RankResponse:
     """Record scored examples: one routing-memory record each, plus an audit row.
 
@@ -399,7 +411,7 @@ async def rank_candidates(
     candidates to, so how a policy spells a candidate cannot decide whether it
     matches.
     """
-    backend = _knn(config)
+    backend = _knn(routing)
     await _require_user(db, request.user_id)
     workspace_id = await resolve_managed_workspace_id(db, request.workspace_id)
     # Committed before the loop, because `record_preference` writes its
@@ -418,7 +430,7 @@ async def rank_candidates(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
         ) from None
-    normalized = _validated_scores(config, request.user_id, request.examples, workspace_id)
+    normalized = _validated_scores(config, request.user_id, request.examples, workspace_id, routing)
 
     recorded = 0
     touched: set[str | None] = set()
@@ -497,6 +509,7 @@ async def rank_candidates(
 async def routing_memory_status(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    routing: RoutingPortDep,
     user_id: Annotated[str, Query(description="Whose routing memory to report on.")],
     workspace_id: Annotated[
         uuid.UUID | None,
@@ -512,7 +525,7 @@ async def routing_memory_status(
     instead of being required, because a single-workspace deployment has one
     answer.
     """
-    backend = _knn(config)
+    backend = _knn(routing)
     await _require_user(db, user_id)
     target_workspace_id = await resolve_managed_workspace_id(db, workspace_id)
     total, per_task = await _pool_counts(db, backend, user_id, target_workspace_id)
@@ -530,7 +543,7 @@ async def routing_memory_status(
         tasks=[
             TaskPool(task_id=task_id, records=count, warm=count >= seed) for task_id, count in per_task
         ],
-        policies=_learned_policies(config, user_id, target_workspace_id),
+        policies=_learned_policies(config, user_id, target_workspace_id, routing),
     )
 
 

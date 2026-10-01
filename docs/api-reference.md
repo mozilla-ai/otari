@@ -48,6 +48,7 @@ keys and management APIs are not used.
 | `/api/v1/models` | Yes | Yes | No |
 | Management APIs | Yes | Yes | No |
 | `/api/v1/key-identity` | Yes | Yes | No |
+| `/api/v1/routing/feedback` | Yes | Yes | No |
 
 Hosted mode is a control plane. Its inference paths return a descriptive `404`
 and, when configured, the data-plane URL to use instead. See [Modes](modes.md).
@@ -68,7 +69,9 @@ moderations, rerank, and search. Provider support differs by endpoint, so use
 
 Every Chat, Messages, and Responses response carries an `Otari-Request-ID`
 header, streaming or not. In hybrid mode it is the platform's id for the
-request; a standalone gateway mints its own.
+request; a standalone gateway mints its own and records it on the request's
+usage rows, which is how a caller [rates a response](#rating-a-routed-response)
+afterwards.
 
 A priced response also carries its cost on the usage object it already returns,
 as `usage.cost_usd` (a six-decimal USD string) and `usage.pricing_source`. On a
@@ -153,6 +156,35 @@ Routing-policy management lives under `/api/v1/routing/policies`; learned-routin
 examples and status live under `/api/v1/routing/preferences` and `/api/v1/routing/status`.
 See [Routing policies](routing.md) for configuration and behavior, and OpenAPI for
 the request schemas.
+
+### Rating a routed response
+
+`POST /api/v1/routing/feedback` tells the router that chose a response's model
+how good the response was. Send the `Otari-Request-ID` header the response came
+back with and a score from 0 (worst) to 1 (best), authenticated with an API key
+of the workspace that served the request:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/routing/feedback \
+  -H "Authorization: Bearer $OTARI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"request_id": "<Otari-Request-ID>", "score": 0.9}'
+```
+
+| Status | Meaning |
+| --- | --- |
+| `204` | The router recorded the rating. |
+| `401` | No valid workspace API key. The master key is not one. |
+| `404` | No request with this id was served in the key's workspace. A request in another workspace is answered the same way. |
+| `409` | The request was not routed by a router that learns from ratings (it named a plain model, a policy without such a router, or the router could not decide and the default target served), or the router already holds a rating for it. |
+| `422` | The body is malformed, or `score` is outside 0 to 1. |
+| `502` | The router could not record the rating, or the gateway is no longer configured to reach it. Retry later. |
+
+Only a policy whose router learns from ratings (`router: smart_router`) makes a
+request rateable; see [Routing policies](routing.md#let-an-external-smart-router-choose).
+The rating is passed on as it is. The smart router keeps one rating per
+response, so rating the same request again is a `409`. A request the router had
+no opinion on, where the default target served, is still rateable.
 
 ## Provider error details
 

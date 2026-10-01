@@ -396,3 +396,97 @@ def test_router_contributions_keep_their_order() -> None:
     container.contribute_router(second)
 
     assert container.router_contributions() == (first, second)
+
+
+def test_routing_resolves_the_core_backends_for_this_config() -> None:
+    from gateway.adapters.routing_adapter import CoreRoutingAdapter
+    from gateway.ports.routing_port import RoutingPort
+    from gateway.services.routing.backends import NoOpRouterBackend
+
+    routing = build_container(config=GatewayConfig()).resolve(RoutingPort, NO_SESSION)
+
+    assert isinstance(routing, CoreRoutingAdapter)
+    assert isinstance(routing.backend(" NOOP "), NoOpRouterBackend)
+    assert routing.backend("cheapest") is None
+    assert set(routing.known_backends()) >= {"knn", "noop", "weighted"}
+    assert routing.traits("knn").requires_pricing
+    assert not routing.traits("weighted").teachable
+
+
+def test_routing_refuses_a_container_built_without_config() -> None:
+    from gateway.ports.routing_port import RoutingPort
+
+    with pytest.raises(ContainerError, match="RoutingPort needs the deployment config"):
+        build_container().resolve(RoutingPort, NO_SESSION)
+
+
+def test_a_bootstrap_can_add_a_router_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An overlay extends the backend set by binding its own adapter and delegating the rest."""
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "routing_bootstrap",
+        """
+from gateway.ports.routing_port import RouterTraits, RoutingDecision, RoutingPort
+
+
+class Cheapest:
+    async def rank(self, ctx):
+        return RoutingDecision(ordered_models=sorted(ctx.candidate_pool), confidence=1.0, rationale="cheapest")
+
+
+def register(container):
+    core = container.resolve(RoutingPort, None)
+
+    class WithCheapest:
+        def __init__(self, session):
+            del session
+
+        def backend(self, name):
+            return Cheapest() if name.strip().lower() == "cheapest" else core.backend(name)
+
+        def known_backends(self):
+            return (*core.known_backends(), "cheapest")
+
+        def traits(self, name):
+            return RouterTraits(teachable=False, requires_pricing=False) if name == "cheapest" else core.traits(name)
+
+    container.bind(RoutingPort, WithCheapest)
+""",
+    )
+    from gateway.ports.routing_port import RoutingPort
+    from gateway.services.routing.backends import NoOpRouterBackend
+
+    container = build_container("routing_bootstrap:register", config=GatewayConfig())
+    routing = container.resolve(RoutingPort, NO_SESSION)
+
+    assert type(routing.backend("cheapest")).__name__ == "Cheapest"
+    assert isinstance(routing.backend("noop"), NoOpRouterBackend)
+    assert "cheapest" in routing.known_backends()
+    assert container.summary.startswith("routing_bootstrap:register rebound RoutingPort")
+
+
+def test_a_routing_adapter_of_the_wrong_shape_fails_at_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "stale_routing_bootstrap",
+        """
+from gateway.ports.routing_port import RoutingPort
+
+
+class OnlyBackends:
+    def __init__(self, session):
+        del session
+
+    def backend(self, name):
+        return None
+
+
+def register(container):
+    container.bind(RoutingPort, OnlyBackends)
+""",
+    )
+
+    with pytest.raises(PortShapeError, match="OnlyBackends, bound to RoutingPort, lacks known_backends, traits"):
+        build_container("stale_routing_bootstrap:register", config=GatewayConfig())

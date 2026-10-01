@@ -38,6 +38,7 @@ from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAdapter
 from gateway.adapters.mcp_server_adapter import build_mcp_server_port
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
+from gateway.adapters.routing_adapter import CoreRoutingAdapter
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
 from gateway.adapters.web_search_policy_adapter import build_web_search_policy_port
 from gateway.core.config import GatewayConfig
@@ -51,6 +52,7 @@ from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.ports.routing_port import RoutingPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 
@@ -362,6 +364,24 @@ def _web_search_policy_port_factory(config: GatewayConfig | None) -> PortFactory
     return factory
 
 
+def _routing_port_factory(config: GatewayConfig | None) -> PortFactory[RoutingPort]:
+    """The core ``RoutingPort`` factory, closed over this app's config.
+
+    Config rather than a session, because a backend's tuning (the kNN router's
+    neighbors and embedding model) is a deployment setting. A container built
+    without config resolves this port only to raise.
+    """
+
+    def factory(session: AsyncSession | None) -> RoutingPort:
+        del session
+        if config is None:
+            msg = "RoutingPort needs the deployment config; build the container with it"
+            raise ContainerError(msg)
+        return CoreRoutingAdapter(config)
+
+    return factory
+
+
 def build_container(bootstrap_selector: str | None = None, config: GatewayConfig | None = None) -> Container:
     """Build the composition-root container for this deployment.
 
@@ -421,6 +441,10 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
     # rows where it holds them, and asks its peer where it does not. An overlay
     # binds a source of its own and changes nothing above the port.
     container.bind(WebSearchPolicyPort, _web_search_policy_port_factory(config))
+    # Router backends a policy's ``select`` may name: the base ships ``noop``,
+    # ``weighted`` and ``knn``. An overlay binds an adapter that adds a backend
+    # of its own and changes nothing in the compiler or the pipeline.
+    container.bind(RoutingPort, _routing_port_factory(config))
     if config is not None:
         # Asked once, at build, rather than per request: selecting a hosted
         # provider is itself what publishes code execution on ``/v1/tools``, in
@@ -463,6 +487,9 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
         raise BootstrapError(msg)
     rebound = sorted(_port_name(port) for port, factory in container.bindings() if defaults.get(port) is not factory)
     _verify_port_shape(container, ModelProviderPort)
+    if config is not None:
+        # Only with config, because that is the only way the core factory builds.
+        _verify_port_shape(container, RoutingPort)
     container.summary = f"{bootstrap_selector} rebound {', '.join(rebound) or 'no ports'}"
     contributed = ", ".join(contribution.capability for contribution in container.router_contributions())
     if contributed:
