@@ -10,6 +10,7 @@ from unittest.mock import patch
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
+from sqlmodel import col
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT
 from gateway.models.budgets import SCOPE_API_TOKEN, Budget, ScopedBudget
@@ -249,7 +250,7 @@ def test_a_tenants_budget_cannot_cap_end_users(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:
     """An end user is a deployment user, so only a deployment budget may cap it."""
-    organization_id = db_session.query(Organization.id).first()
+    organization_id = db_session.query(col(Organization.id)).first()
     assert organization_id is not None
     tenant_budget = Budget(request_limit=1, organization_id=organization_id[0])
     db_session.add(tenant_budget)
