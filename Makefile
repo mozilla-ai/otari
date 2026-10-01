@@ -106,8 +106,10 @@ changelog:
 homebrew-formula:
 	rm -rf build/homebrew
 	uv build --package otari-agent --sdist -o build/homebrew
-# The sdist carries the version setuptools-scm derived from the checkout, so
-# the name is only known after the build; the release workflow globs it too.
+# A preview, so the version shown is the built file's own, known only after the
+# build. The download URL only has to be right in otari-homebrew.yml, which
+# passes the release tag; reading that tag here (git describe --exact-match)
+# would instead fail on every checkout that is not sitting on one.
 	uv run python scripts/homebrew_formula.py --version "$$(ls build/homebrew/otari_agent-*.tar.gz | sed -E 's|.*/otari_agent-(.*)\.tar\.gz|\1|')" --sdist "$$(ls build/homebrew/otari_agent-*.tar.gz)" --output build/homebrew/otari.rb
 	@echo "Rendered build/homebrew/otari.rb"
 
