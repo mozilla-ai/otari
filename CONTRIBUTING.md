@@ -153,7 +153,13 @@ keep it current, and they cover different things:
 - **Dependabot** (`.github/dependabot.yml`) opens weekly version-update PRs for the
   `uv` and `github-actions` ecosystems. Security updates are separate, need no
   config, and already cover every supported ecosystem here. The dashboard is not
-  covered by either right now; see #1001.
+  covered by either, because `web/` uses a pnpm newer than Dependabot supports;
+  see #1001.
+- **`.github/workflows/otari-dashboard-audit.yml`** stands in for Dependabot's
+  security alerts on the dashboard. It runs `pnpm audit` against `web/pnpm-lock.yaml`
+  on every PR that changes the dashboard's dependencies and weekly, failing on a
+  high or critical advisory, and keeps a tracking issue open while one remains.
+  Run it locally with `pnpm --dir web audit`.
 - **`.github/workflows/otari-lock-refresh.yml`** re-resolves `uv.lock` weekly against
   the newest versions the existing constraints already allow, which is the case
   Dependabot does not open PRs for. A floored dependency can otherwise stay at
