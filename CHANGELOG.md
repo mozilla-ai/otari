@@ -4,6 +4,17 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.14.1](https://github.com/mozilla-ai/otari/releases/tag/v0.14.1) - 2026-10-01
+
+
+
+### Bug Fixes
+
+- **auth:** Refuse signup on a verified identity by [@peteski22](https://github.com/peteski22) ([`dd22d23`](https://github.com/mozilla-ai/otari/commit/dd22d23c29e0e8116dc7025ed68810c376afece9))
+- **auth:** Drop an unproven password when a provider verifies the address by [@peteski22](https://github.com/peteski22) ([`a5e8444`](https://github.com/mozilla-ai/otari/commit/a5e844489fcb8ef3213ac5d384e4b2beabc74353))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.14.0...v0.14.1
 ## [0.14.0](https://github.com/mozilla-ai/otari/releases/tag/v0.14.0) - 2026-10-01
 
 
