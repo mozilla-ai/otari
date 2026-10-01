@@ -317,6 +317,8 @@ async def _wait_for_owner(owner: asyncio.Task[None]) -> bool:
             logger.warning("MCP sessions did not close within %s seconds", CLOSE_TIMEOUT_SECONDS)
             owner.cancel()
             cancellation = await _wait_until_done(owner, loop.time() + _CANCEL_GRACE_SECONDS) or cancellation
+            if not owner.done():
+                owner.add_done_callback(_log_late_failure)
     if cancellation is not None:
         raise cancellation
     await anyio.lowlevel.checkpoint_if_cancelled()
@@ -333,6 +335,12 @@ async def _wait_until_done(task: asyncio.Task[None], deadline: float) -> asyncio
         except asyncio.CancelledError as exc:
             cancellation = exc
     return cancellation
+
+
+def _log_late_failure(task: asyncio.Task[None]) -> None:
+    """Log by type why an abandoned owner failed, so asyncio never logs its message."""
+    if (failure := _retrieve_failure(task)) is not None:
+        logger.warning("Abandoned MCP sessions failed to close: %s", failure_class(failure))
 
 
 def _retrieve_failure(task: asyncio.Task[None]) -> BaseException | None:
