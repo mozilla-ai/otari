@@ -23,6 +23,7 @@ from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAdapter
 from gateway.adapters.mcp_server_adapter import RemoteMcpServers
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
+from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
 from gateway.adapters.web_search_policy_adapter import RemoteWebSearchPolicy
 from gateway.container import (
@@ -43,6 +44,7 @@ from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 
@@ -102,6 +104,7 @@ def test_core_defaults_are_bound_for_every_port() -> None:
     assert isinstance(container.resolve(TelemetryStoragePort, NO_SESSION), DatabaseTelemetryStorageAdapter)
     assert isinstance(container.resolve(IdentityProviderPort, NO_SESSION), RosterIdentityProviderAdapter)
     assert isinstance(container.resolve(ApiKeyFormatPort, NO_SESSION), DefaultApiKeyFormatAdapter)
+    assert isinstance(container.resolve(ProviderFilePort, NO_SESSION), AnyLlmProviderFiles)
 
 
 def test_no_selector_contributes_no_routers_and_says_so() -> None:

@@ -28,6 +28,7 @@ from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.api_keys import ApiKeyRepository
@@ -42,7 +43,7 @@ from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultServic
 from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
-from gateway.services.files import FileService, SandboxFileBridge, StagedFile
+from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
 from gateway.services.inference import IdempotencyService
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
@@ -663,13 +664,22 @@ async def get_db_if_needed(
             yield db
 
 
-def build_file_service(uow: UnitOfWork, file_store: FileStoragePort, config: GatewayConfig) -> FileService:
+def build_file_service(uow: UnitOfWork, backends: FileBackends, config: GatewayConfig) -> FileService:
     """Build Files operations for a scoped output request or cleanup job."""
 
     async def reject_unscoped_upload() -> uuid.UUID:
         raise RuntimeError("Unscoped uploads are not supported in this context; specify a workspace.")
 
-    return FileService(uow, FileRepositories.on(uow), file_store, config, reject_unscoped_upload)
+    return FileService(uow, FileRepositories.on(uow), backends, config, reject_unscoped_upload)
+
+
+def _file_backends(request: Request) -> FileBackends | None:
+    """The backends this build bound for files, or ``None`` in hybrid mode, which binds none."""
+    storage: FileStoragePort | None = getattr(request.app.state, "file_store", None)
+    provider_files: ProviderFilePort | None = getattr(request.app.state, "provider_files", None)
+    if storage is None or provider_files is None:
+        return None
+    return FileBackends(storage=storage, provider_files=provider_files)
 
 
 def build_idempotency_service(uow: UnitOfWork, config: GatewayConfig) -> IdempotencyService:
@@ -693,14 +703,14 @@ def build_sandbox_file_bridge(
     Produced files are announced under ``public_base_url`` where the deployment knows its address,
     and otherwise under the one the request arrived on.
     """
-    file_store = getattr(raw_request.app.state, "file_store", None)
-    if uow is None or not config.files_enabled or file_store is None or user_id is None or workspace_id is None:
+    backends = _file_backends(raw_request)
+    if uow is None or not config.files_enabled or backends is None or user_id is None or workspace_id is None:
         return None
     base = (config.public_base_url or str(raw_request.base_url)).rstrip("/")
     return SandboxFileBridge(
-        file_store=file_store,
+        backends=backends,
         config=config,
-        files=build_file_service(uow, file_store, config),
+        files=build_file_service(uow, backends, config),
         user_id=user_id,
         workspace_id=workspace_id,
         inputs=inputs,
@@ -1086,33 +1096,26 @@ def get_file_store(request: Request) -> FileStoragePort:
 
 
 def get_file_service(
+    request: Request,
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    file_store: Annotated[FileStoragePort, Depends(get_file_store)],
 ) -> FileService:
     """Build the request's files service on the request's Unit of Work."""
-    return FileService(uow, FileRepositories.on(uow), file_store, config, lambda: default_workspace_id(db))
+    backends = _file_backends(request)
+    if backends is None:
+        raise RuntimeError("Files are served only where this build binds a file store")
+    return FileService(uow, FileRepositories.on(uow), backends, config, lambda: default_workspace_id(db))
 
 
 FileServiceDep = Annotated[FileService, Depends(get_file_service)]
 
 
-def get_file_store_if_needed(request: Request) -> FileStoragePort | None:
-    """Return the configured blob store in standalone mode, otherwise ``None``.
-
-    The counterpart of ``get_file_store``, for a route that serves both modes. A
-    hybrid gateway binds none, so the attribute is absent rather than set to None.
-    """
-    store: FileStoragePort | None = getattr(request.app.state, "file_store", None)
-    return store
-
-
 def get_file_service_if_needed(
+    request: Request,
     config: Annotated[GatewayConfig, Depends(get_config)],
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
-    file_store: Annotated[FileStoragePort | None, Depends(get_file_store_if_needed)],
 ) -> FileService | None:
     """Return the request's files service in standalone mode, otherwise ``None``.
 
@@ -1123,9 +1126,10 @@ def get_file_service_if_needed(
     NOTE: a route must take its session from ``get_db_if_needed`` as well, for the
     reason ``get_unit_of_work_if_needed`` gives.
     """
-    if uow is None or db is None or file_store is None:
+    backends = _file_backends(request)
+    if uow is None or db is None or backends is None:
         return None
-    return FileService(uow, FileRepositories.on(uow), file_store, config, lambda: default_workspace_id(db))
+    return FileService(uow, FileRepositories.on(uow), backends, config, lambda: default_workspace_id(db))
 
 
 OptionalFileServiceDep = Annotated[FileService | None, Depends(get_file_service_if_needed)]

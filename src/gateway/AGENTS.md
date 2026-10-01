@@ -155,7 +155,9 @@ router backends outside it so CLI and API explain can compile without I/O.
 Asynchronous router decisions live under `services/routing/` and pass a
 `RouterOrdering` into the compiler. A declined decision uses the policy
 default. The API attempt walker executes the compiled order and owns fallback
-settlement.
+settlement. Work that depends on the account a candidate's credential reaches
+runs in its `prepare_kwargs` step, once per candidate, and a candidate that step
+cannot serve is skipped without reordering the plan (`CandidateCannotServe`).
 
 ## Tools, MCP, and guardrails
 
@@ -168,8 +170,10 @@ resolved in `api/routes/_tools.py`): a workspace pin wins over everything, the
 `Otari-Code-Execution` header wins over the deployment default, and `auto`
 claims a declaration only when the dispatched provider does not run it
 natively. The workspace policy is read once, in the request preamble, and
-reused at admission; the same decision says whether a referenced upload is
-staged for the sandbox. The tool loop is in
+reused at admission; the same decision says where a referenced upload goes,
+staged for the gateway's sandbox or copied, for each candidate as it is
+dispatched, into the provider account whose container will read it
+(`FileService.provider_file_ids`). The tool loop is in
 `services/mcp_loop.py`, sandbox and search backends under `services/`, and
 outbound URL checks in `services/url_safety.py`.
 

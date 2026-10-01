@@ -11,6 +11,7 @@ A durable standalone deployment should:
 - use PostgreSQL and back it up
 - set a strong master key in a secret store
 - set and back up `OTARI_SECRET_KEY` when storing provider credentials
+- set `OTARI_PROVIDER_ACCOUNT_PEPPER` to its own random value while provider copies are on
 - configure explicit pricing or deliberately enable default pricing
 - terminate TLS in front of the gateway
 - restrict database and management access

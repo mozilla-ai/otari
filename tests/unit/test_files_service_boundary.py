@@ -18,8 +18,9 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.files_exceptions import FileStorageError
 from gateway.models.files import FileObject
 from gateway.ports.file_storage_port import FileStoragePort
-from gateway.repositories.files import FileRepositories, FileRepository
-from gateway.services.files import FileService, NewOutput, SweepBatch, _sweeper
+from gateway.ports.provider_file_port import ProviderFilePort
+from gateway.repositories.files import FileProviderCopyRepository, FileRepositories, FileRepository
+from gateway.services.files import FileBackends, FileService, NewOutput, SweepBatch, _sweeper
 
 
 class _Transactions:
@@ -39,11 +40,15 @@ class _Transactions:
             raise self.commit_error
 
 
-def _service(uow: _Transactions, repo: Mock, store: Mock) -> FileService:
+def _service(uow: _Transactions, repo: Mock, store: Mock, copies: Mock | None = None) -> FileService:
+    if copies is None:
+        copies = Mock(spec=FileProviderCopyRepository)
+        copies.remove_stale_pending = AsyncMock(return_value=0)
+        copies.remove_expired = AsyncMock(return_value=0)
     return FileService(
         cast(UnitOfWork, uow),
-        FileRepositories(files=repo),
-        store,
+        FileRepositories(files=repo, provider_copies=copies),
+        FileBackends(storage=store, provider_files=cast(ProviderFilePort, None)),
         GatewayConfig(),
         AsyncMock(side_effect=AssertionError("Workspace resolution is not expected")),
     )
@@ -86,10 +91,23 @@ async def test_sweep_transfers_outside_transactions(delete_error: OSError | None
         assert uow.depth == 1
         assert file_ids == ["file-1"]
 
+    async def remove_stale_pending(**kwargs: object) -> int:
+        assert uow.depth == 1
+        return 0
+
+    async def remove_expired(**kwargs: object) -> int:
+        assert uow.depth == 1
+        return 0
+
+    copies = Mock(spec=FileProviderCopyRepository)
+    copies.remove_stale_pending = AsyncMock(side_effect=remove_stale_pending)
+    copies.remove_expired = AsyncMock(side_effect=remove_expired)
     repo.reclaimable.side_effect = candidates
     repo.remove_all.side_effect = remove
     store.delete.side_effect = delete
-    result = await _service(uow, repo, store).sweep(batch_size=2)
+    result = await _service(uow, repo, store, copies).sweep(batch_size=2)
+    copies.remove_stale_pending.assert_awaited_once()
+    copies.remove_expired.assert_awaited_once()
     blocked = isinstance(delete_error, PermissionError)
     assert result == SweepBatch(reclaimed=0 if blocked else 1, seen=1, cursor=(now, "file-1"))
     assert uow.depth == 0

@@ -1,13 +1,13 @@
-"""ORM table for the files the Files API stores, and the metadata that outlives their bytes."""
+"""ORM tables for the files the Files API stores, and for the copies a provider holds of them."""
 
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Uuid, text
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from gateway.models.base import Base
+from gateway.models.base import Base, UtcDateTime
 
 
 def new_file_id() -> str:
@@ -82,3 +82,59 @@ class FileObject(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None, index=True)
 
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+
+
+class FileProviderCopy(Base):
+    """A copy of a stored file that a provider holds, so a provider-native feature can name it.
+
+    Otari's store stays the source of truth.
+    The copy is a cache the provider expires on its own, and ``expires_at`` is
+    when it stops being usable, so a later request can tell without asking.
+
+    A row is recorded before its copy is uploaded, so every copy Otari makes is
+    named by a row, and ``pending_since`` is set until the upload is confirmed.
+    Each copy has its own row, so two requests copying one file at once each
+    record the copy they made.
+
+    ``account_identity`` says which provider account holds the copy, because a
+    provider file ID exists only inside that account.
+    ``provider_instance`` and ``credential_workspace_id`` say how that account's
+    credential is found again, which the identity cannot say.
+    """
+
+    __tablename__ = "file_provider_copies"
+    __table_args__ = (
+        CheckConstraint(
+            "(pending_since IS NULL AND provider_file_id IS NOT NULL AND expires_at IS NOT NULL)"
+            " OR (pending_since IS NOT NULL AND provider_file_id IS NULL)",
+            name="ck_file_provider_copies_pending_or_confirmed",
+        ),
+        Index("ix_file_provider_copies_file_account", "file_id", "account_identity"),
+        # The workspace foreign key cascades, and no other index leads with it.
+        Index("ix_file_provider_copies_credential_workspace_id", "credential_workspace_id"),
+        Index(
+            "ix_file_provider_copies_pending_since",
+            "pending_since",
+            postgresql_where=text("pending_since IS NOT NULL"),
+            sqlite_where=text("pending_since IS NOT NULL"),
+        ),
+        Index(
+            "ix_file_provider_copies_expires_at",
+            "expires_at",
+            postgresql_where=text("pending_since IS NULL"),
+            sqlite_where=text("pending_since IS NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    file_id: Mapped[str] = mapped_column(ForeignKey("file_objects.id", ondelete="CASCADE"))
+    account_identity: Mapped[str] = mapped_column()
+    provider: Mapped[str] = mapped_column()
+    provider_instance: Mapped[str] = mapped_column()
+    # CASCADE rather than the RESTRICT a file uses: a copy is a cache, and
+    # holding up a workspace deletion for one would be the only thing it ever did.
+    credential_workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("workspace.id", ondelete="CASCADE"))
+    provider_file_id: Mapped[str | None] = mapped_column(default=None)
+    expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
+    pending_since: Mapped[datetime | None] = mapped_column(UtcDateTime, default=None)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=lambda: datetime.now(UTC))

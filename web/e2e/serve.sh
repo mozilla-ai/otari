@@ -20,6 +20,9 @@ unset OTARI_AI_TOKEN
 # A throwaway Fernet key so provider credentials can be stored during the run;
 # not a secret (E2E-only, on an ephemeral DB).
 export OTARI_SECRET_KEY="${OTARI_SECRET_KEY:-wdhWKyd1gwpMjxj9h4EbpW9B6pilzfrNTe0wTnwqPHg=}"
+# Provider copies are on by default, and the gateway will not start without a
+# pepper of its own. Also not a secret, for the same reason.
+export OTARI_PROVIDER_ACCOUNT_PEPPER="${OTARI_PROVIDER_ACCOUNT_PEPPER:-e2e-provider-account-pepper-not-a-secret}"
 
 # Start each run from an empty database so onboarding and the seeded flows are
 # deterministic.

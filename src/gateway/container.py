@@ -38,6 +38,7 @@ from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAdapter
 from gateway.adapters.mcp_server_adapter import build_mcp_server_port
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
+from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
 from gateway.adapters.web_search_policy_adapter import build_web_search_policy_port
 from gateway.core.config import GatewayConfig
@@ -51,6 +52,7 @@ from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 
@@ -229,6 +231,11 @@ def _growth_signal_adapter(session: AsyncSession | None) -> GrowthSignalPort:
 def _identity_provider_adapter(session: AsyncSession | None) -> IdentityProviderPort:
     """Build the core ``IdentityProviderPort`` adapter for one request."""
     return RosterIdentityProviderAdapter(session)
+
+
+def _provider_file_adapter(session: AsyncSession | None) -> ProviderFilePort:
+    """Build the core ``ProviderFilePort`` adapter, which holds no state of its own."""
+    return AnyLlmProviderFiles()
 
 
 def _load_register(selector: str) -> Register:
@@ -413,6 +420,10 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
     # bucket or any fsspec filesystem, whichever ``files_backend`` names. An
     # overlay binds a store of its own and changes nothing above the port.
     container.bind(FileStoragePort, _file_storage_port_factory(config))
+    # A provider's own files: the base reaches them through any-llm with the
+    # credential a request dispatches with. An overlay that must not hand a
+    # managed credential to this process binds a transfer of its own.
+    container.bind(ProviderFilePort, _provider_file_adapter)
     # A workspace's MCP servers: the base reads this deployment's own rows
     # where it holds them, and asks its peer where it does not. An overlay
     # binds a source of its own and changes nothing above the port.

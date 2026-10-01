@@ -40,6 +40,7 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX, MCP_CLIENT_BETA
 from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
+from gateway.types.normalization_target import NormalizationTarget
 
 from .conftest import MODEL_NAME
 
@@ -1201,11 +1202,21 @@ def test_echoed_gateway_activity_is_removed_before_prompt_estimation(
 
     async def fake_normalize_messages(input_messages: Any, **kwargs: Any) -> Any:
         captured["normalized_messages"] = input_messages
-        return input_messages, SimpleNamespace(vision_usage=lambda: None, sandbox_inputs=[])
+        return input_messages, SimpleNamespace(vision_usage=lambda: None, sandbox_inputs=[], container_inputs=[])
 
     async def fake_resolve_request_context(**kwargs: Any) -> Any:
         captured.update(kwargs)
-        await kwargs["normalize_messages"]("user", None, "model", None, None, None)
+        await kwargs["normalize_messages"](
+            NormalizationTarget(
+                user_id="user",
+                provider=None,
+                model="model",
+                instance=None,
+                file_workspace_id=None,
+                credential_workspace_id=None,
+                workspace_executor=None,
+            )
+        )
         raise HTTPException(status_code=418, detail="stop after admission inputs")
 
     with (

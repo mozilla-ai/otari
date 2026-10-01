@@ -75,8 +75,11 @@ master_key: "test-master-key"
 EOF
 
 echo "Starting gateway container with image: $IMAGE_TAG"
+# Provider copies are on by default, and the gateway refuses to serve without a
+# pepper of its own. Generated per run, as a deployment would set one.
 docker run -d --name "$OTARI_CONTAINER" \
     --add-host=host.docker.internal:host-gateway \
+    -e OTARI_PROVIDER_ACCOUNT_PEPPER="$(openssl rand -base64 32)" \
     -p 8000:8000 \
     -v "$CONFIG_FILE":/app/config.yml \
     "$IMAGE_TAG" \

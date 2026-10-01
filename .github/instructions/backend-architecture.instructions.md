@@ -97,6 +97,10 @@ error module subclasses those bases.
 
 - Flag a route that catches a tenancy error to turn it into an
   `HTTPException`.
+- The completion pipeline is the one exception. Each completion dialect answers
+  in its own error envelope, which the handler cannot know, so the pipeline
+  renders the family through `domain_error` in `api/routes/_pipeline.py`. Flag a
+  completion route that renders a tenancy error any other way.
 
 ## Module size
 

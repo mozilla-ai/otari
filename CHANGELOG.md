@@ -4,6 +4,69 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.14.0](https://github.com/mozilla-ai/otari/releases/tag/v0.14.0) - 2026-10-01
+
+
+
+### Bug Fixes
+
+- **files:** Record an upload before its bytes are written in [#1756](https://github.com/mozilla-ai/otari/pull/1756) by [@peteski22](https://github.com/peteski22) ([`64930e4`](https://github.com/mozilla-ai/otari/commit/64930e402585ad2964673f19e523ac1e877af36b))
+- **files:** Record a produced file before its bytes are written in [#1757](https://github.com/mozilla-ai/otari/pull/1757) by [@peteski22](https://github.com/peteski22) ([`3394947`](https://github.com/mozilla-ai/otari/commit/3394947efefc6223113315a779b73f54478ccd26))
+- **web:** Render clickable radio controls in filter rail by [@claude](https://github.com/claude) ([`269ca52`](https://github.com/mozilla-ai/otari/commit/269ca52380b66f6922d6f0a5ed72187d7590bc1b))
+- **dashboard:** Keep RadioVisual private to RadioGroup by [@daavoo](https://github.com/daavoo) ([`95474ea`](https://github.com/mozilla-ai/otari/commit/95474ea95a4d455cd20e3e15ac2c97226709d604))
+- **dashboard:** Build RadioGroup options from RadioField and RadioButton in [#1576](https://github.com/mozilla-ai/otari/pull/1576) by [@daavoo](https://github.com/daavoo) ([`b0e0052`](https://github.com/mozilla-ai/otari/commit/b0e00522e6deaae4137c0de749c9a329b3bc5b71))
+- **ci:** Give the SDK regeneration PR a conventional-commit subject in [#1733](https://github.com/mozilla-ai/otari/pull/1733) by [@peteski22](https://github.com/peteski22) ([`8bf18fd`](https://github.com/mozilla-ai/otari/commit/8bf18fdde60cec398ecee6033fb8bb26e656843d))
+- **sandbox:** Stop handing the caller's token to the control plane in [#1739](https://github.com/mozilla-ai/otari/pull/1739) by [@peteski22](https://github.com/peteski22) ([`2cdbb53`](https://github.com/mozilla-ai/otari/commit/2cdbb53c8f3b3084ca66ca5661f5d3aa9e0d48d9))
+- **BREAKING:** **tools:** Apply a workspace's web search limits as a ceiling in hybrid in [#1787](https://github.com/mozilla-ai/otari/pull/1787) by [@peteski22](https://github.com/peteski22) ([`68e8544`](https://github.com/mozilla-ai/otari/commit/68e8544302868b7b0e3d66d537fa86677fb13a9d))
+- **hook:** Show a judge gate the files a change adds in [#1800](https://github.com/mozilla-ai/otari/pull/1800) by [@agpituk](https://github.com/agpituk) ([`c4fc6a2`](https://github.com/mozilla-ai/otari/commit/c4fc6a299a2cce8aeb5117d4cdc0142c81564d46))
+- **inference:** Count request-shaping headers toward an idempotency key's request by [@claude](https://github.com/claude) ([`2e487fa`](https://github.com/mozilla-ai/otari/commit/2e487fadfba4dcf8ba73a9717ea051fc04c29510))
+- **inference:** Renew an idempotency claim while its request runs by [@claude](https://github.com/claude) ([`5e5c301`](https://github.com/mozilla-ai/otari/commit/5e5c3018191b9585f3f2e2c7555435262d725a18))
+- **inference:** Free a running idempotency claim only when its lease lapses by [@claude](https://github.com/claude) ([`8a8b4b9`](https://github.com/mozilla-ai/otari/commit/8a8b4b9ab28d9c521c175fb7e216194b26d55a62))
+- **inference:** Keep an idempotency claim alive after any renewal error by [@peteski22](https://github.com/peteski22) ([`4759a42`](https://github.com/mozilla-ai/otari/commit/4759a4282092f61fd03f0780602b18f3542becbd))
+- **inference:** Refuse an unknown or blocked user before an idempotent replay by [@peteski22](https://github.com/peteski22) ([`451139e`](https://github.com/mozilla-ai/otari/commit/451139ef874dc1eee69fa37b6d79dd5ca172d991))
+- **inference:** Back off exponentially while a retry waits for its key by [@peteski22](https://github.com/peteski22) ([`3c009d5`](https://github.com/mozilla-ai/otari/commit/3c009d5fa6ea9ee5bd753cd01763a6244d45e4a8))
+- **inference:** Time idempotency leases by the database clock by [@peteski22](https://github.com/peteski22) ([`0e55c3e`](https://github.com/mozilla-ai/otari/commit/0e55c3e6edd9dcca5aabb963f05db0eca6b5a699))
+- **inference:** Keep sweeping idempotency records while the header is off by [@peteski22](https://github.com/peteski22) ([`42721db`](https://github.com/mozilla-ai/otari/commit/42721dba249f5e0b03a5bc906a1a769ffb953e9c))
+- **inference:** Keep renewing an idempotency claim until its response is stored by [@peteski22](https://github.com/peteski22) ([`efafbd5`](https://github.com/mozilla-ai/otari/commit/efafbd5857d1e65ab3a08d78d7c773ab8691c782))
+- **inference:** Retry a failed idempotency renewal before the lease runs out by [@peteski22](https://github.com/peteski22) ([`680dbdd`](https://github.com/mozilla-ai/otari/commit/680dbdd96602fac9d4708f6fb63d103326d3688f))
+- **inference:** Never let an idempotency store error fail a paid response by [@peteski22](https://github.com/peteski22) ([`57db096`](https://github.com/mozilla-ai/otari/commit/57db096c0a43ca72d18cfd2177837b27eab2da7b))
+- **inference:** Read the database clock when asked, not at transaction start by [@peteski22](https://github.com/peteski22) ([`5a7bc35`](https://github.com/mozilla-ai/otari/commit/5a7bc35ad244f8d3960c08977b8bd90165fce76e))
+- **inference:** Bound each idempotency sweep and keep replicas apart by [@peteski22](https://github.com/peteski22) ([`a07fc33`](https://github.com/mozilla-ai/otari/commit/a07fc330213777b2a85aaad5de11e56f46fe05ec))
+- **inference:** Drain every expired idempotency record in each sweep by [@peteski22](https://github.com/peteski22) ([`0bf1b5f`](https://github.com/mozilla-ai/otari/commit/0bf1b5f6ec49c55bcde1c18afea483a51a174ec2))
+- **inference:** Count routing headers toward an idempotent request by [@peteski22](https://github.com/peteski22) ([`dbdb6ee`](https://github.com/mozilla-ai/otari/commit/dbdb6eedce95b4c28ebbf9012d8dabc9844e2a79))
+- **inference:** Count every value of a repeated header toward an idempotent request by [@peteski22](https://github.com/peteski22) ([`3688f32`](https://github.com/mozilla-ai/otari/commit/3688f3268f9b03e2548d8939a77fc6e4412463fb))
+- **inference:** Repeat the guardrail verdict on an idempotent replay by [@peteski22](https://github.com/peteski22) ([`5d72c16`](https://github.com/mozilla-ai/otari/commit/5d72c1670398d8822f4585156f18d0c0eb75cd79))
+- **inference:** Pass on a request's cancellation while its claim renewal stops by [@peteski22](https://github.com/peteski22) ([`ace57ab`](https://github.com/mozilla-ai/otari/commit/ace57ab6b5fb1a75c38e3bde2d0884e37d453268))
+- **inference:** Take over only an idempotency claim that is unchanged since it was read in [#1771](https://github.com/mozilla-ai/otari/pull/1771) by [@peteski22](https://github.com/peteski22) ([`8e11b9c`](https://github.com/mozilla-ai/otari/commit/8e11b9c8c2eeaa0ad01c25d0f6412e0a2f2fea15))
+- **gateway:** Turn in-product feedback off by default until the intake delivers in [#1810](https://github.com/mozilla-ai/otari/pull/1810) by [@jigjigjig](https://github.com/jigjigjig) ([`12b62d2`](https://github.com/mozilla-ai/otari/commit/12b62d20b6e20727e40e09e0952330f0b75b9289))
+- **files:** Make a copy again when the provider dropped it early in [#1830](https://github.com/mozilla-ai/otari/pull/1830) by [@peteski22](https://github.com/peteski22) ([`fb6f167`](https://github.com/mozilla-ai/otari/commit/fb6f1672499119123fbac7927a6027f7864d365a))
+
+
+### Features
+
+- **inference:** Honor Idempotency-Key on non-streaming completions by [@claude](https://github.com/claude) ([`90f2986`](https://github.com/mozilla-ai/otari/commit/90f2986a3ff869d582e9960e06f520b9009ba7e1))
+- **inference:** Encrypt stored idempotent responses with OTARI_SECRET_KEY by [@claude](https://github.com/claude) ([`1592fea`](https://github.com/mozilla-ai/otari/commit/1592fea1a8e7875501755bf266653262637cfbd8))
+- **inference:** Answer a retry of a running idempotent request with 409 at once by [@peteski22](https://github.com/peteski22) ([`928575c`](https://github.com/mozilla-ai/otari/commit/928575c4e2fdaf58f690f2b00146c99ef935d4bc))
+- **hook:** Compose user-level guardrails from ~/.otari in [#1804](https://github.com/mozilla-ai/otari/pull/1804) by [@peteski22](https://github.com/peteski22) ([`a80e0b2`](https://github.com/mozilla-ai/otari/commit/a80e0b2bbbb164b3e9907af229d70cac2d86afec))
+- **BREAKING:** **files:** Give the provider's own code execution the files a request attaches in [#1666](https://github.com/mozilla-ai/otari/pull/1666) by [@peteski22](https://github.com/peteski22) ([`4b80994`](https://github.com/mozilla-ai/otari/commit/4b8099497fb6d7616ec21cd0556ad49eca5e0066))
+
+
+### Maintenance
+
+- **BREAKING:** **files:** Allocate a storage reference before writing bytes in [#1755](https://github.com/mozilla-ai/otari/pull/1755) by [@peteski22](https://github.com/peteski22) ([`14f9fcc`](https://github.com/mozilla-ai/otari/commit/14f9fcc91a3c951e3096940a7a2a3d99566c9782))
+- **BREAKING:** **metrics:** Make prometheus-client an optional extra in [#1235](https://github.com/mozilla-ai/otari/pull/1235) by [@daavoo](https://github.com/daavoo) ([`34ae4a8`](https://github.com/mozilla-ai/otari/commit/34ae4a82dd9dd30f14c6179f2f24baa8f1a66bb5))
+
+
+### Performance
+
+- **inference:** Delete expired idempotency records in bounded batches by [@peteski22](https://github.com/peteski22) ([`b2a36fe`](https://github.com/mozilla-ai/otari/commit/b2a36fe46e039c684e658ec1de5f5a48e88f48c1))
+
+
+
+### New Contributors
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.13.0...v0.14.0
 ## [0.13.0](https://github.com/mozilla-ai/otari/releases/tag/v0.13.0) - 2026-09-29
 
 

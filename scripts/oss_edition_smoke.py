@@ -264,7 +264,7 @@ def mock_provider(expected_api_key: str) -> Iterator[_MockProviderServer]:
 # --------------------------------------------------------------------------- #
 
 
-def oss_edition_env(base_env: dict[str, str], secret_key: str) -> dict[str, str]:
+def oss_edition_env(base_env: dict[str, str], secret_key: str, pepper: str) -> dict[str, str]:
     """Return the environment the OSS edition boots in.
 
     Settings are dropped rather than overridden with a benign value: an override
@@ -279,6 +279,9 @@ def oss_edition_env(base_env: dict[str, str], secret_key: str) -> dict[str, str]
     # Provider credentials are encrypted at rest, so storing one (step 4) needs a
     # secret key. Generated per run and thrown away with the database.
     env["OTARI_SECRET_KEY"] = secret_key
+    # Provider copies are on by default, and the edition refuses to boot without
+    # the pepper that names a provider account. Generated per run, like the key.
+    env["OTARI_PROVIDER_ACCOUNT_PEPPER"] = pepper
     return env
 
 
@@ -686,6 +689,7 @@ def main(argv: list[str] | None = None) -> int:
         # A Fernet key is urlsafe-base64 of 32 random bytes, which is why this
         # needs no cryptography import.
         secret_key = base64.urlsafe_b64encode(os.urandom(32)).decode()
+        pepper = secrets.token_urlsafe(32)
 
         try:
             with mock_provider(names.byo_key) as provider:
@@ -699,7 +703,7 @@ def main(argv: list[str] | None = None) -> int:
                         names=names,
                     ),
                 )
-                env = oss_edition_env(dict(os.environ), secret_key)
+                env = oss_edition_env(dict(os.environ), secret_key, pepper)
                 with gateway(config_path, env, base_url, log_path):
                     smoke(base_url, provider, mock_base_url, names)
         except SmokeFailure as failure:

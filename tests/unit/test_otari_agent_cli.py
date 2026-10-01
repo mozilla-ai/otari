@@ -18,7 +18,9 @@ from otari_agent.cli import SERVER_COMMANDS, OtariGroup, cli
 
 # Spelled out rather than read from either side, so a command dropped from
 # SERVER_COMMANDS or from the gateway group fails here instead of vanishing.
-_EXPECTED_SERVER_COMMANDS = frozenset({"serve", "init-db", "migrate", "gen-secret-key", "routing"})
+_EXPECTED_SERVER_COMMANDS = frozenset(
+    {"serve", "init-db", "migrate", "gen-secret-key", "gen-provider-account-pepper", "routing"}
+)
 
 # What a Homebrew install of the light CLI does not have. The gateway is the
 # reason the split exists; the rest is what gateway.core.config drags in.

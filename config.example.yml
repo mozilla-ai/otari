@@ -61,6 +61,8 @@ providers:
 
 # Provider and search credentials stored through the dashboard require
 # OTARI_SECRET_KEY in the process environment.
+# Provider copies of attached files, on by default, require
+# OTARI_PROVIDER_ACCOUNT_PEPPER: its own random value of at least 32 characters.
 
 # Optional email delivery. public_base_url is also used by passkeys and OAuth.
 # public_base_url: "https://otari.example.com"
@@ -95,6 +97,9 @@ providers:
 # files_output_max_bytes: 67108864
 # files_retention_hours: 168
 # files_sweep_interval_sec: 3600
+# A copy at the provider that runs a request's code, and how long it lives there:
+# files_provider_upload_enabled: true
+# files_provider_upload_ttl_hours: 1
 # vision_strategy: describe
 # vision_describe_model: "ollama:qwen2-vl"
 # model_capabilities:

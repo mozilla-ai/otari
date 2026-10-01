@@ -14,7 +14,9 @@ from otari_agent.usage_import import import_group
 
 # What gateway.cli.register attaches, named here so a light install can say why
 # the command is missing rather than that it does not exist.
-SERVER_COMMANDS = frozenset({"serve", "init-db", "migrate", "gen-secret-key", "routing"})
+SERVER_COMMANDS = frozenset(
+    {"serve", "init-db", "migrate", "gen-secret-key", "gen-provider-account-pepper", "routing"}
+)
 
 
 class OtariGroup(click.Group):

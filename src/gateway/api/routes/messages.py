@@ -1,9 +1,10 @@
 import math
 import uuid
 from collections.abc import AsyncIterator, Callable
+from functools import partial
 from typing import Annotated, Any, Literal
 
-from any_llm import AnyLLM, LLMProvider, amessages
+from any_llm import AnyLLM, amessages
 from any_llm.types.completion import CompletionUsage
 from any_llm.types.messages import (
     MessageDeltaEvent,
@@ -33,7 +34,12 @@ from gateway.api.deps import (
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
-from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
+from gateway.api.routes._normalize import (
+    container_copies_step,
+    normalize_request_messages,
+    provider_container_requested,
+    sandbox_requested,
+)
 from gateway.api.routes._pipeline import (
     CONTAINER_AUTO,
     DB_UNAVAILABLE_DETAIL,
@@ -45,6 +51,7 @@ from gateway.api.routes._pipeline import (
     _requested_container,
     classify_provider_error,
     default_attempt_kwargs,
+    domain_error,
     error_kind_for_status,
     prepare_gateway_tools,
     provider_error_headers,
@@ -68,10 +75,10 @@ from gateway.api.routes._tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
+from gateway.exceptions.files_exceptions import ProviderUploadFailedError
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
-from gateway.models.tools import CodeExecutor
 from gateway.services.code_execution import ContainerLease
 from gateway.services.files import StagedFile
 from gateway.services.log_writer import LogWriter
@@ -83,11 +90,13 @@ from gateway.services.mcp_loop_messages import (
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
+from gateway.services.provider_kwargs import ProviderAccounts
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
 from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX, Dialect, ToolUseBudget
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
+from gateway.types.normalization_target import NormalizationTarget
 
 router = APIRouter(tags=["messages"])
 
@@ -785,37 +794,43 @@ async def create_message(
     # Uploads the normalizer found for the code-execution sandbox, handed to the
     # sandbox session once the billed user and workspace are resolved.
     sandbox_inputs: list[StagedFile] = []
+    # Uploads a container_upload block names for the provider's own container.
+    # Each candidate is sent copies in its own account, made as it is dispatched.
+    container_inputs: list[StagedFile] = []
 
-    async def _normalize(
-        user_id: str,
-        provider: LLMProvider | None,
-        model: str,
-        instance: str | None,
-        workspace_id: uuid.UUID | None,
-        workspace_executor: CodeExecutor | None,
-    ) -> tuple[int, CompletionUsage | None]:
+    async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Anthropic wire payload
         # before the cost estimate. Standalone only; no-op when the files
         # feature is off or the request has no attachments.
+        code_execution_header = raw_request.headers.get(CODE_EXECUTION_HEADER)
         request.messages, stats = await normalize_request_messages(
             request.messages,
             fmt="anthropic",
             config=config,
-            provider=provider,
-            model=model,
+            provider=target.provider,
+            model=target.model,
             files=files,
-            user_id=user_id,
-            instance=instance,
-            workspace_id=workspace_id,
+            user_id=target.user_id,
+            instance=target.instance,
+            workspace_id=target.file_workspace_id,
             sandbox_requested=sandbox_requested(
                 request.tools,
                 config=config,
-                provider=provider,
+                provider=target.provider,
                 dialect=_ADAPTER.name,
-                code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-                workspace_executor=workspace_executor,
+                code_execution_header=code_execution_header,
+                workspace_executor=target.workspace_executor,
+            ),
+            provider_container=provider_container_requested(
+                request.tools,
+                config=config,
+                provider=target.provider,
+                dialect=_ADAPTER.name,
+                code_execution_header=code_execution_header,
+                workspace_executor=target.workspace_executor,
             ),
         )
+        container_inputs.extend(stats.container_inputs)
         sandbox_inputs.extend(stats.sandbox_inputs)
         return len(str(request.messages)) + len(str(request.system or "")), stats.vision_usage()
 
@@ -927,6 +942,20 @@ async def create_message(
         # strand a container the provider would have used.
         request_fields.pop("container", None)
 
+    prepare_kwargs = None
+    if container_inputs:
+        pepper = config.provider_account_pepper
+        if files is None or ctx.workspace_id is None or pepper is None:
+            # The blocks still name Otari's files, which no provider account holds.
+            await release_reservation(ctx)
+            raise domain_error(_ADAPTER, ProviderUploadFailedError())
+        prepare_kwargs = container_copies_step(
+            files=files,
+            inputs=container_inputs,
+            accounts=ProviderAccounts(pepper=pepper, workspace_id=ctx.workspace_id),
+            render=partial(domain_error, _ADAPTER),
+        )
+
     # ------------------------------------------------------------------
     # Streaming path
     # ------------------------------------------------------------------
@@ -979,6 +1008,7 @@ async def create_message(
             session_label=request.session_label,
             display_model=resolved.alias,
             base_request_fields=request_fields,
+            prepare_kwargs=prepare_kwargs,
         )
 
     # ------------------------------------------------------------------
@@ -1025,6 +1055,7 @@ async def create_message(
         model=resolved.model,
         display_model=resolved.alias,
         base_request_fields=request_fields,
+        prepare_kwargs=prepare_kwargs,
     )
 
     body = result.model_dump(exclude_none=True)
