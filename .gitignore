@@ -10,6 +10,8 @@ venv/
 dist/
 build/
 *.egg-info/
+# Written at build time by setuptools-scm.
+cli/src/otari_agent/_version.py
 
 .env
 config.yml

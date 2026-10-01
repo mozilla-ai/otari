@@ -59,9 +59,11 @@ class OtariGroup(click.Group):
         return command
 
 
-# The Docker image installs from the tree, where __version__ is the unstamped
-# 0.0.0, and names its version in OTARI_VERSION instead, the variable
-# src/gateway/version.py reads. A stamped build (Homebrew) sets no such variable.
+# The Docker image builds from a tree with no Git metadata, so setuptools-scm
+# has no tag to read and __version__ falls back to 0.0.0; the image names its
+# version in OTARI_VERSION instead, the variable src/gateway/version.py reads.
+# Every other install path takes its version from the tag and sets no such
+# variable.
 _REPORTED_VERSION = os.environ.get("OTARI_VERSION") or __version__
 
 

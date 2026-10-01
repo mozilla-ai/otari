@@ -104,8 +104,11 @@ changelog:
 # from the committed lock and a freshly built sdist. The tap's copy is never
 # edited by hand; change packaging/homebrew/otari.rb.tmpl instead.
 homebrew-formula:
+	rm -rf build/homebrew
 	uv build --package otari-agent --sdist -o build/homebrew
-	uv run python scripts/homebrew_formula.py --version 0.0.0 --sdist build/homebrew/otari_agent-0.0.0.tar.gz --output build/homebrew/otari.rb
+# The sdist carries the version setuptools-scm derived from the checkout, so
+# the name is only known after the build; the release workflow globs it too.
+	uv run python scripts/homebrew_formula.py --version "$$(ls build/homebrew/otari_agent-*.tar.gz | sed -E 's|.*/otari_agent-(.*)\.tar\.gz|\1|')" --sdist "$$(ls build/homebrew/otari_agent-*.tar.gz)" --output build/homebrew/otari.rb
 	@echo "Rendered build/homebrew/otari.rb"
 
 # Reads the live template from Railway's public API, so it needs network but no token.

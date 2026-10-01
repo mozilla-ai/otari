@@ -1,6 +1,6 @@
 [build-system]
 # 77 is the first setuptools that accepts a PEP 639 SPDX string in `license`.
-requires = ["setuptools>=84.0.0"]
+requires = ["setuptools>=84.0.0", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -23,7 +23,6 @@ dynamic = ["version"]
 dependencies = [
     "click>=8.1.0",
     "httpx>=0.28.1",
-    "python-dotenv>=1.0.0",
     "pyyaml>=6.0",
 ]
 
@@ -40,5 +39,20 @@ include = ["otari_agent*"]
 [tool.setuptools.package-data]
 otari_agent = ["py.typed"]
 
-[tool.setuptools.dynamic]
-version = {attr = "otari_agent.__version__"}
+# The version comes from the repository's own Git tag, the same source
+# RELEASE.md names for the gateway's, so every way of installing this
+# distribution reports one: a tag checkout, a `uv tool install`, and the sdist
+# the Homebrew formula builds from (setuptools-scm writes the resolved version
+# into its PKG-INFO, so the build needs no Git metadata of its own).
+[tool.setuptools_scm]
+# The tags are on the repository, and this distribution is a workspace member.
+root = ".."
+# Written at build time, gitignored, and read by otari_agent/__init__.py. A
+# literal in a generated module, not importlib.metadata: `otari hook` runs on
+# every tool call of a coding agent, and scripts/check_architecture.py bans
+# entry-point discovery under otari_agent/ besides.
+version_file = "src/otari_agent/_version.py"
+# A build that can see no Git metadata (the Docker image copies the tree
+# without .git) gets the unstamped version rather than a hard failure; that
+# image names its own version in OTARI_VERSION, which `otari --version` prefers.
+fallback_version = "0.0.0"
