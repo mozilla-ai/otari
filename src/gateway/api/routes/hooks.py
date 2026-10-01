@@ -1,15 +1,14 @@
 """Otari's Hook Server: evaluate an Agent Gates policy against caller-submitted evidence.
 
-Otari never reads a caller's repository. The caller (an agent hook, e.g.
-``otari hook``) already read its own ``.otari-gates.yml`` and collected its
-own Git evidence, and submits both here in one request; this route parses
-and evaluates them and returns the per-gate results, exactly the way ``otari
-hook`` itself evaluates the same policy in process by default (see
-``otari_agent.domain.check.run_policy_check``, which both call): this
-route is the opt-in path for a caller that wants a gateway to be the one
-deciding instead. This is the integration mechanism that
-docs/otari-product-foundation.md calls the Hook Server; see
-docs/agent-gates.md for the request/response contract.
+Otari never reads a caller's repository. A caller already read its own
+``.otari-gates.yml`` and collected its own Git evidence, and submits both
+here in one request; this route parses and evaluates them and returns the
+per-gate results. The work itself is
+``otari_agent.domain.check.run_policy_check``, which ``otari hook`` calls in
+process rather than over HTTP: this route is for a caller that wants a
+gateway to be the one deciding, and Otari ships none today. This is the
+integration mechanism that docs/otari-product-foundation.md calls the Hook
+Server; see docs/agent-gates.md for the request/response contract.
 
 Every result is ``client_reported`` provenance: an authenticated request
 identifies its sender, not the truth of what it claims about a repository
@@ -200,7 +199,7 @@ class PolicyCheckRequest(BaseModel):
     # Defaults to "call" so a client written before this field existed keeps
     # the semantics it was written against: one tool call's own command,
     # judged by command. Only a caller that really can see the whole
-    # session (otari hook on a Stop event) says "session", and saying it is
+    # session (an agent hook on a Stop event) says "session", and saying it is
     # what lets command_if_changed resolve and what takes command out
     # of the picture. See CommandEvidence.scope.
     command_scope: EvidenceScope = Field(
@@ -215,7 +214,7 @@ class PolicyCheckRequest(BaseModel):
     # "collected, and there is none for this gate" case an empty list needs
     # to express that a missing gate id doesn't already cover. What None
     # (omitted, or an explicit `null`) means instead is "this caller's event
-    # type never runs judge gates at all" (otari hook on PreToolUse, which
+    # type never runs judge gates at all" (an agent hook on PreToolUse, which
     # has neither a finished diff nor a transcript to judge yet): resolving
     # that the same `unknown` a caller that does run judge gates but is
     # missing one gets would warn on every single PreToolUse edit to a
@@ -231,7 +230,7 @@ class PolicyCheckRequest(BaseModel):
     # "collected, and there is none for this gate" case an empty list needs
     # to express beyond a missing gate id. None (omitted, or an explicit
     # `null`) means this caller's event type never runs verifier gates
-    # at all (otari hook on PreToolUse, which has no finished session for a
+    # at all (an agent hook on PreToolUse, which has no finished session for a
     # verifier to check yet) and resolves every verifier gate
     # not_applicable rather than the unknown a caller that does run them but
     # is genuinely missing one gets (see CheckEvidence's and
