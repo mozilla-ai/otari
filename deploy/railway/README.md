@@ -35,6 +35,7 @@ the snapshot of what the template sets lives in [`template.json`](template.json)
 | `OTARI_PROVIDER_ACCOUNT_PEPPER` | auto-generated (`${{secret(43)}}`) | Names the provider account a copy of an attached file is in. Otari refuses to start without it while provider copies are on. |
 | `OTARI_REQUIRE_PRICING` | `false` | Pre-set, so a fresh deploy serves models that have no configured pricing. |
 | `OTARI_DEFAULT_PRICING` | `true` | Pre-set, so common models are metered from the bundled genai-prices dataset without configuring each one. Prices you set in the dashboard or via `/api/v1/pricing` always override it. |
+| `PORT` | `8000` | Pre-set for Railway's deploy-time healthcheck, which probes the port in `PORT`, not the target port. Otari listens on `OTARI_PORT` (pinned to `8000` in the image) and never reads `PORT`, so keep the two equal. |
 
 Notes:
 
