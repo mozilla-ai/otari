@@ -77,6 +77,11 @@ class BudgetService:
         async with self._uow:
             return await self._organization.list_ceilings(user=user, skip=skip, limit=limit)
 
+    async def require_end_user_budget(self, budget_id: str) -> None:
+        """Refuse a budget a service key may not cap its end users at: an unknown one, or a tenant's."""
+        async with self._uow:
+            await self._end_users.require_assignable_budget(budget_id)
+
     async def resolve_end_user(self, *, api_key: APIKey, external_id: str) -> str:
         """Return the end user a service key named, creating it under the key's end-user budget on first use.
 

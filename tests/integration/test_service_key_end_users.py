@@ -12,7 +12,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT
-from gateway.models.budgets import SCOPE_API_TOKEN, ScopedBudget
+from gateway.models.budgets import SCOPE_API_TOKEN, Budget, ScopedBudget
+from gateway.models.tenancy import Organization
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
 from gateway.rate_limit import RateLimiter
@@ -242,3 +243,39 @@ def test_a_deleted_end_user_comes_back_with_what_it_spent(
     assert revived is not None
     assert revived.user_id == alice.user_id
     assert revived.deleted_at is None
+
+
+def test_a_tenants_budget_cannot_cap_end_users(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """An end user is a deployment user, so only a deployment budget may cap it."""
+    organization_id = db_session.query(Organization.id).first()
+    assert organization_id is not None
+    tenant_budget = Budget(request_limit=1, organization_id=organization_id[0])
+    db_session.add(tenant_budget)
+    db_session.commit()
+
+    created = client.post(
+        f"{API_ROOT}/keys",
+        json={"is_service_key": True, "end_user_budget_id": tenant_budget.budget_id},
+        headers=master_key_header,
+    )
+    assert created.status_code == 404
+    assert created.json()["detail"] == f"Budget with id '{tenant_budget.budget_id}' not found"
+
+
+def test_an_unknown_end_user_budget_is_refused_on_update_and_leaves_the_key_alone(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    key_id, _ = _service_key(client, master_key_header, "svc")
+
+    refused = client.patch(
+        f"{API_ROOT}/keys/{key_id}",
+        json={"key_name": "renamed", "end_user_budget_id": "no-such-budget"},
+        headers=master_key_header,
+    )
+    assert refused.status_code == 404
+
+    fetched = client.get(f"{API_ROOT}/keys/{key_id}", headers=master_key_header)
+    assert fetched.json()["key_name"] == "svc"
+    assert fetched.json()["end_user_budget_id"] is None

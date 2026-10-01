@@ -4,6 +4,7 @@ import uuid
 from datetime import UTC, datetime
 
 from gateway.exceptions.budget_exceptions import (
+    EndUserBudgetNotFoundError,
     EndUserIdInvalidError,
     EndUserOwnerUnavailableError,
 )
@@ -27,6 +28,12 @@ class _EndUsers:
 
     def __init__(self, repositories: BudgetRepositories) -> None:
         self._repositories = repositories
+
+    async def require_assignable_budget(self, budget_id: str) -> None:
+        """Refuse an end-user budget that does not exist or that a tenant owns."""
+        budget = await self._repositories.budgets.get(budget_id)
+        if budget is None or budget.organization_id is not None:
+            raise EndUserBudgetNotFoundError(budget_id)
 
     async def resolve(self, api_key: APIKey, external_id: str) -> str:
         """The ``users.user_id`` that ``external_id`` names under this key's owner.

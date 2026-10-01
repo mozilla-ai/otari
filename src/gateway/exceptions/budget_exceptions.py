@@ -135,6 +135,17 @@ class SpendCeilingAlreadyExistsError(Exception):
         super().__init__(f"A spend ceiling already exists for {scope_type} {scope_id}")
 
 
+class EndUserBudgetNotFoundError(TenancyNotFoundError):
+    """A service key names an end-user budget that does not exist, or that a tenant owns.
+
+    One answer for both, as ``POST /users`` gives: an end user is a deployment
+    user, so a tenant's budget is not one it may be capped at.
+    """
+
+    def __init__(self, budget_id: str):
+        super().__init__(f"Budget with id '{budget_id}' not found")
+
+
 class EndUserIdInvalidError(TenancyValidationError):
     """A service key named an end user by an id it cannot be stored under."""
 
@@ -151,6 +162,7 @@ class EndUserOwnerUnavailableError(TenancyForbiddenError):
 
 __all__ = [
     "BudgetStillReferencedError",
+    "EndUserBudgetNotFoundError",
     "EndUserIdInvalidError",
     "EndUserOwnerUnavailableError",
     "MemberBudgetPolicyAlreadyExistsError",

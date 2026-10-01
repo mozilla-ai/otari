@@ -9,12 +9,18 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.api.deps import ApiKeyFormatPortDep, CallerOrganization, get_config, get_db, require_deployment_operator
+from gateway.api.deps import (
+    ApiKeyFormatPortDep,
+    BudgetServiceDep,
+    CallerOrganization,
+    get_config,
+    get_db,
+    require_deployment_operator,
+)
 from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
-from gateway.models.budgets import Budget
 from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
@@ -241,19 +247,6 @@ class UpdateKeyRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
-async def _require_end_user_budget(db: AsyncSession, budget_id: str) -> None:
-    """Refuse an end-user budget that does not exist or that a tenant owns.
-
-    An end user is a ``users`` row like any other, so it may be capped only at
-    what ``POST /users`` may assign: a deployment budget. The 404 is the one an
-    unknown id gets, for the reason that route gives.
-    """
-    owner = await db.execute(select(Budget.organization_id).where(Budget.budget_id == budget_id))
-    row = owner.one_or_none()
-    if row is None or row[0] is not None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Budget with id '{budget_id}' not found")
-
-
 @router.post("")
 async def create_key(
     request: CreateKeyRequest,
@@ -261,6 +254,7 @@ async def create_key(
     config: Annotated[GatewayConfig, Depends(get_config)],
     organization_id: CallerOrganization,
     key_format: ApiKeyFormatPortDep,
+    budgets: BudgetServiceDep,
 ) -> CreateKeyResponse:
     """Create a new API key in the caller's organization.
 
@@ -280,6 +274,10 @@ async def create_key(
         allowed_models = validate_allowed_models(config, request.allowed_models)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    # Before anything is staged: the check runs in a Unit of Work block, and the
+    # block's commit would store whatever this route had added by then.
+    if request.end_user_budget_id is not None:
+        await budgets.require_end_user_budget(request.end_user_budget_id)
 
     api_key = key_format.mint()
     key_hash = hash_key(api_key)
@@ -321,9 +319,6 @@ async def create_key(
     # has no default, so this only bites when attaching to a restricted user).
     if not is_allowlist_subset(allowed_models, user.allowed_models):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_KEY_EXCEEDS_USER_DETAIL)
-
-    if request.end_user_budget_id is not None:
-        await _require_end_user_budget(db, request.end_user_budget_id)
 
     # Checked rather than left to the foreign key: an id naming no workspace is
     # a bad request, and letting it reach the constraint answered 500 "Database
@@ -440,12 +435,16 @@ async def update_key(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     organization_id: CallerOrganization,
+    budgets: BudgetServiceDep,
 ) -> KeyInfo:
     """Update an API key in the caller's organization.
 
     Requires master key authentication.
     """
     key = await _load_key_in_organization(db, key_id, organization_id)
+    # Before the key is changed, for the reason create_key gives.
+    if request.end_user_budget_id is not None:
+        await budgets.require_end_user_budget(request.end_user_budget_id)
 
     # Tri-state via model_fields_set, like allowed_models below: both columns
     # are nullable and the dashboard's edit form sends null to clear them
@@ -482,8 +481,6 @@ async def update_key(
     if request.is_service_key is not None:
         key.is_service_key = request.is_service_key
     if "end_user_budget_id" in request.model_fields_set:
-        if request.end_user_budget_id is not None:
-            await _require_end_user_budget(db, request.end_user_budget_id)
         key.end_user_budget_id = request.end_user_budget_id
     if request.metadata is not None:
         key.metadata_ = request.metadata
