@@ -24,6 +24,21 @@ A `/metrics` scrape needs the `metrics` extra (`pip install gateway[metrics]`),
 which the Docker image installs. A source install that sets `enable_metrics`
 without it refuses to start rather than serving an empty scrape.
 
+### Behind a reverse proxy
+
+When TLS ends at a proxy or a platform ingress, each request reaches Otari from
+the proxy's address. The dashboard sign-in limit and the public-catalog limit
+count failures per client address, so all visitors then share one budget. Ten
+wrong passwords from one visitor lock everyone out of the dashboard for a
+minute.
+
+Set `forwarded_allow_ips` (`OTARI_FORWARDED_ALLOW_IPS`) to the proxy's
+addresses or networks, comma-separated, so Otari reads the client address from
+`X-Forwarded-For`. Use `*` only where the proxy is the sole path to the
+container, as on Railway: any peer in the list can set its own client address.
+When it is unset, uvicorn's `FORWARDED_ALLOW_IPS` applies, and without that
+only `127.0.0.1` is trusted.
+
 ### Watch the connection pool
 
 On PostgreSQL the gateway serves requests from a fixed pool of database

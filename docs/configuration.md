@@ -256,11 +256,12 @@ path, and `dashboard_login_rate_limit_per_minute` is sized for password
 attempts, not for browsing. Set it to `null` to remove the limit.
 
 Two limits of that throttle are worth knowing before a catalog is put on the
-open internet. The address is the socket's, and the bundled server is started
-without proxy headers, so behind a reverse proxy every visitor shares the
-proxy's address and one scraper exhausts the budget for everyone; put the
-throttle in the proxy instead. And the counter is per worker, so a deployment
-running N workers serves up to N times the configured number.
+open internet. Behind a reverse proxy every visitor shares the proxy's
+address, and one scraper exhausts the budget for everyone, unless
+`forwarded_allow_ips` trusts that proxy; see
+[Behind a reverse proxy](deployment.md#behind-a-reverse-proxy). And the counter
+is per worker, so a deployment running N workers serves up to N times the
+configured number.
 
 In hosted mode a visitor sees the same thing a visitor sees anywhere else: the
 process-wide `providers:` instances, which in that mode are the deployment's
