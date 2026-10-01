@@ -20,15 +20,18 @@ this build does not have serves its default target and warns once.
 * ``weighted`` → :class:`gateway.services.routing.weighted.WeightedRouterBackend`,
   a load balancer: one candidate per request, drawn in proportion to the weights
   the policy declares.
+
+The request path reaches these through ``RoutingPort`` (``gateway.ports``), whose
+core adapter is the switch in :func:`get_router_backend`, so an overlay can add or
+replace a backend. The contract types live on the port and are re-exported here.
 """
 
 from __future__ import annotations
 
-import uuid
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any
 
 from gateway.models.routing import WEIGHTED_BACKEND
+from gateway.ports.routing_port import RouterBackend, RouterTraits, RoutingContext, RoutingDecision
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
@@ -39,6 +42,7 @@ __all__ = [
     "WEIGHTED_BACKEND",
     "NoOpRouterBackend",
     "RouterBackend",
+    "RouterTraits",
     "RoutingContext",
     "RoutingDecision",
     "backend_is_weighted",
@@ -48,80 +52,11 @@ __all__ = [
     "get_router_backend",
     "known_backends",
     "owes_missing_backend_warning",
+    "router_traits",
 ]
 
 KNN_BACKEND = "knn"
 NOOP_BACKEND = "noop"
-
-
-@dataclass
-class RoutingContext:
-    """Inputs a backend may use to rank candidates for a single request.
-
-    The prompt arrives as already-flattened text rather than as wire messages.
-    Flattening is format-specific (chat, Anthropic messages, and responses all
-    shape content differently) and the API layer already does it for guardrails,
-    so a backend never has to know which endpoint it is serving.
-    """
-
-    user_id: str
-    default_model: str
-    """The policy's default target: what serves if the backend declines, and the
-    safe choice a low-confidence decision leads with."""
-    candidate_pool: list[str]
-    """The policy's candidates, already filtered to what this caller may use."""
-    workspace_id: uuid.UUID | None = None
-    """The workspace this request bills to, when there is one. A backend that
-    reads stored state partitions on it as well as on ``user_id``, so a user
-    holding keys in two workspaces does not have one steer the other. ``None``
-    only where there is no request (a synchronous surface), which is also where
-    no backend is asked to rank."""
-    task_signal: str = ""
-    """This turn's prompt text. What ``step`` granularity routes on."""
-    trace_signal: str = ""
-    """The conversation's opening prompt text. What ``trace_sticky`` routes on, so
-    every turn of one conversation embeds the same thing."""
-    trace_anchor: str = ""
-    """Stable text identifying the conversation when the client sends no id."""
-    task_id: str | None = None
-    has_tools: bool = False
-    is_trace_continuation: bool = False
-    trace_key: str | None = None
-    weights: dict[str, float] = field(default_factory=dict)
-    """Per-candidate traffic weights the policy declared, for a backend that takes
-    its parameters from the policy document rather than from the environment. Empty
-    for every other backend. Kept as declared: normalizing needs ``candidate_pool``,
-    which is already filtered to this caller."""
-
-
-@dataclass
-class RoutingDecision:
-    """A backend's ranking for one request, best first.
-
-    An empty ``ordered_models`` is a decline: a normal outcome (cold pool, sparse
-    neighborhood, no embeddable signal) that leaves the policy's default target to
-    serve. ``rationale`` is operator-facing text saying which of those it was.
-    """
-
-    ordered_models: list[str]
-    confidence: float
-    rationale: str
-    log_decision: bool = True
-    """Whether this decision earns its INFO line. A learned router's pick is
-    unreconstructable after the fact and worth one; a load balancer's draw is one
-    line per request forever, and the usage row already records what served. The
-    backend decides, because only it knows how often it is asked."""
-
-    @classmethod
-    def decline(cls, rationale: str) -> RoutingDecision:
-        return cls(ordered_models=[], confidence=0.0, rationale=rationale)
-
-
-@runtime_checkable
-class RouterBackend(Protocol):
-    """Contract a router backend implements."""
-
-    async def rank(self, ctx: RoutingContext) -> RoutingDecision: ...
 
 
 class NoOpRouterBackend:
@@ -202,6 +137,11 @@ def backend_requires_pricing(name: str | None) -> bool:
     would refuse a working policy.
     """
     return name is not None and name.strip().lower() == KNN_BACKEND
+
+
+def router_traits(name: str | None) -> RouterTraits:
+    """What a policy naming ``name`` asks of the rest of the gateway, for this build's backends."""
+    return RouterTraits(teachable=backend_pool_is_teachable(name), requires_pricing=backend_requires_pricing(name))
 
 
 def owes_missing_backend_warning(policy_name: str, name: str) -> bool:

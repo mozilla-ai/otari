@@ -157,6 +157,7 @@ from gateway.models.usage import UsageLog
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
+from gateway.ports.routing_port import RoutingPort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.rate_limit import RateLimitInfo, check_rate_limit
 from gateway.services.budgets import (
@@ -1583,6 +1584,7 @@ async def _compile_request_plan(
     started_at: float,
     routing_signal: Callable[[], RoutingSignal] | None = None,
     workspace_id: uuid.UUID | None = None,
+    routing: RoutingPort | None = None,
 ) -> CompiledPlan | None:
     """Compile ``model`` into a plan when it names a routing policy, else ``None``.
 
@@ -1624,6 +1626,7 @@ async def _compile_request_plan(
             allowlist=allowlist,
             signal=routing_signal() if routing_signal is not None else None,
             workspace_id=workspace_id,
+            routing=routing,
         )
 
     try:
@@ -1774,6 +1777,7 @@ async def resolve_request_context(
     | None = None,
     tools: list[dict[str, Any]] | None = None,
     idempotency: IdempotencyGuard | None = None,
+    routing: RoutingPort | None = None,
 ) -> RequestContext:
     """Run the shared handler preamble up to (and including) budget pre-debit.
 
@@ -1798,6 +1802,7 @@ async def resolve_request_context(
     endpoint knows how to flatten. A factory rather than a value because only a
     policy with a router consults it. Omit it and such a policy serves its default
     target, which is the correct behavior for a surface that has no prompt.
+    ``routing`` is the port that names the backend a policy's router entry asks.
 
     ``normalize_messages`` (standalone only) is an optional hook the file
     feature uses to resolve uploaded attachments into the wire payload before
@@ -1942,6 +1947,7 @@ async def resolve_request_context(
             started_at=started_at,
             routing_signal=routing_signal,
             workspace_id=workspace_id,
+            routing=routing,
         )
         if plan is not None:
             head = plan.head

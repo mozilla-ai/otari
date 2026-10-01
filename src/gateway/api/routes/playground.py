@@ -67,6 +67,7 @@ from gateway.api.deps import (
     FileServiceDep,
     McpServerPortDep,
     ModelProviderPortDep,
+    RoutingPortDep,
     WebSearchPolicyPortDep,
     get_config,
     get_db,
@@ -184,6 +185,7 @@ async def playground_chat_completions(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
+    routing: RoutingPortDep,
     code_execution_port: CodeExecutionPortDep,
     mcp_server_port: McpServerPortDep,
     web_search_policy_port: WebSearchPolicyPortDep,
@@ -241,6 +243,7 @@ async def playground_chat_completions(
         config=config,
         log_writer=log_writer,
         model_provider=model_provider,
+        routing=routing,
         session_principal=principal,
     )
 

@@ -26,12 +26,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, require_deployment_operator
+from gateway.api.deps import RoutingPortDep, get_config, get_db, require_deployment_operator
 from gateway.api.routes._helpers import resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.log_config import logger
 from gateway.models.routing import PolicySpec, RoutingPolicy
+from gateway.ports.routing_port import RoutingPort
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.alias_service import all_alias_names
 from gateway.services.policy_store import (
@@ -42,9 +43,9 @@ from gateway.services.policy_store import (
 from gateway.services.routing import (
     BudgetState,
     NoEligibleCandidatesError,
-    backend_requires_pricing,
     compile_policy,
 )
+from gateway.services.routing.backends import router_traits
 from gateway.services.routing.decide import explain_router_ordering
 from gateway.services.routing.knn import unpriced_router_candidates
 
@@ -288,7 +289,11 @@ def _validate_write(config: GatewayConfig, name: str, spec: PolicySpec, user_id:
 
 
 async def _validate_router_pricing(
-    config: GatewayConfig, db: AsyncSession, spec: PolicySpec, workspace_id: uuid.UUID
+    config: GatewayConfig,
+    db: AsyncSession,
+    spec: PolicySpec,
+    workspace_id: uuid.UUID,
+    routing: RoutingPort | None,
 ) -> None:
     """Refuse a learned policy whose candidates are not all priced.
 
@@ -306,7 +311,8 @@ async def _validate_router_pricing(
     into, so one naming an alias is validated as it will resolve for the requests
     this policy will actually serve.
     """
-    if not backend_requires_pricing(spec.router_backend):
+    traits = routing.traits(spec.router_backend) if routing is not None else router_traits(spec.router_backend)
+    if not traits.requires_pricing:
         return
     missing = await unpriced_router_candidates(
         config, db, spec.router_candidates, workspace_id=workspace_id
@@ -442,6 +448,7 @@ async def upsert_policy_in_workspace(
     config: GatewayConfig,
     *,
     workspace_id: uuid.UUID,
+    routing: RoutingPort | None = None,
 ) -> PolicyResponse:
     """Create or update a stored policy in an already-resolved workspace.
 
@@ -468,7 +475,7 @@ async def upsert_policy_in_workspace(
     spec = validated_spec(request.name, request.spec)
     await refresh_policy_cache(db)
     _validate_write(config, request.name, spec, request.user_id)
-    await _validate_router_pricing(config, db, spec, workspace_id)
+    await _validate_router_pricing(config, db, spec, workspace_id, routing)
 
     # Both scopes are part of the identity: the upsert must not turn one
     # workspace's policy into another's, nor a workspace-wide policy into a
@@ -562,6 +569,7 @@ async def set_policy(
     request: PolicyRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    routing: RoutingPortDep,
 ) -> PolicyResponse:
     """Create or update a stored policy in one workspace, optionally for one user.
 
@@ -573,6 +581,7 @@ async def set_policy(
         db,
         config,
         workspace_id=await resolve_managed_workspace_id(db, request.workspace_id),
+        routing=routing,
     )
 
 

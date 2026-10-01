@@ -18,6 +18,7 @@ from gateway.api.deps import (
     McpServerPortDep,
     ModelProviderPortDep,
     OptionalFileServiceDep,
+    RoutingPortDep,
     WebSearchPolicyPortDep,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
@@ -522,6 +523,7 @@ async def create_response(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
+    routing: RoutingPortDep,
     code_execution_port: CodeExecutionPortDep,
     mcp_server_port: McpServerPortDep,
     web_search_policy_port: WebSearchPolicyPortDep,
@@ -600,6 +602,7 @@ async def create_response(
             normalize_messages=_normalize,
             tools=request_body.tools,
             idempotency=None if bool(request_body.stream) else idempotency,
+            routing=routing,
         )
     except IdempotentReplay as replay:
         return replay.response()

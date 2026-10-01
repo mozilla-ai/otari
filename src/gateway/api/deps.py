@@ -28,6 +28,7 @@ from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.ports.routing_port import RoutingPort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.api_keys import ApiKeyRepository
@@ -965,6 +966,15 @@ def get_telemetry_storage_port(
     return container.resolve(TelemetryStoragePort, db)
 
 
+def get_routing_port(container: ContainerDep) -> RoutingPort:
+    """Resolve the router-backend adapter this build bound at startup.
+
+    No session: a backend opens what it reads itself, or reads over the
+    network, and which backends exist is a deployment fact.
+    """
+    return container.resolve(RoutingPort, None)
+
+
 def get_web_search_policy_port(db: PortSessionDep, container: ContainerDep) -> WebSearchPolicyPort:
     """Resolve the web search policy adapter this build bound at startup."""
     return container.resolve(WebSearchPolicyPort, db)
@@ -1065,6 +1075,7 @@ GrowthSignalPortDep = Annotated[GrowthSignalPort, Depends(get_growth_signal_port
 IdentityProviderPortDep = Annotated[IdentityProviderPort, Depends(get_identity_provider_port)]
 McpServerPortDep = Annotated[McpServerPort, Depends(get_mcp_server_port)]
 ModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_model_provider_port)]
+RoutingPortDep = Annotated[RoutingPort, Depends(get_routing_port)]
 
 
 def get_org_provider_model_service(
@@ -1220,6 +1231,7 @@ __all__ = [
     "McpServerPortDep",
     "ModelProviderPortDep",
     "OrgProviderModelServiceDep",
+    "RoutingPortDep",
     "TelemetryStoragePortDep",
     "WebSearchPolicyPortDep",
     "get_config",

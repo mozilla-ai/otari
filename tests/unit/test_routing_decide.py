@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.models.routing import PolicySpec
+from gateway.ports.routing_port import RouterTraits
 from gateway.services.routing.backends import (
     NoOpRouterBackend,
     RouterBackend,
@@ -390,3 +391,59 @@ async def test_the_request_headers_reach_the_backend(config: GatewayConfig, reco
     assert (seen.user_id, seen.trace_key, seen.task_id) == ("user-7", "conv-1", "summarize")
     assert (seen.has_tools, seen.is_trace_continuation) == (True, True)
     assert seen.default_model == "openai:gpt-5"
+
+
+# -- the port --------------------------------------------------------------
+
+
+class _Port:
+    """A bound ``RoutingPort`` that knows one backend, named ``custom``."""
+
+    def __init__(self, backend: _Recorder) -> None:
+        self.recorder = backend
+        self.asked: list[str] = []
+
+    def backend(self, name: str) -> _Recorder | None:
+        self.asked.append(name)
+        return self.recorder if name == "custom" else None
+
+    def known_backends(self) -> tuple[str, ...]:
+        return ("custom",)
+
+    def traits(self, name: str | None) -> RouterTraits:
+        return RouterTraits(teachable=False, requires_pricing=False)
+
+
+@pytest.mark.asyncio
+async def test_the_bound_port_supplies_the_backend(config: GatewayConfig) -> None:
+    # A backend this build does not ship is reachable once a port that has it is bound.
+    port = _Port(_Recorder())
+
+    ordering = await decide_ordering(
+        config,
+        _spec(backend="custom"),
+        policy_name="smart",
+        user_id="u",
+        allowlist=None,
+        signal=_signal(),
+        routing=port,
+    )
+
+    assert port.asked == ["custom"]
+    assert port.recorder.seen is not None
+    assert ordering is not None and ordering.selectors == ["openai:gpt-5-mini", "openai:gpt-5"]
+
+
+@pytest.mark.asyncio
+async def test_a_name_the_port_lacks_lists_the_ports_own_backends(
+    config: GatewayConfig, router_warnings: Callable[[], list[str]]
+) -> None:
+    # The core switch has `knn`, and the bound port does not: the port is what is asked.
+    port = _Port(_Recorder())
+
+    ordering = await decide_ordering(
+        config, _spec(backend="knn"), policy_name="smart", user_id="u", allowlist=None, signal=_signal(), routing=port
+    )
+
+    assert ordering is None
+    assert "Available backends: custom" in router_warnings()[0]

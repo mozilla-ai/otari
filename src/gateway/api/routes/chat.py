@@ -18,6 +18,7 @@ from gateway.api.deps import (
     McpServerPortDep,
     ModelProviderPortDep,
     OptionalFileServiceDep,
+    RoutingPortDep,
     WebSearchPolicyPortDep,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
@@ -64,6 +65,7 @@ from gateway.models.tools import CodeExecutor
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.ports.routing_port import RoutingPort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.services.files import FileService, StagedFile
 from gateway.services.log_writer import LogWriter
@@ -405,6 +407,7 @@ async def chat_completions(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
+    routing: RoutingPortDep,
     code_execution_port: CodeExecutionPortDep,
     mcp_server_port: McpServerPortDep,
     web_search_policy_port: WebSearchPolicyPortDep,
@@ -431,6 +434,7 @@ async def chat_completions(
         config=config,
         log_writer=log_writer,
         model_provider=model_provider,
+        routing=routing,
         code_execution_port=code_execution_port,
         mcp_server_port=mcp_server_port,
         web_search_policy_port=web_search_policy_port,
@@ -455,6 +459,7 @@ async def run_chat_completion(
     web_search_policy_port: WebSearchPolicyPort,
     session_principal: SessionPrincipal | None = None,
     idempotency: IdempotencyGuard | None = None,
+    routing: RoutingPort | None = None,
 ) -> ChatCompletion | Response:
     """Serve one chat completion, from the resolved preamble to the response.
 
@@ -542,6 +547,7 @@ async def run_chat_completion(
             normalize_messages=_normalize,
             tools=request.tools,
             idempotency=None if request.stream else idempotency,
+            routing=routing,
         )
     except IdempotentReplay as replay:
         return replay.response()

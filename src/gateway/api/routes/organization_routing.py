@@ -61,7 +61,14 @@ from sqlalchemy import Select, false, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.api.deps import CurrentIdentity, ModelProviderPortDep, get_config, get_db, verify_master_key
+from gateway.api.deps import (
+    CurrentIdentity,
+    ModelProviderPortDep,
+    RoutingPortDep,
+    get_config,
+    get_db,
+    verify_master_key,
+)
 from gateway.api.routes.aliases import (
     AliasRequest,
     AliasResponse,
@@ -299,6 +306,7 @@ async def set_organization_routing_policy(
     config: Annotated[GatewayConfig, Depends(get_config)],
     current_identity: CurrentIdentity,
     model_provider: ModelProviderPortDep,
+    routing: RoutingPortDep,
 ) -> PolicyResponse:
     """Create or update a stored policy in one of the organization's workspaces.
 
@@ -315,7 +323,7 @@ async def set_organization_routing_policy(
         targets=validated_spec(request.name, request.spec).static_selectors(),
         model_provider=model_provider,
     )
-    return await upsert_policy_in_workspace(request, db, config, workspace_id=workspace_id)
+    return await upsert_policy_in_workspace(request, db, config, workspace_id=workspace_id, routing=routing)
 
 
 @policies_router.delete("/{name:path}", status_code=status.HTTP_204_NO_CONTENT)

@@ -24,6 +24,7 @@ from any_llm.exceptions import AnyLLMError
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.routing import PolicySpec
+from gateway.ports.routing_port import RoutingPort
 from gateway.services.model_access import is_model_allowed
 from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.routing.backends import (
@@ -89,6 +90,7 @@ async def decide_ordering(
     allowlist: list[str] | None,
     signal: RoutingSignal | None,
     workspace_id: uuid.UUID | None = None,
+    routing: RoutingPort | None = None,
 ) -> RouterOrdering | None:
     """Ask the policy's router to rank its candidates for this request.
 
@@ -100,6 +102,10 @@ async def decide_ordering(
     Returns an *empty* :class:`RouterOrdering` when a router was asked and
     declined, or when the caller opted out. That also serves the default target,
     but deliberately without the warning: a decline is normal operation.
+
+    ``routing`` is the port the request path resolved from the container, so a
+    backend an overlay bound is the one asked. Omitted, this build's own
+    backends answer, which is what a caller with no container (a test) gets.
     """
     backend_name = spec.router_backend
     if backend_name is None:
@@ -110,7 +116,7 @@ async def decide_ordering(
     if signal.opted_out:
         return RouterOrdering([], rationale="caller sent Otari-Router: off")
 
-    backend = get_router_backend(config, backend_name)
+    backend = routing.backend(backend_name) if routing is not None else get_router_backend(config, backend_name)
     if backend is None:
         # This build has no such backend, which is the one "no ordering" case that
         # is a misconfiguration rather than normal operation, and the only one worth
@@ -125,7 +131,7 @@ async def decide_ordering(
                 policy_name,
                 backend_name,
                 spec.default_target,
-                ", ".join(known_backends()),
+                ", ".join(routing.known_backends() if routing is not None else known_backends()),
             )
         return None
 
