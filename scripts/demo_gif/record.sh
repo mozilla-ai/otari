@@ -38,6 +38,16 @@ case "$(uname -s)-$(uname -m)" in
     ;;
 esac
 
+# Refuse to start beside another listener: the gateway would fail to bind, the
+# health probe would get its answer from whatever holds the port, and the tour
+# would record that instead.
+for port in 8000 8099; do
+  if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+    echo "port $port is already in use; stop whatever is listening there and rerun"
+    exit 1
+  fi
+done
+
 echo ">> Resetting demo database"
 rm -f "$DB" "$DB-wal" "$DB-shm"
 rm -rf "$ART"
@@ -50,7 +60,7 @@ echo ">> Seeding demo data"
 uv run python "$DIR/seed.py" "sqlite:///./$DB"
 
 echo ">> Starting mock provider and gateway"
-uv run python "$DIR/mock_provider.py" 8099 >"$ART/mock.log" 2>&1 &
+uv run python "$DIR/mock_provider.py" >"$ART/mock.log" 2>&1 &
 MOCK_PID=$!
 uv run otari serve --config "$CONFIG" >"$ART/server.log" 2>&1 &
 SERVER_PID=$!

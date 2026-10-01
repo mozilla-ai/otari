@@ -1,20 +1,20 @@
 """A stand-in OpenAI-compatible upstream for the README dashboard GIF.
 
-Serves ``GET /v1/models`` and ``POST /v1/chat/completions`` (streamed or not) on
-127.0.0.1:8099, so the Playground stop in tour.mjs has a reply to stream. The
-reply is canned per model and paced like a real one, and the final chunk
-carries usage so the turn readout shows tokens and cost.
+Serves ``GET /v1/models`` and a streamed ``POST /v1/chat/completions`` on
+127.0.0.1:8099 (the ``api_base`` otari.yml gives it), so the Playground stop in
+tour.mjs has a reply to stream. The reply is canned per model and paced like a
+real one, and the final chunk carries usage so the turn readout shows tokens and
+cost.
 
 Standard library only. Run by scripts/demo_gif/record.sh.
 """
 
 import json
 import re
-import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8099
+PORT = 8099
 
 MODELS = ["gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra", "deepseek-v4-pro", "deepseek-v4-flash"]
 
@@ -91,20 +91,6 @@ class Handler(BaseHTTPRequestHandler):
             "total_tokens": prompt_tokens + completion_tokens,
         }
         base = {"id": "chatcmpl-demo", "created": int(time.time()), "model": model}
-
-        if not body.get("stream"):
-            self._json(
-                200,
-                {
-                    **base,
-                    "object": "chat.completion",
-                    "choices": [
-                        {"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}
-                    ],
-                    "usage": usage,
-                },
-            )
-            return
 
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")

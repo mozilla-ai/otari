@@ -76,20 +76,15 @@ const context = await browser.newContext({
 await context.addInitScript(CURSOR_SCRIPT);
 const page = await context.newPage();
 
-let mouse = { x: SIZE.width / 2, y: SIZE.height / 2 };
 async function glide(x, y, steps = 18) {
   await page.mouse.move(x, y, { steps });
-  mouse = { x, y };
 }
-async function moveTo(locator, steps) {
+async function click(locator) {
   await locator.scrollIntoViewIfNeeded();
   const box = await locator.boundingBox();
   if (!box) throw new Error(`no box for ${locator}`);
-  await glide(box.x + Math.min(box.width / 2, 60), box.y + box.height / 2, steps);
-}
-async function click(locator, { pause = 110 } = {}) {
-  await moveTo(locator);
-  await sleep(pause);
+  await glide(box.x + Math.min(box.width / 2, 60), box.y + box.height / 2);
+  await sleep(110);
   await page.mouse.down();
   await page.mouse.up();
 }

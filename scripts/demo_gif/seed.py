@@ -1,16 +1,16 @@
 """Seed a realistic-looking standalone gateway for the README dashboard GIF.
 
 Populates an organization with members (each linked to the gateway user their
-keys and budget attach to), budgets, named API keys, model pricing, and ~14k
+keys and budget attach to), budgets, named API keys, model pricing, and ~26k
 usage_logs over ~60 days, part of them routed through the policies declared in
 otari.yml, so Overview / Usage / Activity / Members / Budgets all render with
 live-looking data.
 
-Token and cost values are deterministic (seeded RNG), so the numbers on screen
-are stable across runs. Timestamps are anchored to the current wall clock, not a
-fixed reference, so the demo always looks fresh whenever the GIF is regenerated,
-and row/budget IDs are random UUIDs. Re-running therefore yields a structurally
-identical dataset, not a byte-identical one.
+Values come from a seeded RNG and timestamps are anchored to the current wall
+clock, so the demo always looks fresh whenever the GIF is regenerated. A run's
+shape (growth, mix, budget utilization) is reproducible; its exact figures are
+not, because how many of today's rows fall in the future, and so every draw after
+them, depends on the time of day the seed runs.
 
 Usage:
     uv run otari migrate --config scripts/demo_gif/otari.yml
@@ -42,9 +42,6 @@ from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
 URL = sys.argv[1] if len(sys.argv) > 1 else "sqlite:///./scripts/demo_gif/demo.db"
 rng = random.Random(4242)  # deterministic values across runs
 
-# Anchor the usage window to the real clock so "today" and the 30-day windows
-# always have fresh data whenever the GIF is regenerated. Token/cost values stay
-# deterministic (seeded RNG); only the timestamps track the current date.
 NOW = datetime.now(UTC)
 MONTH = 30 * 24 * 3600
 DAYS = 60
@@ -158,7 +155,7 @@ ORGANIZATION, WORKSPACE = default_tenancy()
 
 # --- Budgets -----------------------------------------------------------------
 # Created with a placeholder limit; the real max_budget is derived from seeded
-# spend after the usage rows exist (see "Derive budget limits" below).
+# spend once the usage rows exist, at the end of this file.
 budgets: dict[str, Budget] = {}
 for name in BUDGETS:
     budgets[name] = Budget(budget_id=str(uuid.uuid4()), name=name, max_budget=0.0, budget_duration_sec=MONTH)
@@ -344,8 +341,8 @@ for day in range(DAYS, -1, -1):
             )
 
 # The newest rows are written out rather than drawn, so the top of Activity
-# (which the tour opens) shows the routing column at work: a weighted split, a
-# budget-aware policy, and one request a fallback rescued.
+# (which the tour opens) shows each policy at work, and one request a fallback
+# rescued.
 RECENT = [
     # (minutes ago, key, model_key, policy, selection reason)
     (0.4, "prod-api", "openai:gpt-6.1-sol", "smart", "router:weighted"),
