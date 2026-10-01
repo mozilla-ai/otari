@@ -15,6 +15,7 @@ from gateway.core.usage import (
     cache_tokens_in_prompt_of,
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
+    reasoning_tokens_of,
 )
 from gateway.log_config import logger
 from gateway.model_labeling import relabel_model
@@ -106,6 +107,7 @@ def _merge_usage(current: CompletionUsage, update: CompletionUsage) -> Completio
         # (Anthropic) if any chunk reported it that way, so the seed's default of
         # "in prompt" never masks the Anthropic shape.
         cache_tokens_in_prompt=cache_tokens_in_prompt_of(update) and cache_tokens_in_prompt_of(current),
+        reasoning_tokens=reasoning_tokens_of(update) or reasoning_tokens_of(current),
     )
 
 

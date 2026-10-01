@@ -55,7 +55,7 @@ from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_
 from gateway.api.routes._tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.core.usage import GatewayUsage
+from gateway.core.usage import GatewayUsage, reasoning_tokens_of
 from gateway.core.usage_source import PLAYGROUND_USAGE_ENDPOINT
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
@@ -228,6 +228,7 @@ class _ChatAdapter:
             total_tokens=chunk.usage.total_tokens or 0,
             prompt_tokens_details=details,
             cache_read_tokens=(details.cached_tokens or 0) if details is not None else 0,
+            reasoning_tokens=reasoning_tokens_of(chunk.usage),
         )
 
     def extract_usage(self, result: ChatCompletion) -> CompletionUsage | None:

@@ -275,7 +275,7 @@ def test_otlp_codex_sse_event_is_ingested_and_priced(
     headers = _exempt_key(client, master_key_header)
     _seed_codex_pricing(client, master_key_header)
 
-    resp = client.post(_PATH, json=_otlp(_codex_sse_record()), headers=headers)
+    resp = client.post(_PATH, json=_otlp(_codex_sse_record(reasoning_token_count=40)), headers=headers)
     assert resp.status_code == 200, resp.text
 
     rows = db_session.query(UsageLog).filter(UsageLog.source == "codex").all()
@@ -287,6 +287,8 @@ def test_otlp_codex_sse_event_is_ingested_and_priced(
     assert row.source_label == "conv-abc"  # conversation.id
     # Raw counts stored as reported; input stays inclusive of the cached slice.
     assert row.prompt_tokens == 1000 and row.completion_tokens == 100 and row.cache_read_tokens == 200
+    assert row.reasoning_tokens == 40
+    # Reasoning sits inside the 100 output tokens, so it adds nothing to the price.
     # De-included price: cached 200 billed once at the cache-read rate, not twice.
     expected = _usd(800, "0.15") + _usd(200, "0.075") + _usd(100, "0.6")
     assert row.cost == expected

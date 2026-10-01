@@ -8107,6 +8107,11 @@ export interface components {
             output_tokens: number;
             /** Provider */
             provider: string;
+            /**
+             * Reasoning Tokens
+             * @default 0
+             */
+            reasoning_tokens: number;
             /** Session Label */
             session_label?: string | null;
             /** Source Event Id */
@@ -12910,6 +12915,8 @@ export interface components {
             prompt_tokens: number | null;
             /** Provider */
             provider: string | null;
+            /** Reasoning Tokens */
+            reasoning_tokens?: number | null;
             /** Request Group Id */
             request_group_id?: string | null;
             /** Selection Reason */
@@ -13286,6 +13293,11 @@ export interface components {
             error_count: number;
             /** Prompt Tokens */
             prompt_tokens: number;
+            /**
+             * Reasoning Tokens
+             * @default 0
+             */
+            reasoning_tokens: number;
             /** Request Count */
             request_count: number;
             /** Total Tokens */

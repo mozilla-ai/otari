@@ -133,6 +133,7 @@ from gateway.core.usage import (
     cache_tokens_in_prompt_of,
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
+    reasoning_tokens_of,
 )
 from gateway.exceptions import TenancyError
 from gateway.exceptions.tools_exceptions import (
@@ -3813,6 +3814,7 @@ async def record_usage(
         usage_log.cache_read_tokens = cache_read_tokens_of(usage_data)
         usage_log.cache_write_tokens = cache_write_tokens_of(usage_data)
         usage_log.cache_write_1h_tokens = cache_write_1h_tokens_of(usage_data)
+        usage_log.reasoning_tokens = reasoning_tokens_of(usage_data)
         # Which convention those cache counts were reported under, recorded rather
         # than left to be inferred from the numbers later (mozilla-ai/otari#690).
         usage_log.cache_tokens_in_prompt = cache_tokens_in_prompt_of(usage_data)

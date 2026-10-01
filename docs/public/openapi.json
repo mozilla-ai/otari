@@ -5739,6 +5739,13 @@
             "title": "Provider",
             "type": "string"
           },
+          "reasoning_tokens": {
+            "default": 0,
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
+            "title": "Reasoning Tokens",
+            "type": "integer"
+          },
           "session_label": {
             "anyOf": [
               {
@@ -16212,6 +16219,17 @@
             ],
             "title": "Provider"
           },
+          "reasoning_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Tokens"
+          },
           "request_group_id": {
             "anyOf": [
               {
@@ -17169,6 +17187,11 @@
           },
           "prompt_tokens": {
             "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "reasoning_tokens": {
+            "default": 0,
+            "title": "Reasoning Tokens",
             "type": "integer"
           },
           "request_count": {

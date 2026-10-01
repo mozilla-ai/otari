@@ -79,6 +79,7 @@ class UsageLog(Base):
     cache_read_tokens: Mapped[int | None] = mapped_column()
     cache_write_tokens: Mapped[int | None] = mapped_column()
     cache_write_1h_tokens: Mapped[int | None] = mapped_column()
+    reasoning_tokens: Mapped[int | None] = mapped_column()
     # Which cached-token convention the counts above were reported under: True
     # when the cache buckets are already inside ``prompt_tokens`` (OpenAI shape),
     # False when they are additive to it (Anthropic / Claude Code shape). Written
@@ -205,6 +206,7 @@ class UsageLog(Base):
             "cache_read_tokens": self.cache_read_tokens,
             "cache_write_tokens": self.cache_write_tokens,
             "cache_write_1h_tokens": self.cache_write_1h_tokens,
+            "reasoning_tokens": self.reasoning_tokens,
             "cache_tokens_in_prompt": self.cache_tokens_in_prompt,
             "billing_meters": self.billing_meters,
             "pricing_breakdown": self.pricing_breakdown,

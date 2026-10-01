@@ -114,6 +114,7 @@ class ExternalUsageEvent(BaseModel):
     cache_read_tokens: int = Field(default=0, ge=0, le=_MAX_TOKENS)
     cache_write_tokens: int = Field(default=0, ge=0, le=_MAX_TOKENS)
     cache_write_1h_tokens: int = Field(default=0, ge=0, le=_MAX_TOKENS)
+    reasoning_tokens: int = Field(default=0, ge=0, le=_MAX_TOKENS)
     # Whether ``input_tokens`` already includes the cache counts (OpenAI shape,
     # where ``cached_tokens`` is a subset of ``prompt_tokens``) or excludes them
     # (Anthropic / Claude Code shape, where the cache buckets are additive). The
@@ -384,6 +385,7 @@ def _build_row(
         cache_read_tokens=event.cache_read_tokens,
         cache_write_tokens=event.cache_write_tokens,
         cache_write_1h_tokens=event.cache_write_1h_tokens,
+        reasoning_tokens=event.reasoning_tokens,
         # Persist the convention the submitter stated, so a row repriced later
         # (POST /v1/usage/set-price) is priced the way it was reported rather than
         # the way its numbers happen to look. A row that arrives with no rate to
