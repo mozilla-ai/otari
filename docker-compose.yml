@@ -67,6 +67,11 @@ services:
       # the provider's `providers:` entry.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Deployment-wide management credential. config.example.yml and
+      # docs/configuration.md both set `master_key` from this, so it has to
+      # reach the container: without it the gateway starts, cannot resolve
+      # ${OTARI_MASTER_KEY}, and restarts in a loop.
+      - OTARI_MASTER_KEY=${OTARI_MASTER_KEY:-}
       # Fernet key that encrypts provider credentials added through the admin
       # dashboard. Needed only for the dashboard-first flow (add providers in
       # the browser); unset is fine when providers live in config.yml. Generate
