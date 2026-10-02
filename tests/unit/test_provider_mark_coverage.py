@@ -34,6 +34,24 @@ TILED = {
     "amazon",
     # No mark for it in either source set.
     "openbmb",
+    # Labs named by models.dev's canonical ids whose marks are not vendored yet.
+    "aisingapore",
+    "arceeai",
+    "inclusionai",
+    "meituan",
+    "mixedbread",
+    "poolside",
+    "sakanaai",
+    "sarvamai",
+    "sdaia",
+    "stepfun",
+    "swissai",
+    "tencent",
+    "thinkingmachines",
+    "trendyol",
+    "upstage",
+    "writer",
+    "xiaomi",
 }
 
 

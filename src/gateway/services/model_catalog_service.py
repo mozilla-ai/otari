@@ -48,6 +48,8 @@ class ModelCatalogEntry:
     name: str | None = None
     description: str | None = None
     family: str | None = None
+    canonical_model_id: str | None = None
+    """models.dev's provider-independent id, ``vendor/model``: who made the model."""
     input_modalities: list[str] = field(default_factory=list)
     output_modalities: list[str] = field(default_factory=list)
     reasoning: bool = False
@@ -268,6 +270,7 @@ def parse_entry(model: dict[str, Any]) -> ModelCatalogEntry:
         name=_as_str(model.get("name")),
         description=_as_str(model.get("description")),
         family=_as_str(model.get("family")),
+        canonical_model_id=_as_str(model.get("canonical_model_id")),
         input_modalities=_str_list(modalities.get("input")),
         output_modalities=_str_list(modalities.get("output")),
         reasoning=bool(model.get("reasoning")),

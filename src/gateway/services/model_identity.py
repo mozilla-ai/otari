@@ -41,7 +41,7 @@ _PATH_PREFIXES = (
 # Bedrock and its imitators write the vendor into the id with a dot:
 # ``anthropic.claude-sonnet-5-v1:0``. The vendor is kept as a hint and the
 # segment is dropped from the key.
-_DOTTED_VENDOR = re.compile(r"^(anthropic|openai|meta|qwen|deepseek|mistral|cohere|amazon|google|ai21|writer)\.")
+_DOTTED_VENDOR = re.compile(r"^(anthropic|openai|meta|qwen|deepseek|mistral|cohere|amazon|google|ai21|writer|nvidia)\.")
 
 # Suffixes that name a version pin or a tier of service on one provider.
 _SUFFIXES = (
@@ -60,7 +60,8 @@ _P_FOR_POINT = re.compile(r"(?<=\d)p(?=\d)")
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
-# The vendor an org segment in a model id names. Lowercased on lookup.
+# The vendor an org segment in a model id names, and the display name for the
+# org of a models.dev ``canonical_model_id``. Lowercased on lookup.
 _ORG_VENDORS: dict[str, str] = {
     "openai": "OpenAI",
     "anthropic": "Anthropic",
@@ -68,6 +69,7 @@ _ORG_VENDORS: dict[str, str] = {
     "meta": "Meta",
     "meta-llama": "Meta",
     "qwen": "Alibaba",
+    "alibaba": "Alibaba",
     "deepseek": "DeepSeek",
     "deepseek-ai": "DeepSeek",
     "moonshotai": "Moonshot AI",
@@ -76,11 +78,13 @@ _ORG_VENDORS: dict[str, str] = {
     "z-ai": "Z.ai",
     "zai": "Z.ai",
     "zai-org": "Z.ai",
+    "zhipuai": "Z.ai",
     "nvidia": "NVIDIA",
     "microsoft": "Microsoft",
     "minimaxai": "MiniMax",
     "minimax": "MiniMax",
     "bytedance": "ByteDance",
+    "bytedance-seed": "ByteDance",
     "nousresearch": "Nous Research",
     "openbmb": "OpenBMB",
     "xai": "xAI",
@@ -89,6 +93,25 @@ _ORG_VENDORS: dict[str, str] = {
     "amazon": "Amazon",
     "ai21": "AI21",
     "perplexity": "Perplexity",
+    "fireworks": "Fireworks",
+    "thinkingmachines": "Thinking Machines",
+    "xiaomi": "Xiaomi",
+    "tencent": "Tencent",
+    "stepfun": "StepFun",
+    "sakana": "Sakana AI",
+    "poolside": "Poolside",
+    "meituan": "Meituan",
+    "arcee-ai": "Arcee AI",
+    "inclusionai": "inclusionAI",
+    "upstage": "Upstage",
+    "writer": "Writer",
+    "ibm": "IBM",
+    "sarvam": "Sarvam AI",
+    "swiss-ai": "Swiss AI",
+    "aisingapore": "AI Singapore",
+    "sdaia": "SDAIA",
+    "mixedbread": "Mixedbread",
+    "trendyol": "Trendyol",
 }
 
 # The vendor a model family's leading token implies, for an id with no org
@@ -130,6 +153,8 @@ _KEY_VENDORS: tuple[tuple[str, str], ...] = tuple(
             "hermes": "Nous Research",
             "jamba": "AI21",
             "sonar": "Perplexity",
+            "ember": "Fireworks",
+            "inkling": "Thinking Machines",
         }.items(),
         key=lambda item: -len(item[0]),
     )
@@ -208,6 +233,30 @@ def vendor_slug(vendor: str) -> str:
     return _NON_ALNUM.sub("-", _VENDOR_SPACES.sub("", vendor.lower())).strip("-")
 
 
+# A vendor's name written in front of its own model: "NVIDIA Nemotron 3 Ultra",
+# ``openai-gpt-oss-120b``. Dropped only when the rest is a family that vendor
+# makes, so "DeepSeek V4" and "Mistral Medium 3" keep their whole name.
+_LEADING_WORD = re.compile(r"([a-z0-9]+)[\s_-]+", re.IGNORECASE)
+
+
+def _family_vendor(key: str) -> str | None:
+    for prefix, vendor in _KEY_VENDORS:
+        if key.startswith(prefix):
+            return vendor
+    return None
+
+
+def _strip_vendor_prefix(text: str) -> tuple[str, str | None]:
+    """``text`` without a leading vendor name, and the vendor it named."""
+    match = _LEADING_WORD.match(text)
+    if match:
+        vendor = _ORG_VENDORS.get(match.group(1).lower())
+        rest = text[match.end() :]
+        if vendor is not None and _family_vendor(normalize(rest)) == vendor:
+            return rest, vendor
+    return text, None
+
+
 @dataclass(frozen=True)
 class CleanedId:
     """A provider's model id with the serving details separated out."""
@@ -238,6 +287,9 @@ def clean_model_id(model_id: str) -> CleanedId:
         vendor_hint = vendor_hint or _ORG_VENDORS.get(dotted.group(1))
         text = text[dotted.end() :]
 
+    text, prefixed = _strip_vendor_prefix(text)
+    vendor_hint = vendor_hint or prefixed
+
     for suffix in _SUFFIXES:
         text = suffix.sub("", text)
 
@@ -252,8 +304,14 @@ def clean_model_id(model_id: str) -> CleanedId:
 
 def _name_key(name: str) -> str:
     # A reseller sometimes puts the org into the display name too
-    # (``deepseek-ai/DeepSeek-V4-Pro``); the org is not part of the model.
-    return normalize(name.rsplit("/", 1)[-1])
+    # (``deepseek-ai/DeepSeek-V4-Pro``), or the vendor's name in front of the
+    # family; neither is part of the model.
+    return normalize(_display_name(name))
+
+
+def _display_name(name: str) -> str:
+    """A models.dev name without an org path or a leading vendor name."""
+    return _strip_vendor_prefix(name.rsplit("/", 1)[-1])[0]
 
 
 def identity_key(provider_type: str, model_id: str, name: str | None) -> str:
@@ -274,15 +332,26 @@ def identity_key(provider_type: str, model_id: str, name: str | None) -> str:
     return key or normalize(model_id) or model_id
 
 
-def infer_vendor(model_id: str, key: str) -> str | None:
-    """The vendor that built a model, from its id's org segment or its family."""
-    hint = clean_model_id(model_id).vendor_hint
-    if hint is not None:
-        return hint
-    for prefix, vendor in _KEY_VENDORS:
-        if key.startswith(prefix):
-            return vendor
-    return None
+def canonical_vendor(canonical_id: str | None) -> str | None:
+    """The vendor a models.dev ``canonical_model_id`` names: ``zhipuai/glm-5.3`` is Z.ai.
+
+    An org with no entry in the table is named as models.dev spells it, so a
+    new lab shows up under its own name rather than as an unknown vendor.
+    """
+    if not canonical_id or "/" not in canonical_id:
+        return None
+    org = canonical_id.split("/", 1)[0].strip()
+    return _ORG_VENDORS.get(org.lower(), org) or None
+
+
+def infer_vendor(model_id: str, key: str, canonical_id: str | None = None) -> str | None:
+    """The vendor that built a model.
+
+    models.dev's canonical id first, because it is curated per model and the
+    id's own org segment can name a router rather than the maker
+    (``amazon/google.gemma-3-4b-it``); then that org segment; then the family.
+    """
+    return canonical_vendor(canonical_id) or clean_model_id(model_id).vendor_hint or _family_vendor(key)
 
 
 @dataclass(frozen=True)
@@ -293,6 +362,8 @@ class OfferingSeed:
     provider_type: str
     model_id: str
     name: str | None = None
+    canonical_id: str | None = None
+    """models.dev's ``canonical_model_id``, ``vendor/model``, when it has one."""
 
 
 @dataclass(frozen=True)
@@ -333,8 +404,8 @@ def _vote_name(seeds: list[OfferingSeed], vendor: str | None) -> str:
         own = _VENDOR_PROVIDERS.get(vendor, frozenset())
         for seed in seeds:
             if seed.name and seed.provider_type in own:
-                return seed.name.rsplit("/", 1)[-1]
-    spellings = [seed.name.rsplit("/", 1)[-1] for seed in seeds if seed.name]
+                return _display_name(seed.name)
+    spellings = [_display_name(seed.name) for seed in seeds if seed.name]
     if spellings:
         counts = Counter(spellings)
         return max(spellings, key=lambda name: (counts[name], -spellings.index(name)))
@@ -342,7 +413,9 @@ def _vote_name(seeds: list[OfferingSeed], vendor: str | None) -> str:
 
 
 def _vote_vendor(seeds: list[OfferingSeed], key: str) -> str | None:
-    votes = Counter(vendor for seed in seeds if (vendor := infer_vendor(seed.model_id, key)) is not None)
+    votes = Counter(
+        vendor for seed in seeds if (vendor := infer_vendor(seed.model_id, key, seed.canonical_id)) is not None
+    )
     if not votes:
         return None
     return sorted(votes.items(), key=lambda item: (-item[1], item[0]))[0][0]
@@ -381,6 +454,7 @@ __all__ = [
     "vendor_slug",
     "ModelIdentity",
     "OfferingSeed",
+    "canonical_vendor",
     "clean_model_id",
     "group_offerings",
     "identity_key",

@@ -9,6 +9,7 @@ import pytest
 
 from gateway.services.model_identity import (
     OfferingSeed,
+    canonical_vendor,
     clean_model_id,
     group_offerings,
     identity_key,
@@ -51,6 +52,13 @@ def test_normalize_folds_case_and_punctuation_only(text: str, expected: str) -> 
         ("deepseek-ai/DeepSeek-V4-Pro", "DeepSeek-V4-Pro", "DeepSeek", None),
         ("gpt-oss:120b", "gpt-oss:120b", None, None),
         ("nemotron-3-ultra-550b-a55b:free", "nemotron-3-ultra-550b-a55b", None, None),
+        ("nvidia.nemotron-nano-9b-v2", "nemotron-nano-9b-v2", "NVIDIA", None),
+        # A vendor's name in front of its own family is the vendor, not the model.
+        ("nvidia-nemotron-3-super-120b-a12b", "nemotron-3-super-120b-a12b", "NVIDIA", None),
+        ("openai-gpt-oss-120b", "gpt-oss-120b", "OpenAI", None),
+        # ...but a model named after its vendor keeps the name.
+        ("deepseek-v4-pro", "deepseek-v4-pro", None, None),
+        ("mistral-medium-3", "mistral-medium-3", None, None),
     ],
 )
 def test_clean_model_id_separates_serving_from_model(
@@ -73,6 +81,15 @@ def test_the_name_rung_wins_over_the_id() -> None:
 def test_the_id_rung_is_the_fallback() -> None:
     assert identity_key("fireworks", "accounts/fireworks/models/deepseek-v4-pro", None) == "deepseekv4pro"
     assert identity_key("ollama", "gpt-oss:120b", None) == "gptoss120b"
+
+
+def test_a_vendor_name_in_front_of_the_family_groups_with_the_bare_name() -> None:
+    bare = identity_key("fireworks", "accounts/fireworks/models/nemotron-3-ultra", "Nemotron 3 Ultra")
+    assert identity_key("venice", "nvidia-nemotron-3-ultra-550b-a55b", "NVIDIA Nemotron 3 Ultra") == bare
+    assert identity_key("requesty", "nvidia-nemotron-3-ultra", None) == bare
+    assert identity_key("venice", "google-gemma-4-31b-it", "Google Gemma 4 31B") == "gemma431b"
+    # Mistral's own names start with its name; nothing is stripped there.
+    assert identity_key("mistral", "mistral-medium-3", "Mistral Medium 3") == "mistralmedium3"
 
 
 def test_a_dated_build_and_a_tier_stay_apart() -> None:
@@ -104,6 +121,52 @@ def test_a_name_that_normalizes_to_nothing_falls_through() -> None:
 def test_infer_vendor(model_id: str, vendor: str | None) -> None:
     key = identity_key("x", model_id, None)
     assert infer_vendor(model_id, key) == vendor
+
+
+@pytest.mark.parametrize(
+    ("canonical_id", "vendor"),
+    [
+        ("zhipuai/glm-5.3", "Z.ai"),
+        ("nvidia/nemotron-3-ultra", "NVIDIA"),
+        ("thinkingmachines/inkling", "Thinking Machines"),
+        # A lab the table does not know is still named, as models.dev spells it.
+        ("quiverai/arrow-2", "quiverai"),
+        ("no-org", None),
+        (None, None),
+    ],
+)
+def test_canonical_vendor(canonical_id: str | None, vendor: str | None) -> None:
+    assert canonical_vendor(canonical_id) == vendor
+
+
+def test_the_canonical_id_wins_over_a_router_s_org_segment() -> None:
+    # Eden AI routes through Amazon and says so in the id; Google made the model.
+    model_id = "amazon/google.gemma-3-4b-it@us"
+    key = identity_key("edenai", model_id, None)
+    assert infer_vendor(model_id, key) == "Amazon"
+    assert infer_vendor(model_id, key, "google/gemma-3-4b-it") == "Google"
+
+
+def test_fireworks_own_model_is_credited_to_fireworks() -> None:
+    model_id = "accounts/fireworks/models/ember-1"
+    groups = group_offerings([OfferingSeed(f"fireworks:{model_id}", "fireworks-ai", model_id, "Ember-1")])
+    assert groups["ember1"].vendor == "Fireworks"
+    assert groups["ember1"].id == "fireworks/ember-1"
+
+
+def test_nvidia_models_are_credited_to_nvidia_however_the_provider_spells_them() -> None:
+    seeds = [
+        OfferingSeed("venice:a", "venice", "nvidia-nemotron-3-ultra", "NVIDIA Nemotron 3 Ultra"),
+        OfferingSeed("requesty:b", "requesty", "nvidia-nemotron-3-ultra", None),
+        OfferingSeed("do:c", "digitalocean", "nemotron-3-ultra", "Nemotron 3 Ultra"),
+    ]
+    groups = group_offerings(seeds)
+    assert set(groups) == {"nemotron3ultra"}
+    identity = groups["nemotron3ultra"]
+    assert identity.vendor == "NVIDIA"
+    # The name drops the vendor too, since the page already shows it beside the name.
+    assert identity.name == "Nemotron 3 Ultra"
+    assert identity.id == "nvidia/nemotron-3-ultra"
 
 
 def test_group_offerings_folds_the_fireworks_spellings_with_everyone_else() -> None:

@@ -211,8 +211,12 @@ the genai-prices default. Both routes accept the same credentials as
 
 Grouping keys on the models.dev display name where the dataset knows the
 model, and on the provider's id with its path prefixes, org segment and version
-pins removed where it does not. A model's id is its vendor and its name,
-`z-ai/glm-5.3`, or the bare name where nobody could say the vendor. A dated build, a size or tier, and a mode a
+pins removed where it does not; a vendor's name written in front of its own
+model (`NVIDIA Nemotron 3 Ultra`, `openai-gpt-oss-120b`) is dropped from both. A
+model's id is its vendor and its name, `z-ai/glm-5.3`, or the bare name where
+nobody could say the vendor. The vendor is the org of models.dev's
+`canonical_model_id` where the dataset has one, else the org segment of the
+provider's id, else the model family (`claude`, `nemotron`). A dated build, a size or tier, and a mode a
 reseller exposes as its own id stay separate models. models.dev's description,
 capabilities and modalities are served to every catalog reader here, where
 `GET /api/v1/models/metadata` stays operator-only.
