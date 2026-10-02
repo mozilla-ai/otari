@@ -198,6 +198,7 @@ uv run --frozen --no-dev python scripts/oss_edition_smoke.py
 - Do not hand-edit `CHANGELOG.md`; it is regenerated from commit history at release time.
 - The PR description must keep the **PR Type**, **Checklist**, and **AI Usage** sections from the [PR template](https://github.com/mozilla-ai/otari/blob/main/.github/pull_request_template.md). CI checks for these sections and will auto-close PRs that are missing them after 24 hours.
 - Until one of your PRs has been approved or merged, keep only one open at a time. CI closes any extra PRs from a first-time contributor (keeping the oldest open); reopen them once the first PR is approved. A maintainer can exempt a PR with the `skip-pr-limit` label.
+- Before opening a PR for an issue, check whether an open PR is already linked to it, and keep no more than four PRs open at a time. CI comments on a PR that duplicates another, and closes a newly opened or reopened PR that would take you past four (unless it carries the `skip-pr-limit` label).
 
 ## Questions?
 
