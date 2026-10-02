@@ -1,0 +1,114 @@
+name: "Automation Review"
+
+# The job behind the scheduled review-*.yml workflows: each one names a task
+# and a prompt file, and this runs Claude Code on main with them. Kept in one
+# place so a hardening change cannot reach four of the five.
+on:
+  workflow_call:
+    inputs:
+      task:
+        description: "Task name, used in the branch name and the PR body"
+        required: true
+        type: string
+      prompt:
+        description: "Path of the task's prompt file"
+        required: true
+        type: string
+
+jobs:
+  review:
+    # Holds CLAUDE_CODE_OAUTH_TOKEN, shared with review-pr.yml. Its deployment
+    # branches are restricted to main.
+    environment: pr-review
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    concurrency:
+      group: automation-${{ inputs.task }}
+      cancel-in-progress: false
+    # The job token only checks out the repository and mints the OIDC token
+    # the action exchanges for a Claude App installation token. Pushes and
+    # PRs go through that App token, so the PR's checks run, which they would
+    # not for a PR opened with this job's token.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # No persisted job token: the agent's shell would otherwise find it in
+      # .git/config.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: ./.github/actions/agent-setup
+
+      # Without a PID namespace, a scrubbed variable is still readable from
+      # the parent process through /proc, so the scrub below needs bubblewrap
+      # to mean anything; see review-pr.yml.
+      - name: Install subprocess isolation
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bubblewrap socat
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
+      - name: Run agent
+        id: claude
+        uses: anthropics/claude-code-action@fd1c128679612beff4ca259c78021c506e8aa7a7 # v1.0.237
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # A `prompt` input puts the action in automation mode, so the run
+          # needs no `@claude` mention. A `with:` input is not shell-expanded,
+          # so the prompt points at the checked-out file rather than inlining it.
+          prompt: "Read ${{ inputs.prompt }} and follow every instruction in it. The task name is `${{ inputs.task }}`. Complete every step in this one run: there is no later turn, so never delegate to a background agent or subagent and never wait for a notification."
+          # Bash is for tests, git and `gh`. No WebFetch or WebSearch: no
+          # prompt needs the web, and they would be a way out for the App
+          # token, which can write contents and workflows.
+          #
+          # Delegation is denied: a subagent launched here runs in the
+          # background and the parent ends its turn waiting for a notification
+          # a one-shot run never delivers, so the job exits green with the work
+          # unfinished. ScheduleWakeup is a `/loop` tool, equally meaningless.
+          #
+          # The Read denials cover what the env scrub cannot: Claude's own Read
+          # (and Grep and Glob) could otherwise open /proc/self/environ and
+          # find the OAuth token there.
+          #
+          # The run link goes in --append-system-prompt because the URL needs
+          # `github.run_id`, which the static prompt file cannot interpolate.
+          claude_args: |
+            --model opus
+            --allowed-tools "Bash,Edit,Write,Read,Glob,Grep,TodoWrite"
+            --disallowed-tools "Agent,Task,ScheduleWakeup,Read(//proc/**),Read(//home/runner/.claude/**),Read(//home/runner/work/_temp/**)"
+            --append-system-prompt "The pull request you open must end its body with this line, on its own, verbatim: [View job run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+        env:
+          # Keeps subagents in the foreground, alongside the delegation denial.
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+          # Strips Anthropic and cloud credentials, the OAuth token among them,
+          # from every command the agent runs. GH_TOKEN stays, so `gh` works.
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
+
+      # The execution file is the full transcript, tool output included, and
+      # artifacts on a public repo are downloadable by anyone signed in. So
+      # upload it only on a re-run with "Enable debug logging" ticked.
+      - name: Upload logs
+        if: always() && runner.debug == '1' && steps.claude.outputs.execution_file != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: claude-logs
+          path: ${{ steps.claude.outputs.execution_file }}
+          retention-days: 1
+
+      # The security prompt stops on a finding that must not become a public
+      # PR and leaves this marker, saying nothing more; failing here is how a
+      # maintainer learns to rerun the review privately (SECURITY.md).
+      - name: Check for a withheld finding
+        if: always()
+        env:
+          PROMPT: ${{ inputs.prompt }}
+        run: |
+          if [ -e .automation-withheld ]; then
+            echo "::error::A finding was withheld for private handling; run $PROMPT locally and follow SECURITY.md"
+            exit 1
+          fi

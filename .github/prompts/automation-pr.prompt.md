@@ -5,9 +5,15 @@ that sent you here says what to change; this says how to propose it.
 
 ## Before you start
 
-Run `gh pr list --label automation --state open --json number,title,headRefName`.
-Do not redo a fix that an open automation PR already makes, and avoid a change
-that would conflict with one still waiting for review.
+Run `gh pr list --label automation --state all --limit 50 --json number,title,state,headRefName,closedAt`.
+These workflows run more often than the window they look at, so most of what
+you find an earlier run has already seen:
+
+- Do not redo a fix that an open automation PR already makes, and avoid a
+  change that would conflict with one still waiting for review.
+- Do not propose again what a closed, unmerged automation PR proposed: a
+  maintainer declined it. Read its comments with `gh pr view <number>
+  --comments` when you need to know why.
 
 ## The change
 
