@@ -18,8 +18,8 @@ Keep documentation and AI guidance synchronized with the current repository.
 
 ## Method
 
-1. Inspect recent merged changes (`git log --oneline --since="7 days ago"`,
-   `gh pr list --state merged --limit 20`).
+1. Inspect recent merged changes (`git log --oneline --since="<window start>"`,
+   `gh pr list --state merged --search "merged:>=<window start>"`).
 2. Identify drift between code behavior and docs or instructions: a renamed
    setting, a changed default, a removed route, a command that no longer
    exists, a file path that moved.

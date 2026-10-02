@@ -17,8 +17,8 @@ improvements to code quality and architecture.
 
 ## Method
 
-1. Look at recent commits and merged PRs (`git log --oneline --since="7 days ago"`
-   and `gh pr list --state merged --limit 20`).
+1. Look at recent commits and merged PRs (`git log --oneline --since="<window start>"`
+   and `gh pr list --state merged --search "merged:>=<window start>"`).
 2. Read the guidance for the area you are in: [ARCHITECTURE.md](../../ARCHITECTURE.md)
    and [docs/domains.md](../../docs/domains.md) for where code belongs,
    `.github/skills/backend-standards/SKILL.md` for the gateway and

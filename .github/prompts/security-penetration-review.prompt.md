@@ -33,7 +33,7 @@ configuration-dependent by design. In particular:
 
 ## Method
 
-1. Inspect recent changes (`git log --oneline --since="7 days ago"`), then
+1. Inspect recent changes (`git log --oneline --since="<window start>"`), then
    review the high-risk surfaces they touched.
 2. Validate each finding by tracing it end to end through the code, and prove
    it with a test where you can.

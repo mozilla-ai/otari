@@ -19,10 +19,10 @@ revealed by CI runs and recent code changes.
 ## Method
 
 1. Review recent CI results on `main`
-   (`gh run list --branch main --limit 20 --json conclusion,name,databaseId`),
+   (`gh run list --branch main --created ">=<window start>" --limit 200 --json conclusion,name,databaseId`),
    and read the failing logs with `gh run view <id> --log-failed`.
 2. Inspect recent code changes for missing or weak tests
-   (`git log --oneline --since="7 days ago"`).
+   (`git log --oneline --since="<window start>"`).
 3. Add or improve tests and related quality fixes. Include every validated fix,
    not just one.
 4. Validate with the commands below, then create a PR as

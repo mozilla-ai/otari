@@ -25,7 +25,7 @@ Find unused code and remove it safely, before it accumulates.
 
 ## Method
 
-1. Inspect recent changes (`git log --oneline --since="7 days ago"`) and look
+1. Inspect recent changes (`git log --oneline --since="<window start>"`) and look
    for dead code introduced or left behind.
 2. Confirm code is truly unused before removing it, with `rg` across the whole
    repository (tests, scripts, `docs/`, `web/`, `pyproject.toml` entry points),

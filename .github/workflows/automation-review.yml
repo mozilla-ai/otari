@@ -25,12 +25,13 @@ jobs:
     concurrency:
       group: automation-${{ inputs.task }}
       cancel-in-progress: false
-    # The job token only checks out the repository and mints the OIDC token
-    # the action exchanges for a Claude App installation token. Pushes and
-    # PRs go through that App token, so the PR's checks run, which they would
-    # not for a PR opened with this job's token.
+    # The job token only checks out the repository, finds the last run, and
+    # mints the OIDC token the action exchanges for a Claude App installation
+    # token. Pushes and PRs go through that App token, so the PR's checks run,
+    # which they would not for a PR opened with this job's token.
     permissions:
       contents: read
+      actions: read
       id-token: write
     steps:
       # No persisted job token: the agent's shell would otherwise find it in
@@ -53,6 +54,26 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
 
+      # The window starts where the last successful run of the calling
+      # workflow did, so no run reviews changes an earlier one already saw and
+      # a failed run's changes roll into the next. It never reaches back more
+      # than 7 days, so a workflow broken for a month does not wake up to it.
+      - name: Find the review window
+        id: window
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          workflow=$(basename "${WORKFLOW_REF%@*}")
+          floor=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          last=$(gh run list -R "$REPO" --workflow "$workflow" --branch main \
+            --status success --limit 1 --json createdAt --jq '.[0].createdAt // empty')
+          since=$floor
+          if [[ -n "$last" && "$last" > "$floor" ]]; then since=$last; fi
+          echo "Reviewing changes since $since"
+          echo "since=$since" >> "$GITHUB_OUTPUT"
+
       - name: Run agent
         id: claude
         uses: anthropics/claude-code-action@fd1c128679612beff4ca259c78021c506e8aa7a7 # v1.0.237
@@ -61,7 +82,7 @@ jobs:
           # A `prompt` input puts the action in automation mode, so the run
           # needs no `@claude` mention. A `with:` input is not shell-expanded,
           # so the prompt points at the checked-out file rather than inlining it.
-          prompt: "Read ${{ inputs.prompt }} and follow every instruction in it. The task name is `${{ inputs.task }}`. Complete every step in this one run: there is no later turn, so never delegate to a background agent or subagent and never wait for a notification."
+          prompt: "Read ${{ inputs.prompt }} and follow every instruction in it. The task name is `${{ inputs.task }}`. Use `${{ steps.window.outputs.since }}` wherever the prompt says `<window start>`. Complete every step in this one run: there is no later turn, so never delegate to a background agent or subagent and never wait for a notification."
           # Bash is for tests, git and `gh`. No WebFetch or WebSearch: no
           # prompt needs the web, and they would be a way out for the App
           # token, which can write contents and workflows.

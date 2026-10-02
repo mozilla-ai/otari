@@ -6,8 +6,10 @@ that sent you here says what to change; this says how to propose it.
 ## Before you start
 
 Run `gh pr list --label automation --state all --limit 50 --json number,title,state,headRefName,closedAt`.
-These workflows run more often than the window they look at, so most of what
-you find an earlier run has already seen:
+`<window start>` in the task prompt is the time the workflow gave you: when
+this workflow last succeeded, or 7 days ago if that was longer ago. Changes
+before it were an earlier run's to review. An earlier run may still have
+proposed what you find:
 
 - Do not redo a fix that an open automation PR already makes, and avoid a
   change that would conflict with one still waiting for review.
