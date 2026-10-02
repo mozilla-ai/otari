@@ -12,12 +12,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
+from gateway.adapters.rate_limit_store_adapter import InMemoryRateLimitStore
 from gateway.core.config import API_KEY_HEADER, API_ROOT
 from gateway.models.budgets import SCOPE_API_TOKEN, Budget, ScopedBudget
 from gateway.models.tenancy import Organization
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
-from gateway.rate_limit import RateLimiter
+from gateway.rate_limit import UserRateLimiter
 
 from .conftest import MODEL_NAME
 
@@ -159,7 +160,7 @@ def test_end_users_share_their_owners_rate_limit_and_a_limited_one_is_not_create
 ) -> None:
     """The limit is checked before an end user is created, so it bounds how fast a key adds them."""
     _, headers = _service_key(client, master_key_header, "svc")
-    client.app.state.rate_limiter = RateLimiter(2)  # type: ignore[attr-defined]
+    client.app.state.rate_limiter = UserRateLimiter(InMemoryRateLimitStore(), 2)  # type: ignore[attr-defined]
 
     assert _chat(client, headers, "alice").status_code == 200
     assert _chat(client, headers, "bob").status_code == 200

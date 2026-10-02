@@ -133,6 +133,12 @@ e2b = [
     "e2b>=2.0.0",
     "e2b-code-interpreter>=2.0.0",
 ]
+# A rate-limit store every gateway process shares (`rate_limit_store: redis`),
+# so a limit holds across replicas rather than per process. The adapter imports
+# the client only when that store is selected.
+redis = [
+    "redis>=5.0.1",
+]
 # Prometheus scrape at /metrics. Optional so a deployment that never scrapes
 # pays neither the import (prometheus_client.exposition pulls in http.server and
 # wsgiref.simple_server, which nothing else here needs) nor the collection; when
@@ -171,7 +177,7 @@ dev = [
     # The fsspec file store test reaches a real S3-compatible store through s3fs.
     # Its aiobotocore dependency pins botocore, so it also bounds the boto3 this lock can take.
     "s3fs>=2026.3.0",
-    "testcontainers[postgres]>=4.0.0",
+    "testcontainers[postgres,redis]>=4.0.0",
 ]
 
 [tool.uv]

@@ -81,6 +81,8 @@ the corresponding startup value after the database is available.
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
+| `rate_limit_store` | Where `rate_limit_rpm` is counted: `memory` (the default) or `redis`. See [Rate limits across replicas](#rate-limits-across-replicas). |
+| `rate_limit_redis_url` | The Redis that the `redis` store counts in. |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
@@ -119,6 +121,29 @@ server-side, so the second one still ends a statement when the client is the
 stuck half. Configure the server-side value above the client-side one, which
 the defaults do and startup validation requires: set equal, whichever fires
 first is a race.
+
+### Rate limits across replicas
+
+`rate_limit_rpm` is counted in this process by default, so a deployment
+running N replicas (or N workers) admits up to N times the limit. To hold the
+limit for the deployment as a whole, count it in Redis:
+
+```yaml
+rate_limit_rpm: 600
+rate_limit_store: redis
+rate_limit_redis_url: redis://redis:6379/0
+```
+
+This needs the `redis` extra (`pip install gateway[redis]`), which the Docker
+image installs, and Redis 5 or later. Startup refuses `redis` without a URL or
+without the extra, because quietly counting per process would multiply the
+limit again.
+
+Each request is checked and counted in one step, against Redis's own clock, so
+replicas never both take the last slot and their clock skew does not matter.
+If Redis cannot be reached, each replica counts on its own instead of refusing
+traffic, and tries Redis again a few seconds later; the gateway log says when
+that starts and stops.
 
 ## Provider configuration
 

@@ -246,7 +246,7 @@ async def run_passthrough(
         if (
             exc.status_code == status.HTTP_403_FORBIDDEN
             and api_key is not None
-            and not throttle_early_rejection(raw_request, str(api_key.user_id))
+            and not await throttle_early_rejection(raw_request, str(api_key.user_id))
         ):
             await log_gateway_rejection(
                 db=db,
@@ -262,7 +262,7 @@ async def run_passthrough(
             )
         raise
 
-    rate_limit_info = check_rate_limit(raw_request, user_id)
+    rate_limit_info = await check_rate_limit(raw_request, user_id)
 
     async def _log_rejection(detail: str, *, row_model: str, row_provider: str | None, status_code: int) -> None:
         """Record a gateway-side rejection of this request.

@@ -1756,7 +1756,7 @@ async def _resolve_keyed_user_id(
         if (
             exc.status_code == status.HTTP_403_FORBIDDEN
             and api_key is not None
-            and not throttle_early_rejection(raw_request, str(api_key.user_id))
+            and not await throttle_early_rejection(raw_request, str(api_key.user_id))
         ):
             await log_gateway_rejection(
                 db=db,
@@ -1949,7 +1949,7 @@ async def resolve_request_context(
             # end users, and it is its owner's, shared by all of them.
             names_end_user = _names_end_user(api_key, user_id_from_request)
             if names_end_user and api_key is not None:
-                rate_limit_info = check_rate_limit(raw_request, str(api_key.user_id))
+                rate_limit_info = await check_rate_limit(raw_request, str(api_key.user_id))
             user_id = await _resolve_keyed_user_id(
                 adapter=adapter,
                 db=db,
@@ -1972,7 +1972,7 @@ async def resolve_request_context(
             # itself stays where it was, so a plain model name is unaffected.
             key_allowlist = await resolve_request_allowlist(db, api_key)
         if not names_end_user:
-            rate_limit_info = check_rate_limit(raw_request, user_id)
+            rate_limit_info = await check_rate_limit(raw_request, user_id)
 
         # Tolerate an unparseable / unknown-provider selector here: the budget
         # check below and the downstream provider call surface those with
@@ -4030,7 +4030,7 @@ async def release_reservation(ctx: RequestContext) -> None:
     await refund_reservation(ctx.db, ctx.reservation)
 
 
-def throttle_early_rejection(raw_request: Request, user_id: str) -> bool:
+async def throttle_early_rejection(raw_request: Request, user_id: str) -> bool:
     """Charge a pre-rate-limit refusal to ``user_id``'s bucket, reporting the verdict.
 
     The user/key mismatch gate is the one rejection that fires *before*
@@ -4048,7 +4048,7 @@ def throttle_early_rejection(raw_request: Request, user_id: str) -> bool:
     must not depend on how the gateway chose to record it.
     """
     try:
-        check_rate_limit(raw_request, user_id)
+        await check_rate_limit(raw_request, user_id)
     except HTTPException:
         return True
     return False

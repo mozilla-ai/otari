@@ -39,6 +39,7 @@ from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAda
 from gateway.adapters.mcp_server_adapter import build_mcp_server_port
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
 from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
+from gateway.adapters.rate_limit_store_adapter import build_rate_limit_store
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
 from gateway.adapters.web_search_policy_adapter import build_web_search_policy_port
 from gateway.core.config import GatewayConfig
@@ -53,6 +54,7 @@ from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
+from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 
@@ -337,6 +339,28 @@ def _file_storage_port_factory(config: GatewayConfig | None) -> PortFactory[File
     return factory
 
 
+def _rate_limit_store_port_factory(config: GatewayConfig | None) -> PortFactory[RateLimitStorePort]:
+    """The core ``RateLimitStorePort`` factory, closed over this app's config.
+
+    Built on first resolve and reused, so every request counts in one store and
+    a process holds one connection pool to it.
+    A container built without config resolves this port only to raise.
+    """
+    store: RateLimitStorePort | None = None
+
+    def factory(session: AsyncSession | None) -> RateLimitStorePort:
+        del session
+        nonlocal store
+        if config is None:
+            msg = "RateLimitStorePort needs the deployment config; build the container with it"
+            raise ContainerError(msg)
+        if store is None:
+            store = build_rate_limit_store(config)
+        return store
+
+    return factory
+
+
 def _mcp_server_port_factory(config: GatewayConfig | None) -> PortFactory[McpServerPort]:
     """The core ``McpServerPort`` factory, closed over this app's config.
 
@@ -432,6 +456,9 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
     # rows where it holds them, and asks its peer where it does not. An overlay
     # binds a source of its own and changes nothing above the port.
     container.bind(WebSearchPolicyPort, _web_search_policy_port_factory(config))
+    # Rate-limit counts: the base keeps them in this process, or in Redis
+    # where ``rate_limit_store`` asks for one count shared by every replica.
+    container.bind(RateLimitStorePort, _rate_limit_store_port_factory(config))
     if config is not None:
         # Asked once, at build, rather than per request: selecting a hosted
         # provider is itself what publishes code execution on ``/v1/tools``, in

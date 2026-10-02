@@ -358,7 +358,7 @@ async def create_batch(
         reject_mismatch=config.reject_user_mismatch,
     )
 
-    rate_limit_info = check_rate_limit(raw_request, user_id)
+    rate_limit_info = await check_rate_limit(raw_request, user_id)
 
     # Zero I/O for a keyed request (see `_pipeline.resolve_request_context`'s
     # equivalent comment); only a master-key request pays a lookup.

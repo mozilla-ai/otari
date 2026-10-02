@@ -95,7 +95,7 @@ def test_rate_limiter_window_expiry() -> None:
 
 def test_rate_limiter_cleanup() -> None:
     limiter = RateLimiter(rpm=100)
-    limiter._CLEANUP_INTERVAL = 3
+    limiter._log._CLEANUP_INTERVAL = 3
 
     with patch("gateway.rate_limit.time") as mock_time:
         mock_time.monotonic.return_value = 1000.0
@@ -108,8 +108,8 @@ def test_rate_limiter_cleanup() -> None:
         mock_time.time.return_value = 1700000061.0
         limiter.check("active-user")
 
-        assert "stale-user" not in limiter._requests
-        assert "active-user" in limiter._requests
+        assert "stale-user" not in limiter._log._requests
+        assert "active-user" in limiter._log._requests
 
 
 def test_rate_limiter_uses_deque_buckets() -> None:
@@ -120,7 +120,7 @@ def test_rate_limiter_uses_deque_buckets() -> None:
         mock_time.time.return_value = 1700000000.0
         limiter.check("user-1")
 
-    assert isinstance(limiter._requests["user-1"], deque)
+    assert isinstance(limiter._log._requests["user-1"], deque)
 
 
 def test_config_rejects_zero_rate_limit() -> None:

@@ -6,7 +6,7 @@ import types
 import typing
 from collections.abc import Container
 from pathlib import Path
-from typing import Annotated, Any, NamedTuple
+from typing import Annotated, Any, Literal, NamedTuple
 from urllib.parse import urlsplit
 
 import yaml
@@ -490,6 +490,21 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
     )
     rate_limit_rpm: Annotated[int | None, Shown(SettingsGroup.RATE_LIMITING)] = Field(
         default=None, ge=1, description="Maximum requests per minute per user (None disables rate limiting)"
+    )
+    rate_limit_store: Annotated[Literal["memory", "redis"], Shown(SettingsGroup.RATE_LIMITING)] = Field(
+        default="memory",
+        description=(
+            "Where rate_limit_rpm is counted: 'memory' (each process counts on its own, so N "
+            "replicas admit N times the limit) or 'redis' (every replica shares one count, at "
+            "rate_limit_redis_url). Needs the redis extra for 'redis'."
+        ),
+    )
+    rate_limit_redis_url: Annotated[str | None, SECRET] = Field(
+        default=None,
+        description=(
+            "Redis URL for the 'redis' rate-limit store, e.g. 'redis://redis:6379/0' or "
+            "'rediss://user:password@host:6380/0'. Required when rate_limit_store is 'redis'."
+        ),
     )
     dashboard_login_rate_limit_per_minute: Annotated[int | None, Shown(SettingsGroup.RATE_LIMITING)] = Field(
         default=10,

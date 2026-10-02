@@ -1,4 +1,5 @@
 import asyncio
+import importlib.util
 from collections.abc import AsyncGenerator, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -30,7 +31,8 @@ from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
-from gateway.rate_limit import RateLimiter
+from gateway.ports.rate_limit_store_port import RateLimitStorePort
+from gateway.rate_limit import RateLimiter, UserRateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
 from gateway.services.bootstrap_service import bootstrap_first_api_key
@@ -387,6 +389,23 @@ def _validate_metrics_support(config: GatewayConfig) -> None:
         raise ValueError(msg)
 
 
+def _validate_rate_limit_store(config: GatewayConfig) -> None:
+    """Refuse to start a shared rate-limit store that has nowhere to count.
+
+    Falling back to counting per process would quietly multiply the limit by
+    the number of replicas, which is the thing a shared store was asked for to
+    prevent, so a missing URL or client library stops startup instead.
+    """
+    if config.rate_limit_store != "redis":
+        return
+    if not config.rate_limit_redis_url:
+        msg = "rate_limit_store is 'redis' but rate_limit_redis_url is not set"
+        raise ValueError(msg)
+    if importlib.util.find_spec("redis") is None:
+        msg = "rate_limit_store is 'redis' but redis is not installed. Install it with: pip install gateway[redis]"
+        raise ValueError(msg)
+
+
 def _validate_provider_account_pepper(config: GatewayConfig) -> None:
     """Refuse to start a deployment that makes provider copies without its own pepper.
 
@@ -658,6 +677,9 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # POST /api/v1/search dispatches on one pooled client for the process, so
             # shutdown owns closing it. A no-op when no search was ever served.
             await close_search_client()
+            rate_limiter: UserRateLimiter | None = getattr(app.state, "rate_limiter", None)
+            if rate_limiter is not None:
+                await rate_limiter.aclose()
             # After the log writer, whose final flush is the last thing to need
             # a session. Hybrid mode never opened an engine, so this is a no-op there.
             await dispose_db()
@@ -746,6 +768,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     _validate_platform_config(config)
     _warn_if_hosted_has_no_data_plane(config)
     _validate_metrics_support(config)
+    _validate_rate_limit_store(config)
     # A set-but-invalid OTARI_SECRET_KEY must not silently pass startup and then
     # break provider-credential storage at request time. Fail fast here instead.
     validate_secret_key()
@@ -959,11 +982,6 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
         app.add_middleware(MetricsMiddleware)
 
-    if config.rate_limit_rpm is not None:
-        app.state.rate_limiter = RateLimiter(config.rate_limit_rpm)
-    else:
-        app.state.rate_limiter = None
-
     if config.dashboard_login_rate_limit_per_minute is not None:
         app.state.login_rate_limiter = RateLimiter(config.dashboard_login_rate_limit_per_minute)
     else:
@@ -988,6 +1006,11 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # that cannot be loaded raises here, so a deployment that named one and got
     # it wrong fails to start instead of quietly running the plain build.
     app.state.container = build_container(config.bootstrap, config=config)
+    app.state.rate_limiter = (
+        UserRateLimiter(app.state.container.resolve(RateLimitStorePort, None), config.rate_limit_rpm)
+        if config.rate_limit_rpm is not None
+        else None
+    )
 
     register_routers(app, config)
     app.add_exception_handler(TenancyError, _tenancy_error_handler)
