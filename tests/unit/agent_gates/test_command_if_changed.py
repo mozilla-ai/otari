@@ -148,3 +148,12 @@ def test_shares_a_precomputed_segment_cache() -> None:
         segment_cache=cache,
     )
     assert result.outcome is Outcome.PASS
+
+
+def test_a_required_git_command_run_with_global_options_satisfies_the_gate() -> None:
+    result = evaluate_command_if_changed(
+        _gate(require=("git add docs/public/openapi.json",)),
+        PathEvidence(paths=("docs/public/openapi.json",)),
+        CommandEvidence(commands=("git -C . add docs/public/openapi.json",), scope="session"),
+    )
+    assert result.outcome is Outcome.PASS

@@ -574,3 +574,38 @@ def test_session_scoped_evidence_is_not_this_gates_to_judge() -> None:
     # Same evidence at call scope is exactly what this gate does judge.
     blocked = evaluate_command(gate, CommandEvidence(commands=("npm install",), scope="call"))
     assert blocked.outcome is Outcome.FAIL
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git reset --hard",
+        "git -C /tmp/x reset --hard",
+        "git --no-pager reset --hard",
+        "git -c core.x=y reset --hard",
+        "git -P -C repo -c a=b reset --hard",
+        "git --git-dir=.git --work-tree=. reset --hard",
+        "git --git-dir .git reset --hard",
+        "/usr/bin/git -C repo reset --hard",
+        "sudo git -C repo reset --hard",
+        "cd repo && git -C . reset --hard HEAD~1",
+    ],
+)
+def test_git_global_options_do_not_hide_a_forbidden_subcommand(command: str) -> None:
+    gate = _gate(id="no-hard-reset", forbidden=("git reset --hard",), message="No hard reset.")
+    assert evaluate_command(gate, CommandEvidence(commands=(command,))).outcome is Outcome.FAIL
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["git -C /tmp/x status", "git -C reset --hard", "echo reset --hard", "git -C repo log --hard"],
+)
+def test_skipping_git_global_options_does_not_invent_a_match(command: str) -> None:
+    gate = _gate(id="no-hard-reset", forbidden=("git reset --hard",), message="No hard reset.")
+    assert evaluate_command(gate, CommandEvidence(commands=(command,))).outcome is Outcome.PASS
+
+
+def test_a_phrase_naming_a_git_global_option_still_matches_literally() -> None:
+    gate = _gate(id="no-hook-bypass", forbidden=("git -c core.hooksPath=/dev/null",), message="Keep hooks.")
+    command = "git -c core.hooksPath=/dev/null commit -m x"
+    assert evaluate_command(gate, CommandEvidence(commands=(command,))).outcome is Outcome.FAIL

@@ -525,6 +525,75 @@ def tokenize_commands(commands: tuple[str, ...]) -> dict[str, list[list[str]]]:
     return {command: _command_segments(command) for command in commands}
 
 
+# git's global options, which sit between `git` and its subcommand (`git --help`).
+_GIT_GLOBAL_OPTIONS_WITH_VALUE = frozenset(
+    {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--attr-source"}
+)
+_GIT_GLOBAL_LONG_OPTIONS_WITH_INLINE_VALUE = _GIT_GLOBAL_OPTIONS_WITH_VALUE - {"-C", "-c"} | {
+    "--exec-path",
+    "--list-cmds",
+}
+_GIT_GLOBAL_FLAGS = frozenset(
+    {
+        "-p",
+        "--paginate",
+        "-P",
+        "--no-pager",
+        "--bare",
+        "--no-replace-objects",
+        "--no-lazy-fetch",
+        "--no-optional-locks",
+        "--no-advice",
+        "--literal-pathspecs",
+        "--glob-pathspecs",
+        "--noglob-pathspecs",
+        "--icase-pathspecs",
+        "--exec-path",
+        "--html-path",
+        "--man-path",
+        "--info-path",
+    }
+)
+
+
+def _without_git_global_options(segment: list[str]) -> list[str]:
+    """`segment` with git's global options removed after every `git` invocation.
+
+    `git -C repo reset --hard` runs the same subcommand as `git reset --hard`,
+    so a phrase naming the subcommand has to match it however git was called.
+    """
+    result: list[str] = []
+    index = 0
+    while index < len(segment):
+        token = segment[index]
+        result.append(token)
+        index += 1
+        if _basename(token) != "git":
+            continue
+        while index < len(segment):
+            option = segment[index]
+            name, has_inline_value, _ = option.partition("=")
+            if option in _GIT_GLOBAL_FLAGS or (has_inline_value and name in _GIT_GLOBAL_LONG_OPTIONS_WITH_INLINE_VALUE):
+                index += 1
+            elif option in _GIT_GLOBAL_OPTIONS_WITH_VALUE and index + 1 < len(segment):
+                index += 2
+            else:
+                break
+    return result
+
+
+def _command_segment_matches(segment: list[str], phrase: list[str]) -> bool:
+    """Whether `phrase` matches `segment` as written or with git's global options skipped.
+
+    The literal form is still tried, so a phrase that itself names a global
+    option (`git -c core.hooksPath=/dev/null`) keeps matching.
+    """
+    if _contains_subsequence(segment, phrase):
+        return True
+    without_options = _without_git_global_options(segment)
+    return without_options != segment and _contains_subsequence(without_options, phrase)
+
+
 def _contains_subsequence(segment: list[str], phrase: list[str]) -> bool:
     """Whether `phrase`'s tokens appear, in order and unbroken, inside `segment`.
 
@@ -627,7 +696,7 @@ def evaluate_command(
         command
         for command in evidence.commands
         if any(
-            _contains_subsequence(segment, phrase)
+            _command_segment_matches(segment, phrase)
             for segment in (segments_by_command.get(command) or _command_segments(command))
             for phrase in forbidden_phrases
         )
@@ -742,7 +811,7 @@ def evaluate_command_if_changed(
     required_phrases = [phrases_by_text.get(phrase) or tokenize_phrase(phrase) for phrase in gate.require]
     segments_by_command = segment_cache if segment_cache is not None else {}
     satisfied = any(
-        _contains_subsequence(segment, phrase)
+        _command_segment_matches(segment, phrase)
         for command in command_evidence.commands
         for segment in (segments_by_command.get(command) or _command_segments(command))
         for phrase in required_phrases
