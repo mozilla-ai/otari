@@ -2213,6 +2213,30 @@
     {
       "item": [
         {
+          "name": "Read Key Identity",
+          "request": {
+            "description": "Validate a workspace API key and return who owns it.\n\nEvery refusal is the same 401: a key that is missing, malformed, unknown,\ninactive, expired or another deployment's, and a key whose owner is\ndeleted or blocked. A 503 means the key was not judged.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "key-identity"
+              ],
+              "raw": "{{baseUrl}}/api/v1/key-identity"
+            }
+          }
+        }
+      ],
+      "name": "key-identity"
+    },
+    {
+      "item": [
+        {
           "name": "List Keys",
           "request": {
             "description": "List the API keys in the caller's organization.\n\nRequires master key authentication. An unset ``workspace_id`` lists every key\nin that organization; naming a workspace in another one lists nothing rather\nthan refusing, so the filter reports no more than the unfiltered read does.",

@@ -26,6 +26,7 @@ from gateway.api.routes import (
     hybrid_mode,
     images,
     invitations,
+    key_identity,
     keys,
     mail,
     maintenance_mode,
@@ -186,6 +187,10 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(providers.catalog_router, Plane.CONTROL),
     RouterMount(providers.router, Plane.CONTROL),
     RouterMount(keys.router, Plane.CONTROL),
+    # Authenticated by the workspace API key it identifies, for a service that
+    # was handed one. It reads the local key table, so a hybrid gateway, which
+    # holds none, does not answer it.
+    RouterMount(key_identity.router, Plane.CONTROL),
     RouterMount(users.router, Plane.CONTROL),
     RouterMount(organizations.router, Plane.CONTROL),
     RouterMount(organization_budgets.budgets_router, Plane.CONTROL),
