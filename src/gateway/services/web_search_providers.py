@@ -12,7 +12,7 @@ Two callers, and the difference between them is where the credential may sit:
 
 * **Standalone.** ``WebSearchBackend`` calls :func:`provider_search` directly
   when ``web_search_provider`` is configured, so a self-hosted deployment
-  reaches Tavily or Brave with no adapter container, no second URL, and no
+  reaches a licensed provider with no adapter container, no second URL, and no
   extra hop.
 * **Hosted.** The data plane is a separate process on separate hardware, and a
   deployment-owned search key must not be on it. There the control plane serves
@@ -40,15 +40,25 @@ if TYPE_CHECKING:
 
 TAVILY_PROVIDER = "tavily"
 BRAVE_PROVIDER = "brave"
+SERPLY_PROVIDER = "serply"
 
 _TAVILY_ENDPOINT = "https://api.tavily.com/search"
 _BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
+_SERPLY_ENDPOINT = "https://api.serply.io/v1/search"
 
-# Both providers document 20 as the ceiling on a page of results, and both treat
-# more as an error rather than clamping, so a request is clamped here. ``options``
-# is the opaque ``provider_options`` bag, which can name any number at all.
+# Tavily and Brave document 20 as the ceiling on a page of results, and both
+# treat more as an error rather than clamping, so a request is clamped here.
+# ``options`` is the opaque ``provider_options`` bag, which can name any number
+# at all. Serply's page is smaller and is bounded separately, see _SERPLY_PAGE_SIZE.
 _MAX_RESULTS_CEILING = 20
 _BRAVE_DEFAULT_COUNT = 10
+
+# Serply serves one page of Google results and reads ``num`` as an approximate
+# bound rather than a count: ``num=20`` answers with the same page as ``num=10``,
+# and a page can come back holding one row more than was asked for. So the
+# request is clamped to the page size and the answer is trimmed to it, which a
+# provider that returns at most what it was asked for does not need.
+_SERPLY_PAGE_SIZE = 10
 
 # Brave spells recency as ``freshness``. Both the single and the plural forms of
 # each window are accepted, matching Tavily's own ``time_range`` vocabulary, so
@@ -79,6 +89,19 @@ _DEFAULT_TIMEOUT_S = 15.0
 # ``max_results`` is listed but not forwarded from here: it has a ceiling and a
 # caller-supplied default, and :func:`_bounded_max_results` applies both.
 _TAVILY_OPTION_KEYS = ("max_results", "search_depth", "topic", "time_range", "include_answer")
+
+# Serply passes Google's own ``tbs`` window through, so the same recency
+# vocabulary maps onto it rather than onto a spelling of its own.
+_SERPLY_TBS = {
+    "d": "qdr:d",
+    "day": "qdr:d",
+    "w": "qdr:w",
+    "week": "qdr:w",
+    "m": "qdr:m",
+    "month": "qdr:m",
+    "y": "qdr:y",
+    "year": "qdr:y",
+}
 
 
 class WebSearchProviderError(RuntimeError):
@@ -111,21 +134,25 @@ async def provider_search(
         return await _search_tavily(api_key, query, options or {}, client, timeout_s)
     if normalized == BRAVE_PROVIDER:
         return await _search_brave(api_key, query, options or {}, client, timeout_s)
+    if normalized == SERPLY_PROVIDER:
+        return await _search_serply(api_key, query, options or {}, client, timeout_s)
     msg = f"web_search_provider must be one of {sorted(WEB_SEARCH_PROVIDERS)}, got '{provider}'"
     raise ValueError(msg)
 
 
-def _bounded_max_results(options: Mapping[str, Any], default: int) -> int:
+def _bounded_max_results(options: Mapping[str, Any], default: int, ceiling: int = _MAX_RESULTS_CEILING) -> int:
     """The number of hits to ask the provider for, bounded at what it will serve.
 
     ``default`` is the caller's own resolved ceiling, so a deployment that raised
     ``web_search_max_results`` asks the provider for that many instead of taking
     the provider's default and being trimmed to fewer by a post-hoc slice.
+    ``ceiling`` is the page the provider will actually serve, which is not the
+    same number for every provider.
     """
     requested = options.get("max_results")
     if isinstance(requested, int) and not isinstance(requested, bool) and requested > 0:
-        return min(requested, _MAX_RESULTS_CEILING)
-    return min(max(default, 1), _MAX_RESULTS_CEILING)
+        return min(requested, ceiling)
+    return min(max(default, 1), ceiling)
 
 
 async def _search_tavily(
@@ -234,6 +261,58 @@ async def _search_brave(
         if published_date:
             result["published_date"] = str(published_date)
         results.append(result)
+    return results
+
+
+async def _search_serply(
+    api_key: str,
+    query: str,
+    options: Mapping[str, Any],
+    client: httpx.AsyncClient,
+    timeout_s: float,
+) -> list[dict[str, Any]]:
+    """Serply's Google SERP proxy, which returns snippets only.
+
+    ``extracted_content`` is left unset for the same reason as Brave's, so the
+    caller fetches and extracts each page itself. Ads and knowledge-graph
+    entries arrive in sibling keys of the envelope that this does not read, but
+    a local pack is sometimes folded into ``results`` instead, as a row that
+    calls itself organic and links back into Google rather than at a site.
+    """
+    limit = _bounded_max_results(options, _SERPLY_PAGE_SIZE, ceiling=_SERPLY_PAGE_SIZE)
+    params: dict[str, Any] = {"q": query, "num": limit}
+    tbs = _SERPLY_TBS.get(str(options.get("time_range") or "").strip().lower())
+    if tbs is not None:
+        params["tbs"] = tbs
+
+    payload = await _request(
+        SERPLY_PROVIDER,
+        client,
+        "GET",
+        _SERPLY_ENDPOINT,
+        params=params,
+        headers={"X-Api-Key": api_key, "Accept": "application/json"},
+        timeout_s=timeout_s,
+    )
+
+    hits = payload.get("results")
+    if not isinstance(hits, list):
+        msg = "serply search returned no results list"
+        raise WebSearchProviderError(msg)
+
+    results: list[dict[str, Any]] = []
+    for hit in hits:
+        if not isinstance(hit, dict) or not hit.get("link"):
+            continue
+        results.append(
+            {
+                "url": str(hit["link"]),
+                "title": str(hit.get("title", "")),
+                "content": str(hit.get("description", "")),
+            }
+        )
+        if len(results) == limit:
+            break
     return results
 
 
