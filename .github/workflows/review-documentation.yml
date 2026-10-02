@@ -1,0 +1,75 @@
+name: "Documentation Review"
+on:
+  schedule:
+    - cron: "0 0 * * 3,5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  # Required by claude-code-action's default GitHub App authentication: the
+  # action exchanges this job's OIDC token for a Claude App installation
+  # token, so the PR is authored by the Claude App and its checks run, which a
+  # PR opened with GITHUB_TOKEN would not.
+  id-token: write
+
+jobs:
+  review:
+    # Holds CLAUDE_CODE_OAUTH_TOKEN, shared with review-pr.yml. Its deployment
+    # branches are restricted to main.
+    environment: pr-review
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    concurrency:
+      group: automation-documentation
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/agent-setup
+
+      - name: Run agent
+        id: claude
+        uses: anthropics/claude-code-action@cfc3eb22bfed5c26ef66e3223c982af27e4524de # v1.0.231
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # A `prompt` input puts the action in automation mode, so the run
+          # needs no `@claude` mention. The prompt points at the checked-out
+          # instruction file rather than inlining it, since a `with:` input is
+          # not shell-expanded.
+          prompt: "Read .github/prompts/documentation-maintenance.prompt.md and follow every instruction in it. The task name is `documentation`. Complete every step in this one run: there is no later turn, so never delegate to a background agent or subagent and never wait for a notification."
+          # The action allows only file and basic GitHub operations by default;
+          # these prompts also need a shell for tests, git and `gh`.
+          # Delegation tools are denied outright: a subagent launched here
+          # runs in the background and the parent ends its turn waiting for a
+          # completion notification that a one-shot run never delivers, so the
+          # job exits green with the work unfinished. ScheduleWakeup is a
+          # `/loop` pacing tool and equally meaningless in a single run.
+          #
+          # The run link goes in --append-system-prompt because the URL needs
+          # `github.run_id`, which the static prompt file cannot interpolate.
+          claude_args: |
+            --model opus
+            --allowed-tools Bash,Edit,Write,Read,Glob,Grep,TodoWrite,WebFetch,WebSearch
+            --disallowed-tools Agent,Task,ScheduleWakeup
+            --append-system-prompt "The pull request you open must end its body with this line, on its own, verbatim: [View job run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+        env:
+          # Keep subagents in the foreground: they are otherwise
+          # auto-backgrounded after ~2 minutes and a one-shot run
+          # never receives their results. Defense in depth alongside
+          # the delegation denial above.
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+
+      # The execution file is the full transcript, tool output included, and
+      # artifacts on a public repo are downloadable by anyone signed in. So
+      # upload it only on a re-run with "Enable debug logging" ticked.
+      - name: Upload logs
+        if: always() && runner.debug == '1' && steps.claude.outputs.execution_file != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: claude-logs
+          path: ${{ steps.claude.outputs.execution_file }}
+          retention-days: 1
