@@ -52,6 +52,10 @@ _PADDED_OPERATORS = ("&&", "||", ";", "|", "&", "(", ")")
 # _normalize_separators can rule out the common case with one C-level scan
 # instead of a Python loop over every character.
 _SEPARATOR_SCAN = re.compile(r"[\n|&;()]")
+# Matches a heredoc redirection operator and captures its delimiter word: `<<` or
+# `<<-`, optional whitespace, then a bare, single- or double-quoted delimiter. The
+# delimiter is stripped of its quotes by the caller before the terminator is matched.
+_HEREDOC_OPERATOR = re.compile(r"<<-?\s*('[^']*'|\"[^\"]*\"|[A-Za-z_][A-Za-z0-9_]*)")
 
 # The same padding with no quote awareness at all, for the fallback path in
 # _command_segments, which is reached only by a command shlex could not parse
@@ -298,6 +302,53 @@ def _operator_at(command: str, index: int) -> str | None:
     return next((operator for operator in _PADDED_OPERATORS if command.startswith(operator, index)), None)
 
 
+def _strip_heredoc_bodies(command: str) -> str:
+    """Replace every heredoc body with an empty quoted token, keeping the command.
+
+    A command gate sees the command, not the data it carries. A heredoc body is
+    data: `python3 - <<'EOF'\n...\nEOF` runs the body through the interpreter, the
+    same as a quoted argument or a piped file, none of which the gate reads
+    (docs/agent-guardrails.md draws exactly this line). But `shlex` has no notion
+    of a heredoc, so `<<'EOF'` tokenizes as `<<EOF` and every body line becomes
+    bare command words: `_normalize_separators` then turns each newline into a
+    `;`, and a two-word forbidden phrase the body merely *mentions* matches as if
+    it had been typed as a command. A body piped to a shell is a script the
+    command invokes, and losing that true positive is the documented trade.
+
+    Each `<<[-] DELIM` (with an optional `-` for `<<-`, optional whitespace, and a
+    bare, single- or double-quoted delimiter word) has its body removed: every
+    physical line after the operator's own line, up to and including the
+    terminator line (the delimiter alone, with only leading tabs allowed under
+    `<<-`). The `<<DELIM` operator itself is left in place, so the surrounding
+    command still tokenizes and its own forbidden phrases are still found. Runs
+    outside a heredoc, and does not track shell quoting: an operator that only
+    appears inside a quoted string is rare, and treating it as a heredoc only
+    drops text a gate does not read anyway. A heredoc whose terminator never
+    appears (an unterminated body) has everything from the operator's next line
+    to end-of-string removed, which is what a shell would still be waiting for.
+    """
+    if "<<" not in command:
+        return command
+    lines = command.split("\n")
+    out: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        out.append(line)
+        delimiters = _HEREDOC_OPERATOR.findall(line)
+        index += 1
+        for raw_delimiter in delimiters:
+            delimiter = raw_delimiter.strip("'\"")
+            while index < len(lines) and lines[index].lstrip("\t") != delimiter:
+                index += 1
+            if index < len(lines):
+                # Keep the terminator line, so a command joined after the heredoc
+                # (`cat <<EOF\n...\nEOF && npm install`) is still seen.
+                out.append(lines[index])
+                index += 1
+    return "\n".join(out)
+
+
 def _normalize_separators(command: str) -> str:
     """Pad every unquoted separator with whitespace, newlines included.
 
@@ -443,7 +494,7 @@ def _command_segments(command: str) -> list[list[str]]:
     separators and no real content, ";" * 500 against 500 forbidden
     phrases, measured ~25,000,000 such comparisons and ~1.1s before this.
     """
-    stripped = _strip_shell_comment(command)
+    stripped = _strip_heredoc_bodies(_strip_shell_comment(command))
     try:
         tokens = shlex.split(_normalize_separators(stripped), posix=True)
     except ValueError:

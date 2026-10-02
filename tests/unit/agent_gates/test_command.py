@@ -157,6 +157,40 @@ def test_an_unparseable_heredoc_does_not_block_an_unrelated_command() -> None:
     assert evaluate_command(gate, CommandEvidence(commands=(heredoc,))).outcome is Outcome.PASS
 
 
+def test_a_heredoc_body_that_only_mentions_a_phrase_is_not_a_command() -> None:
+    """A heredoc body is data the gate does not read, like a quoted argument.
+
+    The reporter's case: a `git commit` whose message body, delivered on a
+    heredoc, describes the forbidden phrase as an example. Nothing is executed,
+    so a required gate must not block it.
+    """
+    gate = _gate(id="use-pnpm", forbidden=("npm install",), message="Use pnpm, not npm.")
+    command = "git commit -F - <<'MSG'\nfix: do not run npm install here\nMSG"
+    assert evaluate_command(gate, CommandEvidence(commands=(command,))).outcome is Outcome.PASS
+
+
+def test_a_command_joined_after_a_heredoc_is_still_seen() -> None:
+    """Dropping the body must not drop a real command chained after the terminator."""
+    gate = _gate(id="use-pnpm", forbidden=("npm install",), message="Use pnpm, not npm.")
+    command = "cat <<EOF\njust data\nEOF\n&& npm install"
+    assert evaluate_command(gate, CommandEvidence(commands=(command,))).outcome is Outcome.FAIL
+
+
+def test_command_segments_drops_a_heredoc_body() -> None:
+    assert _command_segments("git commit -F - <<'MSG'\nnpm install\nMSG") == [
+        ["git", "commit", "-F", "-", "<<MSG"],
+        ["MSG"],
+    ]
+
+
+def test_command_segments_keeps_a_command_after_a_heredoc() -> None:
+    assert _command_segments("cat <<EOF\ndata\nEOF\n&& git push --force") == [
+        ["cat", "<<EOF"],
+        ["EOF"],
+        ["git", "push", "--force"],
+    ]
+
+
 @pytest.mark.parametrize(
     "command",
     [
