@@ -5,17 +5,21 @@ that sent you here says what to change; this says how to propose it.
 
 ## Before you start
 
-Run `gh pr list --label automation --state all --limit 50 --json number,title,state,headRefName,closedAt`.
+Run `gh pr list --label automation --state all --limit 50 --json number,title,state,labels,headRefName,closedAt`.
 `<window start>` in the task prompt is the time the workflow gave you: when
 this workflow last succeeded, or 7 days ago if that was longer ago. Changes
 before it were an earlier run's to review. An earlier run may still have
-proposed what you find:
+proposed what you find; the 50 most recent automation PRs are the history
+you check, deliberately, and anything older is fair to propose again:
 
 - Do not redo a fix that an open automation PR already makes, and avoid a
   change that would conflict with one still waiting for review.
-- Do not propose again what a closed, unmerged automation PR proposed: a
-  maintainer declined it. Read its comments with `gh pr view <number>
-  --comments` when you need to know why.
+- Do not propose again what a closed, unmerged automation PR proposed: treat
+  it as declined, since a maintainer often closes without a comment. Two
+  closures are not declines: a `missing-template` label means
+  `pr-template-check.yml` closed it, and a comment pointing to a replacement
+  PR means it was superseded. Read its comments with `gh pr view <number>
+  --comments` when you need to tell which.
 
 ## The change
 
