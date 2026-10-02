@@ -11564,6 +11564,12 @@ export interface components {
              */
             reencrypted: number;
             /**
+             * Skipped
+             * @description Number of rows whose stored key changed between the read and the write, so the re-encryption was not applied. They already hold whoever wrote them last.
+             * @default 0
+             */
+            skipped: number;
+            /**
              * Unreadable
              * @description Number of encrypted keys left untouched because they could not be decrypted.
              */
@@ -11579,6 +11585,12 @@ export interface components {
              * @description Number of stored search-tool keys re-encrypted.
              */
             reencrypted: number;
+            /**
+             * Skipped
+             * @description Number of rows whose stored key changed between the read and the write, so the re-encryption was not applied. They already hold whoever wrote them last.
+             * @default 0
+             */
+            skipped: number;
             /**
              * Unreadable
              * @description Number of encrypted keys left untouched because they could not be decrypted.

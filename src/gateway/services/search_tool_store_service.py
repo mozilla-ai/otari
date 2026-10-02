@@ -129,14 +129,9 @@ async def refresh_search_tool_cache(db: AsyncSession, config: GatewayConfig) -> 
     """Reload the overlay from the database, apply it, and return shadowed names."""
     global _cached_at  # noqa: PLW0603
 
-    # `populate_existing`: the session factory sets `expire_on_commit=False`,
-    # so a row already in the identity map keeps the values it was loaded
-    # with and this SELECT would hand them straight back. The rotation
-    # endpoint refreshes on the same session it just re-encrypted on, where
-    # that means a credential a concurrent PATCH replaced can return to the
-    # cache. Today nothing holds those rows alive that long, which makes it
-    # a garbage-collection timing question rather than a guarantee
-    # (CodeRabbit).
+    # `populate_existing`: sessions use `expire_on_commit=False`, so without it
+    # a row still in the identity map (as after a rotation on this session)
+    # would return the values it was loaded with, not what is committed.
     rows = (await db.execute(select(SearchToolCredential).execution_options(populate_existing=True))).scalars().all()
     overlay: dict[str, dict[str, Any]] = {}
     for row in rows:
@@ -278,17 +273,10 @@ async def reencrypt_search_tools(db: AsyncSession) -> tuple[int, int, int]:
     untouched and counted as unreadable, so the operator can recover it by
     replacing that tool's key.
 
-    Each row is written with a conditional UPDATE matching the ciphertext that
-    was read. Rotation reads every row, decrypts and re-encrypts, and nothing
-    pinned the write to what it had seen: an edit committing in that window was
-    overwritten with a re-encryption of the value it replaced — a silent lost
-    update on a credential (otari#1127). Zero rows matched means someone else
-    got there first, and that row is counted as skipped rather than clobbered.
-
-    Skipped is reported rather than retried. A rotation is run by hand, the
-    operator is watching, and a row whose value changed under them is already
-    encrypted with the primary key by whoever wrote it — so the honest answer is
-    "these were not mine to rewrite", not a loop that races the same edit again.
+    Each row is written only if it still holds the ciphertext that was read, so
+    an edit committed mid-rotation is not overwritten. Such a row is counted as
+    skipped rather than retried: whoever wrote it already encrypted it with the
+    primary key.
     """
     rows = (
         (await db.execute(select(SearchToolCredential).where(SearchToolCredential.encrypted_api_key.is_not(None))))

@@ -99,7 +99,7 @@ def test_reencrypt_provider_keys_allows_secret_key_retirement(
     monkeypatch.setenv("OTARI_SECRET_KEY", f"{new_key},{old_key}")
     resp = client.post(f"{API_ROOT}/provider-credentials/reencrypt", headers=master_key_header)
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"reencrypted": 1, "unreadable": 0}
+    assert resp.json() == {"reencrypted": 1, "unreadable": 0, "skipped": 0}
 
     db_session.expire_all()
     row = db_session.get(ProviderCredential, "openai")
@@ -121,7 +121,7 @@ def test_reencrypt_reports_unreadable_rows_for_manual_recovery(
     monkeypatch.setenv("OTARI_SECRET_KEY", new_key)
     resp = client.post(f"{API_ROOT}/provider-credentials/reencrypt", headers=master_key_header)
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"reencrypted": 0, "unreadable": 1}
+    assert resp.json() == {"reencrypted": 0, "unreadable": 1, "skipped": 0}
     listed = client.get(f"{API_ROOT}/provider-credentials", headers=master_key_header)
     assert listed.json()[0]["decryptable"] is False
 

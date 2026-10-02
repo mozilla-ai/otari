@@ -3,7 +3,7 @@
 otari#1127. ``reencrypt_*`` reads every row holding a secret, decrypts it and
 re-encrypts it, and nothing pinned the write to the ciphertext it had read. A
 PATCH committing in that window was overwritten with a re-encryption of the
-value it replaced — a lost update on a credential, and a silent one.
+value it replaced: a lost update on a credential, and a silent one.
 
 The window is small and rotation is rare and hand-run, which is exactly why it
 is worth a test: nobody would ever see it happen.
@@ -27,7 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlmodel import SQLModel
 
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import ProviderCredential, SearchToolCredential
+from gateway.models.providers import ProviderCredential
+from gateway.models.tools import SearchToolCredential
 from gateway.services import provider_store_service as provider_store
 from gateway.services import search_tool_store_service as search_tool_store
 from gateway.services.provider_store_service import reencrypt_credentials, refresh_provider_cache, reset_provider_cache
@@ -130,14 +131,12 @@ class TestProviderRotation:
 
         assert _run(scenario) == "sk-live-value"
 
-    def test_a_row_changed_under_the_rotation_is_skipped_not_clobbered(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_row_changed_under_the_rotation_is_skipped_not_clobbered(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The whole point: the stored value must still be the competing edit's.
 
         The window is between the read and the write, so the competing commit has
         to land there and nowhere else. Hooking the service's own
-        ``encrypt_secret`` puts it exactly there — the row has been read and
+        ``encrypt_secret`` puts it exactly there: the row has been read and
         decrypted, and its UPDATE has not run yet.
         """
 
@@ -171,13 +170,11 @@ class TestProviderRotation:
         assert counts == (0, 0, 1)
         assert stored_value == "sk-new-value"
 
-    def test_the_skipped_row_does_not_come_back_through_the_cache(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_the_skipped_row_does_not_come_back_through_the_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """The database keeps the competing edit; the runtime cache must too.
 
         The route re-encrypts, commits, and refreshes the overlay on the SAME
-        session, and the factory sets ``expire_on_commit=False`` — so a row the
+        session, and the factory sets ``expire_on_commit=False``, so a row the
         identity map still holds would be handed back with the ciphertext read
         BEFORE the race (CodeRabbit).
 
@@ -239,7 +236,7 @@ class TestProviderRotation:
 
 
 class TestSearchToolRotation:
-    """Same shape, second store. Both or neither — three stores with two shapes
+    """Same shape, second store. Both or neither: three stores with two shapes
     is worse than three with one, because the next person copies whichever they
     find first."""
 
@@ -250,9 +247,7 @@ class TestSearchToolRotation:
 
         assert _run(scenario) == (1, 0, 0)
 
-    def test_a_row_changed_under_the_rotation_is_skipped_not_clobbered(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_row_changed_under_the_rotation_is_skipped_not_clobbered(self, monkeypatch: pytest.MonkeyPatch) -> None:
         async def scenario(session: AsyncSession, db_path: str) -> tuple[tuple[int, int, int], str]:
             await _add_search_tool(session, "searxng", "key-old")
             real_encrypt = search_tool_store.encrypt_secret
