@@ -350,8 +350,16 @@ def infer_vendor(model_id: str, key: str, canonical_id: str | None = None) -> st
     models.dev's canonical id first, because it is curated per model and the
     id's own org segment can name a router rather than the maker
     (``amazon/google.gemma-3-4b-it``); then that org segment; then the family.
+    A canonical org the table does not know comes last: it names a new lab
+    well, but a known lab under a spelling models.dev changed would otherwise
+    move every one of its catalog ids, which are request spellings.
     """
-    return canonical_vendor(canonical_id) or clean_model_id(model_id).vendor_hint or _family_vendor(key)
+    known = (
+        _ORG_VENDORS.get(canonical_id.split("/", 1)[0].strip().lower())
+        if canonical_id and "/" in canonical_id
+        else None
+    )
+    return known or clean_model_id(model_id).vendor_hint or _family_vendor(key) or canonical_vendor(canonical_id)
 
 
 @dataclass(frozen=True)

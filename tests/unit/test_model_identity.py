@@ -147,6 +147,14 @@ def test_the_canonical_id_wins_over_a_router_s_org_segment() -> None:
     assert infer_vendor(model_id, key, "google/gemma-3-4b-it") == "Google"
 
 
+def test_an_unknown_canonical_org_does_not_override_a_known_vendor() -> None:
+    # A known lab under a new models.dev slug keeps its catalog ids.
+    key = identity_key("moonshotai", "kimi-k2", "Kimi K2")
+    assert infer_vendor("kimi-k2", key, "moonshot/kimi-k2") == "Moonshot AI"
+    # With nothing else to go on, the unknown org still names the lab.
+    assert infer_vendor("arrow-2", identity_key("vercel", "arrow-2", "Arrow 2"), "quiverai/arrow-2") == "quiverai"
+
+
 def test_fireworks_own_model_is_credited_to_fireworks() -> None:
     model_id = "accounts/fireworks/models/ember-1"
     groups = group_offerings([OfferingSeed(f"fireworks:{model_id}", "fireworks-ai", model_id, "Ember-1")])
