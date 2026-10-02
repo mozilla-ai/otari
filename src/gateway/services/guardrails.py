@@ -181,7 +181,7 @@ async def _validate_one(
         result = result[0] if result else {}
     if not isinstance(result, dict):
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} returned an unexpected result shape: {result!r}",
+            f"guardrail profile {cfg.profile!r} returned an unexpected result shape: {type(result).__name__}",
             public_detail=_unevaluated_detail(cfg.profile),
         )
 
@@ -191,13 +191,13 @@ async def _validate_one(
     # explicit `valid: null` is a legitimate inconclusive verdict (not flagged).
     if "valid" not in result:
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} returned no 'valid' field: {result!r}",
+            f"guardrail profile {cfg.profile!r} returned a result with no 'valid' field",
             public_detail=_unevaluated_detail(cfg.profile),
         )
     valid = result["valid"]
     if valid is not None and not isinstance(valid, bool):
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} returned a non-boolean 'valid': {valid!r}",
+            f"guardrail profile {cfg.profile!r} returned a non-boolean 'valid' of type {type(valid).__name__}",
             public_detail=_unevaluated_detail(cfg.profile),
         )
 

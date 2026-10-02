@@ -197,6 +197,27 @@ async def test_non_boolean_valid_is_rejected(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"echo": "SECRET-echoed-value-4271"},
+        {"explanation": "SECRET-echoed-value-4271"},
+        {"valid": "SECRET-echoed-value-4271"},
+    ],
+    ids=["no_valid_field", "unexpected_shape", "non_boolean_valid"],
+)
+async def test_malformed_result_is_not_echoed_into_the_error(
+    monkeypatch: pytest.MonkeyPatch, result: dict[str, object]
+) -> None:
+    """A malformed result that echoes what it was sent must not put that value into the
+    error message, which the request path logs whole (otari#1610-adjacent, otari#1623)."""
+    _patch_transport(monkeypatch, _result_handler(result))
+    with pytest.raises(GuardrailsNotReachableError) as exc:
+        await run_input_guardrails([GuardrailConfig(profile="prompt-injection", mode="block")], "x", default_url=_URL)
+    assert "SECRET-echoed-value-4271" not in str(exc.value)
+
+
+@pytest.mark.asyncio
 async def test_explicit_null_valid_is_inconclusive_not_flagged(monkeypatch: pytest.MonkeyPatch) -> None:
     """An explicit ``valid: null`` is a legitimate inconclusive verdict, not malformed."""
     _patch_transport(monkeypatch, _result_handler({"valid": None, "score": 0.5}))
