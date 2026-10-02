@@ -203,6 +203,7 @@ function mockApi(
   stored: StoredProvider[] = [],
   reencryptResult: ReencryptProviderCredentialsResult = {
     reencrypted: 1,
+    skipped: 0,
     unreadable: 0,
   },
 ) {

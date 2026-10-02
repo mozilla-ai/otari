@@ -24,6 +24,7 @@ from typing import TypeVar
 import pytest
 from sqlalchemy import create_engine, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.sql import Executable
 from sqlmodel import SQLModel
 
 from gateway.core.config import GatewayConfig
@@ -65,12 +66,12 @@ def _run(scenario: Callable[[AsyncSession, str], Awaitable[T]]) -> T:
     return asyncio.run(main())
 
 
-def _commit_from_another_connection(db_path: str, statement: object) -> None:
+def _commit_from_another_connection(db_path: str, statement: Executable) -> None:
     """Commit one statement on a separate connection, the way a PATCH would."""
     other = create_engine(f"sqlite:///{db_path}")
     try:
         with other.begin() as conn:
-            conn.execute(statement)  # type: ignore[arg-type]
+            conn.execute(statement)
     finally:
         other.dispose()
 
@@ -142,7 +143,7 @@ class TestProviderRotation:
 
         async def scenario(session: AsyncSession, db_path: str) -> tuple[tuple[int, int, int], str]:
             await _add_provider(session, "openai", "sk-old-value")
-            real_encrypt = provider_store.encrypt_secret
+            real_encrypt = encrypt_secret
             raced = False
 
             def encrypt_and_let_someone_else_commit(plaintext: str) -> str:
@@ -192,7 +193,7 @@ class TestProviderRotation:
 
         async def scenario(session: AsyncSession, db_path: str) -> str:
             await _add_provider(session, "openai", "sk-old-value")
-            real_encrypt = provider_store.encrypt_secret
+            real_encrypt = encrypt_secret
             raced = False
 
             def encrypt_and_let_someone_else_commit(plaintext: str) -> str:
@@ -250,7 +251,7 @@ class TestSearchToolRotation:
     def test_a_row_changed_under_the_rotation_is_skipped_not_clobbered(self, monkeypatch: pytest.MonkeyPatch) -> None:
         async def scenario(session: AsyncSession, db_path: str) -> tuple[tuple[int, int, int], str]:
             await _add_search_tool(session, "searxng", "key-old")
-            real_encrypt = search_tool_store.encrypt_secret
+            real_encrypt = encrypt_secret
             raced = False
 
             def encrypt_and_let_someone_else_commit(plaintext: str) -> str:
