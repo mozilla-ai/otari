@@ -115,6 +115,24 @@ async def test_call_tool_returns_formatted_results_without_extraction(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_result_numbering_continues_across_searches_in_one_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patched_async_client(
+        {("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY)},
+        monkeypatch,
+    )
+
+    async with WebSearchBackend(base_url="http://searxng:8080", extract_content=False) as backend:
+        first = await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "first"})
+        second = await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "second"})
+
+    assert "[1] Post A" in first
+    assert "[2] Post B" in first
+    assert "[3] Post A" in second
+    assert "[4] Post B" in second
+    assert "[1] " not in second
+
+
+@pytest.mark.asyncio
 async def test_published_date_is_rendered_when_backend_supplies_it(monkeypatch: pytest.MonkeyPatch) -> None:
     # A recency-aware adapter (e.g. Brave with time_range) may set
     # published_date; a plain SearXNG backend never does. Both must render

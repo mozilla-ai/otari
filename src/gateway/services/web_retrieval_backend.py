@@ -267,6 +267,9 @@ class WebRetrievalBackend:
         # already flattened them. Safe as single-slot state because every tool loop
         # awaits its calls one at a time.
         self._last_results: list[dict[str, Any]] = []
+        # One backend serves one request, so numbering continues across its searches
+        # and a citation like ``[4]`` names one URL however many searches ran.
+        self._next_result_number = 1
 
     async def __aenter__(self) -> WebRetrievalBackend:
         try:
@@ -426,7 +429,8 @@ class WebRetrievalBackend:
 
             span.set_attribute("web_search.result_count", len(filtered))
             self._last_results = filtered
-            formatted = _format_results_for_model(query, filtered)
+            formatted = _format_results_for_model(query, filtered, start=self._next_result_number)
+            self._next_result_number += len(filtered)
             return truncate_utf8(
                 formatted,
                 WEB_RETRIEVAL_RESULT_MAX_BYTES,
@@ -542,7 +546,7 @@ class WebRetrievalBackend:
         return result.text or None
 
 
-def _format_results_for_model(query: str, results: list[dict[str, Any]]) -> str:
+def _format_results_for_model(query: str, results: list[dict[str, Any]], *, start: int = 1) -> str:
     """Render results as compact Markdown for tool-message consumption.
 
     Numbered so the model can refer to ``[1]``, ``[2]`` in its answer — gives
@@ -553,7 +557,7 @@ def _format_results_for_model(query: str, results: list[dict[str, Any]]) -> str:
         return f"No results for query: {query!r}"
 
     parts: list[str] = []
-    for i, r in enumerate(results, start=1):
+    for i, r in enumerate(results, start=start):
         title = str(r.get("title") or "(untitled)").strip()
         url = str(r.get("url") or "").strip()
         snippet = str(r.get("content") or "").strip()
