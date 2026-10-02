@@ -38,6 +38,7 @@ from sqlmodel import col
 
 from gateway.api.deps import (
     ModelProviderPortDep,
+    ModelProviderPortSharedDep,
     get_config,
     get_db,
     get_session_identity,
@@ -661,7 +662,7 @@ async def list_catalog(
     config: Annotated[GatewayConfig, Depends(get_config)],
     caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
-    model_provider: ModelProviderPortDep,
+    model_provider: ModelProviderPortSharedDep,
     at_context: Annotated[
         int | None,
         Query(
@@ -724,7 +725,7 @@ async def get_catalog_model(
     config: Annotated[GatewayConfig, Depends(get_config)],
     caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
-    model_provider: ModelProviderPortDep,
+    model_provider: ModelProviderPortSharedDep,
 ) -> CatalogModelDetail:
     """One model and every offering of it this caller may use.
 
