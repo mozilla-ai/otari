@@ -257,6 +257,14 @@ class _FakeSearchPool(_FakePool):
         return [{"url": "https://a", "title": "A"}]
 
 
+class _FailingSearchPool(_FakeSearchPool):
+    """A gateway search backend whose call errors, as a search that could not reach its backend does."""
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        self.calls.append((name, arguments))
+        raise RuntimeError("search backend unreachable")
+
+
 @pytest.mark.asyncio
 async def test_max_uses_stops_further_searches_and_announces_only_the_one_that_ran(
     monkeypatch: pytest.MonkeyPatch,
@@ -296,6 +304,38 @@ async def test_max_uses_stops_further_searches_and_announces_only_the_one_that_r
     announced = [item for item in (out.output or []) if getattr(item, "type", None) == "web_search_call"]
     assert len(announced) == 1, "a refused search must not be announced as a completed one"
     assert announced[0].id == "c1"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_search_is_announced_as_failed_non_streaming(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A gateway search whose backend errored reaches the client as status=failed, not completed."""
+    responses = iter(
+        [
+            _response(output=[_function_call("c1", "web_search", '{"query": "first"}')]),
+            _response(output=[], status="completed"),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        return next(responses)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    pool = _FailingSearchPool()
+
+    out = await responses_tool_loop(
+        completion_kwargs={"model": "fake", "input_data": [{"role": "user", "content": "hi"}]},
+        pool=cast(Any, pool),
+        max_iterations=5,
+        native_tools=_SEARCH,
+    )
+
+    announced = [item for item in (out.output or []) if getattr(item, "type", None) == "web_search_call"]
+    assert len(announced) == 1
+    item = cast(Any, announced[0])
+    assert item.id == "c1"
+    assert item.status == "failed"
 
 
 @pytest.mark.asyncio
@@ -762,6 +802,51 @@ async def test_stream_max_uses_announces_only_the_search_that_ran(
     ]
     assert len(announced) == 1, "a refused search must not be announced as a completed one"
     assert announced[0].item.id == "c1"
+
+
+@pytest.mark.asyncio
+async def test_stream_announces_a_failed_search_as_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The streamed ``web_search_call`` for a search whose backend errored carries status=failed."""
+    arguments = json.dumps({"query": "first"})
+    iter_streams = iter(
+        [
+            _async_iter(
+                _output_item_added(0, _function_call("c1", "web_search", "")),
+                _function_call_args_done(0, "fc_1", "web_search", arguments),
+                _output_item_done(0, _function_call("c1", "web_search", arguments)),
+                _response_completed(),
+            ),
+            _async_iter(_text_delta("msg_1", 0, "done"), _response_completed()),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    pool = _FailingSearchPool()
+
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, pool),
+            max_iterations=5,
+            native_tools=_SEARCH,
+        )
+    ]
+
+    announced = [
+        event.item
+        for event in events
+        if event.type == "response.output_item.added" and getattr(event.item, "type", None) == "web_search_call"
+    ]
+    assert len(announced) == 1
+    item = cast(Any, announced[0])
+    assert item.id == "c1"
+    assert item.status == "failed"
 
 
 @pytest.mark.asyncio

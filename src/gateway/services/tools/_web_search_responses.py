@@ -32,17 +32,15 @@ class ResponsesWebSearchRendering:
         """The item for one search, whether or not it returned hits.
 
         ``pool`` carries no part of the item: unlike the Messages rendering, this
-        vocabulary reports that a search happened rather than what it found.
-        ``call.failed`` is not read either, so a search whose backend errored is still
-        announced as completed. The model is told about the failure in the call's own
-        output, and reporting it here as well needs an outcome the non-streaming caller
-        does not hold.
+        vocabulary reports that a search happened rather than what it found. A search
+        whose backend errored is announced with ``status="failed"``; the model is also
+        told about the failure in the call's own output.
         """
         return [
             ResponseFunctionWebSearch(
                 id=call.id,
                 action=ActionSearch(type="search", query=str(call.arguments.get("query") or "")),
-                status="completed",
+                status="failed" if call.failed else "completed",
                 type="web_search_call",
             )
         ]

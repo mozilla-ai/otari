@@ -26,6 +26,7 @@ import json
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from any_llm import aresponses
@@ -45,6 +46,7 @@ from gateway.services.mcp_loop import (
 )
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, CodeExecution
 from gateway.services.tool_format import openai_to_responses_tools
+from gateway.services.tool_usage import is_tool_error
 from gateway.services.tools import (
     MAX_USES_EXCEEDED_ERROR,
     Dialect,
@@ -96,6 +98,7 @@ async def _execute_function_calls(
     *,
     budget: ToolUseBudget | None = None,
     refused_call_ids: set[str] | None = None,
+    failed_call_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Run each owned function_call and return the Responses function_call_output items.
 
@@ -104,7 +107,8 @@ async def _execute_function_calls(
     as :func:`gateway.services.mcp_loop._execute_mcp_calls`. A call past ``budget``
     is refused as one of those errors. When supplied, ``refused_call_ids`` records
     that decision at its source, so a tool announces a refused call the way its own
-    rendering says to rather than as one that ran.
+    rendering says to rather than as one that ran. ``failed_call_ids`` records the
+    calls whose backend errored, so a tool's rendering can announce the real outcome.
     """
     out: list[dict[str, Any]] = []
     for item in items:
@@ -113,9 +117,7 @@ async def _execute_function_calls(
         if capped and budget is not None and budget.exhausted():
             if refused_call_ids is not None:
                 refused_call_ids.add(str(item.call_id))
-            out.append(
-                {"type": "function_call_output", "call_id": item.call_id, "output": MAX_USES_EXCEEDED_ERROR}
-            )
+            out.append({"type": "function_call_output", "call_id": item.call_id, "output": MAX_USES_EXCEEDED_ERROR})
             continue
         try:
             text = await pool.call_tool(item.name, args)
@@ -127,6 +129,8 @@ async def _execute_function_calls(
         else:
             if capped and budget is not None:
                 budget.record(text)
+        if failed_call_ids is not None and is_tool_error(text):
+            failed_call_ids.add(str(item.call_id))
         out.append({"type": "function_call_output", "call_id": item.call_id, "output": text})
     return out
 
@@ -270,7 +274,8 @@ def _native_items(call: NativeCall, pool: ToolBackend, tools: frozenset[str], *,
 
     A refused call is announced through its tool's refusal rendering, which for a
     search is nothing: no search ran. An MCP call has no native equivalent at all and
-    stays invisible.
+    stays invisible. ``call.failed`` lets a rendering announce a failed call's real
+    outcome rather than as one that ran.
     """
     if call.name not in tools:
         return []
@@ -286,18 +291,23 @@ def _native_items_for(
     refused_call_ids: set[str] | None = None,
     *,
     tools: frozenset[str] = frozenset(),
+    failed_call_ids: set[str] | None = None,
 ) -> list[Any]:
     """Native items for the gateway-run calls among ``owned`` whose tool ``tools`` names.
 
     ``code_execution`` maps to a ``code_interpreter_call``, read off the executions the
     sandbox backend kept for the calls just awaited rather than off the calls themselves.
+    ``failed_call_ids`` marks the calls whose backend errored, so their native item can
+    report the failure rather than announcing a call that did not succeed.
     """
     items: list[Any] = []
     for item in owned:
+        call_id = str(getattr(item, "call_id", "") or "")
         call = NativeCall(
             str(getattr(item, "name", "") or ""),
-            str(getattr(item, "call_id", "") or ""),
+            call_id,
             _parsed_arguments(getattr(item, "arguments", "")),
+            failed=bool(failed_call_ids and call_id in failed_call_ids),
         )
         items.extend(_native_items(call, pool, tools, refused=bool(refused_call_ids and call.id in refused_call_ids)))
     items.extend(_code_interpreter_items(pool, emit=CODE_EXECUTION_TOOL_NAME in tools))
@@ -326,10 +336,7 @@ def _replay_items(output: list[Any], owned: list[Any]) -> list[Any]:
         item
         for item in output
         if getattr(item, "type", None) == "compaction"
-        or (
-            getattr(item, "type", None) == "function_call"
-            and getattr(item, "call_id", None) in owned_call_ids
-        )
+        or (getattr(item, "type", None) == "function_call" and getattr(item, "call_id", None) in owned_call_ids)
     ]
 
 
@@ -365,7 +372,8 @@ async def _execute_stream_owned(
         else:
             if capped and budget is not None:
                 budget.record(text)
-        state.native_items.extend(_native_items(call, pool, tools, refused=False))
+        ran_call = replace(call, failed=is_tool_error(text))
+        state.native_items.extend(_native_items(ran_call, pool, tools, refused=False))
         results.append({"type": "function_call_output", "call_id": call.id, "output": text})
     state.code_interpreter_items.extend(_code_interpreter_items(pool, emit=CODE_EXECUTION_TOOL_NAME in tools))
     return results
@@ -508,10 +516,15 @@ class _ResponsesToolLoopStrategy:
         # its native items too, since ``fold_usage`` runs on that path and
         # prepends them, so the caller still sees the search or run it paid for.
         refused_call_ids: set[str] = set()
-        outputs = await _execute_function_calls(pool, owned, budget=self._budget, refused_call_ids=refused_call_ids)
+        failed_call_ids: set[str] = set()
+        outputs = await _execute_function_calls(
+            pool, owned, budget=self._budget, refused_call_ids=refused_call_ids, failed_call_ids=failed_call_ids
+        )
         if acc is not None:
             acc["native_items"].extend(
-                _native_items_for(owned, pool, refused_call_ids, tools=self._native_tools)
+                _native_items_for(
+                    owned, pool, refused_call_ids, tools=self._native_tools, failed_call_ids=failed_call_ids
+                )
             )
         return outputs
 
@@ -526,8 +539,7 @@ class _ResponsesToolLoopStrategy:
                 item
                 for item in output
                 if not (
-                    getattr(item, "type", None) == "function_call"
-                    and getattr(item, "call_id", None) in owned_call_ids
+                    getattr(item, "type", None) == "function_call" and getattr(item, "call_id", None) in owned_call_ids
                 )
             ]
         except (AttributeError, TypeError):
@@ -551,18 +563,20 @@ class _ResponsesToolLoopStrategy:
         output = list(result.output or [])
         transcript.extend(_items_to_dicts(_replay_items(output, owned)))
         refused_call_ids: set[str] = set()
+        failed_call_ids: set[str] = set()
         outputs = await _execute_function_calls(
             pool,
             owned,
             budget=self._budget,
             refused_call_ids=refused_call_ids,
+            failed_call_ids=failed_call_ids,
         )
         transcript.extend(outputs)
         if acc is not None:
             acc["compactions"].extend(_compaction_items(output))
             acc["native_items"].extend(
                 _native_items_for(
-                    owned, pool, refused_call_ids, tools=self._native_tools
+                    owned, pool, refused_call_ids, tools=self._native_tools, failed_call_ids=failed_call_ids
                 )
             )
 
@@ -722,9 +736,7 @@ class _ResponsesToolLoopStrategy:
         # request. Matches the non-streaming loop's mixed-batch handling, and like
         # it announces the runs natively before the round exits.
         if state.owned_specs:
-            await _execute_stream_owned(
-                state, pool, budget=self._budget, tools=self._native_tools
-            )
+            await _execute_stream_owned(state, pool, budget=self._budget, tools=self._native_tools)
             for event in self.synthetic_events(state, acc):
                 yield event
 
@@ -753,9 +765,7 @@ class _ResponsesToolLoopStrategy:
                 acc["output_tokens"] += getattr(iter_usage, "output_tokens", 0) or 0
         acc["compactions"].extend(state.compaction_items[index] for index in sorted(state.compaction_items))
 
-    def synthetic_events(
-        self, state: _ResponsesStreamState, acc: dict[str, Any]
-    ) -> list[ResponseStreamEvent]:
+    def synthetic_events(self, state: _ResponsesStreamState, acc: dict[str, Any]) -> list[ResponseStreamEvent]:
         """Announce this iteration's gateway-run calls in the Responses API's own vocabulary.
 
         The raw ``function_call`` events were swallowed (the client can never be sent
@@ -809,11 +819,7 @@ class _ResponsesToolLoopStrategy:
                     }
                 )
         transcript.extend(_items_to_dicts(replay_items))
-        transcript.extend(
-            await _execute_stream_owned(
-                state, pool, budget=self._budget, tools=self._native_tools
-            )
-        )
+        transcript.extend(await _execute_stream_owned(state, pool, budget=self._budget, tools=self._native_tools))
         return
         yield  # pragma: no cover - makes this a no-event async iterator
 

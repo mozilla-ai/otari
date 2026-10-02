@@ -99,6 +99,14 @@ def test_the_responses_item_carries_the_query_and_the_caller_s_call_id() -> None
     assert item.status == "completed"
 
 
+def test_a_failed_search_is_announced_as_failed_in_the_responses_vocabulary() -> None:
+    (item,) = _rendering(Dialect.RESPONSES).ran(_call(failed=True), _SearchBackendLike())
+
+    assert item.type == "web_search_call"
+    assert item.id == "toolu_1"
+    assert item.status == "failed"
+
+
 def test_a_refused_search_is_invisible_in_the_responses_vocabulary() -> None:
     """No search ran, so there is nothing to announce."""
     assert _rendering(Dialect.RESPONSES).refused(_call()) == []
