@@ -5687,6 +5687,11 @@ async def run_standalone_non_stream(
                 response.headers[key] = value
         for key, value in _container_headers(tool_ctx.container_lease).items():
             response.headers[key] = value
+        # ``position`` is 1-indexed, so ``position - 1`` is how many earlier
+        # candidates fell over before this one. No attribution is zero fallbacks
+        # (no policy routed the request), not an unknown count.
+        response.headers["otari-backend"] = str(provider or "")
+        response.headers["otari-attempted-fallbacks"] = str(attribution.position - 1 if attribution else 0)
         if ctx.db is not None:
             usage_data = adapter.extract_usage(result)
             logged = LoggedUsage(None, None)
@@ -5709,6 +5714,8 @@ async def run_standalone_non_stream(
                     tool_tally=tool_ctx.tally,
                     workspace_id=ctx.workspace_id,
                 )
+            if logged.cost is not None:
+                response.headers["otari-response-cost"] = str(logged.cost)
             if ctx.reservation is not None:
                 await reconcile_reservation(
                     ctx.db, ctx.reservation, logged.cost or Decimal(0), actual_tokens=_settled_tokens(usage_data)
