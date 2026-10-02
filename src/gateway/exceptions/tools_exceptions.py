@@ -63,13 +63,6 @@ class WebAccessRefusedError(Exception):
         self.message = message
 
 
-class WebAccessDomainsExcludedError(WebAccessRefusedError):
-    """A request's Fetch domains share nothing with its workspace's."""
-
-    def __init__(self) -> None:
-        super().__init__("The request and workspace web-access domain policies do not overlap")
-
-
 class WebAccessNotEnabledError(WebAccessRefusedError):
     """A workspace with web access turned off refuses a request that declares Fetch."""
 
@@ -219,7 +212,6 @@ __all__ = [
     "McpSessionsInterruptedError",
     "SandboxImageNotAllowedError",
     "SandboxToolsUnrunnableError",
-    "WebAccessDomainsExcludedError",
     "WebAccessNotEnabledError",
     "WebAccessRefusedError",
     "WebAccessToolNotAuthorizedError",

@@ -11,10 +11,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from gateway.exceptions.tools_exceptions import (
-    WebAccessDomainsExcludedError,
     WebAccessNotEnabledError,
     WebAccessToolNotAuthorizedError,
     WebSearchNotEnabledError,
+    WorkspaceWebSearchDomainsExcludedError,
 )
 from gateway.services.tenancy.workspace_web_search_service import narrow_web_search_tool_entry
 from gateway.services.tools._web_search_results import web_search_max_results_baseline
@@ -54,7 +54,7 @@ def apply_web_access_policy(
 
     Raises:
         WebAccessRefusedError: the policy refuses the request, and the subclass says why.
-        WorkspaceWebSearchDomainsExcludedError: the Search domains share nothing with the workspace's.
+        WorkspaceWebSearchDomainsExcludedError: the request's domains share nothing with the workspace's.
     """
     fetch_requested = WEB_FETCH_TOOL_NAME in requested_tools
     workspace_domains = DomainPolicy()
@@ -70,7 +70,7 @@ def apply_web_access_policy(
     try:
         fetch_policy = _fetch_policy(workspace_domains, search_tool_entry if fetch_requested else None)
     except DisjointDomainAllowListsError as exc:
-        raise WebAccessDomainsExcludedError() from exc
+        raise WorkspaceWebSearchDomainsExcludedError() from exc
     if policy is not None and search_tool_entry is not None:
         search_tool_entry = narrow_web_search_tool_entry(
             search_tool_entry,
