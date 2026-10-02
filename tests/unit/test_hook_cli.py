@@ -14,7 +14,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import httpx
 import pytest
@@ -1775,6 +1775,108 @@ def test_judge_transcript_extraction_keeps_only_assistant_text(tmp_path: Path) -
 
 def test_judge_transcript_extraction_returns_empty_for_an_unreadable_file(tmp_path: Path) -> None:
     assert hook_cli._hook_extract_judge_transcript(tmp_path / "missing.jsonl") == ""
+
+
+def _forbid_whole_file_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*args: object, **kwargs: object) -> NoReturn:
+        raise AssertionError("a transcript reader materialized the whole file")
+
+    monkeypatch.setattr(Path, "read_text", fail)
+    monkeypatch.setattr(Path, "read_bytes", fail)
+
+
+def test_transcript_readers_stream_a_normal_transcript_unchanged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(
+        "\n".join(
+            [
+                _transcript_line(text="Adding a helper."),
+                _transcript_line(edit_path="src/app.py", tool_use_id="toolu_edit"),
+                _transcript_line(command="make lint", tool_use_id="toolu_lint"),
+                _transcript_line(text="Done."),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _forbid_whole_file_reads(monkeypatch)
+
+    assert hook_cli._hook_collect_transcript_commands(transcript) == ["make lint"]
+    assert hook_cli._hook_extract_judge_transcript(transcript) == "Adding a helper.\nDone."
+
+
+def test_transcript_commands_are_not_collected_from_a_transcript_over_the_byte_budget(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Over `_HOOK_MAX_TRANSCRIPT_BYTES`, command collection returns None, its existing
+
+    could-not-read sentinel, rather than reading the whole file or acting on
+    a part of it: a dropped forbidden command would read as a false pass.
+    """
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(
+        "\n".join(_transcript_line(command=f"make step-{n}", tool_use_id=f"toolu_{n}") for n in range(3)) + "\n",
+        encoding="utf-8",
+    )
+    size = transcript.stat().st_size
+    _forbid_whole_file_reads(monkeypatch)
+
+    monkeypatch.setattr(hook_cli, "_HOOK_MAX_TRANSCRIPT_BYTES", size)
+    assert hook_cli._hook_collect_transcript_commands(transcript) == ["make step-0", "make step-1", "make step-2"]
+
+    monkeypatch.setattr(hook_cli, "_HOOK_MAX_TRANSCRIPT_BYTES", size - 1)
+    assert hook_cli._hook_collect_transcript_commands(transcript) is None
+    assert "byte limit" in capsys.readouterr().err
+
+
+def test_stop_event_submits_no_commands_when_transcript_is_over_the_byte_budget(
+    monkeypatch: pytest.MonkeyPatch, repo: Path, tmp_path: Path
+) -> None:
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text(_transcript_line(command="make postman") + "\n", encoding="utf-8")
+    monkeypatch.setattr(hook_cli, "_HOOK_MAX_TRANSCRIPT_BYTES", transcript.stat().st_size - 1)
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: object) -> _FakeResponse:
+        captured["json"] = kwargs.get("json")
+        return _FakeResponse({"blocked": False, "results": []})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    payload = {"hook_event_name": "Stop", "cwd": str(repo), "transcript_path": str(transcript)}
+    result = _invoke(payload)
+    assert result.exit_code == 0, result.output
+    assert captured["json"]["commands"] is None
+
+
+def test_judge_transcript_extraction_reads_only_the_tail_of_a_transcript_over_the_byte_budget(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The judge keeps only the most recent transcript text anyway, so over the
+
+    budget it reads the whole lines in the file's last budget's worth of
+    bytes, dropping a line the budget would cut in half.
+    """
+    lines = [_transcript_line(text="Oldest."), _transcript_line(text="Recent."), _transcript_line(text="Latest.")]
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    recent_bytes = len(("\n".join(lines[1:]) + "\n").encode("utf-8"))
+    _forbid_whole_file_reads(monkeypatch)
+
+    monkeypatch.setattr(hook_cli, "_HOOK_MAX_TRANSCRIPT_BYTES", recent_bytes)
+    assert hook_cli._hook_extract_judge_transcript(transcript) == "Recent.\nLatest."
+    assert "most recent" in capsys.readouterr().err
+
+    monkeypatch.setattr(hook_cli, "_HOOK_MAX_TRANSCRIPT_BYTES", recent_bytes + 5)
+    assert hook_cli._hook_extract_judge_transcript(transcript) == "Recent.\nLatest."
+
+    monkeypatch.setattr(hook_cli, "_HOOK_MAX_TRANSCRIPT_BYTES", recent_bytes - 1)
+    assert hook_cli._hook_extract_judge_transcript(transcript) == "Latest."
 
 
 def test_judge_workdir_is_not_the_repo_being_judged(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -7,6 +7,7 @@ in, asks a gateway's Hook Server to) and answers in the harness's own exit-code
 protocol. See docs/agent-guardrails.md.
 """
 
+import errno
 import json
 import os
 import re
@@ -17,7 +18,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from enum import Enum
@@ -666,6 +667,55 @@ def _hook_collect_changed_paths(repo_root: Path) -> list[str] | None:
     return paths
 
 
+# The most of a session transcript any Stop-event reader below will read. A
+# transcript grows for the whole session: the largest of 887 real local
+# Claude Code transcripts measured 124 MB, which reading whole (then
+# splitting into a list of lines) held at ~870 MB peak RSS. Roughly twice
+# that, read one line at a time.
+_HOOK_MAX_TRANSCRIPT_BYTES = 256 * 1024 * 1024
+
+
+def _hook_iter_transcript_lines(transcript_path: Path, *, tail: bool = False) -> Iterator[str]:
+    """A transcript's lines, read one at a time and at most `_HOOK_MAX_TRANSCRIPT_BYTES` of them.
+
+    Over the budget, a reader that needs the whole session (`tail=False`, the
+    command collectors) gets an OSError, so it falls back to the same
+    sentinel it returns for an unreadable transcript rather than acting on a
+    partial read. A reader that only needs the recent end (`tail=True`, the
+    judge extractors) gets the whole lines in the last budget's worth of
+    bytes instead.
+    """
+
+    def over_budget() -> OSError:
+        click.echo(
+            f"otari hook: transcript is over the {_HOOK_MAX_TRANSCRIPT_BYTES:,}-byte limit; not reading it.", err=True
+        )
+        return OSError(errno.EFBIG, "transcript over the byte budget", str(transcript_path))
+
+    with transcript_path.open("rb") as handle:
+        remaining = _HOOK_MAX_TRANSCRIPT_BYTES
+        size = os.fstat(handle.fileno()).st_size
+        if size > remaining:
+            if not tail:
+                raise over_budget()
+            click.echo(
+                f"otari hook: transcript is {size:,} bytes, over the {remaining:,}-byte limit; "
+                "reading only the most recent that many.",
+                err=True,
+            )
+            # Starting one byte early and discarding through the next newline
+            # drops a partial first line but keeps one that starts exactly there.
+            handle.seek(size - remaining - 1)
+            remaining -= len(handle.readline(remaining + 1)) - 1
+        while raw := handle.readline(remaining + 1):
+            remaining -= len(raw)
+            if remaining < 0:
+                if tail:
+                    return
+                raise over_budget()
+            yield raw.decode("utf-8", errors="replace").rstrip("\r\n")
+
+
 # Claude Code's own wrapper around a hook's blocking stderr, written as the
 # denied tool call's `tool_result` content: "{event}:{tool_name} hook error:
 # [{hook_command}]: {stderr}". Both substrings, not just "hook error:" alone,
@@ -738,17 +788,12 @@ def _hook_collect_transcript_commands(transcript_path: Path) -> list[str] | None
     gates unsatisfiable.
 
     Returns None only when the transcript itself cannot be read (missing,
-    permissions, not a file): the same fail-open sentinel
-    `_hook_collect_changed_paths` uses, so the caller can tell "collected,
-    and there are none" (an empty list) apart from "could not collect at
-    all". A single malformed line is skipped, not fatal, matching
+    permissions, not a file, over `_HOOK_MAX_TRANSCRIPT_BYTES`): the same
+    fail-open sentinel `_hook_collect_changed_paths` uses, so the caller can
+    tell "collected, and there are none" (an empty list) apart from "could
+    not collect at all". A single malformed line is skipped, not fatal, matching
     `claude_code_import.py`'s tolerance of the same file format.
     """
-    try:
-        lines = transcript_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return None
-
     # tool_use_id is None for a block missing or misshaping its own id: kept
     # in the requested list regardless (never silently dropped for that),
     # just ineligible to ever match an entry in denied_ids.
@@ -756,39 +801,42 @@ def _hook_collect_transcript_commands(transcript_path: Path) -> list[str] | None
     edit_positions: dict[str | None, int] = {}
     denied_ids: set[str] = set()
     position = 0
-    for line in lines:
-        if not line.strip():
-            continue
-        try:
-            record = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(record, dict) or record.get("isSidechain"):
-            continue
-        message = record.get("message")
-        content = message.get("content") if isinstance(message, dict) else None
-        if not isinstance(content, list):
-            continue
-        for block in content:
-            if not isinstance(block, dict):
+    try:
+        for line in _hook_iter_transcript_lines(transcript_path):
+            if not line.strip():
                 continue
-            block_type = block.get("type")
-            if block_type == "tool_use" and block.get("name") == "Bash":
-                tool_input = block.get("input")
-                command = tool_input.get("command") if isinstance(tool_input, dict) else None
-                if isinstance(command, str) and command:
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(record, dict) or record.get("isSidechain"):
+                continue
+            message = record.get("message")
+            content = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                block_type = block.get("type")
+                if block_type == "tool_use" and block.get("name") == "Bash":
+                    tool_input = block.get("input")
+                    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+                    if isinstance(command, str) and command:
+                        position += 1
+                        tool_use_id = block.get("id")
+                        requested.append((tool_use_id if isinstance(tool_use_id, str) else None, command, position))
+                elif block_type == "tool_use" and block.get("name") in _HOOK_EDIT_TOOL_PATH_FIELDS:
                     position += 1
                     tool_use_id = block.get("id")
-                    requested.append((tool_use_id if isinstance(tool_use_id, str) else None, command, position))
-            elif block_type == "tool_use" and block.get("name") in _HOOK_EDIT_TOOL_PATH_FIELDS:
-                position += 1
-                tool_use_id = block.get("id")
-                edit_positions[tool_use_id if isinstance(tool_use_id, str) else None] = position
-            elif block_type == "tool_result" and block.get("is_error"):
-                tool_use_id = block.get("tool_use_id")
-                text = _tool_result_text(block.get("content"))
-                if isinstance(tool_use_id, str) and all(marker in text for marker in _PRETOOLUSE_DENIAL_MARKERS):
-                    denied_ids.add(tool_use_id)
+                    edit_positions[tool_use_id if isinstance(tool_use_id, str) else None] = position
+                elif block_type == "tool_result" and block.get("is_error"):
+                    tool_use_id = block.get("tool_use_id")
+                    text = _tool_result_text(block.get("content"))
+                    if isinstance(tool_use_id, str) and all(marker in text for marker in _PRETOOLUSE_DENIAL_MARKERS):
+                        denied_ids.add(tool_use_id)
+    except OSError:
+        return None
 
     last_edit_position = max(
         (pos for tool_use_id, pos in edit_positions.items() if tool_use_id is None or tool_use_id not in denied_ids),
@@ -829,51 +877,49 @@ def _hook_collect_codex_transcript_commands(transcript_path: Path) -> list[str] 
     Returns None only when the transcript itself cannot be read, the same
     sentinel `_hook_collect_transcript_commands` uses.
     """
-    try:
-        lines = transcript_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return None
-
     commands: list[str] = []
-    for line in lines:
-        if not line.strip():
-            continue
-        try:
-            record = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(record, dict) or record.get("type") != "response_item":
-            continue
-        item = record.get("payload")
-        if not isinstance(item, dict):
-            continue
-        item_type = item.get("type")
-        if item_type == "custom_tool_call" and item.get("name") == "exec":
-            text = item.get("input")
-            if isinstance(text, str) and text:
-                commands.append(text)
-        elif item_type == "function_call" and item.get("name") in _CODEX_COMMAND_TOOL_NAMES:
-            raw_arguments = item.get("arguments")
-            # isinstance first, not a bare json.loads(... or "{}"): "arguments" is
-            # documented as a JSON-encoded string, but a malformed record or a
-            # future Codex shape carrying it pre-parsed (a dict/list) would
-            # otherwise reach json.loads and raise TypeError, which nothing here
-            # catches, crashing this whole Stop-event invocation instead of
-            # skipping the one record, the same fail-open contract every other
-            # per-record parse in this function already keeps.
-            if not isinstance(raw_arguments, str):
+    try:
+        for line in _hook_iter_transcript_lines(transcript_path):
+            if not line.strip():
                 continue
             try:
-                arguments = json.loads(raw_arguments)
+                record = json.loads(line)
             except ValueError:
                 continue
-            if not isinstance(arguments, dict):
+            if not isinstance(record, dict) or record.get("type") != "response_item":
                 continue
-            command = arguments.get("command")
-            if isinstance(command, list):
-                command = " ".join(str(part) for part in command)
-            if isinstance(command, str) and command:
-                commands.append(command)
+            item = record.get("payload")
+            if not isinstance(item, dict):
+                continue
+            item_type = item.get("type")
+            if item_type == "custom_tool_call" and item.get("name") == "exec":
+                text = item.get("input")
+                if isinstance(text, str) and text:
+                    commands.append(text)
+            elif item_type == "function_call" and item.get("name") in _CODEX_COMMAND_TOOL_NAMES:
+                raw_arguments = item.get("arguments")
+                # isinstance first, not a bare json.loads(... or "{}"): "arguments" is
+                # documented as a JSON-encoded string, but a malformed record or a
+                # future Codex shape carrying it pre-parsed (a dict/list) would
+                # otherwise reach json.loads and raise TypeError, which nothing here
+                # catches, crashing this whole Stop-event invocation instead of
+                # skipping the one record, the same fail-open contract every other
+                # per-record parse in this function already keeps.
+                if not isinstance(raw_arguments, str):
+                    continue
+                try:
+                    arguments = json.loads(raw_arguments)
+                except ValueError:
+                    continue
+                if not isinstance(arguments, dict):
+                    continue
+                command = arguments.get("command")
+                if isinstance(command, list):
+                    command = " ".join(str(part) for part in command)
+                if isinstance(command, str) and command:
+                    commands.append(command)
+    except OSError:
+        return None
     return commands
 
 
@@ -998,32 +1044,32 @@ def _hook_extract_judge_transcript(transcript_path: Path) -> str:
     Returns "" when the transcript cannot be read at all (missing,
     permissions) or carries no assistant text, the same as an empty
     transcript otherwise would: a judge gate degrades to diff-only evidence
-    rather than treating this as a collection failure.
+    rather than treating this as a collection failure. A transcript over
+    `_HOOK_MAX_TRANSCRIPT_BYTES` is read from its most recent end only, the
+    same end the caller's own `_HOOK_JUDGE_MAX_TRANSCRIPT_CHARS` cut keeps.
     """
+    texts: list[str] = []
     try:
-        lines = transcript_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        for line in _hook_iter_transcript_lines(transcript_path, tail=True):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(record, dict) or record.get("isSidechain") or record.get("type") != "assistant":
+                continue
+            message = record.get("message")
+            content = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(content, list):
+                continue
+            texts.extend(
+                block["text"]
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+            )
     except OSError:
         return ""
-
-    texts: list[str] = []
-    for line in lines:
-        if not line.strip():
-            continue
-        try:
-            record = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(record, dict) or record.get("isSidechain") or record.get("type") != "assistant":
-            continue
-        message = record.get("message")
-        content = message.get("content") if isinstance(message, dict) else None
-        if not isinstance(content, list):
-            continue
-        texts.extend(
-            block["text"]
-            for block in content
-            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
-        )
     return "\n".join(texts)
 
 
@@ -1039,32 +1085,30 @@ def _hook_extract_codex_judge_transcript(transcript_path: Path) -> str:
     Returns "" when the transcript cannot be read at all, or carries no
     assistant text, the same as `_hook_extract_judge_transcript`.
     """
+    texts: list[str] = []
     try:
-        lines = transcript_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        for line in _hook_iter_transcript_lines(transcript_path, tail=True):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(record, dict) or record.get("type") != "response_item":
+                continue
+            item = record.get("payload")
+            if not isinstance(item, dict) or item.get("type") != "message" or item.get("role") != "assistant":
+                continue
+            content = item.get("content")
+            if not isinstance(content, list):
+                continue
+            texts.extend(
+                block["text"]
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "output_text" and isinstance(block.get("text"), str)
+            )
     except OSError:
         return ""
-
-    texts: list[str] = []
-    for line in lines:
-        if not line.strip():
-            continue
-        try:
-            record = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(record, dict) or record.get("type") != "response_item":
-            continue
-        item = record.get("payload")
-        if not isinstance(item, dict) or item.get("type") != "message" or item.get("role") != "assistant":
-            continue
-        content = item.get("content")
-        if not isinstance(content, list):
-            continue
-        texts.extend(
-            block["text"]
-            for block in content
-            if isinstance(block, dict) and block.get("type") == "output_text" and isinstance(block.get("text"), str)
-        )
     return "\n".join(texts)
 
 

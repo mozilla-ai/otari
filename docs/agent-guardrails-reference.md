@@ -948,8 +948,9 @@ that cutoff: a `Bash` call can write to the tree too, but the transcript
 does not say which ones did, and the command a gate requires is often the
 writer itself (`make postman` writes the collection its own gate asks for),
 so counting one would leave that gate unsatisfiable.
-If the transcript cannot be read at all, `otari hook` collects no command
-evidence at all, rather than an empty list: the difference between "collected,
+If the transcript cannot be read at all, or is over the 256 MiB that
+`otari hook` will read of one, `otari hook` collects no command evidence at
+all, rather than an empty list: the difference between "collected,
 and there is none" and "could not collect" is what keeps a required
 `command`/`command_if_changed` gate from reading a failed read as a clean pass
 (it resolves `unknown`, and blocks, instead).

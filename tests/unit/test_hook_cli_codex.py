@@ -12,7 +12,7 @@ boundary (subprocess.run), same as test_hook_cli.py.
 import json
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import httpx
 import pytest
@@ -469,6 +469,55 @@ def test_codex_judge_transcript_extraction_keeps_only_assistant_output_text(tmp_
 
 def test_codex_judge_transcript_extraction_returns_empty_for_an_unreadable_file(tmp_path: Path) -> None:
     assert hook_cli._hook_extract_codex_judge_transcript(tmp_path / "missing.jsonl") == ""
+
+
+def _assistant_item(text: str) -> str:
+    return _response_item({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text}]})
+
+
+def _forbid_whole_file_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*args: object, **kwargs: object) -> NoReturn:
+        raise AssertionError("a transcript reader materialized the whole file")
+
+    monkeypatch.setattr(Path, "read_text", fail)
+    monkeypatch.setattr(Path, "read_bytes", fail)
+
+
+def test_codex_transcript_commands_are_not_collected_from_a_transcript_over_the_byte_budget(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text(
+        "\n".join(
+            _response_item({"type": "function_call", "name": "Bash", "arguments": json.dumps({"command": f"step-{n}"})})
+            for n in range(3)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    size = transcript.stat().st_size
+    _forbid_whole_file_reads(monkeypatch)
+
+    monkeypatch.setattr(hook_cli, "_HOOK_MAX_TRANSCRIPT_BYTES", size)
+    assert hook_cli._hook_collect_codex_transcript_commands(transcript) == ["step-0", "step-1", "step-2"]
+
+    monkeypatch.setattr(hook_cli, "_HOOK_MAX_TRANSCRIPT_BYTES", size - 1)
+    assert hook_cli._hook_collect_codex_transcript_commands(transcript) is None
+
+
+def test_codex_judge_transcript_extraction_reads_only_the_tail_of_a_transcript_over_the_byte_budget(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    lines = [_assistant_item("Oldest."), _assistant_item("Recent."), _assistant_item("Latest.")]
+    transcript = tmp_path / "rollout.jsonl"
+    transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _forbid_whole_file_reads(monkeypatch)
+
+    assert hook_cli._hook_extract_codex_judge_transcript(transcript) == "Oldest.\nRecent.\nLatest."
+
+    recent_bytes = len(("\n".join(lines[1:]) + "\n").encode("utf-8"))
+    monkeypatch.setattr(hook_cli, "_HOOK_MAX_TRANSCRIPT_BYTES", recent_bytes + 5)
+    assert hook_cli._hook_extract_codex_judge_transcript(transcript) == "Recent.\nLatest."
 
 
 # --- otari hook setup --harness codex ---------------------------------------
