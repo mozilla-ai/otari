@@ -56,10 +56,10 @@ from gateway.api.routes._tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage, reasoning_tokens_of
-from gateway.core.usage_source import PLAYGROUND_USAGE_ENDPOINT
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
+from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
@@ -84,10 +84,6 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 # The label written to a usage-log row. An identifier, not a URL: it stays as
 # it is so new rows compare with old ones.
 USAGE_ENDPOINT = "/v1/chat/completions"
-
-# The label a Playground request carries instead, declared in
-# ``core/usage_source`` because the activation guide filters on it and a service
-# may not import this layer. That module says which readers care and why.
 
 __all__ = [
     "ChatCompletionRequest",
@@ -471,8 +467,7 @@ async def run_chat_completion(
     endpoint, which keeps its API-key-or-master-key rule exactly as it was; see
     :class:`SessionPrincipal` for what a caller owes before building one. It is
     also what picks the usage row's endpoint label, so a Playground request is
-    countable separately from a customer's; ``PLAYGROUND_USAGE_ENDPOINT`` says
-    who reads that distinction and why.
+    countable separately from a customer's (``PLAYGROUND_USAGE_ENDPOINT``).
     """
     adapter = _PLAYGROUND_ADAPTER if session_principal is not None else _ADAPTER
     if not request.model.strip():

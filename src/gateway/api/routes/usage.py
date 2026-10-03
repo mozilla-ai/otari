@@ -28,11 +28,10 @@ from gateway.core.sql import (
     utc_bound,
 )
 from gateway.core.surface import Surface
-from gateway.core.usage_source import SERVED_HERE_SLUG
 from gateway.inflight import get_registry
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float
-from gateway.models.usage import UsageLog
+from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
 from gateway.models.users import User
 from gateway.services.external_usage_service import (
     ExternalEventsRequest,

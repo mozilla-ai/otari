@@ -14,6 +14,17 @@ from gateway.models.money import UsdCost
 # Mirrors ``gateway_usage_settlement.pricing_reference`` on the platform.
 PRICING_REFERENCE_MAX_LENGTH = 511
 
+# ``usage_logs.source`` on a row this gateway served itself. Any other value is usage
+# imported through the external-events or OTLP ingest, which reserves this one so an
+# import cannot pass as traffic served here.
+SERVED_HERE_SLUG = "gateway"
+
+# The endpoint label on a usage row the dashboard's own Playground produced. Its
+# rows are still served here, so the label, not the source, tells them apart. An
+# identifier, not a URL: it keeps its value if the route ever moves, exactly as
+# ``chat.USAGE_ENDPOINT`` does.
+PLAYGROUND_USAGE_ENDPOINT = "/v1/playground/chat/completions"
+
 
 class UsageLog(Base):
     """Usage log model for tracking API requests."""
@@ -61,11 +72,10 @@ class UsageLog(Base):
     endpoint: Mapped[str] = mapped_column()
 
     # Provenance. "gateway" for requests Otari served itself; a source slug (e.g.
-    # "claude_code") for usage imported through POST /v1/usage/external-events; see
-    # core/usage_source.
+    # "claude_code") for usage imported through POST /v1/usage/external-events.
     # source_event_id is the upstream event id used for idempotent import (NULL for
     # gateway rows); source_label carries optional session/project attribution.
-    source: Mapped[str] = mapped_column(default="gateway", index=True)
+    source: Mapped[str] = mapped_column(default=SERVED_HERE_SLUG, index=True)
     source_event_id: Mapped[str | None] = mapped_column()
     source_label: Mapped[str | None] = mapped_column()
     # Whether this row's cost participates in budget enforcement. True for normal

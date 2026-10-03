@@ -46,7 +46,6 @@ from gateway.api.routes import (
     search,
     web_search_backend,
 )
-from gateway.core import usage_source
 from gateway.core.config import API_ROOT, OTLP_ROOT, PLATFORM_TOKEN_ENV_VAR, GatewayConfig
 from gateway.main import (
     _COOKIE_AUTH_PREFIXES,
@@ -58,6 +57,7 @@ from gateway.main import (
 from gateway.main import (
     _under as _main_under,
 )
+from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 
 # App-level paths that deliberately stay at the origin root. Each has a reason
 # outside this repository's control; see the spec's D8.
@@ -328,7 +328,7 @@ FROZEN_LABELS = frozenset(
         rerank.USAGE_ENDPOINT,
         responses.USAGE_ENDPOINT,
         search.SEARCH_ENDPOINT,
-        usage_source.PLAYGROUND_USAGE_ENDPOINT,
+        PLAYGROUND_USAGE_ENDPOINT,
         web_search_backend.SEARCH_ENDPOINT,
     }
 )
