@@ -536,8 +536,9 @@ const getBudgetRowKey = (budget: Budget): string => budget.budget_id
 
 // Whose budget a row is: a tenant's carries an organization, the deployment's own
 // carries none. `/users` refuses to cap a gateway user at a tenant's
-// (otari#881), so the page marks the row and withholds the assignment control
-// rather than offering a save the API answers 404.
+// (otari#881) and `/budgets` refuses to delete one (otari#902), so the page
+// marks the row and withholds both controls rather than offering an action the
+// API refuses.
 function isOrganizationOwned(budget: Budget): boolean {
   return budget.organization_id !== null
 }
@@ -643,7 +644,14 @@ function DeploymentBudgetsPage() {
   // open leaves it nothing to return to, so focus lands on body and Tab
   // restarts at the top of the document.
   const showOnboarding = !loading && rows.length === 0
-  const selectableKeys = rows.map((budget) => budget.budget_id)
+  // A tenant's row stays out of the selection: the only bulk action is Delete,
+  // and one refusal would stop the loop with the rest of the batch undeleted.
+  const ownedKeys = rows
+    .filter(isOrganizationOwned)
+    .map((budget) => budget.budget_id)
+  const selectableKeys = rows
+    .filter((budget) => !isOrganizationOwned(budget))
+    .map((budget) => budget.budget_id)
   const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys)
 
   const onBulkDelete = async () => {
@@ -777,11 +785,13 @@ function DeploymentBudgetsPage() {
                 setEditing(budget.budget_id)
               }}
             />
-            <RowAction
-              icon={FiTrash2}
-              label="Delete"
-              onPress={() => setPendingDelete(budget)}
-            />
+            {isOrganizationOwned(budget) ? null : (
+              <RowAction
+                icon={FiTrash2}
+                label="Delete"
+                onPress={() => setPendingDelete(budget)}
+              />
+            )}
           </RowActionRow>
         ),
       },
@@ -978,6 +988,7 @@ function DeploymentBudgetsPage() {
             selectionMode="multiple"
             selectedKeys={selection.selectedKeys}
             onSelectionChange={selection.onSelectionChange}
+            disabledKeys={ownedKeys}
           />
         </TableScrollFrame>
       )}

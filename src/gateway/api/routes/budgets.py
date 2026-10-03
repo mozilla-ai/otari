@@ -2,7 +2,7 @@ from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -248,13 +248,20 @@ async def delete_budget(
     budget_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Delete a budget.
+    """Delete a budget the deployment owns.
 
-    Refused with 409 while anything still names this budget: a workspace handing
-    it to its members, or a scoped ceiling enforcing it. Both foreign keys are
-    ``RESTRICT``, so the database would refuse either anyway, but as an
+    Refused with 409 for an organization's budget: the operator may edit one
+    (``PATCH`` retimes its ceilings) but deleting it would take a budget the
+    tenant defined out from under them.
+
+    Refused with 409, too, while anything still names this budget: a workspace
+    handing it to its members, or a scoped ceiling enforcing it. Both foreign
+    keys are ``RESTRICT``, so the database would refuse either anyway, but as an
     ``IntegrityError`` reported as "Database error" with nothing naming what to
     go and change. Checked here so the refusal can say which, and where.
+
+    Gateway users assigned to the budget are left uncapped, as the dashboard's
+    confirmation says, and its reset history is deleted with it.
     """
     result = await db.execute(select(Budget).where(Budget.budget_id == budget_id))
     budget = result.scalar_one_or_none()
@@ -263,6 +270,15 @@ async def delete_budget(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Budget with id '{budget_id}' not found",
+        )
+
+    if budget.organization_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This budget is owned by an organization. It can be edited here but not "
+                "deleted; the organization that owns it manages it."
+            ),
         )
 
     holders = (
@@ -304,6 +320,9 @@ async def delete_budget(
             ),
         )
 
+    # ``budget_reset_logs.budget_id`` is NOT NULL with no ``ondelete``, so the ORM's
+    # null-out would fail at the commit for any budget that has ever reset.
+    await db.execute(delete(BudgetResetLog).where(col(BudgetResetLog.budget_id) == budget_id))
     await db.delete(budget)
     try:
         await db.commit()

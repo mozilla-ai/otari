@@ -9,7 +9,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
-from gateway.models.budgets import BudgetResetLog, ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.budgets import Budget, BudgetResetLog, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import Organization, Workspace
 from gateway.models.users import User
 
@@ -176,6 +176,55 @@ def test_deleting_a_budget_a_workspace_hands_out_is_refused_by_name(
     db_session.execute(delete(WorkspaceBudgetDefault).where(WorkspaceBudgetDefault.budget_id == budget_id))
     db_session.commit()
     assert client.delete(f"{API_ROOT}/budgets/{budget_id}", headers=master_key_header).status_code == 204
+
+
+def test_deleting_an_organization_budget_is_refused(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """The operator may edit a tenant's budget but not delete it out from under them."""
+    organization = Organization(name="Acme", slug="acme-owned-budget")
+    db_session.add(organization)
+    db_session.flush()
+    budget = Budget(organization_id=organization.id, name="Tenant cap", max_budget=Decimal(50))
+    db_session.add(budget)
+    db_session.commit()
+    budget_id = budget.budget_id
+
+    refused = client.delete(f"{API_ROOT}/budgets/{budget_id}", headers=master_key_header)
+    assert refused.status_code == 409, refused.text
+    assert "organization" in refused.json()["detail"]
+    assert client.get(f"{API_ROOT}/budgets/{budget_id}", headers=master_key_header).status_code == 200
+
+
+def test_deleting_a_budget_that_has_reset_clears_its_history(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """A reset log names its budget NOT NULL, so it goes with the budget rather than failing the delete."""
+    budget_id = _make_budget(client, master_key_header)
+    client.post(
+        f"{API_ROOT}/users", json={"user_id": "reset-then-delete", "budget_id": budget_id}, headers=master_key_header
+    )
+    db_session.add(BudgetResetLog(user_id="reset-then-delete", budget_id=budget_id, previous_spend=5.0))
+    db_session.commit()
+
+    assert client.delete(f"{API_ROOT}/budgets/{budget_id}", headers=master_key_header).status_code == 204
+    db_session.expire_all()
+    remaining = db_session.execute(select(BudgetResetLog).where(BudgetResetLog.budget_id == budget_id)).all()
+    assert remaining == []
+
+
+def test_deleting_a_budget_leaves_its_users_uncapped(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """Assigned gateway users lose the cap, which is what the dashboard's confirmation promises."""
+    budget_id = _make_budget(client, master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "capped", "budget_id": budget_id}, headers=master_key_header)
+
+    assert client.delete(f"{API_ROOT}/budgets/{budget_id}", headers=master_key_header).status_code == 204
+    user = client.get(f"{API_ROOT}/users/capped", headers=master_key_header).json()
+    assert user["budget_id"] is None
 
 
 def test_an_explicit_null_budget_detaches_and_clears_the_reset_clock(
