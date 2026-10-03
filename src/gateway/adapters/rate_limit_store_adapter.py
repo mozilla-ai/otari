@@ -11,6 +11,7 @@ import time
 import uuid
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import TYPE_CHECKING, TypeVar
 
 from gateway.core.config import GatewayConfig
@@ -104,6 +105,9 @@ _KEY_PREFIX = "otari:rl:"
 # then counts locally before it tries Redis again.
 _REDIS_TIMEOUT_SEC = 0.5
 _REDIS_RETRY_AFTER_SEC = 5.0
+# Marks a handle or lease the in-process fallback issued, so it is settled or
+# released there even after Redis answers again.
+_LOCAL_PREFIX = "local:"
 
 
 class InMemoryRateLimitStore:
@@ -148,6 +152,9 @@ class RedisRateLimitStore:
     When Redis cannot answer, the store counts in this process instead rather
     than refusing traffic, and tries Redis again after a few seconds. Each
     replica then admits the full limit on its own until Redis is back.
+
+    A handle or lease goes back to the store that issued it. One Redis issued
+    that cannot reach Redis is left to run out on its own.
     """
 
     def __init__(self, client: Redis) -> None:
@@ -169,6 +176,9 @@ class RedisRateLimitStore:
         """The log, cost and lease keys for ``key``, hash-tagged so a Redis Cluster keeps them on one node."""
         base = f"{_KEY_PREFIX}{{{key}}}"
         return f"{base}:log", f"{base}:cost", f"{base}:leases"
+
+    async def _noop(self) -> None:
+        return None
 
     async def _redis_or_fallback(self, call: Callable[[], Awaitable[T]], fallback: Callable[[], Awaitable[T]]) -> T:
         from redis.exceptions import RedisError
@@ -202,15 +212,22 @@ class RedisRateLimitStore:
                 handle=handle if allowed else None,
             )
 
-        return await self._redis_or_fallback(call, lambda: self._fallback.hit(key, limit, window_sec, cost))
+        async def fallback() -> RateLimitWindow:
+            window = await self._fallback.hit(key, limit, window_sec, cost)
+            return replace(window, handle=window.handle and _LOCAL_PREFIX + window.handle)
+
+        return await self._redis_or_fallback(call, fallback)
 
     async def settle(self, key: str, handle: str, cost: int) -> None:
+        if handle.startswith(_LOCAL_PREFIX):
+            await self._fallback.settle(key, handle.removeprefix(_LOCAL_PREFIX), cost)
+            return
         log_key, cost_key, _ = self._keys(key)
 
         async def call() -> None:
             await self._settle(keys=[log_key, cost_key], args=[handle, cost])
 
-        await self._redis_or_fallback(call, lambda: self._fallback.settle(key, handle, cost))
+        await self._redis_or_fallback(call, self._noop)
 
     async def acquire(self, key: str, limit: int, lease_sec: float) -> str | None:
         _, _, lease_key = self._keys(key)
@@ -220,15 +237,22 @@ class RedisRateLimitStore:
             taken = await self._acquire(keys=[lease_key], args=[limit, math.ceil(lease_sec * 1000), lease])
             return lease if taken else None
 
-        return await self._redis_or_fallback(call, lambda: self._fallback.acquire(key, limit, lease_sec))
+        async def fallback() -> str | None:
+            local = await self._fallback.acquire(key, limit, lease_sec)
+            return local and _LOCAL_PREFIX + local
+
+        return await self._redis_or_fallback(call, fallback)
 
     async def release(self, key: str, lease: str) -> None:
+        if lease.startswith(_LOCAL_PREFIX):
+            await self._fallback.release(key, lease.removeprefix(_LOCAL_PREFIX))
+            return
         _, _, lease_key = self._keys(key)
 
         async def call() -> None:
             await self._client.zrem(lease_key, lease)
 
-        await self._redis_or_fallback(call, lambda: self._fallback.release(key, lease))
+        await self._redis_or_fallback(call, self._noop)
 
     async def aclose(self) -> None:
         await self._client.aclose()

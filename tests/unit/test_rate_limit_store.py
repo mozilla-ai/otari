@@ -240,3 +240,48 @@ async def test_unreachable_redis_hands_out_slots_in_process() -> None:
 
     await store.release("k", lease)
     assert await store.acquire("k", 1, 30) is not None
+
+
+class _RecoveringRedis(_FailingRedis):
+    """A client that fails until ``up`` is set, then answers every script and ``zrem``."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.up = False
+        self.zrems: list[str] = []
+
+    def register_script(self, script: str) -> Any:
+        failing = super().register_script(script)
+
+        async def run(*, keys: list[str], args: list[Any]) -> Any:
+            if not self.up:
+                return await failing(keys=keys, args=args)
+            return [1, args[3], 1000] if len(keys) == 2 and len(args) == 4 else 1
+
+        return run
+
+    async def zrem(self, key: str, member: str) -> int:
+        if not self.up:
+            return await super().zrem(key, member)
+        self.zrems.append(member)
+        return 1
+
+
+@pytest.mark.asyncio
+async def test_what_the_fallback_issued_goes_back_to_it_after_redis_recovers() -> None:
+    """A slot taken while Redis was down is not stranded in memory once Redis answers again."""
+    client = _RecoveringRedis()
+    store = RedisRateLimitStore(client)  # type: ignore[arg-type]
+    lease = await store.acquire("k", 1, 30)
+    estimate = await store.hit("k", 100, 60, cost=90)
+    assert lease is not None
+    assert estimate.handle is not None
+
+    client.up = True
+    store._retry_at = None
+    await store.release("k", lease)
+    await store.settle("k", estimate.handle, 30)
+
+    assert client.zrems == []
+    assert await store._fallback.acquire("k", 1, 30) is not None
+    assert (await store._fallback.hit("k", 100, 60, cost=70)).allowed
