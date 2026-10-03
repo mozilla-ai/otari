@@ -70,8 +70,8 @@ class OrganizationBudgetInUseError(TenancyConflictError):
 class OrganizationBudgetHeldElsewhereError(TenancyConflictError):
     """Something outside this organization's own surface still names the budget.
 
-    ``users.budget_id`` and ``budget_reset_logs.budget_id``, neither of which is a
-    tenant's to see, so the refusal does not name the rows holding it.
+    ``users.budget_id``, which is not a tenant's to see, so the refusal does not
+    name the rows holding it.
     """
 
     def __init__(self, budget_id: object):

@@ -1091,11 +1091,12 @@ async def test_a_delete_is_refused_while_a_gateway_user_holds_the_budget(async_d
 
 
 @pytest.mark.asyncio
-async def test_a_delete_is_refused_while_a_reset_record_names_the_budget(async_db: AsyncSession) -> None:
-    """The reference that outlives the assignment which produced it.
+async def test_a_delete_clears_the_budget_reset_history(async_db: AsyncSession) -> None:
+    """A reset record outlives the assignment that produced it, and goes with the budget.
 
     A user can detach after a reset, leaving no live `users.budget_id` while the
-    `budget_reset_logs` row remains and goes on refusing the delete.
+    `budget_reset_logs` row remains. Refusing on it would strand the budget: the
+    deployment route will not delete a tenant's budget, so no one could.
     """
     organization = await _organization(async_db, slug="acme-reset-hold")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
@@ -1113,11 +1114,10 @@ async def test_a_delete_is_refused_while_a_reset_record_names_the_budget(async_d
     )
     await async_db.flush()
 
-    # `OrganizationBudgetHeldElsewhereError`, not the in-use error: a reset log is
-    # not a tenant's row to be told about, and its NOT NULL column makes the
-    # ORM's null-out fail at the commit rather than being caught by a count.
-    with pytest.raises(OrganizationBudgetHeldElsewhereError):
-        await service.delete_organization_budget(user=owner, budget_id=budget.budget_id)
+    await service.delete_organization_budget(user=owner, budget_id=budget.budget_id)
+
+    remaining = await async_db.execute(select(BudgetResetLog).where(BudgetResetLog.budget_id == budget.budget_id))
+    assert remaining.all() == []
 
 
 @pytest.mark.asyncio
