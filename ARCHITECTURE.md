@@ -87,7 +87,7 @@ A **port** is a domain-named interface (a Python `Protocol`), named for what it 
 | `FileStoragePort` | Where the bytes behind an uploaded file are kept. Three core adapters: a local directory, S3, and any fsspec filesystem. |
 | `ProviderFilePort` | Reading and writing the files a provider holds: a copy an attached file gets for the provider's own code execution, and a file that code produced. The core adapter reaches them through any-llm. |
 | `ApiKeyFormatPort` | The shape of the API keys a build mints, and where a presented key is checked. |
-| `RateLimitStorePort` | Where rate-limit counts are kept. Two core adapters: this process's memory, and Redis for a count every replica shares. |
+| `RateLimitStorePort` | Where rate-limit counts and concurrency slots are kept. Two core adapters: this process's memory, and Redis for a count every replica shares. |
 
 The cardinal property: **every port ships with a working adapter in Otari's core**, a real lightweight implementation or an honest [Null Object](https://en.wikipedia.org/wiki/Null_object_pattern). Otari must stand alone with no overlay present. `BillingPort`, for example, is a Null Object in the core: it is present and callable, and does nothing, so nothing in the core needs to know whether real billing exists anywhere.
 

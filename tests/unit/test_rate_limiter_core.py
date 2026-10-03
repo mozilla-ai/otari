@@ -120,7 +120,7 @@ def test_rate_limiter_uses_deque_buckets() -> None:
         mock_time.time.return_value = 1700000000.0
         limiter.check("user-1")
 
-    assert isinstance(limiter._log._requests["user-1"], deque)
+    assert isinstance(limiter._log._requests["user-1"].entries, deque)
 
 
 def test_config_rejects_zero_rate_limit() -> None:

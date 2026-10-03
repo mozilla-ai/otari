@@ -122,8 +122,75 @@ def test_the_gateway_counts_rate_limit_rpm_in_redis(redis_rate_limit_client: Tes
     async def counted() -> int:
         client = Redis.from_url(redis_url)
         try:
-            return int(await client.zcard(f"otari:rl:user:{user_id}"))
+            return int(await client.zcard(f"otari:rl:{{user:{user_id}}}:log"))
         finally:
             await client.aclose()
 
     assert asyncio.run(counted()) == 2
+
+
+@pytest.mark.asyncio
+async def test_replicas_share_what_entries_cost_and_what_they_settle(redis_url: str) -> None:
+    key = f"tpm:{uuid.uuid4()}"
+    first, second = _replica(redis_url), _replica(redis_url)
+    try:
+        estimate = await first.hit(key, 100, 60, cost=90)
+        refused = await second.hit(key, 100, 60, cost=20)
+        assert estimate.handle is not None
+        await first.settle(key, estimate.handle, 30)
+        admitted = await second.hit(key, 100, 60, cost=70)
+        full = await first.hit(key, 100, 60, cost=1)
+    finally:
+        await first.aclose()
+        await second.aclose()
+
+    assert (estimate.allowed, estimate.count) == (True, 90)
+    assert not refused.allowed
+    assert (admitted.allowed, admitted.count) == (True, 100)
+    assert not full.allowed
+
+
+@pytest.mark.asyncio
+async def test_an_entry_leaving_the_window_frees_what_it_cost(redis_url: str) -> None:
+    key = f"tpm:{uuid.uuid4()}"
+    store = _replica(redis_url)
+    try:
+        assert (await store.hit(key, 100, 0.3, cost=100)).allowed
+        assert not (await store.hit(key, 100, 0.3, cost=1)).allowed
+        await asyncio.sleep(0.4)
+        admitted = await store.hit(key, 100, 0.3, cost=100)
+    finally:
+        await store.aclose()
+
+    assert (admitted.allowed, admitted.count) == (True, 100)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_acquires_across_replicas_never_overshoot(redis_url: str) -> None:
+    key = f"conc:{uuid.uuid4()}"
+    replicas = [_replica(redis_url) for _ in range(4)]
+    try:
+        leases = await asyncio.gather(*(replicas[i % 4].acquire(key, 5, 30) for i in range(20)))
+        taken = [lease for lease in leases if lease is not None]
+        await replicas[0].release(key, taken[0])
+        after_release = await replicas[1].acquire(key, 5, 30)
+    finally:
+        await asyncio.gather(*(replica.aclose() for replica in replicas))
+
+    assert len(taken) == 5
+    assert after_release is not None
+
+
+@pytest.mark.asyncio
+async def test_an_unreleased_slot_returns_when_its_lease_runs_out(redis_url: str) -> None:
+    key = f"conc:{uuid.uuid4()}"
+    store = _replica(redis_url)
+    try:
+        assert await store.acquire(key, 1, 0.3) is not None
+        assert await store.acquire(key, 1, 0.3) is None
+        await asyncio.sleep(0.4)
+        reacquired = await store.acquire(key, 1, 0.3)
+    finally:
+        await store.aclose()
+
+    assert reacquired is not None

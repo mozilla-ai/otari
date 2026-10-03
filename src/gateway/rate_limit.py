@@ -1,9 +1,10 @@
 """Sliding-window rate limiting: in-process limiters and the per-user limit counted in a rate-limit store."""
 
+import itertools
 import math
 import time
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from fastapi import HTTPException, Request, status
 
@@ -26,24 +27,34 @@ class RateLimitInfo:
     reset: float
 
 
-class SlidingWindowLog:
-    """Request timestamps per key, held in this process.
+@dataclass
+class _Window:
+    """One key's admitted entries, oldest first, and what each one counts for."""
 
-    Exact: a request is admitted when fewer than ``limit`` were admitted in the
-    last ``window_sec``. Keys idle for longer than the widest window seen are
-    dropped every ``_CLEANUP_INTERVAL`` hits, so the map is bounded by the keys
-    that are active.
+    entries: deque[tuple[float, str]] = field(default_factory=deque)
+    costs: dict[str, int] = field(default_factory=dict)
+    total: int = 0
+
+
+class SlidingWindowLog:
+    """Admitted entries per key, held in this process.
+
+    Exact: an entry costing ``cost`` is admitted when the entries admitted in
+    the last ``window_sec`` cost at most ``limit`` with it. Keys idle for longer
+    than the widest window seen are dropped every ``_CLEANUP_INTERVAL`` hits, so
+    the map is bounded by the keys that are active.
     """
 
     _CLEANUP_INTERVAL = 1000
 
     def __init__(self) -> None:
-        self._requests: dict[str, deque[float]] = defaultdict(deque)
+        self._requests: dict[str, _Window] = defaultdict(_Window)
         self._call_count = 0
         self._widest_window = 0.0
+        self._handles = itertools.count()
 
-    def hit(self, key: str, limit: int, window_sec: float) -> RateLimitWindow:
-        """Count one request against ``key`` if it fits under ``limit``."""
+    def hit(self, key: str, limit: int, window_sec: float, cost: int = 1) -> RateLimitWindow:
+        """Count an entry costing ``cost`` against ``key`` if it fits under ``limit``."""
         now = time.monotonic()
         cutoff = now - window_sec
         self._widest_window = max(self._widest_window, window_sec)
@@ -53,18 +64,31 @@ class SlidingWindowLog:
             self._cleanup(now - self._widest_window)
             self._call_count = 0
 
-        timestamps = self._requests[key]
-        while timestamps and timestamps[0] <= cutoff:
-            timestamps.popleft()
+        window = self._requests[key]
+        while window.entries and window.entries[0][0] <= cutoff:
+            _, expired = window.entries.popleft()
+            window.total -= window.costs.pop(expired)
 
-        allowed = len(timestamps) < limit
-        if allowed:
-            timestamps.append(now)
-        return RateLimitWindow(allowed=allowed, count=len(timestamps), reset_after=timestamps[0] + window_sec - now)
+        handle = None
+        if window.total + cost <= limit:
+            handle = str(next(self._handles))
+            window.entries.append((now, handle))
+            window.costs[handle] = cost
+            window.total += cost
+        reset_after = window.entries[0][0] + window_sec - now if window.entries else window_sec
+        return RateLimitWindow(allowed=handle is not None, count=window.total, reset_after=reset_after, handle=handle)
+
+    def settle(self, key: str, handle: str, cost: int) -> None:
+        """Make an admitted entry count for ``cost`` instead; a no-op once it has left the window."""
+        window = self._requests.get(key)
+        if window is None or handle not in window.costs:
+            return
+        window.total += cost - window.costs[handle]
+        window.costs[handle] = cost
 
     def _cleanup(self, cutoff: float) -> None:
         """Remove entries for keys with no recent requests."""
-        stale = [key for key, ts in self._requests.items() if not ts or ts[-1] <= cutoff]
+        stale = [key for key, w in self._requests.items() if not w.entries or w.entries[-1][0] <= cutoff]
         for key in stale:
             del self._requests[key]
 
