@@ -56,11 +56,9 @@ providers:
 # Optional server controls.
 # rate_limit_rpm: 60
 # enable_metrics: true
-# Honor incoming OpenTelemetry context propagation headers. The default
-# propagator uses W3C Trace Context (traceparent/tracestate); OTEL_PROPAGATORS
-# controls the configured propagator set. Off by default because these headers
-# are unauthenticated (checked before route auth) and let a caller choose the
-# context your collector ingests. Enable only for trusted service callers.
+# Honor incoming OpenTelemetry trace context (traceparent/tracestate by
+# default). Off by default: the headers are unauthenticated, so enable it only
+# for trusted service callers.
 # accept_incoming_trace_context: true
 # cors_allow_origins:
 #   - "https://app.example.com"

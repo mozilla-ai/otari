@@ -15,6 +15,7 @@ from gateway.core.config import GatewayConfig, load_config
 # Each name is a config.yml key, and OTARI_<NAME> is its environment variable.
 _SETTING_NAMES = frozenset(
     {
+        "accept_incoming_trace_context",
         "activation_guide",
         "aliases",
         "auto_migrate",

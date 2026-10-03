@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionMessage,
@@ -15,6 +17,16 @@ from fastapi.testclient import TestClient
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+from gateway.core.config import API_ROOT, GatewayConfig
+
+from .conftest import build_test_client
+
+
+@pytest.fixture
+def client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
+    """A client on the shared config with incoming trace context honored."""
+    yield from build_test_client(test_config.model_copy(update={"accept_incoming_trace_context": True}))
 
 
 def test_chat_request_propagates_trace_context_to_provider_span(
@@ -47,7 +59,7 @@ def test_chat_request_propagates_trace_context_to_provider_span(
 
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         response = client.post(
-            "/v1/chat/completions",
+            f"{API_ROOT}/chat/completions",
             headers={
                 **master_key_header,
                 "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",

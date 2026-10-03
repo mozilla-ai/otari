@@ -82,7 +82,7 @@ def test_cors_rejects_trace_context_headers(postgres_url: str, test_db: Session)
     try:
         with TestClient(app) as client:
             response = client.options(
-                "/health",
+                f"{API_ROOT}/health",
                 headers={
                     "Origin": "https://trusted.com",
                     "Access-Control-Request-Method": "GET",

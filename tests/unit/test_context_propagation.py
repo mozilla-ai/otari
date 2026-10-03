@@ -53,6 +53,8 @@ def _test_config(tmp_path: Path, **overrides: Any) -> GatewayConfig:
         master_key="sk-test-master",
         mode="standalone",
         require_pricing=False,
+        # Provider copies need OTARI_PROVIDER_ACCOUNT_PEPPER, which the fixture above strips.
+        files_provider_upload_enabled=False,
         **overrides,
     )
 
@@ -154,9 +156,7 @@ def test_missing_traceparent_creates_new_root_span(tmp_path: Path) -> None:
 
 
 def test_extract_trace_context_valid_format() -> None:
-    context = extract_trace_context(
-        {"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}
-    )
+    context = extract_trace_context({"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"})
     assert context is not None
 
 
@@ -169,9 +169,7 @@ def test_extract_trace_context_uses_configured_global_propagator(
     monkeypatch.setattr(propagate, "get_global_textmap", lambda: configured_propagator)
 
     assert (
-        extract_trace_context(
-            {"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}
-        )
+        extract_trace_context({"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"})
         is configured_context
     )
     configured_propagator.extract.assert_called_once()
