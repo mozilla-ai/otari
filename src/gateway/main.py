@@ -78,6 +78,7 @@ from gateway.services.provider_store_service import (
     reset_provider_cache,
     run_provider_refresher,
 )
+from gateway.services.rate_limits import load_rate_limit_rules_at_startup, run_rate_limit_refresher
 from gateway.services.runtime_settings_service import apply_overrides_from_db
 from gateway.services.search_backend import close_search_client
 from gateway.services.search_tool_store_service import (
@@ -240,6 +241,8 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker(
         "search tool", lambda config, _container: run_search_tool_refresher(config), reset_search_tool_cache
     ),
+    # No reset: the stored rules live on the config, which the startup load rebuilds.
+    _LifespanWorker("rate limit rule", lambda config, _container: run_rate_limit_refresher(config)),
     _LifespanWorker("price snapshot", lambda _config, _container: run_price_snapshot_refresher()),
     # Started whatever ``pricing_refresh`` says, because that policy is
     # runtime-settable and each tick re-reads it.
@@ -393,20 +396,20 @@ def _validate_metrics_support(config: GatewayConfig) -> None:
 def install_rate_limits(app: FastAPI, config: GatewayConfig) -> None:
     """Put the per-user limit and the ``rate_limits`` rules on the app, counting in the container's store.
 
-    The store is resolved only when either is set, so a deployment that limits
-    nothing opens no connection to one.
+    A standalone gateway always holds the rules, because the dashboard can add
+    one at runtime; a hybrid one, which refuses ``rate_limits``, holds them only
+    for ``rate_limit_rpm``. Resolving the store opens no connection.
     """
+    rules_possible = not config.is_hybrid_mode
     store: RateLimitStorePort | None = (
         app.state.container.resolve(RateLimitStorePort, None)
-        if config.rate_limit_rpm is not None or config.rate_limits
+        if config.rate_limit_rpm is not None or rules_possible
         else None
     )
     app.state.rate_limit_store = store
     rpm = config.rate_limit_rpm
     app.state.rate_limiter = UserRateLimiter(store, rpm) if store is not None and rpm is not None else None
-    app.state.rate_limit_rules = (
-        RateLimitRules(store, config.rate_limits) if store is not None and config.rate_limits else None
-    )
+    app.state.rate_limit_rules = RateLimitRules(store, config) if store is not None and rules_possible else None
 
 
 def _validate_rate_limit_store(config: GatewayConfig) -> None:
@@ -615,6 +618,8 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 # so a tool added through the dashboard is one the backend-URL
                 # warning and the flat-pricing warning can see.
                 await load_search_tools_at_startup(session, config)
+                # Before the first request, so a stored rule never lets a burst through at boot.
+                await load_rate_limit_rules_at_startup(config)
                 # After the overrides, not at config load: the web-search URL a
                 # searxng search tool inherits can be the dashboard-stored one
                 # applied just above, and that tool is only broken if nothing
@@ -1005,7 +1010,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # an entry never outlives its response (see gateway.inflight).
     app.state.inflight = InFlightRegistry()
     app.add_middleware(InFlightMiddleware, registry=app.state.inflight)
-    if config.rate_limits:
+    if not config.is_hybrid_mode:
         app.add_middleware(RateLimitGrantMiddleware)
 
     if config.enable_metrics:

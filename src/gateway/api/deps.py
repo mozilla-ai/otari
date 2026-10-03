@@ -37,6 +37,7 @@ from gateway.repositories.files import FileRepositories
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.repositories.providers import OrgProviderKeyModelRepository
+from gateway.repositories.rate_limits import RateLimitRuleRepository
 from gateway.repositories.tenancy import OrganizationGuardrailDefinitionRepository, OrgProviderKeyRepository
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultService
@@ -50,6 +51,7 @@ from gateway.services.master_key_service import hash_master_key, is_generated_ma
 from gateway.services.organization_pricing_service import OrganizationPricingService
 from gateway.services.overview.overview_service import OverviewService
 from gateway.services.providers import OrgProviderModelService
+from gateway.services.rate_limits import RateLimitService
 from gateway.services.routing import clear_router_backend_cache
 from gateway.services.tenancy import OrganizationService, organization_guardrail_runner
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
@@ -1060,6 +1062,17 @@ def get_org_provider_model_service(
 
 
 OrgProviderModelServiceDep = Annotated[OrgProviderModelService, Depends(get_org_provider_model_service)]
+
+
+def get_rate_limit_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> RateLimitService:
+    """Build the rate-limit rules service on the request's unit of work."""
+    return RateLimitService(uow, RateLimitRuleRepository(uow), config)
+
+
+RateLimitServiceDep = Annotated[RateLimitService, Depends(get_rate_limit_service)]
 TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_storage_port)]
 WebSearchPolicyPortDep = Annotated[WebSearchPolicyPort, Depends(get_web_search_policy_port)]
 
@@ -1181,6 +1194,7 @@ __all__ = [
     "McpServerPortDep",
     "ModelProviderPortDep",
     "OrgProviderModelServiceDep",
+    "RateLimitServiceDep",
     "TelemetryStoragePortDep",
     "WebSearchPolicyPortDep",
     "get_config",

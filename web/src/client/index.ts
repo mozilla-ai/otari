@@ -443,6 +443,14 @@ export type GuardrailCategory = Schemas["GuardrailCategory"]
 export type RequirementGroup = Schemas["RequirementGroup"]
 
 // ---------------------------------------------------------------------------
+// Rate limit rules
+// ---------------------------------------------------------------------------
+export type RateLimitRule = Schemas["RateLimitRulePublic"]
+export type RateLimitRules = Schemas["RateLimitRulesPublic"]
+export type CreateRateLimitRuleRequest = Schemas["RateLimitRuleCreate"]
+export type UpdateRateLimitRuleRequest = Schemas["RateLimitRuleUpdate"]
+
+// ---------------------------------------------------------------------------
 // Search tools
 // ---------------------------------------------------------------------------
 export type SearchProviderInfo = Schemas["SearchProviderSchema"]
