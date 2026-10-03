@@ -6,6 +6,7 @@ import {
   apiFetch,
   createSession,
   deleteSession,
+  isGatewayUnreachable,
   siteFetch,
 } from "./client"
 
@@ -23,6 +24,23 @@ afterEach(() => {
   vi.restoreAllMocks()
   policy.origin = ""
   policy.credentials = "same-origin"
+})
+
+describe("isGatewayUnreachable", () => {
+  it("recognizes network failures and invalid gateway replies", () => {
+    expect(isGatewayUnreachable(new ApiError(0, "Failed to fetch"))).toBe(true)
+    expect(
+      isGatewayUnreachable(new ApiError(200, "Not JSON", "invalid-response")),
+    ).toBe(true)
+  })
+
+  it("does not classify genuine HTTP refusals or unrelated errors as outages", () => {
+    for (const status of [401, 403, 500]) {
+      expect(isGatewayUnreachable(new ApiError(status, "Refused"))).toBe(false)
+    }
+    expect(isGatewayUnreachable(new Error("Unrelated failure"))).toBe(false)
+    expect(isGatewayUnreachable(null)).toBe(false)
+  })
 })
 
 describe("the request policy", () => {
@@ -152,11 +170,36 @@ describe("apiFetch", () => {
     await expect(failure).rejects.toBeInstanceOf(ApiError)
     await expect(failure).rejects.toMatchObject({
       status: 200,
+      kind: "invalid-response",
       message: expect.stringContaining("not JSON"),
     })
     await expect(failure).rejects.not.toMatchObject({
       message: expect.stringContaining("DOCTYPE"),
     })
+  })
+
+  it("classifies a failed response-body decoding as an invalid reply", async () => {
+    const response = new Response("invalid encoding", { status: 200 })
+    vi.spyOn(response, "json").mockRejectedValue(
+      new TypeError("Failed to decode response body"),
+    )
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response)
+
+    await expect(apiFetch("/health/liveness")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 200,
+      kind: "invalid-response",
+    })
+  })
+
+  it("preserves intentional cancellation while reading the response body", async () => {
+    const response = new Response("", { status: 200 })
+    const aborted = new DOMException("Cancelled by caller", "AbortError")
+    vi.spyOn(response, "json").mockRejectedValue(aborted)
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response)
+
+    await expect(apiFetch("/health/liveness")).rejects.toBe(aborted)
+    expect(isGatewayUnreachable(aborted)).toBe(false)
   })
 
   it("passes a caller's signal through instead of imposing its own", async () => {

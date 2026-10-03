@@ -54,6 +54,7 @@ export const STORED_PROVIDERS = "stored-providers"
 export const METADATA = "model-metadata"
 export const BUILD = "build"
 export const HEALTH = "health"
+export const GATEWAY_LIVENESS = "gateway-liveness"
 export const KEYS = "keys"
 export const BUDGETS = "budgets"
 export const SCOPED_BUDGETS = "scoped-budgets"
@@ -133,11 +134,11 @@ export const PASSKEYS = "passkeys"
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
 // open, so a minute keeps a deploy from going unnoticed for long.
 export const BUILD_POLL_MS = 60_000
-// How often the hybrid landing page re-asks whether this gateway is up and can
-// still reach its control plane. That pair is the only thing on that page which
-// changes, and it is the reason to leave the page open, so it ticks faster than
-// the build check. The gateway bounds its own upstream probe (`resolve_timeout_ms`),
-// so a stalled control plane answers "no" rather than piling up requests.
+// How often the shell rechecks gateway liveness and the hybrid landing page
+// re-asks whether it can still reach its control plane. These need to recover
+// sooner than the build check. The gateway bounds its own upstream probe
+// (`resolve_timeout_ms`), so a stalled control plane answers "no" rather than
+// piling up requests.
 export const HEALTH_POLL_MS = 15_000
 
 // The four queries below are backed by provider or models.dev fan-out
