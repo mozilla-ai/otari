@@ -11,6 +11,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from gateway.models.base import Base
 from gateway.models.money import UsdCost
 
+# Mirrors ``gateway_usage_settlement.pricing_reference`` on the platform.
+PRICING_REFERENCE_MAX_LENGTH = 511
+
 
 class UsageLog(Base):
     """Usage log model for tracking API requests."""
@@ -111,21 +114,23 @@ class UsageLog(Base):
     # ``timestamp`` (when the request ran): usage settled or repriced later moves
     # the two apart.
     #
-    # All nullable with no backfill. The gateway's own settlement does not record
-    # provenance, so these are written by the hosted-usage backfill
-    # (mozilla-ai/otari-ai#1798) from the platform's ``gateway_usage_settlement``
-    # row, and null reads correctly as "not recorded". The lengths mirror that
+    # All nullable with no backfill, so null reads as "not recorded". Rows this
+    # gateway settles (``record_usage``) record them; rows the hosted-usage backfill
+    # (mozilla-ai/otari-ai#1798) copies from the platform's
+    # ``gateway_usage_settlement`` carry the platform's. The lengths mirror that
     # table's columns rather than this file's usual unbounded strings, so a value
     # copied across always fits.
     #
-    # ``pricing_source`` speaks the platform's settlement vocabulary, the values
-    # ``_platform.SettledCost.pricing_source`` already carries on the hybrid wire
-    # (echoed to callers as ``usage.pricing_source``). It is not the same field as
-    # the one on a listed model in ``api/routes/models.py`` ("configured",
-    # "default", "dynamic", "none"), which says where a price list entry came from
-    # in this deployment rather than what settled one row's amount.
+    # ``pricing_source`` therefore speaks one of two vocabularies: this gateway's
+    # ``PriceSource`` ("organization", "deployment", "defaults"), the values it
+    # already echoes to callers as ``usage.pricing_source``, or the platform's on a
+    # backfilled row. Neither is the field on a listed model in
+    # ``api/routes/models.py`` ("configured", "default", "dynamic", "none"), which
+    # says where a price list entry came from rather than what settled one row's
+    # amount. ``pricing_version`` is left null here: no price list this gateway
+    # reads is versioned.
     pricing_source: Mapped[str | None] = mapped_column(String(32))
-    pricing_reference: Mapped[str | None] = mapped_column(String(511))
+    pricing_reference: Mapped[str | None] = mapped_column(String(PRICING_REFERENCE_MAX_LENGTH))
     pricing_effective_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     pricing_version: Mapped[str | None] = mapped_column(String(255))
     calculated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

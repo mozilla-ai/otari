@@ -156,7 +156,7 @@ from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
 from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.tools import CodeExecutor
-from gateway.models.usage import UsageLog
+from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH, UsageLog
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
@@ -3859,19 +3859,34 @@ async def record_usage(
             usage_log.cost = cost
             usage_log.billing_meters = meters
             usage_log.pricing_breakdown = breakdown
+            usage_log.pricing_source = resolved.source
+            # A model key is unbounded where the column is not, and an oversized
+            # value would fail the row's insert on PostgreSQL rather than lose a
+            # label, so a key past the limit is recorded as unknown.
+            reference = resolved.reference
+            if reference is not None and len(reference) > PRICING_REFERENCE_MAX_LENGTH:
+                reference = None
+            usage_log.pricing_reference = reference
+            usage_log.pricing_effective_at = resolved.effective_at
         else:
             _warn_unpriced_model(f"{provider}:{model}" if provider else model)
 
     # When the caller bills a fixed amount without provider usage (e.g. the
     # stream-missing-usage estimate policy), record that amount on the log row
     # so usage_logs.cost stays consistent with the spend that was reconciled.
+    # No rate entry produced that amount, so the row names none.
     if cost_override is not None:
         usage_log.cost = to_usd(cost_override)
+        usage_log.pricing_source = None
+        usage_log.pricing_reference = None
+        usage_log.pricing_effective_at = None
 
     # Gateway-run tool calls are a separate charge from the model's tokens, so they
     # are folded in last: after the token branch (which may not have run at all) and
     # after cost_override (which replaces the token cost, not the whole bill).
     await _apply_tool_charges(db, usage_log, tool_tally)
+    if usage_log.cost is not None:
+        usage_log.calculated_at = usage_log.timestamp
 
     # Emitted once here rather than inside the pricing branch so the cost metric
     # tracks the row's total, including tool charges on an unpriced model. A priced
