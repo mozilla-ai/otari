@@ -1901,6 +1901,7 @@ async def resolve_request_context(
     resolved_provider: ResolvedProvider | None = None
     plan: CompiledPlan | None = None
     estimate_inputs: EstimateInputs | None = None
+    rate_limit_grant: RateLimitGrant | None = None
     request_id: str
 
     if hybrid_mode:
@@ -2367,6 +2368,8 @@ async def resolve_request_context(
         policy_name=plan.policy_name if plan else None,
     )
 
+    if rate_limit_grant is not None:
+        rate_limit_grant.hand_over()
     return RequestContext(
         config=config,
         db=db,
@@ -4799,6 +4802,8 @@ def build_streaming_response(
         )
 
     async def _on_error(exc: BaseException) -> None:
+        if rate_limit_grant is not None:
+            await rate_limit_grant.settle(_settled_tokens(reported_usage))
         if platform_active:
             assert platform_correlation_id is not None
             _schedule_usage_report(
@@ -4854,6 +4859,8 @@ def build_streaming_response(
         # metering exists to close. A row is written only when there is something to
         # bill, so an abandoned stream that reported nothing and ran no tools leaves
         # no trace.
+        if rate_limit_grant is not None:
+            await rate_limit_grant.settle(_settled_tokens(reported_usage))
         if db is None or reservation is None:
             return
         has_tool_work = tool_tally is not None and not tool_tally.is_empty()

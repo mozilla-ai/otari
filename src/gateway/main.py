@@ -415,7 +415,11 @@ def _validate_rate_limit_store(config: GatewayConfig) -> None:
     Falling back to counting per process would quietly multiply the limit by
     the number of replicas, which is the thing a shared store was asked for to
     prevent, so a missing URL or client library stops startup instead.
+    ``rate_limits`` is refused in hybrid mode, which does not enforce it yet.
     """
+    if config.rate_limits and config.is_hybrid_mode:
+        msg = "rate_limits is not supported in hybrid mode yet"
+        raise ValueError(msg)
     if config.rate_limit_store != "redis":
         return
     if not config.rate_limit_redis_url:

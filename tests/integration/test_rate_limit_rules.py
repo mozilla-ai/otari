@@ -223,3 +223,28 @@ def test_a_stream_holds_its_slot_until_the_body_ends(concurrency_client: TestCli
 
     assert statuses == [200, 200]
     assert free_during_stream == [False, False]
+
+
+def test_a_request_its_budget_refuses_is_charged_no_tokens(tpm_client: TestClient) -> None:
+    """The rules admit before the budget refuses, so without settling the third would get a 429."""
+    tpm_client.post(f"{API_ROOT}/users", json={"user_id": "judy", "blocked": True}, headers=_MASTER)
+
+    statuses = [_chat(tpm_client, _MASTER, user="judy", max_tokens=400).status_code for _ in range(3)]
+
+    assert statuses == [403, 403, 403]
+
+
+def test_a_stream_that_fails_midway_is_charged_only_what_it_reported(tpm_client: TestClient) -> None:
+    headers = _key(tpm_client, "kim")
+
+    async def open_stream(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        async def chunks() -> AsyncIterator[ChatCompletionChunk]:
+            yield _stream_chunks(10)[0]
+            raise RuntimeError("upstream dropped")
+
+        return chunks()
+
+    with patch("gateway.api.routes.chat.acompletion", side_effect=open_stream):
+        statuses = [_stream(tpm_client, headers, max_tokens=400) for _ in range(3)]
+
+    assert statuses == [200, 200, 200]

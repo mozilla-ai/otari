@@ -190,6 +190,11 @@ class RateLimitGrant:
         self._store = store
         self._estimates: list[tuple[str, str]] = []
         self._leases: list[tuple[str, str]] = []
+        self.handed_over = False
+
+    def hand_over(self) -> None:
+        """Mark the request dispatched, so its own paths settle the estimates from here."""
+        self.handed_over = True
 
     async def settle(self, tokens: int) -> None:
         """Charge every token estimate ``tokens`` instead. Only the first call counts."""
@@ -204,12 +209,13 @@ class RateLimitGrant:
             await self._store.release(key, lease)
 
 
-def _refused(rule: "RateLimitRule", retry_after: float) -> HTTPException:
+def _refused(rule: "RateLimitRule", retry_after: float | None) -> HTTPException:
+    """A 429 naming ``rule``, without ``Retry-After`` when no wait would let the request in."""
     RATE_LIMIT_HITS.inc()
     return HTTPException(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         detail=f"Rate limit '{rule.name}' exceeded",
-        headers={"Retry-After": str(max(math.ceil(retry_after), 1))},
+        headers={"Retry-After": str(max(math.ceil(retry_after), 1))} if retry_after is not None else None,
     )
 
 
@@ -250,9 +256,10 @@ class RateLimitRules:
                     counted.append((f"{base}:rpm", window.handle))
                 if rule.tpm is not None:
                     # At least one token, so a request estimating none is still refused by a full window.
-                    window = await self._store.hit(
-                        f"{base}:tpm", rule.tpm, _RULE_WINDOW_SEC, cost=max(estimated_tokens, 1)
-                    )
+                    cost = max(estimated_tokens, 1)
+                    if cost > rule.tpm:
+                        raise _refused(rule, None)
+                    window = await self._store.hit(f"{base}:tpm", rule.tpm, _RULE_WINDOW_SEC, cost=cost)
                     if window.handle is None:
                         raise _refused(rule, window.reset_after)
                     counted.append((f"{base}:tpm", window.handle))
@@ -281,12 +288,19 @@ async def admit_rate_limit_rules(
     return await rules.admit(request, key_id=key_id, user_id=user_id, estimated_tokens=estimated_tokens)
 
 
+async def _close_grant(grant: RateLimitGrant) -> None:
+    if not grant.handed_over:
+        await grant.settle(0)
+    await grant.release()
+
+
 class RateLimitGrantMiddleware:
     """Gives back a request's concurrency slots once its response has ended.
 
     The ASGI call returns only after a response's last byte is sent or its
     client has gone, so this one ``finally`` covers a streamed body that
-    outlives its handler as well as every way a request can fail.
+    outlives its handler as well as every way a request can fail. A request
+    refused before it was handed over (by its budget, say) is charged no tokens.
     """
 
     def __init__(self, app: "ASGIApp") -> None:
@@ -300,6 +314,6 @@ class RateLimitGrantMiddleware:
             if grant is not None:
                 try:
                     # Shielded: this can run while a disconnect is cancelling the request.
-                    await asyncio.shield(grant.release())
+                    await asyncio.shield(_close_grant(grant))
                 except Exception:
                     logger.exception("Could not give back a request's concurrency slots; their leases will run out")

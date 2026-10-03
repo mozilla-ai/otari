@@ -10,6 +10,7 @@ from starlette.types import Message, Receive, Scope, Send
 
 from gateway.adapters.rate_limit_store_adapter import InMemoryRateLimitStore
 from gateway.core.config import GatewayConfig, RateLimitRule
+from gateway.main import _validate_rate_limit_store
 from gateway.rate_limit import RateLimitGrantMiddleware, RateLimitRules
 
 
@@ -51,6 +52,13 @@ def test_rule_names_are_unique() -> None:
                 RateLimitRule(name="twice", per="user", rpm=1),
             ]
         )
+
+
+def test_hybrid_mode_refuses_to_start_with_rules() -> None:
+    config = GatewayConfig(mode="hybrid", rate_limits=[RateLimitRule(name="keys", per="key", rpm=1)])
+
+    with pytest.raises(ValueError, match="hybrid mode"):
+        _validate_rate_limit_store(config)
 
 
 @pytest.mark.asyncio
@@ -109,6 +117,16 @@ async def test_tokens_are_admitted_on_the_estimate_and_charged_what_was_used() -
 
     await grant.settle(50)
     await _admit(rules, tokens=600)
+
+
+@pytest.mark.asyncio
+async def test_a_request_larger_than_the_limit_is_not_told_to_retry() -> None:
+    rules = _rules(InMemoryRateLimitStore(), {"name": "tpm", "per": "key", "tpm": 1000})
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _admit(rules, tokens=1001)
+
+    assert exc_info.value.headers is None
 
 
 @pytest.mark.asyncio
@@ -179,3 +197,23 @@ async def test_the_middleware_gives_slots_back_however_the_request_ends(fails: b
         await RateLimitGrantMiddleware(app)(scope, _receive, _send)
 
     await _admit(rules)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handed_over", [False, True])
+async def test_the_middleware_charges_no_tokens_to_a_request_refused_before_dispatch(handed_over: bool) -> None:
+    """A budget refusal after admission frees its estimate; a dispatched request settles its own."""
+    rules = _rules(InMemoryRateLimitStore(), {"name": "tpm", "per": "deployment", "tpm": 1000})
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        grant = await rules.admit(Request(scope), key_id=None, user_id=None, estimated_tokens=600)
+        if handed_over:
+            grant.hand_over()
+
+    await RateLimitGrantMiddleware(app)({"type": "http", "headers": []}, _receive, _send)
+
+    if handed_over:
+        with pytest.raises(HTTPException):
+            await _admit(rules, tokens=600)
+    else:
+        await _admit(rules, tokens=600)

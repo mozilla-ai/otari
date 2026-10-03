@@ -169,19 +169,22 @@ rate_limits:
 - `rpm`: requests per minute.
 - `tpm`: tokens per minute. A request is admitted on an estimate (its prompt
   plus `max_tokens`, or `budget_estimate_default_output_tokens` when it sets
-  none) and charged what it used once it completes; a failed request is charged
-  nothing. A request whose estimate alone exceeds the limit is always refused.
-  In hybrid mode a completed request is charged its estimate for now.
+  none) and charged what it used once it completes. A request that fails is
+  charged the tokens its provider reported before failing, usually none, and a
+  request refused after admission (by its budget, say) is charged nothing. A
+  request whose estimate alone exceeds the limit is always refused, with no
+  `Retry-After`, since waiting would not let it in.
 - `max_concurrent`: requests in flight at once. A slot is given back when the
   response ends, streamed or not. `lease_sec` (15 minutes by default) bounds how
   long a slot outlives a process that dies holding it.
 
 `per: key` does not limit a request made without an API key (the master key or
-a dashboard session). A request has to fit every rule that applies to it; one
+a dashboard session), and `per: user` does not limit one billed to no user. A request has to fit every rule that applies to it; one
 that does not is refused with a 429 naming the rule, counted by none of them,
 and holds no budget. Rules count in `rate_limit_store`, so with Redis they hold
 across replicas. They apply to chat completions, messages and responses, after
-`rate_limit_rpm`.
+`rate_limit_rpm`. A hybrid gateway does not enforce them yet, so it refuses to
+start with `rate_limits` set.
 
 ### Trace context propagation
 
