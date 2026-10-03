@@ -1,27 +1,17 @@
 """Which usage rows count, for the readers that must not count all of them.
 
-The column carries provenance: the bare slug ``gateway`` for a request Otari served,
+``usage_logs.source`` carries provenance: ``gateway`` for a request Otari served,
 and a source slug (``claude_code``, ``codex``) for usage imported through
 ``POST /api/v1/usage/external-events``.
 
-Three callers ask this same question, which is why it is here rather than a literal
-in each: the usage admin mutations exclude served-here rows (they may only touch
-imported usage, and ``counts_toward_budget`` does not tell them apart), the count
-behind their "select all N matching" excludes the same rows so the number an operator
-confirms is one the mutation can reach, and the activation guide requires a served-here
-row (imported usage is somebody else's traffic, so it is never a workspace's first
-request to this gateway).
-
-The Playground is a fourth reader and deliberately not a fourth *source*. Its
-rows were served here, and they must stay in that set so the imported-usage
-mutations keep their hands off them; what tells them apart is the endpoint
-label below, which says which surface made the call rather than who served it.
-Two questions, two columns, and it lives here beside the other one because both
-the route that writes it and the service that filters on it need the name, and a
-service may not import the API layer (`scripts/check_architecture.py`).
+The Playground is deliberately not a source of its own. Its rows were served here,
+so the imported-usage mutations keep their hands off them; what tells them apart is
+the endpoint label below, which says which surface made the call rather than who
+served it. It lives here because both the route that writes it and the service that
+filters on it need the name, and a service may not import the API layer.
 """
 
-from typing import Any, cast
+from typing import Any
 
 from sqlalchemy import ColumnElement, and_, select
 
@@ -38,26 +28,11 @@ SERVED_HERE_SLUG = "gateway"
 PLAYGROUND_USAGE_ENDPOINT = "/v1/playground/chat/completions"
 
 
-def served_here(column: Any) -> ColumnElement[bool]:
-    """Match rows this deployment served itself."""
-    return cast("ColumnElement[bool]", column == SERVED_HERE_SLUG)
-
-
-def not_served_here(column: Any) -> ColumnElement[bool]:
-    """Match rows this deployment did not serve: imported usage."""
-    return cast("ColumnElement[bool]", column != SERVED_HERE_SLUG)
-
-
-def is_served_here(source: str) -> bool:
-    """The same question about a row already in memory, for a response field."""
-    return source == SERVED_HERE_SLUG
-
-
 def integration_traffic(endpoint: Any, api_key_id: Any) -> ColumnElement[bool]:
     """Match rows made from outside the product, over ``usage_logs``.
 
-    The activation guide's question, and the reason it cannot simply ask
-    :func:`served_here`. The guide closes when a workspace first calls this
+    The activation guide's question, and the reason it cannot simply ask whether
+    a row was served here. The guide closes when a workspace first calls this
     gateway *from somebody\'s own code*, which is the milestone it was written to
     celebrate; a message typed into our own Playground is the product being
     demonstrated, not integrated, so closing on one would congratulate somebody

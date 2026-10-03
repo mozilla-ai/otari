@@ -48,7 +48,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
-from gateway.core.usage_source import integration_traffic, served_here
+from gateway.core.usage_source import SERVED_HERE_SLUG, integration_traffic
 from gateway.exceptions.organizations_exceptions import (
     WorkspaceActivationUnavailableError,
     WorkspaceAlreadyActivatedError,
@@ -477,7 +477,7 @@ class WorkspaceActivationService:
             select(UsageLog)
             .where(
                 UsageLog.workspace_id == workspace_id,
-                served_here(UsageLog.source),
+                UsageLog.source == SERVED_HERE_SLUG,
                 integration_traffic(UsageLog.endpoint, UsageLog.api_key_id),
                 UsageLog.status == "success",
             )
@@ -501,7 +501,7 @@ class WorkspaceActivationService:
             select(UsageLog)
             .where(
                 UsageLog.workspace_id == workspace_id,
-                served_here(UsageLog.source),
+                UsageLog.source == SERVED_HERE_SLUG,
                 integration_traffic(UsageLog.endpoint, UsageLog.api_key_id),
                 UsageLog.status.in_(_ATTEMPT_STATUSES),
             )

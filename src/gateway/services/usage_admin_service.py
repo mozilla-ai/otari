@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.metered_pricing import BillableUsage, billable_usage, price_billable_usage
 from gateway.core.sql import MAX_FILTER_VALUES, match_any, utc_bound
-from gateway.core.usage_source import not_served_here
+from gateway.core.usage_source import SERVED_HERE_SLUG
 from gateway.log_config import logger
 from gateway.models.pricing import ModelPricing
 from gateway.models.usage import UsageLog
@@ -144,7 +144,7 @@ def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]
     Two fixed conditions pin the target set to imported usage regardless of the
     caller's input:
 
-    - :func:`not_served_here` is the provenance invariant: imported rows carry a
+    - ``source != 'gateway'`` is the provenance invariant: imported rows carry a
       source slug (e.g. ``claude_code``), while usage Otari served itself is tagged
       ``gateway``. This is the load-bearing guard, because ``counts_toward_budget``
       alone is *not* an imported-only flag: gateway traffic on a budget-exempt API
@@ -157,7 +157,7 @@ def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]
     rows cannot reach them: they simply do not match.
     """
     conditions: list[ColumnElement[bool]] = [
-        not_served_here(UsageLog.source),
+        UsageLog.source != SERVED_HERE_SLUG,
         UsageLog.counts_toward_budget.is_(False),
     ]
     if selection.ids:

@@ -28,7 +28,7 @@ from gateway.core.sql import (
     utc_bound,
 )
 from gateway.core.surface import Surface
-from gateway.core.usage_source import is_served_here, not_served_here
+from gateway.core.usage_source import SERVED_HERE_SLUG
 from gateway.inflight import get_registry
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float
@@ -259,7 +259,7 @@ class UsageEntry(BaseModel):
             source=log.source,
             source_label=log.source_label,
             counts_toward_budget=log.counts_toward_budget,
-            bulk_editable=not is_served_here(log.source) and not log.counts_toward_budget,
+            bulk_editable=log.source != SERVED_HERE_SLUG and not log.counts_toward_budget,
             prompt_tokens=log.prompt_tokens,
             completion_tokens=log.completion_tokens,
             total_tokens=log.total_tokens,
@@ -650,7 +650,7 @@ async def count_usage(
         # counts_toward_budget alone does not say "imported": gateway traffic on an
         # exclude_from_budget key is also False, so without this the count would
         # promise rows _selection_conditions then refuses to touch.
-        conditions.append(not_served_here(UsageLog.source))
+        conditions.append(UsageLog.source != SERVED_HERE_SLUG)
     stmt: Any = select(func.count()).select_from(UsageLog).where(*conditions)
     total = (await db.execute(stmt)).scalar_one()
     return UsageCount(total=total)
