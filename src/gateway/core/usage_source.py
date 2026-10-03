@@ -2,16 +2,7 @@
 
 The column carries provenance: the bare slug ``gateway`` for a request Otari served,
 and a source slug (``claude_code``, ``codex``) for usage imported through
-``POST /api/v1/usage/external-events``. Hosted history adds a third shape, because a row
-backfilled from otari.ai keeps its origin under a legacy prefix: traffic that
-deployment served itself arrives as ``otari-ai:gateway``, and usage a customer had
-imported there as ``otari-ai:claude_code``.
-
-So the question is about the slug behind the prefix, never the prefix itself. A
-blanket ``otari-ai:%`` match would be wrong in the direction that breaks a feature:
-``otari-ai:claude_code`` is imported usage that happens to have been migrated, and the
-operator surface whose whole purpose is repricing imported usage has to keep reaching
-it.
+``POST /api/v1/usage/external-events``.
 
 Three callers ask this same question, which is why it is here rather than a literal
 in each: the usage admin mutations exclude served-here rows (they may only touch
@@ -36,19 +27,9 @@ from sqlalchemy import ColumnElement, and_, select
 
 from gateway.models.api_keys import APIKey
 
-# The slug on a row this gateway served itself.
+# The slug on a row this gateway served itself. The ingest reserves it, so an import
+# cannot claim to be traffic served here.
 SERVED_HERE_SLUG = "gateway"
-
-# What a hosted-history backfill puts in front of the origin's own slug so a migrated
-# row stays distinguishable from one recorded live here (otari-ai#1798). Reserving it
-# against an importer claiming it is the ingest's business, not this module's; today
-# that lives as a local constant in ``services/external_usage_service.py``.
-LEGACY_ORIGIN_PREFIX = "otari-ai:"
-
-# Every spelling of "served here": the bare slug, and the same slug behind the legacy
-# prefix. The prefix says a row was migrated; the slug behind it says what kind of row
-# it is, and only the slug answers this question.
-SERVED_HERE_SOURCES: tuple[str, ...] = (SERVED_HERE_SLUG, f"{LEGACY_ORIGIN_PREFIX}{SERVED_HERE_SLUG}")
 
 
 # The endpoint label on a usage row the dashboard's own Playground produced.
@@ -58,18 +39,18 @@ PLAYGROUND_USAGE_ENDPOINT = "/v1/playground/chat/completions"
 
 
 def served_here(column: Any) -> ColumnElement[bool]:
-    """Match rows this deployment served itself, whether recorded live or migrated."""
-    return cast("ColumnElement[bool]", column.in_(SERVED_HERE_SOURCES))
+    """Match rows this deployment served itself."""
+    return cast("ColumnElement[bool]", column == SERVED_HERE_SLUG)
 
 
 def not_served_here(column: Any) -> ColumnElement[bool]:
-    """Match rows this deployment did not serve: imported usage, live or migrated."""
-    return cast("ColumnElement[bool]", column.not_in(SERVED_HERE_SOURCES))
+    """Match rows this deployment did not serve: imported usage."""
+    return cast("ColumnElement[bool]", column != SERVED_HERE_SLUG)
 
 
 def is_served_here(source: str) -> bool:
     """The same question about a row already in memory, for a response field."""
-    return source in SERVED_HERE_SOURCES
+    return source == SERVED_HERE_SLUG
 
 
 def integration_traffic(endpoint: Any, api_key_id: Any) -> ColumnElement[bool]:

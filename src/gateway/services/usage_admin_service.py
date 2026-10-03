@@ -146,14 +146,10 @@ def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]
 
     - :func:`not_served_here` is the provenance invariant: imported rows carry a
       source slug (e.g. ``claude_code``), while usage Otari served itself is tagged
-      ``gateway`` (or ``otari-ai:gateway`` when it was backfilled from hosted
-      history). This is the load-bearing guard, because ``counts_toward_budget``
+      ``gateway``. This is the load-bearing guard, because ``counts_toward_budget``
       alone is *not* an imported-only flag: gateway traffic on a budget-exempt API
       key (``exclude_from_budget``) is also ``counts_toward_budget = False``, and
-      those are real gateway rows a cleanup / reprice must never touch. Matching the
-      slug behind the legacy prefix, rather than the prefix itself, is what keeps a
-      migrated import (``otari-ai:claude_code``) repriceable while a migrated hosted
-      row is not; see :mod:`gateway.core.usage_source`.
+      those are real gateway rows a cleanup / reprice must never touch.
     - ``counts_toward_budget = False`` is kept as a defense-in-depth budget guard, so
       the spend ledger can never be affected even if the provenance guard ever slips.
 
