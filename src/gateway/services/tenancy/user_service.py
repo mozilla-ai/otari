@@ -55,6 +55,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
     CurrentPasswordIncorrectError,
     EmailAlreadyInUseError,
@@ -253,12 +254,17 @@ async def update_full_name(db: AsyncSession, identity: User, *, full_name: str |
     return identity
 
 
+class _SignupRaceLostError(Exception):
+    """Another write claimed this address first, so the signup's block rolls back and answers as a no-op."""
+
+
 async def create_user_for_signup(
     db: AsyncSession,
     config: GatewayConfig,
     *,
     email: str,
     password: str,
+    uow: UnitOfWork,
     membership_listener: MembershipListener,
     full_name: str | None = None,
     terms_accepted: bool = False,
@@ -313,60 +319,64 @@ async def create_user_for_signup(
         # address with no stored hash.
         await verify_absent_password_async(password)
         return None
-    if identity is None:
-        if not config.open_signup:
-            # The same bcrypt cost as the branch above, for the same reason: an
-            # address this deployment will not register has to answer in about
-            # the time one it would register takes.
-            await verify_absent_password_async(password)
-            return None
-        # Staged into this call's transaction rather than committed on its own,
-        # so the password and verification token below land with it: an account
-        # committed here and nowhere else would be live, password-less and
-        # unverifiable.
-        try:
-            identity = await OrganizationService(db, membership_listener=membership_listener).provision_signup_tenancy(
-                email=address,
-                full_name=full_name,
-            )
-        except IntegrityError as exc:
-            # Two registrations of the same address at once. The unique index on
-            # email decides, and the loser answers like every other
-            # enumeration-safe path rather than reporting a 500 or admitting
-            # that the address is now taken.
-            #
-            # Matched on that index rather than on "an IntegrityError happened",
-            # the same discrimination ``update_password`` already makes with
-            # this helper: the other constraints this unit of work can violate
-            # (the organization slug, a membership) are not a taken address, and
-            # swallowing one as though it were would answer a failed
-            # registration with the sentence that says it succeeded.
-            await db.rollback()
-            if not _is_email_conflict(exc):
-                raise
-            return None
 
-    token = generate_token()
-    values: dict[str, str | datetime | None] = {
-        "full_name": identity.full_name or full_name,
-        "email_verification_token_hash": hash_token(token),
-        "email_verification_token_expires_at": datetime.now(UTC)
-        + timedelta(hours=config.email_verification_expiry_hours),
-    }
-    if terms_accepted:
-        values["terms_accepted_at"] = datetime.now(UTC)
-    # NOTE: A provider sign-in or another first password can commit after the check above.
-    # The condition in this write decides.
-    claimed = await UserRepository(db).claim_first_password(
-        identity.id,
-        hashed_password=await hash_password_async(password),
-        require_unverified=True,
-        values=values,
-    )
-    if not claimed:
-        await db.rollback()
+    try:
+        async with uow:
+            if identity is None:
+                if not config.open_signup:
+                    # The same bcrypt cost as the branch above, for the same reason: an
+                    # address this deployment will not register has to answer in about
+                    # the time one it would register takes.
+                    await verify_absent_password_async(password)
+                    return None
+                # Staged into this call's transaction rather than committed on its own,
+                # so the password and verification token below land with it: an account
+                # committed here and nowhere else would be live, password-less and
+                # unverifiable.
+                try:
+                    identity = await OrganizationService(
+                        db, membership_listener=membership_listener, uow=uow
+                    ).provision_signup_tenancy(
+                        email=address,
+                        full_name=full_name,
+                    )
+                except IntegrityError as exc:
+                    # Two registrations of the same address at once. The unique index on
+                    # email decides, and the loser answers like every other
+                    # enumeration-safe path rather than reporting a 500 or admitting
+                    # that the address is now taken.
+                    #
+                    # Matched on that index rather than on "an IntegrityError happened",
+                    # the same discrimination ``update_password`` already makes with
+                    # this helper: the other constraints this unit of work can violate
+                    # (the organization slug, a membership) are not a taken address, and
+                    # swallowing one as though it were would answer a failed
+                    # registration with the sentence that says it succeeded.
+                    if not _is_email_conflict(exc):
+                        raise
+                    raise _SignupRaceLostError from None
+
+            token = generate_token()
+            values: dict[str, str | datetime | None] = {
+                "full_name": identity.full_name or full_name,
+                "email_verification_token_hash": hash_token(token),
+                "email_verification_token_expires_at": datetime.now(UTC)
+                + timedelta(hours=config.email_verification_expiry_hours),
+            }
+            if terms_accepted:
+                values["terms_accepted_at"] = datetime.now(UTC)
+            # NOTE: A provider sign-in or another first password can commit after the check above.
+            # The condition in this write decides.
+            claimed = await UserRepository(db).claim_first_password(
+                identity.id,
+                hashed_password=await hash_password_async(password),
+                require_unverified=True,
+                values=values,
+            )
+            if not claimed:
+                raise _SignupRaceLostError
+    except _SignupRaceLostError:
         return None
-    await db.commit()
     await db.refresh(identity)
 
     await mailer.send(

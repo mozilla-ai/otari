@@ -85,7 +85,9 @@ Organizations, workspaces, members, invitations, email-domain claims, first-boot
 provisioning, the setup guide, and the gateway's billing users.
 
 It defines `MembershipListener`, the interface budgets implements to react to a
-membership change without organizations importing budgets. It also owns
+membership change without organizations importing budgets. The listener writes
+through the caller's Unit of Work, so a service that changes membership is built
+with one and makes the change inside its block. It also owns
 `models/users.py`, `repositories/users_repository.py` and
 `services/workspace_scope.py`.
 

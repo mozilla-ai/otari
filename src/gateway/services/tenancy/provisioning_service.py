@@ -30,6 +30,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions import TenancyError, TenancyNotFoundError
 from gateway.exceptions.organizations_exceptions import ForeignTenancyError
 from gateway.log_config import logger
@@ -67,7 +68,9 @@ class BootstrapIdentityUnavailableError(TenancyError):
         super().__init__("Could not resolve the operator identity; retry the request")
 
 
-async def ensure_bootstrap_identity(db: AsyncSession, *, membership_listener: MembershipListener) -> User:
+async def ensure_bootstrap_identity(
+    db: AsyncSession, *, uow: UnitOfWork, membership_listener: MembershipListener
+) -> User:
     """Return the operator identity, provisioning the tenancy root on first call.
 
     Idempotent: the marker row makes the common path a single indexed lookup and
@@ -81,11 +84,10 @@ async def ensure_bootstrap_identity(db: AsyncSession, *, membership_listener: Me
     await _refuse_to_shadow_existing_tenancy(db)
 
     try:
-        return await _provision(db, membership_listener=membership_listener)
+        return await _provision(db, uow=uow, membership_listener=membership_listener)
     except IntegrityError:
         # Two first requests raced. Whichever lost re-reads the winner's work:
         # the slug and the marker are both unique, so exactly one provisioned.
-        await db.rollback()
         logger.info("Concurrent first-boot tenancy provisioning; using the identity that won")
         resolved = await load_bootstrap_identity(db)
         if resolved is None:
@@ -202,84 +204,84 @@ async def password_claims_deployment(db: AsyncSession, identity: User) -> bool:
     return operator is not None and operator.id == identity.id
 
 
-async def _provision(db: AsyncSession, *, membership_listener: MembershipListener) -> User:
+async def _provision(db: AsyncSession, *, uow: UnitOfWork, membership_listener: MembershipListener) -> User:
     """Create the default organization, workspace, operator identity, and memberships.
 
     Ordered by the foreign keys: the organization exists before the identity that
     points at it, and the identity exists before it can own anything.
     """
-    organizations = OrganizationRepository(db)
-    organization = await organizations.get_by_slug(DEFAULT_ORGANIZATION_SLUG)
-    if organization is None:
-        organization = await organizations.create_organization(
-            name=DEFAULT_ORGANIZATION_NAME,
-            slug=DEFAULT_ORGANIZATION_SLUG,
-            created_by_user_id=None,
+    async with uow:
+        organizations = OrganizationRepository(db)
+        organization = await organizations.get_by_slug(DEFAULT_ORGANIZATION_SLUG)
+        if organization is None:
+            organization = await organizations.create_organization(
+                name=DEFAULT_ORGANIZATION_NAME,
+                slug=DEFAULT_ORGANIZATION_SLUG,
+                created_by_user_id=None,
+            )
+
+        operator = await UserRepository(db).create_local_identity(
+            full_name=OPERATOR_FULL_NAME,
+            active_organization_id=organization.id,
+            is_superuser=True,
         )
-
-    operator = await UserRepository(db).create_local_identity(
-        full_name=OPERATOR_FULL_NAME,
-        active_organization_id=organization.id,
-        is_superuser=True,
-    )
-    await organizations.update_organization(organization, {"created_by_user_id": operator.id})
-    await OrganizationMemberRepository(db).create_membership(
-        organization_id=organization.id,
-        user_id=operator.id,
-        role="owner",
-    )
-    # The operator's request-plane owner, so the first-boot identity can hold a
-    # key like any other member. Aliased by name rather than address because this
-    # identity deliberately has none.
-    await get_or_create_attribution_user(db, user_id=str(operator.id), alias=OPERATOR_FULL_NAME)
-
-    workspaces = WorkspaceRepository(db)
-    workspace = await workspaces.get_by_organization_and_name(organization.id, DEFAULT_WORKSPACE_NAME)
-    if workspace is None:
-        workspace = await workspaces.create_workspace(
-            name=DEFAULT_WORKSPACE_NAME,
+        await organizations.update_organization(organization, {"created_by_user_id": operator.id})
+        await OrganizationMemberRepository(db).create_membership(
             organization_id=organization.id,
-            created_by_user_id=operator.id,
+            user_id=operator.id,
+            role="owner",
         )
-    # Serialized against a concurrent ``create_default`` on this workspace, via
-    # the same lock ``WorkspaceService.add_member`` takes and for the reason
-    # ``WorkspaceRepository.lock`` gives: this path reads the workspace's
-    # defaults before materializing, that one reads its members, and without a
-    # shared lock both can read before either commits, leaving the operator
-    # with no ceiling. ``create_workspace`` is the documented exception because
-    # a workspace it just made cannot have a default yet; this path is not, since
-    # it adopts an existing one. Reachable despite the marker being unresolved:
-    # ``get_current_identity`` returns a dashboard session's identity without
-    # consulting the marker at all, so a signed-in operator can be creating a
-    # default while a request with no session is provisioning here.
-    await workspaces.lock(workspace.id)
-    member = await WorkspaceMemberRepository(db).create(
-        workspace_id=workspace.id,
-        user_id=operator.id,
-        role="owner",
-    )
-    # A no-op on a genuine first boot, where nothing exists for the listener to act on.
-    # Flush-only, so it lands in the commit below and a lost race rolls it back with it.
-    try:
-        await membership_listener.member_joined(member)
-    except TenancyNotFoundError as exc:
-        # The only not-found a listener raises here is a default naming a deleted budget.
-        # Logged and skipped rather than raised: raising would leave the marker unwritten,
-        # so every later request would re-enter this function and fail identically.
-        logger.warning("Skipping budget-default materialization for the operator identity: %s", exc)
+        # The operator's request-plane owner, so the first-boot identity can hold a
+        # key like any other member. Aliased by name rather than address because this
+        # identity deliberately has none.
+        await get_or_create_attribution_user(db, user_id=str(operator.id), alias=OPERATOR_FULL_NAME)
 
-    # Upsert rather than insert: a marker whose value no longer resolves (an
-    # unreadable id, or one naming a row that is gone) is what
-    # ``load_bootstrap_identity`` reports as "no identity yet", and it says it will
-    # re-provision. Adding a second row with the same primary key would instead
-    # raise, be swallowed as a lost race, and leave every later request answering
-    # 500 with nothing able to clear it.
-    marker = await db.get(RuntimeSetting, BOOTSTRAP_IDENTITY_KEY)
-    if marker is None:
-        db.add(RuntimeSetting(key=BOOTSTRAP_IDENTITY_KEY, value=str(operator.id)))
-    else:
-        marker.value = str(operator.id)
-    await db.commit()
+        workspaces = WorkspaceRepository(db)
+        workspace = await workspaces.get_by_organization_and_name(organization.id, DEFAULT_WORKSPACE_NAME)
+        if workspace is None:
+            workspace = await workspaces.create_workspace(
+                name=DEFAULT_WORKSPACE_NAME,
+                organization_id=organization.id,
+                created_by_user_id=operator.id,
+            )
+        # Serialized against a concurrent ``create_default`` on this workspace, via
+        # the same lock ``WorkspaceService.add_member`` takes and for the reason
+        # ``WorkspaceRepository.lock`` gives: this path reads the workspace's
+        # defaults before materializing, that one reads its members, and without a
+        # shared lock both can read before either commits, leaving the operator
+        # with no ceiling. ``create_workspace`` is the documented exception because
+        # a workspace it just made cannot have a default yet; this path is not, since
+        # it adopts an existing one. Reachable despite the marker being unresolved:
+        # ``get_current_identity`` returns a dashboard session's identity without
+        # consulting the marker at all, so a signed-in operator can be creating a
+        # default while a request with no session is provisioning here.
+        await workspaces.lock(workspace.id)
+        member = await WorkspaceMemberRepository(db).create(
+            workspace_id=workspace.id,
+            user_id=operator.id,
+            role="owner",
+        )
+        # A no-op on a genuine first boot, where nothing exists for the listener to act on.
+        # Flush-only, so it lands in the commit below and a lost race rolls it back with it.
+        try:
+            await membership_listener.member_joined(member)
+        except TenancyNotFoundError as exc:
+            # The only not-found a listener raises here is a default naming a deleted budget.
+            # Logged and skipped rather than raised: raising would leave the marker unwritten,
+            # so every later request would re-enter this function and fail identically.
+            logger.warning("Skipping budget-default materialization for the operator identity: %s", exc)
+
+        # Upsert rather than insert: a marker whose value no longer resolves (an
+        # unreadable id, or one naming a row that is gone) is what
+        # ``load_bootstrap_identity`` reports as "no identity yet", and it says it will
+        # re-provision. Adding a second row with the same primary key would instead
+        # raise, be swallowed as a lost race, and leave every later request answering
+        # 500 with nothing able to clear it.
+        marker = await db.get(RuntimeSetting, BOOTSTRAP_IDENTITY_KEY)
+        if marker is None:
+            db.add(RuntimeSetting(key=BOOTSTRAP_IDENTITY_KEY, value=str(operator.id)))
+        else:
+            marker.value = str(operator.id)
     await db.refresh(operator)
     logger.info("Provisioned the default organization and operator identity on first boot")
     return operator
