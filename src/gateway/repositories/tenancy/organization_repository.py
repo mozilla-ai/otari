@@ -17,6 +17,11 @@ class OrganizationRepository(BaseRepository[Organization, OrganizationCreate, Or
     def __init__(self, db: AsyncSession):
         super().__init__(db, Organization)
 
+    async def exists(self, organization_id: uuid.UUID) -> bool:
+        """Check the database rather than trusting an organization already in the identity map."""
+        result = await self.db.execute(select(col(Organization.id)).where(col(Organization.id) == organization_id))
+        return result.scalar_one_or_none() is not None
+
     async def get_by_slug(self, slug: str) -> Organization | None:
         """Return the organization with this slug, or None."""
         result = await self.db.execute(select(Organization).where(col(Organization.slug) == slug))

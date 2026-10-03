@@ -106,6 +106,15 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
         result = await self.db.execute(select(func.count()).select_from(ScopedBudget).where(_in_scopes(scopes)))
         return result.scalar_one()
 
+    async def delete_for_api_key(self, key_id: str) -> None:
+        """Remove all ceilings keyed on this API key, including provider-narrowed ones.
+
+        The caller holds the key lock and commits this sweep with the key's deletion.
+        """
+        await self.db.execute(
+            delete(ScopedBudget).where(ScopedBudget.scope_type == SCOPE_API_TOKEN, ScopedBudget.scope_id == key_id)
+        )
+
     async def delete_for_member(self, member_id: uuid.UUID) -> None:
         """Delete every ceiling keyed on this membership.
 

@@ -41,7 +41,7 @@ from gateway.schemas.budgets import (
 )
 from gateway.services.budgets._periods import period_window
 from gateway.services.budgets._retiming import cadence_of
-from gateway.services.budgets._scopes import ScopeOwnership, lock_workspace_for_scope
+from gateway.services.budgets._scopes import ScopeOwnership
 from gateway.services.tenancy.organization_service import OrganizationService
 
 _MAX_LIST_LIMIT = 1000
@@ -150,9 +150,9 @@ class _OrganizationSurface:
         # unknown scope type with an assertion rather than a validation error.
         if request.scope_type not in SCOPE_TYPES:
             raise TenancyValidationError(f"Unknown scope type: {request.scope_type}")
-        # The lock precedes the check, so a concurrent workspace deletion cannot
+        # The lock precedes the check, so a concurrent scope deletion cannot
         # commit between the check and the insert.
-        await lock_workspace_for_scope(self._organizations, request.scope_type, request.scope_id)
+        await self._scopes.lock_for_ceiling(request.scope_type, request.scope_id)
         await self._require_scope_in_organization(
             organization=organization,
             scope_type=request.scope_type,
@@ -300,4 +300,3 @@ class _OrganizationSurface:
             changes["period_start"], changes["period_end"] = _current_window(budget)
         ceiling = await self._repositories.ceilings.update(ceiling, changes)
         return OrganizationScopedBudgetPublic.from_model(ceiling, budget, organization_id=organization.id)
-

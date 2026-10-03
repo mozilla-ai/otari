@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 
 import pytest
-from fastapi import HTTPException, status
+from fastapi import status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -26,7 +26,7 @@ from gateway.api.routes.scoped_budgets import create_scoped_budget
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.exceptions.budget_exceptions import OrganizationScopeNotFoundError
+from gateway.exceptions.budget_exceptions import DeploymentScopeNotFoundError, OrganizationScopeNotFoundError
 from gateway.exceptions.identity_exceptions import (
     EmailAlreadyInUseError,
     ResetTokenInvalidError,
@@ -59,7 +59,7 @@ from gateway.models.tenancy import (
     WorkspacePublic,
 )
 from gateway.repositories.api_keys import ApiKeyRepository
-from gateway.repositories.budgets import BudgetRepositories
+from gateway.repositories.budgets import BudgetRepositories, ScopedBudgetRepository
 from gateway.repositories.tenancy import (
     InvitationRepository,
     OrganizationMemberRepository,
@@ -75,7 +75,7 @@ from gateway.schemas.budgets import (
     OrganizationScopedBudgetPublic,
     WorkspaceMemberBudgetPolicyCreate,
 )
-from gateway.services.api_keys import ApiKeyService
+from gateway.services.api_keys import ApiKeyDeletionListener, ApiKeyService
 from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultService
 from gateway.services.password_service import verify_password_async
 from gateway.services.tenancy import OrganizationService, WorkspaceService, user_service
@@ -555,7 +555,7 @@ def _budget_service(db: AsyncSession, organizations: OrganizationService | None 
         uow,
         BudgetRepositories.on(uow),
         organizations or OrganizationService(db, membership_listener=None),
-        ApiKeyService(ApiKeyRepository(uow)),
+        ApiKeyService(uow, ApiKeyRepository(uow)),
     )
 
 
@@ -701,8 +701,7 @@ async def test_a_deployment_ceiling_created_during_a_workspace_delete_leaves_no_
         ready.set()
         return await create_scoped_budget(
             CreateScopedBudgetRequest(scope_type=scope_type, scope_id=scope_id, budget_id=budget_id),
-            session,
-            OrganizationService(session, membership_listener=None),
+            _budget_service(session),
         )
 
     race = await _race_a_workspace_delete(
@@ -717,7 +716,7 @@ async def test_a_deployment_ceiling_created_during_a_workspace_delete_leaves_no_
     assert [ceiling.scope_id for ceiling in ceilings if ceiling.scope_id in gone] == []
     # The negative above would pass on a create that never contended. These say it did.
     assert race.contended
-    assert isinstance(race.produced, HTTPException)
+    assert isinstance(race.produced, DeploymentScopeNotFoundError)
     assert race.produced.status_code == status.HTTP_404_NOT_FOUND
 
 
@@ -1220,3 +1219,221 @@ async def test_concurrent_first_issuance_leaves_one_setup_key(
     # one row would fail rather than look like an improvement.
     live = [issue for issue in issued if hash_key(issue.key) == key_hash]  # type: ignore[attr-defined]
     assert len(live) == 1
+
+
+class _PausingKeyDeletionListener:
+    """Pause after ceiling cleanup, before the key is deleted and committed."""
+
+    def __init__(self, inner: ApiKeyDeletionListener, after_sweep: Callable[[], Awaitable[None]]) -> None:
+        self._inner = inner
+        self._after_sweep = after_sweep
+
+    async def key_deleted(self, key_id: str) -> None:
+        await self._inner.key_deleted(key_id)
+        await self._after_sweep()
+
+
+def _key_deletion_service(db: AsyncSession, after_sweep: Callable[[], Awaitable[None]] | None = None) -> ApiKeyService:
+    uow = UnitOfWork(db)
+    keys = ApiKeyRepository(uow)
+    budgets = BudgetService(
+        uow,
+        BudgetRepositories.on(uow),
+        OrganizationService(db, membership_listener=None),
+        ApiKeyService(uow, keys),
+    )
+    listener: ApiKeyDeletionListener = budgets
+    if after_sweep is not None:
+        listener = _PausingKeyDeletionListener(listener, after_sweep)
+    return ApiKeyService(uow, keys, deletion_listener=listener)
+
+
+async def _seed_key_to_delete(db: AsyncSession) -> tuple[Organization, User, APIKey, str]:
+    organization, owner = await _seed_owner(db)
+    workspace = await WorkspaceRepository(db).create_workspace(
+        name="Keys", organization_id=organization.id, created_by_user_id=owner.id
+    )
+    key = APIKey(id=f"key-{uuid.uuid4()}", key_hash=uuid.uuid4().hex, workspace_id=workspace.id)
+    db.add(key)
+    await db.commit()
+    budget = await _budget_service(db).create_organization_budget(
+        user=owner, request=OrganizationBudgetCreate(name="Key cap", max_budget=10.0)
+    )
+    return organization, owner, key, budget.budget_id
+
+
+async def _create_key_ceiling(db: AsyncSession, *, owner: User, key_id: str, budget_id: str, surface: str) -> object:
+    service = _budget_service(db)
+    if surface == "deployment":
+        return await service.create_deployment_ceiling(
+            request=CreateScopedBudgetRequest(scope_type="api_token", scope_id=key_id, budget_id=budget_id)
+        )
+    return await service.create_organization_ceiling(
+        user=owner,
+        request=OrganizationScopedBudgetCreate(scope_type="api_token", scope_id=key_id, budget_id=budget_id),
+    )
+
+
+@pytest.mark.parametrize("surface", ["deployment", "organization"])
+async def test_a_key_ceiling_created_during_deletion_waits_then_refuses_the_deleted_key(
+    async_db: AsyncSession, sessions: async_sessionmaker[AsyncSession], surface: str
+) -> None:
+    """Deletion wins the key lock, so no ceiling can enter the post-sweep window."""
+    organization, owner, key, budget_id = await _seed_key_to_delete(async_db)
+    swept = asyncio.Event()
+    attempting = asyncio.Event()
+
+    async def create() -> object:
+        await swept.wait()
+        async with sessions() as session:
+            actor = await UserRepository(session).get(owner.id)
+            assert actor is not None
+            attempting.set()
+            try:
+                return await _create_key_ceiling(
+                    session, owner=actor, key_id=key.id, budget_id=budget_id, surface=surface
+                )
+            except (DeploymentScopeNotFoundError, OrganizationScopeNotFoundError) as exc:
+                return exc
+
+    creating = asyncio.create_task(create())
+
+    async def pause() -> None:
+        swept.set()
+        await asyncio.wait_for(attempting.wait(), timeout=_CHECKPOINT_TIMEOUT)
+        done, _ = await asyncio.wait({creating}, timeout=_WRITER_WINDOW)
+        assert not done, "Ceiling creation did not wait for key deletion"
+
+    try:
+        async with sessions() as session:
+            await _key_deletion_service(session, pause).delete(key_id=key.id, organization_id=organization.id)
+    finally:
+        swept.set()
+        outcome = await asyncio.wait_for(creating, timeout=_CHECKPOINT_TIMEOUT)
+
+    expected = DeploymentScopeNotFoundError if surface == "deployment" else OrganizationScopeNotFoundError
+    assert isinstance(outcome, expected)
+    assert await async_db.get(APIKey, key.id, populate_existing=True) is None
+    assert (await async_db.execute(select(ScopedBudget).where(ScopedBudget.scope_id == key.id))).scalars().all() == []
+    await _budget_service(async_db).delete_organization_budget(user=owner, budget_id=budget_id)
+
+
+@pytest.mark.parametrize("surface", ["deployment", "organization"])
+async def test_a_key_delete_waits_for_ceiling_creation_then_sweeps_what_it_committed(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    surface: str,
+) -> None:
+    """Creation wins the key lock, so deletion must see and sweep its committed ceiling."""
+    organization, owner, key, budget_id = await _seed_key_to_delete(async_db)
+    inserted = asyncio.Event()
+    may_commit = asyncio.Event()
+    attempting = asyncio.Event()
+    add = ScopedBudgetRepository.add
+
+    async def pause_after_insert(self: ScopedBudgetRepository, ceiling: ScopedBudget) -> ScopedBudget:
+        created = await add(self, ceiling)
+        inserted.set()
+        await asyncio.wait_for(may_commit.wait(), timeout=_CHECKPOINT_TIMEOUT)
+        return created
+
+    monkeypatch.setattr(ScopedBudgetRepository, "add", pause_after_insert)
+
+    async def create() -> object:
+        async with sessions() as session:
+            actor = await UserRepository(session).get(owner.id)
+            assert actor is not None
+            return await _create_key_ceiling(session, owner=actor, key_id=key.id, budget_id=budget_id, surface=surface)
+
+    async def delete() -> None:
+        async with sessions() as session:
+            await session.execute(select(1))
+            attempting.set()
+            await _key_deletion_service(session).delete(key_id=key.id, organization_id=organization.id)
+
+    creating = asyncio.create_task(create())
+    deleting: asyncio.Task[None] | None = None
+    try:
+        await asyncio.wait_for(inserted.wait(), timeout=_CHECKPOINT_TIMEOUT)
+        deleting = asyncio.create_task(delete())
+        await asyncio.wait_for(attempting.wait(), timeout=_CHECKPOINT_TIMEOUT)
+        done, _ = await asyncio.wait({deleting}, timeout=_WRITER_WINDOW)
+        assert not done, "Key deletion did not wait for ceiling creation"
+    finally:
+        may_commit.set()
+        await asyncio.wait_for(creating, timeout=_CHECKPOINT_TIMEOUT)
+        if deleting is not None:
+            await asyncio.wait_for(deleting, timeout=_CHECKPOINT_TIMEOUT)
+
+    assert await async_db.get(APIKey, key.id, populate_existing=True) is None
+    assert (await async_db.execute(select(ScopedBudget).where(ScopedBudget.scope_id == key.id))).scalars().all() == []
+    await _budget_service(async_db).delete_organization_budget(user=owner, budget_id=budget_id)
+
+
+async def test_key_deletion_preserves_a_workspace_ceiling_with_the_same_scope_id(
+    async_db: AsyncSession,
+) -> None:
+    """Scope IDs are strings shared across kinds; cleanup must match api_token as well as the ID."""
+    organization, owner, key, budget_id = await _seed_key_to_delete(async_db)
+    key.id = str(key.workspace_id)
+    await async_db.commit()
+    service = _budget_service(async_db)
+    for scope_type in ("api_token", "workspace"):
+        await service.create_deployment_ceiling(
+            request=CreateScopedBudgetRequest(scope_type=scope_type, scope_id=key.id, budget_id=budget_id)
+        )
+
+    await _key_deletion_service(async_db).delete(key_id=key.id, organization_id=organization.id)
+    remaining = (await async_db.execute(select(ScopedBudget).where(ScopedBudget.scope_id == key.id))).scalars().all()
+    assert [ceiling.scope_type for ceiling in remaining] == ["workspace"]
+
+
+async def test_deleting_a_key_does_not_lock_other_keys_in_its_workspace(
+    async_db: AsyncSession, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    """The authorization join must lock only the target key, not its workspace row."""
+    organization, _, key, _ = await _seed_key_to_delete(async_db)
+    other = APIKey(id=f"other-{uuid.uuid4()}", key_hash=uuid.uuid4().hex, workspace_id=key.workspace_id)
+    async_db.add(other)
+    await async_db.commit()
+
+    async def delete_other() -> None:
+        async with sessions() as session:
+            await _key_deletion_service(session).delete(key_id=other.id, organization_id=organization.id)
+
+    async def while_first_is_locked() -> None:
+        await asyncio.wait_for(delete_other(), timeout=_CHECKPOINT_TIMEOUT)
+
+    async with sessions() as session:
+        await _key_deletion_service(session, while_first_is_locked).delete(
+            key_id=key.id, organization_id=organization.id
+        )
+    assert await async_db.get(APIKey, key.id, populate_existing=True) is None
+    assert await async_db.get(APIKey, other.id, populate_existing=True) is None
+
+
+async def test_deployment_ceiling_creation_refuses_a_deleted_organization_already_in_the_identity_map(
+    async_db: AsyncSession, sessions: async_sessionmaker[AsyncSession]
+) -> None:
+    """Moving existence checks into the service must preserve the route's fresh database read."""
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Cached", slug=f"cached-{uuid.uuid4()}", created_by_user_id=None
+    )
+    budget_id = await create_budget(async_db, max_budget=10.0)
+    await async_db.commit()
+    # Keep a strong reference to the row, as a request's earlier context lookup would.
+    assert await async_db.get(Organization, organization.id) is organization
+    async with sessions() as session:
+        doomed = await OrganizationRepository(session).get(organization.id)
+        assert doomed is not None
+        await OrganizationRepository(session).delete(doomed)
+        await session.commit()
+
+    with pytest.raises(DeploymentScopeNotFoundError):
+        await _budget_service(async_db).create_deployment_ceiling(
+            request=CreateScopedBudgetRequest(
+                scope_type="organization", scope_id=str(organization.id), budget_id=budget_id
+            )
+        )
+    assert (await async_db.execute(select(ScopedBudget))).scalars().all() == []

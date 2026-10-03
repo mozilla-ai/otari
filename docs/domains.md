@@ -93,6 +93,9 @@ membership change without organizations importing budgets. It also owns
 
 The deployment's and the members' API keys, and which models a key may reach.
 
+It defines `ApiKeyDeletionListener`, which budgets implements to remove a key's
+spend ceilings in the key-deletion transaction.
+
 It also owns `services/model_access.py` and `services/bootstrap_service.py`.
 
 ### budgets

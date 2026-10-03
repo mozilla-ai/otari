@@ -177,3 +177,20 @@ __all__ = [
     "WorkspaceBudgetDefaultBudgetNotFoundError",
     "WorkspaceBudgetDefaultNotFoundError",
 ]
+
+
+class DeploymentScopeNotFoundError(TenancyNotFoundError):
+    """The scope an operator's ceiling names no longer exists."""
+
+    def __init__(self, subject: str, scope_id: str) -> None:
+        super().__init__(f"{subject} '{scope_id}' not found")
+
+
+class DeploymentBudgetNotFoundError(TenancyNotFoundError):
+    def __init__(self, budget_id: str) -> None:
+        super().__init__(f"Budget '{budget_id}' not found")
+
+
+class DeploymentScopedBudgetAlreadyExistsError(TenancyConflictError):
+    def __init__(self) -> None:
+        super().__init__("A budget already exists for this scope and provider")

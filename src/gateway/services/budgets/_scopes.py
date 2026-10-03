@@ -57,6 +57,17 @@ class ScopeOwnership:
             case _:
                 assert_never(scope_type)
 
+    async def lock_for_ceiling(self, scope_type: ScopeType, scope_id: str) -> None:
+        """Serialize a ceiling's creation against deletion of the scope it caps.
+
+        Held in the caller's transaction before checking the scope exists. A missing
+        scope locks nothing and is refused by the existence or ownership check.
+        """
+        if scope_type == "api_token":
+            await self._api_keys.lock(scope_id)
+        else:
+            await lock_workspace_for_scope(self._organizations, scope_type, scope_id)
+
     async def get_scope_ids_in(self, organization_id: uuid.UUID) -> ScopeIdSets:
         """Return the IDs of every scope of every kind inside an organization."""
         workspace_ids = await self._organizations.get_workspace_ids_in_organization(organization_id)

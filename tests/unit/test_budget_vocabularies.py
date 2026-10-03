@@ -1,14 +1,13 @@
 """Guards on the budget vocabularies.
 
 The named constants cover each ``Literal``.
-The deployment route's scope table has a row for every scope type.
+The deployment surface's scope table has a row for every scope type.
 Both ceiling create bodies refuse a scope type outside the vocabulary.
 """
 
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from gateway.api.routes.scoped_budgets import _SCOPE_SUBJECTS
 from gateway.models.budgets import (
     ALIGN_DAY,
     ALIGN_MONTH,
@@ -27,6 +26,7 @@ from gateway.models.budgets import (
     SCOPE_WORKSPACE_MEMBER,
 )
 from gateway.schemas.budgets import CreateScopedBudgetRequest, OrganizationScopedBudgetCreate
+from gateway.services.budgets._deployment_surface import _SCOPE_SUBJECTS
 
 
 def test_the_alignment_constants_cover_the_literal() -> None:
@@ -43,7 +43,7 @@ def test_the_reservation_status_constants_cover_the_literal() -> None:
     assert named == set(RESERVATION_STATUSES)
 
 
-def test_the_deployment_route_resolves_every_scope_type() -> None:
+def test_the_deployment_surface_resolves_every_scope_type() -> None:
     assert set(_SCOPE_SUBJECTS) == set(SCOPE_TYPES)
 
 

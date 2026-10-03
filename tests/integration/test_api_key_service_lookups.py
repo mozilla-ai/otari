@@ -27,7 +27,7 @@ async def _two_workspaces_with_keys(db: AsyncSession) -> tuple[Workspace, Worksp
 
 
 def _service(uow: UnitOfWork) -> ApiKeyService:
-    return ApiKeyService(ApiKeyRepository(uow))
+    return ApiKeyService(uow, ApiKeyRepository(uow))
 
 
 async def test_get_workspace_id_for_key_names_the_owning_workspace(async_db: AsyncSession) -> None:

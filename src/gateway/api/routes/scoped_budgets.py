@@ -5,30 +5,19 @@ It is operator-gated.
 These routes create, list, retime and remove a ceiling, and they enforce none.
 """
 
-import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import OrganizationServiceDep, get_db, require_deployment_operator
-from gateway.models.api_keys import APIKey
-from gateway.models.budgets import (
-    SCOPE_API_TOKEN,
-    SCOPE_ORG_MEMBER,
-    SCOPE_ORGANIZATION,
-    SCOPE_WORKSPACE,
-    SCOPE_WORKSPACE_MEMBER,
-    Budget,
-    ScopedBudget,
-    ScopeType,
-)
-from gateway.models.tenancy import Organization, OrganizationMember, Workspace, WorkspaceMember
+from gateway.api.deps import BudgetServiceDep, get_db, require_deployment_operator
+from gateway.core.database import DATABASE_ERRORS
+from gateway.models.budgets import Budget, ScopedBudget, ScopeType
 from gateway.schemas.budgets import CreateScopedBudgetRequest, ScopedBudgetResponse, UpdateScopedBudgetRequest
-from gateway.services.budgets import lock_workspace_for_scope, period_window
+from gateway.services.budgets import period_window
 
 # Auth is declared on the router, not repeated on each handler, following
 # `routes/organizations.py`: every handler here needs the master key, and a
@@ -51,54 +40,11 @@ async def _get_or_404(db: AsyncSession, budget_id: str) -> ScopedBudget:
     return budget
 
 
-# What a scope's id has to name for the ceiling to ever bind, by scope type.
-# `api_token` keys on a string id, the rest on UUIDs.
-_ScopeSubject = type[Organization | Workspace | OrganizationMember | WorkspaceMember | APIKey]
-_SCOPE_SUBJECTS: dict[ScopeType, tuple[_ScopeSubject, str]] = {
-    SCOPE_ORGANIZATION: (Organization, "Organization"),
-    SCOPE_WORKSPACE: (Workspace, "Workspace"),
-    SCOPE_WORKSPACE_MEMBER: (WorkspaceMember, "Workspace membership"),
-    SCOPE_ORG_MEMBER: (OrganizationMember, "Organization membership"),
-    SCOPE_API_TOKEN: (APIKey, "API key"),
-}
-
-
-async def _require_scope_exists(db: AsyncSession, scope_type: ScopeType, scope_id: str) -> None:
-    """Refuse a ceiling on a scope that does not exist.
-
-    Without this a typo answers 200 and then never binds: resolution matches on
-    the id, so a ceiling naming nothing is created, listed, and silently
-    unenforced, with nothing anywhere to surface it. That is the shape a bulk
-    import produces from a mis-mapped id, and it fails in the permissive
-    direction. `POST /api/v1/keys` already refuses an unknown workspace for the same
-    reason; this matches it.
-    """
-    model, subject = _SCOPE_SUBJECTS[scope_type]
-    identifier: object = scope_id
-    if model is not APIKey:
-        try:
-            identifier = uuid.UUID(scope_id)
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"{subject} '{scope_id}' not found",
-            ) from None
-
-    # ``populate_existing`` so a row already in the identity map is re-read. Under the
-    # workspace lock taken before this, a cached row could predate the lock.
-    found = await db.get(model, identifier, populate_existing=True)
-    if found is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"{subject} '{scope_id}' not found",
-        )
-
-
 async def _require_budget(db: AsyncSession, budget_id: str) -> Budget:
     """The budget a ceiling names, refused as 404 when it does not exist.
 
     A ceiling naming nothing would cap nothing, in the permissive direction, so
-    this refuses for the same reason `_require_scope_exists` does.
+    this refuses it before the write.
     """
     limit = await db.get(Budget, budget_id)
     if limit is None:
@@ -112,56 +58,20 @@ async def _require_budget(db: AsyncSession, budget_id: str) -> Budget:
 @router.post("")
 async def create_scoped_budget(
     request: CreateScopedBudgetRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    organizations: OrganizationServiceDep,
+    budgets: BudgetServiceDep,
 ) -> ScopedBudgetResponse:
     """Create a scoped budget.
 
     Answers 404 when the scope names nothing, rather than creating a ceiling
     that can never bind.
     """
-    # The lock precedes the check, so a concurrent workspace deletion cannot
-    # commit between the check and the insert.
-    await lock_workspace_for_scope(organizations, request.scope_type, request.scope_id)
-    await _require_scope_exists(db, request.scope_type, request.scope_id)
-    limit = await _require_budget(db, request.budget_id)
-    # The window opens now rather than on first spend, so a period-limited ceiling
-    # has a defined end before any request has arrived. An aligned one opens on the
-    # boundary it is already past, so its first period is the remainder of the
-    # calendar period it was created in rather than a full one starting now. The
-    # cadence is the budget's, which is the whole point of naming one.
-    window = period_window(
-        datetime.now(UTC),
-        duration=limit.budget_duration_sec,
-        alignment=limit.reset_alignment,
-    )
-    period_start, period_end = window if window is not None else (None, None)
-    budget = ScopedBudget(
-        scope_type=request.scope_type,
-        scope_id=request.scope_id,
-        provider_key_id=request.provider_key_id,
-        budget_id=limit.budget_id,
-        name=request.name,
-        period_start=period_start,
-        period_end=period_end,
-    )
-    db.add(budget)
     try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A budget already exists for this scope and provider",
-        ) from None
-    except SQLAlchemyError:
-        await db.rollback()
+        return await budgets.create_deployment_ceiling(request=request)
+    except DATABASE_ERRORS:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error",
         ) from None
-    await db.refresh(budget)
-    return ScopedBudgetResponse.from_model(budget, limit)
 
 
 @router.get("")

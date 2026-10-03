@@ -984,11 +984,22 @@ def get_budget_service(
         uow,
         BudgetRepositories.on(uow),
         OrganizationService(db, membership_listener=None),
-        ApiKeyService(ApiKeyRepository(uow)),
+        ApiKeyService(uow, ApiKeyRepository(uow)),
     )
 
 
 BudgetServiceDep = Annotated[BudgetService, Depends(get_budget_service)]
+
+
+def get_api_key_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    budgets: BudgetServiceDep,
+) -> ApiKeyService:
+    """Build key deletion and its budget listener on the request's one Unit of Work."""
+    return ApiKeyService(uow, ApiKeyRepository(uow), deletion_listener=budgets)
+
+
+ApiKeyServiceDep = Annotated[ApiKeyService, Depends(get_api_key_service)]
 
 
 def get_organization_guardrail_definition_service(

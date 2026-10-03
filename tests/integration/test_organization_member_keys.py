@@ -621,3 +621,51 @@ def test_a_member_minted_key_authenticates_on_the_data_plane(client: TestClient,
     )
     assert response.status_code == status.HTTP_400_BAD_REQUEST, response.text
     assert "Unknown or unsupported model" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("delete_surface", ["member", "operator"])
+def test_revoking_a_key_sweeps_its_ceilings_without_touching_other_members(
+    client: TestClient, world: _World, master_key_header: dict[str, str], delete_surface: str
+) -> None:
+    """Unauthorized attempts preserve the ceilings, and either authorized surface cleans them up."""
+    code, mine = _create(client, world, "alpha_member")
+    assert code == status.HTTP_200_OK
+    code, theirs = _create(client, world, "alpha_colleague")
+    assert code == status.HTTP_200_OK
+    budgets = []
+    ceilings = []
+    for key in (mine, theirs):
+        budget = client.post(f"{API_ROOT}/budgets", headers=master_key_header, json={"max_budget": 10.0})
+        assert budget.status_code == status.HTTP_200_OK, budget.text
+        budgets.append(budget.json()["budget_id"])
+        for provider in (None, "openai"):
+            ceiling = client.post(
+                f"{API_ROOT}/scoped-budgets",
+                headers=master_key_header,
+                json={
+                    "scope_type": "api_token",
+                    "scope_id": key["id"],
+                    "budget_id": budgets[-1],
+                    "provider_key_id": provider,
+                },
+            )
+            assert ceiling.status_code == status.HTTP_200_OK, ceiling.text
+            ceilings.append(ceiling.json()["id"])
+
+    for who in ("alpha_colleague", "beta_owner"):
+        code, body = _request(client, world, who, "DELETE", f"{_PREFIX}/{mine['id']}")
+        assert code == status.HTTP_404_NOT_FOUND, body
+    # An operator acting in another organization also sees a 404.
+    foreign = client.delete(f"{API_ROOT}/keys/{mine['id']}", headers=master_key_header)
+    assert foreign.status_code == status.HTTP_404_NOT_FOUND
+    listed = client.get(f"{API_ROOT}/scoped-budgets", headers=master_key_header)
+    assert {ceiling["id"] for ceiling in listed.json()} == set(ceilings)
+
+    who = "alpha_member" if delete_surface == "member" else "alpha_operator"
+    prefix = _PREFIX if delete_surface == "member" else f"{API_ROOT}/keys"
+    code, body = _request(client, world, who, "DELETE", f"{prefix}/{mine['id']}")
+    assert code == status.HTTP_204_NO_CONTENT, body
+    listed = client.get(f"{API_ROOT}/scoped-budgets", headers=master_key_header)
+    assert {ceiling["id"] for ceiling in listed.json()} == set(ceilings[2:])
+    budget_delete = client.delete(f"{API_ROOT}/budgets/{budgets[0]}", headers=master_key_header)
+    assert budget_delete.status_code == status.HTTP_204_NO_CONTENT, budget_delete.text

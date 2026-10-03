@@ -11,6 +11,7 @@ from sqlmodel import col
 
 from gateway.api.deps import (
     ApiKeyFormatPortDep,
+    ApiKeyServiceDep,
     BudgetServiceDep,
     CallerOrganization,
     get_config,
@@ -19,6 +20,7 @@ from gateway.api.deps import (
 )
 from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import Workspace
@@ -542,20 +544,16 @@ async def rotate_key(
 @router.delete("/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_key(
     key_id: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    keys: ApiKeyServiceDep,
     organization_id: CallerOrganization,
 ) -> None:
     """Delete (revoke) an API key in the caller's organization.
 
     Requires master key authentication.
     """
-    key = await _load_key_in_organization(db, key_id, organization_id)
-
-    await db.delete(key)
     try:
-        await db.commit()
-    except SQLAlchemyError:
-        await db.rollback()
+        await keys.delete(key_id=key_id, organization_id=organization_id)
+    except DATABASE_ERRORS:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error",

@@ -3,6 +3,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.schemas.budgets import (
+    CreateScopedBudgetRequest,
     OrganizationBudgetCreate,
     OrganizationBudgetPublic,
     OrganizationBudgetsPublic,
@@ -11,8 +12,10 @@ from gateway.schemas.budgets import (
     OrganizationScopedBudgetPublic,
     OrganizationScopedBudgetsPublic,
     OrganizationScopedBudgetUpdate,
+    ScopedBudgetResponse,
 )
 from gateway.services.api_keys import ApiKeyService
+from gateway.services.budgets._deployment_surface import _DeploymentSurface
 from gateway.services.budgets._end_users import _EndUsers
 from gateway.services.budgets._organization_surface import _OrganizationSurface
 from gateway.services.budgets._scopes import ScopeOwnership
@@ -22,7 +25,8 @@ from gateway.services.tenancy.organization_service import OrganizationService
 class BudgetService:
     """The budgets domain's use cases: an organization's budgets and the spend ceilings that enforce them.
 
-    Each public method is one business step, run in a block of the Unit of Work it was built on.
+    Use cases run in blocks of the Unit of Work it was built on. A deletion listener
+    joins its caller's block without committing.
     """
 
     def __init__(
@@ -33,8 +37,20 @@ class BudgetService:
         api_keys: ApiKeyService,
     ) -> None:
         self._uow = uow
-        self._organization = _OrganizationSurface(repositories, ScopeOwnership(organizations, api_keys), organizations)
+        self._repositories = repositories
+        scopes = ScopeOwnership(organizations, api_keys)
+        self._organization = _OrganizationSurface(repositories, scopes, organizations)
+        self._deployment = _DeploymentSurface(repositories, scopes)
         self._end_users = _EndUsers(repositories)
+
+    async def key_deleted(self, key_id: str) -> None:
+        """Remove a key's ceilings inside the deleting service's transaction, without committing."""
+        await self._repositories.ceilings.delete_for_api_key(key_id)
+
+    async def create_deployment_ceiling(self, *, request: CreateScopedBudgetRequest) -> ScopedBudgetResponse:
+        """Create an operator-managed ceiling without allowing it to outlive its scope."""
+        async with self._uow:
+            return await self._deployment.create_ceiling(request)
 
     async def create_organization_budget(
         self, *, user: User, request: OrganizationBudgetCreate

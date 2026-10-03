@@ -270,7 +270,7 @@ class OrganizationService:
 
     async def has_organization(self, organization_id: uuid.UUID) -> bool:
         """Return whether an organization with this ID exists."""
-        return await self.organizations.get(organization_id) is not None
+        return await self.organizations.exists(organization_id)
 
     async def get_organization_id_for_workspace(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
         """Return the ID of the organization that owns a workspace, or None when the workspace does not exist."""

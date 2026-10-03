@@ -45,6 +45,7 @@ from sqlmodel import col
 
 from gateway.api.deps import (
     ApiKeyFormatPortDep,
+    ApiKeyServiceDep,
     CurrentIdentity,
     GrowthSignalPortDep,
     get_config,
@@ -60,6 +61,7 @@ from gateway.api.routes.keys import (
 )
 from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User as TenancyUser
@@ -431,16 +433,13 @@ async def delete_own_key(
     key_id: str,
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
+    keys: ApiKeyServiceDep,
 ) -> None:
     """Delete (revoke) one of the caller's own API keys."""
     organization_id, owner_user_id = await _caller_context(db, identity)
-    key = await _load_key_in_organization(db, key_id, organization_id, owner_user_id=owner_user_id)
-
-    await db.delete(key)
     try:
-        await db.commit()
-    except SQLAlchemyError:
-        await db.rollback()
+        await keys.delete(key_id=key_id, organization_id=organization_id, owner_user_id=owner_user_id)
+    except DATABASE_ERRORS:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error",
