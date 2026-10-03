@@ -48,6 +48,7 @@ from gateway.api.routes import (
     playground,
     pricing,
     providers,
+    rate_limits,
     rerank,
     responses,
     routing,
@@ -234,6 +235,7 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(usage.key_router, Plane.CONTROL),
     RouterMount(agent_telemetry.router, Plane.CONTROL),
     RouterMount(settings.router, Plane.CONTROL),
+    RouterMount(rate_limits.router, Plane.CONTROL),
     RouterMount(mail.router, Plane.CONTROL),
     RouterMount(maintenance_mode.router, Plane.CONTROL),
     # All three prefixed /tool-settings, split by who may call them. Operator

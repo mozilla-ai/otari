@@ -5,7 +5,6 @@ import itertools
 import math
 import time
 from collections import defaultdict, deque
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -18,7 +17,7 @@ from gateway.ports.rate_limit_store_port import RateLimitStorePort, RateLimitWin
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Receive, Scope, Send
 
-    from gateway.core.config import RateLimitRule
+    from gateway.core.config import GatewayConfig, RateLimitRule
 
 RATE_LIMIT_HITS = Counter(
     "gateway_rate_limit_hits",
@@ -220,11 +219,20 @@ def _refused(rule: "RateLimitRule", retry_after: float | None) -> HTTPException:
 
 
 class RateLimitRules:
-    """The ``rate_limits`` rules, counted in one store."""
+    """The ``rate_limits`` rules, counted in one store.
 
-    def __init__(self, store: RateLimitStorePort, rules: Sequence["RateLimitRule"]) -> None:
+    Read from the config on every request, so a rule the dashboard adds or edits
+    applies from the next request without rebuilding anything.
+    """
+
+    def __init__(self, store: RateLimitStorePort, config: "GatewayConfig") -> None:
         self._store = store
-        self._rules = tuple(rules)
+        self._config = config
+
+    @property
+    def active(self) -> bool:
+        """Whether any rule is in effect."""
+        return bool(self._config.rate_limits)
 
     async def admit(
         self, request: Request, *, key_id: str | None, user_id: str | None, estimated_tokens: int
@@ -244,7 +252,7 @@ class RateLimitRules:
         subjects = {"deployment": "all", "key": key_id, "user": user_id}
         counted: list[tuple[str, str]] = []
         try:
-            for rule in self._rules:
+            for rule in tuple(self._config.rate_limits):
                 subject = subjects[rule.per]
                 if subject is None:
                     continue
@@ -283,7 +291,7 @@ async def admit_rate_limit_rules(
 ) -> RateLimitGrant | None:
     """Count a request against the deployment's ``rate_limits``, or ``None`` when it has none."""
     rules: RateLimitRules | None = getattr(request.app.state, "rate_limit_rules", None)
-    if rules is None:
+    if rules is None or not rules.active:
         return None
     return await rules.admit(request, key_id=key_id, user_id=user_id, estimated_tokens=estimated_tokens)
 

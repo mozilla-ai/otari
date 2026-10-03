@@ -13062,6 +13062,271 @@
         "title": "RankResponse",
         "type": "object"
       },
+      "RateLimitRuleCreate": {
+        "additionalProperties": false,
+        "description": "A rule to add. The same fields, limits and validation as a ``rate_limits`` entry in config.yml.",
+        "properties": {
+          "lease_sec": {
+            "default": 900.0,
+            "description": "How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.",
+            "exclusiveMinimum": 0.0,
+            "title": "Lease Sec",
+            "type": "number"
+          },
+          "max_concurrent": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Requests in flight at once.",
+            "title": "Max Concurrent"
+          },
+          "name": {
+            "description": "Names the rule in a 429's detail and in the counter's key. Unique across rate_limits.",
+            "pattern": "^[A-Za-z0-9_.-]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "per": {
+            "description": "What one count is shared by.",
+            "enum": [
+              "deployment",
+              "key",
+              "user"
+            ],
+            "title": "Per",
+            "type": "string"
+          },
+          "rpm": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Requests per minute.",
+            "title": "Rpm"
+          },
+          "tpm": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tokens per minute. A request is admitted on its estimate (prompt plus max output, or budget_estimate_default_output_tokens) and charged what it used once it completes.",
+            "title": "Tpm"
+          }
+        },
+        "required": [
+          "name",
+          "per"
+        ],
+        "title": "RateLimitRuleCreate",
+        "type": "object"
+      },
+      "RateLimitRulePublic": {
+        "additionalProperties": false,
+        "description": "One rule in effect, and where it is defined.",
+        "properties": {
+          "lease_sec": {
+            "default": 900.0,
+            "description": "How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.",
+            "exclusiveMinimum": 0.0,
+            "title": "Lease Sec",
+            "type": "number"
+          },
+          "max_concurrent": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Requests in flight at once.",
+            "title": "Max Concurrent"
+          },
+          "name": {
+            "description": "Names the rule in a 429's detail and in the counter's key. Unique across rate_limits.",
+            "pattern": "^[A-Za-z0-9_.-]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "per": {
+            "description": "What one count is shared by.",
+            "enum": [
+              "deployment",
+              "key",
+              "user"
+            ],
+            "title": "Per",
+            "type": "string"
+          },
+          "rpm": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Requests per minute.",
+            "title": "Rpm"
+          },
+          "source": {
+            "description": "'config' for a rule from config.yml, which is read-only here; 'dashboard' for a stored one.",
+            "enum": [
+              "config",
+              "dashboard"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "tpm": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tokens per minute. A request is admitted on its estimate (prompt plus max output, or budget_estimate_default_output_tokens) and charged what it used once it completes.",
+            "title": "Tpm"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When a stored rule last changed.",
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "name",
+          "per",
+          "source"
+        ],
+        "title": "RateLimitRulePublic",
+        "type": "object"
+      },
+      "RateLimitRuleUpdate": {
+        "additionalProperties": false,
+        "description": "Fields to change on a stored rule. An omitted field keeps its value; ``null`` clears a limit.\n\nThe merged rule must still set at least one of rpm, tpm or max_concurrent.",
+        "properties": {
+          "lease_sec": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How long a max_concurrent slot is held at most.",
+            "title": "Lease Sec"
+          },
+          "max_concurrent": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Requests in flight at once.",
+            "title": "Max Concurrent"
+          },
+          "per": {
+            "anyOf": [
+              {
+                "enum": [
+                  "deployment",
+                  "key",
+                  "user"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What one count is shared by.",
+            "title": "Per"
+          },
+          "rpm": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Requests per minute.",
+            "title": "Rpm"
+          },
+          "tpm": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tokens per minute.",
+            "title": "Tpm"
+          }
+        },
+        "title": "RateLimitRuleUpdate",
+        "type": "object"
+      },
+      "RateLimitRulesPublic": {
+        "description": "Every rule in effect: config-file rules first, then stored ones, each in name order.",
+        "properties": {
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/RateLimitRulePublic"
+            },
+            "title": "Rules",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rules"
+        ],
+        "title": "RateLimitRulesPublic",
+        "type": "object"
+      },
       "RecordedPool": {
         "description": "How warm one pool is after the write.",
         "properties": {
@@ -31635,6 +31900,187 @@
         "summary": "Provider Health",
         "tags": [
           "providers"
+        ]
+      }
+    },
+    "/api/v1/rate-limits": {
+      "get": {
+        "description": "List every rule in effect: the config.yml rules, then the ones stored here.",
+        "operationId": "rate-limits-list_rate_limit_rules",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitRulesPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Rate Limit Rules",
+        "tags": [
+          "rate-limits"
+        ]
+      },
+      "post": {
+        "description": "Add a rule. It applies from the next request on this replica, and on every replica within 30 seconds.",
+        "operationId": "rate-limits-create_rate_limit_rule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RateLimitRuleCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitRulePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Rate Limit Rule",
+        "tags": [
+          "rate-limits"
+        ]
+      }
+    },
+    "/api/v1/rate-limits/{name}": {
+      "delete": {
+        "description": "Remove a stored rule. A config.yml rule answers 409.",
+        "operationId": "rate-limits-delete_rate_limit_rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Rate Limit Rule",
+        "tags": [
+          "rate-limits"
+        ]
+      },
+      "patch": {
+        "description": "Change a stored rule. Requests it already counted stay counted. A config.yml rule answers 409.",
+        "operationId": "rate-limits-update_rate_limit_rule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RateLimitRuleUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RateLimitRulePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Rate Limit Rule",
+        "tags": [
+          "rate-limits"
         ]
       }
     },

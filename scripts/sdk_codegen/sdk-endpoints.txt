@@ -125,6 +125,11 @@ POST /api/v1/provider-credentials/{instance}/test   # not yet wrapped
 # Providers catalog
 GET /api/v1/providers                               # not yet wrapped
 GET /api/v1/providers/catalog                       # not yet wrapped
+# Rate limit rules
+GET /api/v1/rate-limits                             # not yet wrapped
+POST /api/v1/rate-limits                            # not yet wrapped
+PATCH /api/v1/rate-limits/{name}                    # not yet wrapped
+DELETE /api/v1/rate-limits/{name}                   # not yet wrapped
 # Runtime settings
 GET /api/v1/settings                                # not yet wrapped
 PATCH /api/v1/settings                              # not yet wrapped

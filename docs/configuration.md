@@ -83,7 +83,7 @@ the corresponding startup value after the database is available.
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
 | `rate_limit_store` | Where `rate_limit_rpm` is counted: `memory` (the default) or `redis`. See [Rate limits across replicas](#rate-limits-across-replicas). |
 | `rate_limit_redis_url` | The Redis that the `redis` store counts in. |
-| `rate_limits` | Requests per minute, tokens per minute and requests in flight, per deployment, API key or user. See [Rate limit rules](#rate-limit-rules). |
+| `rate_limits` | Requests per minute, tokens per minute and requests in flight, per deployment, API key or user. Also managed from the dashboard. See [Rate limit rules](#rate-limit-rules). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
@@ -185,6 +185,12 @@ and holds no budget. Rules count in `rate_limit_store`, so with Redis they hold
 across replicas. They apply to chat completions, messages and responses, after
 `rate_limit_rpm`. A hybrid gateway does not enforce them yet, so it refuses to
 start with `rate_limits` set.
+
+Rules can also be added, changed and removed from the dashboard (Settings, Rate
+limit rules) or through `/api/v1/rate-limits`. A change applies at once on the
+replica that served it and on every other replica within 30 seconds; a changed
+rule keeps the requests it already counted. The rules in config.yml are listed
+there read-only, and a stored rule cannot take the name of one.
 
 ### Trace context propagation
 

@@ -19,7 +19,7 @@ def _request() -> Request:
 
 
 def _rules(store: InMemoryRateLimitStore, *rules: dict[str, Any]) -> RateLimitRules:
-    return RateLimitRules(store, [RateLimitRule(**rule) for rule in rules])
+    return RateLimitRules(store, GatewayConfig(rate_limits=[RateLimitRule(**rule) for rule in rules]))
 
 
 async def _admit(

@@ -14,6 +14,7 @@ import { Toolbar } from "@/design-system/layout/Toolbar"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { MailDeliveryCard } from "@/features/settings/MailDeliveryCard"
 import { MaintenanceModeCard } from "@/features/settings/MaintenanceModeCard"
+import { RateLimitsCard } from "@/features/settings/RateLimitsCard"
 import { useRotateMasterKey } from "@/shared/api/auth"
 import {
   useReencryptProviderCredentials,
@@ -663,6 +664,8 @@ export function SettingsPage() {
           ))}
         </SettingsGroup>
       ))}
+
+      <RateLimitsCard />
 
       {data ? (
         <SecurityKeysSection masterKeySource={data.master_key_source} />

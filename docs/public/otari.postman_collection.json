@@ -7182,6 +7182,131 @@
     {
       "item": [
         {
+          "name": "List Rate Limit Rules",
+          "request": {
+            "description": "List every rule in effect: the config.yml rules, then the ones stored here.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rate-limits"
+              ],
+              "raw": "{{baseUrl}}/api/v1/rate-limits"
+            }
+          }
+        },
+        {
+          "name": "Create Rate Limit Rule",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"name\": \"string\",\n  \"per\": \"deployment\"\n}"
+            },
+            "description": "Add a rule. It applies from the next request on this replica, and on every replica within 30 seconds.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rate-limits"
+              ],
+              "raw": "{{baseUrl}}/api/v1/rate-limits"
+            }
+          }
+        },
+        {
+          "name": "Update Rate Limit Rule",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"lease_sec\": 0,\n  \"max_concurrent\": 0,\n  \"per\": \"deployment\",\n  \"rpm\": 0,\n  \"tpm\": 0\n}"
+            },
+            "description": "Change a stored rule. Requests it already counted stay counted. A config.yml rule answers 409.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rate-limits",
+                ":name"
+              ],
+              "raw": "{{baseUrl}}/api/v1/rate-limits/:name",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "name",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Rate Limit Rule",
+          "request": {
+            "description": "Remove a stored rule. A config.yml rule answers 409.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rate-limits",
+                ":name"
+              ],
+              "raw": "{{baseUrl}}/api/v1/rate-limits/:name",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "name",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "rate-limits"
+    },
+    {
+      "item": [
+        {
           "name": "Create Rerank",
           "request": {
             "body": {
