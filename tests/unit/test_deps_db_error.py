@@ -53,6 +53,27 @@ async def test_generated_master_key_lookup_db_error_raises_503_not_500() -> None
 
 
 @pytest.mark.asyncio
+async def test_non_ascii_token_is_not_a_configured_master_key() -> None:
+    db: Any = AsyncMock()
+
+    assert await is_valid_master_key("non\u2014ascii\u2014token", GatewayConfig(master_key="sk-master"), db) is False
+
+
+@pytest.mark.asyncio
+async def test_non_ascii_master_key_header_is_refused_with_401_not_500() -> None:
+    db: Any = AsyncMock()
+    request: Any = MagicMock()
+
+    with (
+        patch.object(deps, "extract_credential_token", return_value="non\u2014ascii\u2014token"),
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await deps.verify_master_key(request, db, GatewayConfig(master_key="sk-master"), None)
+
+    assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+@pytest.mark.asyncio
 async def test_failed_last_used_bump_logs_warning_and_does_not_poison_request_session() -> None:
     """A failed ``last_used_at`` bump must be logged and must not fail the request.
 

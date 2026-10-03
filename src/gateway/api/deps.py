@@ -371,9 +371,14 @@ async def get_session_identity(
         ) from exc
 
 
+def _matches_configured_master_key(token: str, master_key: str) -> bool:
+    """Constant-time match on UTF-8 bytes: ``compare_digest`` raises on a non-ASCII ``str``."""
+    return secrets.compare_digest(token.encode(), master_key.encode())
+
+
 async def is_valid_master_key(token: str, config: GatewayConfig, db: AsyncSession) -> bool:
     """Check if token matches the configured key or the current generated key."""
-    if config.master_key is not None and secrets.compare_digest(token, config.master_key):
+    if config.master_key is not None and _matches_configured_master_key(token, config.master_key):
         return True
     if config.master_key is not None or not is_generated_master_key(token):
         return False
@@ -471,7 +476,7 @@ async def verify_master_key(
             )
         if is_generated_master_key(token) and secrets.compare_digest(hash_master_key(token), stored_hash):
             return token
-    elif secrets.compare_digest(token, config.master_key):
+    elif _matches_configured_master_key(token, config.master_key):
         return token
 
     raise HTTPException(
