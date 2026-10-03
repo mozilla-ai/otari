@@ -4,6 +4,7 @@ from typing import Never
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.elements import ColumnElement
+from sqlmodel import col
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.budget_exceptions import MemberBudgetPolicyAlreadyExistsError
@@ -61,8 +62,8 @@ class WorkspaceBudgetDefaultRepository(BaseRepository[WorkspaceBudgetDefault, Ne
     async def workspace_names_for_budget(self, budget_id: str) -> list[str]:
         """Return the names of the workspaces whose policies hand out this budget, alphabetically."""
         result = await self.db.execute(
-            select(Workspace.name)
-            .join(WorkspaceBudgetDefault, WorkspaceBudgetDefault.workspace_id == Workspace.id)
+            select(col(Workspace.name))
+            .join(WorkspaceBudgetDefault, WorkspaceBudgetDefault.workspace_id == col(Workspace.id))
             .where(WorkspaceBudgetDefault.budget_id == budget_id)
             .order_by(Workspace.name)
         )
