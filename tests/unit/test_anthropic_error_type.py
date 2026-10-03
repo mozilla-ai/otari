@@ -7,11 +7,17 @@ Both reach the same table, so one status cannot be classified two ways.
 
 from __future__ import annotations
 
+import json
+from typing import Any, cast
+
+import anthropic
+import httpx
 import pytest
 from fastapi import HTTPException, status
 
 from gateway.api.routes._pipeline import ErrorKind
 from gateway.api.routes.messages import _ADAPTER, _ERROR_KIND_TO_ANTHROPIC_TYPE, _ensure_anthropic_error
+from gateway.streaming import ANTHROPIC_STREAM_FORMAT
 
 
 def _rendered(exc: HTTPException) -> str:
@@ -93,3 +99,54 @@ def test_the_retry_hint_survives_enveloping() -> None:
     limited = HTTPException(status_code=429, detail="slow down", headers={"Retry-After": "30"})
 
     assert _ensure_anthropic_error(limited).headers == {"Retry-After": "30"}
+
+
+def _stream_error(exc: BaseException) -> dict[str, Any]:
+    payload = _ADAPTER.stream_error_payload(exc)
+    event_line, data_line, *_ = payload.split("\n")
+    assert event_line == "event: error"
+    return cast(dict[str, Any], json.loads(data_line.removeprefix("data: ")))
+
+
+def _mid_stream_error(error_type: str) -> anthropic.APIStatusError:
+    """What the Anthropic SDK raises for an SSE ``error`` event: the stream's 200, the event as body."""
+    body = {"type": "error", "error": {"type": error_type, "message": "raw provider text"}, "request_id": "req_x"}
+    response = httpx.Response(200, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"))
+    return anthropic.APIStatusError(str(body), response=response, body=body)
+
+
+class _Wrapped(Exception):
+    def __init__(self, original: BaseException) -> None:
+        super().__init__("wrapped")
+        self.original_exception = original
+
+
+@pytest.mark.parametrize("error_type", ["overloaded_error", "rate_limit_error"])
+def test_a_transient_mid_stream_failure_keeps_its_type(error_type: str) -> None:
+    rendered = _stream_error(_mid_stream_error(error_type))
+
+    assert rendered["error"]["type"] == error_type
+    assert "raw provider text" not in rendered["error"]["message"]
+    assert "req_x" not in json.dumps(rendered)
+
+
+def test_the_type_survives_an_any_llm_wrapper() -> None:
+    assert _stream_error(_Wrapped(_mid_stream_error("overloaded_error")))["error"]["type"] == "overloaded_error"
+
+
+@pytest.mark.parametrize(("upstream_status", "expected"), [(529, "overloaded_error"), (429, "rate_limit_error")])
+def test_a_transient_status_without_a_body_is_named_from_the_status(upstream_status: int, expected: str) -> None:
+    assert _stream_error(_UpstreamStatusError(upstream_status))["error"]["type"] == expected
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        RuntimeError("upstream stack trace"),
+        _mid_stream_error("authentication_error"),
+        _mid_stream_error("invalid_request_error"),
+        _UpstreamStatusError(401),
+    ],
+)
+def test_any_other_mid_stream_failure_stays_the_generic_api_error(exc: BaseException) -> None:
+    assert _ADAPTER.stream_error_payload(exc) == ANTHROPIC_STREAM_FORMAT.error_payload

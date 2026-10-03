@@ -835,6 +835,14 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         """Map a single-attempt upstream failure to the format's wire error."""
         ...
 
+    def stream_error_payload(self, exc: BaseException) -> str:
+        """Render the SSE error event for a failure after the stream committed.
+
+        The status line is already on the wire by then, so this event is the only
+        place the caller learns what kind of failure ended the stream.
+        """
+        ...
+
     def format_chunk(self, chunk: ChunkT) -> str: ...
 
     def extract_stream_usage(self, chunk: ChunkT) -> CompletionUsage | None: ...
@@ -4835,6 +4843,7 @@ def build_streaming_response(
             is_cost_carrier=adapter.is_stream_cost_carrier if settles_inline else None,
             attach_settlement=_attach_inline_cost if settles_inline else None,
             on_first_chunk=_on_first_chunk,
+            error_payload=adapter.stream_error_payload,
         ),
         media_type="text/event-stream",
         headers=headers,

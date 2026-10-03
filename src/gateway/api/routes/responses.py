@@ -343,6 +343,9 @@ class _ResponsesAdapter:
             detail=PROVIDER_ERROR_DETAIL,
         )
 
+    def stream_error_payload(self, exc: BaseException) -> str:
+        return self.stream_format.error_payload
+
     def format_chunk(self, chunk: ResponseStreamEvent) -> str:
         return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True)}\n\n"
 

@@ -215,6 +215,9 @@ class _ChatAdapter:
             detail=PROVIDER_ERROR_DETAIL,
         )
 
+    def stream_error_payload(self, exc: BaseException) -> str:
+        return self.stream_format.error_payload
+
     def format_chunk(self, chunk: ChatCompletionChunk) -> str:
         return f"data: {chunk.model_dump_json()}\n\n"
 
