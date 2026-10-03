@@ -120,7 +120,7 @@ class DecisionUsage(BaseModel):
 
     input_tokens: int = 0
     output_tokens: int = 0
-    cost: float | None = Field(default=None, description="The provider's own charge in USD, when it reports one")
+    cost: float | None = Field(default=None, ge=0, description="The provider's own charge in USD, when it reports one")
 
 
 class DecisionResponse(BaseModel):

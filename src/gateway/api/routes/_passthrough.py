@@ -421,9 +421,7 @@ async def run_passthrough(
     # audio branch reserves before resolve), so refund before rejecting. A key with
     # no list of its own inherits its user's default.
     key_allowlist = await resolve_request_allowlist(db, api_key)
-    if key_allowlist is not None and not is_model_allowed(
-        key_allowlist, f"{resolved.instance}:{resolved.model}"
-    ):
+    if key_allowlist is not None and not is_model_allowed(key_allowlist, f"{resolved.instance}:{resolved.model}"):
         await refund_reservation(db, reservation)
         not_allowed_detail = model_not_allowed_detail(model)
         await _log_rejection(
@@ -687,23 +685,31 @@ async def run_decision(
         + len(json.dumps(questions))
         + _ESTIMATED_CHARS_PER_IMAGE * len(request.images or ())
     )
-    reservation = await reserve_budget(
-        db,
-        user_id,
-        estimate_cost(
-            pricing,
-            prompt_chars=prompt_chars,
-            max_output_tokens=None,
-            default_output_tokens=_ESTIMATED_OUTPUT_TOKENS_PER_QUESTION * len(questions),
-        ),
-        # Not the selector: ``model`` only drives reserve_budget's free-model
-        # shortcut, which splits it through any-llm (see search.py).
-        model=None,
-        strategy=config.budget_strategy,
-        counts_toward_budget=not budget_exempt,
-        scope=BudgetScopeRequest(api_key=api_key, provider_instance=provider.name),
-        organization_id=organization_id,
-    )
+    try:
+        reservation = await reserve_budget(
+            db,
+            user_id,
+            estimate_cost(
+                pricing,
+                prompt_chars=prompt_chars,
+                max_output_tokens=None,
+                default_output_tokens=_ESTIMATED_OUTPUT_TOKENS_PER_QUESTION * len(questions),
+            ),
+            # Not the selector: ``model`` only drives reserve_budget's free-model
+            # shortcut, which splits it through any-llm (see search.py).
+            model=None,
+            strategy=config.budget_strategy,
+            counts_toward_budget=not budget_exempt,
+            scope=BudgetScopeRequest(api_key=api_key, provider_instance=provider.name),
+            organization_id=organization_id,
+        )
+    except HTTPException as exc:
+        # As in run_passthrough's _reserve: an unknown user's 404 cannot satisfy usage_logs.user_id's foreign key.
+        if exc.status_code != status.HTTP_404_NOT_FOUND:
+            await log_rejection(
+                str(exc.detail), row_model=model, row_provider=provider.name, status_code=exc.status_code
+            )
+        raise
     if not budget_exempt and pricing_required_but_missing(pricing, require_pricing=config.require_pricing):
         await refund_reservation(db, reservation)
         no_pricing_detail = no_pricing_error_detail(request.model)

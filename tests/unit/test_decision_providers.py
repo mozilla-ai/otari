@@ -124,6 +124,22 @@ async def test_an_error_status_carries_the_status_and_no_body(status_code: int) 
     assert "SECRET" not in str(raised.value)
 
 
+@pytest.mark.parametrize("status_code", [301, 302, 304, 307, 308])
+@pytest.mark.asyncio
+async def test_a_redirect_is_refused_and_not_followed(status_code: int) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(status_code, headers={"location": "https://elsewhere.example/"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=True) as client:
+        with pytest.raises(DecisionProviderError) as raised:
+            await request_decision(_provider(), {"model": "jev-latest", "state": "s"}, client=client)
+    assert raised.value.status_code == status_code
+    assert [str(request.url) for request in seen] == ["https://api.typesafe.ai/v1/systemone"]
+
+
 @pytest.mark.parametrize(
     "response",
     [

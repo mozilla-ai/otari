@@ -239,6 +239,13 @@ def test_decisions_unreadable_answer_is_502(client: TestClient, api_key_header: 
     assert resp.status_code == 502
 
 
+def test_decisions_negative_provider_cost_is_502(client: TestClient, api_key_header: dict[str, str]) -> None:
+    answer = {"model": "jev", "answers": {}, "usage": {"input_tokens": 1, "output_tokens": 1, "cost": -1.0}}
+    with _mock_decision(answer):
+        resp = client.post(f"{API_ROOT}/decisions", json=PAYLOAD, headers=api_key_header)
+    assert resp.status_code == 502
+
+
 def test_decisions_is_budget_enforced(client: TestClient, master_key_header: dict[str, str]) -> None:
     client.post(
         f"{API_ROOT}/pricing",
@@ -257,6 +264,9 @@ def test_decisions_is_budget_enforced(client: TestClient, master_key_header: dic
         resp = client.post(f"{API_ROOT}/decisions", json=PAYLOAD, headers={API_KEY_HEADER: f"Bearer {key['key']}"})
     assert resp.status_code == 403
     mock.assert_not_awaited()
+
+    rows = _decision_rows(client, master_key_header, "capped")
+    assert [(row["status"], row["status_code"]) for row in rows] == [("error", 403)]
 
 
 def test_decisions_require_pricing_refuses_an_unpriced_model(

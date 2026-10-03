@@ -134,12 +134,14 @@ async def request_decision(
             json=body,
             headers={"Authorization": f"Bearer {provider.api_key}"} if provider.api_key else {},
             timeout=provider.timeout_s,
+            # A redirect would carry the provider's key to wherever it points.
+            follow_redirects=False,
         )
     except httpx.HTTPError as exc:
         msg = f"{provider.provider} decisions could not be reached: {type(exc).__name__}"
         raise DecisionProviderError(msg) from exc
 
-    if response.status_code >= httpx.codes.BAD_REQUEST:
+    if response.status_code >= httpx.codes.MULTIPLE_CHOICES:
         msg = f"{provider.provider} decisions returned HTTP {response.status_code}"
         raise DecisionProviderError(msg, status_code=response.status_code)
 
