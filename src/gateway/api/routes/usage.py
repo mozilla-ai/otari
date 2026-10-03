@@ -625,7 +625,8 @@ async def get_request_settlement(
     key sees any. Returns 404 until the request has settled (its rows are written
     by a background writer, so a lookup made the instant a stream closes can
     precede them), and for an id that is unknown or belongs to another key, with
-    no way to tell those apart.
+    no way to tell those apart. A stream that ended before the provider reported
+    usage, and ran no gateway tools, writes no row, so its id stays 404.
     """
     api_key, is_master_key = auth_result
     conditions: list[ColumnElement[bool]] = [UsageLog.request_group_id == request_id]
@@ -640,18 +641,18 @@ async def get_request_settlement(
         func.coalesce(func.sum(UsageLog.prompt_tokens), 0),
         func.coalesce(func.sum(UsageLog.completion_tokens), 0),
         func.coalesce(func.sum(UsageLog.total_tokens), 0),
-        func.count(case((UsageLog.status == "success", 1))),
+        # A vision describe side-call's success row is written before the main
+        # call runs and is the only one with no latency, so it settles nothing.
+        func.count(case(((UsageLog.status == "success") & UsageLog.latency_ms.is_not(None), 1))),
         func.count(case((UsageLog.status == "error", 1))),
     ).where(*conditions)
-    row_count, cost, priced_rows, prompt_tokens, completion_tokens, total_tokens, successes, errors = (
+    row_count, cost, priced_rows, prompt_tokens, completion_tokens, total_tokens, served, errors = (
         await db.execute(stmt)
     ).one()
-    # Absorbed rows alone are attempts a routing policy fell over from: the row
-    # that settles the request has not been written yet.
-    if successes == 0 and errors == 0:
+    # Absorbed rows and a side-call alone mean the row that settles the request
+    # has not been written yet.
+    if served == 0 and errors == 0:
         raise HTTPException(status_code=404, detail="Request not found")
-    # Any error row means the request failed. A success row does not mean it
-    # served: a vision describe side-call writes one before the main call runs.
     return RequestSettlement(
         request_id=request_id,
         status="error" if errors else "success",

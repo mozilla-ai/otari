@@ -338,3 +338,31 @@ def test_a_failed_request_with_a_successful_side_call_settles_as_an_error(
     assert settled.json()["status"] == "error"
     assert settled.json()["cost_usd"] == "0.001000"
     assert settled.json()["row_count"] == 2
+
+
+def test_a_side_call_alone_is_not_a_settled_request(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """While the main call runs, the vision side-call's row is the only one written."""
+    request_id = str(uuid.uuid4())
+    with db_session_factory() as db:
+        db.add(
+            UsageLog(
+                id=str(uuid.uuid4()),
+                workspace_id=seed_workspace_id(db),
+                timestamp=datetime.now(UTC),
+                model=MODEL_NAME,
+                provider="openai",
+                endpoint="/v1/chat/completions",
+                status="success",
+                cost=Decimal("0.001000"),
+                request_group_id=request_id,
+            )
+        )
+        db.commit()
+
+    response = client.get(f"{API_ROOT}/usage/requests/{request_id}", headers=master_key_header)
+
+    assert response.status_code == 404

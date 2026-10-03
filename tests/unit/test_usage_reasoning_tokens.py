@@ -7,7 +7,7 @@ from gateway.api.routes.chat import _ChatAdapter
 from gateway.api.routes.messages import _messages_stream_usage, _MessagesAdapter
 from gateway.api.routes.responses import _usage_to_completion_usage
 from gateway.core.usage import GatewayUsage, reasoning_tokens_of
-from gateway.streaming import _merge_usage
+from gateway.streaming import merge_stream_usage
 
 
 def _openai_usage(reasoning: int) -> CompletionUsage:
@@ -86,7 +86,7 @@ def test_merge_usage_keeps_reasoning_tokens() -> None:
     """The stream loop rebuilds usage on every chunk; the count must survive that."""
     start = GatewayUsage(prompt_tokens=100, completion_tokens=0, total_tokens=100)
     delta = GatewayUsage(prompt_tokens=0, completion_tokens=30, total_tokens=30, reasoning_tokens=12)
-    merged = _merge_usage(
-        _merge_usage(start, delta), GatewayUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
+    merged = merge_stream_usage(
+        merge_stream_usage(start, delta), GatewayUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
     )
     assert reasoning_tokens_of(merged) == 12

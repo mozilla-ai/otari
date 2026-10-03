@@ -1444,7 +1444,8 @@ async def _bill_vision_side_call(
     # request is billed (the vision call itself routes via the same resolver).
     # latency_ms is intentionally left NULL: this row bills the describe model as
     # its own side-call, so the enclosing request's duration would misattribute
-    # the caller's wall-clock to it.
+    # the caller's wall-clock to it. ``GET /usage/requests/{id}`` relies on that
+    # NULL to tell this row from the one that settles the request.
     cost = await log_usage(
         db=db,
         log_writer=log_writer,
@@ -2117,6 +2118,7 @@ async def resolve_request_context(
                         detail=str(exc.detail),
                         status_code=exc.status_code,
                         started_at=started_at,
+                        request_id=request_id,
                     )
                 raise
 
