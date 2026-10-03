@@ -285,3 +285,18 @@ async def test_what_the_fallback_issued_goes_back_to_it_after_redis_recovers() -
     assert client.zrems == []
     assert await store._fallback.acquire("k", 1, 30) is not None
     assert (await store._fallback.hit("k", 100, 60, cost=70)).allowed
+
+
+@pytest.mark.asyncio
+async def test_keys_whose_leases_all_ran_out_are_dropped() -> None:
+    store = InMemoryRateLimitStore()
+
+    with patch("gateway.adapters.rate_limit_store_adapter.time") as mock_time:
+        mock_time.monotonic.return_value = 1000.0
+        assert await store.acquire("abandoned", 1, 30) is not None
+
+        mock_time.monotonic.return_value = 1031.0
+        for _ in range(InMemoryRateLimitStore._CLEANUP_INTERVAL - 1):
+            assert await store.acquire("busy", 10**6, 60) is not None
+
+    assert set(store._leases) == {"busy"}

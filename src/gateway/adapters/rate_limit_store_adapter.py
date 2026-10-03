@@ -111,11 +111,18 @@ _LOCAL_PREFIX = "local:"
 
 
 class InMemoryRateLimitStore:
-    """Counts in this process, so each replica admits the full limit on its own."""
+    """Counts in this process, so each replica admits the full limit on its own.
+
+    Keys whose every lease has run out are dropped every ``_CLEANUP_INTERVAL``
+    acquires, so slots nobody released do not pile up.
+    """
+
+    _CLEANUP_INTERVAL = 1000
 
     def __init__(self) -> None:
         self._log = SlidingWindowLog()
         self._leases: defaultdict[str, dict[str, float]] = defaultdict(dict)
+        self._acquires = 0
 
     async def hit(self, key: str, limit: int, window_sec: float, cost: int = 1) -> RateLimitWindow:
         return self._log.hit(key, limit, window_sec, cost)
@@ -125,6 +132,11 @@ class InMemoryRateLimitStore:
 
     async def acquire(self, key: str, limit: int, lease_sec: float) -> str | None:
         now = time.monotonic()
+        self._acquires += 1
+        if self._acquires >= self._CLEANUP_INTERVAL:
+            self._acquires = 0
+            for stale in [k for k, slots in self._leases.items() if all(t <= now for t in slots.values())]:
+                del self._leases[stale]
         slots = self._leases[key]
         for lease in [lease for lease, expires_at in slots.items() if expires_at <= now]:
             del slots[lease]
