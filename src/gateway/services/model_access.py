@@ -135,11 +135,12 @@ def _known_prefix(config: GatewayConfig, prefix: str) -> bool:
     providers behind the configured search tools: ``/v1/search`` checks the same
     allow-list against its ``<provider>:<tool>`` key, so refusing to store that
     prefix would leave a restricted key permanently denied search with no way for
-    an operator to grant it.
+    an operator to grant it. The configured decision providers are accepted for
+    the same reason: ``/v1/decisions`` checks ``<provider>:<model>``.
     """
     if prefix in config.providers:
         return True
-    if prefix in config.search_tool_providers():
+    if prefix in config.search_tool_providers() or prefix in config.decision_providers:
         return True
     try:
         LLMProvider(prefix)

@@ -362,6 +362,34 @@ each requires an `api_key` or `api_base`. Provider options and request filters
 are covered in [Built-in tools](tools.md). A tool carrying an `api_key` must use
 an HTTPS `api_base`; a keyless local SearXNG endpoint may use HTTP.
 
+## Decision providers
+
+`decision_providers` configures the upstreams behind `POST /api/v1/decisions`. The
+key is the prefix callers write in `model`, so the entry below serves
+`typesafe:jev-latest`, `openrouter:typesafe/jev-1.13` and `local:openjev`:
+
+```yaml
+decision_providers:
+  typesafe:
+    api_key: ${TYPESAFE_API_KEY}
+  openrouter:
+    api_key: ${OPENROUTER_API_KEY}
+  local:
+    provider: llamacpp
+    api_base: "http://127.0.0.1:8080"
+```
+
+`provider` is one of `typesafe`, `openrouter` or `llamacpp`, and defaults to the
+key. TypeSafe and OpenRouter need an `api_key`, and their default `api_base` can be
+replaced with another https root. A `llamacpp` entry points at a `llama-server`
+running a decision model and needs an `api_base`; it may use plain http only when
+it has no `api_key`. `timeout` sets the seconds to wait for an answer (default 30).
+
+These entries are separate from `providers` because none of these upstreams serves
+chat: they never appear in `/api/v1/models` or provider health. Price a decision
+model like any other, as `<provider>:<model>` in `pricing`. Decisions are
+standalone-mode only.
+
 ## Mail
 
 Mail is optional. Invitations always return an accept link, and an invitee who

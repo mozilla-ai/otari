@@ -22,18 +22,21 @@ scaffolds record a rejection identically.
 
 from __future__ import annotations
 
+import json
 import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, Generic, TypeVar
+from typing import Annotated, Any, Generic, TypeVar
 
 from any_llm.exceptions import AnyLLMError
-from fastapi import HTTPException, Request, Response, status
+from fastapi import Depends, HTTPException, Request, Response, status
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.api.deps import get_config, get_db, get_log_writer
 from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes._pipeline import (
     _elapsed_ms,
@@ -47,7 +50,7 @@ from gateway.api.routes._pipeline import (
 from gateway.api.routes._platform import _classify_upstream_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import release_session
-from gateway.core.metered_pricing import quantize_cost
+from gateway.core.metered_pricing import billable_usage, price_billable_usage, quantize_cost
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.model_labeling import relabel_model
@@ -55,13 +58,21 @@ from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.models.usage import UsageLog
 from gateway.rate_limit import check_rate_limit
+from gateway.schemas.inference import DecisionRequest, DecisionResponse
 from gateway.services.budgets import (
     ZERO,
     BudgetScopeRequest,
     ReservationHandle,
+    estimate_cost,
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
+)
+from gateway.services.inference import (
+    DecisionProviderError,
+    UnknownDecisionProviderError,
+    request_decision,
+    resolve_decision_provider,
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
@@ -561,3 +572,254 @@ async def run_passthrough(
         relabel_model(result, resolved.alias)
 
     return PassthroughOutcome(result=result, resolved=resolved, headers=headers)
+
+
+DECISIONS_ENDPOINT = "/v1/decisions"
+"""The usage-log label for every decisions path. See chat.USAGE_ENDPOINT."""
+
+# An answer is a handful of tokens (one label, or a number), so the reservation
+# holds this many output tokens per question rather than a completion's default.
+_ESTIMATED_OUTPUT_TOKENS_PER_QUESTION = 32
+# An image costs the model a fixed token budget, not its base64 length, so the
+# estimate counts each one as this many characters of prompt (about 1024 tokens).
+_ESTIMATED_CHARS_PER_IMAGE = 4096
+
+_DECISION_INVALID_DETAIL = "The provider rejected the request as invalid"
+_DECISION_RATE_LIMITED_DETAIL = "The provider is rate limiting requests; retry with backoff"
+_DECISION_UNSUPPORTED_DETAIL = (
+    "The model cannot answer this request; it may not be a decision model or may not accept images"
+)
+
+
+def _decision_provider_error(exc: DecisionProviderError) -> HTTPException:
+    """Return the caller-facing status for an upstream failure, with no upstream text."""
+    if exc.status_code in (status.HTTP_400_BAD_REQUEST, status.HTTP_422_UNPROCESSABLE_CONTENT):
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_DECISION_INVALID_DETAIL)
+    # llama-server's answer to a model that is not a decision model, or to images it cannot read.
+    if exc.status_code == status.HTTP_501_NOT_IMPLEMENTED:
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_DECISION_UNSUPPORTED_DETAIL)
+    if exc.status_code == status.HTTP_429_TOO_MANY_REQUESTS:
+        return HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=_DECISION_RATE_LIMITED_DETAIL)
+    return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=PASSTHROUGH_PROVIDER_ERROR_DETAIL)
+
+
+async def run_decision(
+    *,
+    raw_request: Request,
+    response: Response,
+    request: DecisionRequest,
+    auth_result: tuple[APIKey | None, bool],
+    db: AsyncSession,
+    config: GatewayConfig,
+    log_writer: LogWriter,
+) -> DecisionResponse:
+    """Run the decisions scaffold: resolve, gate, reserve, call, log, settle.
+
+    The same steps as :func:`run_passthrough`, which cannot run them: it resolves the model
+    against the any-llm provider instances, and a decisions provider is a ``decision_providers``
+    entry. Billing is per token, priced from the ``<provider>:<model>`` rate when one is
+    configured, otherwise from the charge the provider reports, which only OpenRouter does.
+    """
+    started_at = time.monotonic()
+    api_key, _ = auth_result
+    api_key_id = api_key.id if api_key else None
+    budget_exempt = api_key is not None and api_key.exclude_from_budget
+    workspace_id = await resolve_workspace_id(db, api_key)
+    organization_id = await organization_for_workspace_id(db, workspace_id)
+
+    try:
+        user_id = resolve_passthrough_user_id(auth_result, request.user, reject_mismatch=config.reject_user_mismatch)
+    except HTTPException as exc:
+        # As in run_passthrough: only the mismatch has a user to attribute the refusal to.
+        if (
+            exc.status_code == status.HTTP_403_FORBIDDEN
+            and api_key is not None
+            and not await throttle_early_rejection(raw_request, str(api_key.user_id))
+        ):
+            await log_gateway_rejection(
+                db=db,
+                log_writer=log_writer,
+                api_key_id=api_key_id,
+                user_id=api_key.user_id,
+                model=request.model,
+                provider=None,
+                endpoint=DECISIONS_ENDPOINT,
+                detail=str(exc.detail),
+                status_code=exc.status_code,
+                started_at=started_at,
+            )
+        raise
+
+    rate_limit_info = await check_rate_limit(raw_request, user_id)
+
+    async def log_rejection(detail: str, *, row_model: str, row_provider: str | None, status_code: int) -> None:
+        await log_gateway_rejection(
+            db=db,
+            log_writer=log_writer,
+            api_key_id=api_key_id,
+            user_id=user_id,
+            model=row_model,
+            provider=row_provider,
+            endpoint=DECISIONS_ENDPOINT,
+            detail=detail,
+            status_code=status_code,
+            started_at=started_at,
+        )
+
+    try:
+        provider, model = resolve_decision_provider(config, request.model)
+    except UnknownDecisionProviderError as exc:
+        await log_rejection(str(exc), row_model=request.model, row_provider=None, status_code=400)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    key_allowlist = await resolve_request_allowlist(db, api_key)
+    if key_allowlist is not None and not is_model_allowed(key_allowlist, f"{provider.name}:{model}"):
+        not_allowed_detail = model_not_allowed_detail(request.model)
+        await log_rejection(not_allowed_detail, row_model=model, row_provider=provider.name, status_code=403)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
+
+    # A decisions model is not in the community pricing dataset, which could
+    # only produce a false match on the bare model name.
+    pricing = await find_model_pricing(db, provider.name, model, use_defaults=False, organization_id=organization_id)
+    questions = {name: question.model_dump(exclude_none=True) for name, question in request.questions.items()}
+    prompt_chars = (
+        len(json.dumps(request.state))
+        + len(json.dumps(questions))
+        + _ESTIMATED_CHARS_PER_IMAGE * len(request.images or ())
+    )
+    reservation = await reserve_budget(
+        db,
+        user_id,
+        estimate_cost(
+            pricing,
+            prompt_chars=prompt_chars,
+            max_output_tokens=None,
+            default_output_tokens=_ESTIMATED_OUTPUT_TOKENS_PER_QUESTION * len(questions),
+        ),
+        # Not the selector: ``model`` only drives reserve_budget's free-model
+        # shortcut, which splits it through any-llm (see search.py).
+        model=None,
+        strategy=config.budget_strategy,
+        counts_toward_budget=not budget_exempt,
+        scope=BudgetScopeRequest(api_key=api_key, provider_instance=provider.name),
+        organization_id=organization_id,
+    )
+    if not budget_exempt and pricing_required_but_missing(pricing, require_pricing=config.require_pricing):
+        await refund_reservation(db, reservation)
+        no_pricing_detail = no_pricing_error_detail(request.model)
+        await log_rejection(no_pricing_detail, row_model=model, row_provider=provider.name, status_code=402)
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=no_pricing_detail)
+
+    def usage_row(**outcome: Any) -> UsageLog:
+        return UsageLog(
+            id=str(uuid.uuid4()),
+            workspace_id=workspace_id,
+            api_key_id=api_key_id,
+            user_id=user_id,
+            timestamp=datetime.now(UTC),
+            model=model,
+            provider=provider.name,
+            endpoint=DECISIONS_ENDPOINT,
+            latency_ms=_elapsed_ms(started_at),
+            counts_toward_budget=not budget_exempt,
+            **outcome,
+        )
+
+    # As in run_passthrough: nothing else runs on the session before settlement.
+    await release_session(db)
+    track_request(
+        raw_request,
+        endpoint=DECISIONS_ENDPOINT,
+        model=model,
+        provider=provider.name,
+        user_id=user_id,
+        api_key_id=api_key_id,
+    )
+
+    body: dict[str, Any] = {"model": model, "state": request.state, "questions": questions}
+    if request.images:
+        body["images"] = request.images
+    try:
+        result = DecisionResponse.model_validate(await request_decision(provider, body))
+        input_tokens = result.usage.input_tokens if result.usage else 0
+        output_tokens = result.usage.output_tokens if result.usage else 0
+        row = usage_row(
+            status="success",
+            prompt_tokens=input_tokens,
+            completion_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+        )
+        cost: Decimal | None = None
+        if pricing is not None:
+            cost, row.billing_meters, row.pricing_breakdown = price_billable_usage(
+                pricing,
+                billable_usage(input_tokens=input_tokens, output_tokens=output_tokens, cache_tokens_included=True),
+            )
+        elif result.usage is not None and result.usage.cost is not None:
+            cost = quantize_cost(Decimal(str(result.usage.cost)))
+        row.cost = cost
+        await log_writer.put(row)
+        await reconcile_reservation(
+            db,
+            reservation,
+            cost if cost is not None else 0.0,
+            actual_tokens=input_tokens + output_tokens,
+        )
+    except DecisionProviderError as exc:
+        await log_writer.put(usage_row(status="error", error_message=str(exc), status_code=failure_status_code(exc)))
+        await refund_reservation(db, reservation)
+        logger.error("Decision failed for %s:%s: %s", provider.name, model, exc)
+        raise _decision_provider_error(exc) from exc
+    except ValidationError as exc:
+        # The error's own text quotes the upstream body, so only its size is kept.
+        detail = f"{provider.provider} decisions returned an answer with {exc.error_count()} invalid field(s)"
+        await log_writer.put(usage_row(status="error", error_message=detail, status_code=502))
+        await refund_reservation(db, reservation)
+        logger.error("Decision failed for %s:%s: %s", provider.name, model, detail)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=PASSTHROUGH_PROVIDER_ERROR_DETAIL) from exc
+    except BaseException:
+        # Cancellation or an unexpected error: the hold is released either way.
+        await refund_reservation(db, reservation)
+        raise
+
+    if rate_limit_info:
+        for header, value in rate_limit_headers(rate_limit_info).items():
+            response.headers[header] = value
+    return result
+
+
+@dataclass(frozen=True)
+class DecisionScaffold:
+    """:func:`run_decision`, bound to the request's session, so the route never names one."""
+
+    db: AsyncSession
+    config: GatewayConfig
+    log_writer: LogWriter
+
+    async def run(
+        self,
+        *,
+        raw_request: Request,
+        response: Response,
+        request: DecisionRequest,
+        auth_result: tuple[APIKey | None, bool],
+    ) -> DecisionResponse:
+        """Run the scaffold for one decisions request."""
+        return await run_decision(
+            raw_request=raw_request,
+            response=response,
+            request=request,
+            auth_result=auth_result,
+            db=self.db,
+            config=self.config,
+            log_writer=self.log_writer,
+        )
+
+
+def get_decision_scaffold(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    log_writer: Annotated[LogWriter, Depends(get_log_writer)],
+) -> DecisionScaffold:
+    """Build the decisions scaffold on the request's session."""
+    return DecisionScaffold(db=db, config=config, log_writer=log_writer)

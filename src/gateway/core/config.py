@@ -245,6 +245,61 @@ def validate_search_tool_entry(name: str, entry: Any) -> None:
         raise ValueError(msg)
 
 
+# Upstreams POST /api/v1/decisions can dispatch to. All take TypeSafe's
+# question-and-answer shape, which OpenRouter's alpha Decisions API and
+# llama-server's /v1/systemone adopted, and none is an any-llm provider, so they
+# are declared under ``decision_providers`` rather than ``providers``. Declared
+# here for the same reason as SEARCH_PROVIDERS.
+DECISION_PROVIDERS = ("typesafe", "openrouter", "llamacpp")
+# Self-hosted servers: no endpoint of their own to default to, and normally no key.
+DECISION_PROVIDERS_SELF_HOSTED = ("llamacpp",)
+
+
+def validate_decision_provider_entry(name: str, entry: Any) -> None:
+    """Validate one ``decision_providers`` entry, raising ``ValueError`` on any problem.
+
+    The name is the selector prefix a caller writes (``typesafe:jev-latest``),
+    so it follows the rules of a ``providers:`` instance name.
+    """
+    if not name or ":" in name or "/" in name:
+        msg = f"decision provider name '{name}' must be non-empty and must not contain ':' or '/'."
+        raise ValueError(msg)
+    if name in RESERVED_PROVIDER_INSTANCE_NAMES:
+        msg = f"decision provider name '{name}' is reserved."
+        raise ValueError(msg)
+    if not isinstance(entry, dict):
+        msg = f"decision_providers.{name} must be a mapping."
+        raise ValueError(msg)
+    provider = entry.get("provider") or name
+    if provider not in DECISION_PROVIDERS:
+        msg = (
+            f"decision_providers.{name}.provider '{provider}' is not a supported decision provider "
+            f"(one of: {', '.join(DECISION_PROVIDERS)})."
+        )
+        raise ValueError(msg)
+    self_hosted = provider in DECISION_PROVIDERS_SELF_HOSTED
+    api_key, api_base = entry.get("api_key"), entry.get("api_base")
+    if not api_key and not self_hosted:
+        msg = f"decision_providers.{name}.api_key is required for provider '{provider}'."
+        raise ValueError(msg)
+    if not api_base and self_hosted:
+        msg = f"decision_providers.{name}.api_base is required for provider '{provider}'."
+        raise ValueError(msg)
+    if api_base is not None:
+        try:
+            scheme = urlsplit(str(api_base).strip()).scheme.lower()
+        except ValueError:
+            scheme = ""
+        # Plain http only for a keyless self-hosted server, such as a llama-server on the same host.
+        if scheme != "https" and not (scheme == "http" and self_hosted and not api_key):
+            msg = f"decision_providers.{name}.api_base must use https when it carries an api_key."
+            raise ValueError(msg)
+    timeout = entry.get("timeout")
+    if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0):
+        msg = f"decision_providers.{name}.timeout must be a number of seconds greater than 0."
+        raise ValueError(msg)
+
+
 class _NonScalarField(Exception):
     """Raised when a config field is not a simple scalar settable from a plain env string."""
 
@@ -848,6 +903,16 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             "store is scanned linearly, so this also bounds per-request routing latency. 0 disables "
             "eviction rather than storing nothing, and the per-request read falls back to the default "
             "bound, so the store grows without limit while each decision stays bounded."
+        ),
+    )
+    decision_providers: Annotated[dict[str, dict[str, Any]], OMITTED] = Field(
+        default_factory=dict,
+        description=(
+            "Upstreams served by POST /api/v1/decisions, keyed by the selector prefix callers "
+            "write ('typesafe:jev-latest'). Each entry may declare a 'provider' (one of: typesafe, "
+            "openrouter, llamacpp; defaults to the key), an 'api_key' (required except for llamacpp), "
+            "an 'api_base' (required for llamacpp; https whenever a key is set), and a 'timeout' "
+            "in seconds. Standalone-mode only."
         ),
     )
     search_tools: Annotated[dict[str, dict[str, Any]], OMITTED] = Field(
@@ -2121,6 +2186,11 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             if provider in SEARCH_PROVIDERS_REQUIRING_API_BASE and not entry.get("api_base"):
                 validate_search_tool_transport(name, self.web_search_url, entry.get("api_key"))
 
+    def validate_decision_providers(self) -> None:
+        """Validate the ``decision_providers`` map at startup so misconfig fails fast."""
+        for name, entry in self.decision_providers.items():
+            validate_decision_provider_entry(name, entry)
+
     @model_validator(mode="after")
     def _validate_database_timeout_ordering(self) -> "GatewayConfig":
         """Keep the server-side statement timeout behind the client-side one.
@@ -2648,6 +2718,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.validate_aliases()
     config.validate_routing_policies()
     config.validate_search_tools()
+    config.validate_decision_providers()
     config.validate_mail_transport()
     config.validate_webauthn_relying_party()
     config.warn_about_half_configured_oauth()

@@ -42,6 +42,7 @@ _SETTING_NAMES = frozenset(
         "db_pool_size",
         "db_pool_timeout",
         "db_statement_timeout_ms",
+        "decision_providers",
         "default_pricing",
         "docs_url",
         "email_verification_expiry_hours",

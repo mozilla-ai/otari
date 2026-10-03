@@ -1801,6 +1801,77 @@
     {
       "item": [
         {
+          "name": "Create Decision",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"typesafe:jev-latest\",\n  \"questions\": {\n    \"urgency\": {\n      \"instructions\": \"Does this message express urgency?\",\n      \"type\": \"noul\"\n    }\n  },\n  \"state\": \"The Stripe integration has failed for 3 days and I'm losing sales.\"\n}"
+            },
+            "description": "Answer typed questions (noul, choice, score) about a state.\n\n``model`` is ``<provider>:<model>``, where the provider is a ``decision_providers``\nentry, for example ``typesafe:jev-latest`` or ``openrouter:typesafe/jev-1.13``.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user; a ``user`` naming a\n  different user is rejected with 403 unless mismatch rejection is off.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "decisions"
+              ],
+              "raw": "{{baseUrl}}/api/v1/decisions"
+            }
+          }
+        },
+        {
+          "name": "Create Systemone Decision",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"typesafe:jev-latest\",\n  \"questions\": {\n    \"urgency\": {\n      \"instructions\": \"Does this message express urgency?\",\n      \"type\": \"noul\"\n    }\n  },\n  \"state\": \"The Stripe integration has failed for 3 days and I'm losing sales.\"\n}"
+            },
+            "description": "Answer typed questions at the path TypeSafe's SDK and llama-server use.\n\nIdentical to ``POST /api/v1/decisions``; point the client's base URL at the gateway's ``/api``.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "systemone"
+              ],
+              "raw": "{{baseUrl}}/api/v1/systemone"
+            }
+          }
+        }
+      ],
+      "name": "decisions"
+    },
+    {
+      "item": [
+        {
           "name": "Create Embedding",
           "request": {
             "body": {

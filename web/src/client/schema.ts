@@ -1063,6 +1063,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Decision
+         * @description Answer typed questions (noul, choice, score) about a state.
+         *
+         *     ``model`` is ``<provider>:<model>``, where the provider is a ``decision_providers``
+         *     entry, for example ``typesafe:jev-latest`` or ``openrouter:typesafe/jev-1.13``.
+         *
+         *     Authentication modes:
+         *     - Master key: the ``user`` field is required and may name any existing user.
+         *     - API key: usage and spend bind to the key's own user; a ``user`` naming a
+         *       different user is rejected with 403 unless mismatch rejection is off.
+         */
+        post: operations["decisions-create_decision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/embeddings": {
         parameters: {
             query?: never;
@@ -4402,6 +4430,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/systemone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Systemone Decision
+         * @description Answer typed questions at the path TypeSafe's SDK and llama-server use.
+         *
+         *     Identical to ``POST /api/v1/decisions``; point the client's base URL at the gateway's ``/api``.
+         */
+        post: operations["decisions-create_systemone_decision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tool-settings": {
         parameters: {
             query?: never;
@@ -7158,6 +7208,32 @@ export interface components {
             outcome: "pass" | "fail" | "error";
         };
         /**
+         * ChoiceQuestion
+         * @description A question answered with one of the named options.
+         */
+        ChoiceQuestion: {
+            /**
+             * Criteria
+             * @description Option name to what it means
+             */
+            criteria: {
+                [key: string]: string | {
+                    [key: string]: unknown;
+                } | unknown[] | null;
+            };
+            /** Instructions */
+            instructions: string | {
+                [key: string]: unknown;
+            } | unknown[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "choice";
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * CodeExecutor
          * @description Who runs the code a request's code-execution tool asks for.
          *
@@ -7662,6 +7738,124 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["PricingResponse"][];
+        };
+        /**
+         * DecisionAnswer
+         * @description One question's answer. Which value field is set follows ``type``.
+         */
+        DecisionAnswer: {
+            /**
+             * Choice
+             * @description The chosen option, for a choice question
+             */
+            choice?: string | null;
+            /** Confidence */
+            confidence?: number | null;
+            /** Legend */
+            legend?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Noul
+             * @description Probability of yes, for a noul question
+             */
+            noul?: number | null;
+            /** Probabilities */
+            probabilities?: {
+                [key: string]: number;
+            } | null;
+            /**
+             * Score
+             * @description The level, for a score question
+             */
+            score?: number | null;
+            /** Type */
+            type: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * DecisionRequest
+         * @description A decisions request: typed questions to answer about one state.
+         * @example {
+         *       "model": "typesafe:jev-latest",
+         *       "questions": {
+         *         "urgency": {
+         *           "instructions": "Does this message express urgency?",
+         *           "type": "noul"
+         *         }
+         *       },
+         *       "state": "The Stripe integration has failed for 3 days and I'm losing sales."
+         *     }
+         */
+        DecisionRequest: {
+            /**
+             * Images
+             * @description Images for a vision decision model, as data URLs (data:image/...;base64,...). An extension llama-server supports; a provider that does not refuses the request.
+             */
+            images?: string[] | null;
+            /**
+             * Model
+             * @description Decision provider and model, e.g. 'typesafe:jev-latest'
+             */
+            model: string;
+            /**
+             * Questions
+             * @description Questions, keyed by answer name
+             */
+            questions: {
+                [key: string]: components["schemas"]["NoulQuestion"] | components["schemas"]["ChoiceQuestion"] | components["schemas"]["ScoreQuestion"];
+            };
+            /**
+             * State
+             * @description The content the questions are about
+             */
+            state: string | {
+                [key: string]: unknown;
+            } | unknown[];
+            /**
+             * User
+             * @description User ID for usage attribution; not sent upstream
+             */
+            user?: string | null;
+        };
+        /**
+         * DecisionResponse
+         * @description The provider's answers, keyed like the request's questions.
+         */
+        DecisionResponse: {
+            /** Answers */
+            answers: {
+                [key: string]: components["schemas"]["DecisionAnswer"];
+            };
+            /** Model */
+            model: string;
+            usage?: components["schemas"]["DecisionUsage"] | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * DecisionUsage
+         * @description Token counts the provider reported, plus its own cost where it reports one.
+         */
+        DecisionUsage: {
+            /**
+             * Cost
+             * @description The provider's own charge in USD, when it reports one
+             */
+            cost?: number | null;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+        } & {
+            [key: string]: unknown;
         };
         /**
          * DeploymentAdminAccessPublic
@@ -9336,6 +9530,40 @@ export interface components {
             provider_raw?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /**
+         * NoulCriteria
+         * @description What a yes and a no each mean, for a ``noul`` question.
+         */
+        NoulCriteria: {
+            /** False */
+            false?: string | {
+                [key: string]: unknown;
+            } | unknown[] | null;
+            /** True */
+            true?: string | {
+                [key: string]: unknown;
+            } | unknown[] | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * NoulQuestion
+         * @description A yes-or-no question, answered with the probability of yes.
+         */
+        NoulQuestion: {
+            criteria?: components["schemas"]["NoulCriteria"] | null;
+            /** Instructions */
+            instructions: string | {
+                [key: string]: unknown;
+            } | unknown[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "noul";
+        } & {
+            [key: string]: unknown;
         };
         /**
          * OAuthCallbackRequest
@@ -11968,6 +12196,30 @@ export interface components {
             token_limit: number | null;
             /** Updated At */
             updated_at: string;
+        };
+        /**
+         * ScoreQuestion
+         * @description A question answered with a level on an ordered scale.
+         */
+        ScoreQuestion: {
+            /**
+             * Criteria
+             * @description Level descriptions, lowest first
+             */
+            criteria: (string | {
+                [key: string]: unknown;
+            } | unknown[])[];
+            /** Instructions */
+            instructions: string | {
+                [key: string]: unknown;
+            } | unknown[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "score";
+        } & {
+            [key: string]: unknown;
         };
         /**
          * ScoredExample
@@ -15615,6 +15867,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "decisions-create_decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DecisionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -21094,6 +21379,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RotateMasterKeyResponse"];
+                };
+            };
+        };
+    };
+    "decisions-create_systemone_decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DecisionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

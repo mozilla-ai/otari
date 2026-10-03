@@ -43,7 +43,7 @@ from gateway.services.code_execution.container_sweeper import run_sandbox_contai
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.files import FileBackends, run_file_sweeper
-from gateway.services.inference import run_idempotency_sweeper
+from gateway.services.inference import close_decision_client, run_idempotency_sweeper
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
 from gateway.services.model_catalog_service import (
@@ -675,9 +675,11 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # nothing to stop, but the refreshers above still needed cancelling.
             if log_writer_started:
                 await log_writer.stop()
-            # POST /api/v1/search dispatches on one pooled client for the process, so
-            # shutdown owns closing it. A no-op when no search was ever served.
+            # POST /api/v1/search and /api/v1/decisions each dispatch on one pooled
+            # client for the process, so shutdown owns closing them. Each is a no-op
+            # when that endpoint was never served.
             await close_search_client()
+            await close_decision_client()
             rate_limiter: UserRateLimiter | None = getattr(app.state, "rate_limiter", None)
             if rate_limiter is not None:
                 await rate_limiter.aclose()

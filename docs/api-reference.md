@@ -60,7 +60,7 @@ Otari implements three completion surfaces:
 - `POST /api/v1/responses`, OpenAI Responses
 
 Standalone mode also serves embeddings, images, audio, files, batches,
-moderations, rerank, and search. Provider support differs by endpoint, so use
+moderations, rerank, search, and decisions. Provider support differs by endpoint, so use
 `GET /api/v1/models` and the OpenAPI document for the deployment you are calling.
 
 ### Request ID and inline cost
@@ -145,6 +145,46 @@ model request searches during a completion. Both are described in
 
 Search-tool management lives under `/api/v1/search-tools`. The generated OpenAPI
 document describes the supported providers, filters, and management schemas.
+
+## Decisions
+
+`POST /api/v1/decisions` answers typed questions about a piece of content with
+probabilities rather than generated text: `noul` (the probability of yes),
+`choice` (one of the named options) and `score` (a level on an ordered scale).
+The body is TypeSafe's System One shape, which OpenRouter's alpha Decisions API
+and llama-server also take:
+
+```json
+{
+  "model": "typesafe:jev-latest",
+  "state": "I've been trying to connect Stripe for 3 days and I'm losing sales.",
+  "questions": {
+    "urgency": {"type": "noul", "instructions": "Does this message express urgency?"},
+    "team": {
+      "type": "choice",
+      "instructions": "Which team should handle this?",
+      "criteria": {"billing": null, "technical": "Integrations and outages"}
+    }
+  }
+}
+```
+
+`model` is `<provider>:<model>`, where the provider is an entry under
+[`decision_providers`](configuration.md#decision-providers). The answer comes back
+as the provider returned it, keyed like the questions, with `probabilities`,
+`confidence` and `usage`. `images` takes data URLs for a vision decision model
+served by llama-server; other providers refuse it.
+
+`POST /api/v1/systemone` serves the same request at the path TypeSafe's SDK and
+llama-server use, so a client written for either works against Otari with its
+base URL set to `https://<otari>/api`.
+
+A decision is billed like a completion: the `<provider>:<model>` rate prices the
+reported tokens, the provider's own reported cost is used when no rate is set
+(only OpenRouter reports one), and it is subject to budgets, key allow-lists and
+`require_pricing`. A provider's refusal of the request (400, 422, or llama-server's
+501 for a model that cannot answer it) returns 400, its rate limit returns 429, and
+any other failure returns 502.
 
 ## Routing policies
 
