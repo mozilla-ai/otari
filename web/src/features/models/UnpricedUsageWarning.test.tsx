@@ -199,6 +199,26 @@ describe("UnpricedUsageWarning", () => {
     expect(screen.queryByText(/had no model price/)).not.toBeInTheDocument()
   })
 
+  it("still warns when the context read fails, as every operator gate does", async () => {
+    // A failed read cannot say who is asking, and withholding the banner would
+    // hide unbilled traffic from the operator it is for (otari#876). The server
+    // refuses the read to anyone else.
+    vi.spyOn(apiClient, "apiFetch").mockImplementation(async (path: string) => {
+      if (path === "/organizations/me") throw new Error("context exploded")
+      if (path.startsWith("/usage/summary?"))
+        return summary(2, [modelRow("gemini-3.7-flash", 2)]) as never
+      if (path.startsWith("/pricing?")) return [] as never
+      throw new Error(`unexpected request: ${path}`)
+    })
+    renderBanner()
+
+    expect(
+      await screen.findByText(
+        "2 requests in the last 24 hours had no model price",
+      ),
+    ).toBeInTheDocument()
+  })
+
   it("drops a model priced since its requests were logged", async () => {
     // Pricing a model leaves its logged rows uncosted, so the summary still
     // counts them; the banner must not keep asking for that price.

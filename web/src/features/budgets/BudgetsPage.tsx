@@ -36,7 +36,6 @@ import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { SpendMeter, spendState } from "@/design-system/metrics/SpendMeter"
 import { Segmented } from "@/design-system/navigation/Segmented"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
-import { isDeploymentOperator } from "@/features/organization/roles"
 import { UserMultiSelect } from "@/features/users/UserMultiSelect"
 import { aliasesByUserId, userDisplay } from "@/features/users/userDisplay"
 import {
@@ -46,7 +45,10 @@ import {
   useDeleteBudget,
   useUpdateBudget,
 } from "@/shared/api/budgets"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import {
+  useDeploymentOperator,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
 import { useUpdateUser, useUsers } from "@/shared/api/users"
 import {
   useAllWorkspaceBudgetDefaults,
@@ -1232,16 +1234,16 @@ function CreateBudgetDialog({
  */
 export function BudgetsPage() {
   const organization = useOrganizationContext()
+  const { answer, isSettled } = useDeploymentOperator()
 
-  if (organization.isPending && !organization.data) {
+  if (!isSettled) {
     return <PageLoading label="Loading spend and budgets…" />
   }
-  // Fails towards the operator page on an errored context, matching what the
-  // rail does with this row: it is the page that was here before, its reads say
-  // in their own words when they are refused, and an admin seeing that is a
-  // worse-looking version of a page they can still reach, where the reverse
-  // would hide the deployment's budgets from the one caller who owns them.
-  if (organization.data && !isDeploymentOperator(organization.data)) {
+  // An errored context lands on the operator page, as every operator gate does
+  // (`useDeploymentOperator`): its reads say in their own words when they are
+  // refused, where the reverse would hide the deployment's budgets from the one
+  // caller who owns them.
+  if (answer === "not-operator" && organization.data) {
     return <OrganizationBudgetsPage organization={organization.data} />
   }
   return <DeploymentBudgetsPage />

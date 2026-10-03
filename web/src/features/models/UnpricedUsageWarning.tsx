@@ -2,8 +2,7 @@ import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { Button } from "@/design-system/actions/Button"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
-import { isDeploymentOperator } from "@/features/organization/roles"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import { useDeploymentOperator } from "@/shared/api/organizations"
 import { usePricing } from "@/shared/api/pricing"
 import { useUnpricedUsage } from "@/shared/api/usage"
 import { formatNumber } from "@/shared/helpers/format"
@@ -31,8 +30,7 @@ function isPriced(model: string, pricedKeys: Set<string>): boolean {
 // "Price this model". Deployment-operator-only, because a price is a
 // deployment-wide write. Dismissible per tab.
 export function UnpricedUsageWarning() {
-  const organization = useOrganizationContext()
-  const isOperator = isDeploymentOperator(organization.data)
+  const { isOperator } = useDeploymentOperator()
   const { selected: workspace } = useSelectedWorkspace()
   const unpriced = useUnpricedUsage(
     DAY_S,

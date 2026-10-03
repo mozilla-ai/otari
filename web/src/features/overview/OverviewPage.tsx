@@ -18,7 +18,7 @@ import { SpendMeter } from "@/design-system/metrics/SpendMeter"
 import { TrendChip } from "@/design-system/metrics/TrendChip"
 import { scopeLabel } from "@/features/budgets/organizationBudget"
 import { SetupGuide } from "@/features/onboarding/SetupGuide"
-import { canManage, isDeploymentOperator } from "@/features/organization/roles"
+import { canManage } from "@/features/organization/roles"
 import {
   allocationStrip,
   type BudgetHealth,
@@ -26,7 +26,10 @@ import {
   providerHealthStatus,
 } from "@/features/overview/overview"
 import { useModels } from "@/shared/api/models"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import {
+  useDeploymentOperator,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
 import { useOverviewSummary } from "@/shared/api/overview"
 import { useProviderHealth, useProviders } from "@/shared/api/providers"
 import {
@@ -331,24 +334,20 @@ function UsageKpiCells({
  * neighbor and each query happy with its own. It also costs no request, since
  * the shell reads this context before it paints.
  *
- * So it fails toward the scoped page, the direction the hooks behind those tiles
- * already fail in: the narrower surface understates rather than refusing, and
- * reports its own error where this page can show it. An errored context is an
- * answer, not a wait, for `useUsageScope`'s reason: holding the page on a
- * loading state that no retry clears renders nothing at all.
+ * So an errored context lands on the operator page, as it does for the usage
+ * hooks behind its tiles and for every other operator gate
+ * (`useDeploymentOperator`): its panels report their own refusals, where the
+ * reverse would hide the deployment's state from the one caller who owns it.
+ * An errored context is an answer, not a wait: holding the page on a loading
+ * state that no retry clears renders nothing at all.
  */
 export function OverviewIndex() {
-  const context = useOrganizationContext()
+  const { answer, isSettled } = useDeploymentOperator()
 
-  // `isFetched`, not `isPending`: a query that errored with no data goes back to
-  // pending on its next fetch, and the page below this line mounts a second
-  // observer of the same context (the usage hooks), whose mount is what asks for
-  // that fetch. Reading the transient state would swing the page back to this
-  // spinner, unmount the observer, and start the round again forever.
-  if (!context.isFetched) {
+  if (!isSettled) {
     return <PageLoading />
   }
-  if (!isDeploymentOperator(context.data)) {
+  if (answer === "not-operator") {
     return <OrganizationOverview />
   }
   return <OperatorOverviewIndex />
@@ -368,7 +367,7 @@ export function OverviewIndex() {
  *
  * Two things the operator page has are deliberately absent. The attention strip
  * reads provider health and the deployment's budgets, neither of which is this
- * caller's to see. And there is no `isDeploymentOperator` anywhere below this
+ * caller's to see. And there is no `useDeploymentOperator` anywhere below this
  * line: this *is* the non-operator branch, so asking again is how otari-ai#2080
  * happened.
  */

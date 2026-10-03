@@ -53,6 +53,7 @@ import {
 } from "@/shared/api/budgets"
 import {
   useBulkInviteOrganizationMembers,
+  useDeploymentOperator,
   useInviteOrganizationMember,
   useOrganizationContext,
   useOrganizationMembersPage,
@@ -76,7 +77,6 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 import {
   asMembershipRole,
   canManage,
-  isDeploymentOperator,
   MEMBERSHIP_ROLES,
   memberLabel,
   memberRowKey,
@@ -812,7 +812,7 @@ export function OrganizationMembersPage() {
   // (otari#838). What those reads feed is withheld with them rather than left
   // rendering an em dash, which on this table cannot be told apart from "this
   // member has no gateway identity yet".
-  const isOperator = isDeploymentOperator(context.data)
+  const { isOperator } = useDeploymentOperator()
   const updateUser = useUpdateUser()
   // The roster row carries where its member is and what they may spend there,
   // and the operator-only spend figures with it (otari#1381). The page used to

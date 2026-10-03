@@ -16,8 +16,7 @@
 
 import { useMemo } from "react"
 
-import { isDeploymentOperator } from "@/features/organization/roles"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import { useDeploymentOperator } from "@/shared/api/organizations"
 import { useSurfaces } from "@/shared/hooks/useDeployment"
 import { useEntitlements } from "@/shared/hooks/useEntitlements"
 
@@ -50,13 +49,10 @@ export function useNavVisibility(): (item: NavItem) => boolean {
   // its 404 could not become a second reading of `surfaces`; this read is not
   // that request, and each operator-only row still declares the surface it
   // needs, which `isRouteVisible` composes below.
-  const organization = useOrganizationContext()
-  // Through `roles.isDeploymentOperator` rather than reading the field, so the
-  // client keeps one spelling of the predicate for the same reason the server
-  // does: it already requires an explicit `true`, so an older gateway that omits
-  // the field reads as not an operator rather than as an answer.
-  const isOperator = isDeploymentOperator(organization.data)
-  const answerUnavailable = organization.isError
+  //
+  // Through `useDeploymentOperator`, the one answer the pages read too, so a row
+  // and the page behind it cannot disagree about a failed read (otari#876).
+  const { answer, isOperator } = useDeploymentOperator()
 
   return useMemo(() => {
     // Both values wait for an explicit yes, so neither kind of row is shown and
@@ -71,12 +67,12 @@ export function useNavVisibility(): (item: NavItem) => boolean {
         return true
       }
       return item.operatorOnly === "unlisted"
-        ? isOperator
-        : isOperator || answerUnavailable
+        ? answer === "operator"
+        : isOperator
     }
 
     return (item: NavItem) => isRouteVisible(item) && allowedByCaller(item)
-  }, [isRouteVisible, isOperator, answerUnavailable])
+  }, [isRouteVisible, answer, isOperator])
 }
 
 /**

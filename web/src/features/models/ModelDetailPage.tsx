@@ -25,9 +25,12 @@ import {
   rememberModel,
 } from "@/features/models/publicCatalog"
 import { UseModelDrawer } from "@/features/models/UseModelDrawer"
-import { canManage, isDeploymentOperator } from "@/features/organization/roles"
+import { canManage } from "@/features/organization/roles"
 import { useCatalogModel } from "@/shared/api/models"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import {
+  useDeploymentOperator,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
 import { ProviderMark } from "@/shared/components/marks/BrandMark"
 import {
   formatContext,
@@ -352,7 +355,8 @@ export function ModelDetailView({
   // Not a pricing authority here: rates are set per model on Providers, which
   // answers to the organization role. It decides the two hints below that point
   // at deployment-wide pages.
-  const isOperator = !publicView && isDeploymentOperator(organization.data)
+  const operator = useDeploymentOperator(!publicView)
+  const isOperator = !publicView && operator.isOperator
   // Includes an operator: on a standalone deployment they are also the single
   // organization's owner, and excluding them would leave the one caller who can
   // set a rate without the link to set it.
