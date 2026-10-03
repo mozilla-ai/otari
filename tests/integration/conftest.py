@@ -33,9 +33,8 @@ from gateway.api.deps import set_config
 from gateway.container import build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.db import get_db
-from gateway.main import create_app
-from gateway.ports.rate_limit_store_port import RateLimitStorePort
-from gateway.rate_limit import RateLimiter, UserRateLimiter
+from gateway.main import create_app, install_rate_limits
+from gateway.rate_limit import RateLimiter
 from gateway.services.feedback import new_feedback_rate_limiter
 
 MODEL_NAME = "gemini:gemini-2.5-flash"
@@ -346,11 +345,7 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
     )
     app.state.feedback_rate_limiter = new_feedback_rate_limiter() if config.feedback_enabled else None
     app.state.container = build_container(config.bootstrap, config=config)
-    app.state.rate_limiter = (
-        UserRateLimiter(app.state.container.resolve(RateLimitStorePort, None), config.rate_limit_rpm)
-        if config.rate_limit_rpm is not None
-        else None
-    )
+    install_rate_limits(app, config)
 
 
 def dispose_async_engine(async_engine: AsyncEngine) -> None:

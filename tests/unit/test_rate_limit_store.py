@@ -106,10 +106,10 @@ async def test_unreachable_redis_is_not_retried_on_every_request() -> None:
 
 
 @pytest.mark.asyncio
-async def test_closing_the_limiter_closes_the_client() -> None:
+async def test_closing_the_store_closes_the_client() -> None:
     client = _FailingRedis()
 
-    await UserRateLimiter(RedisRateLimitStore(client), 1).aclose()  # type: ignore[arg-type]
+    await RedisRateLimitStore(client).aclose()  # type: ignore[arg-type]
 
     assert client.closed
 

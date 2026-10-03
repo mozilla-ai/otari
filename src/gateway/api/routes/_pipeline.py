@@ -161,7 +161,7 @@ from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
-from gateway.rate_limit import RateLimitInfo, check_rate_limit
+from gateway.rate_limit import RateLimitGrant, RateLimitInfo, admit_rate_limit_rules, check_rate_limit
 from gateway.services.budgets import (
     ZERO,
     BudgetScopeRequest,
@@ -988,6 +988,7 @@ class RequestContext:
         code_execution_policy: ResolvedCodeExecutionPolicy | None = None,
         code_execution_policy_loaded: bool = False,
         request_id: str | None = None,
+        rate_limit_grant: RateLimitGrant | None = None,
     ) -> None:
         self.config = config
         # Sent to the client as ``Otari-Request-ID``: the platform's id in hybrid
@@ -1018,6 +1019,8 @@ class RequestContext:
         # organization-scoped provider keys on its real dispatch attempt.
         self.workspace_id = workspace_id
         self.rate_limit_info = rate_limit_info
+        # What the ``rate_limits`` rules hold for this request, settled where its reservation is.
+        self.rate_limit_grant = rate_limit_grant
         self.reservation = reservation
         # USD already written onto a failure row for gateway-run tool calls. A
         # request whose plan is exhausted still owes for the searches it ran, and
@@ -2156,6 +2159,13 @@ async def resolve_request_context(
             max_output_tokens=estimate_inputs.max_output_tokens,
             default_output_tokens=estimate_inputs.default_output_tokens,
         )
+        # Before the reservation, so a request the rules refuse holds no budget to refund.
+        rate_limit_grant = await admit_rate_limit_rules(
+            raw_request,
+            key_id=api_key.id if api_key is not None else None,
+            user_id=user_id,
+            estimated_tokens=estimated_tokens,
+        )
         # A key flagged exclude_from_budget logs its cost and is never reserved, reconciled into users.spend, or gated.
         # A master-key caller has no API key and stays on the enforced path.
         budget_exempt = api_key is not None and api_key.exclude_from_budget
@@ -2370,6 +2380,7 @@ async def resolve_request_context(
         api_key_id=api_key_id,
         user_id=user_id,
         rate_limit_info=rate_limit_info,
+        rate_limit_grant=rate_limit_grant,
         reservation=reservation,
         started_at=started_at,
         workspace_id=workspace_id,
@@ -4071,6 +4082,8 @@ async def release_reservation(ctx: RequestContext) -> None:
     spend, which would leave the charge visible in the activity log and missing from
     the budget it should have consumed.
     """
+    if ctx.rate_limit_grant is not None:
+        await ctx.rate_limit_grant.settle(0)
     if ctx.db is None or ctx.reservation is None:
         return
     if ctx.tool_charge:
@@ -4218,6 +4231,8 @@ async def _log_failure_and_refund(
     *without* writing spend, which would leave the cost visible on the row and
     absent from ``users.spend``.
     """
+    if ctx.rate_limit_grant is not None:
+        await ctx.rate_limit_grant.settle(0)
     if ctx.db is None:
         return
     cost = await log_usage(
@@ -4608,6 +4623,7 @@ def build_streaming_response(
     tool_tally: ToolUsageTally | None = None,
     workspace_id: uuid.UUID | None = None,
     extra_headers: dict[str, str] | None = None,
+    rate_limit_grant: RateLimitGrant | None = None,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
 
@@ -4657,6 +4673,8 @@ def build_streaming_response(
         return chunk_usage
 
     async def _on_complete(usage_data: CompletionUsage) -> SettledCost | None:
+        if rate_limit_grant is not None:
+            await rate_limit_grant.settle(_settled_tokens(usage_data))
         if platform_active:
             assert platform_correlation_id is not None
             return await _await_usage_report(
@@ -5112,6 +5130,7 @@ async def run_single_attempt_stream(
         user_id=ctx.user_id,
         rate_limit_info=ctx.rate_limit_info,
         reservation=ctx.reservation,
+        rate_limit_grant=ctx.rate_limit_grant,
         started_at=ctx.started_at,
         workspace_id=ctx.workspace_id,
         platform_correlation_id=platform_correlation_id,
@@ -5770,6 +5789,8 @@ async def run_standalone_non_stream(
             response.headers[key] = value
         if ctx.db is not None:
             usage_data = adapter.extract_usage(result)
+            if ctx.rate_limit_grant is not None:
+                await ctx.rate_limit_grant.settle(_settled_tokens(usage_data))
             logged = LoggedUsage(None, None)
             # A request whose provider reported no usage still owes for the tool
             # calls it ran, so a non-empty tally forces the row that

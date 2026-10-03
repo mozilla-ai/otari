@@ -110,6 +110,7 @@ _SETTING_NAMES = frozenset(
         "rate_limit_redis_url",
         "rate_limit_rpm",
         "rate_limit_store",
+        "rate_limits",
         "reject_user_mismatch",
         "require_pricing",
         "router_alpha",

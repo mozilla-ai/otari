@@ -13,7 +13,7 @@ import yaml
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, PrivateAttr, ValidationInfo, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gateway.core.addresses import normalized_address
@@ -344,6 +344,49 @@ def provider_credential_env_names(provider_type: str) -> tuple[str, ...] | None:
     return tuple(candidate for candidate in candidates if candidate)
 
 
+class RateLimitRule(BaseModel):
+    """One limit from ``rate_limits``, counted separately for each deployment, API key or user.
+
+    ``per: key`` counts each API key on its own; a request with no key (the
+    master key, a dashboard session) is not limited by it. ``per: user`` counts
+    the user a request is billed to, so a service key's end users each get their
+    own count. ``per: deployment`` is one count shared by every request.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        pattern=r"^[A-Za-z0-9_.-]+$",
+        description="Names the rule in a 429's detail and in the counter's key. Unique across rate_limits.",
+    )
+    per: Literal["deployment", "key", "user"] = Field(description="What one count is shared by.")
+    rpm: int | None = Field(default=None, ge=1, description="Requests per minute.")
+    tpm: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Tokens per minute. A request is admitted on its estimate (prompt plus max output, or "
+            "budget_estimate_default_output_tokens) and charged what it used once it completes."
+        ),
+    )
+    max_concurrent: int | None = Field(default=None, ge=1, description="Requests in flight at once.")
+    lease_sec: float = Field(
+        default=900.0,
+        gt=0,
+        description=(
+            "How long a max_concurrent slot is held at most. A slot is given back when its response "
+            "ends; this bounds what a process that dies mid-request keeps."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _requires_a_limit(self) -> "RateLimitRule":
+        if self.rpm is None and self.tpm is None and self.max_concurrent is None:
+            msg = f"rate limit rule '{self.name}' sets none of rpm, tpm or max_concurrent"
+            raise ValueError(msg)
+        return self
+
+
 class ModelCapabilityConfig(BaseModel):
     """Per-model multimodal capability override.
 
@@ -559,6 +602,14 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
         description=(
             "Redis URL for the 'redis' rate-limit store, e.g. 'redis://redis:6379/0' or "
             "'rediss://user:password@host:6380/0'. Required when rate_limit_store is 'redis'."
+        ),
+    )
+    rate_limits: Annotated[list[RateLimitRule], OMITTED] = Field(
+        default_factory=list,
+        description=(
+            "Limits on requests per minute, tokens per minute and requests in flight, each counted "
+            "per deployment, per API key or per user, in rate_limit_store. Applies to chat "
+            "completions, messages and responses."
         ),
     )
     dashboard_login_rate_limit_per_minute: Annotated[int | None, Shown(SettingsGroup.RATE_LIMITING)] = Field(
@@ -2213,6 +2264,16 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             )
             raise ValueError(msg)
         return self
+
+    @field_validator("rate_limits")
+    @classmethod
+    def _validate_rate_limit_names(cls, rules: list[RateLimitRule]) -> list[RateLimitRule]:
+        names = [rule.name for rule in rules]
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            msg = f"rate_limits names must be unique, repeated: {', '.join(duplicates)}"
+            raise ValueError(msg)
+        return rules
 
     @field_validator("web_search_provider")
     @classmethod

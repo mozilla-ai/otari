@@ -33,7 +33,7 @@ from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
-from gateway.rate_limit import RateLimiter, UserRateLimiter
+from gateway.rate_limit import RateLimiter, RateLimitGrantMiddleware, RateLimitRules, UserRateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
 from gateway.services.bootstrap_service import bootstrap_first_api_key
@@ -390,6 +390,25 @@ def _validate_metrics_support(config: GatewayConfig) -> None:
         raise ValueError(msg)
 
 
+def install_rate_limits(app: FastAPI, config: GatewayConfig) -> None:
+    """Put the per-user limit and the ``rate_limits`` rules on the app, counting in the container's store.
+
+    The store is resolved only when either is set, so a deployment that limits
+    nothing opens no connection to one.
+    """
+    store: RateLimitStorePort | None = (
+        app.state.container.resolve(RateLimitStorePort, None)
+        if config.rate_limit_rpm is not None or config.rate_limits
+        else None
+    )
+    app.state.rate_limit_store = store
+    rpm = config.rate_limit_rpm
+    app.state.rate_limiter = UserRateLimiter(store, rpm) if store is not None and rpm is not None else None
+    app.state.rate_limit_rules = (
+        RateLimitRules(store, config.rate_limits) if store is not None and config.rate_limits else None
+    )
+
+
 def _validate_rate_limit_store(config: GatewayConfig) -> None:
     """Refuse to start a shared rate-limit store that has nowhere to count.
 
@@ -680,9 +699,9 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # when that endpoint was never served.
             await close_search_client()
             await close_decision_client()
-            rate_limiter: UserRateLimiter | None = getattr(app.state, "rate_limiter", None)
-            if rate_limiter is not None:
-                await rate_limiter.aclose()
+            rate_limit_store: RateLimitStorePort | None = getattr(app.state, "rate_limit_store", None)
+            if rate_limit_store is not None:
+                await rate_limit_store.aclose()
             # After the log writer, whose final flush is the last thing to need
             # a session. Hybrid mode never opened an engine, so this is a no-op there.
             await dispose_db()
@@ -982,6 +1001,8 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # an entry never outlives its response (see gateway.inflight).
     app.state.inflight = InFlightRegistry()
     app.add_middleware(InFlightMiddleware, registry=app.state.inflight)
+    if config.rate_limits:
+        app.add_middleware(RateLimitGrantMiddleware)
 
     if config.enable_metrics:
         from gateway.metrics import MetricsMiddleware
@@ -1012,11 +1033,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # that cannot be loaded raises here, so a deployment that named one and got
     # it wrong fails to start instead of quietly running the plain build.
     app.state.container = build_container(config.bootstrap, config=config)
-    app.state.rate_limiter = (
-        UserRateLimiter(app.state.container.resolve(RateLimitStorePort, None), config.rate_limit_rpm)
-        if config.rate_limit_rpm is not None
-        else None
-    )
+    install_rate_limits(app, config)
 
     register_routers(app, config)
     app.add_exception_handler(TenancyError, _tenancy_error_handler)

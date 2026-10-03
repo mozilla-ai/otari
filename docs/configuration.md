@@ -83,6 +83,7 @@ the corresponding startup value after the database is available.
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
 | `rate_limit_store` | Where `rate_limit_rpm` is counted: `memory` (the default) or `redis`. See [Rate limits across replicas](#rate-limits-across-replicas). |
 | `rate_limit_redis_url` | The Redis that the `redis` store counts in. |
+| `rate_limits` | Requests per minute, tokens per minute and requests in flight, per deployment, API key or user. See [Rate limit rules](#rate-limit-rules). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
@@ -145,6 +146,42 @@ replicas never both take the last slot and their clock skew does not matter.
 If Redis cannot be reached, each replica counts on its own instead of refusing
 traffic, and tries Redis again a few seconds later; the gateway log says when
 that starts and stops.
+
+### Rate limit rules
+
+`rate_limits` sets limits beyond `rate_limit_rpm`. Each rule names what one
+count is shared by (`per`) and sets any of three limits:
+
+```yaml
+rate_limits:
+  - name: keys          # each API key on its own
+    per: key
+    rpm: 600
+    tpm: 200000
+  - name: end-users     # each user, including a service key's end users
+    per: user
+    rpm: 30
+  - name: everyone      # one count for the whole deployment
+    per: deployment
+    max_concurrent: 200
+```
+
+- `rpm`: requests per minute.
+- `tpm`: tokens per minute. A request is admitted on an estimate (its prompt
+  plus `max_tokens`, or `budget_estimate_default_output_tokens` when it sets
+  none) and charged what it used once it completes; a failed request is charged
+  nothing. A request whose estimate alone exceeds the limit is always refused.
+  In hybrid mode a completed request is charged its estimate for now.
+- `max_concurrent`: requests in flight at once. A slot is given back when the
+  response ends, streamed or not. `lease_sec` (15 minutes by default) bounds how
+  long a slot outlives a process that dies holding it.
+
+`per: key` does not limit a request made without an API key (the master key or
+a dashboard session). A request has to fit every rule that applies to it; one
+that does not is refused with a 429 naming the rule, counted by none of them,
+and holds no budget. Rules count in `rate_limit_store`, so with Redis they hold
+across replicas. They apply to chat completions, messages and responses, after
+`rate_limit_rpm`.
 
 ### Trace context propagation
 
