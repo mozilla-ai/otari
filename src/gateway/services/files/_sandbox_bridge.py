@@ -205,10 +205,12 @@ class SandboxFileBridge:
                 else:
                     logger.exception("Could not copy %s file %s", source.provider, file.file_id)
             else:
-                # Only a stored file spends a slot: a provider having a bad minute
-                # must not cost the files named after it their allowance.
-                self._provider_files_left -= 1
-                self._provider_bytes_left -= size
+                # Only a stored file spends a slot: a provider having a bad minute,
+                # or a file that arrived empty and was not stored, must not cost
+                # the files named after it their allowance.
+                if size:
+                    self._provider_files_left -= 1
+                    self._provider_bytes_left -= size
                 self._provider_files_settled.add(file.file_id)
 
     async def _copy_provider_file(

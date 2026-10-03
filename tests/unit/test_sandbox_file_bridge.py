@@ -433,6 +433,18 @@ async def test_a_file_the_provider_refused_does_not_spend_the_file_count(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_an_empty_file_does_not_spend_the_file_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An empty copy stores nothing, so it must not take the last slot from the file after it."""
+    _stub_provider(monkeypatch, {"file_01empty": b"", "file_01b": b"b"})
+    db = _FakeDb()
+    bridge = _bridge(_MemoryStore(), _CommittingUnitOfWork(db), files_output_max_files=1)
+
+    await _copy(bridge, "file_01empty", "file_01b")
+
+    assert [record.id for record in db.added if record.bytes] == ["file_01b"]
+
+
+@pytest.mark.asyncio
 async def test_a_file_the_provider_refuses_does_not_stop_the_rest(monkeypatch: pytest.MonkeyPatch) -> None:
     gone = ProviderFileUnavailableError("anthropic could not serve file file_01gone")
     _stub_provider(monkeypatch, {"file_01gone": gone, "file_01b": b"b"})
