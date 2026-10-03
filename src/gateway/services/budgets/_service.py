@@ -13,6 +13,7 @@ from gateway.schemas.budgets import (
     OrganizationScopedBudgetUpdate,
 )
 from gateway.services.api_keys import ApiKeyService
+from gateway.services.budgets._deployment_surface import _DeploymentSurface
 from gateway.services.budgets._end_users import _EndUsers
 from gateway.services.budgets._organization_surface import _OrganizationSurface
 from gateway.services.budgets._scopes import ScopeOwnership
@@ -35,6 +36,7 @@ class BudgetService:
         self._uow = uow
         self._organization = _OrganizationSurface(repositories, ScopeOwnership(organizations, api_keys), organizations)
         self._end_users = _EndUsers(repositories)
+        self._deployment = _DeploymentSurface(repositories)
 
     async def create_organization_budget(
         self, *, user: User, request: OrganizationBudgetCreate
@@ -49,6 +51,11 @@ class BudgetService:
         """Cap one identity inside the caller's organization at one of its budgets."""
         async with self._uow:
             return await self._organization.create_ceiling(user=user, request=request)
+
+    async def delete_deployment_budget(self, budget_id: str) -> None:
+        """Delete a budget the deployment owns, with its reset history, unless something still names it."""
+        async with self._uow:
+            await self._deployment.delete_budget(budget_id)
 
     async def delete_organization_budget(self, *, user: User, budget_id: str) -> None:
         """Delete a budget the caller's organization owns, unless something still names it."""

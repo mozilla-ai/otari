@@ -21399,7 +21399,7 @@
     },
     "/api/v1/budgets/{budget_id}": {
       "delete": {
-        "description": "Delete a budget the deployment owns.\n\nRefused with 409 for an organization's budget: the operator may edit one\n(``PATCH`` retimes its ceilings) but deleting it would take a budget the\ntenant defined out from under them.\n\nRefused with 409, too, while anything still names this budget: a workspace\nhanding it to its members, or a scoped ceiling enforcing it. Both foreign\nkeys are ``RESTRICT``, so the database would refuse either anyway, but as an\n``IntegrityError`` reported as \"Database error\" with nothing naming what to\ngo and change. Checked here so the refusal can say which, and where.\n\nGateway users assigned to the budget are left uncapped, as the dashboard's\nconfirmation says, and its reset history is deleted with it.",
+        "description": "Delete a budget the deployment owns.\n\nRefused with 409 for an organization's budget: the operator may edit one\n(``PATCH`` retimes its ceilings) but deleting it would take a budget the\ntenant defined out from under them.\n\nRefused with 409, too, while anything still names this budget: a workspace\nhanding it to its members, or a scoped ceiling enforcing it. The refusal says\nwhich, and where.\n\nGateway users assigned to the budget are left uncapped, as the dashboard's\nconfirmation says, and its reset history is deleted with it.",
         "operationId": "budgets-delete_budget",
         "parameters": [
           {

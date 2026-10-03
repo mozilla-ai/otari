@@ -927,10 +927,8 @@ export interface paths {
          *     tenant defined out from under them.
          *
          *     Refused with 409, too, while anything still names this budget: a workspace
-         *     handing it to its members, or a scoped ceiling enforcing it. Both foreign
-         *     keys are ``RESTRICT``, so the database would refuse either anyway, but as an
-         *     ``IntegrityError`` reported as "Database error" with nothing naming what to
-         *     go and change. Checked here so the refusal can say which, and where.
+         *     handing it to its members, or a scoped ceiling enforcing it. The refusal says
+         *     which, and where.
          *
          *     Gateway users assigned to the budget are left uncapped, as the dashboard's
          *     confirmation says, and its reset history is deleted with it.

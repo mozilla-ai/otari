@@ -81,6 +81,50 @@ class OrganizationBudgetHeldElsewhereError(TenancyConflictError):
         )
 
 
+class DeploymentBudgetNotFoundError(TenancyNotFoundError):
+    def __init__(self, budget_id: object):
+        super().__init__(f"Budget with id '{budget_id}' not found")
+
+
+class DeploymentBudgetOwnedByOrganizationError(TenancyConflictError):
+    """The operator may edit an organization's budget but not delete it out from under the tenant."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This budget is owned by an organization. It can be edited here but not "
+            "deleted; the organization that owns it manages it."
+        )
+
+
+class DeploymentBudgetIsMemberDefaultError(TenancyConflictError):
+    """A workspace hands the budget to its members, so the delete is refused by workspace name."""
+
+    def __init__(self, workspaces: list[str]):
+        super().__init__(
+            f"This budget is the member default for {', '.join(workspaces)}. Change or remove that "
+            "default on the workspace (Organization > Workspaces > Edit) before deleting it."
+        )
+
+
+class DeploymentBudgetEnforcedError(TenancyConflictError):
+    """Ceilings still enforce the budget.
+
+    Counted rather than named: a scope id is a bare uuid, so listing them would say less than the number does.
+    """
+
+    def __init__(self, ceilings: int):
+        super().__init__(
+            f"This budget is enforced by {ceilings} spend {'ceiling' if ceilings == 1 else 'ceilings'}. "
+            "A member's ceiling is changed on Members & roles (Edit > Workspace access); others are managed "
+            "through /api/v1/scoped-budgets."
+        )
+
+
+class DeploymentBudgetStillReferencedError(TenancyConflictError):
+    def __init__(self, budget_id: object):
+        super().__init__(f"Budget {budget_id} is still in use and cannot be deleted.")
+
+
 class OrganizationScopeNotFoundError(TenancyNotFoundError):
     """The identity a ceiling would cap is not one in the caller's organization.
 
