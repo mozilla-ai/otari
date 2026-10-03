@@ -1505,6 +1505,10 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
     # any dashboard-stored tool is overlaid by ``search_tool_store_service``.
     _search_tool_baseline: dict[str, dict[str, Any]] | None = PrivateAttr(default=None)
 
+    # The same idea for ``rate_limits``: the config-file rules, before the
+    # dashboard's stored rules are added by the rate-limits service.
+    _rate_limit_baseline: list["RateLimitRule"] | None = PrivateAttr(default=None)
+
     # SHA-256 hash of a master key generated on first run (see
     # ``master_key_service``). Set at startup when no ``master_key`` is
     # configured, so ``verify_master_key`` can authenticate the generated key

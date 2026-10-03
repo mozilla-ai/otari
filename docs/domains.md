@@ -219,6 +219,17 @@ plane, and the value that says which of them a process serves. `surface.py`
 says which deployments publish a dashboard page and `feature.py` shapes an
 optional feature, so the three together are how a build describes itself.
 
+### rate-limits
+
+The `rate_limits` rules an operator adds, changes and removes from the
+dashboard, stored beside the ones config.yml declares. The service keeps the
+stored rules in `config.rate_limits`, and the request path reads that list on
+every request, so this domain holds no enforcement. Counting stays in
+`gateway/rate_limit.py`, over the rate-limit store port. A config.yml rule is
+listed and never edited here.
+
+Built in the target shape from the start.
+
 ### alerts
 
 Alert destinations, rules, send-once delivery and the test send. It knows

@@ -22,6 +22,7 @@ export const PRICING = "pricing"
 export const SETTINGS = "settings"
 export const MAIL_SETTINGS = "mail-settings"
 export const MAINTENANCE_MODE = "maintenance-mode"
+export const RATE_LIMIT_RULES = "rate-limit-rules"
 // One indexed single-row read, and only while the settings page is mounted.
 export const MAINTENANCE_MODE_POLL_MS = 30_000
 export const TOOL_SETTINGS = "tool-settings"

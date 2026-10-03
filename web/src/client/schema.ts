@@ -3871,6 +3871,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/rate-limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Rate Limit Rules
+         * @description List every rule in effect: the config.yml rules, then the ones stored here.
+         */
+        get: operations["rate-limits-list_rate_limit_rules"];
+        put?: never;
+        /**
+         * Create Rate Limit Rule
+         * @description Add a rule. It applies from the next request on this replica, and on every replica within 30 seconds.
+         */
+        post: operations["rate-limits-create_rate_limit_rule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rate-limits/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Rate Limit Rule
+         * @description Remove a stored rule. A config.yml rule answers 409.
+         */
+        delete: operations["rate-limits-delete_rate_limit_rule"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Rate Limit Rule
+         * @description Change a stored rule. Requests it already counted stay counted. A config.yml rule answers 409.
+         */
+        patch: operations["rate-limits-update_rate_limit_rule"];
+        trace?: never;
+    };
     "/api/v1/rerank": {
         parameters: {
             query?: never;
@@ -11802,6 +11850,134 @@ export interface components {
             recorded: number;
             /** Seed Count */
             seed_count: number;
+        };
+        /**
+         * RateLimitRuleCreate
+         * @description A rule to add. The same fields, limits and validation as a ``rate_limits`` entry in config.yml.
+         */
+        RateLimitRuleCreate: {
+            /**
+             * Lease Sec
+             * @description How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.
+             * @default 900
+             */
+            lease_sec: number;
+            /**
+             * Max Concurrent
+             * @description Requests in flight at once.
+             */
+            max_concurrent?: number | null;
+            /**
+             * Name
+             * @description Names the rule in a 429's detail and in the counter's key. Unique across rate_limits.
+             */
+            name: string;
+            /**
+             * Per
+             * @description What one count is shared by.
+             * @enum {string}
+             */
+            per: "deployment" | "key" | "user";
+            /**
+             * Rpm
+             * @description Requests per minute.
+             */
+            rpm?: number | null;
+            /**
+             * Tpm
+             * @description Tokens per minute. A request is admitted on its estimate (prompt plus max output, or budget_estimate_default_output_tokens) and charged what it used once it completes.
+             */
+            tpm?: number | null;
+        };
+        /**
+         * RateLimitRulePublic
+         * @description One rule in effect, and where it is defined.
+         */
+        RateLimitRulePublic: {
+            /**
+             * Lease Sec
+             * @description How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.
+             * @default 900
+             */
+            lease_sec: number;
+            /**
+             * Max Concurrent
+             * @description Requests in flight at once.
+             */
+            max_concurrent?: number | null;
+            /**
+             * Name
+             * @description Names the rule in a 429's detail and in the counter's key. Unique across rate_limits.
+             */
+            name: string;
+            /**
+             * Per
+             * @description What one count is shared by.
+             * @enum {string}
+             */
+            per: "deployment" | "key" | "user";
+            /**
+             * Rpm
+             * @description Requests per minute.
+             */
+            rpm?: number | null;
+            /**
+             * Source
+             * @description 'config' for a rule from config.yml, which is read-only here; 'dashboard' for a stored one.
+             * @enum {string}
+             */
+            source: "config" | "dashboard";
+            /**
+             * Tpm
+             * @description Tokens per minute. A request is admitted on its estimate (prompt plus max output, or budget_estimate_default_output_tokens) and charged what it used once it completes.
+             */
+            tpm?: number | null;
+            /**
+             * Updated At
+             * @description When a stored rule last changed.
+             */
+            updated_at?: string | null;
+        };
+        /**
+         * RateLimitRuleUpdate
+         * @description Fields to change on a stored rule. An omitted field keeps its value; ``null`` clears a limit.
+         *
+         *     The merged rule must still set at least one of rpm, tpm or max_concurrent.
+         */
+        RateLimitRuleUpdate: {
+            /**
+             * Lease Sec
+             * @description How long a max_concurrent slot is held at most.
+             */
+            lease_sec?: number | null;
+            /**
+             * Max Concurrent
+             * @description Requests in flight at once.
+             */
+            max_concurrent?: number | null;
+            /**
+             * Per
+             * @description What one count is shared by.
+             */
+            per?: ("deployment" | "key" | "user") | null;
+            /**
+             * Rpm
+             * @description Requests per minute.
+             */
+            rpm?: number | null;
+            /**
+             * Tpm
+             * @description Tokens per minute.
+             */
+            tpm?: number | null;
+        };
+        /**
+         * RateLimitRulesPublic
+         * @description Every rule in effect: config-file rules first, then stored ones, each in name order.
+         */
+        RateLimitRulesPublic: {
+            /** Rules */
+            rules: components["schemas"]["RateLimitRulePublic"][];
         };
         /**
          * RecordedPool
@@ -20598,6 +20774,123 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProviderHealthResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "rate-limits-list_rate_limit_rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RateLimitRulesPublic"];
+                };
+            };
+        };
+    };
+    "rate-limits-create_rate_limit_rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RateLimitRuleCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RateLimitRulePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "rate-limits-delete_rate_limit_rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "rate-limits-update_rate_limit_rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RateLimitRuleUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RateLimitRulePublic"];
                 };
             };
             /** @description Validation Error */
