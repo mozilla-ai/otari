@@ -2506,6 +2506,17 @@
         "title": "CatalogCapabilities",
         "type": "object"
       },
+      "CatalogCapability": {
+        "enum": [
+          "tool_call",
+          "reasoning",
+          "structured_output",
+          "attachment",
+          "open_weights"
+        ],
+        "title": "CatalogCapability",
+        "type": "string"
+      },
       "CatalogCredential": {
         "description": "Whose key serves a catalog offering, which also says who may price it.",
         "enum": [
@@ -2533,6 +2544,39 @@
           "name"
         ],
         "title": "CatalogElsewhere",
+        "type": "object"
+      },
+      "CatalogFacets": {
+        "description": "The filter rail's choices, from the caller's whole authorized catalog rather than one page.",
+        "properties": {
+          "providers": {
+            "description": "Every provider instance offering an authorized model, sorted.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "total_count": {
+            "description": "Authorized models before any of the request's filters.",
+            "minimum": 0.0,
+            "title": "Total Count",
+            "type": "integer"
+          },
+          "vendors": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogVendorFacet"
+            },
+            "title": "Vendors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "total_count",
+          "providers",
+          "vendors"
+        ],
+        "title": "CatalogFacets",
         "type": "object"
       },
       "CatalogModelDetail": {
@@ -3183,7 +3227,7 @@
         "description": "The grouped catalog, and the facts a reader needs to interpret its prices.",
         "properties": {
           "count": {
-            "description": "Models matching the search, before the window, so a caller can page without reading them all.",
+            "description": "Models matching all filters before paging.",
             "title": "Count",
             "type": "integer"
           },
@@ -3204,6 +3248,17 @@
             ],
             "description": "When the accepted genai-prices snapshot was taken. Null while the bundled dataset serves.",
             "title": "Defaults As Of"
+          },
+          "facets": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogFacets"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present when include_facets is requested."
           },
           "metadata_available": {
             "description": "False when models.dev could not be read; descriptions are then absent.",
@@ -3226,6 +3281,31 @@
           "models"
         ],
         "title": "CatalogResponse",
+        "type": "object"
+      },
+      "CatalogVendorFacet": {
+        "properties": {
+          "value": {
+            "description": "The vendor's name; empty for models whose vendor is unknown.",
+            "title": "Value",
+            "type": "string"
+          },
+          "vendor_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor Slug"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "CatalogVendorFacet",
         "type": "object"
       },
       "CeremonyOptions": {
@@ -3646,6 +3726,65 @@
           "outcome"
         ],
         "title": "CheckVerdictRequest",
+        "type": "object"
+      },
+      "ChoiceQuestion": {
+        "additionalProperties": true,
+        "description": "A question answered with one of the named options.",
+        "properties": {
+          "criteria": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "items": {},
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "description": "Option name to what it means",
+            "maxProperties": 255,
+            "minProperties": 2,
+            "title": "Criteria",
+            "type": "object"
+          },
+          "instructions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              }
+            ],
+            "title": "Instructions"
+          },
+          "type": {
+            "const": "choice",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "instructions",
+          "criteria"
+        ],
+        "title": "ChoiceQuestion",
         "type": "object"
       },
       "CodeExecutor": {
@@ -4129,6 +4268,18 @@
             "description": "Per-key override of the deployment-wide capture_agent_telemetry setting: null (default) inherits it, true always stores this key's coding-agent telemetry, false always discards it. Covers both behavioral events (tool_result, tool_decision, user_prompt, api_error) from POST /otlp/v1/logs and outcome-metric data points (lines of code, commits, pull requests, active time) from POST /otlp/v1/metrics. Usage capture and billing are unaffected either way.",
             "title": "Capture Agent Telemetry"
           },
+          "end_user_budget_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Budget each end user this key creates is capped at. Null leaves end users capped only by this key's own ceiling.",
+            "title": "End User Budget Id"
+          },
           "exclude_from_budget": {
             "default": false,
             "description": "When true, requests on this key are logged with cost but never reserved, reconciled into the user's spend, or gated by budget.",
@@ -4147,6 +4298,12 @@
             ],
             "description": "Optional expiration timestamp",
             "title": "Expires At"
+          },
+          "is_service_key": {
+            "default": false,
+            "description": "When true, a request may name an end user in its 'user' field. Each end user is created on first use, owned by this key's user, and billed to its own budget, while this key's own ceiling caps all of them together.",
+            "title": "Is Service Key",
+            "type": "boolean"
           },
           "key_name": {
             "anyOf": [
@@ -4239,6 +4396,17 @@
             "title": "Created At",
             "type": "string"
           },
+          "end_user_budget_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End User Budget Id"
+          },
           "exclude_from_budget": {
             "title": "Exclude From Budget",
             "type": "boolean"
@@ -4260,6 +4428,10 @@
           },
           "is_active": {
             "title": "Is Active",
+            "type": "boolean"
+          },
+          "is_service_key": {
+            "title": "Is Service Key",
             "type": "boolean"
           },
           "key": {
@@ -4341,6 +4513,8 @@
           "exclude_from_budget",
           "reject_user_mismatch",
           "capture_agent_telemetry",
+          "is_service_key",
+          "end_user_budget_id",
           "metadata"
         ],
         "title": "CreateKeyResponse",
@@ -4778,6 +4952,257 @@
           "count"
         ],
         "title": "CurrentPricingPage",
+        "type": "object"
+      },
+      "DecisionAnswer": {
+        "additionalProperties": true,
+        "description": "One question's answer. Which value field is set follows ``type``.",
+        "properties": {
+          "choice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The chosen option, for a choice question",
+            "title": "Choice"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "legend": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legend"
+          },
+          "noul": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Probability of yes, for a noul question",
+            "title": "Noul"
+          },
+          "probabilities": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Probabilities"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The level, for a score question",
+            "title": "Score"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "DecisionAnswer",
+        "type": "object"
+      },
+      "DecisionRequest": {
+        "description": "A decisions request: typed questions to answer about one state.",
+        "example": {
+          "model": "typesafe:jev-latest",
+          "questions": {
+            "urgency": {
+              "instructions": "Does this message express urgency?",
+              "type": "noul"
+            }
+          },
+          "state": "The Stripe integration has failed for 3 days and I'm losing sales."
+        },
+        "properties": {
+          "images": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 16,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Images for a vision decision model, as data URLs (data:image/...;base64,...). An extension llama-server supports; a provider that does not refuses the request.",
+            "title": "Images"
+          },
+          "model": {
+            "description": "Decision provider and model, e.g. 'typesafe:jev-latest'",
+            "title": "Model",
+            "type": "string"
+          },
+          "questions": {
+            "additionalProperties": {
+              "discriminator": {
+                "mapping": {
+                  "choice": "#/components/schemas/ChoiceQuestion",
+                  "noul": "#/components/schemas/NoulQuestion",
+                  "score": "#/components/schemas/ScoreQuestion"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/NoulQuestion"
+                },
+                {
+                  "$ref": "#/components/schemas/ChoiceQuestion"
+                },
+                {
+                  "$ref": "#/components/schemas/ScoreQuestion"
+                }
+              ]
+            },
+            "description": "Questions, keyed by answer name",
+            "minProperties": 1,
+            "title": "Questions",
+            "type": "object"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              }
+            ],
+            "description": "The content the questions are about",
+            "title": "State"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "User ID for usage attribution; not sent upstream",
+            "title": "User"
+          }
+        },
+        "required": [
+          "model",
+          "state",
+          "questions"
+        ],
+        "title": "DecisionRequest",
+        "type": "object"
+      },
+      "DecisionResponse": {
+        "additionalProperties": true,
+        "description": "The provider's answers, keyed like the request's questions.",
+        "properties": {
+          "answers": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DecisionAnswer"
+            },
+            "title": "Answers",
+            "type": "object"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DecisionUsage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "model",
+          "answers"
+        ],
+        "title": "DecisionResponse",
+        "type": "object"
+      },
+      "DecisionUsage": {
+        "additionalProperties": true,
+        "description": "Token counts the provider reported, plus its own cost where it reports one.",
+        "properties": {
+          "cost": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider's own charge in USD, when it reports one",
+            "title": "Cost"
+          },
+          "input_tokens": {
+            "default": 0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "default": 0,
+            "title": "Output Tokens",
+            "type": "integer"
+          }
+        },
+        "title": "DecisionUsage",
         "type": "object"
       },
       "DeploymentAdminAccessPublic": {
@@ -5739,6 +6164,13 @@
             "title": "Provider",
             "type": "string"
           },
+          "reasoning_tokens": {
+            "default": 0,
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
+            "title": "Reasoning Tokens",
+            "type": "integer"
+          },
           "session_label": {
             "anyOf": [
               {
@@ -6642,6 +7074,17 @@
             "title": "Created At",
             "type": "string"
           },
+          "end_user_budget_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End User Budget Id"
+          },
           "exclude_from_budget": {
             "title": "Exclude From Budget",
             "type": "boolean"
@@ -6663,6 +7106,10 @@
           },
           "is_active": {
             "title": "Is Active",
+            "type": "boolean"
+          },
+          "is_service_key": {
+            "title": "Is Service Key",
             "type": "boolean"
           },
           "key_name": {
@@ -6756,6 +7203,8 @@
           "exclude_from_budget",
           "reject_user_mismatch",
           "capture_agent_telemetry",
+          "is_service_key",
+          "end_user_budget_id",
           "workspace_id",
           "metadata"
         ],
@@ -8177,6 +8626,95 @@
           "flagged"
         ],
         "title": "ModerationResult",
+        "type": "object"
+      },
+      "NoulCriteria": {
+        "additionalProperties": true,
+        "description": "What a yes and a no each mean, for a ``noul`` question.",
+        "properties": {
+          "false": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "False"
+          },
+          "true": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "True"
+          }
+        },
+        "title": "NoulCriteria",
+        "type": "object"
+      },
+      "NoulQuestion": {
+        "additionalProperties": true,
+        "description": "A yes-or-no question, answered with the probability of yes.",
+        "properties": {
+          "criteria": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoulCriteria"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "instructions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              }
+            ],
+            "title": "Instructions"
+          },
+          "type": {
+            "const": "noul",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "instructions"
+        ],
+        "title": "NoulQuestion",
         "type": "object"
       },
       "OAuthCallbackRequest": {
@@ -12563,6 +13101,12 @@
             "title": "Reencrypted",
             "type": "integer"
           },
+          "skipped": {
+            "default": 0,
+            "description": "Number of rows whose stored key changed between the read and the write, so the re-encryption was not applied. They already hold whoever wrote them last.",
+            "title": "Skipped",
+            "type": "integer"
+          },
           "unreadable": {
             "description": "Number of encrypted keys left untouched because they could not be decrypted.",
             "title": "Unreadable",
@@ -12582,6 +13126,12 @@
           "reencrypted": {
             "description": "Number of stored search-tool keys re-encrypted.",
             "title": "Reencrypted",
+            "type": "integer"
+          },
+          "skipped": {
+            "default": 0,
+            "description": "Number of rows whose stored key changed between the read and the write, so the re-encryption was not applied. They already hold whoever wrote them last.",
+            "title": "Skipped",
             "type": "integer"
           },
           "unreadable": {
@@ -13666,6 +14216,62 @@
           "updated_at"
         ],
         "title": "ScopedBudgetResponse",
+        "type": "object"
+      },
+      "ScoreQuestion": {
+        "additionalProperties": true,
+        "description": "A question answered with a level on an ordered scale.",
+        "properties": {
+          "criteria": {
+            "description": "Level descriptions, lowest first",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "items": {},
+                  "type": "array"
+                }
+              ]
+            },
+            "maxItems": 10,
+            "minItems": 2,
+            "title": "Criteria",
+            "type": "array"
+          },
+          "instructions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "items": {},
+                "type": "array"
+              }
+            ],
+            "title": "Instructions"
+          },
+          "type": {
+            "const": "score",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "instructions",
+          "criteria"
+        ],
+        "title": "ScoreQuestion",
         "type": "object"
       },
       "ScoredExample": {
@@ -15040,6 +15646,17 @@
             ],
             "title": "Capture Agent Telemetry"
           },
+          "end_user_budget_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End User Budget Id"
+          },
           "exclude_from_budget": {
             "anyOf": [
               {
@@ -15073,6 +15690,17 @@
               }
             ],
             "title": "Is Active"
+          },
+          "is_service_key": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Service Key"
           },
           "key_name": {
             "anyOf": [
@@ -16267,6 +16895,17 @@
             ],
             "title": "Provider"
           },
+          "reasoning_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Tokens"
+          },
           "request_group_id": {
             "anyOf": [
               {
@@ -17226,6 +17865,11 @@
             "title": "Prompt Tokens",
             "type": "integer"
           },
+          "reasoning_tokens": {
+            "default": 0,
+            "title": "Reasoning Tokens",
+            "type": "integer"
+          },
           "request_count": {
             "title": "Request Count",
             "type": "integer"
@@ -17321,6 +17965,17 @@
             "title": "Current Tokens",
             "type": "integer"
           },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
           "metadata": {
             "additionalProperties": true,
             "title": "Metadata",
@@ -17336,6 +17991,17 @@
               }
             ],
             "title": "Next Budget Reset At"
+          },
+          "parent_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent User Id"
           },
           "reserved": {
             "title": "Reserved",
@@ -21243,7 +21909,7 @@
     },
     "/api/v1/budgets/{budget_id}": {
       "delete": {
-        "description": "Delete a budget.\n\nRefused with 409 while anything still names this budget: a workspace handing\nit to its members, or a scoped ceiling enforcing it. Both foreign keys are\n``RESTRICT``, so the database would refuse either anyway, but as an\n``IntegrityError`` reported as \"Database error\" with nothing naming what to\ngo and change. Checked here so the refusal can say which, and where.",
+        "description": "Delete a budget the deployment owns.\n\nRefused with 409 for an organization's budget: the operator may edit one\n(``PATCH`` retimes its ceilings) but deleting it would take a budget the\ntenant defined out from under them.\n\nRefused with 409, too, while anything still names this budget: a workspace\nhanding it to its members, or a scoped ceiling enforcing it. The refusal says\nwhich, and where.\n\nGateway users assigned to the budget are left uncapped, as the dashboard's\nconfirmation says, and its reset history is deleted with it.",
         "operationId": "budgets-delete_budget",
         "parameters": [
           {
@@ -21496,7 +22162,7 @@
             }
           },
           {
-            "description": "Narrow to models whose name, catalog id or any selector contains this text, case-insensitively.",
+            "description": "Case-insensitive text in a model's name, vendor, id, selectors, or provider instances.",
             "in": "query",
             "name": "search",
             "required": false,
@@ -21510,35 +22176,232 @@
                   "type": "null"
                 }
               ],
-              "description": "Narrow to models whose name, catalog id or any selector contains this text, case-insensitively.",
+              "description": "Case-insensitive text in a model's name, vendor, id, selectors, or provider instances.",
               "title": "Search"
             }
           },
           {
-            "description": "Number of models to skip",
+            "description": "Number of matching models to skip.",
             "in": "query",
             "name": "skip",
             "required": false,
             "schema": {
               "default": 0,
-              "description": "Number of models to skip",
+              "description": "Number of matching models to skip.",
               "minimum": 0,
               "title": "Skip",
               "type": "integer"
             }
           },
           {
-            "description": "Maximum number of models to return",
+            "description": "Maximum number of models to return.",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 100,
-              "description": "Maximum number of models to return",
+              "description": "Maximum number of models to return.",
               "maximum": 1000,
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Match any named provider instance.",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "description": "Match any named provider instance.",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "Provider",
+              "type": "array"
+            }
+          },
+          {
+            "description": "Match any vendor; an empty value names unknown vendors.",
+            "in": "query",
+            "name": "vendor",
+            "required": false,
+            "schema": {
+              "description": "Match any vendor; an empty value names unknown vendors.",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "Vendor",
+              "type": "array"
+            }
+          },
+          {
+            "description": "Require every input modality.",
+            "in": "query",
+            "name": "input_modality",
+            "required": false,
+            "schema": {
+              "description": "Require every input modality.",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "Input Modality",
+              "type": "array"
+            }
+          },
+          {
+            "description": "Require every output modality.",
+            "in": "query",
+            "name": "output_modality",
+            "required": false,
+            "schema": {
+              "description": "Require every output modality.",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "Output Modality",
+              "type": "array"
+            }
+          },
+          {
+            "description": "Require every capability.",
+            "in": "query",
+            "name": "capability",
+            "required": false,
+            "schema": {
+              "description": "Require every capability.",
+              "items": {
+                "$ref": "#/components/schemas/CatalogCapability"
+              },
+              "maxItems": 100,
+              "title": "Capability",
+              "type": "array"
+            }
+          },
+          {
+            "description": "Minimum context window; unknown windows do not match.",
+            "in": "query",
+            "name": "min_context",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Minimum context window; unknown windows do not match.",
+              "minimum": 0,
+              "title": "Min Context",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum cheapest input price per million tokens; unpriced models do not match.",
+            "in": "query",
+            "name": "max_input",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Maximum cheapest input price per million tokens; unpriced models do not match.",
+              "title": "Max Input"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pricing",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "custom",
+                "default",
+                "priced",
+                "unpriced"
+              ],
+              "title": "Pricing",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "discovered",
+                "custom"
+              ],
+              "title": "Source",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Release window ending today (UTC); zero disables it. Unknown and future releases do not match.",
+            "in": "query",
+            "name": "released_within_days",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Release window ending today (UTC); zero disables it. Unknown and future releases do not match.",
+              "maximum": 36500,
+              "minimum": 0,
+              "title": "Released Within Days",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "name",
+              "enum": [
+                "name",
+                "released",
+                "input",
+                "output",
+                "context",
+                "providers"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "default": "asc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Direction",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Include the filter choices drawn from the whole authorized catalog.",
+            "in": "query",
+            "name": "include_facets",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include the filter choices drawn from the whole authorized catalog.",
+              "title": "Include Facets",
+              "type": "boolean"
             }
           }
         ],
@@ -21724,6 +22587,56 @@
         "summary": "Chat Completions",
         "tags": [
           "chat"
+        ]
+      }
+    },
+    "/api/v1/decisions": {
+      "post": {
+        "description": "Answer typed questions (noul, choice, score) about a state.\n\n``model`` is ``<provider>:<model>``, where the provider is a ``decision_providers``\nentry, for example ``typesafe:jev-latest`` or ``openrouter:typesafe/jev-1.13``.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user; a ``user`` naming a\n  different user is rejected with 403 unless mismatch rejection is off.",
+        "operationId": "decisions-create_decision",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Decision",
+        "tags": [
+          "decisions"
         ]
       }
     },
@@ -32137,6 +33050,56 @@
         "summary": "Rotate Master Key",
         "tags": [
           "settings"
+        ]
+      }
+    },
+    "/api/v1/systemone": {
+      "post": {
+        "description": "Answer typed questions at the path TypeSafe's SDK and llama-server use.\n\nIdentical to ``POST /api/v1/decisions``; point the client's base URL at the gateway's ``/api``.",
+        "operationId": "decisions-create_systemone_decision",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Systemone Decision",
+        "tags": [
+          "decisions"
         ]
       }
     },

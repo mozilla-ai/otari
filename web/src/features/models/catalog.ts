@@ -2,6 +2,8 @@ import type {
   CatalogCapabilities,
   CatalogModelSummary,
   CatalogOffering,
+  CatalogQueryParams,
+  CatalogVendorFacet,
 } from "@/client"
 import { providerDisplayName } from "@/shared/helpers/providers"
 
@@ -27,38 +29,30 @@ export const CAPABILITY_LABELS: {
   { key: "temperature", label: "Temperature" },
 ]
 
-// The capability filter tests the model's own flags and modalities, so a pick
-// narrows to models that actually report it rather than to a provider's coarse
-// claim about everything it serves.
+// The server evaluates these flags against each model, independently of its providers.
 export const CAPABILITY_FILTERS: {
   value: string
   label: string
-  test: (model: CatalogModelSummary) => boolean
 }[] = [
   {
     value: "tool_call",
     label: "Tool calling",
-    test: (model) => model.capabilities.tool_call,
   },
   {
     value: "reasoning",
     label: "Reasoning",
-    test: (model) => model.capabilities.reasoning,
   },
   {
     value: "structured_output",
     label: "Structured output",
-    test: (model) => model.capabilities.structured_output,
   },
   {
     value: "attachment",
     label: "Attachments",
-    test: (model) => model.capabilities.attachment,
   },
   {
     value: "open_weights",
     label: "Open weights",
-    test: (model) => model.open_weights,
   },
 ]
 
@@ -106,8 +100,6 @@ export const RELEASE_OPTIONS = [
   { value: "730", label: "Past 2 years" },
   { value: "1095", label: "Past 3 years" },
 ]
-
-const DAY_MS = 24 * 60 * 60 * 1000
 
 export interface CatalogFilters {
   query: string
@@ -157,117 +149,6 @@ export function activeFilterCount(filters: CatalogFilters): number {
   )
 }
 
-function pricingMatches(model: CatalogModelSummary, pricing: string): boolean {
-  switch (pricing) {
-    case "custom":
-      return model.price_sources.some(
-        (source) => source === "deployment" || source === "organization",
-      )
-    case "default":
-      return model.price_sources.includes("defaults")
-    case "priced":
-      return model.min_input_price_per_million != null
-    case "unpriced":
-      return model.unpriced_count > 0
-    default:
-      return true
-  }
-}
-
-function matchesQuery(model: CatalogModelSummary, query: string): boolean {
-  // The selectors and instances are searched too: an operator's query is as
-  // often `accounts/fireworks/models/glm-5p3` or `nebius` as it is a name.
-  return (
-    model.name.toLowerCase().includes(query) ||
-    (model.vendor ?? "").toLowerCase().includes(query) ||
-    model.id.includes(query) ||
-    model.selectors.some((selector) =>
-      selector.toLowerCase().includes(query),
-    ) ||
-    model.providers.some((provider) => provider.toLowerCase().includes(query))
-  )
-}
-
-export function filterModels(
-  models: CatalogModelSummary[],
-  filters: CatalogFilters,
-  now: Date = new Date(),
-): CatalogModelSummary[] {
-  const query = filters.query.trim().toLowerCase()
-  const capabilities = CAPABILITY_FILTERS.filter((entry) =>
-    filters.capabilities.includes(entry.value),
-  )
-  const releasedAfter =
-    filters.releasedWithinDays > 0
-      ? new Date(now.getTime() - filters.releasedWithinDays * DAY_MS)
-          .toISOString()
-          .slice(0, 10)
-      : null
-  // "Past year" is a window, not a floor: a model dated in the future (an
-  // announced release, or a dataset typo) is not something released recently.
-  const releasedBefore = now.toISOString().slice(0, 10)
-  return models.filter((model) => {
-    if (query && !matchesQuery(model, query)) return false
-    if (
-      filters.inputModalities.length > 0 &&
-      !filters.inputModalities.every((modality) =>
-        model.input_modalities.includes(modality),
-      )
-    ) {
-      return false
-    }
-    if (
-      filters.outputModalities.length > 0 &&
-      !filters.outputModalities.every((modality) =>
-        model.output_modalities.includes(modality),
-      )
-    ) {
-      return false
-    }
-    if (
-      filters.vendors.length > 0 &&
-      !filters.vendors.includes(model.vendor ?? "")
-    ) {
-      return false
-    }
-    if (
-      filters.providers.length > 0 &&
-      !filters.providers.some((provider) => model.providers.includes(provider))
-    ) {
-      return false
-    }
-    if (!capabilities.every((capability) => capability.test(model))) {
-      return false
-    }
-    if (
-      filters.minContext > 0 &&
-      (model.context_window == null ||
-        model.context_window < filters.minContext)
-    ) {
-      return false
-    }
-    if (!pricingMatches(model, filters.pricing)) return false
-    if (filters.source === "discovered" && !model.discovered) return false
-    if (filters.source === "custom" && model.discovered) return false
-    if (
-      filters.maxInput > 0 &&
-      (model.min_input_price_per_million == null ||
-        model.min_input_price_per_million > filters.maxInput)
-    ) {
-      return false
-    }
-    if (
-      releasedAfter !== null &&
-      (model.release_date == null ||
-        model.release_date < releasedAfter ||
-        model.release_date > releasedBefore)
-    ) {
-      return false
-    }
-    return true
-  })
-}
-
 export type CatalogSortColumn =
   | "name"
   | "released"
@@ -275,36 +156,6 @@ export type CatalogSortColumn =
   | "output"
   | "context"
   | "providers"
-
-// Unpriced or undated rows sort last whichever way the column goes, and ties
-// fall back to the name so the order never depends on how the rows arrived.
-export function compareModels(
-  column: CatalogSortColumn,
-  direction: "asc" | "desc",
-): (a: CatalogModelSummary, b: CatalogModelSummary) => number {
-  const sign = direction === "asc" ? 1 : -1
-  const byName = (a: CatalogModelSummary, b: CatalogModelSummary) =>
-    a.name.localeCompare(b.name)
-  if (column === "name") {
-    return (a, b) => byName(a, b) * sign
-  }
-  const pick = (model: CatalogModelSummary): number | string | null => {
-    if (column === "released") return model.release_date ?? null
-    if (column === "input") return model.min_input_price_per_million ?? null
-    if (column === "output") return model.min_output_price_per_million ?? null
-    if (column === "context") return model.context_window ?? null
-    return model.provider_count
-  }
-  return (a, b) => {
-    const av = pick(a)
-    const bv = pick(b)
-    if (av == null && bv == null) return byName(a, b)
-    if (av == null) return 1
-    if (bv == null) return -1
-    const order = av < bv ? -1 : av > bv ? 1 : 0
-    return order * sign || byName(a, b)
-  }
-}
 
 /** The sort menu's choices, each a column and a direction. */
 export const SORT_OPTIONS: {
@@ -365,49 +216,54 @@ export function makerKeyOf(
   return separator > 0 ? model.id.slice(0, separator) : undefined
 }
 
-/**
- * Vendors present, with the unknown bucket named, for the rail.
- *
- * `markKey` rides along because the filter carries the vendor's display string
- * (it is what the URL and the filter match on) while a mark is keyed on the
- * slug, and only a row knows both.
- */
-export function vendorOptions(
-  models: CatalogModelSummary[],
-): { value: string; label: string; markKey: string | undefined }[] {
-  const keys = new Map<string, string | undefined>()
-  for (const model of models) {
-    const vendor = model.vendor ?? ""
-    // First row wins, which is enough: a vendor string maps to one slug.
-    if (!keys.has(vendor)) keys.set(vendor, makerKeyOf(model))
-  }
-  return [...keys.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([vendor, markKey]) => ({
-      value: vendor,
-      label: vendor || "Unknown vendor",
-      markKey,
+/** The server's complete vendor choices, with their catalog identity slugs. */
+export function vendorOptions(facets: CatalogVendorFacet[]) {
+  return facets
+    .map((facet) => ({
+      value: facet.value,
+      label: facet.value || "Unknown vendor",
+      markKey: facet.vendor_slug ?? undefined,
     }))
+    .sort((a, b) => a.label.localeCompare(b.label))
 }
 
-/**
- * Provider instances present, once each, for the rail.
- *
- * Named the way the vendor names itself and sorted by that, so the list reads
- * alphabetically on screen (otari#990); the value stays the instance id, which
- * is what the filter and the URL carry. An instance the operator named
- * themselves has no entry and is shown as they spelled it.
- */
-export function providerOptions(
-  models: CatalogModelSummary[],
-): { value: string; label: string }[] {
-  const providers = new Set(models.flatMap((model) => model.providers))
-  return [...providers]
+/** The server's complete provider choices, named for display. */
+export function providerOptions(providers: string[]) {
+  return providers
     .map((provider) => ({
       value: provider,
       label: providerDisplayName(provider),
     }))
     .sort((a, b) => a.label.localeCompare(b.label))
+}
+
+export function catalogRequest(
+  filters: CatalogFilters,
+  column: CatalogSortColumn,
+  direction: "asc" | "desc",
+  page: number,
+  pageSize: number,
+): CatalogQueryParams {
+  return {
+    skip: page * pageSize,
+    limit: pageSize,
+    search: filters.query.trim() || undefined,
+    provider: [...filters.providers].sort(),
+    vendor: [...filters.vendors].sort(),
+    input_modality: [...filters.inputModalities].sort(),
+    output_modality: [...filters.outputModalities].sort(),
+    capability: [
+      ...filters.capabilities,
+    ].sort() as CatalogQueryParams["capability"],
+    min_context: filters.minContext || undefined,
+    max_input: filters.maxInput || undefined,
+    pricing: filters.pricing as CatalogQueryParams["pricing"],
+    source: filters.source as CatalogQueryParams["source"],
+    released_within_days: filters.releasedWithinDays || undefined,
+    sort: column,
+    direction,
+    include_facets: true,
+  }
 }
 
 export function priceSourceLabel(

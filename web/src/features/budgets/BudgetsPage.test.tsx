@@ -996,6 +996,37 @@ describe("BudgetsPage", () => {
     })
   })
 
+  it("withholds Delete on a budget an organization owns, singly and in bulk", async () => {
+    // /api/v1/budgets refuses to delete a tenant's budget, and the bulk loop stops
+    // at the first refusal, so one tenant row in a selection would strand the rest.
+    mockApi({
+      budgets: [
+        budget({ budget_id: "b1", name: "Team monthly" }),
+        budget({
+          budget_id: "b2",
+          name: "Tenant cap",
+          organization_id: "99999999-8888-7777-6666-555555555555",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    const tenantRow = (await screen.findByText("Tenant cap")).closest("tr")!
+    expect(
+      within(tenantRow).queryByRole("button", { name: "Delete" }),
+    ).toBeNull()
+    expect(within(tenantRow).getByRole("checkbox")).toBeDisabled()
+
+    const ownRow = screen.getByText("Team monthly").closest("tr")!
+    expect(
+      within(ownRow).getByRole("button", { name: "Delete" }),
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole("checkbox", { name: /select all/i }))
+    expect(await screen.findByText("1 selected")).toBeInTheDocument()
+  })
+
   it("gives an organization admin their own budgets, not the deployment's", async () => {
     // One route, two pages (otari-ai#1943). Every deployment-wide read this
     // file's other cases make answers 403 to a tenant, so an admin gets the

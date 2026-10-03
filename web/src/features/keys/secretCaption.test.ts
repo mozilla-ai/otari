@@ -18,6 +18,8 @@ const result = (over: Partial<CreateKeyResponse> = {}): CreateKeyResponse => ({
   key_suffix: "cret",
   metadata: {},
   reject_user_mismatch: null,
+  is_service_key: false,
+  end_user_budget_id: null,
   user_id: "alice",
   ...over,
 })

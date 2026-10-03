@@ -2,7 +2,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
-from any_llm import LLMProvider, acompletion
+from any_llm import acompletion
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -55,12 +55,11 @@ from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_
 from gateway.api.routes._tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.core.usage import GatewayUsage
-from gateway.core.usage_source import PLAYGROUND_USAGE_ENDPOINT
+from gateway.core.usage import GatewayUsage, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
-from gateway.models.tools import CodeExecutor
+from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
@@ -77,6 +76,7 @@ from gateway.services.mcp_loop import (
 from gateway.services.tools import Dialect, ToolUseBudget
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
+from gateway.types.normalization_target import NormalizationTarget
 from gateway.types.session_principal import SessionPrincipal
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -84,10 +84,6 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 # The label written to a usage-log row. An identifier, not a URL: it stays as
 # it is so new rows compare with old ones.
 USAGE_ENDPOINT = "/v1/chat/completions"
-
-# The label a Playground request carries instead, declared in
-# ``core/usage_source`` because the activation guide filters on it and a service
-# may not import this layer. That module says which readers care and why.
 
 __all__ = [
     "ChatCompletionRequest",
@@ -215,6 +211,9 @@ class _ChatAdapter:
             detail=PROVIDER_ERROR_DETAIL,
         )
 
+    def stream_error_payload(self, exc: BaseException) -> str:
+        return self.stream_format.error_payload
+
     def format_chunk(self, chunk: ChatCompletionChunk) -> str:
         return f"data: {chunk.model_dump_json()}\n\n"
 
@@ -228,6 +227,7 @@ class _ChatAdapter:
             total_tokens=chunk.usage.total_tokens or 0,
             prompt_tokens_details=details,
             cache_read_tokens=(details.cached_tokens or 0) if details is not None else 0,
+            reasoning_tokens=reasoning_tokens_of(chunk.usage),
         )
 
     def extract_usage(self, result: ChatCompletion) -> CompletionUsage | None:
@@ -470,8 +470,7 @@ async def run_chat_completion(
     endpoint, which keeps its API-key-or-master-key rule exactly as it was; see
     :class:`SessionPrincipal` for what a caller owes before building one. It is
     also what picks the usage row's endpoint label, so a Playground request is
-    countable separately from a customer's; ``PLAYGROUND_USAGE_ENDPOINT`` says
-    who reads that distinction and why.
+    countable separately from a customer's (``PLAYGROUND_USAGE_ENDPOINT``).
     """
     adapter = _PLAYGROUND_ADAPTER if session_principal is not None else _ADAPTER
     if not request.model.strip():
@@ -484,14 +483,7 @@ async def run_chat_completion(
     # sandbox session once the billed user and workspace are resolved.
     sandbox_inputs: list[StagedFile] = []
 
-    async def _normalize(
-        user_id: str,
-        provider: LLMProvider | None,
-        model: str,
-        instance: str | None,
-        workspace_id: uuid.UUID | None,
-        workspace_executor: CodeExecutor | None,
-    ) -> tuple[int, CompletionUsage | None]:
+    async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the wire payload (extract to
         # text for text-only models, inline for natively-capable ones) before
         # the cost estimate. Standalone only; no-op when the files feature is
@@ -500,19 +492,19 @@ async def run_chat_completion(
             request.messages,
             fmt="openai",
             config=config,
-            provider=provider,
-            model=model,
+            provider=target.provider,
+            model=target.model,
             files=files,
-            user_id=user_id,
-            instance=instance,
-            workspace_id=workspace_id,
+            user_id=target.user_id,
+            instance=target.instance,
+            workspace_id=target.file_workspace_id,
             sandbox_requested=sandbox_requested(
                 request.tools,
                 config=config,
-                provider=provider,
+                provider=target.provider,
                 dialect=adapter.name,
                 code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-                workspace_executor=workspace_executor,
+                workspace_executor=target.workspace_executor,
             ),
         )
         sandbox_inputs.extend(stats.sandbox_inputs)

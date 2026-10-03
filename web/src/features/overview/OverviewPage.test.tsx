@@ -1360,11 +1360,11 @@ describe("OverviewIndex operator-ness", () => {
     ).toBe(false)
   })
 
-  it("lands a failed context on the scoped page, where its tiles already read", async () => {
-    // The failure the two sources used to disagree about: the context read is
-    // what the usage hooks scope off, so a page that decided operator-ness some
-    // other way would render the deployment-wide panels above tiles quietly
-    // serving this caller's own organization, with nothing on screen to say so.
+  it("lands a failed context on the operator page, where its tiles read too", async () => {
+    // Every operator gate fails open on a failed read (otari#876), and the page
+    // and the usage hooks behind its tiles take that answer from one place, so
+    // the operator panels never sit above tiles serving the caller's own
+    // organization.
     const requested: string[] = []
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
@@ -1372,59 +1372,41 @@ describe("OverviewIndex operator-ness", () => {
       if (url.endsWith(`${API_ROOT}/organizations/me`)) {
         return jsonResponse({ detail: "context exploded" }, 500)
       }
-      if (url.includes(`${API_ROOT}/organizations/me/usage/summary`)) {
-        if (url.includes("bucket=hour"))
-          return jsonResponse(summary({ cost: 5 }))
+      if (url.includes(`${API_ROOT}/usage/summary`)) {
         return jsonResponse(summary({ cost: 200, request_count: 2000 }))
       }
-      if (url.includes(`${API_ROOT}/organizations/me/usage`)) {
-        return jsonResponse([])
+      if (url.includes(`${API_ROOT}/providers/health`)) {
+        return jsonResponse({
+          providers: [],
+          healthy: 1,
+          total: 1,
+          checked_at: null,
+        })
       }
-      return jsonResponse({ detail: "forbidden" }, 403)
+      if (url.includes(`${API_ROOT}/providers`)) {
+        return jsonResponse({ providers: [{ provider: "openai" }] })
+      }
+      return jsonResponse([])
     })
     renderPage(<OverviewIndex />)
 
-    // The scoped page, rendering scoped numbers: an errored context is an
-    // answer, so the page is not stranded on its loading state either.
-    expect(await screen.findByText("$200.00")).toBeInTheDocument()
-    expect(screen.getByText("$5.00")).toBeInTheDocument()
     expect(
-      screen.queryByText(
+      await screen.findByText(
         "At-a-glance spend, traffic, and health across the gateway.",
       ),
-    ).not.toBeInTheDocument()
-    expect(screen.queryByText("Budget health")).not.toBeInTheDocument()
+    ).toBeInTheDocument()
+    expect(
+      requested.some((url) => url.includes(`${API_ROOT}/organizations/me/`)),
+    ).toBe(false)
 
-    // And it settled there. The usage hooks behind those tiles observe the same
-    // errored context, and their mount asks it to refetch; a page reading the
-    // transient pending state would flip back to its spinner, unmount them, and
-    // ask again without end. The tiles asserted above are what such a page never
-    // reaches, and this is the request storm underneath it.
+    // And it settled there. The usage hooks observe the same errored context,
+    // and their mount asks it to refetch; a page reading that transient pending
+    // state would flip back to its spinner, unmount them, and ask again
+    // without end.
     expect(
       requested.filter((url) => url.endsWith(`${API_ROOT}/organizations/me`))
         .length,
     ).toBeLessThan(4)
-
-    // And it asked nothing the deployment-wide page would have: not the gate,
-    // and no endpoint outside the surface the hooks fell back to. /v1/overview
-    // is the exception the scoped-surface test above explains: it is scoped by
-    // the identity asking rather than by its prefix.
-    const asked = requested.filter(
-      (url) =>
-        !url.endsWith(`${API_ROOT}/organizations/me`) &&
-        !url.includes(`${API_ROOT}/overview`),
-    )
-    expect(asked.length).toBeGreaterThan(0)
-    for (const url of asked) {
-      expect(url).toContain(`${API_ROOT}/organizations/me/`)
-    }
-    // The ceilings among them: an errored context names no role, and the page
-    // withholds a read the server may refuse rather than painting its refusal.
-    expect(
-      asked.some((url) =>
-        url.includes(`${API_ROOT}/organizations/me/spend-ceilings`),
-      ),
-    ).toBe(false)
   })
 })
 

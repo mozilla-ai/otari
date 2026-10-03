@@ -22,6 +22,7 @@ import re
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
@@ -72,6 +73,7 @@ from gateway.exceptions.tools_exceptions import (
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.tools import ResolvedWebSearchConfig
+from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.rate_limit import RateLimitInfo
@@ -1001,6 +1003,79 @@ async def test_priced_settlement_does_not_warn(
 
     assert row.cost is not None
     assert _unpriced_warnings(gateway_caplog) == []
+
+
+def _deployment_rate() -> ResolvedPricing:
+    pricing = ModelPricing(
+        model_key="gemini:gemini-2.5-flash", input_price_per_million=1.0, output_price_per_million=2.0
+    )
+    return ResolvedPricing(pricing, "deployment", "gemini:gemini-2.5-flash", datetime(2026, 9, 1, tzinfo=UTC))
+
+
+@pytest.mark.asyncio
+async def test_priced_settlement_records_its_provenance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The row names the rate that priced it, so it can say why it costs what it does (#782)."""
+    _stub_pricing(monkeypatch, _deployment_rate())
+
+    row = await _settle("gemini-2.5-flash")
+
+    assert row.cost is not None
+    assert row.pricing_source == "deployment"
+    assert row.pricing_reference == "gemini:gemini-2.5-flash"
+    assert row.pricing_effective_at == datetime(2026, 9, 1, tzinfo=UTC)
+    assert row.pricing_version is None
+    assert row.calculated_at == row.timestamp
+
+
+@pytest.mark.asyncio
+async def test_unpriced_settlement_records_no_provenance(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_pricing(monkeypatch, None)
+
+    row = await _settle("gemini-3.7-flash")
+
+    assert row.cost is None
+    assert (row.pricing_source, row.pricing_reference, row.pricing_effective_at, row.calculated_at) == (
+        None,
+        None,
+        None,
+        None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_cost_override_settlement_names_no_rate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fixed amount billed in place of the rate is not that rate's work."""
+    _stub_pricing(monkeypatch, _deployment_rate())
+    writer = _FakeLogWriter()
+
+    await log_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, writer),
+        api_key_id=None,
+        model="gemini-2.5-flash",
+        provider="gemini",
+        endpoint="/v1/chat/completions",
+        usage_override=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        cost_override=Decimal("0.5"),
+    )
+
+    row = writer.put_rows[0]
+    assert row.cost == Decimal("0.5")
+    assert (row.pricing_source, row.pricing_reference, row.pricing_effective_at) == (None, None, None)
+    assert row.calculated_at == row.timestamp
+
+
+@pytest.mark.asyncio
+async def test_oversized_pricing_reference_is_recorded_as_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A model key past the column's length must not fail the row's insert."""
+    rate = _deployment_rate()
+    _stub_pricing(monkeypatch, rate._replace(reference="k" * (PRICING_REFERENCE_MAX_LENGTH + 1)))
+
+    row = await _settle("gemini-2.5-flash")
+
+    assert row.cost is not None
+    assert row.pricing_source == "deployment"
+    assert row.pricing_reference is None
 
 
 @pytest.mark.asyncio

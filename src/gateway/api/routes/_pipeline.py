@@ -41,11 +41,11 @@ import time
 import uuid
 from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable, Sequence
-from contextlib import AsyncExitStack
+from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
-from enum import Enum, auto
+from enum import Enum, StrEnum, auto
 from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar, assert_never
 from urllib.parse import ParseResult, urlparse
 
@@ -64,8 +64,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import extract_credential_token, verify_api_key_or_master_key
-from gateway.api.routes._attempts import walk_attempts
+from gateway.api.deps import extract_credential_token, get_budget_service, verify_api_key_or_master_key
+from gateway.api.routes._attempts import CandidateCannotServe, PrepareKwargs, walk_attempts
 from gateway.api.routes._helpers import apply_input_guardrails, resolve_user_id
 from gateway.api.routes._idempotency import (
     IDEMPOTENCY_KEY_IN_FLIGHT_DETAIL,
@@ -133,7 +133,10 @@ from gateway.core.usage import (
     cache_tokens_in_prompt_of,
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
+    reasoning_tokens_of,
 )
+from gateway.exceptions import TenancyError
+from gateway.exceptions.control_plane_exceptions import ControlPlaneError
 from gateway.exceptions.tools_exceptions import (
     McpServerResolutionFailedError,
     WebAccessRefusedError,
@@ -153,7 +156,7 @@ from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
 from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.tools import CodeExecutor
-from gateway.models.usage import UsageLog
+from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH, UsageLog
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
@@ -197,6 +200,7 @@ from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
     ToolBackend,
 )
+from gateway.services.mcp_stateless import failure_class
 from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
 from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.pricing_service import (
@@ -236,6 +240,7 @@ from gateway.services.tenancy.organization_guardrail_service import (
 from gateway.services.tenancy.workspace_code_execution_policy_service import (
     SERVED_TOOL_NAMES,
     ResolvedCodeExecutionPolicy,
+    read_code_execution_policy,
     resolve_workspace_code_execution_policy,
 )
 from gateway.services.tenancy.workspace_web_search_service import MAX_WEB_SEARCH_DOMAINS
@@ -273,10 +278,12 @@ from gateway.streaming import (
     streaming_generator,
 )
 from gateway.types.attempt import Attempt
+from gateway.types.normalization_target import NormalizationTarget
 from gateway.types.session_principal import SessionPrincipal
 
 ResultT = TypeVar("ResultT")
 ChunkT = TypeVar("ChunkT")
+BackendT = TypeVar("BackendT")
 _P = ParamSpec("_P")
 
 TOKENS = PrometheusCounter(
@@ -829,6 +836,14 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         """Map a single-attempt upstream failure to the format's wire error."""
         ...
 
+    def stream_error_payload(self, exc: BaseException) -> str:
+        """Render the SSE error event for a failure after the stream committed.
+
+        The status line is already on the wire by then, so this event is the only
+        place the caller learns what kind of failure ended the stream.
+        """
+        ...
+
     def format_chunk(self, chunk: ChunkT) -> str: ...
 
     def extract_stream_usage(self, chunk: ChunkT) -> CompletionUsage | None: ...
@@ -919,6 +934,26 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         """Adjust the ``run_platform_attempts``-shaped kwargs for the format's
         provider call (the responses format re-splits ``provider:model``)."""
         ...
+
+
+_DOMAIN_ERROR_KINDS = {
+    status.HTTP_403_FORBIDDEN: ErrorKind.PERMISSION,
+    status.HTTP_404_NOT_FOUND: ErrorKind.NOT_FOUND,
+}
+
+
+def domain_error(adapter: FormatAdapter[Any, Any], exc: TenancyError) -> HTTPException:
+    """``exc`` in the error envelope of ``adapter``'s dialect.
+
+    A 4xx message is written for the caller and is sent as it is.
+    A 5xx message describes the deployment, so it goes to the log instead.
+    """
+    if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
+        logger.error("Request failed: %s", exc.message)
+        return adapter.error(exc.status_code, "Internal server error", ErrorKind.API)
+    return adapter.error(
+        exc.status_code, exc.message, _DOMAIN_ERROR_KINDS.get(exc.status_code, ErrorKind.INVALID_REQUEST)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1665,10 +1700,22 @@ async def _compile_request_plan(
         raise adapter.error(exc.status_code, exc.caller_detail, ErrorKind.PERMISSION) from exc
 
 
+def _names_end_user(api_key: APIKey | None, user_id_from_request: str | None) -> bool:
+    """Whether a request names an end user of its service key: anyone but the key's own user."""
+    return bool(
+        api_key is not None
+        and api_key.is_service_key
+        and api_key.user_id
+        and user_id_from_request
+        and user_id_from_request != api_key.user_id
+    )
+
+
 async def _resolve_keyed_user_id(
     *,
     adapter: FormatAdapter[Any, Any],
     db: AsyncSession,
+    uow: UnitOfWork | None,
     log_writer: LogWriter,
     config: GatewayConfig,
     raw_request: Request,
@@ -1688,7 +1735,19 @@ async def _resolve_keyed_user_id(
     rejection row it owes. Split out of :func:`resolve_request_context` so the
     two ways into that preamble read as two branches rather than one branch
     wrapped around thirty lines of logging.
+
+    A service key naming anyone but its own user names one of its owner's end
+    users, which is found or created here rather than checked as a mismatch.
     """
+    if api_key is not None and user_id_from_request and _names_end_user(api_key, user_id_from_request):
+        if uow is None:
+            raise adapter.error(500, DB_UNAVAILABLE_DETAIL, ErrorKind.API)
+        try:
+            return await get_budget_service(uow, db).resolve_end_user(
+                api_key=api_key, external_id=user_id_from_request
+            )
+        except TenancyError as exc:
+            raise domain_error(adapter, exc) from exc
     try:
         return resolve_user_id(
             user_id_from_request=user_id_from_request,
@@ -1716,7 +1775,7 @@ async def _resolve_keyed_user_id(
         if (
             exc.status_code == status.HTTP_403_FORBIDDEN
             and api_key is not None
-            and not throttle_early_rejection(raw_request, str(api_key.user_id))
+            and not await throttle_early_rejection(raw_request, str(api_key.user_id))
         ):
             await log_gateway_rejection(
                 db=db,
@@ -1779,11 +1838,7 @@ async def resolve_request_context(
     estimate_cache_write_ttl: Literal["5m", "1h"] | None = None,
     session_principal: SessionPrincipal | None = None,
     routing_signal: Callable[[], RoutingSignal] | None = None,
-    normalize_messages: Callable[
-        [str, LLMProvider | None, str, str | None, uuid.UUID | None, CodeExecutor | None],
-        Awaitable[tuple[int, CompletionUsage | None]],
-    ]
-    | None = None,
+    normalize_messages: Callable[[NormalizationTarget], Awaitable[tuple[int, CompletionUsage | None]]] | None = None,
     tools: list[dict[str, Any]] | None = None,
     idempotency: IdempotencyGuard | None = None,
 ) -> RequestContext:
@@ -1891,6 +1946,7 @@ async def resolve_request_context(
         # around it.
         api_key: APIKey | None = None
         is_master_key = False
+        names_end_user = False
         if session_principal is not None:
             workspace_id = session_principal.workspace_id
             user_id = session_principal.user_id
@@ -1908,9 +1964,16 @@ async def resolve_request_context(
             # organization's keys, not every organization the deployment holds
             # (`workspace_scope.py`'s docstring).
             workspace_id = await resolve_workspace_id(db, api_key)
+            # Limited before the end user is resolved, because resolving one may
+            # create it: the limit is what bounds how fast a service key can add
+            # end users, and it is its owner's, shared by all of them.
+            names_end_user = _names_end_user(api_key, user_id_from_request)
+            if names_end_user and api_key is not None:
+                rate_limit_info = await check_rate_limit(raw_request, str(api_key.user_id))
             user_id = await _resolve_keyed_user_id(
                 adapter=adapter,
                 db=db,
+                uow=uow,
                 log_writer=log_writer,
                 config=config,
                 raw_request=raw_request,
@@ -1929,7 +1992,8 @@ async def resolve_request_context(
             # over to a forbidden model would be an access-control bypass. The gate
             # itself stays where it was, so a plain model name is unaffected.
             key_allowlist = await resolve_request_allowlist(db, api_key)
-        rate_limit_info = check_rate_limit(raw_request, user_id)
+        if not names_end_user:
+            rate_limit_info = await check_rate_limit(raw_request, user_id)
 
         # Tolerate an unparseable / unknown-provider selector here: the budget
         # check below and the downstream provider call surface those with
@@ -2200,12 +2264,17 @@ async def resolve_request_context(
                 # file references. The files service reads None as "every
                 # workspace", matching the /api/v1/files routes.
                 post_chars, vision_usage = await normalize_messages(
-                    user_id,
-                    gate_impl,
-                    gate_model,
-                    gate_instance,
-                    _caller_workspace_id(api_key, session_principal),
-                    code_execution_policy.executor if code_execution_policy is not None else None,
+                    NormalizationTarget(
+                        user_id=user_id,
+                        provider=gate_impl,
+                        model=gate_model,
+                        instance=gate_instance,
+                        file_workspace_id=_caller_workspace_id(api_key, session_principal),
+                        credential_workspace_id=workspace_id,
+                        workspace_executor=(
+                            code_execution_policy.executor if code_execution_policy is not None else None
+                        ),
+                    )
                 )
                 # Bill the vision describe side-call before the reservation
                 # top-up: its cost is already incurred by normalize_messages,
@@ -2251,6 +2320,9 @@ async def resolve_request_context(
             except HTTPException:
                 await refund_reservation(db, reservation)
                 raise
+            except TenancyError as exc:
+                await refund_reservation(db, reservation)
+                raise domain_error(adapter, exc) from exc
             except Exception as exc:
                 await refund_reservation(db, reservation)
                 logger.error("Request setup failed after reservation: %s", exc)
@@ -2956,6 +3028,20 @@ async def prepare_gateway_tools(
             use_web_search=web.search_tool_entry is not None,
             use_web_fetch=web.fetch_tool_entry is not None,
         )
+    except ControlPlaneError as exc:
+        # A peer's refusal of the web search, code execution or MCP resolve is a domain error,
+        # so without this it would answer in `main.py`'s shape rather than this route's.
+        # Not `domain_error`: that one is right for the tenancy family it is named for, and
+        # would drop a 429's `Retry-After` and read the status as an invalid request. Both are
+        # the peer's answer, which `_control_plane_error_handler` keeps whole for the same reason.
+        await release_reservation(ctx)
+        retry_after = getattr(exc, "retry_after", None)
+        raise adapter.error(
+            exc.status_code,
+            exc.message,
+            error_kind_for_status(exc.status_code),
+            {"Retry-After": retry_after} if retry_after else None,
+        ) from exc
     except HTTPException:
         await release_reservation(ctx)
         raise
@@ -3266,16 +3352,7 @@ async def _admit_code_execution(
             provider_code_entry, provider=_dispatch_provider_name(ctx), dialect=adapter.name
         )
         if ctx.hybrid_mode:
-            # Gotcha: the control plane refuses a workspace that may not run code here.
-            # It is asked only when the code will run here, so a natively served keyword is not refused.
-            provisional, _ = resolve_code_executor_preference(
-                requested=requested_executor, workspace=None, deployment=deployment_executor
-            )
-            provisional_executor = decide_code_executor(
-                provisional, sandbox_configured=True, native_available=native_available
-            )
-            if sandbox_tool_entry is not None or provisional_executor is CodeExecutor.OTARI:
-                code_execution_policy = await _hybrid_code_execution_policy(adapter, ctx)
+            code_execution_policy = await _hybrid_code_execution_policy(adapter, ctx)
         else:
             code_execution_policy = await _standalone_code_execution_policy(adapter, ctx)
 
@@ -3453,45 +3530,16 @@ async def _hybrid_code_execution_policy(
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
 ) -> ResolvedCodeExecutionPolicy:
-    """The platform's answer for the caller's workspace, in the standalone shape.
+    """The control plane's answer for the caller's workspace, in the standalone shape.
 
-    The platform owns the per-workspace policy: ``enabled`` is its veto, the
-    hint and the loop ceiling its defaults (per-request values win), and
-    ``executor`` its pin where it sends one. A malformed ``enabled`` is a
-    cross-service contract break, not a "disabled" signal, so it surfaces as a
-    502 and never runs. The other fields are read leniently: an unusable one
-    narrows nothing rather than failing a request over a default.
-
-    The tool allow-list and the execution timeout the payload also carries are
-    deliberately not applied here: the platform's sandbox proxy re-enforces both
-    on every call, and enforcing them twice would let this gateway refuse a tool
-    the platform admits.
+    A malformed answer is a contract break rather than a denial, so it is refused with a 502 and no code runs.
     """
     assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
-    policy = await _resolve_platform_code_execution(config=ctx.config, user_token=ctx.user_token)
-    enabled = policy.get("enabled")
-    if not isinstance(enabled, bool):
-        raise adapter.error(502, MALFORMED_CODE_EXEC_POLICY_DETAIL, ErrorKind.API)
-    hint = policy.get("default_purpose_hint")
-    return ResolvedCodeExecutionPolicy(
-        enabled=enabled,
-        default_purpose_hint=hint if isinstance(hint, str) and hint else None,
-        max_iterations=_positive_int(policy.get("max_iterations")),
-        exec_timeout_s=None,
-        image=None,
-        tools=None,
-        executor=CodeExecutor.parse(policy.get("executor")),
-    )
-
-
-def _positive_int(value: Any) -> int | None:
-    """``value`` when it is a positive integer, else ``None``.
-
-    ``bool`` is an ``int`` subclass and is excluded so a JSON ``true`` is not read as 1.
-    """
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        return None
-    return int(value)
+    answer = await _resolve_platform_code_execution(config=ctx.config, user_token=ctx.user_token)
+    try:
+        return read_code_execution_policy(answer)
+    except ValueError:
+        raise adapter.error(502, MALFORMED_CODE_EXEC_POLICY_DETAIL, ErrorKind.API) from None
 
 
 def _implementation_for(ctx: RequestContext, instance: str) -> LLMProvider | None:
@@ -3813,6 +3861,7 @@ async def record_usage(
         usage_log.cache_read_tokens = cache_read_tokens_of(usage_data)
         usage_log.cache_write_tokens = cache_write_tokens_of(usage_data)
         usage_log.cache_write_1h_tokens = cache_write_1h_tokens_of(usage_data)
+        usage_log.reasoning_tokens = reasoning_tokens_of(usage_data)
         # Which convention those cache counts were reported under, recorded rather
         # than left to be inferred from the numbers later (mozilla-ai/otari#690).
         usage_log.cache_tokens_in_prompt = cache_tokens_in_prompt_of(usage_data)
@@ -3842,19 +3891,34 @@ async def record_usage(
             usage_log.cost = cost
             usage_log.billing_meters = meters
             usage_log.pricing_breakdown = breakdown
+            usage_log.pricing_source = resolved.source
+            # A model key is unbounded where the column is not, and an oversized
+            # value would fail the row's insert on PostgreSQL rather than lose a
+            # label, so a key past the limit is recorded as unknown.
+            reference = resolved.reference
+            if reference is not None and len(reference) > PRICING_REFERENCE_MAX_LENGTH:
+                reference = None
+            usage_log.pricing_reference = reference
+            usage_log.pricing_effective_at = resolved.effective_at
         else:
             _warn_unpriced_model(f"{provider}:{model}" if provider else model)
 
     # When the caller bills a fixed amount without provider usage (e.g. the
     # stream-missing-usage estimate policy), record that amount on the log row
     # so usage_logs.cost stays consistent with the spend that was reconciled.
+    # No rate entry produced that amount, so the row names none.
     if cost_override is not None:
         usage_log.cost = to_usd(cost_override)
+        usage_log.pricing_source = None
+        usage_log.pricing_reference = None
+        usage_log.pricing_effective_at = None
 
     # Gateway-run tool calls are a separate charge from the model's tokens, so they
     # are folded in last: after the token branch (which may not have run at all) and
     # after cost_override (which replaces the token cost, not the whole bill).
     await _apply_tool_charges(db, usage_log, tool_tally)
+    if usage_log.cost is not None:
+        usage_log.calculated_at = usage_log.timestamp
 
     # Emitted once here rather than inside the pricing branch so the cost metric
     # tracks the row's total, including tool charges on an unpriced model. A priced
@@ -4013,7 +4077,7 @@ async def release_reservation(ctx: RequestContext) -> None:
     await refund_reservation(ctx.db, ctx.reservation)
 
 
-def throttle_early_rejection(raw_request: Request, user_id: str) -> bool:
+async def throttle_early_rejection(raw_request: Request, user_id: str) -> bool:
     """Charge a pre-rate-limit refusal to ``user_id``'s bucket, reporting the verdict.
 
     The user/key mismatch gate is the one rejection that fires *before*
@@ -4031,7 +4095,7 @@ def throttle_early_rejection(raw_request: Request, user_id: str) -> bool:
     must not depend on how the gateway chose to record it.
     """
     try:
-        check_rate_limit(raw_request, user_id)
+        await check_rate_limit(raw_request, user_id)
     except HTTPException:
         return True
     return False
@@ -4330,6 +4394,49 @@ async def dispatch_non_stream(
         )
 
 
+class _ToolBackendKind(StrEnum):
+    """The kind of tool backend a streamed request holds open, as its log lines name it."""
+
+    MCP = "MCP"
+    SANDBOX = "sandbox"
+    WEB_RETRIEVAL = "web retrieval"
+
+    @classmethod
+    def of(cls, tool_ctx: ToolContext) -> _ToolBackendKind:
+        if tool_ctx.mcp_server_configs:
+            return cls.MCP
+        return cls.SANDBOX if tool_ctx.use_sandbox else cls.WEB_RETRIEVAL
+
+
+async def _close_tool_backend(closing: Awaitable[object], kind: _ToolBackendKind) -> None:
+    """Await a tool backend's close, logging an ordinary failure rather than raising it.
+
+    A failed close must not replace or cut off what the stream produced, but a cancellation still propagates.
+    """
+    try:
+        await closing
+    except BaseExceptionGroup as group:
+        ordinary, fatal = group.split(Exception)
+        if ordinary is not None:
+            logger.warning("The %s tool backend failed to close: %s", kind, failure_class(ordinary))
+        if fatal is not None:
+            raise fatal from None
+    except Exception as exc:
+        logger.warning("The %s tool backend failed to close: %s", kind, failure_class(exc))
+
+
+@contextlib.asynccontextmanager
+async def _held_tool_backend(
+    backend: AbstractAsyncContextManager[BackendT], kind: _ToolBackendKind
+) -> AsyncIterator[BackendT]:
+    """Enter ``backend`` for the block, and close it through :func:`_close_tool_backend`."""
+    entered = await backend.__aenter__()
+    try:
+        yield entered
+    finally:
+        await _close_tool_backend(backend.__aexit__(None, None, None), kind)
+
+
 async def _lazy_mcp_stream(
     adapter: FormatAdapter[Any, ChunkT],
     kwargs: dict[str, Any],
@@ -4339,7 +4446,7 @@ async def _lazy_mcp_stream(
     # The MCP pool is entered lazily inside the generator: a dial failure
     # surfaces once the client starts pulling events. Sandbox / web_search use
     # the eager-open path below for a pre-200 HTTP error instead.
-    async with MCPClientPool(configs, tally=tool_ctx.tally) as pool:
+    async with _held_tool_backend(MCPClientPool(configs, tally=tool_ctx.tally), _ToolBackendKind.MCP) as pool:
         hinted = adapter.inject_hints(kwargs, pool.purpose_hints(), header=tool_ctx.tools_header)
         async for event in adapter.open_tool_loop_stream(hinted, pool, tool_ctx.max_tool_iterations):
             yield event
@@ -4365,7 +4472,7 @@ async def _eager_backend_stream(
         ):
             yield event
     finally:
-        await backend.__aexit__(None, None, None)
+        await _close_tool_backend(backend.__aexit__(None, None, None), _ToolBackendKind.of(tool_ctx))
 
 
 async def open_stream(
@@ -4791,6 +4898,7 @@ def build_streaming_response(
             is_cost_carrier=adapter.is_stream_cost_carrier if settles_inline else None,
             attach_settlement=_attach_inline_cost if settles_inline else None,
             on_first_chunk=_on_first_chunk,
+            error_payload=adapter.stream_error_payload,
         ),
         media_type="text/event-stream",
         headers=headers,
@@ -4864,6 +4972,24 @@ def stream_final_attempt_extra_seconds(
 # ---------------------------------------------------------------------------
 
 
+async def _prepared(
+    adapter: FormatAdapter[Any, Any], prepare_kwargs: PrepareKwargs | None, instance: str, call_kwargs: dict[str, Any]
+) -> dict[str, Any]:
+    """What the only candidate of a request with no fallover is sent.
+
+    Raises:
+        HTTPException: the candidate cannot serve the request, or it was refused.
+    """
+    if prepare_kwargs is None:
+        return call_kwargs
+    try:
+        return await prepare_kwargs(instance, call_kwargs)
+    except CandidateCannotServe as exc:
+        raise exc.refusal from exc
+    except TenancyError as exc:
+        raise domain_error(adapter, exc) from exc
+
+
 async def run_single_attempt_stream(
     *,
     adapter: FormatAdapter[Any, ChunkT],
@@ -4876,6 +5002,7 @@ async def run_single_attempt_stream(
     session_label: str | None = None,
     display_model: str | None = None,
     base_request_fields: dict[str, Any] | None = None,
+    prepare_kwargs: PrepareKwargs | None = None,
 ) -> StreamingResponse:
     """Open a single-attempt stream and wrap it with settlement callbacks.
 
@@ -4925,6 +5052,7 @@ async def run_single_attempt_stream(
                     max_tool_iterations=tool_ctx.max_tool_iterations,
                     policy_name=ctx.plan.policy_name,
                     build_kwargs=adapter.local_attempt_kwargs,
+                    prepare_kwargs=prepare_kwargs,
                     on_absorbed=_absorbed,
                     on_terminal=stopped_on.append,
                 )
@@ -4936,6 +5064,7 @@ async def run_single_attempt_stream(
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
             stream_attribution = _attribution_for(ctx, chosen)
         else:
+            call_kwargs = await _prepared(adapter, prepare_kwargs, provider, call_kwargs)
             stream = await open_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
             # A single-candidate policy still names a policy and a reason, and
             # both belong on the row.
@@ -5086,6 +5215,7 @@ async def run_streaming_with_fallback(
         has_forwarded_tools=bool(tool_ctx.remaining_user_tools),
     )
 
+    # Only tool backends go on this stack, because a failure to close it is logged rather than raised.
     backend_stack = AsyncExitStack()
     pool_for_loop: Any = None
     try:
@@ -5201,7 +5331,7 @@ async def run_streaming_with_fallback(
 
     stream_to_return: AsyncIterator[ChunkT] = stream
     if pool_for_loop is not None:
-        stream_to_return = _stream_with_stack_cleanup(stream, backend_stack)
+        stream_to_return = _stream_with_stack_cleanup(stream, backend_stack, _ToolBackendKind.of(tool_ctx))
 
     return build_streaming_response(
         adapter=adapter,
@@ -5225,12 +5355,13 @@ async def run_streaming_with_fallback(
 async def _stream_with_stack_cleanup(
     stream: AsyncIterator[ChunkT],
     backend_stack: AsyncExitStack,
+    kind: _ToolBackendKind,
 ) -> AsyncIterator[ChunkT]:
     try:
         async for chunk in stream:
             yield chunk
     finally:
-        await backend_stack.aclose()
+        await _close_tool_backend(backend_stack.aclose(), kind)
 
 
 def _sandbox_error(
@@ -5556,6 +5687,7 @@ async def run_standalone_non_stream(
     model: str,
     display_model: str | None = None,
     base_request_fields: dict[str, Any] | None = None,
+    prepare_kwargs: PrepareKwargs | None = None,
 ) -> ResultT:
     """Standalone-mode non-streaming dispatch with reservation settlement.
 
@@ -5611,6 +5743,7 @@ async def run_standalone_non_stream(
                     max_tool_iterations=tool_ctx.max_tool_iterations,
                     policy_name=ctx.plan.policy_name,
                     build_kwargs=adapter.local_attempt_kwargs,
+                    prepare_kwargs=prepare_kwargs,
                     on_absorbed=_absorbed,
                     on_terminal=stopped_on.append,
                 )
@@ -5622,6 +5755,7 @@ async def run_standalone_non_stream(
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
             attribution = _attribution_for(ctx, chosen)
         else:
+            call_kwargs = await _prepared(adapter, prepare_kwargs, provider, call_kwargs)
             result = await dispatch_non_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
             # A single-candidate policy still has a name and a selection reason, and
             # both belong on the row: "served by its default target" is the answer to

@@ -206,9 +206,17 @@ class McpServerResolutionFailedError(TenancyError):
         self.reason = reason
 
 
+class McpSessionsInterruptedError(Exception):
+    """A request's MCP sessions were canceled while they opened, by something other than the request."""
+
+    def __init__(self) -> None:
+        super().__init__("MCP sessions were canceled before they opened")
+
+
 __all__ = [
     "McpResolutionFailure",
     "McpServerResolutionFailedError",
+    "McpSessionsInterruptedError",
     "SandboxImageNotAllowedError",
     "SandboxToolsUnrunnableError",
     "WebAccessDomainsExcludedError",

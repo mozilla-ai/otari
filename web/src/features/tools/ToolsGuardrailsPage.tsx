@@ -10,7 +10,6 @@ import { Skeleton } from "@/design-system/feedback/Skeleton"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { CONTROL_LANE } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
-import { isDeploymentOperator } from "@/features/organization/roles"
 import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
 import type { FieldCopy } from "@/features/tools/ToolSettingRows"
 import { ToolPriceRow, ToolSettingRow } from "@/features/tools/ToolSettingRows"
@@ -18,7 +17,7 @@ import { ToolStatusGroup } from "@/features/tools/ToolStatusGroup"
 import { WorkspaceCodeExecutionPolicyCard } from "@/features/tools/WorkspaceCodeExecutionPolicyCard"
 import { WorkspaceMcpServersCard } from "@/features/tools/WorkspaceMcpServersCard"
 import { WorkspaceWebSearchCard } from "@/features/tools/WorkspaceWebSearchCard"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import { useDeploymentOperator } from "@/shared/api/organizations"
 import { usePricing, useSetPricing } from "@/shared/api/pricing"
 import {
   useToolSettings,
@@ -338,8 +337,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
   // that one is asked unconditionally and rendered read-only. The pricing rows
   // and the /api/v1/search tools stay operator-only on the server, so they are
   // still gated on the same answer the sidebar uses rather than fired into a 403.
-  const organization = useOrganizationContext()
-  const isOperator = isDeploymentOperator(organization.data)
+  const { isOperator } = useDeploymentOperator()
   const query = useToolSettings()
   const tools = useTools(isOperator)
   const pricing = usePricing(isOperator)

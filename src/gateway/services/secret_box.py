@@ -51,6 +51,11 @@ def _load_keys() -> list[str]:
     return [key for key in re.split(r"[\s,]+", raw.strip()) if key]
 
 
+def shares_secret_key(value: str) -> bool:
+    """Whether ``value`` is one of the configured ``OTARI_SECRET_KEY`` keys."""
+    return value in _load_keys()
+
+
 def secret_box_configured() -> bool:
     """Whether at least one ``OTARI_SECRET_KEY`` value is set (not validated)."""
     return bool(_load_keys())

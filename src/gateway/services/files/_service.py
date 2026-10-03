@@ -21,10 +21,13 @@ from gateway.exceptions.files_exceptions import (
 from gateway.log_config import logger
 from gateway.models.files import FileObject, new_file_id
 from gateway.ports.file_storage_port import FileStoragePort
+from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.repositories.files import FilePageQuery, FileRepositories
 from gateway.services.files._file_ids import file_id_in, page_token
 from gateway.services.files._metadata import expiry_for, guess_mime_type
+from gateway.services.files._provider_uploads import ProviderCopies
 from gateway.services.files._staging import StagedFile
+from gateway.types.provider_account import ProviderAccount, ResolvedCredential
 
 # Resolves the workspace a deployment-wide write lands in. It belongs to the
 # organizations domain, so files receives it rather than looking it up.
@@ -130,6 +133,14 @@ class FileContent:
 
 
 @dataclass(frozen=True)
+class FileBackends:
+    """Where the files domain keeps bytes, and how it reaches the files a provider holds."""
+
+    storage: FileStoragePort
+    provider_files: ProviderFilePort
+
+
+@dataclass(frozen=True)
 class SweepBatch:
     """One cleanup batch and the key that resumes scanning after it."""
 
@@ -156,15 +167,17 @@ class FileService:
         self,
         uow: UnitOfWork,
         repositories: FileRepositories,
-        file_store: FileStoragePort,
+        backends: FileBackends,
         config: GatewayConfig,
         default_workspace: DefaultWorkspace,
     ) -> None:
         self._uow = uow
         self._files = repositories.files
-        self._file_store = file_store
+        self._copies = repositories.provider_copies
+        self._file_store = backends.storage
         self._config = config
         self._default_workspace = default_workspace
+        self._provider_copies = ProviderCopies(uow, repositories.provider_copies, backends, config)
 
     async def store(self, upload: NewFile) -> FileObject:
         """Store an upload's bytes and record the file, and return the row.
@@ -277,7 +290,7 @@ class FileService:
             record = await self._files.live(file_id, scope.user_id, workspace_id=scope.workspace_id)
         if record is None or record.storage_ref is None:
             return None
-        return StagedFile(record.id, record.filename, record.mime_type, record.storage_ref)
+        return StagedFile(record.id, record.filename, record.mime_type, record.storage_ref, record.expires_at)
 
     async def read_bytes(self, staged: StagedFile) -> bytes:
         """The whole of a staged upload's bytes."""
@@ -333,10 +346,28 @@ class FileService:
         record = await self._reserve_produced(output, storage_ref)
         return await self._write(record, chunks)
 
+    async def provider_file_ids(
+        self, files: Sequence[StagedFile], account: ProviderAccount, credential: ResolvedCredential
+    ) -> dict[str, str]:
+        """The provider's ID for a copy of each file in ``account``, keyed by the file's own ID.
+
+        A copy with enough life left is reused, and one is uploaded where none
+        is. ``credential`` must be the one the request dispatches with, because
+        a copy exists only in the account that credential reaches.
+
+        Raises:
+            ProviderUploadDisabledError: the deployment makes no provider copies.
+            AttachedFileExpiresTooSoonError: a copy would outlive its file.
+            ProviderUploadFailedError: a copy could not be made or recorded.
+        """
+        return await self._provider_copies.file_ids_for(files, account, credential)
+
     async def sweep(self, *, batch_size: int, after: tuple[datetime, str] | None = None) -> SweepBatch:
         """Delete expired, revoked and abandoned bytes between short database transactions."""
         now = datetime.now(UTC)
         async with self._uow:
+            await self._copies.remove_stale_pending(pending_before=now - _PENDING_GRACE, limit=batch_size)
+            await self._copies.remove_expired(expired_before=now, limit=batch_size)
             records = await self._files.reclaimable(
                 batch_size=batch_size, pending_before=now - _PENDING_GRACE, after=after
             )

@@ -38,10 +38,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
-from gateway.core.usage_source import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.tools import WorkspaceWebSearchConfig
-from gateway.models.usage import UsageLog
+from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, UsageLog
 from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 
@@ -751,7 +750,7 @@ def test_a_completion_is_billed_to_the_caller_with_no_api_key(
     assert row.workspace_id == world.workspaces["alpha_one"]
     # Still served-here traffic, so the operator's imported-usage mutations
     # cannot touch it: the surface it came from is a different question from
-    # who served it (``core/usage_source``).
+    # who served it.
     assert row.source == SERVED_HERE_SLUG
 
 

@@ -11,7 +11,7 @@ import type {
   SetRoutingPolicyRequest,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import { useDeploymentOperator } from "@/shared/api/organizations"
 import {
   ALIASES,
   CATALOG,
@@ -26,20 +26,20 @@ import {
 // deployment; the `/organizations/me/*` two answer the same shapes for the
 // caller's own organization (otari-ai#1942, otari-ai#1969). The bases are part
 // of every query key they feed, so a demotion cannot serve the wider list from
-// cache, and an errored context falls through to the narrower surface.
+// cache, and an errored context takes the wider one, as every operator gate
+// does (`useDeploymentOperator`).
 export function useRoutingScope(): {
   policies: string
   aliases: string
   isReady: boolean
 } {
-  const context = useOrganizationContext()
-  const isDeploymentWide = context.data?.deployment_operator === true
+  const { isOperator: isDeploymentWide, isSettled } = useDeploymentOperator()
   return {
     policies: isDeploymentWide
       ? "/routing/policies"
       : "/organizations/me/routing-policies",
     aliases: isDeploymentWide ? "/aliases" : "/organizations/me/aliases",
-    isReady: context.isSuccess || context.isError,
+    isReady: isSettled,
   }
 }
 

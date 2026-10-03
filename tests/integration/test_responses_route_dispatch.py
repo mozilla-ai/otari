@@ -922,6 +922,78 @@ def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
     assert plain_aresponses_called is False
 
 
+def _assert_stream_ended_cleanly(resp: Any) -> None:
+    assert resp.status_code == 200, resp.text
+    lines = [line for line in resp.text.splitlines() if line]
+    assert "event: error" not in lines, resp.text
+    assert lines[-1] == "data: [DONE]", resp.text
+    assert any('"response.completed"' in line for line in lines), resp.text
+
+
+def test_stream_mcp_pool_close_failure_does_not_cut_off_the_stream(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    async def fake_loop_stream(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+    ) -> AsyncIterator[ResponseStreamEvent]:
+        yield _stream_completed_event()
+
+    with (
+        patch("gateway.api.routes.responses.responses_tool_loop_stream", new=fake_loop_stream),
+        patch(
+            "gateway.services.mcp_client.MCPClientPool.__aenter__",
+            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [])),
+        ),
+        patch(
+            "gateway.services.mcp_client.MCPClientPool.__aexit__",
+            new=AsyncMock(side_effect=RuntimeError("the MCP server hung up")),
+        ),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/responses",
+            json={
+                "model": _MODEL,
+                "input": "hi",
+                "stream": True,
+                "mcp_servers": [{"name": "test", "url": "http://127.0.0.1:9999/mcp"}],
+            },
+            headers=api_key_header,
+        )
+
+    _assert_stream_ended_cleanly(resp)
+
+
+def test_stream_sandbox_close_failure_does_not_cut_off_the_stream(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+
+    async def fake_loop_stream(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+    ) -> AsyncIterator[ResponseStreamEvent]:
+        yield _stream_completed_event()
+
+    fake_backend = AsyncMock()
+    fake_backend.purpose_hints = lambda: []
+    fake_backend.__aenter__ = AsyncMock(return_value=fake_backend)
+    fake_backend.__aexit__ = AsyncMock(side_effect=RuntimeError("the sandbox hung up"))
+
+    with (
+        patch("gateway.api.routes.responses.responses_tool_loop_stream", new=fake_loop_stream),
+        patch("gateway.api.routes._pipeline.SandboxBackend", return_value=fake_backend),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/responses",
+            json={"model": _MODEL, "input": "compute", "stream": True, "tools": [{"type": "otari_code_execution"}]},
+            headers=api_key_header,
+        )
+
+    _assert_stream_ended_cleanly(resp)
+
+
 def test_stream_code_execution_dispatches_through_sandbox(
     client: TestClient,
     api_key_header: dict[str, str],

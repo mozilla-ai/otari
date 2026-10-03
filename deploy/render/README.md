@@ -40,6 +40,7 @@ The Blueprint wires the web service and database together. Otari settings use th
 | `OTARI_AUTO_MIGRATE` | `true` | Runs Alembic migrations during startup. |
 | `OTARI_BOOTSTRAP_API_KEY` | `true` | Creates a first-use API key when the database has no keys. |
 | `OTARI_SECRET_KEY` | generated | Encrypts provider credentials added on the Providers page. |
+| `OTARI_PROVIDER_ACCOUNT_PEPPER` | generated | Names the provider account a copy of an attached file is in. Otari refuses to start without it while provider copies are on. |
 
 Render's `postgresql://` connection string works without modification. Otari selects the async database driver automatically.
 

@@ -277,11 +277,7 @@ class SandboxBackend:
             timeout_s * max(max_executions, 1) * _CALLS_PER_ROUND_ALLOWANCE + _SESSION_TTL_SLACK_S,
             _MAX_SESSION_TTL_S,
         )
-        # Optional bearer credential forwarded as `Authorization: Bearer` on every
-        # call to the sandbox backend. Set in hybrid mode so the platform-hosted
-        # /v1/sandbox proxy (which authenticates the caller's workspace token) admits
-        # the request and derives tenancy from it. Unset (and unsent) when the
-        # backend is a standalone exec-service that needs no auth.
+        # Sent as `Authorization: Bearer` on every sandbox call when set.
         self._auth_token = auth_token
         # The sandbox image this session asks for: the workspace's pinned image,
         # else the deployment's, else nothing. Sent as an additive field on

@@ -276,25 +276,12 @@ async def create_user_for_signup(
     (``OrganizationService.provision_signup_tenancy``), which is how a control
     plane serving many tenants takes its first member of each.
 
-    Enumeration-safe the same way ``resend_verification_email`` and
-    ``request_password_reset`` are, and the setting does not change that: an
-    address that already has a password and one whose identity has been
-    deactivated return with nothing written and nothing mailed, whichever way it
-    is set, and an unknown address is either registered or ignored in silence.
-    The response never distinguishes them. Deactivation is
-    checked here for the reason ``verify_email`` and ``reset_password`` already
-    check it: it has to close every road in, and without this an identity
-    deactivated before it ever signed up could still have a password set and a
-    live verification token minted on it, waiting to become usable the moment
-    an operator reactivated it. An earlier version of this call answered the
-    three cases with distinguishable 404/409/200 statuses, which let an
-    unauthenticated caller enumerate an organization's roster and signup
-    progress, exactly what the sibling functions were already written to
-    avoid; this closes that gap. ``password`` is still validated and reported
-    on its own shape (too short, too long) before the lookup, since a policy
-    violation says nothing about whether the address exists and checking it
-    first means a bad password answers the same way whether or not the
-    address is real.
+    A refusal writes nothing and mails nothing, so it does not reveal which addresses hold an account.
+    An address that has a password, an address that is already verified, and a deactivated identity are refused.
+    An unknown address is registered where ``open_signup`` is on, and refused otherwise.
+    A verified address is refused because a password set on it would sign in with no proof of the mailbox.
+    A deactivated identity is refused so that no password or verification token waits on it for a reactivation.
+    ``password`` is validated before the lookup, so a policy violation answers the same for every address.
 
     Returns the identity that was claimed or registered, or ``None`` on every
     enumeration-safe path, so a caller can tell the two apart without the
@@ -315,7 +302,9 @@ async def create_user_for_signup(
 
     address = validated_email(email)
     identity = await UserRepository(db).get_by_email(address)
-    if identity is not None and (identity.hashed_password is not None or not identity.is_active):
+    if identity is not None and (
+        identity.hashed_password is not None or identity.email_verified_at is not None or not identity.is_active
+    ):
         # Pays the same bcrypt cost the claim path pays hashing a fresh
         # password, so the two cases are closer in wall-clock time than a bare
         # early return would be. Not a full equalization (the claim path also
@@ -366,14 +355,12 @@ async def create_user_for_signup(
     }
     if terms_accepted:
         values["terms_accepted_at"] = datetime.now(UTC)
-    # Conditional rather than a plain write: the check above raced any other
-    # first-credential write on this address (another signup, an invitation
-    # accepted with a password), and this is what decides between them. The
-    # loser answers like every other enumeration-safe path.
+    # NOTE: A provider sign-in or another first password can commit after the check above.
+    # The condition in this write decides.
     claimed = await UserRepository(db).claim_first_password(
         identity.id,
         hashed_password=await hash_password_async(password),
-        require_unverified=False,
+        require_unverified=True,
         values=values,
     )
     if not claimed:

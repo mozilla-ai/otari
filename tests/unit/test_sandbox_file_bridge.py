@@ -16,20 +16,23 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
+from any_llm import LLMProvider
 from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.exceptions.files_exceptions import FileStorageError
+from gateway.exceptions.files_exceptions import FileOverBudgetError, FileStorageError, ProviderFileUnavailableError
 from gateway.models.files import FileObject
-from gateway.repositories.files import FileRepositories, FileRepository
+from gateway.ports.provider_file_port import ProviderFilePort
+from gateway.repositories.files import FileProviderCopyRepository, FileRepositories, FileRepository
 from gateway.services.files import (
     CODE_EXECUTION_OUTPUT_PURPOSE,
+    FileBackends,
     FileService,
     ProviderFile,
     SandboxFileBridge,
 )
-from gateway.services.files._provider_files import FileOverBudgetError, ProviderFileUnavailableError
+from gateway.types.provider_account import ResolvedCredential
 
 
 class _MemoryStore:
@@ -165,15 +168,17 @@ def _bridge(
 ) -> SandboxFileBridge:
     uow = uow if uow is not None else _CommittingUnitOfWork(_FakeDb())
     settings = GatewayConfig(**config)
+    backends = FileBackends(storage=store, provider_files=cast(ProviderFilePort, _PROVIDER_FILES))
     return SandboxFileBridge(
-        file_store=store,
+        backends=backends,
         config=settings,
         files=FileService(
             cast(UnitOfWork, uow),
             FileRepositories(
-                files=_StubFiles(uow._session, known=known, error=lookup_error, record_error=record_error)
+                files=_StubFiles(uow._session, known=known, error=lookup_error, record_error=record_error),
+                provider_copies=cast(FileProviderCopyRepository, None),
             ),
-            store,
+            backends,
             settings,
             AsyncMock(side_effect=AssertionError("Workspace resolution is not expected")),
         ),
@@ -257,13 +262,11 @@ class _FailingBlock(_FakeUnitOfWork):
 
 
 class _StubProviderClient:
-    """Serves ``files`` by ID the way ``ProviderFileClient`` does, budget included."""
-
-    provider = "anthropic"
-    provider_instance = "anthropic-eu"
+    """Serves ``files`` by ID the way a provider file session does, budget included."""
 
     def __init__(self, files: dict[str, bytes | Exception], delay: float = 0.0) -> None:
-        self._files = files
+        # Public so a test can make a refused file available again between calls.
+        self.files = files
         self._delay = delay
         self.reads: list[str] = []
         self.closed = False
@@ -271,7 +274,7 @@ class _StubProviderClient:
     async def aclose(self) -> None:
         self.closed = True
 
-    async def get_filename(self, file_id: str) -> str | None:
+    async def filename_of(self, file_id: str) -> str | None:
         if file_id == "file_01nameless":
             raise RuntimeError("metadata failed")
         return f"{file_id}.png"
@@ -279,12 +282,32 @@ class _StubProviderClient:
     async def read(self, file: ProviderFile, *, budget_bytes: int) -> AsyncGenerator[bytes, None]:
         self.reads.append(file.file_id)
         await asyncio.sleep(self._delay)
-        body = self._files[file.file_id]
+        body = self.files[file.file_id]
         if isinstance(body, Exception):
             raise body
         if len(body) > budget_bytes:
             raise FileOverBudgetError
         yield body
+
+
+class _StubProviderFiles:
+    """The provider file port, reaching Anthropic and OpenAI through ``client`` once a test sets one."""
+
+    def __init__(self) -> None:
+        self.client: _StubProviderClient | None = None
+        self.opened: list[tuple[LLMProvider, str]] = []
+
+    def serves(self, provider: LLMProvider) -> bool:
+        return provider in (LLMProvider.ANTHROPIC, LLMProvider.OPENAI)
+
+    def open_session(self, *, provider: LLMProvider, instance: str, credential: ResolvedCredential) -> Any:
+        self.opened.append((provider, instance))
+        if self.client is None:
+            raise LookupError("no provider files stubbed")
+        return self.client
+
+
+_PROVIDER_FILES = _StubProviderFiles()
 
 
 def _stub_provider(
@@ -293,9 +316,8 @@ def _stub_provider(
     delay: float = 0.0,
 ) -> _StubProviderClient:
     client = _StubProviderClient(files, delay)
-    monkeypatch.setattr(
-        "gateway.services.files._sandbox_bridge.ProviderFileClient.for_run", lambda *args, **kwargs: client
-    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setattr(_PROVIDER_FILES, "client", client)
     return client
 
 
@@ -391,8 +413,35 @@ async def test_the_caps_hold_across_calls_in_one_request(monkeypatch: pytest.Mon
     await _copy(bridge, "file_01b")
     await _copy(bridge, "file_01c")
 
-    # file_01b is past the bytes left, and file_01c is past the file count.
-    assert [record.id for record in db.added] == ["file_01a"]
+    # file_01b is past the bytes left. It is not stored, so it spends none of the
+    # count either, and file_01c still has both a slot and the one byte it needs.
+    assert [record.id for record in db.added] == ["file_01a", "file_01c"]
+
+
+@pytest.mark.asyncio
+async def test_a_file_the_provider_refused_does_not_spend_the_file_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only a stored file spends a slot, so a provider having a bad minute costs the rest nothing."""
+    gone = ProviderFileUnavailableError("anthropic could not serve file file_01gone")
+    _stub_provider(monkeypatch, {"file_01gone": gone, "file_01b": b"b"})
+    db = _FakeDb()
+    bridge = _bridge(_MemoryStore(), _CommittingUnitOfWork(db), files_output_max_files=1)
+
+    await _copy(bridge, "file_01gone")
+    await _copy(bridge, "file_01b")
+
+    assert [record.id for record in db.added] == ["file_01b"]
+
+
+@pytest.mark.asyncio
+async def test_an_empty_file_does_not_spend_the_file_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An empty copy stores nothing, so it must not take the last slot from the file after it."""
+    _stub_provider(monkeypatch, {"file_01empty": b"", "file_01b": b"b"})
+    db = _FakeDb()
+    bridge = _bridge(_MemoryStore(), _CommittingUnitOfWork(db), files_output_max_files=1)
+
+    await _copy(bridge, "file_01empty", "file_01b")
+
+    assert [record.id for record in db.added if record.bytes] == ["file_01b"]
 
 
 @pytest.mark.asyncio
@@ -471,10 +520,9 @@ async def test_a_copy_whose_stamp_is_uncertain_keeps_its_blob(monkeypatch: pytes
 
 @pytest.mark.asyncio
 async def test_no_credential_copies_nothing_and_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _no_credential(*args: Any, **kwargs: Any) -> Any:
-        raise LookupError("no credential configured for provider 'anthropic'")
-
-    monkeypatch.setattr("gateway.services.files._sandbox_bridge.ProviderFileClient.for_run", _no_credential)
+    _stub_provider(monkeypatch, {"file_01a": b"a"})
+    for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
     store = _MemoryStore()
 
     await _copy(_bridge(store), "file_01a")
@@ -495,29 +543,43 @@ async def test_a_provider_otari_cannot_read_from_is_not_copied(monkeypatch: pyte
 
 
 @pytest.mark.asyncio
-async def test_a_file_cited_again_in_one_request_is_tried_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A stream names one file in several events, and a failed copy must not be retried or recharged."""
-    gone = ProviderFileUnavailableError("anthropic could not serve file file_01gone")
-    client = _stub_provider(monkeypatch, {"file_01gone": gone, "file_01b": b"b"})
+async def test_a_file_the_provider_refused_is_retried_on_a_later_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Responses stream names one file in up to four events, so a refusal gets a free retry."""
+    gone = ProviderFileUnavailableError("anthropic could not serve file file_01flaky")
+    client = _stub_provider(monkeypatch, {"file_01flaky": gone})
     db = _FakeDb()
-    bridge = _bridge(_MemoryStore(), _CommittingUnitOfWork(db), files_output_max_files=2)
+    bridge = _bridge(_MemoryStore(), _CommittingUnitOfWork(db))
+
+    await _copy(bridge, "file_01flaky")
+    client.files["file_01flaky"] = b"chart"
+    await _copy(bridge, "file_01flaky")
+
+    assert client.reads == ["file_01flaky", "file_01flaky"]
+    assert [record.id for record in db.added] == ["file_01flaky"]
+
+
+@pytest.mark.asyncio
+async def test_a_file_already_copied_in_this_request_is_not_read_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The other half: once it is stored, the events that repeat its id cost nothing."""
+    client = _stub_provider(monkeypatch, {"file_01chart": b"chart"})
+    db = _FakeDb()
+    bridge = _bridge(_MemoryStore(), _CommittingUnitOfWork(db))
 
     for _ in range(3):
-        await _copy(bridge, "file_01gone")
-    await _copy(bridge, "file_01b")
+        await _copy(bridge, "file_01chart")
 
-    assert client.reads == ["file_01gone", "file_01b"]
-    assert [record.id for record in db.added] == ["file_01b"]
+    assert client.reads == ["file_01chart"]
+    assert [record.id for record in db.added] == ["file_01chart"]
 
 
 @pytest.mark.asyncio
 async def test_the_copy_stops_at_the_time_limit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("gateway.services.files._sandbox_bridge._PROVIDER_COPY_SECONDS", 0.05)
     _stub_provider(monkeypatch, {"file_01slow": b"a", "file_01next": b"b"}, delay=1.0)
     store = _MemoryStore()
     db = _FakeDb()
+    bridge = _bridge(store, _CommittingUnitOfWork(db), files_provider_copy_max_sec=0.05)
 
-    await _copy(_bridge(store, _CommittingUnitOfWork(db)), "file_01slow", "file_01next")
+    await _copy(bridge, "file_01slow", "file_01next")
 
     assert db.added == []
     assert store.blobs == {}

@@ -21,9 +21,9 @@ only: the caller must not load or refresh this in the hybrid platform path.
 
 import asyncio
 import time
-from typing import Any, Final
+from typing import Any, Final, cast
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
@@ -125,7 +125,10 @@ async def refresh_provider_cache(db: AsyncSession, config: GatewayConfig) -> set
     """Reload the overlay from the database, apply it, and return shadowed names."""
     global _cached_at  # noqa: PLW0603
 
-    rows = (await db.execute(select(ProviderCredential))).scalars().all()
+    # `populate_existing`: sessions use `expire_on_commit=False`, so without it
+    # a row still in the identity map (as after a rotation on this session)
+    # would return the values it was loaded with, not what is committed.
+    rows = (await db.execute(select(ProviderCredential).execution_options(populate_existing=True))).scalars().all()
     overlay: dict[str, dict[str, Any]] = {}
     for row in rows:
         try:
@@ -259,13 +262,18 @@ async def save_credential(
     return row
 
 
-async def reencrypt_credentials(db: AsyncSession) -> tuple[int, int]:
+async def reencrypt_credentials(db: AsyncSession) -> tuple[int, int, int]:
     """Re-encrypt stored provider keys with the current primary OTARI_SECRET_KEY.
 
-    Returns ``(reencrypted, unreadable)``. Rows without a stored key are ignored.
-    If any encrypted key cannot be decrypted with the configured key set, it is
-    left untouched and counted as unreadable so the operator can recover it by
+    Returns ``(reencrypted, unreadable, skipped)``. Rows without a stored key are
+    ignored. A key that cannot be decrypted with the configured key set is left
+    untouched and counted as unreadable, so the operator can recover it by
     replacing that provider's key.
+
+    Each row is written only if it still holds the ciphertext that was read, so
+    an edit committed mid-rotation is not overwritten. Such a row is counted as
+    skipped rather than retried: whoever wrote it already encrypted it with the
+    primary key.
     """
     rows = (
         (await db.execute(select(ProviderCredential).where(ProviderCredential.encrypted_api_key.is_not(None))))
@@ -274,17 +282,31 @@ async def reencrypt_credentials(db: AsyncSession) -> tuple[int, int]:
     )
     reencrypted = 0
     unreadable = 0
+    skipped = 0
     for row in rows:
-        if row.encrypted_api_key is None:
+        original = row.encrypted_api_key
+        if original is None:
             continue
         try:
-            plaintext = decrypt_secret(row.encrypted_api_key)
+            plaintext = decrypt_secret(original)
         except SecretDecryptionError:
             unreadable += 1
             continue
-        row.encrypted_api_key = encrypt_secret(plaintext)
-        reencrypted += 1
-    return reencrypted, unreadable
+        # Core UPDATE rather than a mutation on the loaded row: the whole point
+        # is the WHERE, and an ORM flush would carry no condition at all.
+        result = await db.execute(
+            update(ProviderCredential)
+            .where(ProviderCredential.instance == row.instance, ProviderCredential.encrypted_api_key == original)
+            .values(encrypted_api_key=encrypt_secret(plaintext))
+            .execution_options(synchronize_session=False)
+        )
+        # `execute` is typed as returning Result; an UPDATE always yields a
+        # CursorResult, which is where rowcount lives.
+        if cast(CursorResult[Any], result).rowcount == 1:
+            reencrypted += 1
+        else:
+            skipped += 1
+    return reencrypted, unreadable, skipped
 
 
 async def delete_credential(db: AsyncSession, instance: str) -> bool:

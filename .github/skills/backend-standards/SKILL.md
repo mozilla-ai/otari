@@ -90,6 +90,10 @@ remove a name when you move its code, and never add one.
   `TenancyError` and the four status bases under it, defined in `exceptions/_base.py`, imported
   from `gateway.exceptions` and rendered by `_tenancy_error_handler` in `gateway.main`. A
   domain's own error module subclasses those bases, as `exceptions/budget_exceptions.py` does.
+  The completion routes are the one place that renders the family itself, through
+  `domain_error` in `api/routes/_pipeline.py`, because each completion dialect answers in an
+  error envelope of its own that the registered handler cannot know. It follows the handler's
+  rule for a 5xx message.
 
 Catch specific exceptions, not a broad `except Exception`.
 

@@ -251,7 +251,7 @@ async def _dispatch_search(
     budget_exempt = api_key is not None and api_key.exclude_from_budget
 
     user_id = resolve_passthrough_user_id(auth_result, request.user, reject_mismatch=config.reject_user_mismatch)
-    rate_limit_info = check_rate_limit(raw_request, user_id)
+    rate_limit_info = await check_rate_limit(raw_request, user_id)
 
     async def log_rejection(detail: str, *, row_model: str, row_provider: str | None, status_code: int) -> None:
         """Record a search the gateway itself refused.

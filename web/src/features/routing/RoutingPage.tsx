@@ -12,9 +12,12 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
-import { canManage, isDeploymentOperator } from "@/features/organization/roles"
+import { canManage } from "@/features/organization/roles"
 import { RouterReadiness } from "@/features/routing/RouterReadiness"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import {
+  useDeploymentOperator,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
 import {
   useAliases,
   useDeleteAlias,
@@ -193,9 +196,7 @@ export function RoutingPage() {
   // tenant-scoped `/organizations/me/*` one. Both wait for the context to settle
   // rather than taking "not yet an operator" as "member".
   const organization = useOrganizationContext()
-  const isOperator = isDeploymentOperator(organization.data)
-  const isContextSettled =
-    organization.data !== undefined || organization.isError
+  const { isOperator, isSettled: isContextSettled } = useDeploymentOperator()
   // The switcher is seeded from the caller's own memberships, not the
   // organization's whole list (otari-ai#1969), so this is null only for somebody
   // who belongs to no workspace: they have nothing of their own to see and

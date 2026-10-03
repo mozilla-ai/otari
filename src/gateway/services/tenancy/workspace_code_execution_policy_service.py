@@ -18,7 +18,9 @@ Reads and writes both require an owner or admin of the organization or of the wo
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -292,6 +294,35 @@ async def resolve_workspace_code_execution_policy(
     )
 
 
+def read_code_execution_policy(answer: Mapping[str, Any]) -> ResolvedCodeExecutionPolicy:
+    """Read the control plane's answer for one workspace's code execution policy.
+
+    Raises ``ValueError`` when a field is malformed, so a policy that cannot be read fails closed.
+    A ceiling above this gateway's own is read as sent, because it can only lower a limit.
+    """
+    enabled = answer.get("enabled")
+    if not isinstance(enabled, bool):
+        raise ValueError("enabled must be a boolean")
+    hint = answer.get("default_purpose_hint")
+    if hint is not None and not isinstance(hint, str):
+        raise ValueError("default_purpose_hint must be a string")
+    tools = answer.get("tools")
+    if tools is not None and (not isinstance(tools, list) or any(not isinstance(tool, str) for tool in tools)):
+        raise ValueError("tools must be a list of strings")
+    executor = answer.get("executor")
+    if executor is not None and CodeExecutor.parse(executor) is None:
+        raise ValueError("executor must be one of auto, otari or provider")
+    return ResolvedCodeExecutionPolicy(
+        enabled=enabled,
+        default_purpose_hint=_blank_to_none(hint),
+        max_iterations=_answer_ceiling(answer, "max_iterations"),
+        exec_timeout_s=_answer_ceiling(answer, "exec_timeout_s"),
+        image=None,
+        tools=frozenset(tools) if tools is not None else None,
+        executor=CodeExecutor.parse(executor),
+    )
+
+
 class WorkspaceCodeExecutionPolicyService:
     """Read and upsert one workspace's code-execution policy."""
 
@@ -475,6 +506,17 @@ def _require_runnable_tools(tools: list[str] | None) -> None:
     if tools is None or set(tools) & set(SERVED_TOOL_NAMES):
         return
     raise SandboxToolsUnrunnableError(SERVED_TOOL_NAMES)
+
+
+def _answer_ceiling(answer: Mapping[str, Any], field: str) -> int | None:
+    """A ceiling from the control plane's answer, or ``None`` when it sends none."""
+    value = answer.get(field)
+    if value is None:
+        return None
+    # ``bool`` is an ``int`` subclass, so a JSON ``true`` would otherwise read as 1.
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{field} must be a positive integer")
+    return int(value)
 
 
 def _blank_to_none(value: str | None) -> str | None:

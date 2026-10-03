@@ -22,8 +22,8 @@ from gateway.services.tenancy.workspace_web_search_service import (
     _MAX_DOMAINS,
     _MAX_RESULTS,
     InvalidStoredWebSearchDomainError,
-    _as_tuple,
     _normalize_domains,
+    _stored_domains,
     narrow_web_search_tool_entry,
     read_web_search_policy,
 )
@@ -69,7 +69,7 @@ def test_new_domain_rules_are_stored_in_canonical_form() -> None:
 
 
 def test_valid_legacy_domain_rules_are_canonicalized_in_memory() -> None:
-    assert _as_tuple(["EXAMPLE.com.", "bücher.example"], stored=True) == (
+    assert _stored_domains(["EXAMPLE.com.", "bücher.example"]) == (
         "example.com",
         "xn--bcher-kva.example",
     )
@@ -77,18 +77,56 @@ def test_valid_legacy_domain_rules_are_canonicalized_in_memory() -> None:
 
 def test_invalid_legacy_domain_rule_fails_closed() -> None:
     with pytest.raises(InvalidStoredWebSearchDomainError):
-        _as_tuple(["https://example.com/path"], stored=True)
+        _stored_domains(["https://example.com/path"])
 
 
 @pytest.mark.parametrize("value", [{}, False, 0, "", "example.com", {"example.com": True}])
 def test_invalid_stored_domain_container_fails_closed(value: Any) -> None:
     with pytest.raises(InvalidStoredWebSearchDomainError):
-        _as_tuple(value, stored=True)
+        _stored_domains(value)
 
 
 @pytest.mark.parametrize("value", [None, []])
 def test_empty_stored_domain_list_remains_unconfigured(value: list[str] | None) -> None:
-    assert _as_tuple(value, stored=True) is None
+    assert _stored_domains(value) is None
+
+
+_TOO_MANY = [f"d{i}.example" for i in range(_MAX_DOMAINS + 1)]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(["example.com", 1], id="entry-not-string"),
+        pytest.param(["https://example.com/path"], id="entry-not-host"),
+        pytest.param([".".join(["a" * 60] * 5)], id="entry-too-long"),
+        pytest.param(_TOO_MANY, id="too-many-entries"),
+    ],
+)
+def test_every_source_refuses_the_same_domain_list(value: list[Any]) -> None:
+    with pytest.raises(ValueError):
+        _normalize_domains(value)
+    with pytest.raises(InvalidStoredWebSearchDomainError):
+        _stored_domains(value)
+    with pytest.raises(ValueError):
+        read_web_search_policy({"enabled": True, "allowed_domains": value})
+
+
+def test_every_source_reads_the_same_domain_list() -> None:
+    value = [".Docs.Python.org", "docs.python.org", "bücher.example"]
+    expected = ("docs.python.org", "xn--bcher-kva.example")
+
+    assert tuple(_normalize_domains(value) or ()) == expected
+    assert _stored_domains(value) == expected
+    assert read_web_search_policy({"enabled": True, "allowed_domains": value}).allowed_domains == expected
+
+
+def test_a_blank_entry_is_refused_unless_a_caller_wrote_it() -> None:
+    assert _normalize_domains(["", "example.com"]) == ["example.com"]
+    with pytest.raises(InvalidStoredWebSearchDomainError):
+        _stored_domains(["", "example.com"])
+    with pytest.raises(ValueError):
+        read_web_search_policy({"enabled": True, "allowed_domains": ["", "example.com"]})
 
 
 def test_a_row_that_narrows_nothing_leaves_the_entry_alone() -> None:

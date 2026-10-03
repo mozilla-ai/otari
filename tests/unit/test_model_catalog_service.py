@@ -25,6 +25,7 @@ GPT_4O = {
     "name": "GPT-4o",
     "description": "General reasoning model.",
     "family": "gpt",
+    "canonical_model_id": "openai/gpt-4o",
     "reasoning": False,
     "tool_call": True,
     "structured_output": True,
@@ -47,6 +48,7 @@ CATALOG: dict[str, Any] = {
 def test_parse_entry_reads_all_fields() -> None:
     entry = parse_entry(GPT_4O)
     assert entry.name == "GPT-4o"
+    assert entry.canonical_model_id == "openai/gpt-4o"
     assert entry.input_modalities == ["text", "image", "pdf"]
     assert entry.output_modalities == ["text"]
     assert entry.tool_call is True
@@ -64,6 +66,7 @@ def test_parse_entry_reads_all_fields() -> None:
 def test_parse_entry_tolerates_missing_fields() -> None:
     entry = parse_entry({"id": "bare"})
     assert entry.name is None
+    assert entry.canonical_model_id is None
     assert entry.input_modalities == []
     assert entry.context_window is None
     assert entry.tool_call is False

@@ -8,7 +8,7 @@ import type {
   UpdateOwnKeyRequest,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import { useDeploymentOperator } from "@/shared/api/organizations"
 import { fetchAllRows } from "@/shared/api/paging"
 import { KEYS } from "@/shared/api/queryKeys"
 
@@ -19,18 +19,17 @@ import { KEYS } from "@/shared/api/queryKeys"
 // workspaces they belong to (otari-ai#1941). Both answer identical shapes, so
 // the key hooks below differ only in the prefix they ask. Same construction as
 // `useUsageScope` above, for the same reasons: the organization context is what
-// the shell already reads, an errored context falls through to the narrower
-// surface, and the base is part of every query key it feeds.
+// the shell already reads, an errored context takes the wider surface, and the
+// base is part of every query key it feeds.
 export function useKeysScope(): {
   base: string
   isReady: boolean
   isDeploymentWide: boolean
 } {
-  const context = useOrganizationContext()
-  const isDeploymentWide = context.data?.deployment_operator === true
+  const { isOperator: isDeploymentWide, isSettled } = useDeploymentOperator()
   return {
     base: isDeploymentWide ? "/keys" : "/organizations/me/keys",
-    isReady: context.isSuccess || context.isError,
+    isReady: isSettled,
     isDeploymentWide,
   }
 }

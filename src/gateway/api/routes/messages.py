@@ -1,9 +1,11 @@
+import json
 import math
 import uuid
 from collections.abc import AsyncIterator, Callable
+from functools import partial
 from typing import Annotated, Any, Literal
 
-from any_llm import AnyLLM, LLMProvider, amessages
+from any_llm import AnyLLM, amessages
 from any_llm.types.completion import CompletionUsage
 from any_llm.types.messages import (
     MessageDeltaEvent,
@@ -33,7 +35,12 @@ from gateway.api.deps import (
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
 from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
-from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
+from gateway.api.routes._normalize import (
+    container_copies_step,
+    normalize_request_messages,
+    provider_container_requested,
+    sandbox_requested,
+)
 from gateway.api.routes._pipeline import (
     CONTAINER_AUTO,
     DB_UNAVAILABLE_DETAIL,
@@ -45,6 +52,7 @@ from gateway.api.routes._pipeline import (
     _requested_container,
     classify_provider_error,
     default_attempt_kwargs,
+    domain_error,
     error_kind_for_status,
     prepare_gateway_tools,
     provider_error_headers,
@@ -62,16 +70,18 @@ from gateway.api.routes._platform import (
     ResolvedAttempt,
     SettledCost,
     _resolve_platform_credentials,
+    upstream_exception_chain,
+    upstream_exception_shape,
 )
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
+from gateway.exceptions.files_exceptions import ProviderUploadFailedError
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
-from gateway.models.tools import CodeExecutor
 from gateway.services.code_execution import ContainerLease
 from gateway.services.files import StagedFile
 from gateway.services.log_writer import LogWriter
@@ -83,11 +93,13 @@ from gateway.services.mcp_loop_messages import (
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
+from gateway.services.provider_kwargs import ProviderAccounts
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
 from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX, Dialect, ToolUseBudget
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
+from gateway.types.normalization_target import NormalizationTarget
 
 router = APIRouter(tags=["messages"])
 
@@ -442,6 +454,41 @@ def _ensure_anthropic_error(exc: HTTPException) -> HTTPException:
     )
 
 
+_ERR_OVERLOADED = "overloaded_error"
+
+# A failure after the stream committed can only be reported in the SSE error
+# event, so its type is what tells a client whether retrying makes sense. Only
+# transient upstream conditions are named; every other failure stays the generic
+# ``api_error``, and the message is always the gateway's own text, never the
+# provider's.
+_STREAM_ERROR_MESSAGES = {
+    _ERR_OVERLOADED: "The upstream provider is overloaded. Retry the request.",
+    _ERR_RATE_LIMIT: "The upstream provider rate limited the request. Retry the request later.",
+}
+_STREAM_ERROR_STATUS_TYPES = {
+    status.HTTP_429_TOO_MANY_REQUESTS: _ERR_RATE_LIMIT,
+    529: _ERR_OVERLOADED,
+}
+
+
+def _upstream_stream_error_type(exc: BaseException) -> str | None:
+    """The transient Anthropic ``error.type`` behind a mid-stream failure, if any.
+
+    Anthropic reports a failure after the stream began as an SSE ``error`` event,
+    which its SDK raises as an ``APIStatusError`` whose status is the stream's
+    original 200 and whose ``body`` holds the event. The body's type is the
+    signal; the status is read only for a provider that failed with a real one.
+    """
+    for candidate in upstream_exception_chain(exc):
+        body = getattr(candidate, "body", None)
+        error = body.get("error") if isinstance(body, dict) else None
+        error_type = error.get("type") if isinstance(error, dict) else None
+        if error_type in _STREAM_ERROR_MESSAGES:
+            return str(error_type)
+    _kind, status_code = upstream_exception_shape(exc)
+    return _STREAM_ERROR_STATUS_TYPES.get(status_code) if status_code is not None else None
+
+
 _MASTER_KEY_USER_REQUIRED = "When using master key, 'metadata.user_id' is required in request body"
 _USER_FORBIDDEN = "'metadata.user_id' does not match the authenticated API key's user"
 _PROVIDER_ERROR = "The request could not be completed by the provider"
@@ -464,6 +511,7 @@ def _billable_messages_usage(usage: Any) -> GatewayUsage:
         ),
         cache_write_1h_tokens=sum(_cache_write_1h_tokens(part) for part in billable_parts),
         cache_tokens_in_prompt=False,
+        reasoning_tokens=getattr(getattr(usage, "output_tokens_details", None), "thinking_tokens", None) or 0,
     )
 
 
@@ -556,6 +604,13 @@ class _MessagesAdapter:
                 provider_error_headers(exc, mapping.status_code),
             )
         return _anthropic_error(_ERR_API, _PROVIDER_ERROR, status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def stream_error_payload(self, exc: BaseException) -> str:
+        error_type = _upstream_stream_error_type(exc)
+        if error_type is None:
+            return self.stream_format.error_payload
+        event = {"type": "error", "error": {"type": error_type, "message": _STREAM_ERROR_MESSAGES[error_type]}}
+        return f"event: error\ndata: {json.dumps(event)}\n\n"
 
     def format_chunk(self, chunk: MessageStreamEvent) -> str:
         return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True)}\n\n"
@@ -785,37 +840,43 @@ async def create_message(
     # Uploads the normalizer found for the code-execution sandbox, handed to the
     # sandbox session once the billed user and workspace are resolved.
     sandbox_inputs: list[StagedFile] = []
+    # Uploads a container_upload block names for the provider's own container.
+    # Each candidate is sent copies in its own account, made as it is dispatched.
+    container_inputs: list[StagedFile] = []
 
-    async def _normalize(
-        user_id: str,
-        provider: LLMProvider | None,
-        model: str,
-        instance: str | None,
-        workspace_id: uuid.UUID | None,
-        workspace_executor: CodeExecutor | None,
-    ) -> tuple[int, CompletionUsage | None]:
+    async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Anthropic wire payload
         # before the cost estimate. Standalone only; no-op when the files
         # feature is off or the request has no attachments.
+        code_execution_header = raw_request.headers.get(CODE_EXECUTION_HEADER)
         request.messages, stats = await normalize_request_messages(
             request.messages,
             fmt="anthropic",
             config=config,
-            provider=provider,
-            model=model,
+            provider=target.provider,
+            model=target.model,
             files=files,
-            user_id=user_id,
-            instance=instance,
-            workspace_id=workspace_id,
+            user_id=target.user_id,
+            instance=target.instance,
+            workspace_id=target.file_workspace_id,
             sandbox_requested=sandbox_requested(
                 request.tools,
                 config=config,
-                provider=provider,
+                provider=target.provider,
                 dialect=_ADAPTER.name,
-                code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-                workspace_executor=workspace_executor,
+                code_execution_header=code_execution_header,
+                workspace_executor=target.workspace_executor,
+            ),
+            provider_container=provider_container_requested(
+                request.tools,
+                config=config,
+                provider=target.provider,
+                dialect=_ADAPTER.name,
+                code_execution_header=code_execution_header,
+                workspace_executor=target.workspace_executor,
             ),
         )
+        container_inputs.extend(stats.container_inputs)
         sandbox_inputs.extend(stats.sandbox_inputs)
         return len(str(request.messages)) + len(str(request.system or "")), stats.vision_usage()
 
@@ -927,6 +988,20 @@ async def create_message(
         # strand a container the provider would have used.
         request_fields.pop("container", None)
 
+    prepare_kwargs = None
+    if container_inputs:
+        pepper = config.provider_account_pepper
+        if files is None or ctx.workspace_id is None or pepper is None:
+            # The blocks still name Otari's files, which no provider account holds.
+            await release_reservation(ctx)
+            raise domain_error(_ADAPTER, ProviderUploadFailedError())
+        prepare_kwargs = container_copies_step(
+            files=files,
+            inputs=container_inputs,
+            accounts=ProviderAccounts(pepper=pepper, workspace_id=ctx.workspace_id),
+            render=partial(domain_error, _ADAPTER),
+        )
+
     # ------------------------------------------------------------------
     # Streaming path
     # ------------------------------------------------------------------
@@ -979,6 +1054,7 @@ async def create_message(
             session_label=request.session_label,
             display_model=resolved.alias,
             base_request_fields=request_fields,
+            prepare_kwargs=prepare_kwargs,
         )
 
     # ------------------------------------------------------------------
@@ -1025,6 +1101,7 @@ async def create_message(
         model=resolved.model,
         display_model=resolved.alias,
         base_request_fields=request_fields,
+        prepare_kwargs=prepare_kwargs,
     )
 
     body = result.model_dump(exclude_none=True)

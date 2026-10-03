@@ -11,6 +11,7 @@ from uvicorn.config import logger
 
 from gateway.core.config import API_ROOT, load_config
 from gateway.log_config import setup_logger
+from gateway.services.url_safety import redact_url_secrets
 
 _LOG_LEVEL_NAMES: dict[str, int] = {
     "DEBUG": logging.DEBUG,
@@ -147,6 +148,7 @@ def serve(
             app,
             host=gateway_config.host,
             port=gateway_config.port,
+            forwarded_allow_ips=gateway_config.forwarded_allow_ips,
         )
     except KeyboardInterrupt:
         logger.info("\nShutting down Otari...")
@@ -165,7 +167,7 @@ def init_db(config: str | None, database_url: str | None) -> None:
     if database_url:
         gateway_config.database_url = database_url
 
-    click.echo(f"Initializing database: {gateway_config.database_url}")
+    click.echo(f"Initializing database: {redact_url_secrets(gateway_config.database_url)}")
 
     db_init(gateway_config)
 
@@ -192,7 +194,7 @@ def migrate(config: str | None, database_url: str | None, revision: str) -> None
         click.echo("alembic command not found in PATH", err=True)
         sys.exit(1)
 
-    click.echo(f"Running migrations on: {gateway_config.database_url}")
+    click.echo(f"Running migrations on: {redact_url_secrets(gateway_config.database_url)}")
     click.echo(f"Target revision: {revision}")
 
     env = os.environ.copy()
@@ -224,6 +226,18 @@ def gen_secret_key() -> None:
     from gateway.services.secret_box import generate_secret_key
 
     click.echo(generate_secret_key())
+
+
+@cli.command(name="gen-provider-account-pepper")
+def gen_provider_account_pepper() -> None:
+    """Print a fresh OTARI_PROVIDER_ACCOUNT_PEPPER for naming the provider accounts that hold file copies.
+
+    A deployment that makes provider copies will not start without one. Losing
+    it costs nothing but a fresh copy of each file the next time it is used.
+    """
+    import secrets
+
+    click.echo(secrets.token_urlsafe(32))
 
 
 @cli.group()

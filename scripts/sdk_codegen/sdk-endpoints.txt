@@ -82,6 +82,11 @@ GET /api/v1/files                        # not yet wrapped
 GET /api/v1/files/{file_id}              # not yet wrapped
 GET /api/v1/files/{file_id}/content      # not yet wrapped
 DELETE /api/v1/files/{file_id}           # not yet wrapped
+# Decisions: added to the gateway spec, not yet wrapped by any SDK shell. The
+# alias exists so TypeSafe's SDK and llama-server clients work unchanged, so an
+# otari SDK wrapping decisions would wrap the canonical path only.
+POST /api/v1/decisions                   # not yet wrapped
+POST /api/v1/systemone                   # alias of /api/v1/decisions for TypeSafe-compatible clients
 
 # The Playground, which is the dashboard's own chat page and is excluded on a
 # stronger ground than "not yet wrapped": its completion endpoint is authorized

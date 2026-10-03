@@ -4,7 +4,7 @@ A condition that belongs to the deployment rather than to one domain has no
 domain module to sit in, and lives here.
 """
 
-from gateway.exceptions import TenancyError
+from gateway.exceptions import TenancyError, TenancyValidationError
 
 
 class SecretBoxUnavailableTenancyError(TenancyError):
@@ -27,6 +27,19 @@ class SecretBoxUnavailableTenancyError(TenancyError):
         super().__init__(f"OTARI_SECRET_KEY is not set; it is required to store {stored}")
 
 
+class UnresolvedRedactionError(TenancyValidationError):
+    """An edited list entry in a settings object still holds the ``***`` mask.
+
+    Raised by ``models.secret_fields.restore_redacted_values``, which cannot tell
+    which stored credential an edited list entry is without guessing. Names no
+    field and no value, so it carries nothing secret.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("An edited list entry still contains the masked value ***; re-enter its credential")
+
+
 __all__ = [
     "SecretBoxUnavailableTenancyError",
+    "UnresolvedRedactionError",
 ]

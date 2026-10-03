@@ -42,7 +42,8 @@ default workspace.
 Otari maintains identities for dashboard sign-in and user records for request
 attribution and per-user budgets. Management flows connect them where needed.
 Client-provided `user` values are never trusted to move spend away from the API
-key's bound user.
+key's bound user. The one exception is a [service key](#service-keys-and-end-users),
+which bills end users that belong to its own user.
 
 A user's `allowed_models` is inherited by newly created keys unless the key
 defines its own list. A missing list allows any model, an empty list allows none,
@@ -61,6 +62,7 @@ may also define:
 - budget exemption
 - whether mismatched client `user` fields are accepted
 - whether content-free agent telemetry is captured
+- whether it is a service key, which may name end users
 - application metadata
 
 The plaintext key is returned only when it is created or rotated. Store it then.
@@ -74,6 +76,48 @@ deployment operator's standing. A signed-in member without it manages their own
 keys at `/api/v1/organizations/me/keys`, which derives the owner rather than
 accepting one, mints only into a workspace the caller may see, and never issues
 a budget-exempt key.
+
+## Service keys and end users
+
+A service key lets one application track spend per end user without sharing
+the master key or minting a key per end user. Mark a key with `is_service_key`
+on `POST` or `PATCH /api/v1/keys`; only a deployment operator can.
+
+A request on a service key names its end user the way any client names a user:
+the `user` field on `/v1/chat/completions` and `/v1/responses`, and
+`metadata.user_id` on `/v1/messages`. Otari then:
+
+- Bills the request to that end user, creating it on first use. An end user is
+  a user record owned by the key's user, so a key can only bill end users of
+  its own user: two services that both name `alice` get two separate end users,
+  and naming another key's user creates an end user of your own rather than
+  reaching theirs.
+- Caps each end user at the key's `end_user_budget_id`, copied onto the end
+  user when it is created. Each end user gets the full limit and its own reset
+  period. Changing the key's setting affects end users created afterwards; to
+  give one end user a different budget, update it on `/api/v1/users`, where it
+  is listed with `parent_user_id` (the key's user) and `external_id` (the name
+  the service sent).
+- Checks the key's own ceiling as well, so a scoped budget on the API key pools
+  every end user behind it. The key's user's per-user budget is not checked for
+  an end user's request; use the key's ceiling as the pool.
+- Keeps the key's user's rate limit and model allow-list, and any member
+  ceiling of the key's user, in force for every end user. The rate limit is
+  shared by all of them and is checked before an end user is created.
+
+A request that names nobody, or the key's own user, bills the key's user as it
+would on any other key. Blocking the key's user stops its end users too.
+
+Each distinct `user` value creates an end user, whether or not the request is
+then admitted, and nothing else caps how many a key can create. Set a rate
+limit on a deployment that issues service keys, and send a stable id per end
+user rather than a per-session or per-request value.
+
+End users are supported on the three completion endpoints above. The other
+endpoints (embeddings, search, files, batches and the other pass-through
+routes) treat a service key as an ordinary key, so a `user` naming someone else
+is handled by the `reject_user_mismatch` setting there. Hybrid mode resolves
+users on the platform and does not support service keys.
 
 ## Budgets
 
@@ -185,6 +229,8 @@ dashboard to finish. Where an edge serves the dashboard elsewhere, set
 OAuth signs in an existing Otari identity whose email the provider verifies. It
 does not provision arbitrary provider accounts.
 
+A provider sign-in on an address that is not yet verified marks it verified. It also removes any password and verification link set on that address before then: the provider confirms who owns the address, not who chose that password. The person can set a new password from their account page once signed in. A password on an address that was already verified is kept.
+
 ### Signup
 
 Signup sets a password for an address and sends a verification link. What an
@@ -197,10 +243,14 @@ unknown address does depends on `open_signup`:
 - `true`: an unknown address is registered, with an organization and workspace of
   its own. Use it where the deployment serves many tenants.
 
+Signup never sets a password on an address that is already verified. That is the
+state a Google or GitHub sign-in leaves, and the person who signs in that way
+adds a password from Account settings while signed in.
+
 Either way the response says the same thing whether the address was unknown,
-already claimed, or genuinely just claimed, so its body discloses nothing about
-the address. Response *timing* still does, because the eligible path sends mail
-before it answers; that is [otari#720](https://github.com/mozilla-ai/otari/issues/720)
+already claimed, already verified, or genuinely just claimed, so its body
+discloses nothing about the address. Response *timing* still does, because the
+eligible path sends mail before it answers; that is [otari#720](https://github.com/mozilla-ai/otari/issues/720)
 and it applies to both postures.
 
 Signup needs mail configured, because an account that cannot verify its address

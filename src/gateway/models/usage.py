@@ -11,6 +11,20 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from gateway.models.base import Base
 from gateway.models.money import UsdCost
 
+# Mirrors ``gateway_usage_settlement.pricing_reference`` on the platform.
+PRICING_REFERENCE_MAX_LENGTH = 511
+
+# ``usage_logs.source`` on a row this gateway served itself. Any other value is usage
+# imported through the external-events or OTLP ingest, which reserves this one so an
+# import cannot pass as traffic served here.
+SERVED_HERE_SLUG = "gateway"
+
+# The endpoint label on a usage row the dashboard's own Playground produced. Its
+# rows are still served here, so the label, not the source, tells them apart. An
+# identifier, not a URL: it keeps its value if the route ever moves, exactly as
+# ``chat.USAGE_ENDPOINT`` does.
+PLAYGROUND_USAGE_ENDPOINT = "/v1/playground/chat/completions"
+
 
 class UsageLog(Base):
     """Usage log model for tracking API requests."""
@@ -58,13 +72,10 @@ class UsageLog(Base):
     endpoint: Mapped[str] = mapped_column()
 
     # Provenance. "gateway" for requests Otari served itself; a source slug (e.g.
-    # "claude_code") for usage imported through POST /v1/usage/external-events. A row
-    # backfilled from hosted history keeps its origin's slug behind a legacy prefix
-    # ("otari-ai:gateway", "otari-ai:claude_code"), so asking whether this deployment
-    # served a row means asking about the slug behind that prefix: core/usage_source.
+    # "claude_code") for usage imported through POST /v1/usage/external-events.
     # source_event_id is the upstream event id used for idempotent import (NULL for
     # gateway rows); source_label carries optional session/project attribution.
-    source: Mapped[str] = mapped_column(default="gateway", index=True)
+    source: Mapped[str] = mapped_column(default=SERVED_HERE_SLUG, index=True)
     source_event_id: Mapped[str | None] = mapped_column()
     source_label: Mapped[str | None] = mapped_column()
     # Whether this row's cost participates in budget enforcement. True for normal
@@ -79,6 +90,7 @@ class UsageLog(Base):
     cache_read_tokens: Mapped[int | None] = mapped_column()
     cache_write_tokens: Mapped[int | None] = mapped_column()
     cache_write_1h_tokens: Mapped[int | None] = mapped_column()
+    reasoning_tokens: Mapped[int | None] = mapped_column()
     # Which cached-token convention the counts above were reported under: True
     # when the cache buckets are already inside ``prompt_tokens`` (OpenAI shape),
     # False when they are additive to it (Anthropic / Claude Code shape). Written
@@ -110,21 +122,23 @@ class UsageLog(Base):
     # ``timestamp`` (when the request ran): usage settled or repriced later moves
     # the two apart.
     #
-    # All nullable with no backfill. The gateway's own settlement does not record
-    # provenance, so these are written by the hosted-usage backfill
-    # (mozilla-ai/otari-ai#1798) from the platform's ``gateway_usage_settlement``
-    # row, and null reads correctly as "not recorded". The lengths mirror that
+    # All nullable with no backfill, so null reads as "not recorded". Rows this
+    # gateway settles (``record_usage``) record them; rows the hosted-usage backfill
+    # (mozilla-ai/otari-ai#1798) copies from the platform's
+    # ``gateway_usage_settlement`` carry the platform's. The lengths mirror that
     # table's columns rather than this file's usual unbounded strings, so a value
     # copied across always fits.
     #
-    # ``pricing_source`` speaks the platform's settlement vocabulary, the values
-    # ``_platform.SettledCost.pricing_source`` already carries on the hybrid wire
-    # (echoed to callers as ``usage.pricing_source``). It is not the same field as
-    # the one on a listed model in ``api/routes/models.py`` ("configured",
-    # "default", "dynamic", "none"), which says where a price list entry came from
-    # in this deployment rather than what settled one row's amount.
+    # ``pricing_source`` therefore speaks one of two vocabularies: this gateway's
+    # ``PriceSource`` ("organization", "deployment", "defaults"), the values it
+    # already echoes to callers as ``usage.pricing_source``, or the platform's on a
+    # backfilled row. Neither is the field on a listed model in
+    # ``api/routes/models.py`` ("configured", "default", "dynamic", "none"), which
+    # says where a price list entry came from rather than what settled one row's
+    # amount. ``pricing_version`` is left null here: no price list this gateway
+    # reads is versioned.
     pricing_source: Mapped[str | None] = mapped_column(String(32))
-    pricing_reference: Mapped[str | None] = mapped_column(String(511))
+    pricing_reference: Mapped[str | None] = mapped_column(String(PRICING_REFERENCE_MAX_LENGTH))
     pricing_effective_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     pricing_version: Mapped[str | None] = mapped_column(String(255))
     calculated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -207,6 +221,7 @@ class UsageLog(Base):
             "cache_read_tokens": self.cache_read_tokens,
             "cache_write_tokens": self.cache_write_tokens,
             "cache_write_1h_tokens": self.cache_write_1h_tokens,
+            "reasoning_tokens": self.reasoning_tokens,
             "cache_tokens_in_prompt": self.cache_tokens_in_prompt,
             "billing_meters": self.billing_meters,
             "pricing_breakdown": self.pricing_breakdown,

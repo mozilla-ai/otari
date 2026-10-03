@@ -10,6 +10,11 @@ import pytest
 
 from conftest import InstallControlPlane
 from gateway.api.routes._platform import _resolve_platform_code_execution
+from gateway.exceptions.control_plane_exceptions import (
+    ControlPlaneNotConfiguredError,
+    ControlPlaneRefusedError,
+    ControlPlaneUnavailableError,
+)
 
 
 def _config(*, base_url: str | None = "https://platform.local") -> Any:
@@ -66,12 +71,10 @@ async def test_resolve_403_passes_through(
 
     control_plane_transport(fake_post)
 
-    from fastapi import HTTPException
-
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(ControlPlaneRefusedError) as ei:
         await _resolve_platform_code_execution(_config(), "tk")
     assert ei.value.status_code == 403
-    assert ei.value.detail == "code execution disabled"
+    assert ei.value.message == "code execution disabled"
 
 
 @pytest.mark.asyncio
@@ -83,13 +86,11 @@ async def test_resolve_429_passthrough_with_retry_after(
 
     control_plane_transport(fake_post)
 
-    from fastapi import HTTPException
-
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(ControlPlaneRefusedError) as ei:
         await _resolve_platform_code_execution(_config(), "tk")
     assert ei.value.status_code == 429
-    assert ei.value.headers == {"Retry-After": "30"}
-    assert ei.value.detail == "slow down"
+    assert ei.value.retry_after == "30"
+    assert ei.value.message == "slow down"
 
 
 @pytest.mark.asyncio
@@ -101,9 +102,7 @@ async def test_resolve_5xx_maps_to_502(
 
     control_plane_transport(fake_post)
 
-    from fastapi import HTTPException
-
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(ControlPlaneUnavailableError) as ei:
         await _resolve_platform_code_execution(_config(), "tk")
     assert ei.value.status_code == 502
 
@@ -117,9 +116,7 @@ async def test_resolve_422_collapses_to_502(
 
     control_plane_transport(fake_post)
 
-    from fastapi import HTTPException
-
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(ControlPlaneUnavailableError) as ei:
         await _resolve_platform_code_execution(_config(), "tk")
     assert ei.value.status_code == 502
 
@@ -133,17 +130,13 @@ async def test_resolve_network_error_maps_to_502(
 
     control_plane_transport(fake_post)
 
-    from fastapi import HTTPException
-
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(ControlPlaneUnavailableError) as ei:
         await _resolve_platform_code_execution(_config(), "tk")
     assert ei.value.status_code == 502
 
 
 @pytest.mark.asyncio
 async def test_resolve_misconfigured_platform_500() -> None:
-    from fastapi import HTTPException
-
-    with pytest.raises(HTTPException) as ei:
+    with pytest.raises(ControlPlaneNotConfiguredError) as ei:
         await _resolve_platform_code_execution(_config(base_url=None), "tk")
     assert ei.value.status_code == 500

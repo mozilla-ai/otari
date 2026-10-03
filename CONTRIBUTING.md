@@ -153,7 +153,13 @@ keep it current, and they cover different things:
 - **Dependabot** (`.github/dependabot.yml`) opens weekly version-update PRs for the
   `uv` and `github-actions` ecosystems. Security updates are separate, need no
   config, and already cover every supported ecosystem here. The dashboard is not
-  covered by either right now; see #1001.
+  covered by either, because `web/` uses a pnpm newer than Dependabot supports;
+  see #1001.
+- **`.github/workflows/otari-dashboard-audit.yml`** stands in for Dependabot's
+  security alerts on the dashboard. It runs `pnpm audit` against `web/pnpm-lock.yaml`
+  on every PR that changes the dashboard's dependencies and weekly, failing on a
+  high or critical advisory, and keeps a tracking issue open while one remains.
+  Run it locally with `pnpm --dir web audit`.
 - **`.github/workflows/otari-lock-refresh.yml`** re-resolves `uv.lock` weekly against
   the newest versions the existing constraints already allow, which is the case
   Dependabot does not open PRs for. A floored dependency can otherwise stay at
@@ -191,6 +197,8 @@ uv run --frozen --no-dev python scripts/oss_edition_smoke.py
 - Keep diffs focused; avoid unrelated refactors in the same PR.
 - Do not hand-edit `CHANGELOG.md`; it is regenerated from commit history at release time.
 - The PR description must keep the **PR Type**, **Checklist**, and **AI Usage** sections from the [PR template](https://github.com/mozilla-ai/otari/blob/main/.github/pull_request_template.md). CI checks for these sections and will auto-close PRs that are missing them after 24 hours.
+- Until one of your PRs has been approved or merged, keep only one open at a time. CI closes any extra PRs from a first-time contributor (keeping the oldest open); reopen them once the first PR is approved. A maintainer can exempt a PR with the `skip-pr-limit` label.
+- Before opening a PR for an issue, check whether an open PR is already linked to it, and keep no more than four PRs open at a time. CI comments on a PR that duplicates another, and closes a newly opened or reopened PR that would take you past four (unless it carries the `skip-pr-limit` label).
 
 ## Questions?
 

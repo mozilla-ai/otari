@@ -97,6 +97,7 @@ export function usageTotals(overrides: Partial<UsageTotals> = {}): UsageTotals {
     cache_read_tokens: 0,
     cache_write_tokens: 0,
     cache_write_1h_tokens: 0,
+    reasoning_tokens: 0,
     billed_input_tokens: 0,
     billed_output_tokens: 0,
     request_count: 0,
@@ -509,6 +510,8 @@ export function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
     allowed_models: null,
     exclude_from_budget: false,
     reject_user_mismatch: null,
+    is_service_key: false,
+    end_user_budget_id: null,
     metadata: {},
     ...overrides,
   }

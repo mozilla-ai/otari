@@ -356,3 +356,55 @@ async def test_resolve_pricing_reports_the_rung_that_answered(async_db: AsyncSes
     assert await source_of("openai", "gpt-4o-mini") == "deployment"
     assert await source_of("anthropic", "claude-sonnet-4") == "defaults"
     assert await source_of("openai", "nonexistent-model") is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_pricing_names_the_entry_that_answered(async_db: AsyncSession) -> None:
+    """Each rung names its own entry and when it took effect (#782)."""
+    from gateway.models.money import to_usd
+    from gateway.models.pricing import API_ORIGIN, OrganizationModelPricing
+    from gateway.repositories.tenancy import OrganizationRepository
+    from gateway.services.pricing_service import (
+        default_pricing_reference,
+        normalize_effective_at,
+        resolve_model_pricing,
+    )
+
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Provenance", slug="provenance", created_by_user_id=None
+    )
+    as_of = normalize_effective_at(None)
+    override_from = as_of - timedelta(days=2)
+    deployment_from = as_of - timedelta(days=3)
+    configure_default_pricing(True)
+    override = OrganizationModelPricing(
+        organization_id=organization.id,
+        model_key="openai:gpt-4o",
+        input_price_per_million=to_usd(1.0),
+        output_price_per_million=to_usd(2.0),
+        effective_from=override_from,
+        origin=API_ORIGIN,
+    )
+    async_db.add(override)
+    # Stored under the legacy spelling, which is the key the reference names.
+    async_db.add(
+        ModelPricing(
+            model_key="openai/gpt-4o-mini",
+            effective_at=deployment_from,
+            input_price_per_million=3.0,
+            output_price_per_million=4.0,
+        )
+    )
+    await async_db.commit()
+
+    async def resolve(provider: str, model: str) -> tuple[str | None, datetime | None]:
+        resolved = await resolve_model_pricing(async_db, provider, model, as_of=as_of, organization_id=organization.id)
+        assert resolved is not None
+        return resolved.reference, resolved.effective_at
+
+    assert await resolve("openai", "gpt-4o") == (str(override.id), override_from)
+    assert await resolve("openai", "gpt-4o-mini") == ("openai/gpt-4o-mini", deployment_from)
+    reference, effective_at = await resolve("anthropic", "claude-sonnet-4")
+    assert reference is not None
+    assert reference == default_pricing_reference("anthropic", "claude-sonnet-4", as_of)
+    assert effective_at is None

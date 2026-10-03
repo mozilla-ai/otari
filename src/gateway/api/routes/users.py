@@ -73,6 +73,10 @@ class UserResponse(BaseModel):
     created_at: str
     updated_at: str
     metadata: dict[str, Any]
+    # Set on an end user a service key created: the key's user, and the id the
+    # service named it by. Null on every other user.
+    parent_user_id: str | None = None
+    external_id: str | None = None
 
     @classmethod
     def from_model(cls, user: User) -> "UserResponse":
@@ -95,6 +99,8 @@ class UserResponse(BaseModel):
             created_at=user.created_at.isoformat(),
             updated_at=user.updated_at.isoformat(),
             metadata=dict(user.metadata_) if user.metadata_ else {},
+            parent_user_id=user.parent_user_id,
+            external_id=user.external_id,
         )
 
 

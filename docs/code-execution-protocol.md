@@ -40,13 +40,14 @@ policy. `tests/unit/test_code_execution_contract.py` fails when they disagree.
 |---|---|---|
 | Client | Otari | Leases a session, submits tool calls, releases the session |
 | Backend | `otari-sandbox-container` or another implementation | Executes untrusted, model-generated code and returns results |
-| Control plane | The platform, in hybrid mode | Authorizes the caller, enforces per-workspace policy, injects tenancy, meters usage |
+| Control plane | The platform, in hybrid mode | Authorizes the workspace, returns its policy, issues a grant, meters usage |
+| Front door | A service in front of the backend, or the backend itself, in hybrid mode | Checks the grant, enforces its claims, injects tenancy |
 
-The backend does not authorize callers, enforce quota, or meter usage. In
-standalone mode there is no control plane at all: Otari addresses a backend it
-was configured with. In hybrid mode the platform interposes a proxy that
-authenticates the caller and enforces policy before forwarding; the contract
-below is unchanged either way, which is what lets the same backend serve both.
+The backend does not authorize callers, enforce quota, or meter usage. Otari applies the workspace's policy itself, and a front door checking a grant's claims is an extra layer. In hybrid mode Otari does not yet apply the tool list, the timeout or the image, which [#1834](https://github.com/mozilla-ai/otari/issues/1834) fixes. In standalone mode there is no control plane at all: Otari addresses a backend it was configured with.
+
+In hybrid mode the control plane authorizes the workspace and gives Otari a short-lived grant, and Otari presents it to a front door that admits the operation and forwards it to the backend. Code, files and results never pass through the control plane. The contract below is unchanged either way, which is what lets the same backend serve both. [#1603](https://github.com/mozilla-ai/otari/issues/1603) records the decision.
+
+> **Where this stands.** The grant and the front door are not built yet, and [#1688](https://github.com/mozilla-ai/otari/issues/1688) holds their design. Until they are, Otari sends a backend no credential in either mode, as "Authentication and tenancy" below says.
 
 ## Operations
 
@@ -320,9 +321,10 @@ be exposed to an untrusted one.
 
 Authentication is therefore a property of the deployment, not of the contract. A
 client MAY be configured to present a bearer credential on every operation, and
-a backend (or a proxy in front of one) MAY require it. In Otari's hybrid mode
-this is how the platform's authenticated proxy admits the request and derives
-tenancy from the caller's workspace, so the backend behind it never has to.
+a backend (or a front door in front of one) MAY require it. Otari presents none
+today, in either mode, so a backend it reaches must not depend on one.
+
+In hybrid mode that credential will be the grant the control plane issued for the request. The front door checks it, enforces its claims, and derives tenancy from the workspace it names, so the backend behind it never has to. A grant names one workspace, the tools it may use, and a deadline. Otari receives grants and never mints them, and it never logs a grant, stores one, or hands one to a client. The control plane issues a grant only to a workspace whose policy allows code execution. [#1603](https://github.com/mozilla-ai/otari/issues/1603) records the decision.
 
 Tenancy, when a backend is multi-tenant, is injected by whichever component
 authenticates the caller. A backend that expects tenancy MUST fail closed when

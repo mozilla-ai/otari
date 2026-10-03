@@ -22,7 +22,7 @@ track usage.
 </div>
 
 <p align="center">
-  <img src="assets/otari-demo.gif" width="720" alt="Otari dashboard showing usage, providers, models, users, budgets, and API keys"/>
+  <img src="assets/otari-demo.gif" width="720" alt="Otari dashboard tour: spend overview, usage by model, a request rescued by a routing fallback, two models compared in the Playground, the model catalog, routing policies, API keys, members, budgets, and providers"/>
 </p>
 
 Otari sits between your applications and model providers. It authenticates
@@ -102,6 +102,8 @@ git clone https://github.com/mozilla-ai/otari
 cd otari
 cp config.example.yml config.yml
 # Set a master key, provider credentials, and pricing in config.yml.
+# Provider copies of attached files need a pepper of their own. Compose reads .env.
+grep -qs OTARI_PROVIDER_ACCOUNT_PEPPER .env || echo "OTARI_PROVIDER_ACCOUNT_PEPPER=$(openssl rand -base64 32)" >> .env
 docker compose pull
 docker compose up -d
 ```

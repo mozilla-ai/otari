@@ -937,7 +937,17 @@ session's own JSONL file, which the payload does carry) for command
 evidence. It walks every line of that file looking for a `Bash` tool call
 (`message.content[]` blocks with `type: "tool_use"`, `name: "Bash"`) and
 collects each one's `input.command`, skipping a record marked
-`isSidechain: true` (a subagent's own turn, not this policy's own agent).
+`isSidechain: true` (a subagent's own turn, not this policy's own agent). A
+command that ran before the session's last `Edit`/`Write`/`NotebookEdit`
+call is dropped from the evidence it submits: `command_if_changed` reads
+"the required command is in this list" as "the required command validated
+the current working tree", which a command run before a later edit did
+not do. Without this, running `make lint` once and then editing the file
+again with no re-run would still read as satisfied. Only an edit tool moves
+that cutoff: a `Bash` call can write to the tree too, but the transcript
+does not say which ones did, and the command a gate requires is often the
+writer itself (`make postman` writes the collection its own gate asks for),
+so counting one would leave that gate unsatisfiable.
 If the transcript cannot be read at all, `otari hook` collects no command
 evidence at all, rather than an empty list: the difference between "collected,
 and there is none" and "could not collect" is what keeps a required

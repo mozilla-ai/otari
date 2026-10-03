@@ -1,4 +1,5 @@
 import asyncio
+import importlib.util
 from collections.abc import AsyncGenerator, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from gateway import features
 from gateway.api.deps import build_file_service, build_idempotency_service, set_config
 from gateway.api.main import register_routers
 from gateway.container import Container, build_container
+from gateway.context_propagation import TraceContextPropagationMiddleware
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, dispose_db, init_db
 from gateway.core.feature import Worker
@@ -29,7 +31,9 @@ from gateway.log_config import logger
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.model_provider_port import ModelProviderPort
-from gateway.rate_limit import RateLimiter
+from gateway.ports.provider_file_port import ProviderFilePort
+from gateway.ports.rate_limit_store_port import RateLimitStorePort
+from gateway.rate_limit import RateLimiter, UserRateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
 from gateway.services.bootstrap_service import bootstrap_first_api_key
@@ -38,8 +42,8 @@ from gateway.services.catalog_selectors import reset_selector_index
 from gateway.services.code_execution.container_sweeper import run_sandbox_container_sweeper
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.feedback import new_feedback_rate_limiter
-from gateway.services.files import run_file_sweeper
-from gateway.services.inference import run_idempotency_sweeper
+from gateway.services.files import FileBackends, run_file_sweeper
+from gateway.services.inference import close_decision_client, run_idempotency_sweeper
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
 from gateway.services.model_catalog_service import (
@@ -81,7 +85,7 @@ from gateway.services.search_tool_store_service import (
     reset_search_tool_cache,
     run_search_tool_refresher,
 )
-from gateway.services.secret_box import validate_secret_key
+from gateway.services.secret_box import shares_secret_key, validate_secret_key
 from gateway.services.selector_index_service import run_selector_index_refresher
 from gateway.services.tenancy.org_provider_key_service import (
     load_org_provider_keys_at_startup,
@@ -186,9 +190,11 @@ def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutin
     """
     if not config.files_enabled or config.files_sweep_interval_sec <= 0:
         return None
-    file_store = container.resolve(FileStoragePort, None)
+    backends = FileBackends(
+        storage=container.resolve(FileStoragePort, None), provider_files=container.resolve(ProviderFilePort, None)
+    )
     return run_file_sweeper(
-        config.files_sweep_interval_sec, lambda uow: build_file_service(uow, file_store, config)
+        config.files_sweep_interval_sec, lambda uow: build_file_service(uow, backends, config)
     )
 
 
@@ -384,6 +390,48 @@ def _validate_metrics_support(config: GatewayConfig) -> None:
         raise ValueError(msg)
 
 
+def _validate_rate_limit_store(config: GatewayConfig) -> None:
+    """Refuse to start a shared rate-limit store that has nowhere to count.
+
+    Falling back to counting per process would quietly multiply the limit by
+    the number of replicas, which is the thing a shared store was asked for to
+    prevent, so a missing URL or client library stops startup instead.
+    """
+    if config.rate_limit_store != "redis":
+        return
+    if not config.rate_limit_redis_url:
+        msg = "rate_limit_store is 'redis' but rate_limit_redis_url is not set"
+        raise ValueError(msg)
+    if importlib.util.find_spec("redis") is None:
+        msg = "rate_limit_store is 'redis' but redis is not installed. Install it with: pip install gateway[redis]"
+        raise ValueError(msg)
+
+
+def _validate_provider_account_pepper(config: GatewayConfig) -> None:
+    """Refuse to start a deployment that makes provider copies without its own pepper.
+
+    The pepper keys the digest that names a provider account, so it must be set
+    and must share no value with another secret. A shared value would let a leak
+    of one secret expose the other, and tie their rotations together.
+    """
+    makes_copies = config.files_enabled and config.files_provider_upload_enabled
+    if not makes_copies or config.is_hybrid_mode or config.is_hosted_mode:
+        return
+    pepper = config.provider_account_pepper
+    if pepper is None:
+        msg = (
+            "OTARI_PROVIDER_ACCOUNT_PEPPER must be set while files_provider_upload_enabled is on; "
+            "set it to a random value of at least 32 characters, or turn provider copies off"
+        )
+        raise ValueError(msg)
+    if pepper == config.master_key:
+        msg = "OTARI_PROVIDER_ACCOUNT_PEPPER must differ from the master key"
+        raise ValueError(msg)
+    if shares_secret_key(pepper):
+        msg = "OTARI_PROVIDER_ACCOUNT_PEPPER must differ from every OTARI_SECRET_KEY key"
+        raise ValueError(msg)
+
+
 def _validate_platform_config(config: GatewayConfig) -> None:
     config.validate_mode_selection()
     if not config.is_hybrid_mode:
@@ -531,6 +579,10 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 # Persisted dashboard overrides win over config/env; apply them
                 # before pricing init so default-pricing behavior is consistent.
                 await apply_overrides_from_db(config, session)
+                # Checked when serving starts rather than when the app is built,
+                # so a tool that only reads the schema needs no pepper, and after
+                # the overrides, so it sees the copy setting this process serves.
+                _validate_provider_account_pepper(config)
                 await load_persisted_price_snapshot(session)
                 # Persisted tool/guardrail overrides (service URLs + web-search
                 # knobs) win over config/env too; apply them so the running worker
@@ -590,6 +642,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # The retention sweep below resolves this same port, so both it and
             # the request path use whatever store this build bound.
             app.state.file_store = container.resolve(FileStoragePort, None)
+            app.state.provider_files = container.resolve(ProviderFilePort, None)
             workers = _start_lifespan_workers(config, container)
             # Workers of the enabled features. Same supervisor as the registry
             # above: created here, cancelled together in ``finally`` under one
@@ -622,9 +675,14 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # nothing to stop, but the refreshers above still needed cancelling.
             if log_writer_started:
                 await log_writer.stop()
-            # POST /api/v1/search dispatches on one pooled client for the process, so
-            # shutdown owns closing it. A no-op when no search was ever served.
+            # POST /api/v1/search and /api/v1/decisions each dispatch on one pooled
+            # client for the process, so shutdown owns closing them. Each is a no-op
+            # when that endpoint was never served.
             await close_search_client()
+            await close_decision_client()
+            rate_limiter: UserRateLimiter | None = getattr(app.state, "rate_limiter", None)
+            if rate_limiter is not None:
+                await rate_limiter.aclose()
             # After the log writer, whose final flush is the last thing to need
             # a session. Hybrid mode never opened an engine, so this is a no-op there.
             await dispose_db()
@@ -713,6 +771,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     _validate_platform_config(config)
     _warn_if_hosted_has_no_data_plane(config)
     _validate_metrics_support(config)
+    _validate_rate_limit_store(config)
     # A set-but-invalid OTARI_SECRET_KEY must not silently pass startup and then
     # break provider-credential storage at request time. Fail fast here instead.
     validate_secret_key()
@@ -897,7 +956,10 @@ def create_app(config: GatewayConfig) -> FastAPI:
         async def root_index() -> str:
             return ROOT_TUTORIAL_HTML
 
+    # Middleware stack is registered in reverse order (last-added runs first)
     app.add_middleware(SecurityHeadersMiddleware)
+    if config.accept_incoming_trace_context:
+        app.add_middleware(TraceContextPropagationMiddleware)
 
     if config.cors_allow_origins:
         allow_credentials = "*" not in config.cors_allow_origins
@@ -926,11 +988,6 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
         app.add_middleware(MetricsMiddleware)
 
-    if config.rate_limit_rpm is not None:
-        app.state.rate_limiter = RateLimiter(config.rate_limit_rpm)
-    else:
-        app.state.rate_limiter = None
-
     if config.dashboard_login_rate_limit_per_minute is not None:
         app.state.login_rate_limiter = RateLimiter(config.dashboard_login_rate_limit_per_minute)
     else:
@@ -955,6 +1012,11 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # that cannot be loaded raises here, so a deployment that named one and got
     # it wrong fails to start instead of quietly running the plain build.
     app.state.container = build_container(config.bootstrap, config=config)
+    app.state.rate_limiter = (
+        UserRateLimiter(app.state.container.resolve(RateLimitStorePort, None), config.rate_limit_rpm)
+        if config.rate_limit_rpm is not None
+        else None
+    )
 
     register_routers(app, config)
     app.add_exception_handler(TenancyError, _tenancy_error_handler)

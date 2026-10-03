@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from any_llm.exceptions import BatchNotCompleteError
 from any_llm.types.batch import BatchResult, BatchResultError, BatchResultItem
-from any_llm.types.completion import CompletionUsage, PromptTokensDetails
+from any_llm.types.completion import ChatCompletion, CompletionUsage, PromptTokensDetails
 from fastapi.testclient import TestClient
 from openai.types.batch import Batch
 from openai.types.batch_request_counts import BatchRequestCounts
@@ -358,14 +358,30 @@ def test_retrieve_batch_results(
     api_key_header: dict[str, str],
 ) -> None:
     """GET /api/v1/batches/{batch_id}/results returns per-request results."""
-    mock_completion = MagicMock()
-    mock_completion.model = "gpt-4o-mini"
-    mock_completion.usage = None
-    mock_completion.model_dump.return_value = {"id": "chatcmpl-1", "choices": []}
+    completion = ChatCompletion.model_validate(
+        {
+            "id": "chatcmpl-1",
+            "created": 1,
+            "model": "gpt-4o-mini",
+            "object": "chat.completion",
+            "choices": [
+                {
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {
+                        "role": "assistant",
+                        "content": "42",
+                        "reasoning": {"content": "Computed the answer."},
+                    },
+                }
+            ],
+            "provider_extension": {"request_id": "req-1"},
+        }
+    )
 
     mock_result = BatchResult(
         results=[
-            BatchResultItem(custom_id="req-1", result=mock_completion, error=None),
+            BatchResultItem(custom_id="req-1", result=completion, error=None),
             BatchResultItem(
                 custom_id="req-2", result=None, error=BatchResultError(code="rate_limit", message="Rate limit exceeded")
             ),
@@ -387,7 +403,9 @@ def test_retrieve_batch_results(
     assert "results" in data
     assert len(data["results"]) == 2
     assert data["results"][0]["custom_id"] == "req-1"
-    assert data["results"][0]["result"] == {"id": "chatcmpl-1", "choices": []}
+    assert data["results"][0]["result"] == completion.model_dump(mode="json")
+    assert data["results"][0]["result"]["choices"][0]["message"]["reasoning"] == "Computed the answer."
+    assert data["results"][0]["result"]["provider_extension"] == {"request_id": "req-1"}
     assert data["results"][0]["error"] is None
     assert data["results"][1]["custom_id"] == "req-2"
     assert data["results"][1]["result"] is None

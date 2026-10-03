@@ -59,7 +59,6 @@ from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
-from gateway.models.tools import CodeExecutor
 from gateway.services.files import StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
@@ -73,6 +72,7 @@ from gateway.services.tool_format import inject_purpose_hints_responses, openai_
 from gateway.services.tools import Dialect, ToolUseBudget
 from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
+from gateway.types.normalization_target import NormalizationTarget
 
 router = APIRouter(tags=["responses"])
 
@@ -289,11 +289,13 @@ def _usage_to_completion_usage(
         return None
     details = getattr(usage, "input_tokens_details", None)
     cache_read_tokens = (getattr(details, "cached_tokens", 0) or 0) if details is not None else 0
+    output_details = getattr(usage, "output_tokens_details", None)
     return GatewayUsage(
         prompt_tokens=getattr(usage, "input_tokens", 0) or 0,
         completion_tokens=getattr(usage, "output_tokens", 0) or 0,
         total_tokens=getattr(usage, "total_tokens", 0) or 0,
         cache_read_tokens=cache_read_tokens,
+        reasoning_tokens=getattr(output_details, "reasoning_tokens", 0) or 0,
     )
 
 
@@ -340,6 +342,9 @@ class _ResponsesAdapter:
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=PROVIDER_ERROR_DETAIL,
         )
+
+    def stream_error_payload(self, exc: BaseException) -> str:
+        return self.stream_format.error_payload
 
     def format_chunk(self, chunk: ResponseStreamEvent) -> str:
         return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True)}\n\n"
@@ -544,14 +549,7 @@ async def create_response(
     # sandbox session once the billed user and workspace are resolved.
     sandbox_inputs: list[StagedFile] = []
 
-    async def _normalize(
-        user_id: str,
-        provider: LLMProvider | None,
-        model: str,
-        instance: str | None,
-        workspace_id: uuid.UUID | None,
-        workspace_executor: CodeExecutor | None,
-    ) -> tuple[int, CompletionUsage | None]:
+    async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Responses input payload
         # before the cost estimate. Standalone only; no-op when the files
         # feature is off or the request has no attachments.
@@ -559,19 +557,19 @@ async def create_response(
             request_body.input,
             fmt="responses",
             config=config,
-            provider=provider,
-            model=model,
+            provider=target.provider,
+            model=target.model,
             files=files,
-            user_id=user_id,
-            instance=instance,
-            workspace_id=workspace_id,
+            user_id=target.user_id,
+            instance=target.instance,
+            workspace_id=target.file_workspace_id,
             sandbox_requested=sandbox_requested(
                 request_body.tools,
                 config=config,
-                provider=provider,
+                provider=target.provider,
                 dialect=_ADAPTER.name,
                 code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-                workspace_executor=workspace_executor,
+                workspace_executor=target.workspace_executor,
             ),
         )
         sandbox_inputs.extend(stats.sandbox_inputs)

@@ -52,6 +52,8 @@ from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
 from gateway.models.usage import UsageLog
 from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.schemas.catalog import CatalogCapabilities, CatalogFacets, CatalogModelSummary, CatalogQuery
+from gateway.services.catalog import query_catalog
 from gateway.services.catalog_selectors import (
     current_selector_index,
     model_selector_for_slug,
@@ -125,16 +127,6 @@ class CatalogCredential(StrEnum):
 _USAGE_WINDOW = timedelta(days=30)
 
 
-class CatalogCapabilities(BaseModel):
-    """What a model can do, as models.dev reports it. Any offering's yes is the model's."""
-
-    reasoning: bool = False
-    tool_call: bool = False
-    structured_output: bool = False
-    attachment: bool = False
-    temperature: bool = False
-
-
 class OfferingUsage(BaseModel):
     """What the viewer's organization actually paid for one offering, last 30 days.
 
@@ -204,50 +196,6 @@ class CatalogOffering(BaseModel):
     usage_30d: OfferingUsage | None = None
 
 
-class CatalogModelSummary(BaseModel):
-    """One model, as the list shows it."""
-
-    id: str = Field(
-        description="The catalog id, vendor-qualified where the vendor is known: `z-ai/glm-5.3`, else the bare slug."
-    )
-    selector: str | None = Field(
-        default=None,
-        description=(
-            "The id as a selector: send it as `model` and the model's cheapest offering the caller can reach "
-            "answers, the vendor's own provider first where it serves the model. "
-            "Null until the gateway has indexed the catalog."
-        ),
-    )
-    resolves_to: str | None = Field(default=None, description="The offering `selector` resolves to.")
-    name: str
-    vendor: str | None
-    description: str | None = Field(default=None, description="models.dev's, from the offering that named the model.")
-    family: str | None = None
-    capabilities: CatalogCapabilities
-    input_modalities: list[str]
-    output_modalities: list[str]
-    context_window: int | None = Field(default=None, description="The largest any offering serves.")
-    max_output_tokens: int | None = Field(default=None, description="The largest any offering serves.")
-    release_date: str | None = None
-    knowledge_cutoff: str | None = None
-    open_weights: bool = False
-    deprecated: bool = Field(default=False, description="True only when every offering with metadata says so.")
-    offering_count: int
-    provider_count: int
-    providers: list[str] = Field(description="The provider instances offering it, sorted.")
-    selectors: list[str] = Field(description="Every offering's selector, so the list can be searched by one.")
-    price_sources: list[PriceSource] = Field(
-        description="Which price lists the priced offerings came from, distinct and sorted."
-    )
-    unpriced_count: int = Field(description="How many offerings carry no price for this caller.")
-    discovered: bool = Field(description="Whether any offering was discovered from its provider.")
-    min_input_price_per_million: float | None = Field(
-        default=None,
-        description="The cheapest offering's, at the comparison context where one was asked for.",
-    )
-    min_output_price_per_million: float | None = None
-
-
 class CatalogElsewhere(BaseModel):
     """A provider models.dev lists for this model that this deployment has not configured."""
 
@@ -275,10 +223,9 @@ class CatalogResponse(BaseModel):
     metadata_available: bool = Field(
         description="False when models.dev could not be read; descriptions are then absent."
     )
-    count: int = Field(
-        description="Models matching the search, before the window, so a caller can page without reading them all."
-    )
+    count: int = Field(description="Models matching all filters before paging.")
     models: list[CatalogModelSummary]
+    facets: CatalogFacets | None = Field(default=None, description="Present when include_facets is requested.")
 
 
 @dataclass
@@ -441,9 +388,7 @@ async def _group(
         seed, metadata, instance, model_id, provider_type = offering_seed(config, catalog, obj)
         seeds.append(seed)
 
-        pricing, source, reference = viewer_price(
-            obj, overrides, instance=instance, model_id=model_id, as_of=now
-        )
+        pricing, source, reference = viewer_price(obj, overrides, instance=instance, model_id=model_id, as_of=now)
 
         offerings[obj.id] = _Offering(
             wire=CatalogOffering(
@@ -635,26 +580,6 @@ async def _merged_for(
     )
 
 
-def _matches(model: CatalogModelSummary, search: str | None) -> bool:
-    """Whether a catalog row answers this search.
-
-    The name, the catalog id and every selector, because a person picking a
-    model types whichever of those they know: the vendor-qualified name they
-    read in the list, or the ``provider:model`` selector they will send.
-
-    Matched here rather than in the browser, which is what this parameter is
-    for (otari#1380): a picker filtering the page it had fetched offered a
-    subset of the catalog and said nothing about it.
-    """
-
-    term = (search or "").strip().lower()
-    if not term:
-        return True
-    if term in model.name.lower() or term in model.id.lower():
-        return True
-    return any(term in selector.lower() for selector in model.selectors)
-
-
 @router.get("/models")
 async def list_catalog(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -662,28 +587,7 @@ async def list_catalog(
     caller: Annotated[CatalogCaller, Depends(verify_catalog_reader_or_public)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
     model_provider: ModelProviderPortDep,
-    at_context: Annotated[
-        int | None,
-        Query(
-            ge=1,
-            description=(
-                "Compare prices for a request of this many input tokens: each model's minimum is taken "
-                "from the pricing tier that request would settle at. Omitted, the base rates compare."
-            ),
-        ),
-    ] = None,
-    search: Annotated[
-        str | None,
-        Query(
-            max_length=200,
-            description=(
-                "Narrow to models whose name, catalog id or any selector contains this text, "
-                "case-insensitively."
-            ),
-        ),
-    ] = None,
-    skip: Annotated[int, Query(ge=0, description="Number of models to skip")] = 0,
-    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of models to return")] = 100,
+    query: Annotated[CatalogQuery, Query()],
 ) -> CatalogResponse:
     """The models this caller may use, one entry each however many providers serve it.
 
@@ -699,21 +603,19 @@ async def list_catalog(
         _summary(
             identity,
             [grouped.offerings[selector] for selector in identity.selectors],
-            at_context,
+            query.at_context,
             organization_id=grouped.organization_id,
         )
         for identity in grouped.identities.values()
     ]
-    matched = sorted(
-        (model for model in models if _matches(model, search)),
-        key=lambda m: (m.name.lower(), m.id),
-    )
+    page = query_catalog(models, query)
     return CatalogResponse(
         default_pricing=default_pricing_enabled(),
         defaults_as_of=await _defaults_as_of(db),
         metadata_available=grouped.catalog is not None,
-        count=len(matched),
-        models=matched[skip : skip + limit],
+        count=page.count,
+        models=page.models,
+        facets=page.facets,
     )
 
 

@@ -518,8 +518,12 @@ async def _post_resolve(
     """Ask the control plane, and render its refusal as this endpoint's own.
 
     The service raises domain errors so that nothing below the API layer has to
-    know about HTTP. The callers here answer a request, so they need the status
+    know about HTTP. The caller here answers a request, so it needs the status
     back, and a 429 needs the peer's ``Retry-After`` with it.
+
+    A caller that answers in a route's own error format has a ``FormatAdapter``
+    to render through, so it reads the domain error and leaves this alone: see
+    :func:`_resolve_platform_code_execution`.
     """
     try:
         return await resolve(
@@ -889,8 +893,14 @@ async def _resolve_platform_code_execution(
     max_iterations, exec_timeout_s}``, soft limits already clamped to the
     operator's ceilings on the peer's side), and an empty policy for anything
     else, which narrows nothing.
+
+    A refusal stays a ``ControlPlaneError`` rather than being flattened here. The
+    only caller is a completion route, whose error body only its ``FormatAdapter``
+    knows how to build, so ``prepare_gateway_tools`` renders the refusal there and
+    the peer's ``Retry-After`` reaches it typed rather than as a header to re-read.
+    This is the shape ``WebSearchPolicyPort`` already answers in.
     """
-    payload = await _post_resolve(
+    payload = await resolve(
         config,
         user_token=user_token,
         endpoint=ResolveEndpoint.CODE_EXECUTION,

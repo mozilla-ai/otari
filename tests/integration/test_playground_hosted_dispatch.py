@@ -26,10 +26,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.core.usage_source import SERVED_HERE_SLUG
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
-from gateway.models.usage import UsageLog
+from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.secret_box import decrypt_secret, encrypt_secret, generate_secret_key
 

@@ -262,7 +262,7 @@ def test_reencrypt_allows_secret_key_retirement(
     monkeypatch.setenv("OTARI_SECRET_KEY", f"{new_key},{old_key}")
     resp = client.post(f"{API_ROOT}/search-tools/reencrypt", headers=master_key_header)
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"reencrypted": 1, "unreadable": 0}
+    assert resp.json() == {"reencrypted": 1, "unreadable": 0, "skipped": 0}
 
     monkeypatch.setenv("OTARI_SECRET_KEY", new_key)
     listed = client.get(f"{API_ROOT}/search-tools", headers=master_key_header).json()

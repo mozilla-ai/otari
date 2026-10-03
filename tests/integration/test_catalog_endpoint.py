@@ -296,8 +296,20 @@ def test_an_api_key_sees_only_the_models_its_allow_list_permits(
     assert created.status_code == status.HTTP_200_OK, created.text
     key_header = {"Authorization": f"Bearer {created.json()['key']}"}
 
-    body = _get(priced, f"{API_ROOT}/catalog/models", headers=key_header)
+    body = _get(priced, f"{API_ROOT}/catalog/models", headers=key_header, params={"include_facets": True})
     assert [model["id"] for model in body["models"]] == ["moonshotai/kimi-k2.6"]
+    assert body["facets"]["total_count"] == 1
+    assert body["facets"]["providers"] == ["nebius"]
+    assert [facet["value"] for facet in body["facets"]["vendors"]] == ["Moonshot AI"]
+    filtered = _get(
+        priced,
+        f"{API_ROOT}/catalog/models",
+        headers=key_header,
+        params={"provider": "fireworks", "include_facets": True},
+    )
+    assert filtered["count"] == 0
+    assert filtered["models"] == []
+    assert filtered["facets"]["providers"] == ["nebius"]
 
     with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)):
         denied = priced.get(f"{API_ROOT}/catalog/models/z-ai/glm-5.3", headers=key_header)
@@ -637,3 +649,73 @@ def test_a_signed_in_caller_sees_their_own_usage_of_an_offering(
     assert usage["spend_usd"] == 0.003
     assert usage["effective_price_per_million"] == 1.0
     assert by_selector[_FIREWORKS_GLM]["usage_30d"] is None
+
+
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [
+        ({"provider": ["fireworks", "unknown"]}, ["z-ai/glm-5.3"]),
+        ({"vendor": ["Z.ai", "Moonshot AI"]}, ["z-ai/glm-5.3", "moonshotai/kimi-k2.6"]),
+        ({"input_modality": ["image", "text"]}, ["moonshotai/kimi-k2.6"]),
+        ({"output_modality": "image"}, []),
+        ({"capability": ["reasoning", "tool_call"]}, ["z-ai/glm-5.3"]),
+        ({"capability": "open_weights"}, ["z-ai/glm-5.3"]),
+        ({"min_context": 250000}, ["moonshotai/kimi-k2.6"]),
+        ({"max_input": 0.5}, ["z-ai/glm-5.3"]),
+        ({"pricing": "custom"}, ["z-ai/glm-5.3", "moonshotai/kimi-k2.6"]),
+        ({"pricing": "unpriced"}, []),
+        ({"sort": "input", "direction": "desc"}, ["moonshotai/kimi-k2.6", "z-ai/glm-5.3"]),
+        ({"sort": "context", "direction": "desc", "limit": 1, "skip": 1}, ["z-ai/glm-5.3"]),
+        ({"search": "Moonshot AI"}, ["moonshotai/kimi-k2.6"]),
+    ],
+)
+def test_filter_and_sort_parameters_apply_before_pagination(
+    priced: TestClient, master_header: dict[str, str], params: dict[str, Any], expected: list[str]
+) -> None:
+    body = _get(priced, f"{API_ROOT}/catalog/models", headers=master_header, params=params)
+    assert [model["id"] for model in body["models"]] == expected
+
+
+def test_facets_describe_the_whole_catalog_rather_than_the_page(
+    priced: TestClient, master_header: dict[str, str]
+) -> None:
+    body = _get(
+        priced,
+        f"{API_ROOT}/catalog/models",
+        headers=master_header,
+        params={"include_facets": True, "provider": "nebius", "limit": 1},
+    )
+    assert len(body["models"]) == 1
+    assert body["count"] == 2
+    assert body["facets"]["total_count"] == 2
+    assert body["facets"]["providers"] == ["fireworks", "nebius"]
+    empty = _get(
+        priced,
+        f"{API_ROOT}/catalog/models",
+        headers=master_header,
+        params={"include_facets": True, "search": "no-match"},
+    )
+    assert empty["count"] == 0
+    assert empty["facets"] == body["facets"]
+    assert _get(priced, f"{API_ROOT}/catalog/models", headers=master_header)["facets"] is None
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"min_context": -1},
+        {"max_input": -1},
+        {"max_input": "nan"},
+        {"released_within_days": -1},
+        {"sort": "random"},
+        {"direction": "sideways"},
+        {"capability": "invalid"},
+        {"pricing": "invalid"},
+        {"source": "invalid"},
+    ],
+)
+def test_invalid_filter_values_return_validation_errors(
+    priced: TestClient, master_header: dict[str, str], params: dict[str, Any]
+) -> None:
+    response = priced.get(f"{API_ROOT}/catalog/models", headers=master_header, params=params)
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT

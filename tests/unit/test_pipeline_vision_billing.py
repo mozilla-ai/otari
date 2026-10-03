@@ -13,7 +13,6 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from any_llm import LLMProvider
 from any_llm.types.completion import CompletionUsage
 from fastapi import HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +22,7 @@ from gateway.api.routes import chat
 from gateway.container import build_container
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.budgets import ReservationHandle, estimate_tokens
+from gateway.types.normalization_target import NormalizationTarget
 
 _VISION_USAGE = CompletionUsage(prompt_tokens=200, completion_tokens=50, total_tokens=250)
 
@@ -49,6 +49,7 @@ class _Recorder:
                 allowed_models=None,
                 exclude_from_budget=False,
                 reject_user_mismatch=None,
+                is_service_key=False,
                 workspace_id=uuid.uuid4(),
             ), False
 
@@ -85,8 +86,11 @@ class _Recorder:
         async def fake_refund(db: Any, handle: Any) -> None:
             self.refunded += 1
 
+        async def fake_check_rate_limit(request: Any, user_id: str) -> None:
+            return None
+
         monkeypatch.setattr(pipeline, "verify_api_key_or_master_key", fake_verify)
-        monkeypatch.setattr(pipeline, "check_rate_limit", lambda request, user_id: None)
+        monkeypatch.setattr(pipeline, "check_rate_limit", fake_check_rate_limit)
         monkeypatch.setattr(pipeline, "find_model_pricing", fake_find_pricing)
         monkeypatch.setattr(pipeline, "resolve_request_allowlist", fake_resolve_allowlist)
         monkeypatch.setattr(pipeline, "organization_for_workspace_id", fake_organization_for_workspace_id)
@@ -97,14 +101,7 @@ class _Recorder:
         monkeypatch.setattr(pipeline, "refund_reservation", fake_refund)
 
 
-async def _normalize_with_vision(
-    user_id: str,
-    provider: LLMProvider | None,
-    model: str,
-    instance: str | None,
-    workspace_id: uuid.UUID | None,
-    workspace_executor: object = None,
-) -> tuple[int, CompletionUsage | None]:
+async def _normalize_with_vision(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
     return 5000, _VISION_USAGE
 
 

@@ -7,8 +7,8 @@ import { useModelCatalog } from "@/features/models/ModelComboBox"
  * One repeated row of a policy section, with the model catalog's hint under the
  * whole row rather than under the picker inside it.
  *
- * The hint is a sentence ("Could not list models for X. Check that provider's
- * credentials, ..."), and at this dialog's width it wraps. A wrapped message
+ * The hint is a sentence ("Showing 50 of 210 matches. Keep typing to narrow
+ * them."), and at this dialog's width it wraps. A wrapped message
  * makes its field taller than the siblings it shares an `items-end` row with,
  * which lifts that field's input line clear of theirs: measured at 40px on the
  * pool rows and 20px on the chain. `web/design/forms.md` ("Control rows") names
@@ -26,7 +26,7 @@ export function SectionRow({
   modelValue: string
   children: ReactNode
 }) {
-  const { hint } = useModelCatalog(modelValue)
+  const { hint } = useModelCatalog(modelValue, "catalog")
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-end gap-3">{children}</div>

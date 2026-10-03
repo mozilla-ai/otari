@@ -2496,16 +2496,18 @@ describe("ActivityPage when the organization context fails", () => {
     })
     renderPage(<ActivityPage />)
 
-    // Falls back to the narrower surface, which is the safe direction: an
-    // operator reading their own organization understates, where the reverse
-    // would be a cross-tenant read.
+    // Takes the deployment-wide surface, as every operator gate does on a
+    // failed read (otari#876): an operator keeps their log, and the server
+    // refuses anyone else, so nothing crosses a tenant.
     await waitFor(() =>
-      expect(
-        calls.some((url) => url.includes(`${API_ROOT}/organizations/me/usage`)),
-      ).toBe(true),
+      expect(calls.some((url) => url.startsWith(`${API_ROOT}/usage`))).toBe(
+        true,
+      ),
     )
-    expect(calls.some((url) => url.startsWith(`${API_ROOT}/usage`))).toBe(false)
-    // And the refusal reaches the operator instead of an empty table.
+    expect(
+      calls.some((url) => url.includes(`${API_ROOT}/organizations/me/usage`)),
+    ).toBe(false)
+    // And the refusal reaches the caller instead of an empty table.
     expect(await screen.findByText(/context is gone/)).toBeInTheDocument()
   })
 })

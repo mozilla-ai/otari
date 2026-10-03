@@ -79,6 +79,8 @@ DATA_PLANE_PREFIXES: tuple[tuple[str, str], ...] = (
     ("/images", "priced per image"),
     ("/audio", "transcription and speech, priced per second or per character"),
     ("/rerank", "priced per request"),
+    ("/decisions", "priced per token like a completion"),
+    ("/systemone", "the TypeSafe SDK's path for /decisions"),
     ("/moderations", "dispatches upstream even where the upstream charges nothing"),
     (
         "/search",

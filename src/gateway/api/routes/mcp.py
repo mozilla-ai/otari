@@ -351,7 +351,7 @@ async def _authenticate(
         raise McpExecutionError(CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404)
     # The key's own bucket, falling back to the key when it names no user, so
     # every user-less key does not share one bucket keyed on ``"None"``.
-    check_rate_limit(raw_request, api_key.user_id or api_key.id)
+    await check_rate_limit(raw_request, api_key.user_id or api_key.id)
     await _refuse_blocked_user(db, api_key)
     return _Principal(user_token=None, workspace_id=await resolve_workspace_id(db, api_key))
 

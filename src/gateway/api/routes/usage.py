@@ -29,11 +29,10 @@ from gateway.core.sql import (
     utc_bound,
 )
 from gateway.core.surface import Surface
-from gateway.core.usage_source import is_served_here, not_served_here
 from gateway.inflight import get_registry
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float
-from gateway.models.usage import UsageLog
+from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
 from gateway.models.users import User
 from gateway.services.external_usage_service import (
     ExternalEventsRequest,
@@ -210,6 +209,8 @@ class UsageEntry(BaseModel):
     cache_read_tokens: int | None
     cache_write_tokens: int | None
     cache_write_1h_tokens: int | None
+    # A subset of completion_tokens; null on rows written before it was recorded.
+    reasoning_tokens: int | None = None
     # Precise shapes with a permissive fallback arm; see _billing_schemas for why
     # the fallback is what keeps a row written by an older gateway renderable.
     billing_meters: MeterMap | None
@@ -260,13 +261,14 @@ class UsageEntry(BaseModel):
             source=log.source,
             source_label=log.source_label,
             counts_toward_budget=log.counts_toward_budget,
-            bulk_editable=not is_served_here(log.source) and not log.counts_toward_budget,
+            bulk_editable=log.source != SERVED_HERE_SLUG and not log.counts_toward_budget,
             prompt_tokens=log.prompt_tokens,
             completion_tokens=log.completion_tokens,
             total_tokens=log.total_tokens,
             cache_read_tokens=log.cache_read_tokens,
             cache_write_tokens=log.cache_write_tokens,
             cache_write_1h_tokens=log.cache_write_1h_tokens,
+            reasoning_tokens=log.reasoning_tokens,
             billing_meters=log.billing_meters,
             pricing_breakdown=log.pricing_breakdown,
             cost=as_float(log.cost),
@@ -721,7 +723,7 @@ async def count_usage(
         # counts_toward_budget alone does not say "imported": gateway traffic on an
         # exclude_from_budget key is also False, so without this the count would
         # promise rows _selection_conditions then refuses to touch.
-        conditions.append(not_served_here(UsageLog.source))
+        conditions.append(UsageLog.source != SERVED_HERE_SLUG)
     stmt: Any = select(func.count()).select_from(UsageLog).where(*conditions)
     total = (await db.execute(stmt)).scalar_one()
     return UsageCount(total=total)
@@ -817,6 +819,7 @@ class UsageTotals(BaseModel):
     cache_read_tokens: int
     cache_write_tokens: int
     cache_write_1h_tokens: int
+    reasoning_tokens: int = 0
     request_count: int
     error_count: int
     avg_latency_ms: float | None
@@ -1177,6 +1180,7 @@ async def _totals(
                 ),
                 _billed_input_sum(),
                 _billed_output_sum(),
+                func.coalesce(func.sum(UsageLog.reasoning_tokens), 0),
             ).where(*conditions)
         )
     ).one()
@@ -1194,6 +1198,7 @@ async def _totals(
         unpriced_requests=int(row[10]),
         billed_input_tokens=int(row[11]),
         billed_output_tokens=int(row[12]),
+        reasoning_tokens=int(row[13]),
     )
 
 

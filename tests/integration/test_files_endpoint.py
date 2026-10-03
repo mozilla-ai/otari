@@ -764,8 +764,10 @@ def test_sweep_reclaims_expired_and_deleted_files(
     from sqlalchemy.engine import make_url
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+    from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
     from gateway.api.deps import build_file_service
     from gateway.core.unit_of_work import UnitOfWork
+    from gateway.services.files import FileBackends
 
     def _upload(name: str) -> str:
         resp = client.post(
@@ -795,7 +797,9 @@ def test_sweep_reclaims_expired_and_deleted_files(
         try:
             async with async_sessionmaker(engine)() as db:
                 uow = UnitOfWork(db)
-                files = build_file_service(uow, store, test_config)
+                files = build_file_service(
+                    uow, FileBackends(storage=store, provider_files=AnyLlmProviderFiles()), test_config
+                )
                 batch = await files.sweep(batch_size=10)
                 return batch.reclaimed
         finally:
@@ -824,8 +828,10 @@ def test_sweep_pages_past_rows_whose_blob_will_not_delete(
     from sqlalchemy.engine import make_url
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+    from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
     from gateway.api.deps import build_file_service
     from gateway.core.unit_of_work import UnitOfWork
+    from gateway.services.files import FileBackends
 
     ids = []
     for name in ("stuck-1.txt", "stuck-2.txt", "fine.txt"):
@@ -854,7 +860,9 @@ def test_sweep_pages_past_rows_whose_blob_will_not_delete(
         try:
             async with async_sessionmaker(engine)() as db:
                 uow = UnitOfWork(db)
-                files = build_file_service(uow, store, test_config)
+                files = build_file_service(
+                    uow, FileBackends(storage=store, provider_files=AnyLlmProviderFiles()), test_config
+                )
                 first = await files.sweep(batch_size=2)
                 second = await files.sweep(batch_size=2, after=first.cursor)
                 return [(first.seen, first.reclaimed), (second.seen, second.reclaimed)]

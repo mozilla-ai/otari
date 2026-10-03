@@ -31,15 +31,8 @@ from gateway.services.tenancy.email_address import validated_email
 class RosterIdentityProviderAdapter:
     """Resolves an OAuth identity onto an account an operator already added.
 
-    Holds the request's session because resolving is a database read and, on the
-    two paths below, a write. It writes but never commits: the sign-in route owns
-    the transaction, so the link and the verification stamp land with the session
-    row that sign-in mints, or with neither.
-
-    Constructible with no session, like every other core adapter, because the
-    container builds one per request whether or not the request will use it. It
-    is ``None`` only in hybrid mode, which mounts no sign-in route at all
-    (``api.main.register_routers``), so nothing ever resolves an identity there.
+    The adapter stages its writes on the request's session and does not commit them.
+    The session is ``None`` where the deployment has no database, and ``resolve`` needs one.
     """
 
     def __init__(self, session: AsyncSession | None) -> None:
@@ -55,53 +48,31 @@ class RosterIdentityProviderAdapter:
     ) -> User:
         """Return the roster identity this OAuth identity signs in as.
 
-        The provider's assertion is what this trusts, and it must be an
-        assertion: an address the provider returned but would not vouch for is
-        refused before any lookup, so an unverified or merely unasserted address
-        never selects a row. Refusing first also keeps the refusal from
-        depending on whether that address happens to be on the roster.
+        The address must be one the provider verified.
+        An unverified or missing address is refused whether or not it is on the roster.
 
-        Two writes, both conditional and neither committed here:
+        A successful call stages these changes on the identity and commits none of them:
 
-        - The provider is recorded on an identity that had none, which is what
-          "linking" means on this schema. An identity that already names a
-          different provider is *not* rewritten: a second provider vouching for
-          the same address still signs the same person in, and the column keeps
-          the provider that arrived first.
+        - It records ``provider`` if the identity names none.
+          An identity that already names a provider keeps it.
+        - It marks an unverified address verified, which lets a deployment with no mail admit a member.
+          Verifying the address also removes its password and its pending email verification token.
+          The provider confirms who owns the address, not who set a password on it while it was unverified.
+          A password on an address that is already verified is kept.
+        - It sets ``full_name`` if the identity has none.
 
-          "First" is enforced rather than hoped for. Both writes below are
-          read-then-write on a row with no unique index to lose to, so two
-          sign-ins racing on one identity with two *different* providers could
-          otherwise both see NULL and the later commit would win. The row is
-          locked before either is decided, which is the shape otari#729 settled
-          for verification and reset redemption on this same table.
-
-          PostgreSQL only, per ``UserRepository.lock``: ``FOR UPDATE`` is a
-          no-op on SQLite. The consequence there is which of two provider names
-          lands in a column this edition never reads, so it is a documented
-          limit rather than a reason to serialize differently.
-        - A provider-verified address stamps ``email_verified_at`` if it is
-          unset, which lifts the local sign-in gate the password path enforces
-          (``user_service.authenticate``). That is not a shortcut around
-          verification, it is a stronger proof of the same fact than this
-          gateway's own mail loop produces, and it is the one way a deployment
-          that cannot send mail can still let a member in.
+        NOTE: Concurrent sign-ins on one identity are serialized on PostgreSQL only.
+        On SQLite, the later of two concurrent sign-ins can overwrite the provider that the first recorded.
 
         Raises:
-            OAuthEmailNotVerifiedError: If the provider returned no address, or
-                one it does not affirmatively vouch for.
-            OAuthIdentityUnknownError: If no active identity here holds that
-                address.
+            OAuthEmailNotVerifiedError: If the provider returned no address, or one it did not verify.
+            OAuthIdentityUnknownError: If no active identity here holds that address.
 
         """
         assert self._session is not None, "resolving an identity needs a database session"
         if not email_verified or not email:
             raise OAuthEmailNotVerifiedError(provider)
-        # Normalized the way every other address on this deployment is, so a
-        # provider returning a differently-cased address still finds its row.
-        # A provider that returns something this gateway would never have
-        # stored is refused as unknown rather than as malformed: it is not the
-        # caller's typo, and it names no account here either way.
+        # An address this gateway would never store names no account, so it is refused as unknown.
         try:
             address = validated_email(email)
         except InvalidEmailError as error:
@@ -109,15 +80,11 @@ class RosterIdentityProviderAdapter:
 
         users = UserRepository(self._session)
         identity = await users.get_by_email(address)
-        # Deactivated collapses into "unknown" deliberately; see
-        # ``OAuthIdentityUnknownError``.
+        # A deactivated identity is refused as unknown, so the answer does not confirm that the account exists.
         if identity is None or not identity.is_active:
             raise OAuthIdentityUnknownError(provider)
 
-        # Locked before anything below is decided, so the reads the two writes
-        # branch on are still true when they land. Re-read through the lock for
-        # the same reason otari#729 re-resolves after taking it: the row this
-        # transaction is holding may not be the row it first read.
+        # The row is locked and re-read because a concurrent sign-in may have changed it since the first read.
         await users.lock(identity.id)
         await self._session.refresh(identity)
 
@@ -125,9 +92,10 @@ class RosterIdentityProviderAdapter:
             identity.oauth_provider = provider
         if identity.email_verified_at is None:
             identity.email_verified_at = datetime.now(UTC)
-        # Only if the roster row has none: a display name an operator or the
-        # person themselves set here is theirs, and a provider profile does not
-        # get to overwrite it on every sign-in.
+            # The address was unverified when these were set, so they may not be this person's.
+            identity.hashed_password = None
+            identity.email_verification_token_hash = None
+            identity.email_verification_token_expires_at = None
         if not identity.full_name and full_name:
             identity.full_name = full_name
         self._session.add(identity)
