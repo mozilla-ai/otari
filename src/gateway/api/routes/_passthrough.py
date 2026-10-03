@@ -64,6 +64,7 @@ from gateway.services.budgets import (
     BudgetScopeRequest,
     ReservationHandle,
     estimate_cost,
+    estimate_tokens,
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
@@ -685,6 +686,7 @@ async def run_decision(
         + len(json.dumps(questions))
         + _ESTIMATED_CHARS_PER_IMAGE * len(request.images or ())
     )
+    default_output_tokens = _ESTIMATED_OUTPUT_TOKENS_PER_QUESTION * len(questions)
     try:
         reservation = await reserve_budget(
             db,
@@ -693,7 +695,12 @@ async def run_decision(
                 pricing,
                 prompt_chars=prompt_chars,
                 max_output_tokens=None,
-                default_output_tokens=_ESTIMATED_OUTPUT_TOKENS_PER_QUESTION * len(questions),
+                default_output_tokens=default_output_tokens,
+            ),
+            estimated_tokens=estimate_tokens(
+                prompt_chars=prompt_chars,
+                max_output_tokens=None,
+                default_output_tokens=default_output_tokens,
             ),
             # Not the selector: ``model`` only drives reserve_budget's free-model
             # shortcut, which splits it through any-llm (see search.py).

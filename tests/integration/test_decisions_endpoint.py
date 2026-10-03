@@ -269,6 +269,24 @@ def test_decisions_is_budget_enforced(client: TestClient, master_key_header: dic
     assert [(row["status"], row["status_code"]) for row in rows] == [("error", 403)]
 
 
+def test_decisions_reserves_against_the_token_limit(client: TestClient, master_key_header: dict[str, str]) -> None:
+    budget = client.post(f"{API_ROOT}/budgets", json={"token_limit": 10}, headers=master_key_header).json()
+    client.post(
+        f"{API_ROOT}/users",
+        json={"user_id": "token-capped", "budget_id": budget["budget_id"]},
+        headers=master_key_header,
+    )
+    key = client.post(
+        f"{API_ROOT}/keys", json={"key_name": "token-key", "user_id": "token-capped"}, headers=master_key_header
+    ).json()
+
+    with _mock_decision() as mock:
+        resp = client.post(f"{API_ROOT}/decisions", json=PAYLOAD, headers={API_KEY_HEADER: f"Bearer {key['key']}"})
+    assert resp.status_code == 403
+    assert "token" in resp.json()["detail"]
+    mock.assert_not_awaited()
+
+
 def test_decisions_require_pricing_refuses_an_unpriced_model(
     client: TestClient, test_config: GatewayConfig, api_key_header: dict[str, str]
 ) -> None:
