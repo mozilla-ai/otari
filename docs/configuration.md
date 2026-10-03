@@ -85,6 +85,7 @@ the corresponding startup value after the database is available.
 | `rate_limit_redis_url` | The Redis that the `redis` store counts in. |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
+| `accept_incoming_trace_context` | bool | `false` | Honor incoming OpenTelemetry propagation headers (W3C `traceparent`/`tracestate` by default) so spans the gateway creates join the caller's trace. Off by default because the headers are unauthenticated. See [HTTP trace context propagation](#http-trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
 | `mode` | `standalone`, `hosted`, or `hybrid`. See [Modes](modes.md). |
 
@@ -144,6 +145,52 @@ replicas never both take the last slot and their clock skew does not matter.
 If Redis cannot be reached, each replica counts on its own instead of refusing
 traffic, and tries Redis again a few seconds later; the gateway log says when
 that starts and stops.
+
+### HTTP trace context propagation
+
+Otari can accept incoming context propagation headers in both standalone and
+hybrid mode. By default, this feature is disabled because the headers are
+unauthenticated. Set `accept_incoming_trace_context: true` to enable it for
+trusted backend and service-to-service callers. The middleware runs before route
+authentication, so an untrusted caller can choose the incoming trace context and
+any sampling decisions supported by the configured propagator. Prefer enabling
+it behind a proxy that strips propagation headers from untrusted edges.
+
+When enabled, Otari uses OpenTelemetry's configured propagator set to extract
+incoming context. The default is W3C Trace Context plus baggage
+(`tracecontext,baggage`). In this setting, `tracecontext` maps to the W3C
+`traceparent` and `tracestate` headers:
+
+- `traceparent` identifies the caller's trace ID, parent span ID, and trace flags.
+- `tracestate` carries vendor-specific state alongside the trace context.
+- `baggage` carries application-defined key-value metadata across service boundaries.
+
+Set `OTEL_PROPAGATORS` before starting Otari to select the propagators installed
+in your environment. When the W3C propagator is configured, these headers are
+the standard carriers; another propagator may use different headers or carriers.
+A valid incoming context becomes the current context for the request, so spans
+created by the request handler join the caller's trace. Any extracted propagator
+state is retained on spans created in the gateway; Otari does not automatically
+inject propagation headers into provider or platform requests.
+
+Missing or invalid context does not reject the request. Otari continues normally,
+allowing OpenTelemetry to create a new root trace when instrumentation creates a
+span. Context is detached when the request finishes, so separate HTTP requests
+do not share trace state.
+
+Malformed propagation headers can still affect observability noise. In particular,
+a malformed `tracestate` makes OpenTelemetry's internal logger
+(`opentelemetry.trace.span`) emit a warning per offending member and drop the
+`tracestate`; a valid `traceparent` alongside it is still honored, so the request
+joins the caller's trace without the vendor state. If Otari is exposed to
+untrusted callers, treat this as client-controlled log-volume input: keep
+propagation disabled unless needed, strip propagation headers at the edge, and
+tune the `opentelemetry.trace.span` log level or filters for your deployment.
+
+Cross-origin browser propagation is not enabled: propagation headers, including
+the default W3C `traceparent` and `tracestate` headers, are not in the CORS
+allow-list. This applies to arbitrary propagators as well; their carriers are
+not allowed by the gateway's CORS configuration.
 
 ## Provider configuration
 

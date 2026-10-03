@@ -19,6 +19,7 @@ from gateway import features
 from gateway.api.deps import build_file_service, build_idempotency_service, set_config
 from gateway.api.main import register_routers
 from gateway.container import Container, build_container
+from gateway.context_propagation import TraceContextPropagationMiddleware
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, dispose_db, init_db
 from gateway.core.feature import Worker
@@ -953,7 +954,10 @@ def create_app(config: GatewayConfig) -> FastAPI:
         async def root_index() -> str:
             return ROOT_TUTORIAL_HTML
 
+    # Middleware stack is registered in reverse order (last-added runs first)
     app.add_middleware(SecurityHeadersMiddleware)
+    if config.accept_incoming_trace_context:
+        app.add_middleware(TraceContextPropagationMiddleware)
 
     if config.cors_allow_origins:
         allow_credentials = "*" not in config.cors_allow_origins

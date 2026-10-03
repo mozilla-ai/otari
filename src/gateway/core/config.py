@@ -537,6 +537,20 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
         default=False,
         description="Enable Prometheus metrics endpoint at /metrics",
     )
+    accept_incoming_trace_context: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
+        default=False,
+        description=(
+            "Honor incoming OpenTelemetry context propagation headers. The default "
+            "propagator uses W3C Trace Context (traceparent/tracestate); the "
+            "OTEL_PROPAGATORS environment variable controls the configured set. "
+            "Disabled by default: the headers are unauthenticated (the middleware "
+            "runs before route auth) and, once enabled, let any caller pick the "
+            "trace id, parent span id, and sampling flag that reach the operator's "
+            "collector. Enable only for backend/service-to-service deployments "
+            "where callers are trusted, ideally behind a proxy that strips these "
+            "headers from untrusted edges."
+        ),
+    )
     enable_docs: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
         default=True,
         description="Enable FastAPI docs endpoints (/docs, /redoc, /openapi.json). Enabled by default.",
