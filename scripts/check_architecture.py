@@ -61,6 +61,7 @@ Exit codes:
 import ast
 import re
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TypedDict
 
@@ -468,6 +469,19 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
 )
 
 
+def _parsed_modules(src_root: Path, scope: str, exempt: tuple[str, ...] = ()) -> Iterator[tuple[str, ast.Module]]:
+    """Yield the path relative to src_root and the tree of each parseable module under scope, in path order."""
+    for py_file in sorted((src_root / scope).rglob("*.py")):
+        relative_path = py_file.relative_to(src_root).as_posix()
+        if relative_path in exempt or "__pycache__" in py_file.parts:
+            continue
+        try:
+            tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+        except SyntaxError:
+            continue  # check_file already reports an unparseable file.
+        yield relative_path, tree
+
+
 def _database_imports(tree: ast.Module) -> list[tuple[int, str]]:
     """Return the line and module of each import of a database library in a module."""
     found: list[tuple[int, str]] = []
@@ -490,12 +504,7 @@ def _check_layer_database_imports(src_root: Path, scope: str, baseline: tuple[st
     """Check one layer against its database import baseline, reporting new importers and stale entries."""
     violations: list[str] = []
     importing: set[str] = set()
-    for py_file in sorted((src_root / scope).rglob("*.py")):
-        relative_path = py_file.relative_to(src_root).as_posix()
-        try:
-            tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
-        except SyntaxError:
-            continue  # check_file already reports an unparseable file.
+    for relative_path, tree in _parsed_modules(src_root, scope):
         imports = _database_imports(tree)
         if not imports:
             continue
@@ -601,14 +610,7 @@ def check_transaction_control(src_root: Path) -> list[str]:
     """Check that no module off the baseline ends a transaction itself, and that every baseline entry still does."""
     violations: list[str] = []
     ending: set[str] = set()
-    for py_file in sorted((src_root / "gateway").rglob("*.py")):
-        relative_path = py_file.relative_to(src_root).as_posix()
-        if relative_path == UNIT_OF_WORK or "__pycache__" in py_file.parts:
-            continue
-        try:
-            tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
-        except SyntaxError:
-            continue  # check_file already reports an unparseable file.
+    for relative_path, tree in _parsed_modules(src_root, "gateway", exempt=(UNIT_OF_WORK,)):
         calls = _transaction_calls(tree)
         if not calls:
             continue
@@ -688,14 +690,7 @@ def check_unit_of_work_construction(src_root: Path) -> list[str]:
     An import that renames the Unit of Work would hide a construction from it, so such an import is refused.
     """
     violations: list[str] = []
-    for py_file in sorted((src_root / "gateway").rglob("*.py")):
-        relative_path = py_file.relative_to(src_root).as_posix()
-        if relative_path == UNIT_OF_WORK or "__pycache__" in py_file.parts:
-            continue
-        try:
-            tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
-        except SyntaxError:
-            continue  # check_file already reports an unparseable file.
+    for relative_path, tree in _parsed_modules(src_root, "gateway", exempt=(UNIT_OF_WORK,)):
         allowed = _factory_constructions(tree) if relative_path == UNIT_OF_WORK_FACTORY else set()
         violations.extend(
             f"{relative_path}:{call.lineno} constructs a {UNIT_OF_WORK_TYPE}; a request takes one from "
@@ -706,7 +701,7 @@ def check_unit_of_work_construction(src_root: Path) -> list[str]:
         violations.extend(
             f"{relative_path}:{line} imports {UNIT_OF_WORK_TYPE} as {name}; the rule reads the name at the "
             "call site, so import it under its own name"
-            for line, name in _renamed_unit_of_work_imports(tree, py_file, src_root)
+            for line, name in _renamed_unit_of_work_imports(tree, src_root / relative_path, src_root)
         )
     return violations
 
