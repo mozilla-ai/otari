@@ -216,7 +216,7 @@ its own tenant.
 |---|---|
 | `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Authorization request rejected"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
-| Network/timeout                    | Mapped to `502 Bad Gateway`. |
+| Network, timeout, protocol or proxy failure, or an undecodable body | Mapped to `502 Bad Gateway`. |
 
 A `421 Misdirected Request` only ever refers to `X-User-Token`: the user token belongs to another regional deployment, and the `detail` names the host that serves it. Otari forwards both the status and the detail unchanged so the end user can send the request there. A gateway token from the wrong region is not a `421`: that is the operator's configuration, which the end user cannot act on, so the platform answers it the way it answers any other bad gateway token. The region a token carries is a routing hint only: the platform still hashes the whole token and looks it up, and a token with a bad checksum, an unknown region, or the wrong kind for its header gets a `401` with no lookup (otari-ai#1665). The Web Access resolve below shares this ladder and forwards a `421` the same way. The MCP endpoints publish their own error contract and do not forward the detail: a `421` there becomes `misdirected_request` with the fixed safe message and no host (see below).
 
@@ -303,7 +303,7 @@ Nothing platform-side stores or returns a revision.
 |---|---|
 | `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"MCP server resolution failed"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
-| Network/timeout                    | Mapped to `502 Bad Gateway`. |
+| Network, timeout, protocol or proxy failure, or an undecodable body | Mapped to `502 Bad Gateway`. |
 
 The caller-orchestrated endpoints publish their own error contract instead of
 forwarding any detail, because a platform `detail` may name a workspace, a plan,
@@ -375,7 +375,7 @@ For Fetch, allowed and blocked domains form a mandatory policy that request-supp
 |---|---|
 | `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Web search resolution failed"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
-| Network/timeout                    | Mapped to `502 Bad Gateway`. |
+| Network, timeout, protocol or proxy failure, or an undecodable body | Mapped to `502 Bad Gateway`. |
 
 > The resolve endpoints share the timeout (`PLATFORM_RESOLVE_TIMEOUT_MS`) and
 > token headers with `provider-keys/resolve`. Their exact response shapes will
@@ -449,7 +449,7 @@ response that resolves to nothing leaves the deployment's own settings in force.
 |---|---|
 | `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Code execution resolution failed"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
-| Network/timeout                    | Mapped to `502 Bad Gateway`. |
+| Network, timeout, protocol or proxy failure, or an undecodable body | Mapped to `502 Bad Gateway`. |
 
 ### Where the code runs
 

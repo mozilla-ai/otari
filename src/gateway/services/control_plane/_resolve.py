@@ -86,9 +86,8 @@ async def resolve(config: GatewayConfig, *, user_token: str, endpoint: ResolveEn
         ControlPlaneNotConfiguredError: no control plane address is set.
         ControlPlaneRefusedError: the peer refused, carrying its status, its
             detail where that is a safe string, and its ``Retry-After``.
-        ControlPlaneUnavailableError: a timeout, a network failure, an
-            unreadable body or any other status, so nothing about the peer's
-            internals reaches the caller.
+        ControlPlaneUnavailableError: a transport failure, an unreadable body or any other status,
+            so nothing about the peer's internals reaches the caller.
     """
     base_url = config.platform.get("base_url")
     if not base_url:
@@ -107,7 +106,7 @@ async def resolve(config: GatewayConfig, *, user_token: str, endpoint: ResolveEn
             body=body,
             timeout_seconds=timeout_ms / 1000,
         )
-    except (httpx.TimeoutException, httpx.NetworkError):
+    except (httpx.TransportError, httpx.DecodingError):
         raise ControlPlaneUnavailableError(UNAVAILABLE_DETAIL) from None
 
     if response.status_code == HTTPStatus.OK:

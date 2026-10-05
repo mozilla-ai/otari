@@ -154,6 +154,34 @@ async def test_a_peer_that_cannot_be_reached_is_the_same_answer(
         await _ask()
 
 
+def _undecodable_body(**_: Any) -> Any:
+    return httpx.Response(200, headers={"Content-Encoding": "gzip"}, content=b"not gzip")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "handler",
+    [
+        _raises(httpx.RemoteProtocolError("peer closed mid-response")),
+        _raises(httpx.LocalProtocolError("invalid header")),
+        _raises(httpx.ProxyError("proxy refused")),
+        _raises(httpx.UnsupportedProtocol("no such scheme")),
+        _undecodable_body,
+    ],
+    ids=["remote-protocol", "local-protocol", "proxy", "unsupported-protocol", "decoding"],
+)
+async def test_a_peer_that_answers_badly_is_the_same_answer(
+    control_plane_transport: InstallControlPlane,
+    handler: Any,
+) -> None:
+    control_plane_transport(handler)
+
+    with pytest.raises(ControlPlaneUnavailableError) as raised:
+        await _ask()
+
+    assert raised.value.status_code == 502
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("error", "status_code", "detail", "retry_after"),
