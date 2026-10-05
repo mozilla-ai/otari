@@ -6,12 +6,18 @@ import type {
   GatewayHealth,
   UpdateDeploymentUserRequest,
 } from "@/client"
-import { apiFetch, DASHBOARD_BUILD_PATH, siteFetch } from "@/shared/api/client"
+import {
+  apiFetch,
+  DASHBOARD_BUILD_PATH,
+  isGatewayUnreachable,
+  siteFetch,
+} from "@/shared/api/client"
 import { fetchAllPaged } from "@/shared/api/paging"
 import {
   BUILD,
   BUILD_POLL_MS,
   DEPLOYMENT_ADMIN,
+  GATEWAY_LIVENESS,
   HEALTH,
   HEALTH_POLL_MS,
   NO_RETRY,
@@ -33,6 +39,29 @@ export function useDashboardBuild() {
     // A failed check is not worth reporting: the tab keeps working, and the next
     // poll retries anyway.
     retry: false,
+  })
+}
+
+/**
+ * Confirm a lost gateway connection independently of cached page errors.
+ *
+ * Liveness is a cheap read in every deployment, without provider or control
+ * plane checks. Retry missing or invalid replies twice before declaring an
+ * outage, then keep polling so recovery does not depend on revisiting the failed
+ * page.
+ */
+export function useGatewayLiveness() {
+  return useQuery({
+    queryKey: [GATEWAY_LIVENESS],
+    queryFn: () => apiFetch<string>("/health/liveness", { cache: "no-store" }),
+    // The probe must run even offline: a paused query cannot confirm an outage.
+    networkMode: "always",
+    retry: (failureCount, error) =>
+      isGatewayUnreachable(error) && failureCount < 2,
+    refetchInterval: HEALTH_POLL_MS,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    staleTime: 0,
   })
 }
 

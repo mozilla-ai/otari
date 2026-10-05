@@ -11,14 +11,29 @@ import type { OAuthAuthorizeResponse, OAuthCallbackRequest } from "@/client"
 import { requestPolicy } from "@/shared/api/overlayRequestPolicy"
 import { getPasskeyAssertion } from "@/shared/helpers/webauthn"
 
+type ApiErrorKind = "network" | "http" | "invalid-response"
+
 export class ApiError extends Error {
   status: number
+  kind: ApiErrorKind
 
-  constructor(status: number, message: string) {
+  constructor(
+    status: number,
+    message: string,
+    kind: ApiErrorKind = status === 0 ? "network" : "http",
+  ) {
     super(message)
     this.name = "ApiError"
     this.status = status
+    this.kind = kind
   }
+}
+
+export function isGatewayUnreachable(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.kind === "network" || error.kind === "invalid-response")
+  )
 }
 
 // AuthProvider registers a callback so a 401 anywhere can drop the session
@@ -431,8 +446,8 @@ function isTimeout(error: unknown): boolean {
  * says the opposite: `errorMessage` renders it verbatim, and the markup it
  * quotes reads as a defect in the page that made the call (otari-ai#2147).
  *
- * Only `SyntaxError`. A body that fails to arrive at all is a different fault
- * and keeps its own reporting.
+ * A decoding `TypeError` also means no usable reply arrived. Keep timeouts
+ * distinct and let intentional cancellation retain its original error.
  */
 async function readJson<T>(
   response: Response,
@@ -444,10 +459,18 @@ async function readJson<T>(
     if (isTimeout(error)) {
       throw new ApiError(0, timeoutMessage)
     }
+    if (error instanceof TypeError) {
+      throw new ApiError(
+        response.status,
+        `The gateway's reply could not be decoded (HTTP ${response.status}). Whether the request was carried out is unknown.`,
+        "invalid-response",
+      )
+    }
     if (error instanceof SyntaxError) {
       throw new ApiError(
         response.status,
         `The gateway's reply was not JSON (HTTP ${response.status}). Something between this page and the gateway answered in its place, so whether the request was carried out is unknown.`,
+        "invalid-response",
       )
     }
     throw error

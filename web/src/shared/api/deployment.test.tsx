@@ -4,7 +4,7 @@ import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { API_ROOT } from "@/shared/api/client"
-import { useDashboardBuild } from "@/shared/api/deployment"
+import { useDashboardBuild, useGatewayLiveness } from "@/shared/api/deployment"
 
 function wrapper({ children }: { children: ReactNode }) {
   const client = new QueryClient({
@@ -61,5 +61,27 @@ describe("useDashboardBuild", () => {
       expect(result.current.isError).toBe(true)
     })
     expect(result.current.data).toBeUndefined()
+  })
+})
+
+describe("useGatewayLiveness", () => {
+  it("checks fresh liveness through the API transport", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(JSON.stringify("I'm alive!"), {
+          headers: { "Content-Type": "application/json" },
+        }),
+    )
+    const { result } = renderHook(() => useGatewayLiveness(), { wrapper })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(fetch).toHaveBeenCalledWith(
+      `${API_ROOT}/health/liveness`,
+      expect.objectContaining({
+        cache: "no-store",
+        credentials: "same-origin",
+        signal: expect.any(AbortSignal),
+      }),
+    )
   })
 })
