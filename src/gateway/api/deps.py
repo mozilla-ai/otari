@@ -1090,17 +1090,24 @@ class ToolPorts:
     """The ports a request's tools reach."""
 
     code_execution: CodeExecutionPort | None
+    code_execution_policy: CodeExecutionPolicyPort
     mcp_server: McpServerPort
     web_search_policy: WebSearchPolicyPort
 
 
 def get_tool_ports(
     code_execution: CodeExecutionPortDep,
+    code_execution_policy: CodeExecutionPolicyPortDep,
     mcp_server: McpServerPortDep,
     web_search_policy: WebSearchPolicyPortDep,
 ) -> ToolPorts:
     """Resolve the ports a request's tools reach."""
-    return ToolPorts(code_execution=code_execution, mcp_server=mcp_server, web_search_policy=web_search_policy)
+    return ToolPorts(
+        code_execution=code_execution,
+        code_execution_policy=code_execution_policy,
+        mcp_server=mcp_server,
+        web_search_policy=web_search_policy,
+    )
 
 
 ToolPortsDep = Annotated[ToolPorts, Depends(get_tool_ports)]

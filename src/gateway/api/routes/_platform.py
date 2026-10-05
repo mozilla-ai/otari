@@ -522,8 +522,7 @@ async def _post_resolve(
     back, and a 429 needs the peer's ``Retry-After`` with it.
 
     A caller that answers in a route's own error format has a ``FormatAdapter``
-    to render through, so it reads the domain error and leaves this alone: see
-    :func:`_resolve_platform_code_execution`.
+    to render through, so it reads the domain error and leaves this alone.
     """
     try:
         return await resolve(
@@ -881,32 +880,6 @@ def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:
         return True, f"http_{status_code}"
 
     return True, "unknown"
-
-
-async def _resolve_platform_code_execution(
-    config: GatewayConfig,
-    user_token: str,
-) -> dict[str, Any]:
-    """Resolve the workspace's code-execution policy from the control plane.
-
-    Returns the parsed answer on 200 (``{enabled, tools, default_purpose_hint,
-    max_iterations, exec_timeout_s}``, soft limits already clamped to the
-    operator's ceilings on the peer's side), and an empty policy for anything
-    else, which narrows nothing.
-
-    A refusal stays a ``ControlPlaneError`` rather than being flattened here. The
-    only caller is a completion route, whose error body only its ``FormatAdapter``
-    knows how to build, so ``prepare_gateway_tools`` renders the refusal there and
-    the peer's ``Retry-After`` reaches it typed rather than as a header to re-read.
-    This is the shape ``WebSearchPolicyPort`` already answers in.
-    """
-    payload = await resolve(
-        config,
-        user_token=user_token,
-        endpoint=ResolveEndpoint.CODE_EXECUTION,
-        body={},
-    )
-    return payload if isinstance(payload, dict) else {}
 
 
 async def _report_platform_usage(

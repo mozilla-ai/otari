@@ -66,6 +66,7 @@ from gateway.api.routes._pipeline import (
 from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, SettledCost
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.tools_exceptions import (
+    CodeExecutionPolicyResolutionFailure,
     WebAccessToolNotAuthorizedError,
     WebSearchNotEnabledError,
     WebSearchPolicyResolutionFailure,
@@ -73,8 +74,9 @@ from gateway.exceptions.tools_exceptions import (
 )
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.pricing import ModelPricing, PriceSource
-from gateway.models.tools import ResolvedWebSearchConfig
+from gateway.models.tools import ResolvedCodeExecutionPolicy, ResolvedWebSearchConfig
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
+from gateway.ports.code_execution_policy_port import CodeExecutionPolicyScope
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.rate_limit import RateLimitInfo
@@ -1740,6 +1742,13 @@ def _chunk_id(part: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+class _NoCodeExecutionPolicy:
+    """A workspace with no code execution policy, which narrows nothing."""
+
+    async def resolve(self, scope: CodeExecutionPolicyScope) -> ResolvedCodeExecutionPolicy | None:
+        return None
+
+
 _BACKEND_FIELDS = frozenset(field.name for field in dataclasses.fields(ToolBackends))
 _PORT_FIELDS = frozenset(field.name for field in dataclasses.fields(ToolPorts))
 _DECLARED_FIELDS = frozenset(field.name for field in dataclasses.fields(DeclaredTools))
@@ -1760,6 +1769,7 @@ async def _call_prepare_gateway_tools(ctx: RequestContext, **overrides: Any) -> 
     declared.update({name: overrides.pop(name) for name in list(overrides) if name in _DECLARED_FIELDS})
     ports: dict[str, Any] = {
         "code_execution": None,
+        "code_execution_policy": _NoCodeExecutionPolicy(),
         "mcp_server": _Servers(_resolves_to_nothing),
         "web_search_policy": _Policy(),
     }
@@ -2814,3 +2824,17 @@ async def test_standalone_stream_has_no_first_chunk_deadline(monkeypatch: pytest
 
     assert chunks, "the slow first chunk was dropped: a first-chunk deadline is being applied"
     assert settlement.reconciled == [0.25]
+
+
+@pytest.mark.parametrize(
+    ("reason", "status_code"),
+    [
+        (CodeExecutionPolicyResolutionFailure.ANSWER_UNREADABLE, 502),
+        (CodeExecutionPolicyResolutionFailure.NO_CALLER_CREDENTIAL, 500),
+        (CodeExecutionPolicyResolutionFailure.NO_WORKSPACE, 500),
+    ],
+)
+def test_a_code_execution_policy_failure_renders_its_status(
+    reason: CodeExecutionPolicyResolutionFailure, status_code: int
+) -> None:
+    assert pipeline._code_execution_policy_failure_status(reason) == status_code
