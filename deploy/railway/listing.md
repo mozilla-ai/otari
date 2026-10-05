@@ -34,6 +34,7 @@ curl "https://YOUR_DOMAIN/api/v1/chat/completions" \
 | `OTARI_REQUIRE_PRICING` | `false` | Serves models that have no configured pricing. |
 | `OTARI_DEFAULT_PRICING` | `true` | Meters common models from community-maintained rates. Prices you set on the Models page always win. |
 | `OTARI_FORWARDED_ALLOW_IPS` | `*` | Lets per-IP sign-in limits see the real client, not Railway's ingress. |
+| `OTARI_PUBLIC_BASE_URL` | `https://${{RAILWAY_PUBLIC_DOMAIN}}` | Your service's public URL, for sign-in redirects, passkeys and email links. Change it if you attach a custom domain. |
 | `PORT` | `8000` | The port Railway's healthcheck probes. Keep it equal to the target port. |
 
 To keep provider keys in Railway variables instead of the dashboard, declare the providers through `OTARI_CONFIG_YAML`; see [Full config via environment](https://github.com/mozilla-ai/otari/blob/main/docs/configuration.md#full-config-via-environment).

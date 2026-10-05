@@ -53,6 +53,11 @@
           "isOptional": false,
           "description": "Trust X-Forwarded-For from any peer, so the per-IP sign-in and public-catalog limits see the real client instead of Railway's ingress. Safe here because the ingress is the only path to the container. Without it every visitor shares a few ingress addresses, and ten wrong passwords from anyone lock the dashboard for everyone for a minute."
         },
+        "OTARI_PUBLIC_BASE_URL": {
+          "defaultValue": "https://${{RAILWAY_PUBLIC_DOMAIN}}",
+          "isOptional": true,
+          "description": "This deployment's public URL, with no trailing slash. Builds OAuth redirect URIs, the passkey relying-party ID and the links in outgoing email. Pre-wired to the service's Railway domain; change it if you attach a custom domain."
+        },
         "PORT": {
           "defaultValue": "8000",
           "isOptional": false,

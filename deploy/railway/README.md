@@ -36,6 +36,7 @@ the snapshot of what the template sets lives in [`template.json`](template.json)
 | `OTARI_REQUIRE_PRICING` | `false` | Pre-set, so a fresh deploy serves models that have no configured pricing. |
 | `OTARI_DEFAULT_PRICING` | `true` | Pre-set, so common models are metered from the bundled genai-prices dataset without configuring each one. Prices you set in the dashboard or via `/api/v1/pricing` always override it. |
 | `OTARI_FORWARDED_ALLOW_IPS` | `*` | Pre-set, so the per-IP sign-in and public-catalog limits see the real client, not Railway's ingress. Safe here because the ingress is the only path to the container; see [Behind a reverse proxy](../../docs/deployment.md#behind-a-reverse-proxy). |
+| `OTARI_PUBLIC_BASE_URL` | `https://${{RAILWAY_PUBLIC_DOMAIN}}` | Pre-wired to the service's Railway domain. OAuth redirect URIs, the passkey relying-party ID and email links are built from it. Change it if you attach a custom domain. |
 | `PORT` | `8000` | Pre-set for Railway's deploy-time healthcheck, which probes the port in `PORT`, not the target port. Otari listens on `OTARI_PORT` (pinned to `8000` in the image) and never reads `PORT`, so keep the two equal. |
 
 Notes:
