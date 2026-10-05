@@ -5,7 +5,7 @@ gateway in front of key-only providers (OpenAI, Anthropic, Mistral, Gemini),
 backed by a managed Postgres database. No local setup: deploy, then add your
 provider keys on the dashboard.
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/otari-railway-template-demo)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/otari)
 
 ## What you get
 
@@ -150,8 +150,10 @@ When changing the template:
 3. To move a new deploy to a newer release, change the image tag on the live
    template and in `template.json`. This does not touch existing deploys: each
    keeps the tag it was deployed with until its operator upgrades.
-4. If the deploy link changes, update the **Deploy on Railway** button here, in
-   the project root `README.md`, and in `docs/deployment.md`.
+4. The deploy link is `https://railway.com/deploy/<code>`, where the code is
+   set in the template editor (it is `otari`). If it changes, update every
+   **Deploy on Railway** button (`grep -rn railway.com/deploy`) and the
+   `code` in `template.json`.
 
 Listing the template in Railway's public marketplace is optional: the deploy
 link works without it. Publishing only adds marketplace discoverability and
