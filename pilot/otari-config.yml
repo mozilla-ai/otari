@@ -1,0 +1,63 @@
+# Otari for the local pilot (pilot.md section 5), with fakes in place of
+# Vertex, Mistral, Exa and Liner. Swap each fake instance for the real provider
+# block in pilot.md to run against real upstreams.
+
+database_url: "postgresql://otari:otari@127.0.0.1:55432/otari"
+host: "127.0.0.1"
+port: 8100
+master_key: ${OTARI_MASTER_KEY}
+auto_migrate: true
+default_pricing: false
+require_pricing: false
+files_provider_upload_enabled: false
+
+rate_limit_store: redis
+rate_limit_redis_url: "redis://127.0.0.1:56379/0"
+
+providers:
+  # Named vertex_ai, LiteLLM's prefix, so the LiteLLM model names MLPA and the eval
+  # harness send (vertex_ai/mistral-small-2503) resolve as instance/model.
+  vertex_ai:                      # real: provider_type vertexai with credentials, project, location
+    provider_type: openai
+    api_base: "http://127.0.0.1:9100/vertexai"
+    api_key: fake
+    models: [gemini-3.1-flash-lite, qwen/qwen3-235b-a22b-instruct-2507-maas, mistral-small-2503, gemini-2.5-flash-lite-429]
+  mistral:                        # real: api_key ${MISTRAL_API_KEY}
+    provider_type: openai
+    api_base: "http://127.0.0.1:9100/mistral"
+    api_key: fake
+    models: [mistral-small-2603]
+  exa_answers:                    # real: api_base https://api.exa.ai, api_key ${EXA_API_KEY}
+    provider_type: openai
+    api_base: "http://127.0.0.1:9100/exa"
+    api_key: fake
+    models: [exa]
+  liner_answers:                  # the quick-answer shim in fakes.py; real Liner needs an any-llm provider
+    provider_type: openai
+    api_base: "http://127.0.0.1:9100/liner"
+    api_key: fake
+    models: [liner-quick-answer]
+
+# The bare names clients send through MLPA (Remote Settings, Android, iOS).
+# An alias cannot contain '/', which is why the vertex instance carries the prefix.
+aliases:
+  gemini-3.1-flash-lite: vertex_ai:gemini-3.1-flash-lite
+  qwen3-235b-a22b-instruct-2507-maas: vertex_ai:qwen/qwen3-235b-a22b-instruct-2507-maas
+  mistral-small-2603: mistral:mistral-small-2603
+  moz-summarization: vertex_ai:gemini-3.1-flash-lite
+  exa: exa_answers:exa
+  liner: liner_answers:liner-quick-answer
+  throttled: vertex_ai:gemini-2.5-flash-lite-429
+
+pricing:
+  vertex_ai:gemini-3.1-flash-lite: {input_price_per_million: 0.10, output_price_per_million: 0.40}
+  vertex_ai:qwen/qwen3-235b-a22b-instruct-2507-maas: {input_price_per_million: 0.22, output_price_per_million: 0.88}
+  vertex_ai:mistral-small-2503: {input_price_per_million: 0.10, output_price_per_million: 0.30}
+  mistral:mistral-small-2603: {input_price_per_million: 0.10, output_price_per_million: 0.30}
+  exa_answers:exa: {input_price_per_million: 5.0, output_price_per_million: 5.0}
+  liner_answers:liner-quick-answer: {input_price_per_million: 5.0, output_price_per_million: 5.0}
+
+search_tools:
+  exa-search:                     # the name MLPA calls; real: provider exa, api_key ${EXA_API_KEY}
+    provider: searxng
+    api_base: "http://127.0.0.1:9100/searx"

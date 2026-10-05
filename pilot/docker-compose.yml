@@ -1,0 +1,18 @@
+name: otari-pilot
+services:
+  postgres:
+    image: postgres:17
+    container_name: otari_pilot_postgres
+    environment:
+      POSTGRES_USER: otari
+      POSTGRES_PASSWORD: otari
+      POSTGRES_DB: otari
+    ports: ["127.0.0.1:55432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U otari"]
+      interval: 2s
+      retries: 30
+  redis:
+    image: redis:8-alpine
+    container_name: otari_pilot_redis
+    ports: ["127.0.0.1:56379:6379"]
