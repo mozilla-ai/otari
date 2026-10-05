@@ -11,7 +11,7 @@ from starlette.types import Message, Receive, Scope, Send
 from gateway.adapters.rate_limit_store_adapter import InMemoryRateLimitStore
 from gateway.core.config import GatewayConfig, RateLimitRule
 from gateway.main import _validate_rate_limit_store
-from gateway.rate_limit import RateLimitGrantMiddleware, RateLimitRules
+from gateway.rate_limit import BudgetMinuteLimits, RateLimitGrantMiddleware, RateLimitRules
 
 
 def _request() -> Request:
@@ -394,3 +394,31 @@ async def test_used_admission_admits_past_an_estimate_and_counts_what_was_used()
         await _admit(rules, tokens=8192)
 
     assert exc_info.value.detail == "Rate limit 'tpm' exceeded: 2,000 tokens per minute"
+
+
+@pytest.mark.asyncio
+async def test_a_budgets_minute_limits_count_each_user_and_each_budget_on_its_own() -> None:
+    rules = _rules(InMemoryRateLimitStore())
+    ai = BudgetMinuteLimits(budget_id="b-ai", rpm=1, tpm=None)
+
+    await rules.admit(_request(), key_id="k", user_id="u1", estimated_tokens=10, budget_limits=ai)
+    await rules.admit(_request(), key_id="k", user_id="u2", estimated_tokens=10, budget_limits=ai)
+    with pytest.raises(HTTPException) as exc_info:
+        await rules.admit(_request(), key_id="k", user_id="u1", estimated_tokens=10, budget_limits=ai)
+    moved = BudgetMinuteLimits(budget_id="b-ai-dev", rpm=5, tpm=None)
+    await rules.admit(_request(), key_id="k", user_id="u1", estimated_tokens=10, budget_limits=moved)
+
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.headers is not None
+    assert exc_info.value.headers["Otari-Rate-Limit-Rule"] == "budget"
+
+
+@pytest.mark.asyncio
+async def test_a_budgets_tpm_counts_what_was_used_not_the_estimate() -> None:
+    rules = _rules(InMemoryRateLimitStore())
+    limits = BudgetMinuteLimits(budget_id="b", rpm=None, tpm=2000)
+
+    grant = await rules.admit(_request(), key_id="k", user_id="u", estimated_tokens=8192, budget_limits=limits)
+    await grant.settle(2500)
+    with pytest.raises(HTTPException):
+        await rules.admit(_request(), key_id="k", user_id="u", estimated_tokens=8192, budget_limits=limits)

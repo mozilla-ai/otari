@@ -76,6 +76,8 @@ async def create_budget(
         max_budget=to_usd_or_none(request.max_budget),
         token_limit=request.token_limit,
         request_limit=request.request_limit,
+        rpm_limit=request.rpm_limit,
+        tpm_limit=request.tpm_limit,
         budget_duration_sec=request.budget_duration_sec,
         reset_alignment=request.reset_alignment,
     )
@@ -190,6 +192,10 @@ async def update_budget(
         budget.token_limit = request.token_limit
     if "request_limit" in request.model_fields_set:
         budget.request_limit = request.request_limit
+    if "rpm_limit" in request.model_fields_set:
+        budget.rpm_limit = request.rpm_limit
+    if "tpm_limit" in request.model_fields_set:
+        budget.tpm_limit = request.tpm_limit
     # The two cadence fields settle together, because each is only legal in terms
     # of the other: the pair that has to hold is the one the row ends up with, so
     # an omitted field contributes what is stored. Switching a rolling budget to a

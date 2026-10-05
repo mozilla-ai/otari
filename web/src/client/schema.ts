@@ -4956,7 +4956,8 @@ export interface paths {
          *
          *     ``parent_user_id`` with ``external_id`` finds the end user a service key
          *     created for a ``user`` value, which is how a caller maps its own ids to
-         *     Otari's.
+         *     Otari's. ``include_total`` adds an ``Otari-Total-Count`` header counting
+         *     every match, so ``limit=1`` with it counts a service key's end users.
          */
         get: operations["users-list_users"];
         put?: never;
@@ -4965,26 +4966,6 @@ export interface paths {
          * @description Create a new user.
          */
         post: operations["users-create_user"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/users/count": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Count Users
-         * @description Number of users ``GET /api/v1/users`` would list with the same filters.
-         */
-        get: operations["users-count_users"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6516,6 +6497,8 @@ export interface components {
             request_limit: number | null;
             /** Reset Alignment */
             reset_alignment: string | null;
+            /** Rpm Limit */
+            rpm_limit?: number | null;
             /** Token Limit */
             token_limit: number | null;
             /**
@@ -6528,6 +6511,8 @@ export interface components {
              * @default 0
              */
             total_spend: number;
+            /** Tpm Limit */
+            tpm_limit?: number | null;
             /** Updated At */
             updated_at: string;
             /**
@@ -7509,10 +7494,20 @@ export interface components {
              */
             reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
             /**
+             * Rpm Limit
+             * @description Requests per minute for each user on this budget, across replicas; null is unlimited
+             */
+            rpm_limit?: number | null;
+            /**
              * Token Limit
              * @description Maximum tokens over the period. Independent of max_budget; null is unlimited
              */
             token_limit?: number | null;
+            /**
+             * Tpm Limit
+             * @description Tokens per minute for each user on this budget, counted on what requests used: a request is admitted while the user's minute is under the limit. Null is unlimited
+             */
+            tpm_limit?: number | null;
         };
         /**
          * CreateKeyRequest
@@ -13201,10 +13196,20 @@ export interface components {
             /** Reset Alignment */
             reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
             /**
+             * Rpm Limit
+             * @description Requests per minute for each user on this budget, across replicas; null is unlimited
+             */
+            rpm_limit?: number | null;
+            /**
              * Token Limit
              * @description Maximum tokens over the period. Independent of max_budget; null is unlimited
              */
             token_limit?: number | null;
+            /**
+             * Tpm Limit
+             * @description Tokens per minute for each user on this budget, counted on what requests used: a request is admitted while the user's minute is under the limit. Null is unlimited
+             */
+            tpm_limit?: number | null;
         };
         /**
          * UpdateKeyRequest
@@ -13945,17 +13950,6 @@ export interface components {
              * @default 0
              */
             unpriced_requests: number;
-        };
-        /**
-         * UserCount
-         * @description How many users match a filter.
-         */
-        UserCount: {
-            /**
-             * Total
-             * @description Number of users matching the filters
-             */
-            total: number;
         };
         /**
          * UserResponse
@@ -22423,6 +22417,8 @@ export interface operations {
                 external_id?: string | null;
                 /** @description Only blocked users (true) or only unblocked ones (false). */
                 blocked?: boolean | null;
+                /** @description Also count every matching user, in the Otari-Total-Count response header. */
+                include_total?: boolean;
             };
             header?: never;
             path?: never;
@@ -22470,42 +22466,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    "users-count_users": {
-        parameters: {
-            query?: {
-                /** @description Only the end users of this owner: the user a service key belongs to. */
-                parent_user_id?: string | null;
-                /** @description Only the end user a service key names with this `user` value. */
-                external_id?: string | null;
-                /** @description Only blocked users (true) or only unblocked ones (false). */
-                blocked?: boolean | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UserCount"];
                 };
             };
             /** @description Validation Error */

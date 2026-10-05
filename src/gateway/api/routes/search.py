@@ -75,6 +75,7 @@ from gateway.services.budgets import (
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
+    user_minute_limits,
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
@@ -275,7 +276,13 @@ async def _dispatch_search(
     else:
         user_id = resolve_passthrough_user_id(auth_result, request.user, reject_mismatch=config.reject_user_mismatch)
         rate_limit_info = await check_rate_limit(raw_request, user_id)
-    await admit_rate_limit_rules(raw_request, key_id=api_key_id, user_id=user_id, estimated_tokens=0)
+    await admit_rate_limit_rules(
+        raw_request,
+        key_id=api_key_id,
+        user_id=user_id,
+        estimated_tokens=0,
+        budget_limits=await user_minute_limits(db, user_id),
+    )
 
     async def log_rejection(detail: str, *, row_model: str, row_provider: str | None, status_code: int) -> None:
         """Record a search the gateway itself refused.

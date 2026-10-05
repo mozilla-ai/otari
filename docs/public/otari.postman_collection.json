@@ -1418,7 +1418,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"token_limit\": 0\n}"
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"rpm_limit\": 0,\n  \"token_limit\": 0,\n  \"tpm_limit\": 0\n}"
             },
             "description": "Create a new budget.",
             "header": [
@@ -1478,7 +1478,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"token_limit\": 0\n}"
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"rpm_limit\": 0,\n  \"token_limit\": 0,\n  \"tpm_limit\": 0\n}"
             },
             "description": "Update a budget.",
             "header": [
@@ -8794,7 +8794,7 @@
         {
           "name": "List Users",
           "request": {
-            "description": "List the users the caller's organization can name, with pagination.\n\n``users`` is deployment-global and has no organization column, so which of\nthem this organization can name is derived: a key, usage, or a roster row\nputs one in reach, and one reached from nowhere at all (the shared\n``default`` owner, or a user just created) is shared rather than hidden.\nSee ``repositories.users_repository.in_organization``.\n\n``parent_user_id`` with ``external_id`` finds the end user a service key\ncreated for a ``user`` value, which is how a caller maps its own ids to\nOtari's.",
+            "description": "List the users the caller's organization can name, with pagination.\n\n``users`` is deployment-global and has no organization column, so which of\nthem this organization can name is derived: a key, usage, or a roster row\nputs one in reach, and one reached from nowhere at all (the shared\n``default`` owner, or a user just created) is shared rather than hidden.\nSee ``repositories.users_repository.in_organization``.\n\n``parent_user_id`` with ``external_id`` finds the end user a service key\ncreated for a ``user`` value, which is how a caller maps its own ids to\nOtari's. ``include_total`` adds an ``Otari-Total-Count`` header counting\nevery match, so ``limit=1`` with it counts a service key's end users.",
             "header": [],
             "method": "GET",
             "url": {
@@ -8836,9 +8836,15 @@
                   "disabled": true,
                   "key": "blocked",
                   "value": ""
+                },
+                {
+                  "description": "Also count every matching user, in the Otari-Total-Count response header.",
+                  "disabled": true,
+                  "key": "include_total",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/users?skip=&limit=&parent_user_id=&external_id=&blocked="
+              "raw": "{{baseUrl}}/api/v1/users?skip=&limit=&parent_user_id=&external_id=&blocked=&include_total="
             }
           }
         },
@@ -8872,46 +8878,6 @@
                 "users"
               ],
               "raw": "{{baseUrl}}/api/v1/users"
-            }
-          }
-        },
-        {
-          "name": "Count Users",
-          "request": {
-            "description": "Number of users ``GET /api/v1/users`` would list with the same filters.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v1",
-                "users",
-                "count"
-              ],
-              "query": [
-                {
-                  "description": "Only the end users of this owner: the user a service key belongs to.",
-                  "disabled": true,
-                  "key": "parent_user_id",
-                  "value": ""
-                },
-                {
-                  "description": "Only the end user a service key names with this `user` value.",
-                  "disabled": true,
-                  "key": "external_id",
-                  "value": ""
-                },
-                {
-                  "description": "Only blocked users (true) or only unblocked ones (false).",
-                  "disabled": true,
-                  "key": "blocked",
-                  "value": ""
-                }
-              ],
-              "raw": "{{baseUrl}}/api/v1/users/count?parent_user_id=&external_id=&blocked="
             }
           }
         },

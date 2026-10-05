@@ -106,6 +106,12 @@ class Budget(Base):
     # counter, and the counters compared against these are the same width.
     token_limit: Mapped[int | None] = mapped_column(BigInteger(), default=None)
     request_limit: Mapped[int | None] = mapped_column(BigInteger(), default=None)
+    # Per-minute limits for each user on this budget, counted in rate_limit_store
+    # rather than in these rows: requests per minute, and tokens per minute
+    # counted on what each request used. Read only for a user's own budget, not
+    # for a scoped ceiling that names this budget.
+    rpm_limit: Mapped[int | None] = mapped_column(default=None)
+    tpm_limit: Mapped[int | None] = mapped_column(default=None)
     budget_duration_sec: Mapped[int | None] = mapped_column()
     # Snap the window to a UTC calendar boundary instead of counting a fixed
     # number of seconds, which is the only way to express a calendar month (2592000

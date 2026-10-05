@@ -182,6 +182,7 @@ from gateway.services.budgets import (
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
+    user_minute_limits,
 )
 from gateway.services.code_execution import (
     CONTAINER_ID_PREFIX,
@@ -2169,6 +2170,7 @@ async def resolve_request_context(
             key_id=api_key.id if api_key is not None else None,
             user_id=user_id,
             estimated_tokens=estimated_tokens,
+            budget_limits=await user_minute_limits(db, user_id),
         )
         # A key flagged exclude_from_budget logs its cost and is never reserved, reconciled into users.spend, or gated.
         # A master-key caller has no API key and stays on the enforced path.

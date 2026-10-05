@@ -98,11 +98,13 @@ and `metadata.user_id` on `/v1/messages`. Otari then:
   give one end user a different budget, update it on `/api/v1/users`, where it
   is listed with `parent_user_id` (the key's user) and `external_id` (the name
   the service sent). `GET /api/v1/users?parent_user_id=...&external_id=...`
-  finds one end user by the name you sent, and `GET /api/v1/users/count` with
-  the same filters counts them.
-- Applies any `per: user` rate limit rule, which counts each end user on its
-  own. Narrow a rule to one key with `keys` to give that key's end users their
-  own limits (see [Rate limit rules](configuration.md#rate-limit-rules)).
+  finds one end user by the name you sent, and `include_total=true` counts every
+  match in the `Otari-Total-Count` header.
+- Applies the per-minute limits of the end user's budget (`rpm_limit`,
+  `tpm_limit`), and any `per: user` rate limit rule, each counting every end
+  user on its own. Since the limits live on the budget, two service keys with
+  different end-user budgets give their end users different limits, and moving
+  an end user to another budget moves its limits too.
 - Checks the key's own ceiling as well, so a scoped budget on the API key pools
   every end user behind it. The key's user's per-user budget is not checked for
   an end user's request; use the key's ceiling as the pool.
@@ -147,6 +149,14 @@ Endpoints that hold no token estimate (embeddings, rerank, and the other
 pass-through routes) are refused once a token cap is exhausted rather than
 reserving headroom for themselves, so a token cap can be passed by the requests
 already in flight when it runs out.
+
+A budget can also limit each user on it per minute: `rpm_limit` requests and
+`tpm_limit` tokens. These are counted in `rate_limit_store`, so with Redis they
+hold across replicas, and tokens are counted on what each request used, as
+LiteLLM counts them: a request is admitted while the user's minute is under the
+limit. They apply to a user's own budget on chat completions, messages,
+responses and search, not to a scoped ceiling, and a refusal is a 429 naming the
+rule `budget`.
 
 Scoped budgets can use a rolling duration or a UTC calendar boundary. A key with
 `exclude_from_budget`, or a deployment with `budget_strategy: disabled`,
