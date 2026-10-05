@@ -59,6 +59,17 @@ Three workflows react to the published Release:
   installs and `brew test`s the formula on a macOS runner, then commits it to
   the tap, so `brew install mozilla-ai/tap/otari` follows every release.
 
+One step stays manual. The Railway template (`deploy/railway/`) is a
+platform object that no workflow writes. After a release that changes the
+config a deploy needs (a new required variable, a new healthcheck path), or
+that should move new deploys to the new image tag, edit the live template on
+the mozilla-ai Railway account and update `deploy/railway/template.json` in a
+PR. When `deploy/railway/listing.md` changed, paste it into the template's
+README field. Then run `make railway-template-check`; it exits non-zero while
+the two disagree. The **Otari Railway Template** workflow
+(`otari-railway-template.yml`) runs the same check on such a PR and weekly. See
+[Maintaining the template](deploy/railway/README.md#maintaining-the-template).
+
 ### Continuous (non-release) builds
 
 Every push to `main` that touches the service also builds and pushes a Docker

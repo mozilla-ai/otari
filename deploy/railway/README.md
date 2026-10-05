@@ -154,6 +154,14 @@ When changing the template:
    set in the template editor (it is `otari`). If it changes, update every
    **Deploy on Railway** button (`grep -rn railway.com/deploy`) and the
    `code` in `template.json`.
+5. Run `make railway-template-check`. It reads the live template from
+   Railway's public API (no token) and lists every difference from
+   `template.json` and `listing.md`: images, healthcheck path, domain port,
+   and each variable's default, optional flag and description. Fix either side
+   until it passes. CI runs the same check on every PR that touches this
+   directory and once a week, so an edit made in the Railway editor without a
+   PR still shows up. After a release that changes required config, do steps
+   1 to 5 again.
 
 Listing the template in Railway's public marketplace is optional: the deploy
 link works without it. Publishing only adds marketplace discoverability and
