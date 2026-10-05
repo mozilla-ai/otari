@@ -13,7 +13,8 @@ it includes model load time, which is not compute time.
 from any_llm.types.completion import ChatCompletion, ChatCompletionChunk, CompletionUsage
 
 from gateway.api.routes.chat import _ChatAdapter
-from gateway.core.usage import GatewayUsage, provider_latency_ms_of
+from gateway.core.usage import GatewayUsage, cache_write_tokens_of, provider_latency_ms_of
+from gateway.streaming import merge_stream_usage
 
 
 def test_provider_latency_ms_of_normalizes_groq_seconds() -> None:
@@ -103,9 +104,7 @@ def test_provider_latency_ms_of_none_on_non_finite_value() -> None:
 
 def test_provider_latency_ms_of_none_when_scaling_overflows() -> None:
     """A finite raw value can still overflow to inf after the unit multiplier, and round() raises on inf."""
-    huge_usage = CompletionUsage.model_construct(
-        prompt_tokens=1, completion_tokens=1, total_tokens=2, total_time=1e308
-    )
+    huge_usage = CompletionUsage.model_construct(prompt_tokens=1, completion_tokens=1, total_tokens=2, total_time=1e308)
     assert provider_latency_ms_of(huge_usage, "groq") is None
 
 
@@ -202,3 +201,37 @@ def test_chat_stream_never_lets_an_extra_set_a_real_accounting_field() -> None:
     assert usage.cache_write_tokens == 0
     assert usage.cache_write_1h_tokens == 0
     assert usage.cache_tokens_in_prompt is True
+
+
+def test_merge_stream_usage_keeps_provider_timing_across_chunks() -> None:
+    """Streamed usage is merged chunk by chunk; the final chunk's timing must survive it."""
+    adapter = _ChatAdapter()
+    early = adapter.extract_stream_usage(
+        ChatCompletionChunk.model_construct(
+            usage=CompletionUsage.model_construct(prompt_tokens=100, completion_tokens=0, total_tokens=100)
+        )
+    )
+    final = adapter.extract_stream_usage(
+        ChatCompletionChunk.model_construct(
+            usage=CompletionUsage.model_construct(
+                prompt_tokens=100,
+                completion_tokens=20,
+                total_tokens=120,
+                prompt_eval_duration=500_000,
+                eval_duration=1_500_000,
+            )
+        )
+    )
+    assert early is not None and final is not None
+    merged = merge_stream_usage(early, final)
+    assert provider_latency_ms_of(merged, "ollama") == 2
+    # A later usage chunk without timing does not erase what an earlier one reported.
+    assert provider_latency_ms_of(merge_stream_usage(merged, early), "ollama") == 2
+
+
+def test_merge_stream_usage_never_lets_an_extra_set_a_real_accounting_field() -> None:
+    current = GatewayUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+    update = CompletionUsage.model_construct(
+        prompt_tokens=1, completion_tokens=1, total_tokens=2, cache_write_tokens=999
+    )
+    assert cache_write_tokens_of(merge_stream_usage(current, update)) == 0

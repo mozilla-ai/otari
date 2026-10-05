@@ -96,7 +96,11 @@ ANTHROPIC_STREAM_FORMAT = StreamFormat(
 
 def merge_stream_usage(current: CompletionUsage, update: CompletionUsage) -> CompletionUsage:
     """Merge usage data, keeping the last non-zero value for each field."""
+    # Provider extras (e.g. Ollama's timing, read by provider_latency_ms_of) ride
+    # along; the update's win, as they arrive on the final chunk.
+    extras = GatewayUsage.external_extras(current) | GatewayUsage.external_extras(update)
     return GatewayUsage(
+        **extras,
         prompt_tokens=update.prompt_tokens or current.prompt_tokens,
         completion_tokens=update.completion_tokens or current.completion_tokens,
         total_tokens=update.total_tokens or current.total_tokens,
@@ -298,6 +302,7 @@ async def streaming_generator(
             try:
                 if has_usage:
                     if keepalive_interval > 0:
+
                         async def _settle() -> S | None:
                             return await on_complete(usage)
 
