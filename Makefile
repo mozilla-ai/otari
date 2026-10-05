@@ -1,4 +1,4 @@
-.PHONY: help dev dashboard test test-unit test-integration lint check-architecture typecheck openapi-check postman postman-check changelog check-migrations
+.PHONY: help dev dashboard test test-unit test-integration lint check-architecture typecheck openapi-check postman postman-check changelog check-migrations railway-template-check
 
 help:
 	@printf "Available targets:\n"
@@ -14,6 +14,7 @@ help:
 	@printf "  postman Regenerate the Postman collection from the OpenAPI spec\n"
 	@printf "  postman-check Verify the Postman collection is up to date\n"
 	@printf "  changelog Preview the generated CHANGELOG.md locally (git-cliff)\n"
+	@printf "  railway-template-check Compare deploy/railway with the live Railway template\n"
 
 dev:
 	@set -a; \
@@ -91,3 +92,7 @@ homebrew-formula:
 	uv build --package otari-agent --sdist -o build/homebrew
 	uv run python scripts/homebrew_formula.py --version 0.0.0 --sdist build/homebrew/otari_agent-0.0.0.tar.gz --output build/homebrew/otari.rb
 	@echo "Rendered build/homebrew/otari.rb"
+
+# Reads the live template from Railway's public API, so it needs network but no token.
+railway-template-check:
+	python3 scripts/check_railway_template.py
