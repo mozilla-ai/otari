@@ -3,7 +3,7 @@
 Adds ``tpm_admission``: ``estimate`` (what every rule did so far) or ``used``.
 
 Revision ID: b3e8f1a6c9d2
-Revises: a9d4e2c7f1b3
+Revises: c6e2a9f4d7b1
 Create Date: 2026-10-05
 """
 
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "b3e8f1a6c9d2"
-down_revision: str | Sequence[str] | None = "a9d4e2c7f1b3"
+down_revision: str | Sequence[str] | None = "c6e2a9f4d7b1"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

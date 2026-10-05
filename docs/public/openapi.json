@@ -13072,21 +13072,6 @@
           "tpm": 200000
         },
         "properties": {
-          "keys": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The API key ids this rule applies to; a request made with any other key, or with none, is not counted. Unset applies the rule to every request. Not accepted on a per: model rule.",
-            "title": "Keys"
-          },
           "lease_sec": {
             "default": 900.0,
             "description": "How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.",
@@ -13187,21 +13172,6 @@
         "additionalProperties": false,
         "description": "One rule in effect, and where it is defined.",
         "properties": {
-          "keys": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The API key ids this rule applies to; a request made with any other key, or with none, is not counted. Unset applies the rule to every request. Not accepted on a per: model rule.",
-            "title": "Keys"
-          },
           "lease_sec": {
             "default": 900.0,
             "description": "How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.",
@@ -13328,21 +13298,6 @@
           "rpm": 1200
         },
         "properties": {
-          "keys": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The API key ids the rule is narrowed to; null covers every key.",
-            "title": "Keys"
-          },
           "lease_sec": {
             "anyOf": [
               {

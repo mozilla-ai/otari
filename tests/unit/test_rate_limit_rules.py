@@ -382,27 +382,6 @@ async def test_a_refused_attempt_is_counted_by_no_model_rule() -> None:
 
 
 @pytest.mark.asyncio
-async def test_keys_narrows_a_rule_to_the_keys_it_names() -> None:
-    rules = _rules(InMemoryRateLimitStore(), {"name": "ai-users", "per": "user", "keys": ["k-ai"], "rpm": 1})
-
-    await _admit(rules, key_id="k-ai", user_id="u1")
-    await _admit(rules, key_id="k-memories", user_id="u1")
-    await _admit(rules, key_id="k-memories", user_id="u1")
-    await _admit(rules, key_id=None, user_id="u1")
-    with pytest.raises(HTTPException) as exc_info:
-        await _admit(rules, key_id="k-ai", user_id="u1")
-
-    assert exc_info.value.detail == "Rate limit 'ai-users' exceeded: 1 request per minute"
-
-
-def test_keys_is_refused_on_a_per_model_rule_and_when_empty() -> None:
-    with pytest.raises(ValidationError, match="per: model and sets keys"):
-        RateLimitRule(name="m", per="model", models=["vertex:gemini"], keys=["k1"], rpm=1)
-    with pytest.raises(ValidationError, match="empty list"):
-        RateLimitRule(name="none", per="user", keys=[], rpm=1)
-
-
-@pytest.mark.asyncio
 async def test_used_admission_admits_past_an_estimate_and_counts_what_was_used() -> None:
     """MLPA sends max_tokens 8192 against a 2,000 tpm: only what a request used may count."""
     rules = _rules(InMemoryRateLimitStore(), {"name": "tpm", "per": "user", "tpm": 2000, "tpm_admission": "used"})

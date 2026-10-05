@@ -28,8 +28,6 @@ class StoredRateLimitRule(Base):
     per: Mapped[str] = mapped_column(String)
     # The instance:model names a per-model rule limits; null for every other rule.
     models: Mapped[list[str] | None] = mapped_column(JSON, default=None)
-    # The API key ids the rule is narrowed to; null for a rule that covers every key.
-    keys: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     rpm: Mapped[int | None] = mapped_column(default=None)
     tpm: Mapped[int | None] = mapped_column(default=None)
     tpm_admission: Mapped[str] = mapped_column(String, default="estimate", server_default="estimate")

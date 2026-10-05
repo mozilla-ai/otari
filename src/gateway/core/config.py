@@ -374,13 +374,6 @@ class RateLimitRule(BaseModel):
             "refused on any other rule."
         ),
     )
-    keys: list[str] | None = Field(
-        default=None,
-        description=(
-            "The API key ids this rule applies to; a request made with any other key, or with none, "
-            "is not counted. Unset applies the rule to every request. Not accepted on a per: model rule."
-        ),
-    )
     rpm: int | None = Field(default=None, ge=1, description="Requests per minute.")
     tpm: int | None = Field(
         default=None,
@@ -418,13 +411,6 @@ class RateLimitRule(BaseModel):
 
     @model_validator(mode="after")
     def _models_belong_to_per_model(self) -> "RateLimitRule":
-        if self.keys is not None:
-            if self.per == "model":
-                msg = f"rate limit rule '{self.name}' is per: model and sets keys, which it cannot read"
-                raise ValueError(msg)
-            if not self.keys:
-                msg = f"rate limit rule '{self.name}' sets keys to an empty list; omit it to cover every key"
-                raise ValueError(msg)
         if self.per != "model":
             if self.models is not None:
                 msg = f"rate limit rule '{self.name}' sets models, which only a per: model rule reads"

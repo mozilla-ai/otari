@@ -11893,11 +11893,6 @@ export interface components {
          */
         RateLimitRuleCreate: {
             /**
-             * Keys
-             * @description The API key ids this rule applies to; a request made with any other key, or with none, is not counted. Unset applies the rule to every request. Not accepted on a per: model rule.
-             */
-            keys?: string[] | null;
-            /**
              * Lease Sec
              * @description How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.
              * @default 900
@@ -11947,11 +11942,6 @@ export interface components {
          * @description One rule in effect, and where it is defined.
          */
         RateLimitRulePublic: {
-            /**
-             * Keys
-             * @description The API key ids this rule applies to; a request made with any other key, or with none, is not counted. Unset applies the rule to every request. Not accepted on a per: model rule.
-             */
-            keys?: string[] | null;
             /**
              * Lease Sec
              * @description How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.
@@ -12018,11 +12008,6 @@ export interface components {
          *     }
          */
         RateLimitRuleUpdate: {
-            /**
-             * Keys
-             * @description The API key ids the rule is narrowed to; null covers every key.
-             */
-            keys?: string[] | null;
             /**
              * Lease Sec
              * @description How long a max_concurrent slot is held at most.
