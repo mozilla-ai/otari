@@ -180,7 +180,7 @@ rate_limits:
 
 `per: key` does not limit a request made without an API key (the master key or
 a dashboard session), and `per: user` does not limit one billed to no user. A request has to fit every rule that applies to it; one
-that does not is refused with a 429 naming the rule, counted by none of them,
+that does not is refused with a 429 naming the rule and the limit it hit, counted by none of them,
 and holds no budget. Rules count in `rate_limit_store`, so with Redis they hold
 across replicas. They apply to chat completions, messages and responses, after
 `rate_limit_rpm`. A hybrid gateway does not enforce them yet, so it refuses to

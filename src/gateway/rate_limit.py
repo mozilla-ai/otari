@@ -17,7 +17,7 @@ from gateway.ports.rate_limit_store_port import RateLimitStorePort, RateLimitWin
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Receive, Scope, Send
 
-    from gateway.core.config import GatewayConfig, RateLimitRule
+    from gateway.core.config import GatewayConfig
 
 RATE_LIMIT_HITS = Counter(
     "gateway_rate_limit_hits",
@@ -208,12 +208,17 @@ class RateLimitGrant:
             await self._store.release(key, lease)
 
 
-def _refused(rule: "RateLimitRule", retry_after: float | None) -> HTTPException:
-    """A 429 naming ``rule``, without ``Retry-After`` when no wait would let the request in."""
+def _count(n: int, noun: str) -> str:
+    """``n`` of ``noun``, as a person would write it: "1 request", "2,000 tokens"."""
+    return f"{n:,} {noun}" if n == 1 else f"{n:,} {noun}s"
+
+
+def _refused(detail: str, retry_after: float | None) -> HTTPException:
+    """A 429 with ``detail``, without ``Retry-After`` when no wait would let the request in."""
     RATE_LIMIT_HITS.inc()
     return HTTPException(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-        detail=f"Rate limit '{rule.name}' exceeded",
+        detail=detail,
         headers={"Retry-After": str(max(math.ceil(retry_after), 1))} if retry_after is not None else None,
     )
 
@@ -260,22 +265,35 @@ class RateLimitRules:
                 if rule.rpm is not None:
                     window = await self._store.hit(f"{base}:rpm", rule.rpm, _RULE_WINDOW_SEC)
                     if window.handle is None:
-                        raise _refused(rule, window.reset_after)
+                        raise _refused(
+                            f"Rate limit '{rule.name}' exceeded: {_count(rule.rpm, 'request')} per minute",
+                            window.reset_after,
+                        )
                     counted.append((f"{base}:rpm", window.handle))
                 if rule.tpm is not None:
                     # At least one token, so a request estimating none is still refused by a full window.
                     cost = max(estimated_tokens, 1)
                     if cost > rule.tpm:
-                        raise _refused(rule, None)
+                        msg = (
+                            f"Request needs an estimated {_count(cost, 'token')}; "
+                            f"rate limit '{rule.name}' allows {rule.tpm:,} per minute"
+                        )
+                        raise _refused(msg, None)
                     window = await self._store.hit(f"{base}:tpm", rule.tpm, _RULE_WINDOW_SEC, cost=cost)
                     if window.handle is None:
-                        raise _refused(rule, window.reset_after)
+                        raise _refused(
+                            f"Rate limit '{rule.name}' exceeded: {_count(rule.tpm, 'token')} per minute",
+                            window.reset_after,
+                        )
                     counted.append((f"{base}:tpm", window.handle))
                     grant._estimates.append((f"{base}:tpm", window.handle))
                 if rule.max_concurrent is not None:
                     lease = await self._store.acquire(f"{base}:concurrent", rule.max_concurrent, rule.lease_sec)
                     if lease is None:
-                        raise _refused(rule, _CONCURRENCY_RETRY_AFTER_SEC)
+                        raise _refused(
+                            f"Rate limit '{rule.name}' exceeded: {_count(rule.max_concurrent, 'request')} in flight",
+                            _CONCURRENCY_RETRY_AFTER_SEC,
+                        )
                     grant._leases.append((f"{base}:concurrent", lease))
         except HTTPException:
             for key, handle in counted:

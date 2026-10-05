@@ -91,7 +91,7 @@ def test_a_per_key_rule_refuses_the_request_past_its_limit(per_key_rpm_client: T
 
     assert statuses == [200, 200, 429]
     assert bob_status == 200
-    assert refused.json()["detail"] == "Rate limit 'keys' exceeded"
+    assert refused.json()["detail"] == "Rate limit 'keys' exceeded: 2 requests per minute"
     assert "Retry-After" in refused.headers
 
 
@@ -126,7 +126,9 @@ def test_a_request_too_large_for_the_limit_is_refused(tpm_client: TestClient) ->
     response = _chat(tpm_client, headers, max_tokens=5000)
 
     assert response.status_code == 429
-    assert response.json()["detail"] == "Rate limit 'tpm' exceeded"
+    detail = response.json()["detail"]
+    assert detail.startswith("Request needs an estimated 5,")
+    assert detail.endswith("tokens; rate limit 'tpm' allows 1,000 per minute")
 
 
 def test_a_concurrency_slot_is_given_back_when_the_response_ends(concurrency_client: TestClient) -> None:

@@ -73,7 +73,7 @@ async def test_per_key_counts_each_key_on_its_own_and_skips_keyless_requests() -
         await _admit(rules, key_id="k1")
 
     assert exc_info.value.status_code == 429
-    assert exc_info.value.detail == "Rate limit 'keys' exceeded"
+    assert exc_info.value.detail == "Rate limit 'keys' exceeded: 1 request per minute"
     assert exc_info.value.headers is not None
     assert 1 <= int(exc_info.value.headers["Retry-After"]) <= 60
 
@@ -112,7 +112,7 @@ async def test_tokens_are_admitted_on_the_estimate_and_charged_what_was_used() -
     rules = _rules(InMemoryRateLimitStore(), {"name": "tpm", "per": "key", "tpm": 1000})
 
     grant = await _admit(rules, tokens=600)
-    with pytest.raises(HTTPException, match="'tpm'"):
+    with pytest.raises(HTTPException, match="'tpm' exceeded: 1,000 tokens per minute"):
         await _admit(rules, tokens=600)
 
     await grant.settle(50)
@@ -127,6 +127,7 @@ async def test_a_request_larger_than_the_limit_is_not_told_to_retry() -> None:
         await _admit(rules, tokens=1001)
 
     assert exc_info.value.headers is None
+    assert exc_info.value.detail == "Request needs an estimated 1,001 tokens; rate limit 'tpm' allows 1,000 per minute"
 
 
 @pytest.mark.asyncio
@@ -150,6 +151,7 @@ async def test_a_full_concurrency_limit_refuses_until_a_slot_is_given_back() -> 
     with pytest.raises(HTTPException) as exc_info:
         await _admit(rules)
     assert exc_info.value.headers == {"Retry-After": "1"}
+    assert exc_info.value.detail == "Rate limit 'inflight' exceeded: 1 request in flight"
 
     await grant.release()
     await _admit(rules)
