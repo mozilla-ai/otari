@@ -128,7 +128,7 @@ git checkout -b fix/your-description
 After making changes:
 
 ```bash
-make lint        # architecture check + ruff
+make lint        # pre-commit hooks: architecture, migrations, ruff check + format
 make typecheck   # mypy --strict
 make test        # unit + integration
 ```

@@ -48,7 +48,7 @@ Keep documentation and AI guidance synchronized with the current repository.
 ## Validation Commands
 
 - `uv run pytest tests/unit/test_docs_links.py tests/unit/test_docs_style.py tests/unit/test_dashboard_doc.py tests/unit/test_frontend_rule_coverage.py`
-- `uv run pre-commit run --all-files`
+- `make lint`
 - `make openapi-check` and `make postman-check`, if you touched a route
 
 If no docs are out of date, say so and exit without creating a PR.

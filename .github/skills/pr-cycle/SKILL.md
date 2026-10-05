@@ -65,7 +65,8 @@ artifacts.
 
 From the repo root:
 
-- `make lint`: the architecture check, then Ruff. **Ruff alone is not equivalent.** A layer
+- `make lint`: the hooks in `.pre-commit-config.yaml`, which are the architecture check, the
+  Alembic single-head check, then `ruff check` and `ruff format`. **Ruff alone is not equivalent.** A layer
   violation fails here with a clean `ruff check`.
 - `make typecheck`: mypy.
 - `make test`: `tests/unit` and `tests/integration`. `make test-unit` and `make test-integration`

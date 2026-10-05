@@ -7,7 +7,7 @@ help:
 	@printf "  test Run full test suite (unit + integration)\n"
 	@printf "  test-unit Run unit tests\n"
 	@printf "  test-integration Run integration tests\n"
-	@printf "  lint Run Ruff lint checks and the architecture check\n"
+	@printf "  lint Run the pre-commit hooks: architecture, migrations, Ruff lint and format\n"
 	@printf "  check-architecture Enforce gateway layer rules (also run by lint)\n"
 	@printf "  typecheck Run mypy type checks\n"
 	@printf "  openapi-check Verify the OpenAPI spec is up to date\n"
@@ -52,8 +52,9 @@ test-unit:
 test-integration:
 	uv run pytest -v tests/integration
 
-lint: check-architecture check-migrations
-	uv run ruff check src cli tests scripts
+# NOTE: ruff format rewrites files in place, so a failing run can leave changes to commit.
+lint:
+	uv run pre-commit run --all-files --show-diff-on-failure
 
 # Enforce gateway layer rules. Pure stdlib; runs as part of `make lint` (which
 # otari-lint.yml calls on every PR) and stays independently runnable.
