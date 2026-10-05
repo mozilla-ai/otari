@@ -39,7 +39,7 @@ providers from configuration or stored credentials.
 SQLite is useful for evaluation. Use PostgreSQL for a durable deployment.
 
 Standalone supports local aliases and routing policies, including failover,
-weighted routing, conditional selection, and learned routing. Multi-provider
+weighted and priority routing, conditional selection, and learned routing. Multi-provider
 fallback is therefore available without otari.ai when you configure a policy.
 
 ## Hosted

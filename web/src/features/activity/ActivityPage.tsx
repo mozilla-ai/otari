@@ -65,6 +65,7 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { ActivityTimeline } from "./ActivityTimeline"
 import {
   describeSource,
+  displayStatus,
   formatLatencyCell,
   formatToolUsage,
   formatUSD,
@@ -1050,7 +1051,7 @@ export function ActivityPage() {
       {
         id: "status",
         header: "Status",
-        cell: (entry) => <StatusMark status={entry.status} />,
+        cell: (entry) => <StatusMark status={displayStatus(entry)} />,
       },
     ]
   }, [groupOutcomes, memberLabels])

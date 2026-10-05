@@ -28,6 +28,7 @@ from gateway.services.model_access import is_model_allowed
 from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.routing.backends import (
     RoutingContext,
+    backend_is_priority,
     backend_is_weighted,
     get_router_backend,
     known_backends,
@@ -216,12 +217,14 @@ def explain_router_ordering(
 ) -> tuple[RouterOrdering | None, list[WeightedShare]]:
     """The ordering to show on a surface that has no request to route.
 
-    Returns ``(None, [])`` for a policy whose router needs request state, which is
-    every backend but one: kNN has no prompt to embed here, so the compiler falls
-    through to the default target, and that decline path is what ``explain``
-    documents.
+    Returns ``(None, [])`` for a policy whose router needs request state: kNN has
+    no prompt to embed here, so the compiler falls through to the default target,
+    and that decline path is what ``explain`` documents.
 
-    The weighted backend is the exception, because its split is written in the
+    The priority backend's order is the declared one, so it is shown as declared;
+    which candidate has room is a request-time fact this surface does not read.
+
+    The weighted backend is the other exception, because its split is written in the
     policy rather than derived from the request. So explain shows the real answer:
     candidates heaviest share first, with shares normalized over the pool that
     survived this caller's allow-list. Deliberately not a sample of the draw, which
@@ -241,6 +244,11 @@ def explain_router_ordering(
     the policy down to its ``on_failure`` chain with the whole split silently
     missing from both lists.
     """
+    if backend_is_priority(spec.router_backend):
+        declared = spec.router_candidates
+        rationale = f"priority order ({', '.join(declared)})"
+        ordering = RouterOrdering(selectors=declared, confidence=1.0, rationale=rationale)
+        return ordering, []
     if not backend_is_weighted(spec.router_backend):
         return None, []
     declared = spec.router_candidates

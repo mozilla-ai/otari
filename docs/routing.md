@@ -2,7 +2,8 @@
 
 A routing policy is a caller-facing model name that resolves to one or more real
 models. Use a policy for failover, conditional selection, traffic splitting,
-learned selection, or guardrails the caller cannot remove. Use an
+spill-over past a rate limit, learned selection, or guardrails the caller cannot
+remove. Use an
 [alias](models.md#model-aliases) when one name always maps to one target.
 
 Policies are a standalone feature. Hybrid gateways receive their attempt plan
@@ -87,7 +88,50 @@ continues through the remaining weighted pool, then `on_failure`.
 Caller allow-lists filter candidates before weights are normalized. Use
 `otari routing explain` to see the effective split for a restricted caller.
 
-## Let a router choose (learned routing)
+## Spill over when a model is full (priority routing)
+
+The priority router keeps its candidates in the order written. Each request goes
+to the first one that has room under its
+[`per: model` rate limits](configuration.md#rate-limit-rules):
+
+```yaml
+rate_limits:
+  - name: flash-cap
+    per: model
+    models: ["vertex:gemini-2.5-flash"]
+    rpm: 100
+
+routing:
+  policies:
+    summarize:
+      select:
+        - router: priority
+          candidates:
+            - vertex:gemini-2.5-flash   # takes every request up to 100 a minute
+            - together:llama-3.3-70b    # takes the rest
+        - default: together:llama-3.3-70b
+      on_failure:
+        - mistral:mistral-small
+```
+
+A full candidate is skipped without being called, and Activity shows it in the
+request's routing plan as skipped, naming the limit that was full. Prometheus
+counts each one in `gateway_rate_limit_model_full{rule, model}`. The limit lives on the model,
+not on the policy, so it is skipped the same way in `on_failure`, in a weighted
+pool, and in any other policy that names it; with Redis as `rate_limit_store`,
+the count holds across replicas. A candidate with room that fails before
+responding falls through to the next one, as in any policy. The caller gets a
+429 only when every candidate is full, naming the limit the last one hit but
+not the model, since a policy's targets are not the caller's to see.
+
+The policy says which is which: `candidates` handles "full", `on_failure`
+handles "broke". `Otari-Router: off` skips the order and starts from the
+default.
+
+In the dashboard, create one from Routing with "Move to the next model when one
+hits its rate limit", order the models with the arrows, and add the limit under
+Settings, Rate limit rules, counted for "Each model".
+
 
 The `knn` router uses scored examples to rank candidates for each user's
 traffic:
@@ -123,7 +167,7 @@ pools. It is not learned automatically from live traffic.
 
 | Header | Effect |
 | --- | --- |
-| `Otari-Router: off` | Skip learned or weighted selection and use the policy default. |
+| `Otari-Router: off` | Skip learned, weighted or priority selection and use the policy default. |
 | `Otari-Conversation-Id` | Reuse a learned decision for a conversation when granularity is `trace_sticky`. |
 | `Otari-Router-Task` | Use examples from one task partition. |
 

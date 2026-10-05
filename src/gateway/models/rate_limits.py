@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import CheckConstraint, String, func
+from sqlalchemy import JSON, CheckConstraint, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
@@ -19,13 +19,15 @@ class StoredRateLimitRule(Base):
     __table_args__ = (
         # The same set ``RateLimitRule.per`` accepts.
         CheckConstraint(
-            "per IN ('deployment', 'key', 'user')",
+            "per IN ('deployment', 'key', 'user', 'model')",
             name="ck_rate_limit_rules_per",
         ),
     )
 
     name: Mapped[str] = mapped_column(String, primary_key=True)
     per: Mapped[str] = mapped_column(String)
+    # The instance:model names a per-model rule limits; null for every other rule.
+    models: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     rpm: Mapped[int | None] = mapped_column(default=None)
     tpm: Mapped[int | None] = mapped_column(default=None)
     max_concurrent: Mapped[int | None] = mapped_column(default=None)

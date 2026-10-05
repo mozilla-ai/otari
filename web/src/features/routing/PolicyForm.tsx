@@ -9,7 +9,7 @@
 
 import { Link } from "@tanstack/react-router"
 import { type RefObject, useMemo, useState } from "react"
-import { FiTrash2 } from "react-icons/fi"
+import { FiArrowDown, FiArrowUp, FiTrash2 } from "react-icons/fi"
 
 import type { PolicyGuardrail, PolicySpec, User } from "@/client"
 import { Button } from "@/design-system/actions/Button"
@@ -44,13 +44,25 @@ import {
   findWeights,
   KNN_BACKEND,
   MAX_CANDIDATES,
+  PRIORITY_BACKEND,
   type RoutingRow,
   WEIGHTED_BACKEND,
 } from "./policyModel"
 import { ScopePicker } from "./ScopePicker"
 import { SectionRow } from "./SectionRow"
 
-type RouterBackend = typeof KNN_BACKEND | typeof WEIGHTED_BACKEND
+type RouterBackend =
+  | typeof KNN_BACKEND
+  | typeof WEIGHTED_BACKEND
+  | typeof PRIORITY_BACKEND
+
+/** The backend the form edits for a stored spec; an unknown one never reaches the form. */
+function initialBackend(spec: PolicySpec | undefined): RouterBackend {
+  const backend = spec ? findRouterBackend(spec) : undefined
+  if (backend === WEIGHTED_BACKEND || backend === PRIORITY_BACKEND)
+    return backend
+  return KNN_BACKEND
+}
 
 /** Whether a guardrails service is configured for this gateway.
  *
@@ -265,10 +277,8 @@ export function PolicyForm({
   // Which backend orders the pool. The two share the pool control, because both are
   // "these models, one of them per request"; they differ in what decides and in
   // whether a share sits next to each entry.
-  const [backend, setBackend] = useState<RouterBackend>(
-    existing && findRouterBackend(existing.spec) === WEIGHTED_BACKEND
-      ? WEIGHTED_BACKEND
-      : KNN_BACKEND,
+  const [backend, setBackend] = useState<RouterBackend>(() =>
+    initialBackend(existing?.spec),
   )
   // Parallel to `candidates`, so a weight follows its model when one is removed.
   // Held as the text the operator typed rather than as a number: re-rendering a
@@ -283,6 +293,20 @@ export function PolicyForm({
   })
   const isRouted = candidates.length > 0
   const isWeighted = isRouted && backend === WEIGHTED_BACKEND
+  const isPriority = isRouted && backend === PRIORITY_BACKEND
+  // Order is the whole of a priority policy, so its rows move; the other two
+  // backends decide their own order and ignore the one written.
+  const moveCandidate = (from: number, to: number) => {
+    const swap = <T,>(list: T[]) => {
+      const next = [...list]
+      const [moved] = next.splice(from, 1)
+      if (moved !== undefined) next.splice(to, 0, moved)
+      return next
+    }
+    setCandidates(swap)
+    setWeights(swap)
+    setSafeIndex((prev) => (prev === from ? to : prev === to ? from : prev))
+  }
   // An empty field parses to NaN rather than 0, so a share the operator cleared is
   // unfinished rather than a drain they did not ask for. "Infinity" and a negative
   // are rejected here too, matching what the API refuses.
@@ -674,7 +698,9 @@ export function PolicyForm({
             <span className="text-xs text-muted">
               {isWeighted
                 ? "The split picks per request, so this policy has no single target. The model marked below is what serves a caller who opts out."
-                : "A router picks per request, so this policy has no single target. The model marked below is what serves when the router does not choose."}
+                : isPriority
+                  ? "The first model below with room serves, so this policy has no single target. The model marked below is what serves a caller who opts out."
+                  : "A router picks per request, so this policy has no single target. The model marked below is what serves when the router does not choose."}
             </span>
           </div>
         ) : (
@@ -803,12 +829,16 @@ export function PolicyForm({
               label={
                 isWeighted
                   ? "Split traffic between"
-                  : "The router chooses between"
+                  : isPriority
+                    ? "Send each request to the first with room"
+                    : "The router chooses between"
               }
               description={
                 isWeighted
                   ? "Each request goes to one of these, drawn in proportion to its share. Shares are relative, so 70 and 30 mean the same as 7 and 3. No pricing needed."
-                  : "For each request, the cheapest of these that past scoring says is good enough. Every model here needs pricing, because the router weighs quality against cost."
+                  : isPriority
+                    ? "In this order. A model is full when one of its per-model rate limits is, and the next one takes the request. No pricing needed."
+                    : "For each request, the cheapest of these that past scoring says is good enough. Every model here needs pricing, because the router weighs quality against cost."
               }
             />
             <SectionRemove
@@ -873,9 +903,35 @@ export function PolicyForm({
                     checked={safeIndex === index}
                     onChange={() => setSafeIndex(index)}
                   />
-                  {isWeighted ? "Serves on opt-out" : "Serves when unsure"}
+                  {isWeighted || isPriority
+                    ? "Serves on opt-out"
+                    : "Serves when unsure"}
                 </label>
               </FieldAction>
+              {isPriority ? (
+                <FieldAction>
+                  <div className="flex gap-1">
+                    <IconButton
+                      variant="ghost"
+                      isIconOnly
+                      label={`Move model ${index + 1} up`}
+                      isDisabled={index === 0}
+                      onPress={() => moveCandidate(index, index - 1)}
+                    >
+                      <FiArrowUp aria-hidden />
+                    </IconButton>
+                    <IconButton
+                      variant="ghost"
+                      isIconOnly
+                      label={`Move model ${index + 1} down`}
+                      isDisabled={index === candidates.length - 1}
+                      onPress={() => moveCandidate(index, index + 1)}
+                    >
+                      <FiArrowDown aria-hidden />
+                    </IconButton>
+                  </div>
+                </FieldAction>
+              ) : null}
               <FieldAction>
                 <Button
                   variant="ghost"
@@ -903,6 +959,16 @@ export function PolicyForm({
                 responding moves the request to another model in this pool, by
                 the same shares, before any fallback below.
               </>
+            ) : isPriority ? (
+              <>
+                Only a model with a per-model limit ever fills; set one under{" "}
+                <Link to="/settings" className="text-link hover:underline">
+                  Settings, Rate limit rules
+                </Link>
+                . A model that fails before responding moves the request down
+                this list before any fallback below. The marked model serves a
+                caller who sends <code>Otari-Router: off</code>.
+              </>
             ) : (
               <>
                 The marked model serves whenever the router does not choose: too
@@ -915,8 +981,12 @@ export function PolicyForm({
           {candidates.length < 2 ? (
             <p className="text-caption text-danger">
               Name at least two models.{" "}
-              {isWeighted ? "Splitting traffic one way" : "Ranking one"} is not
-              a routing decision.
+              {isWeighted
+                ? "Splitting traffic one way"
+                : isPriority
+                  ? "Ordering one"
+                  : "Ranking one"}{" "}
+              is not a routing decision.
             </p>
           ) : null}
           {duplicateCandidate ? (
@@ -1184,6 +1254,22 @@ export function PolicyForm({
             + Split traffic across providers by weight
           </button>
         ) : null}
+        {candidates.length === 0 ? (
+          <button
+            type="button"
+            className="text-link hover:underline"
+            // The policy's own target first, since that is the model it serves
+            // until its rate limit fills.
+            onClick={() => {
+              setBackend(PRIORITY_BACKEND)
+              setCandidates([target.trim() || "", ""])
+              setWeights([])
+              setSafeIndex(0)
+            }}
+          >
+            + Move to the next model when one hits its rate limit
+          </button>
+        ) : null}
         {guardrails.length === 0 ? (
           // Disabled rather than hidden, and never disabled silently: a hidden
           // control teaches nothing, and a greyed-out one with no explanation
@@ -1227,7 +1313,7 @@ export function PolicyForm({
       {/* Each of these explains a mode chosen above it, so it belongs beside
           that choice. The footer's caption is the one sentence about the save
           itself. */}
-      {isRouted && !isWeighted ? (
+      {isRouted && backend === KNN_BACKEND ? (
         <p className="text-caption">
           A new router serves the model above until it has scored examples.
           Recording them is an API job for now (

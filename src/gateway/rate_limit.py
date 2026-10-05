@@ -17,11 +17,18 @@ from gateway.ports.rate_limit_store_port import RateLimitStorePort, RateLimitWin
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Receive, Scope, Send
 
-    from gateway.core.config import GatewayConfig
+    from gateway.core.config import GatewayConfig, RateLimitRule
 
 RATE_LIMIT_HITS = Counter(
     "gateway_rate_limit_hits",
     "Total number of rate limit hits",
+    registry=REGISTRY,
+)
+# Bounded by the models the per: model rules name, which is config, not traffic.
+RATE_LIMIT_MODEL_FULL = Counter(
+    "gateway_rate_limit_model_full",
+    "Attempts a per: model rate limit refused, so routing moved on or the request was refused",
+    ["rule", "model"],
     registry=REGISTRY,
 )
 
@@ -178,6 +185,37 @@ _GRANT_STATE = "rate_limit_grant"
 _CONCURRENCY_RETRY_AFTER_SEC = 1.0
 
 
+class _Hold:
+    """What one admission counted: its window entries, the token estimates among them, and its slots."""
+
+    def __init__(self) -> None:
+        self.entries: list[tuple[str, str]] = []
+        self.estimates: list[tuple[str, str]] = []
+        self.leases: list[tuple[str, str]] = []
+
+
+class ModelHold:
+    """What one attempt holds under the ``per: model`` rules naming its model."""
+
+    def __init__(self, grant: "RateLimitGrant", hold: _Hold) -> None:
+        self._grant = grant
+        self._hold = hold
+
+    async def drop(self) -> None:
+        """Charge the attempt no tokens and give back its slots, for an attempt the walk moves past.
+
+        Its requests stay counted, because the provider was sent them.
+        """
+        if self._hold in self._grant._holds:
+            self._grant._holds.remove(self._hold)
+        estimates, self._hold.estimates = self._hold.estimates, []
+        for key, handle in estimates:
+            await self._grant._store.settle(key, handle, 0)
+        leases, self._hold.leases = self._hold.leases, []
+        for key, lease in leases:
+            await self._grant._store.release(key, lease)
+
+
 class RateLimitGrant:
     """What one request holds under the ``rate_limits`` rules: its token estimates and concurrency slots.
 
@@ -185,10 +223,13 @@ class RateLimitGrant:
     :class:`RateLimitGrantMiddleware` when the response ends, however it ends.
     """
 
-    def __init__(self, store: RateLimitStorePort) -> None:
+    def __init__(
+        self, store: RateLimitStorePort, config: "GatewayConfig | None" = None, estimated_tokens: int = 0
+    ) -> None:
         self._store = store
-        self._estimates: list[tuple[str, str]] = []
-        self._leases: list[tuple[str, str]] = []
+        self._config = config
+        self._estimated_tokens = estimated_tokens
+        self._holds: list[_Hold] = []
         self.handed_over = False
 
     def hand_over(self) -> None:
@@ -197,15 +238,48 @@ class RateLimitGrant:
 
     async def settle(self, tokens: int) -> None:
         """Charge every token estimate ``tokens`` instead. Only the first call counts."""
-        estimates, self._estimates = self._estimates, []
-        for key, handle in estimates:
-            await self._store.settle(key, handle, max(tokens, 0))
+        for hold in self._holds:
+            estimates, hold.estimates = hold.estimates, []
+            for key, handle in estimates:
+                await self._store.settle(key, handle, max(tokens, 0))
 
     async def release(self) -> None:
         """Give back every concurrency slot. Only the first call counts."""
-        leases, self._leases = self._leases, []
-        for key, lease in leases:
-            await self._store.release(key, lease)
+        for hold in self._holds:
+            leases, hold.leases = hold.leases, []
+            for key, lease in leases:
+                await self._store.release(key, lease)
+
+    async def admit_model(self, instance: str, model: str, *, name_model: bool = True) -> ModelHold | None:
+        """Count an attempt on ``instance:model`` against every ``per: model`` rule naming it.
+
+        ``None`` when no rule names it. A refused attempt is counted by no rule.
+        ``name_model`` puts the model in the refusal; a routing policy passes
+        ``False``, because its targets are not the caller's to see.
+
+        Raises:
+            HTTPException: 429 naming the first rule the attempt does not fit.
+
+        """
+        if self._config is None:
+            return None
+        name = f"{instance}:{model}"
+        rules = [
+            rule for rule in tuple(self._config.rate_limits) if rule.per == "model" and name in (rule.models or ())
+        ]
+        if not rules:
+            return None
+        hold = _Hold()
+        label = f" for {name}" if name_model else ""
+        for rule in rules:
+            try:
+                await _count_rule(self._store, rule, name, self._estimated_tokens, hold, label=label)
+            except HTTPException:
+                RATE_LIMIT_MODEL_FULL.labels(rule=rule.name, model=name).inc()
+                await _undo(self._store, hold)
+                raise
+        self._holds.append(hold)
+        return ModelHold(self, hold)
 
 
 def _count(n: int, noun: str) -> str:
@@ -221,6 +295,69 @@ def _refused(detail: str, retry_after: float | None) -> HTTPException:
         detail=detail,
         headers={"Retry-After": str(max(math.ceil(retry_after), 1))} if retry_after is not None else None,
     )
+
+
+async def _count_rule(
+    store: RateLimitStorePort,
+    rule: "RateLimitRule",
+    subject: str,
+    estimated_tokens: int,
+    hold: _Hold,
+    *,
+    label: str = "",
+) -> None:
+    """Count one request against ``rule`` for ``subject``, adding what it took to ``hold``.
+
+    ``label`` follows the rule's name in a refusal, to say which model it was counted for.
+
+    Raises:
+        HTTPException: 429 when the request does not fit; what it took so far stays in ``hold``.
+
+    """
+    base = f"rule:{rule.name}:{subject}"
+    if rule.rpm is not None:
+        window = await store.hit(f"{base}:rpm", rule.rpm, _RULE_WINDOW_SEC)
+        if window.handle is None:
+            raise _refused(
+                f"Rate limit '{rule.name}'{label} exceeded: {_count(rule.rpm, 'request')} per minute",
+                window.reset_after,
+            )
+        hold.entries.append((f"{base}:rpm", window.handle))
+    if rule.tpm is not None:
+        # At least one token, so a request estimating none is still refused by a full window.
+        cost = max(estimated_tokens, 1)
+        if cost > rule.tpm:
+            msg = (
+                f"Request needs an estimated {_count(cost, 'token')}; "
+                f"rate limit '{rule.name}'{label} allows {rule.tpm:,} per minute"
+            )
+            raise _refused(msg, None)
+        window = await store.hit(f"{base}:tpm", rule.tpm, _RULE_WINDOW_SEC, cost=cost)
+        if window.handle is None:
+            raise _refused(
+                f"Rate limit '{rule.name}'{label} exceeded: {_count(rule.tpm, 'token')} per minute",
+                window.reset_after,
+            )
+        hold.entries.append((f"{base}:tpm", window.handle))
+        hold.estimates.append((f"{base}:tpm", window.handle))
+    if rule.max_concurrent is not None:
+        lease = await store.acquire(f"{base}:concurrent", rule.max_concurrent, rule.lease_sec)
+        if lease is None:
+            raise _refused(
+                f"Rate limit '{rule.name}'{label} exceeded: {_count(rule.max_concurrent, 'request')} in flight",
+                _CONCURRENCY_RETRY_AFTER_SEC,
+            )
+        hold.leases.append((f"{base}:concurrent", lease))
+
+
+async def _undo(store: RateLimitStorePort, hold: _Hold) -> None:
+    """Uncount everything ``hold`` took, for a request that was refused."""
+    entries, hold.entries, hold.estimates = hold.entries, [], []
+    for key, handle in entries:
+        await store.settle(key, handle, 0)
+    leases, hold.leases = hold.leases, []
+    for key, lease in leases:
+        await store.release(key, lease)
 
 
 class RateLimitRules:
@@ -245,61 +382,27 @@ class RateLimitRules:
         """Count a request against every rule that applies to it, or against none.
 
         A refused request is not counted anywhere, so retrying it does not use
-        up the limits it did fit.
+        up the limits it did fit. ``per: model`` rules are counted later, by
+        :meth:`RateLimitGrant.admit_model`, once an attempt names its model.
 
         Raises:
             HTTPException: 429 naming the first rule the request does not fit.
 
         """
-        grant = RateLimitGrant(self._store)
+        grant = RateLimitGrant(self._store, self._config, estimated_tokens)
         # Before any slot is taken, so a request that dies here still gives them back.
         setattr(request.state, _GRANT_STATE, grant)
         subjects = {"deployment": "all", "key": key_id, "user": user_id}
-        counted: list[tuple[str, str]] = []
+        hold = _Hold()
+        grant._holds.append(hold)
         try:
             for rule in tuple(self._config.rate_limits):
-                subject = subjects[rule.per]
+                subject = subjects.get(rule.per)
                 if subject is None:
                     continue
-                base = f"rule:{rule.name}:{subject}"
-                if rule.rpm is not None:
-                    window = await self._store.hit(f"{base}:rpm", rule.rpm, _RULE_WINDOW_SEC)
-                    if window.handle is None:
-                        raise _refused(
-                            f"Rate limit '{rule.name}' exceeded: {_count(rule.rpm, 'request')} per minute",
-                            window.reset_after,
-                        )
-                    counted.append((f"{base}:rpm", window.handle))
-                if rule.tpm is not None:
-                    # At least one token, so a request estimating none is still refused by a full window.
-                    cost = max(estimated_tokens, 1)
-                    if cost > rule.tpm:
-                        msg = (
-                            f"Request needs an estimated {_count(cost, 'token')}; "
-                            f"rate limit '{rule.name}' allows {rule.tpm:,} per minute"
-                        )
-                        raise _refused(msg, None)
-                    window = await self._store.hit(f"{base}:tpm", rule.tpm, _RULE_WINDOW_SEC, cost=cost)
-                    if window.handle is None:
-                        raise _refused(
-                            f"Rate limit '{rule.name}' exceeded: {_count(rule.tpm, 'token')} per minute",
-                            window.reset_after,
-                        )
-                    counted.append((f"{base}:tpm", window.handle))
-                    grant._estimates.append((f"{base}:tpm", window.handle))
-                if rule.max_concurrent is not None:
-                    lease = await self._store.acquire(f"{base}:concurrent", rule.max_concurrent, rule.lease_sec)
-                    if lease is None:
-                        raise _refused(
-                            f"Rate limit '{rule.name}' exceeded: {_count(rule.max_concurrent, 'request')} in flight",
-                            _CONCURRENCY_RETRY_AFTER_SEC,
-                        )
-                    grant._leases.append((f"{base}:concurrent", lease))
+                await _count_rule(self._store, rule, subject, estimated_tokens, hold)
         except HTTPException:
-            for key, handle in counted:
-                await self._store.settle(key, handle, 0)
-            grant._estimates.clear()
-            await grant.release()
+            await _undo(self._store, hold)
             raise
         return grant
 

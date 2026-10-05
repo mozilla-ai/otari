@@ -7243,7 +7243,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"lease_sec\": 0,\n  \"max_concurrent\": 0,\n  \"per\": \"deployment\",\n  \"rpm\": 0,\n  \"tpm\": 0\n}"
+              "raw": "{\n  \"lease_sec\": 0,\n  \"max_concurrent\": 0,\n  \"models\": [\n    \"string\"\n  ],\n  \"per\": \"deployment\",\n  \"rpm\": 0,\n  \"tpm\": 0\n}"
             },
             "description": "Change a stored rule. Requests it already counted stay counted. A config.yml rule answers 409.",
             "header": [

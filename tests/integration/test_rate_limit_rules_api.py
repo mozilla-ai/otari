@@ -143,3 +143,37 @@ def test_the_rules_need_operator_standing(client: TestClient) -> None:
     headers = _key(client, "dave")
 
     assert client.get(_RULES, headers=headers).status_code in {401, 403}
+
+
+@pytest.fixture
+def model_rule_client(config: GatewayConfig) -> Generator[TestClient]:
+    model_rule = RateLimitRule(name="model-cap", per="model", models=["openai:gpt-4o"], rpm=100)
+    yield from build_test_client(config.model_copy(update={"rate_limits": [model_rule]}))
+
+
+def test_a_per_model_rule_is_listed_with_its_models(model_rule_client: TestClient) -> None:
+    rules = model_rule_client.get(_RULES, headers=_MASTER).json()["rules"]
+
+    assert [(rule["name"], rule["source"], rule["models"]) for rule in rules] == [
+        ("model-cap", "config", ["openai:gpt-4o"])
+    ]
+
+
+def test_a_stored_per_model_rule_limits_its_model(client: TestClient) -> None:
+    body = {"name": "cap", "per": "model", "models": ["openai/gpt-4o-mini"], "rpm": 1}
+    response = client.post(_RULES, json=body, headers=_MASTER)
+    assert response.status_code == 201
+    assert response.json()["models"] == ["openai:gpt-4o-mini"]
+
+    assert _chats(client, _key(client, "mallory"), 2) == [200, 429]
+
+
+def test_a_rule_moved_off_per_model_drops_its_models(client: TestClient) -> None:
+    body = {"name": "cap", "per": "model", "models": ["openai:gpt-4o"], "rpm": 5}
+    assert client.post(_RULES, json=body, headers=_MASTER).status_code == 201
+
+    response = client.patch(f"{_RULES}/cap", json={"per": "key"}, headers=_MASTER)
+
+    assert response.status_code == 200
+    assert response.json()["models"] is None
+    assert client.patch(f"{_RULES}/cap", json={"per": "model"}, headers=_MASTER).status_code == 422

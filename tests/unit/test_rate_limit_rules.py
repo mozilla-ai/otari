@@ -219,3 +219,107 @@ async def test_the_middleware_charges_no_tokens_to_a_request_refused_before_disp
             await _admit(rules, tokens=600)
     else:
         await _admit(rules, tokens=600)
+
+
+def test_a_per_model_rule_must_name_its_models() -> None:
+    with pytest.raises(ValidationError, match="names no models"):
+        RateLimitRule(name="cap", per="model", rpm=1)
+
+
+def test_only_a_per_model_rule_names_models() -> None:
+    with pytest.raises(ValidationError, match="only a per: model rule reads"):
+        RateLimitRule(name="cap", per="key", models=["openai:gpt-4o"], rpm=1)
+
+
+def test_a_per_model_rule_spells_each_model_as_instance_and_model() -> None:
+    rule = RateLimitRule(
+        name="cap",
+        per="model",
+        models=["openai:gpt-4o", "together/meta-llama/Llama-3.3-70B", "ollama:llama3:8b"],
+        rpm=1,
+    )
+
+    assert rule.models == ["openai:gpt-4o", "together:meta-llama/Llama-3.3-70B", "ollama:llama3:8b"]
+    with pytest.raises(ValidationError, match="write a model as instance:model"):
+        RateLimitRule(name="cap", per="model", models=["gpt-4o"], rpm=1)
+
+
+@pytest.mark.asyncio
+async def test_admission_leaves_per_model_rules_to_the_attempt() -> None:
+    rules = _rules(InMemoryRateLimitStore(), {"name": "cap", "per": "model", "models": ["openai:gpt-4o"], "rpm": 1})
+
+    await _admit(rules)
+    grant = await _admit(rules)
+
+    assert await grant.admit_model("openai", "gpt-4o") is not None
+
+
+@pytest.mark.asyncio
+async def test_each_model_a_rule_names_is_counted_on_its_own() -> None:
+    rules = _rules(
+        InMemoryRateLimitStore(),
+        {"name": "cap", "per": "model", "models": ["openai:gpt-4o", "openai:gpt-4o-mini"], "rpm": 1},
+    )
+
+    await (await _admit(rules)).admit_model("openai", "gpt-4o")
+    grant = await _admit(rules)
+    await grant.admit_model("openai", "gpt-4o-mini")
+    with pytest.raises(HTTPException) as exc_info:
+        await grant.admit_model("openai", "gpt-4o")
+
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.detail == "Rate limit 'cap' for openai:gpt-4o exceeded: 1 request per minute"
+    assert await grant.admit_model("anthropic", "claude") is None
+
+
+@pytest.mark.asyncio
+async def test_a_dropped_attempt_gives_back_its_slot_and_tokens_but_keeps_its_request() -> None:
+    """The provider was sent the request, so it stays counted; nothing else does."""
+    store = InMemoryRateLimitStore()
+    rules = _rules(
+        store, {"name": "cap", "per": "model", "models": ["openai:gpt-4o"], "rpm": 5, "tpm": 1000, "max_concurrent": 1}
+    )
+    grant = await _admit(rules, tokens=600)
+
+    hold = await grant.admit_model("openai", "gpt-4o")
+    assert hold is not None
+    await hold.drop()
+    await grant.admit_model("openai", "gpt-4o")
+
+    assert (await store.hit("rule:cap:openai:gpt-4o:rpm", 5, 60)).count == 3
+
+
+@pytest.mark.asyncio
+async def test_a_served_attempt_is_settled_and_released_with_its_request() -> None:
+    rules = _rules(
+        InMemoryRateLimitStore(),
+        {"name": "cap", "per": "model", "models": ["openai:gpt-4o"], "tpm": 1000, "max_concurrent": 1},
+    )
+    grant = await _admit(rules, tokens=600)
+    await grant.admit_model("openai", "gpt-4o")
+    other = await _admit(rules, tokens=600)
+    with pytest.raises(HTTPException, match="1,000 tokens per minute"):
+        await other.admit_model("openai", "gpt-4o")
+
+    await grant.settle(50)
+    with pytest.raises(HTTPException, match="1 request in flight"):
+        await other.admit_model("openai", "gpt-4o")
+    await grant.release()
+
+    await other.admit_model("openai", "gpt-4o")
+
+
+@pytest.mark.asyncio
+async def test_a_refused_attempt_is_counted_by_no_model_rule() -> None:
+    store = InMemoryRateLimitStore()
+    rules = _rules(
+        store,
+        {"name": "wide", "per": "model", "models": ["openai:gpt-4o"], "rpm": 5},
+        {"name": "narrow", "per": "model", "models": ["openai:gpt-4o"], "max_concurrent": 1},
+    )
+    await (await _admit(rules)).admit_model("openai", "gpt-4o")
+
+    with pytest.raises(HTTPException, match="'narrow'"):
+        await (await _admit(rules)).admit_model("openai", "gpt-4o")
+
+    assert (await store.hit("rule:wide:openai:gpt-4o:rpm", 5, 60)).count == 2

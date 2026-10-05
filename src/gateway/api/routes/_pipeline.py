@@ -65,7 +65,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import ToolPorts, extract_credential_token, get_budget_service, verify_api_key_or_master_key
-from gateway.api.routes._attempts import CandidateCannotServe, PrepareKwargs, walk_attempts
+from gateway.api.routes._attempts import AdmitAttempt, CandidateCannotServe, PrepareKwargs, walk_attempts
 from gateway.api.routes._helpers import apply_input_guardrails, resolve_user_id
 from gateway.api.routes._idempotency import (
     IDEMPOTENCY_KEY_IN_FLIGHT_DETAIL,
@@ -5002,6 +5002,33 @@ async def _prepared(
         raise domain_error(adapter, exc) from exc
 
 
+def _model_admission(ctx: RequestContext) -> AdmitAttempt | None:
+    """Admits each candidate of a walk under the ``per: model`` rate limits, skipping a full one."""
+    grant = ctx.rate_limit_grant
+    if grant is None:
+        return None
+
+    async def _admit(attempt: Attempt) -> Callable[[], Awaitable[None]] | None:
+        try:
+            hold = await grant.admit_model(attempt.instance, attempt.model, name_model=False)
+        except HTTPException as refusal:
+            raise CandidateCannotServe(refusal) from refusal
+        return hold.drop if hold is not None else None
+
+    return _admit
+
+
+async def _admit_only_candidate(ctx: RequestContext, instance: str, model: str) -> None:
+    """Admit the only candidate of a request under the ``per: model`` rate limits.
+
+    Raises:
+        HTTPException: 429 when a rule naming the model is full.
+    """
+    if ctx.rate_limit_grant is not None:
+        # A policy's target is not the caller's to see; a model the caller named is.
+        await ctx.rate_limit_grant.admit_model(instance, model, name_model=ctx.plan is None)
+
+
 async def run_single_attempt_stream(
     *,
     adapter: FormatAdapter[Any, ChunkT],
@@ -5052,6 +5079,9 @@ async def run_single_attempt_stream(
             async def _absorbed(attempt: Attempt, exc: BaseException, _total: int) -> None:
                 await log_absorbed_attempt(ctx, adapter, attempt, exc)
 
+            async def _skipped(attempt: Attempt, refusal: HTTPException) -> None:
+                await log_skipped_attempt(ctx, adapter, attempt, refusal)
+
             # The walk reports which candidate it stopped on, so the failure row
             # names the provider that actually failed rather than the end of the plan.
             stopped_on: list[Attempt] = []
@@ -5065,7 +5095,9 @@ async def run_single_attempt_stream(
                     policy_name=ctx.plan.policy_name,
                     build_kwargs=adapter.local_attempt_kwargs,
                     prepare_kwargs=prepare_kwargs,
+                    admit_attempt=_model_admission(ctx),
                     on_absorbed=_absorbed,
+                    on_skipped=_skipped,
                     on_terminal=stopped_on.append,
                 )
             except HTTPException as exhausted:
@@ -5077,6 +5109,7 @@ async def run_single_attempt_stream(
             stream_attribution = _attribution_for(ctx, chosen)
         else:
             call_kwargs = await _prepared(adapter, prepare_kwargs, provider, call_kwargs)
+            await _admit_only_candidate(ctx, provider, model)
             stream = await open_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
             # A single-candidate policy still names a policy and a reason, and
             # both belong on the row.
@@ -5662,6 +5695,31 @@ async def log_absorbed_attempt(
     on the row that settles the request's reservation, so this row carries the
     attempt's tokens and none of the tool ledger. See :func:`log_usage`.
     """
+    await _log_absorbed_row(ctx, adapter, attempt, str(exc), failure_status_code(exc))
+
+
+# Starts the error of an absorbed row for a candidate that was skipped rather than
+# called, which is how the activity log tells "skipped" from "failed".
+SKIPPED_ATTEMPT_PREFIX = "Skipped: "
+
+
+async def log_skipped_attempt(
+    ctx: RequestContext,
+    adapter: FormatAdapter[Any, Any],
+    attempt: Attempt,
+    refusal: HTTPException,
+) -> None:
+    """Record a candidate the walk skipped, such as a model a ``per: model`` rate limit had no room on.
+
+    An absorbed row like a recovered failure, so it counts toward no request or
+    error total. Its error starts with :data:`SKIPPED_ATTEMPT_PREFIX`.
+    """
+    await _log_absorbed_row(ctx, adapter, attempt, f"{SKIPPED_ATTEMPT_PREFIX}{refusal.detail}", refusal.status_code)
+
+
+async def _log_absorbed_row(
+    ctx: RequestContext, adapter: FormatAdapter[Any, Any], attempt: Attempt, error: str, status_code: int
+) -> None:
     if ctx.db is None:
         return
     try:
@@ -5673,8 +5731,8 @@ async def log_absorbed_attempt(
             provider=attempt.instance,
             endpoint=adapter.endpoint,
             user_id=ctx.user_id,
-            error=str(exc),
-            status_code=failure_status_code(exc),
+            error=error,
+            status_code=status_code,
             latency_ms=_elapsed_ms(ctx.started_at),
             counts_toward_budget=False,
             attribution=_attribution_for(ctx, attempt, absorbed=True),
@@ -5744,6 +5802,9 @@ async def run_standalone_non_stream(
             async def _absorbed(attempt: Attempt, exc: BaseException, _total: int) -> None:
                 await log_absorbed_attempt(ctx, adapter, attempt, exc)
 
+            async def _skipped(attempt: Attempt, refusal: HTTPException) -> None:
+                await log_skipped_attempt(ctx, adapter, attempt, refusal)
+
             # The walk reports which candidate it stopped on, so the failure row
             # names the provider that actually failed rather than the end of the plan.
             stopped_on: list[Attempt] = []
@@ -5757,7 +5818,9 @@ async def run_standalone_non_stream(
                     policy_name=ctx.plan.policy_name,
                     build_kwargs=adapter.local_attempt_kwargs,
                     prepare_kwargs=prepare_kwargs,
+                    admit_attempt=_model_admission(ctx),
                     on_absorbed=_absorbed,
+                    on_skipped=_skipped,
                     on_terminal=stopped_on.append,
                 )
             except HTTPException as exhausted:
@@ -5769,6 +5832,7 @@ async def run_standalone_non_stream(
             attribution = _attribution_for(ctx, chosen)
         else:
             call_kwargs = await _prepared(adapter, prepare_kwargs, provider, call_kwargs)
+            await _admit_only_candidate(ctx, provider, model)
             result = await dispatch_non_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
             # A single-candidate policy still has a name and a selection reason, and
             # both belong on the row: "served by its default target" is the answer to

@@ -20,7 +20,12 @@ class RateLimitRuleUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    per: Literal["deployment", "key", "user"] | None = Field(default=None, description="What one count is shared by.")
+    per: Literal["deployment", "key", "user", "model"] | None = Field(
+        default=None, description="What one count is shared by."
+    )
+    models: list[str] | None = Field(
+        default=None, description="The instance:model names a per: model rule limits; null for any other rule."
+    )
     rpm: int | None = Field(default=None, ge=1, description="Requests per minute.")
     tpm: int | None = Field(default=None, ge=1, description="Tokens per minute.")
     max_concurrent: int | None = Field(default=None, ge=1, description="Requests in flight at once.")

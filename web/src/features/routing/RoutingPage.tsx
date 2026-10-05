@@ -38,6 +38,7 @@ import {
   findWeights,
   KNN_BACKEND,
   normalizeBackend,
+  PRIORITY_BACKEND,
   type RoutingRow,
   WEIGHTED_BACKEND,
 } from "./policyModel"
@@ -103,7 +104,7 @@ function isEditableInForm(spec: PolicySpec): boolean {
     if (entry.router !== undefined) {
       if ((entry.candidates?.length ?? 0) === 0) return false
       const backend = normalizeBackend(entry.router)
-      if (backend === KNN_BACKEND) return true
+      if (backend === KNN_BACKEND || backend === PRIORITY_BACKEND) return true
       // A weighted entry without weights cannot be saved back (the API refuses it),
       // so the form would have to invent a split. Read-only says so instead.
       return (
@@ -133,6 +134,7 @@ function routerLabelOf(spec: PolicySpec): string {
   const backend = findRouterBackend(spec)
   if (backend === WEIGHTED_BACKEND) return "Weighted"
   if (backend === KNN_BACKEND) return "Learned"
+  if (backend === PRIORITY_BACKEND) return "Priority"
   return "Routed"
 }
 

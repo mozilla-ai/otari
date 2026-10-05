@@ -92,6 +92,27 @@ describe("RateLimitsCard", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("lists a per-model rule with the models it limits", async () => {
+    mockApi([
+      {
+        name: "flash-cap",
+        per: "model",
+        models: ["vertex:gemini-2.5-flash"],
+        rpm: 100,
+        tpm: null,
+        max_concurrent: null,
+        lease_sec: 900,
+        source: "config",
+      },
+    ])
+    renderCard()
+
+    expect(
+      await screen.findByText("vertex:gemini-2.5-flash · 100 requests/min"),
+    ).toBeInTheDocument()
+    expect(screen.getByText("per model")).toBeInTheDocument()
+  })
+
   it("says what limits apply when there are no rules", async () => {
     mockApi([])
     renderCard()
@@ -125,6 +146,7 @@ describe("RateLimitsCard", () => {
           body: {
             name: "keys",
             per: "key",
+            models: null,
             rpm: 60,
             tpm: null,
             max_concurrent: null,
@@ -132,6 +154,39 @@ describe("RateLimitsCard", () => {
           },
         },
       ]),
+    )
+  })
+
+  it("adds a per-model rule naming the models it limits", async () => {
+    const writes = mockApi([])
+    const user = userEvent.setup()
+    renderCard()
+
+    await user.click(await screen.findByRole("button", { name: "Add rule" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.type(within(dialog).getByLabelText(/^Name/), "flash-cap")
+    await user.click(
+      within(dialog).getByRole("button", { name: /Counted for/ }),
+    )
+    await user.click(await screen.findByRole("option", { name: "Each model" }))
+    await user.type(
+      within(dialog).getByRole("combobox", { name: /Model 1/ }),
+      "vertex:gemini-2.5-flash",
+    )
+    await user.keyboard("{Escape}")
+    await user.type(within(dialog).getByLabelText("Requests per minute"), "100")
+    await user.click(within(dialog).getByRole("button", { name: "Add rule" }))
+
+    await waitFor(() =>
+      expect(writes[0]?.body).toEqual({
+        name: "flash-cap",
+        per: "model",
+        models: ["vertex:gemini-2.5-flash"],
+        rpm: 100,
+        tpm: null,
+        max_concurrent: null,
+        lease_sec: 900,
+      }),
     )
   })
 
@@ -170,6 +225,7 @@ describe("RateLimitsCard", () => {
           url: expect.stringContaining("/rate-limits/keys"),
           body: {
             per: "key",
+            models: null,
             rpm: 600,
             tpm: null,
             max_concurrent: null,

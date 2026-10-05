@@ -297,7 +297,7 @@ def routing_explain(
     """
     from gateway.models.routing import PolicySpec
     from gateway.services.routing import BudgetState, NoEligibleCandidatesError, compile_policy
-    from gateway.services.routing.backends import backend_is_weighted
+    from gateway.services.routing.backends import backend_is_priority, backend_is_weighted
     from gateway.services.routing.decide import explain_router_ordering
 
     cfg = load_config(config)
@@ -373,6 +373,11 @@ def routing_explain(
             else "  weighted: no candidate in the split is usable by this caller, so the plan above is "
             "whatever the failure chain leaves. Every candidate in the split is listed as dropped, with "
             "the reason it went."
+        )
+    elif backend_is_priority(spec.router_backend):
+        click.echo(
+            "  priority: each request goes to the first candidate above that has room under its per: model "
+            "rate limits, then on_failure. A candidate that fails before responding falls to the next one."
         )
     elif spec.router_backend is not None:
         # The plan above is the *decline* path, because a router needs a live

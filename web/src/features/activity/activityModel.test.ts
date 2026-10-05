@@ -317,7 +317,38 @@ describe("indexGroupOutcomes", () => {
     expect(indexGroupOutcomes(rows).get("grp-1")).toEqual({
       servedBy: "openai:gpt-4o-mini",
       servedPosition: 2,
+      spilledFrom: [],
     })
+  })
+
+  it("names the candidates a group skipped before the one that served", () => {
+    const rows = [
+      attempt({
+        id: "b",
+        status: "success",
+        attempt_position: 2,
+        provider: "overflow",
+        model: "gpt-4o-mini",
+      }),
+      attempt({
+        id: "a",
+        status: "absorbed",
+        status_code: 429,
+        error_message:
+          "Skipped: Rate limit 'flash-cap' exceeded: 2 requests per minute",
+        attempt_position: 1,
+        provider: "primary",
+        model: "gpt-4o-mini",
+      }),
+    ]
+    const outcome = indexGroupOutcomes(rows).get("grp-1") ?? null
+
+    expect(outcome?.spilledFrom).toEqual([
+      "primary:gpt-4o-mini (rate limit 'flash-cap' full)",
+    ])
+    expect(describeAttempt({ ...rows[0], attempt_count: 2 }, outcome)).toMatch(
+      /^served on attempt 2 of 2.*, spilled over from primary:gpt-4o-mini \(rate limit 'flash-cap' full\)$/,
+    )
   })
 
   it("records a terminal failure as a group with no server", () => {
@@ -328,6 +359,7 @@ describe("indexGroupOutcomes", () => {
     expect(indexGroupOutcomes(rows).get("grp-1")).toEqual({
       servedBy: null,
       servedPosition: null,
+      spilledFrom: [],
     })
   })
 

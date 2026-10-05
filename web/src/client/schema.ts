@@ -11868,6 +11868,11 @@ export interface components {
              */
             max_concurrent?: number | null;
             /**
+             * Models
+             * @description The models a `per: model` rule limits, each as instance:model (the provider instance the model is called through, then the model), each counted on its own. Required there and refused on any other rule.
+             */
+            models?: string[] | null;
+            /**
              * Name
              * @description Names the rule in a 429's detail and in the counter's key. Unique across rate_limits.
              */
@@ -11877,7 +11882,7 @@ export interface components {
              * @description What one count is shared by.
              * @enum {string}
              */
-            per: "deployment" | "key" | "user";
+            per: "deployment" | "key" | "user" | "model";
             /**
              * Rpm
              * @description Requests per minute.
@@ -11906,6 +11911,11 @@ export interface components {
              */
             max_concurrent?: number | null;
             /**
+             * Models
+             * @description The models a `per: model` rule limits, each as instance:model (the provider instance the model is called through, then the model), each counted on its own. Required there and refused on any other rule.
+             */
+            models?: string[] | null;
+            /**
              * Name
              * @description Names the rule in a 429's detail and in the counter's key. Unique across rate_limits.
              */
@@ -11915,7 +11925,7 @@ export interface components {
              * @description What one count is shared by.
              * @enum {string}
              */
-            per: "deployment" | "key" | "user";
+            per: "deployment" | "key" | "user" | "model";
             /**
              * Rpm
              * @description Requests per minute.
@@ -11956,10 +11966,15 @@ export interface components {
              */
             max_concurrent?: number | null;
             /**
+             * Models
+             * @description The instance:model names a per: model rule limits; null for any other rule.
+             */
+            models?: string[] | null;
+            /**
              * Per
              * @description What one count is shared by.
              */
-            per?: ("deployment" | "key" | "user") | null;
+            per?: ("deployment" | "key" | "user" | "model") | null;
             /**
              * Rpm
              * @description Requests per minute.

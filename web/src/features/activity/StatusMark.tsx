@@ -8,13 +8,14 @@ import { describeStatus } from "./activityModel"
  * findable in a scan of fifty rows. `absorbed` is deliberately neutral rather
  * than caution: a routing policy recovered from it, so the request was served,
  * and painting it as a warning made a working gateway look like a failing one.
- * It reads as the third thing it is, on the subtle rung in both channels.
+ * It reads as the third thing it is, on the subtle rung in both channels, and so
+ * does `skipped`, a candidate the walk moved past without calling it.
  */
 export function StatusMark({ status }: { status: string }) {
   const { dot, ink } =
     status === "error"
       ? { dot: "bg-danger", ink: "text-danger" }
-      : status === "absorbed"
+      : status === "absorbed" || status === "skipped"
         ? { dot: "bg-text-subtle", ink: "text-subtle" }
         : { dot: "bg-success", ink: "text-muted" }
   return (

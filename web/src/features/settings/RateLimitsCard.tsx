@@ -8,6 +8,7 @@ import { Field } from "@/design-system/forms/Field"
 import { Select } from "@/design-system/forms/Select"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { ModelComboBox } from "@/features/models/ModelComboBox"
 import {
   useCreateRateLimitRule,
   useDeleteRateLimitRule,
@@ -23,12 +24,14 @@ const SCOPES: { value: Scope; label: string }[] = [
   { value: "key", label: "Each API key" },
   { value: "user", label: "Each user" },
   { value: "deployment", label: "The whole deployment" },
+  { value: "model", label: "Each model" },
 ]
 
 const SCOPE_LABEL: Record<Scope, string> = {
   key: "per key",
   user: "per user",
   deployment: "deployment",
+  model: "per model",
 }
 
 // The pattern the gateway holds a name to, since it is part of the counter's key.
@@ -41,6 +44,7 @@ const SCOPE_LANE = "w-full shrink-0 text-caption text-subtle md:w-[5.5rem]"
 
 function limitsSummary(rule: RateLimitRule): string {
   const parts = [
+    rule.models?.join(", ") ?? "",
     rule.rpm ? `${formatNumber(rule.rpm)} requests/min` : "",
     rule.tpm ? `${formatNumber(rule.tpm)} tokens/min` : "",
     rule.max_concurrent ? `${formatNumber(rule.max_concurrent)} in flight` : "",
@@ -64,6 +68,8 @@ function asText(value: number | null | undefined): string {
 interface RuleDraft {
   name: string
   per: Scope
+  /** The models a per-model rule limits, one picker each. */
+  models: string[]
   rpm: string
   tpm: string
   maxConcurrent: string
@@ -74,6 +80,7 @@ function draftOf(rule: RateLimitRule | undefined): RuleDraft {
   return {
     name: rule?.name ?? "",
     per: rule?.per ?? "key",
+    models: rule?.models ?? [""],
     rpm: asText(rule?.rpm),
     tpm: asText(rule?.tpm),
     maxConcurrent: asText(rule?.max_concurrent),
@@ -115,6 +122,12 @@ function RuleDialog({
   const hasLimit = [rpm, tpm, maxConcurrent].some(
     (value) => typeof value === "number",
   )
+  const isPerModel = draft.per === "model"
+  const models = draft.models.map((model) => model.trim())
+  const modelsReady =
+    !isPerModel ||
+    (models.every((model) => model !== "") &&
+      new Set(models).size === models.length)
   const isReady =
     draft.name.trim() !== "" &&
     nameError === "" &&
@@ -122,11 +135,13 @@ function RuleDialog({
     rpm !== undefined &&
     tpm !== undefined &&
     maxConcurrent !== undefined &&
-    hasLimit
+    hasLimit &&
+    modelsReady
 
   const submit = () => {
     const limits = {
       per: draft.per,
+      models: isPerModel ? models : null,
       rpm: rpm === "" || rpm === undefined ? null : rpm,
       tpm: tpm === "" || tpm === undefined ? null : tpm,
       max_concurrent:
@@ -180,9 +195,58 @@ function RuleDialog({
         value={draft.per}
         onChange={(per) => set({ per: per as Scope })}
         options={SCOPES}
-        description="Each API key and each user get their own count; the whole deployment shares one."
+        description={
+          isPerModel
+            ? "Each model below gets its own count, however a request reaches it. A routing policy skips a full model for its next one."
+            : "Each API key and each user get their own count; the whole deployment shares one."
+        }
         shouldReserveMessage={false}
       />
+      {isPerModel ? (
+        <div className="flex flex-col gap-3">
+          {draft.models.map((model, index) => (
+            <div key={index} className="flex items-end gap-2">
+              <div className="min-w-0 flex-1">
+                <ModelComboBox
+                  source="catalog"
+                  label={`Model ${index + 1}`}
+                  value={model}
+                  onChange={(value) =>
+                    set({
+                      models: draft.models.map((m, i) =>
+                        i === index ? value : m,
+                      ),
+                    })
+                  }
+                  isRequired
+                />
+              </div>
+              {draft.models.length > 1 ? (
+                <Button
+                  variant="ghost"
+                  aria-label={`Remove model ${index + 1}`}
+                  onPress={() =>
+                    set({ models: draft.models.filter((_, i) => i !== index) })
+                  }
+                >
+                  Remove
+                </Button>
+              ) : null}
+            </div>
+          ))}
+          <div>
+            <Button
+              variant="ghost"
+              onPress={() => set({ models: [...draft.models, ""] })}
+            >
+              Add a model
+            </Button>
+          </div>
+          {models.every((m) => m !== "") && !modelsReady ? (
+            <p className="text-caption text-danger">Name each model once.</p>
+          ) : null}
+        </div>
+      ) : null}
       <Field
         label="Requests per minute"
         value={draft.rpm}
@@ -313,7 +377,7 @@ export function RateLimitsCard() {
       <SettingsGroup
         title="Rate limit rules"
         count={rules.data ? all.length : undefined}
-        description="Requests per minute, tokens per minute and requests in flight, per API key, per user or for the whole deployment. A change applies on this replica at once and on every replica within 30 seconds."
+        description="Requests per minute, tokens per minute and requests in flight, per API key, per user, per model or for the whole deployment. A change applies on this replica at once and on every replica within 30 seconds."
         docsHref={docsSourceHref("configuration.md", "rate-limit-rules")}
         action={
           <Button variant="primary" onPress={() => open(undefined)}>

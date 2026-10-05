@@ -1611,6 +1611,83 @@ describe("RoutingPage", () => {
     expect(spec.select[1]).toEqual({ default: "openai:gpt-5" })
   })
 
+  it("creates a priority policy in the order the operator sets", async () => {
+    const { calls } = mockApi([])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    await user.click(await createTrigger())
+    await user.type(
+      screen.getByRole("textbox", { name: /policy name/i }),
+      "spill",
+    )
+    await user.type(
+      screen.getByRole("combobox", { name: /^serves$/i }),
+      "openai:gpt-5",
+    )
+    await user.keyboard("{Escape}")
+    await user.click(
+      screen.getByRole("button", {
+        name: /next model when one hits its rate limit/i,
+      }),
+    )
+    await user.type(
+      screen.getByRole("combobox", { name: /model 2/i }),
+      "anthropic:claude-sonnet-4-5",
+    )
+    await user.keyboard("{Escape}")
+    // Order is the policy, so the rows move, and the opt-out mark moves with its model.
+    await user.click(screen.getByRole("button", { name: "Move model 2 up" }))
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Create policy",
+      }),
+    )
+
+    const post = calls.find(
+      (call) =>
+        call.method === "POST" &&
+        call.url.includes(`${API_ROOT}/routing/policies`),
+    )
+    const spec = (post!.body as { spec: PolicySpec }).spec
+    expect(spec.select[0]).toEqual({
+      router: "priority",
+      candidates: ["anthropic:claude-sonnet-4-5", "openai:gpt-5"],
+    })
+    expect(spec.select[1]).toEqual({ default: "openai:gpt-5" })
+  })
+
+  it("edits a priority policy and labels it by its backend", async () => {
+    mockApi([
+      policy(
+        "spill",
+        {
+          select: [
+            {
+              router: "priority",
+              candidates: ["openai:gpt-5-mini", "openai:gpt-5"],
+            },
+            { default: "openai:gpt-5" },
+          ],
+        },
+        { is_dynamic: true },
+      ),
+    ])
+    const user = userEvent.setup()
+    renderPage(<RoutingPage />)
+
+    const row = (await screen.findByText("spill")).closest("tr")!
+    expect(within(row).getByText(/^Priority/)).toBeInTheDocument()
+    await user.click(within(row).getByRole("button", { name: "Edit" }))
+
+    expect(
+      screen.getByText("Send each request to the first with room"),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Move model 1 up" }),
+    ).toBeDisabled()
+  })
+
   it("edits a weighted policy without losing its split", async () => {
     const { calls } = mockApi([
       policy("balanced", WEIGHTED, { is_dynamic: true }),

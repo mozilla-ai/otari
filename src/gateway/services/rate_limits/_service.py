@@ -74,6 +74,9 @@ class RateLimitService:
             if row is None:
                 raise RateLimitRuleNotFoundError(name)
             changes = request.model_dump(exclude_unset=True)
+            if changes.get("per") not in (None, "model") and "models" not in changes:
+                # Only a per-model rule names models, so a rule moved off per: model drops them.
+                changes["models"] = None
             try:
                 merged = RateLimitRule(**{**rule_of(row).model_dump(), **changes})
             except ValidationError as exc:

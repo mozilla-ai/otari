@@ -61,6 +61,11 @@ EMPTY_PLAN_DETAIL = "Routing produced no candidate to try"
 # candidate's instance and its kwargs as they would be dispatched.
 PrepareKwargs = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
 
+# Gives back what admitting a candidate took, once the walk moves past it.
+DropAdmission = Callable[[], Awaitable[None]]
+# Admits a candidate before it is sent the request, or raises CandidateCannotServe.
+AdmitAttempt = Callable[[Attempt], Awaitable[DropAdmission | None]]
+
 
 class CandidateCannotServe(Exception):
     """The candidate cannot serve this request, which says nothing about its provider.
@@ -111,7 +116,9 @@ async def walk_attempts(
     classify_error: Callable[[BaseException], tuple[bool, str]] = classify_local_attempt_error,
     build_kwargs: Callable[[Attempt, dict[str, Any]], dict[str, Any]] | None = None,
     prepare_kwargs: PrepareKwargs | None = None,
+    admit_attempt: AdmitAttempt | None = None,
     on_absorbed: Callable[[Attempt, BaseException, int], Awaitable[None]] | None = None,
+    on_skipped: Callable[[Attempt, HTTPException], Awaitable[None]] | None = None,
     on_terminal: Callable[[Attempt], None] | None = None,
 ) -> tuple[Attempt, T]:
     """Try each attempt in order; return ``(chosen, result)`` for the first success.
@@ -133,6 +140,10 @@ async def walk_attempts(
     the request itself is still going to be served. It is not called for a terminal failure: that
     one is the request's outcome and the caller logs it as such.
 
+    ``on_skipped`` is the same for a candidate that could not serve, with its
+    refusal, so a model skipped because it was full is on record beside the one
+    that served. A walk that ends in that refusal reports it as the outcome instead.
+
     ``build_kwargs`` builds each candidate's call kwargs, defaulting to
     :meth:`Attempt.call_kwargs`. Formats whose provider call takes a different
     shape pass their own (the responses format splits ``provider`` from ``model``
@@ -144,6 +155,11 @@ async def walk_attempts(
     It may raise :class:`CandidateCannotServe`, which skips the candidate without
     counting it as a provider failure and without reordering the plan. When no
     candidate is left, the request is answered with the last one's refusal.
+
+    ``admit_attempt`` then admits the candidate (a ``per: model`` rate limit
+    with no room raises :class:`CandidateCannotServe` the same way). What it
+    returns is awaited when the candidate fails and the walk moves on, so a
+    failed candidate does not keep what it was admitted with.
 
     Lock-in semantics, matching the hybrid walker: once ``mark_locked_in`` has
     fired, a later failure on that attempt terminates the request instead of
@@ -170,12 +186,14 @@ async def walk_attempts(
     failures: list[AttemptFailure] = []
     last_exc: BaseException | None = None
     cannot_serve: CandidateCannotServe | None = None
-    # A failure is absorbed only once another candidate is sent the request.
+    # A failure is absorbed, and a skip recorded, only once another candidate is sent the request.
     unabsorbed: tuple[Attempt, BaseException] | None = None
+    unrecorded_skips: list[tuple[Attempt, HTTPException]] = []
     last_failed: Attempt | None = None
 
     for attempt in attempts:
         locked_in = False
+        drop_admission: DropAdmission | None = None
 
         def _mark_locked_in(_attempt: Attempt = attempt) -> None:
             nonlocal locked_in
@@ -192,9 +210,15 @@ async def walk_attempts(
             call_kwargs = make_kwargs(attempt, base_request_fields)
             if prepare_kwargs is not None:
                 call_kwargs = await prepare_kwargs(attempt.instance, call_kwargs)
+            if admit_attempt is not None:
+                drop_admission = await admit_attempt(attempt)
             if unabsorbed is not None and on_absorbed is not None:
                 await on_absorbed(*unabsorbed, len(attempts))
             unabsorbed = None
+            if on_skipped is not None:
+                for skipped, refusal in unrecorded_skips:
+                    await on_skipped(skipped, refusal)
+            unrecorded_skips = []
             result = await run_attempt(attempt, call_kwargs, _mark_locked_in)
         except CandidateCannotServe as exc:
             logger.info(
@@ -206,6 +230,7 @@ async def walk_attempts(
                 exc,
             )
             cannot_serve = exc
+            unrecorded_skips.append((attempt, exc.refusal))
             continue
         except HTTPException:
             # A gateway-side refusal for this candidate (a refused reservation
@@ -261,6 +286,8 @@ async def walk_attempts(
                 raise _provider_failure_http_exc(exc, fallback_detail="LLM provider error") from exc
             failures.append(AttemptFailure(attempt.position, attempt.instance, attempt.model, error_class))
             unabsorbed = (attempt, exc)
+            if drop_admission is not None:
+                await drop_admission()
             continue
 
         if failures:

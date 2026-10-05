@@ -345,12 +345,18 @@ def provider_credential_env_names(provider_type: str) -> tuple[str, ...] | None:
 
 
 class RateLimitRule(BaseModel):
-    """One limit from ``rate_limits``, counted separately for each deployment, API key or user.
+    """One limit from ``rate_limits``, counted separately for each deployment, API key, user or model.
 
     ``per: key`` counts each API key on its own; a request with no key (the
     master key, a dashboard session) is not limited by it. ``per: user`` counts
     the user a request is billed to, so a service key's end users each get their
     own count. ``per: deployment`` is one count shared by every request.
+
+    ``per: model`` counts each model in ``models`` on its own, whichever policy,
+    alias or direct call reaches it. It is checked when an attempt is about to
+    call the model rather than at admission, so a routing policy skips a full
+    model and tries its next candidate; a request with no candidate left is
+    refused.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -359,7 +365,15 @@ class RateLimitRule(BaseModel):
         pattern=r"^[A-Za-z0-9_.-]+$",
         description="Names the rule in a 429's detail and in the counter's key. Unique across rate_limits.",
     )
-    per: Literal["deployment", "key", "user"] = Field(description="What one count is shared by.")
+    per: Literal["deployment", "key", "user", "model"] = Field(description="What one count is shared by.")
+    models: list[str] | None = Field(
+        default=None,
+        description=(
+            "The models a `per: model` rule limits, each as instance:model (the provider instance the "
+            "model is called through, then the model), each counted on its own. Required there and "
+            "refused on any other rule."
+        ),
+    )
     rpm: int | None = Field(default=None, ge=1, description="Requests per minute.")
     tpm: int | None = Field(
         default=None,
@@ -385,6 +399,30 @@ class RateLimitRule(BaseModel):
             msg = f"rate limit rule '{self.name}' sets none of rpm, tpm or max_concurrent"
             raise ValueError(msg)
         return self
+
+    @model_validator(mode="after")
+    def _models_belong_to_per_model(self) -> "RateLimitRule":
+        if self.per != "model":
+            if self.models is not None:
+                msg = f"rate limit rule '{self.name}' sets models, which only a per: model rule reads"
+                raise ValueError(msg)
+            return self
+        if not self.models:
+            msg = f"rate limit rule '{self.name}' is per: model and names no models"
+            raise ValueError(msg)
+        self.models = [_canonical_model(self.name, entry) for entry in self.models]
+        return self
+
+
+def _canonical_model(rule_name: str, entry: str) -> str:
+    """``entry`` as ``instance:model``, the spelling an attempt is matched on; ``instance/model`` is accepted too."""
+    instance, sep, model = entry.strip().partition(":")
+    if not sep:
+        instance, sep, model = entry.strip().partition("/")
+    if not sep or not instance or not model:
+        msg = f"rate limit rule '{rule_name}' names '{entry}'; write a model as instance:model"
+        raise ValueError(msg)
+    return f"{instance}:{model}"
 
 
 class ModelCapabilityConfig(BaseModel):
@@ -608,7 +646,7 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
         default_factory=list,
         description=(
             "Limits on requests per minute, tokens per minute and requests in flight, each counted "
-            "per deployment, per API key or per user, in rate_limit_store. Applies to chat "
+            "per deployment, per API key, per user or per model, in rate_limit_store. Applies to chat "
             "completions, messages and responses."
         ),
     )

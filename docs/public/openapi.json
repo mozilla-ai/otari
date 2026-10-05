@@ -13086,6 +13086,21 @@
             "description": "Requests in flight at once.",
             "title": "Max Concurrent"
           },
+          "models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The models a `per: model` rule limits, each as instance:model (the provider instance the model is called through, then the model), each counted on its own. Required there and refused on any other rule.",
+            "title": "Models"
+          },
           "name": {
             "description": "Names the rule in a 429's detail and in the counter's key. Unique across rate_limits.",
             "pattern": "^[A-Za-z0-9_.-]+$",
@@ -13097,7 +13112,8 @@
             "enum": [
               "deployment",
               "key",
-              "user"
+              "user",
+              "model"
             ],
             "title": "Per",
             "type": "string"
@@ -13160,6 +13176,21 @@
             "description": "Requests in flight at once.",
             "title": "Max Concurrent"
           },
+          "models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The models a `per: model` rule limits, each as instance:model (the provider instance the model is called through, then the model), each counted on its own. Required there and refused on any other rule.",
+            "title": "Models"
+          },
           "name": {
             "description": "Names the rule in a 429's detail and in the counter's key. Unique across rate_limits.",
             "pattern": "^[A-Za-z0-9_.-]+$",
@@ -13171,7 +13202,8 @@
             "enum": [
               "deployment",
               "key",
-              "user"
+              "user",
+              "model"
             ],
             "title": "Per",
             "type": "string"
@@ -13263,13 +13295,29 @@
             "description": "Requests in flight at once.",
             "title": "Max Concurrent"
           },
+          "models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The instance:model names a per: model rule limits; null for any other rule.",
+            "title": "Models"
+          },
           "per": {
             "anyOf": [
               {
                 "enum": [
                   "deployment",
                   "key",
-                  "user"
+                  "user",
+                  "model"
                 ],
                 "type": "string"
               },

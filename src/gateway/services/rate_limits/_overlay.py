@@ -30,6 +30,7 @@ def rule_of(row: StoredRateLimitRule) -> RateLimitRule:
     return RateLimitRule(
         name=row.name,
         per=row.per,  # type: ignore[arg-type]  # the check constraint holds it to the Literal
+        models=row.models,
         rpm=row.rpm,
         tpm=row.tpm,
         max_concurrent=row.max_concurrent,
