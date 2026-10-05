@@ -88,8 +88,11 @@ def _request_reset(client: TestClient, caplog: pytest.LogCaptureFixture, *, emai
 
 def _sessions(tmp_path: Path, db_name: str) -> list[DashboardSession]:
     engine = create_engine(f"sqlite:///{tmp_path / db_name}")
-    with sessionmaker(bind=engine)() as session:
-        return list(session.execute(select(DashboardSession)).scalars().all())
+    try:
+        with sessionmaker(bind=engine)() as session:
+            return list(session.execute(select(DashboardSession)).scalars().all())
+    finally:
+        engine.dispose()
 
 
 def test_reset_round_trips_end_to_end(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
@@ -199,6 +202,7 @@ def test_an_expired_reset_token_is_refused(tmp_path: Path, caplog: pytest.LogCap
             text('UPDATE "user" SET password_reset_token_expires_at = :expired WHERE email = :email'),
             {"expired": (datetime.now(UTC) - timedelta(hours=1)).isoformat(), "email": "ada@example.com"},
         )
+    engine.dispose()
 
     with _client(tmp_path) as client:
         response = client.post(
@@ -223,6 +227,7 @@ def test_a_reset_token_is_refused_once_the_identity_is_deactivated(
     engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
     with engine.begin() as connection:
         connection.execute(text('UPDATE "user" SET is_active = 0 WHERE email = :email'), {"email": "ada@example.com"})
+    engine.dispose()
 
     with _client(tmp_path) as client:
         response = client.post(

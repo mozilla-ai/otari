@@ -114,6 +114,7 @@ def test_an_expired_token_is_refused(tmp_path: Path, caplog: pytest.LogCaptureFi
             text('UPDATE "user" SET email_verification_token_expires_at = :expired WHERE email = :email'),
             {"expired": (datetime.now(UTC) - timedelta(hours=1)).isoformat(), "email": "ada@example.com"},
         )
+    engine.dispose()
 
     with _client(tmp_path) as client:
         response = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token})
@@ -132,6 +133,7 @@ def test_a_token_is_refused_once_the_identity_is_deactivated(tmp_path: Path, cap
     engine = create_engine(f"sqlite:///{tmp_path / 'verification-test.db'}")
     with engine.begin() as connection:
         connection.execute(text('UPDATE "user" SET is_active = 0 WHERE email = :email'), {"email": "ada@example.com"})
+    engine.dispose()
 
     with _client(tmp_path) as client:
         response = client.post(f"{API_ROOT}/auth/verify-email", json={"token": token})

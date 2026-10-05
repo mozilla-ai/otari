@@ -69,8 +69,11 @@ def _claim(client: TestClient, *, email: str = EMAIL, password: str = PASSWORD) 
 
 def _sessions(tmp_path: Path) -> list[DashboardSession]:
     engine = create_engine(f"sqlite:///{tmp_path / 'password-test.db'}")
-    with sessionmaker(bind=engine)() as session:
-        return list(session.execute(select(DashboardSession)).scalars().all())
+    try:
+        with sessionmaker(bind=engine)() as session:
+            return list(session.execute(select(DashboardSession)).scalars().all())
+    finally:
+        engine.dispose()
 
 
 # =============================================================================
@@ -217,6 +220,7 @@ def test_the_email_conflict_detector_reads_sqlite_and_ignores_other_constraints(
     with pytest.raises(IntegrityError) as duplicate_id:
         with engine.begin() as connection:
             connection.execute(text("INSERT INTO \"user\" (id, email) VALUES (1, 'other@example.com')"))
+    engine.dispose()
     # A different constraint must keep its own error rather than being reported
     # to the caller as "that address is taken".
     assert not _is_email_conflict(duplicate_id.value)
@@ -270,6 +274,7 @@ def test_claiming_an_identity_that_already_has_an_address_stamps_it_verified(tmp
 
     with engine.begin() as connection:
         verified = connection.execute(text('SELECT email_verified_at FROM "user"')).scalar_one()
+    engine.dispose()
     assert verified is not None
 
 
@@ -302,6 +307,7 @@ def test_an_ordinary_password_change_does_not_stamp_the_address_verified(tmp_pat
 
     with engine.begin() as connection:
         verified = connection.execute(text('SELECT email_verified_at FROM "user"')).scalar_one()
+    engine.dispose()
     assert verified is None
 
 
@@ -478,6 +484,7 @@ def test_a_deactivated_identity_cannot_sign_in(tmp_path: Path) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'password-test.db'}")
     with engine.begin() as connection:
         connection.execute(text('UPDATE "user" SET is_active = 0'))
+    engine.dispose()
 
     with _client(tmp_path) as client:
         assert client.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 401
@@ -496,6 +503,7 @@ def test_an_unverified_identity_with_the_right_password_is_refused(tmp_path: Pat
     engine = create_engine(f"sqlite:///{tmp_path / 'password-test.db'}")
     with engine.begin() as connection:
         connection.execute(text('UPDATE "user" SET email_verified_at = NULL'))
+    engine.dispose()
 
     with _client(tmp_path) as client:
         response = client.post(f"{API_ROOT}/auth/session", json={"email": EMAIL, "password": PASSWORD})
@@ -559,6 +567,7 @@ def test_the_membership_context_reports_whether_a_password_claims_the_deployment
     engine = create_engine(f"sqlite:///{tmp_path / 'password-test.db'}")
     with engine.begin() as connection:
         connection.execute(text('UPDATE "user" SET email = :email'), {"email": EMAIL})
+    engine.dispose()
 
     with _client(tmp_path) as client:
         _sign_in_with_master_key(client)
@@ -685,6 +694,7 @@ def test_a_session_that_outlived_its_expiry_does_not_authenticate_a_change(tmp_p
             text("UPDATE dashboard_sessions SET expires_at = :past"),
             {"past": (datetime.now(UTC) - timedelta(hours=1)).isoformat(sep=" ")},
         )
+    engine.dispose()
 
     with _client(tmp_path) as client:
         response = client.put(f"{API_ROOT}/auth/password", json={"email": EMAIL, "new_password": PASSWORD})
@@ -822,6 +832,7 @@ def _add_a_password(tmp_path: Path, email: str, password: str) -> None:
             ),
             {"hashed": hash_password(password), "verified": datetime.now(UTC), "email": email},
         )
+    engine.dispose()
     assert updated.rowcount == 1
 
 
@@ -971,6 +982,7 @@ def test_an_identity_that_arrived_with_a_password_does_not_claim_the_deployment(
                     "now": datetime.now(UTC),
                 },
             )
+        engine.dispose()
 
         assert client.get(f"{API_ROOT}/bootstrap").json()["sign_in_methods"] == ["master_key", "password"]
 

@@ -68,6 +68,7 @@ def conn() -> Iterator[Connection]:
         for statement in _SCHEMA:
             connection.execute(text(statement))
         yield connection
+    engine.dispose()
 
 
 def _add_alias(conn: Connection, name: str, target: str, user_id: str | None = None) -> None:

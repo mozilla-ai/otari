@@ -319,6 +319,7 @@ def test_signup_without_mail_configured_is_refused_and_writes_nothing(tmp_path: 
             .mappings()
             .one()
         )
+    engine.dispose()
     assert row["hashed_password"] is None
     assert row["email_verification_token_hash"] is None
 
