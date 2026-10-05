@@ -871,7 +871,7 @@ async def create_message(
             # A no-op in hybrid, which reserves nothing locally. Kept so this exit already settles
             # if the gate ever covers a mode that does pre-debit the estimate.
             await release_reservation(ctx)
-            raise _anthropic_error(_ERR_INVALID_REQUEST, exc.message, status.HTTP_400_BAD_REQUEST) from exc
+            raise domain_error(_ADAPTER, exc) from exc
 
     tool_ctx = await prepare_gateway_tools(
         adapter=_ADAPTER,

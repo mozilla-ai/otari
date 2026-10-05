@@ -35,8 +35,10 @@ def test_what_a_container_field_asks_for_is_read_in_both_vocabularies() -> None:
 
 @pytest.mark.parametrize("container", ["otari_cntr_1", "container_abc", {"id": "cntr_1"}, {}, ""])
 def test_a_container_id_is_refused_on_a_managed_credential(container: object) -> None:
-    with pytest.raises(ContainerOnManagedCredentialError):
+    with pytest.raises(ContainerOnManagedCredentialError) as refused:
         check_container_on_credential(container, managed_credential=True)
+
+    assert refused.value.status_code == 400
 
 
 @pytest.mark.parametrize("container", ["auto", " AUTO ", {"type": "auto"}])
