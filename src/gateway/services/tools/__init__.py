@@ -5,7 +5,7 @@
 and ``ToolUseBudget`` is the per-request cap on one tool's gateway-run calls.
 ``Tool`` names the ``tools[].type`` values the gateway runs itself.
 ``claim_web_declarations``, ``extract_web_tools`` and ``admit_web_access`` admit a request's managed web tools,
-``admit_code_execution`` admits its code execution,
+``admit_code_execution`` admits its code execution, ``admit_mcp_servers`` its MCP servers,
 and ``apply_web_access_policy`` narrows its web access to what its workspace permits.
 ``web_search_max_results_baseline`` is how many search results a request gets when it names none.
 """
@@ -29,6 +29,7 @@ from gateway.services.tools._code_execution_declarations import (
     resolve_code_executor_preference,
 )
 from gateway.services.tools._declarations import Tool, extract_first_matching_tool
+from gateway.services.tools._mcp_admission import admit_mcp_servers
 from gateway.services.tools._native import (
     SERVER_TOOL_USE_ID_PREFIX,
     Dialect,
@@ -70,6 +71,7 @@ __all__ = [
     "ToolUseBudget",
     "WebAccessGrant",
     "admit_code_execution",
+    "admit_mcp_servers",
     "admit_web_access",
     "apply_web_access_policy",
     "check_web_tools_alone",

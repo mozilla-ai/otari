@@ -213,7 +213,7 @@ class WorkspaceMcpServersPublic(BaseModel):
 async def _validate_url(url: str, *, has_token: bool) -> None:
     """Run the same SSRF/TLS check a request-body MCP server faces, at write time.
 
-    Checked here as well as on the request path (`_validate_mcp_server_urls`)
+    Checked here as well as on the request path (`services/tools/_mcp_admission.py`)
     rather than instead of it: this catches an operator's mistake at the moment
     they make it, and the request-path check is what still holds when DNS moves
     under a URL that was safe when it was stored.

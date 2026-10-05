@@ -39,7 +39,6 @@ import json
 import re
 import time
 import uuid
-from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable, Sequence
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass, replace
@@ -122,6 +121,8 @@ from gateway.exceptions.tools_exceptions import (
     CodeExecutionPolicyResolutionFailedError,
     CodeExecutionPolicyResolutionFailure,
     CodeExecutionRefusedError,
+    McpServerConfigurationError,
+    McpServerDeclarationError,
     McpServerResolutionFailedError,
     WebAccessRefusedError,
     WebSearchInterceptedError,
@@ -242,6 +243,7 @@ from gateway.services.tools import (
     Dialect,
     ToolUseBudget,
     admit_code_execution,
+    admit_mcp_servers,
     admit_web_access,
     check_web_tools_alone,
     claim_web_declarations,
@@ -253,7 +255,6 @@ from gateway.services.tools import (
     web_search_intercept_enabled,
 )
 from gateway.services.upstream_redaction import redact_upstream_message
-from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.web_retrieval_backend import (
     WEB_FETCH_TOOL_NAME,
     WEB_SEARCH_TOOL_NAME,
@@ -330,12 +331,6 @@ def record_inline_cost_settlement(outcome: str) -> None:
 DB_UNAVAILABLE_DETAIL = "Database session unavailable"
 API_KEY_VALIDATION_FAILED_DETAIL = "API key validation failed"
 API_KEY_NO_USER_DETAIL = "API key has no associated user"
-MCP_SERVER_TOKEN_UNREADABLE_DETAIL = "A configured MCP server's authorization token could not be read"
-MCP_SERVER_URL_UNSAFE_DETAIL = "A configured MCP server's URL failed its safety check"
-MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL = (
-    "A request-supplied MCP server name collides with one of this workspace's stored servers"
-)
-MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL = "Configured MCP servers do not have unique names"
 NO_RESOLVABLE_PROVIDER_DETAIL = "Authorization service returned no resolvable provider"
 PROVIDER_ERROR_DETAIL = "LLM provider error"
 PROVIDER_TIMEOUT_DETAIL = "LLM provider timeout"
@@ -1534,11 +1529,6 @@ def policy_in_hybrid_mode_detail(model_selector: str) -> str:
     )
 
 
-def duplicate_mcp_server_name_detail(name: str) -> str:
-    """400 detail for two entries in the caller's own ``mcp_servers`` list sharing a name."""
-    return f"Duplicate MCP server name {name!r}. mcp_servers entries must have unique names."
-
-
 async def _compile_request_plan(
     *,
     adapter: FormatAdapter[Any, Any],
@@ -2561,60 +2551,6 @@ class ToolContext:
         )
 
 
-async def _validate_mcp_server_urls(
-    adapter: FormatAdapter[Any, Any],
-    mcp_servers: list[McpServerConfig],
-    *,
-    stored: bool = False,
-    workspace_id: uuid.UUID | None = None,
-) -> None:
-    """SSRF/scheme safety check for the MCP server URLs in this request.
-
-    Called once per source rather than over the merged list, because a failure
-    means different things for the two and the caller is owed a different
-    answer:
-
-    * A **request-body** server is the caller's own, so a rejection is their
-      malformed request and the reason travels back to them, naming the URL they
-      sent. That is the pre-existing behavior.
-    * A **stored** server (resolved from ``mcp_server_ids``) is workspace
-      configuration the caller can neither see nor fix, and the rejection names
-      the host and the range it resolved into. ``routes/workspace_mcp_servers``
-      gates even the *read* of those rows behind the master key, on the grounds
-      that they name the endpoints this gateway connects to, so echoing one to
-      any key holder gives away what that gate is there to withhold. It answers
-      the way an unreadable stored token already does: a fixed 500 detail, with
-      the reason and the workspace in the log, since a stored endpoint that
-      fails its check is the operator's problem and not the caller's.
-
-    Runs concurrently since each check does an independent DNS lookup;
-    ``asyncio.gather`` (default ``return_exceptions=False``) propagates the
-    first ``UnsafeURLError`` it sees as soon as it's raised. Note this does
-    *not* cancel the other in-flight checks: they keep running in the
-    background and are simply not awaited further; harmless here since
-    ``validate_mcp_url`` has no side effects beyond a DNS lookup.
-
-    This used to run synchronously inside a Pydantic ``model_validator`` at
-    request-body-parse time (see ``McpServerConfig``/``GuardrailConfig``
-    docstrings). It moved here because the DNS lookup must be awaited, and
-    Pydantic validators can't await. One observable side effect: a rejected
-    URL now surfaces as ``400`` (via ``adapter.error``) instead of Pydantic's
-    ``422``.
-    """
-    try:
-        await asyncio.gather(
-            *(
-                validate_mcp_url(server.url, has_authorization_token=bool(server.authorization_token))
-                for server in mcp_servers
-            )
-        )
-    except UnsafeURLError as exc:
-        if not stored:
-            raise adapter.error(400, str(exc), ErrorKind.INVALID_REQUEST) from exc
-        logger.error("Configured MCP server URL failed its safety check for workspace %s: %s", workspace_id, exc)
-        raise adapter.error(500, MCP_SERVER_URL_UNSAFE_DETAIL, ErrorKind.API) from exc
-
-
 def _overlay_mandate(merged: dict[str, GuardrailConfig], mandated: Iterable[GuardrailConfig]) -> None:
     """Fold one mandated layer over the effective guardrail set, in place.
 
@@ -2790,34 +2726,6 @@ async def _resolve_organization_guardrails(
         raise adapter.error(500, ORGANIZATION_GUARDRAIL_CREDENTIAL_UNREADABLE_DETAIL, ErrorKind.API) from exc
 
 
-async def _resolve_mcp_server_ids(
-    adapter: FormatAdapter[Any, Any],
-    ctx: RequestContext,
-    mcp_server_port: McpServerPort,
-    mcp_server_ids: list[uuid.UUID],
-) -> list[McpServerConfig]:
-    """Swap a request's ``mcp_server_ids`` for the configs they name.
-
-    The port answers from wherever this deployment keeps them.
-    The workspace comes off the key at authentication and never off a header.
-
-    Every deployment refuses an unknown ID with a 404, so the status a caller
-    sees does not change with the deployment it reached.
-    """
-    scope = McpServerScope(workspace_id=ctx.workspace_id, user_token=ctx.user_token)
-    try:
-        return await mcp_server_port.resolve_many(scope, mcp_server_ids)
-    except WorkspaceMcpServerNotFoundError as exc:
-        raise adapter.error(404, exc.message, ErrorKind.NOT_FOUND) from exc
-    except McpServerResolutionFailedError as exc:
-        raise adapter.error(exc.status_code, exc.message, ErrorKind.API) from exc
-    except (SecretBoxUnavailableError, SecretDecryptionError) as exc:
-        # The operator's problem, not the caller's, and the underlying message
-        # names the environment variable, so it stays in the log.
-        logger.error("MCP server token could not be decrypted for workspace %s: %s", ctx.workspace_id, exc)
-        raise adapter.error(500, MCP_SERVER_TOKEN_UNREADABLE_DETAIL, ErrorKind.API) from exc
-
-
 def _policy_failure_status(reason: WebSearchPolicyResolutionFailure) -> int:
     """The HTTP status a failed web search policy resolution renders as."""
     match reason:
@@ -2973,34 +2881,14 @@ async def _admit_mcp_servers(
     adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools, port: McpServerPort
 ) -> list[McpServerConfig] | None:
     """The MCP servers the request may reach: its own, then the stored ones its IDs name."""
-    mcp_servers = declared.mcp_servers
-    # Each source is checked on its own, because a stored server's refusal carries a fixed detail.
-    # A duplicate name collapses two servers into one client session, so each source refuses one.
-    inline_names: set[str] = set()
-    if mcp_servers:
-        # Before the URL check, which resolves DNS for each server.
-        for server in mcp_servers:
-            if server.name in inline_names:
-                raise adapter.error(400, duplicate_mcp_server_name_detail(server.name), ErrorKind.INVALID_REQUEST)
-            inline_names.add(server.name)
-        await _validate_mcp_server_urls(adapter, mcp_servers)
-    if declared.mcp_server_ids:
-        stored_servers = await _resolve_mcp_server_ids(adapter, ctx, port, declared.mcp_server_ids)
-        await _validate_mcp_server_urls(adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id)
-        stored_name_counts = Counter(server.name for server in stored_servers)
-        # Only a peer's answer can repeat a name. The caller cannot fix it, so the names go to the log.
-        if len(stored_name_counts) != len(stored_servers):
-            logger.error(
-                "Stored MCP servers do not have unique names for workspace %s: %s",
-                ctx.workspace_id,
-                sorted(name for name, count in stored_name_counts.items() if count > 1),
-            )
-            raise adapter.error(500, MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL, ErrorKind.API)
-        # Gotcha: the detail does not repeat a stored name, but a caller can still guess one by probing.
-        if inline_names & stored_name_counts.keys():
-            raise adapter.error(400, MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL, ErrorKind.INVALID_REQUEST)
-        mcp_servers = (mcp_servers or []) + stored_servers
-    return mcp_servers
+    scope = McpServerScope(workspace_id=ctx.workspace_id, user_token=ctx.user_token)
+    try:
+        return await admit_mcp_servers(declared.mcp_servers, declared.mcp_server_ids, port=port, scope=scope)
+    except (McpServerDeclarationError, WorkspaceMcpServerNotFoundError) as exc:
+        raise domain_error(adapter, exc) from exc
+    except (McpServerResolutionFailedError, McpServerConfigurationError) as exc:
+        # Not `domain_error`, which would hide a 5xx's fixed message behind a generic one.
+        raise adapter.error(exc.status_code, exc.message, ErrorKind.API) from exc
 
 
 def _admit_web_declarations(adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools) -> bool:

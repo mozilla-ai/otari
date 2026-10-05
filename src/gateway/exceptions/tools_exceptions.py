@@ -66,6 +66,16 @@ class ContainerOnManagedCredentialError(TenancyValidationError):
         )
 
 
+class McpServerDeclarationError(TenancyValidationError):
+    """A request's MCP servers cannot be reached as it declared them."""
+
+
+class McpServerConfigurationError(TenancyError):
+    """A workspace's stored MCP servers cannot be used, which is the operator's to fix and not the caller's."""
+
+    status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
 class CodeExecutionDeclarationError(TenancyValidationError):
     """A request's code execution declaration or container cannot be served as written."""
 

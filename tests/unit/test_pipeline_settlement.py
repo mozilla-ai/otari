@@ -83,6 +83,11 @@ from gateway.rate_limit import RateLimitInfo
 from gateway.services.budgets import ReservationHandle
 from gateway.services.pricing_service import ResolvedPricing
 from gateway.services.tool_usage import ToolUsageTally
+from gateway.services.tools._mcp_admission import (
+    MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL,
+    MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL,
+    duplicate_mcp_server_name_detail,
+)
 from gateway.services.tools._web_admission import WEB_FETCH_NOT_ENABLED_DETAIL
 
 ADAPTERS = [
@@ -2027,7 +2032,6 @@ async def test_invalid_web_declaration_is_rejected_before_policy_io(monkeypatch:
     organization_resolve = AsyncMock(return_value=[])
     mcp_resolve = AsyncMock(return_value=[])
     monkeypatch.setattr(pipeline, "_resolve_organization_guardrails", organization_resolve)
-    monkeypatch.setattr(pipeline, "_resolve_mcp_server_ids", mcp_resolve)
     ctx = _ctx(
         GatewayConfig(require_pricing=False, web_fetch_enabled=True),
         db=cast(Any, AsyncMock()),
@@ -2038,6 +2042,7 @@ async def test_invalid_web_declaration_is_rejected_before_policy_io(monkeypatch:
         await _call_prepare_gateway_tools(
             ctx,
             tools=[{"type": "otari_web_fetch", "headers": {}}],
+            mcp_server=_Servers(mcp_resolve),
             mcp_server_ids=[uuid.uuid4()],
         )
 
@@ -2384,7 +2389,7 @@ async def test_duplicate_mcp_server_name_against_a_stored_server_releases_reserv
     # Deliberately not asserting the stored server's name is IN the detail: it
     # must not be, since an inline caller would otherwise learn a stored
     # server's name by guessing it and reading the error (otari#792 review).
-    assert exc_info.value.detail == pipeline.MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL
+    assert exc_info.value.detail == MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL
     assert "tools" not in str(exc_info.value.detail)
     assert settlement.refunded == 1
 
@@ -2444,7 +2449,7 @@ async def test_an_inline_duplicate_is_refused_before_the_url_safety_check(
         await _call_prepare_gateway_tools(ctx, mcp_servers=dupes)
 
     assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == pipeline.duplicate_mcp_server_name_detail("tools")
+    assert exc_info.value.detail == duplicate_mcp_server_name_detail("tools")
     assert settlement.refunded == 1
 
 
@@ -2483,7 +2488,7 @@ async def test_stored_mcp_servers_sharing_a_name_are_an_operator_error(
     assert exc_info.value.status_code == 500
     # The caller can neither see nor fix a stored server, so the name stays in
     # the log, as it does for a stored URL that fails its safety check.
-    assert exc_info.value.detail == pipeline.MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL
+    assert exc_info.value.detail == MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL
     assert "tools" not in str(exc_info.value.detail)
     assert settlement.refunded == 1
 
