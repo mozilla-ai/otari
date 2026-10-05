@@ -32,9 +32,9 @@ history both record; the cookie is the half of the flow that neither does. See
 
 **What this route decides, and what it does not.** It proves the person holds
 the provider account. Who that makes them *here* is behind
-``IdentityProviderPort``: this build resolves the identity against its roster
-and refuses one it does not recognize, and an overlay binds a different policy
-without editing this file.
+``IdentityProviderPort``: this build answers by ``open_signup``, signing in an
+address an operator added and registering one nobody has only where signup is
+open, and an overlay binds a different policy without editing this file.
 """
 
 import uuid

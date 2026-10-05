@@ -36,7 +36,7 @@ from gateway.adapters.code_execution_policy_adapter import LocalCodeExecutionPol
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.file_storage_adapter import build_file_storage_port
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
-from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAdapter
+from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
 from gateway.adapters.mcp_server_adapter import LocalMcpServers, RemoteMcpServers
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
 from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
@@ -233,9 +233,20 @@ def _growth_signal_adapter(session: AsyncSession | None) -> GrowthSignalPort:
     return NullGrowthSignalAdapter(session)
 
 
-def _identity_provider_adapter(session: AsyncSession | None) -> IdentityProviderPort:
-    """Build the core ``IdentityProviderPort`` adapter for one request."""
-    return RosterIdentityProviderAdapter(session)
+def _identity_provider_adapter_factory(config: GatewayConfig | None) -> PortFactory[IdentityProviderPort]:
+    """The core ``IdentityProviderPort`` factory, closed over this app's signup posture.
+
+    Config as well as a session, because whether an address nobody holds may
+    register is a deployment setting (``open_signup``) and not a per-request
+    fact. A container built without config (the test helper's default) keeps the
+    closed posture, which is also the setting's own default: a build that cannot
+    say it is open is not one that should register strangers.
+    """
+
+    def factory(session: AsyncSession | None) -> IdentityProviderPort:
+        return DeploymentIdentityProviderAdapter(session, open_signup=bool(config and config.open_signup))
+
+    return factory
 
 
 def _provider_file_adapter(session: AsyncSession | None) -> ProviderFilePort:
@@ -447,11 +458,11 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
     # this deployment's own database, which is where it has always gone. An
     # overlay binds a scale-out store behind the same port.
     container.bind(TelemetryStoragePort, _telemetry_storage_adapter)
-    # OAuth sign-in: the base applies its roster policy, so a social identity
-    # signs in as an account an operator already added and never creates one.
-    # This one is a real implementation rather than a Null Object, because
-    # refusing an unknown identity is itself the base's answer.
-    container.bind(IdentityProviderPort, _identity_provider_adapter)
+    # OAuth sign-in: the base applies the posture `open_signup` already sets for
+    # the signup form, so one deployment answers an unknown address the same way
+    # whichever door it arrives at. This one is a real implementation rather than
+    # a Null Object, because registering or refusing is itself the base's answer.
+    container.bind(IdentityProviderPort, _identity_provider_adapter_factory(config))
     # API key format: the base mints the open-source shape and checks every
     # presented key against its own rows. A hosted overlay binds a format that
     # carries a region and a checksum, and routes a key minted elsewhere away.

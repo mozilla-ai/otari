@@ -32,10 +32,11 @@ from sqlmodel import col, select
 from gateway.api.routes import auth_oauth
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
-from gateway.models.tenancy import User
+from gateway.models.tenancy import Organization, User
 from gateway.services import oauth_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 from gateway.services.oauth_service import FLOW_COOKIE_NAME, FLOW_COOKIE_PATH, OAuthIdentity
+from gateway.services.tenancy.organization_service import OrganizationService
 
 ORIGIN = "http://testserver"
 PASSWORD = "a-real-password"  # pragma: allowlist secret
@@ -321,10 +322,9 @@ def test_a_second_change_from_that_session_asks_for_the_password_it_now_holds(
 def test_an_address_nobody_put_on_the_roster_is_refused_rather_than_provisioned(
     client: TestClient, oauth_configured: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The base build's roster policy, and the whole reason the decision sits
-    # behind IdentityProviderPort: social sign-in widens how a member
-    # authenticates, never who may. Provisioning here would let any holder of a
-    # Google account into a self-hosted gateway.
+    # The closed posture, which is the default: social sign-in widens how a
+    # member authenticates, never who may. Registering here would let any holder
+    # of a Google account into a self-hosted gateway.
     stub_exchange(monkeypatch, email="stranger@example.com")
 
     response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
@@ -332,6 +332,202 @@ def test_an_address_nobody_put_on_the_roster_is_refused_rather_than_provisioned(
     assert response.status_code == 401
     assert "not registered on this gateway" in response.json()["detail"]
     assert SESSION_COOKIE_NAME not in response.cookies
+
+
+# ---------- the open posture ----------
+
+
+@pytest.fixture
+def signup_open(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The multi-tenant posture, which a control plane serving many tenants runs."""
+    monkeypatch.setattr(test_config, "open_signup", True)
+
+
+def test_open_signup_registers_an_address_nobody_holds_and_signs_it_in(
+    client: TestClient,
+    oauth_configured: None,
+    signup_open: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    # The same answer `POST /auth/signup` already gives this address. Refusing
+    # here would leave one deployment registering a stranger who types a
+    # password and turning away the same stranger who proves the same address
+    # through Google.
+    stub_exchange(monkeypatch, email="stranger@example.com")
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+
+    assert response.status_code == 200, response.text
+    assert SESSION_COOKIE_NAME in response.cookies
+    identity = _identity(db_session, "stranger@example.com")
+    assert str(identity.id) == response.json()["user_id"]
+
+
+def test_the_registered_identity_lands_the_tenancy_the_signup_form_lands(
+    client: TestClient,
+    oauth_configured: None,
+    signup_open: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # An account that arrived through a provider is not a second kind of member,
+    # so nothing downstream has to ask how it got here. Read back through the
+    # session it just minted, which is what the dashboard does first.
+    stub_exchange(monkeypatch, email="stranger@example.com", full_name="A Stranger")
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+    assert response.status_code == 200, response.text
+
+    membership = client.get(f"{API_ROOT}/organizations/me")
+    assert membership.status_code == 200, membership.text
+    body = membership.json()
+    assert body["organization"]["id"] == response.json()["active_organization_id"]
+    assert body["role"] == "owner"
+    workspaces = client.get(f"{API_ROOT}/workspaces")
+    assert workspaces.status_code == 200, workspaces.text
+    assert workspaces.json()["data"], "the registered tenant has no workspace"
+
+
+def test_a_registered_identity_holds_the_provider_and_a_verified_address_and_no_password(
+    client: TestClient,
+    oauth_configured: None,
+    signup_open: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    # Verified because the provider proved the mailbox, and password-less
+    # because nobody set one: the registration path leaves both for the same
+    # block that stamps them on a rostered identity.
+    stub_exchange(monkeypatch, email="stranger@example.com", full_name="A Stranger")
+
+    assert client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"}).status_code == 200
+
+    identity = _identity(db_session, "stranger@example.com")
+    assert identity.oauth_provider == "google"
+    assert identity.email_verified_at is not None
+    assert identity.hashed_password is None
+    assert identity.full_name == "A Stranger"
+
+
+def test_a_second_sign_in_on_a_registered_address_founds_no_second_tenant(
+    client: TestClient,
+    oauth_configured: None,
+    signup_open: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub_exchange(monkeypatch, email="stranger@example.com")
+
+    first = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+    client.cookies.clear()
+    second = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c2", "state": "s"})
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert second.json()["user_id"] == first.json()["user_id"]
+    assert second.json()["active_organization_id"] == first.json()["active_organization_id"]
+
+
+def test_open_signup_registers_nobody_from_an_address_the_provider_would_not_verify(
+    client: TestClient,
+    oauth_configured: None,
+    signup_open: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    # The refusal that has to come first: registering from an unverified address
+    # would let anybody who can make a provider echo a string take an account on
+    # somebody else's mailbox.
+    stub_exchange(monkeypatch, email="stranger@example.com", email_verified=False)
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+
+    assert response.status_code == 401
+    assert db_session.execute(select(User).where(col(User.email) == "stranger@example.com")).first() is None
+
+
+def test_open_signup_does_not_register_a_deactivated_identity_afresh(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    signup_open: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    # Reading "no account I may sign in" as "no account" would hand somebody an
+    # operator shut out a brand-new tenant and undo the deactivation.
+    add_member(client, master_key_header, email="ada@example.com")
+    identity = _identity(db_session, "ada@example.com")
+    identity.is_active = False
+    db_session.add(identity)
+    db_session.commit()
+    stub_exchange(monkeypatch)
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+
+    assert response.status_code == 401
+    assert "not registered on this gateway" in response.json()["detail"]
+    identities = db_session.execute(select(User).where(col(User.email) == "ada@example.com")).scalars().all()
+    assert len(identities) == 1
+    assert not identities[0].is_active
+
+
+def test_a_lost_registration_race_signs_in_to_the_winner_rather_than_failing(
+    client: TestClient,
+    oauth_configured: None,
+    signup_open: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    """Two first sign-ins on one address: the loser takes the winner's account.
+
+    Sequenced rather than raced, because this suite runs on SQLite, which has no
+    row locks and whose driver opens no transaction for a bare SELECT. The
+    second connection commits the winning row in the window the adapter has
+    already read through, so the registration below hits the unique index on
+    ``user.email`` exactly as a real racer would. Without the savepoint the
+    ``IntegrityError`` would poison the transaction the session row is written
+    in, and a lost race would answer 500 instead of signing the person in.
+    """
+    organization_id = db_session.execute(select(Organization)).scalars().first()
+    assert organization_id is not None
+    original = OrganizationService.provision_signup_tenancy
+
+    async def _lose_the_race(self: OrganizationService, *, email: str, full_name: str | None) -> User:
+        # The winner, committed on another connection between this call's own
+        # read of the address and its insert.
+        db_session.add(User(email=email, is_active=True, active_organization_id=organization_id.id))
+        db_session.commit()
+        return await original(self, email=email, full_name=full_name)
+
+    monkeypatch.setattr(OrganizationService, "provision_signup_tenancy", _lose_the_race)
+    stub_exchange(monkeypatch, email="stranger@example.com")
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+
+    assert response.status_code == 200, response.text
+    assert SESSION_COOKIE_NAME in response.cookies
+    identities = db_session.execute(select(User).where(col(User.email) == "stranger@example.com")).scalars().all()
+    assert len(identities) == 1
+    assert response.json()["user_id"] == str(identities[0].id)
+
+
+def test_open_signup_claims_a_rostered_address_rather_than_founding_a_second_tenant(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    signup_open: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Registering widens who may sign in; it does not change what happens to
+    # somebody already here, who would otherwise be moved out of the
+    # organization that added them and into an empty one of their own.
+    user_id = add_member(client, master_key_header, email="ada@example.com")
+    stub_exchange(monkeypatch)
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["user_id"] == user_id
 
 
 def test_an_unverified_provider_address_is_refused_even_when_it_is_on_the_roster(
