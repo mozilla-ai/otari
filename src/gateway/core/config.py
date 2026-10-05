@@ -415,11 +415,16 @@ class RateLimitRule(BaseModel):
 
 
 def _canonical_model(rule_name: str, entry: str) -> str:
-    """``entry`` as ``instance:model``, the spelling an attempt is matched on; ``instance/model`` is accepted too."""
-    instance, sep, model = entry.strip().partition(":")
-    if not sep:
-        instance, sep, model = entry.strip().partition("/")
-    if not sep or not instance or not model:
+    """``entry`` as ``instance:model``, the spelling an attempt is matched on; ``instance/model`` is accepted too.
+
+    Split at whichever delimiter comes first, since a model id may contain the other one
+    (``together:meta-llama/Llama-3.3-70B``, ``ollama/llama3:latest``).
+    """
+    text = entry.strip()
+    positions = [index for index in (text.find(":"), text.find("/")) if index != -1]
+    split_at = min(positions) if positions else -1
+    instance, model = (text[:split_at], text[split_at + 1 :]) if split_at != -1 else ("", "")
+    if not instance or not model:
         msg = f"rate limit rule '{rule_name}' names '{entry}'; write a model as instance:model"
         raise ValueError(msg)
     return f"{instance}:{model}"

@@ -458,6 +458,31 @@ export function indexGroupOutcomes(
   )
 }
 
+// Groups whose served row is on this page while an earlier attempt's row is not,
+// which a page boundary does. Their outcome is known but incomplete: without the
+// earlier rows, the served row cannot say what it spilled over from.
+export function findGroupsMissingEarlierAttempts(
+  rows: readonly UsageEntry[],
+): string[] {
+  const positions = new Map<string, Set<number>>()
+  for (const row of rows) {
+    if (!row.request_group_id || row.attempt_position == null) continue
+    const seen = positions.get(row.request_group_id) ?? new Set<number>()
+    seen.add(row.attempt_position)
+    positions.set(row.request_group_id, seen)
+  }
+  return rows.flatMap((row) => {
+    const position = row.attempt_position ?? 1
+    if (row.status !== "success" || !row.request_group_id || position <= 1)
+      return []
+    const seen = positions.get(row.request_group_id) ?? new Set<number>()
+    for (let earlier = 1; earlier < position; earlier += 1) {
+      if (!seen.has(earlier)) return [row.request_group_id]
+    }
+    return []
+  })
+}
+
 // One line of prose for a row's place in its plan, replacing the "attempt 1/2 ·
 // default" shorthand: that read as a fraction of something unnamed, said nothing
 // about whether the attempt worked, and pointed at no other row. `outcome` is the

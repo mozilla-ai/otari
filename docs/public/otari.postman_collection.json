@@ -7210,7 +7210,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"name\": \"string\",\n  \"per\": \"deployment\"\n}"
+              "raw": "{\n  \"name\": \"keys\",\n  \"per\": \"key\",\n  \"rpm\": 600,\n  \"tpm\": 200000\n}"
             },
             "description": "Add a rule. It applies from the next request on this replica, and on every replica within 30 seconds.",
             "header": [
@@ -7243,7 +7243,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"lease_sec\": 0,\n  \"max_concurrent\": 0,\n  \"models\": [\n    \"string\"\n  ],\n  \"per\": \"deployment\",\n  \"rpm\": 0,\n  \"tpm\": 0\n}"
+              "raw": "{\n  \"rpm\": 1200\n}"
             },
             "description": "Change a stored rule. Requests it already counted stay counted. A config.yml rule answers 409.",
             "header": [

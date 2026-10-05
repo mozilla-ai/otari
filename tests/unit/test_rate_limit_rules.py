@@ -244,6 +244,13 @@ def test_a_per_model_rule_spells_each_model_as_instance_and_model() -> None:
         RateLimitRule(name="cap", per="model", models=["gpt-4o"], rpm=1)
 
 
+def test_a_slash_selector_with_a_tagged_model_splits_at_its_first_delimiter() -> None:
+    """``ollama/llama3:latest`` is instance ``ollama`` and model ``llama3:latest``, or the rule never matches."""
+    rule = RateLimitRule(name="cap", per="model", models=["ollama/llama3:latest"], rpm=1)
+
+    assert rule.models == ["ollama:llama3:latest"]
+
+
 @pytest.mark.asyncio
 async def test_admission_leaves_per_model_rules_to_the_attempt() -> None:
     rules = _rules(InMemoryRateLimitStore(), {"name": "cap", "per": "model", "models": ["openai:gpt-4o"], "rpm": 1})

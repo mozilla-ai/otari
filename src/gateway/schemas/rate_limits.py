@@ -11,6 +11,11 @@ from gateway.core.config import RateLimitRule
 class RateLimitRuleCreate(RateLimitRule):
     """A rule to add. The same fields, limits and validation as a ``rate_limits`` entry in config.yml."""
 
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": {"name": "keys", "per": "key", "rpm": 600, "tpm": 200000}},
+    )
+
 
 class RateLimitRuleUpdate(BaseModel):
     """Fields to change on a stored rule. An omitted field keeps its value; ``null`` clears a limit.
@@ -18,7 +23,7 @@ class RateLimitRuleUpdate(BaseModel):
     The merged rule must still set at least one of rpm, tpm or max_concurrent.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", json_schema_extra={"example": {"rpm": 1200}})
 
     per: Literal["deployment", "key", "user", "model"] | None = Field(
         default=None, description="What one count is shared by."

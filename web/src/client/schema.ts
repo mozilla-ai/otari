@@ -11854,6 +11854,12 @@ export interface components {
         /**
          * RateLimitRuleCreate
          * @description A rule to add. The same fields, limits and validation as a ``rate_limits`` entry in config.yml.
+         * @example {
+         *       "name": "keys",
+         *       "per": "key",
+         *       "rpm": 600,
+         *       "tpm": 200000
+         *     }
          */
         RateLimitRuleCreate: {
             /**
@@ -11953,6 +11959,9 @@ export interface components {
          * @description Fields to change on a stored rule. An omitted field keeps its value; ``null`` clears a limit.
          *
          *     The merged rule must still set at least one of rpm, tpm or max_concurrent.
+         * @example {
+         *       "rpm": 1200
+         *     }
          */
         RateLimitRuleUpdate: {
             /**

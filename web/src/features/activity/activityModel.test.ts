@@ -7,6 +7,7 @@ import {
   computeToolCost,
   describeAttempt,
   describeAttemptOutcome,
+  findGroupsMissingEarlierAttempts,
   formatElapsed,
   formatLatencyCell,
   formatToolUsage,
@@ -299,6 +300,28 @@ describe("computeToolCost", () => {
 
   it("answers zero for a row with no tool calls", () => {
     expect(computeToolCost(entry({ billing_meters: null }))).toBe(0)
+  })
+})
+
+describe("findGroupsMissingEarlierAttempts", () => {
+  it("names a served group whose skipped attempt fell on the next page", () => {
+    // Newest first, so a page that ends on the served row leaves its earlier
+    // attempt for the next page.
+    const page = [attempt({ id: "b", status: "success", attempt_position: 2 })]
+    expect(findGroupsMissingEarlierAttempts(page)).toEqual(["grp-1"])
+  })
+
+  it("leaves a group alone once every earlier attempt is on the page", () => {
+    const page = [
+      attempt({ id: "b", status: "success", attempt_position: 2 }),
+      attempt({ id: "a", status: "absorbed", attempt_position: 1 }),
+    ]
+    expect(findGroupsMissingEarlierAttempts(page)).toEqual([])
+  })
+
+  it("asks nothing of a request served on its first attempt", () => {
+    const page = [attempt({ id: "a", status: "success", attempt_position: 1 })]
+    expect(findGroupsMissingEarlierAttempts(page)).toEqual([])
   })
 })
 
