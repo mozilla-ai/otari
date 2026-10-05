@@ -1,4 +1,6 @@
 <p align="center">
+
+[![Deploy to Railyard](https://app.railyard.run/deploy/badge)](https://app.railyard.run/deploy?repo=https://github.com/mozilla-ai/otari)
   <img src="assets/otari-logo.svg" width="320" alt="Otari logo"/>
 </p>
 
