@@ -44,6 +44,7 @@ DELETE /api/v1/keys/{key_id}
 # Control plane: users
 POST /api/v1/users
 GET /api/v1/users
+GET /api/v1/users/count
 GET /api/v1/users/{user_id}
 PATCH /api/v1/users/{user_id}
 DELETE /api/v1/users/{user_id}

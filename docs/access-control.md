@@ -84,8 +84,8 @@ the master key or minting a key per end user. Mark a key with `is_service_key`
 on `POST` or `PATCH /api/v1/keys`; only a deployment operator can.
 
 A request on a service key names its end user the way any client names a user:
-the `user` field on `/v1/chat/completions` and `/v1/responses`, and
-`metadata.user_id` on `/v1/messages`. Otari then:
+the `user` field on `/v1/chat/completions`, `/v1/responses` and `/v1/search`,
+and `metadata.user_id` on `/v1/messages`. Otari then:
 
 - Bills the request to that end user, creating it on first use. An end user is
   a user record owned by the key's user, so a key can only bill end users of
@@ -97,7 +97,12 @@ the `user` field on `/v1/chat/completions` and `/v1/responses`, and
   period. Changing the key's setting affects end users created afterwards; to
   give one end user a different budget, update it on `/api/v1/users`, where it
   is listed with `parent_user_id` (the key's user) and `external_id` (the name
-  the service sent).
+  the service sent). `GET /api/v1/users?parent_user_id=...&external_id=...`
+  finds one end user by the name you sent, and `GET /api/v1/users/count` with
+  the same filters counts them.
+- Applies any `per: user` rate limit rule, which counts each end user on its
+  own. Narrow a rule to one key with `keys` to give that key's end users their
+  own limits (see [Rate limit rules](configuration.md#rate-limit-rules)).
 - Checks the key's own ceiling as well, so a scoped budget on the API key pools
   every end user behind it. The key's user's per-user budget is not checked for
   an end user's request; use the key's ceiling as the pool.
@@ -113,8 +118,8 @@ then admitted, and nothing else caps how many a key can create. Set a rate
 limit on a deployment that issues service keys, and send a stable id per end
 user rather than a per-session or per-request value.
 
-End users are supported on the three completion endpoints above. The other
-endpoints (embeddings, search, files, batches and the other pass-through
+End users are supported on the endpoints above. The other endpoints
+(embeddings, files, batches and the other pass-through
 routes) treat a service key as an ordinary key, so a `user` naming someone else
 is handled by the `reject_user_mismatch` setting there. Hybrid mode resolves
 users on the platform and does not support service keys.

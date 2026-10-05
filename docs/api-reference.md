@@ -188,6 +188,10 @@ search tool directly. This is separate from `otari_web_search`, which lets a
 model request searches during a completion. Both are described in
 [Built-in tools](tools.md).
 
+A service key's `user` field names one of its end users here as it does on chat
+completions: the search is billed to that end user, under the key's end-user
+budget, and counted by `rate_limits`.
+
 Search-tool management lives under `/api/v1/search-tools`. The generated OpenAPI
 document describes the supported providers, filters, and management schemas.
 

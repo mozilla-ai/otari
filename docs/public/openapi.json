@@ -13072,6 +13072,21 @@
           "tpm": 200000
         },
         "properties": {
+          "keys": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The API key ids this rule applies to; a request made with any other key, or with none, is not counted. Unset applies the rule to every request. Not accepted on a per: model rule.",
+            "title": "Keys"
+          },
           "lease_sec": {
             "default": 900.0,
             "description": "How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.",
@@ -13162,6 +13177,21 @@
         "additionalProperties": false,
         "description": "One rule in effect, and where it is defined.",
         "properties": {
+          "keys": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The API key ids this rule applies to; a request made with any other key, or with none, is not counted. Unset applies the rule to every request. Not accepted on a per: model rule.",
+            "title": "Keys"
+          },
           "lease_sec": {
             "default": 900.0,
             "description": "How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.",
@@ -13278,6 +13308,21 @@
           "rpm": 1200
         },
         "properties": {
+          "keys": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The API key ids the rule is narrowed to; null covers every key.",
+            "title": "Keys"
+          },
           "lease_sec": {
             "anyOf": [
               {
@@ -18243,6 +18288,21 @@
           "avg_latency_ms"
         ],
         "title": "UsageTotals",
+        "type": "object"
+      },
+      "UserCount": {
+        "description": "How many users match a filter.",
+        "properties": {
+          "total": {
+            "description": "Number of users matching the filters",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total"
+        ],
+        "title": "UserCount",
         "type": "object"
       },
       "UserResponse": {
@@ -32958,7 +33018,7 @@
     },
     "/api/v1/search": {
       "post": {
-        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
+        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use with the key's end-user budget, and is billed and\n  rate limited as that end user, as on chat completions.",
         "operationId": "search-create_search",
         "requestBody": {
           "content": {
@@ -33253,7 +33313,7 @@
     },
     "/api/v1/search/{search_tool_name}": {
       "post": {
-        "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /api/v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
+        "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /api/v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use with the key's end-user budget, and is billed and\n  rate limited as that end user, as on chat completions.",
         "operationId": "search-create_search_for_tool",
         "parameters": [
           {
@@ -35576,7 +35636,7 @@
     },
     "/api/v1/users": {
       "get": {
-        "description": "List the users the caller's organization can name, with pagination.\n\n``users`` is deployment-global and has no organization column, so which of\nthem this organization can name is derived: a key, usage, or a roster row\nputs one in reach, and one reached from nowhere at all (the shared\n``default`` owner, or a user just created) is shared rather than hidden.\nSee ``repositories.users_repository.in_organization``.",
+        "description": "List the users the caller's organization can name, with pagination.\n\n``users`` is deployment-global and has no organization column, so which of\nthem this organization can name is derived: a key, usage, or a roster row\nputs one in reach, and one reached from nowhere at all (the shared\n``default`` owner, or a user just created) is shared rather than hidden.\nSee ``repositories.users_repository.in_organization``.\n\n``parent_user_id`` with ``external_id`` finds the end user a service key\ncreated for a ``user`` value, which is how a caller maps its own ids to\nOtari's.",
         "operationId": "users-list_users",
         "parameters": [
           {
@@ -35600,6 +35660,60 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Only the end users of this owner: the user a service key belongs to.",
+            "in": "query",
+            "name": "parent_user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the end users of this owner: the user a service key belongs to.",
+              "title": "Parent User Id"
+            }
+          },
+          {
+            "description": "Only the end user a service key names with this `user` value.",
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the end user a service key names with this `user` value.",
+              "title": "External Id"
+            }
+          },
+          {
+            "description": "Only blocked users (true) or only unblocked ones (false).",
+            "in": "query",
+            "name": "blocked",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only blocked users (true) or only unblocked ones (false).",
+              "title": "Blocked"
             }
           }
         ],
@@ -35686,6 +35800,102 @@
           }
         ],
         "summary": "Create User",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/v1/users/count": {
+      "get": {
+        "description": "Number of users ``GET /api/v1/users`` would list with the same filters.",
+        "operationId": "users-count_users",
+        "parameters": [
+          {
+            "description": "Only the end users of this owner: the user a service key belongs to.",
+            "in": "query",
+            "name": "parent_user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the end users of this owner: the user a service key belongs to.",
+              "title": "Parent User Id"
+            }
+          },
+          {
+            "description": "Only the end user a service key names with this `user` value.",
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the end user a service key names with this `user` value.",
+              "title": "External Id"
+            }
+          },
+          {
+            "description": "Only blocked users (true) or only unblocked ones (false).",
+            "in": "query",
+            "name": "blocked",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only blocked users (true) or only unblocked ones (false).",
+              "title": "Blocked"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserCount"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Count Users",
         "tags": [
           "users"
         ]

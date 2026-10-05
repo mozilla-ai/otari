@@ -4194,11 +4194,14 @@ export interface paths {
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and may name any existing user.
-         *     - API key: usage and spend always bind to the key's own user. A ``user``
-         *       field naming a different user is rejected with 403 (or ignored, when the
-         *       key's own ``reject_user_mismatch`` is false, or the deployment-wide
-         *       setting is disabled and the key does not override it); it is never billed
-         *       to that user.
+         *     - API key: usage and spend bind to the key's own user. A ``user`` field
+         *       naming a different user is rejected with 403 (or ignored, when the key's
+         *       own ``reject_user_mismatch`` is false, or the deployment-wide setting is
+         *       disabled and the key does not override it); it is never billed to that
+         *       user.
+         *     - Service key: a ``user`` field names one of the key owner's end users,
+         *       created on first use with the key's end-user budget, and is billed and
+         *       rate limited as that end user, as on chat completions.
          */
         post: operations["search-create_search"];
         delete?: never;
@@ -4334,11 +4337,14 @@ export interface paths {
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and may name any existing user.
-         *     - API key: usage and spend always bind to the key's own user. A ``user``
-         *       field naming a different user is rejected with 403 (or ignored, when the
-         *       key's own ``reject_user_mismatch`` is false, or the deployment-wide
-         *       setting is disabled and the key does not override it); it is never billed
-         *       to that user.
+         *     - API key: usage and spend bind to the key's own user. A ``user`` field
+         *       naming a different user is rejected with 403 (or ignored, when the key's
+         *       own ``reject_user_mismatch`` is false, or the deployment-wide setting is
+         *       disabled and the key does not override it); it is never billed to that
+         *       user.
+         *     - Service key: a ``user`` field names one of the key owner's end users,
+         *       created on first use with the key's end-user budget, and is billed and
+         *       rate limited as that end user, as on chat completions.
          */
         post: operations["search-create_search_for_tool"];
         delete?: never;
@@ -4947,6 +4953,10 @@ export interface paths {
          *     puts one in reach, and one reached from nowhere at all (the shared
          *     ``default`` owner, or a user just created) is shared rather than hidden.
          *     See ``repositories.users_repository.in_organization``.
+         *
+         *     ``parent_user_id`` with ``external_id`` finds the end user a service key
+         *     created for a ``user`` value, which is how a caller maps its own ids to
+         *     Otari's.
          */
         get: operations["users-list_users"];
         put?: never;
@@ -4955,6 +4965,26 @@ export interface paths {
          * @description Create a new user.
          */
         post: operations["users-create_user"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count Users
+         * @description Number of users ``GET /api/v1/users`` would list with the same filters.
+         */
+        get: operations["users-count_users"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -11863,6 +11893,11 @@ export interface components {
          */
         RateLimitRuleCreate: {
             /**
+             * Keys
+             * @description The API key ids this rule applies to; a request made with any other key, or with none, is not counted. Unset applies the rule to every request. Not accepted on a per: model rule.
+             */
+            keys?: string[] | null;
+            /**
              * Lease Sec
              * @description How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.
              * @default 900
@@ -11905,6 +11940,11 @@ export interface components {
          * @description One rule in effect, and where it is defined.
          */
         RateLimitRulePublic: {
+            /**
+             * Keys
+             * @description The API key ids this rule applies to; a request made with any other key, or with none, is not counted. Unset applies the rule to every request. Not accepted on a per: model rule.
+             */
+            keys?: string[] | null;
             /**
              * Lease Sec
              * @description How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.
@@ -11964,6 +12004,11 @@ export interface components {
          *     }
          */
         RateLimitRuleUpdate: {
+            /**
+             * Keys
+             * @description The API key ids the rule is narrowed to; null covers every key.
+             */
+            keys?: string[] | null;
             /**
              * Lease Sec
              * @description How long a max_concurrent slot is held at most.
@@ -13896,6 +13941,17 @@ export interface components {
              * @default 0
              */
             unpriced_requests: number;
+        };
+        /**
+         * UserCount
+         * @description How many users match a filter.
+         */
+        UserCount: {
+            /**
+             * Total
+             * @description Number of users matching the filters
+             */
+            total: number;
         };
         /**
          * UserResponse
@@ -22357,6 +22413,12 @@ export interface operations {
             query?: {
                 skip?: number;
                 limit?: number;
+                /** @description Only the end users of this owner: the user a service key belongs to. */
+                parent_user_id?: string | null;
+                /** @description Only the end user a service key names with this `user` value. */
+                external_id?: string | null;
+                /** @description Only blocked users (true) or only unblocked ones (false). */
+                blocked?: boolean | null;
             };
             header?: never;
             path?: never;
@@ -22404,6 +22466,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "users-count_users": {
+        parameters: {
+            query?: {
+                /** @description Only the end users of this owner: the user a service key belongs to. */
+                parent_user_id?: string | null;
+                /** @description Only the end user a service key names with this `user` value. */
+                external_id?: string | null;
+                /** @description Only blocked users (true) or only unblocked ones (false). */
+                blocked?: boolean | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserCount"];
                 };
             };
             /** @description Validation Error */

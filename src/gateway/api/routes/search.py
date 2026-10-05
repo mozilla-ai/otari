@@ -49,13 +49,14 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
+from gateway.api.deps import get_budget_service, get_config, get_db, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._passthrough import (
     PASSTHROUGH_PROVIDER_ERROR_DETAIL,
     resolve_passthrough_user_id,
 )
 from gateway.api.routes._pipeline import (
     _elapsed_ms,
+    _names_end_user,
     failure_status_code,
     log_gateway_rejection,
     rate_limit_headers,
@@ -67,8 +68,14 @@ from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.usage import UsageLog
-from gateway.rate_limit import check_rate_limit
-from gateway.services.budgets import BudgetScopeRequest, reconcile_reservation, refund_reservation, reserve_budget
+from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit
+from gateway.services.budgets import (
+    BudgetScopeRequest,
+    BudgetService,
+    reconcile_reservation,
+    refund_reservation,
+    reserve_budget,
+)
 from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
 from gateway.services.pricing_service import find_model_pricing, flat_request_cost
@@ -162,6 +169,7 @@ async def create_search(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
+    budget_service: Annotated[BudgetService, Depends(get_budget_service)],
 ) -> SearchResponse:
     """Run a search against a configured search tool.
 
@@ -170,11 +178,14 @@ async def create_search(
 
     Authentication modes:
     - Master key: the ``user`` field is required and may name any existing user.
-    - API key: usage and spend always bind to the key's own user. A ``user``
-      field naming a different user is rejected with 403 (or ignored, when the
-      key's own ``reject_user_mismatch`` is false, or the deployment-wide
-      setting is disabled and the key does not override it); it is never billed
-      to that user.
+    - API key: usage and spend bind to the key's own user. A ``user`` field
+      naming a different user is rejected with 403 (or ignored, when the key's
+      own ``reject_user_mismatch`` is false, or the deployment-wide setting is
+      disabled and the key does not override it); it is never billed to that
+      user.
+    - Service key: a ``user`` field names one of the key owner's end users,
+      created on first use with the key's end-user budget, and is billed and
+      rate limited as that end user, as on chat completions.
     """
     return await _dispatch_search(
         raw_request=raw_request,
@@ -185,6 +196,7 @@ async def create_search(
         db=db,
         config=config,
         log_writer=log_writer,
+        budget_service=budget_service,
     )
 
 
@@ -198,6 +210,7 @@ async def create_search_for_tool(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
+    budget_service: Annotated[BudgetService, Depends(get_budget_service)],
 ) -> SearchResponse:
     """Run a search against the search tool named in the path.
 
@@ -207,11 +220,14 @@ async def create_search_for_tool(
 
     Authentication modes:
     - Master key: the ``user`` field is required and may name any existing user.
-    - API key: usage and spend always bind to the key's own user. A ``user``
-      field naming a different user is rejected with 403 (or ignored, when the
-      key's own ``reject_user_mismatch`` is false, or the deployment-wide
-      setting is disabled and the key does not override it); it is never billed
-      to that user.
+    - API key: usage and spend bind to the key's own user. A ``user`` field
+      naming a different user is rejected with 403 (or ignored, when the key's
+      own ``reject_user_mismatch`` is false, or the deployment-wide setting is
+      disabled and the key does not override it); it is never billed to that
+      user.
+    - Service key: a ``user`` field names one of the key owner's end users,
+      created on first use with the key's end-user budget, and is billed and
+      rate limited as that end user, as on chat completions.
     """
     return await _dispatch_search(
         raw_request=raw_request,
@@ -222,6 +238,7 @@ async def create_search_for_tool(
         db=db,
         config=config,
         log_writer=log_writer,
+        budget_service=budget_service,
     )
 
 
@@ -235,6 +252,7 @@ async def _dispatch_search(
     db: AsyncSession,
     config: GatewayConfig,
     log_writer: LogWriter,
+    budget_service: BudgetService,
 ) -> SearchResponse:
     """Run the search request scaffold: reserve, call, log, settle.
 
@@ -250,8 +268,14 @@ async def _dispatch_search(
     # into users.spend, matching every other billed endpoint.
     budget_exempt = api_key is not None and api_key.exclude_from_budget
 
-    user_id = resolve_passthrough_user_id(auth_result, request.user, reject_mismatch=config.reject_user_mismatch)
-    rate_limit_info = await check_rate_limit(raw_request, user_id)
+    if api_key is not None and request.user and _names_end_user(api_key, request.user):
+        # As on chat: the owner's own rpm is checked before an end user is created for it.
+        rate_limit_info = await check_rate_limit(raw_request, str(api_key.user_id))
+        user_id = await budget_service.resolve_end_user(api_key=api_key, external_id=request.user)
+    else:
+        user_id = resolve_passthrough_user_id(auth_result, request.user, reject_mismatch=config.reject_user_mismatch)
+        rate_limit_info = await check_rate_limit(raw_request, user_id)
+    await admit_rate_limit_rules(raw_request, key_id=api_key_id, user_id=user_id, estimated_tokens=0)
 
     async def log_rejection(detail: str, *, row_model: str, row_provider: str | None, status_code: int) -> None:
         """Record a search the gateway itself refused.
