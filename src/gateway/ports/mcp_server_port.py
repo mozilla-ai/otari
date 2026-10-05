@@ -40,6 +40,7 @@ class McpServerPort(Protocol):
         Raises:
             WorkspaceMcpServerNotFoundError: an ID names no server this scope reaches.
             McpServerResolutionFailedError: the answer could not be read.
+            ControlPlaneError: a peer that holds the servers refused or could not answer.
         """
         ...
 
@@ -50,6 +51,7 @@ class McpServerPort(Protocol):
 
         Raises:
             McpServerResolutionFailedError: the answer could not be read.
+            ControlPlaneError: a peer that holds the servers refused or could not answer.
         """
         ...
 
