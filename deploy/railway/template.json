@@ -7,14 +7,15 @@
     "otari": {
       "name": "otari",
       "source": {
-        "image": "docker.io/mzdotai/otari:0.14.1"
+        "image": "mzdotai/otari:0.14.1"
       },
       "deploy": {
         "startCommand": null,
         "healthcheckPath": "/api/v1/health"
       },
       "networking": {
-        "targetPort": 8000
+        "targetPort": 8000,
+        "publicDomain": true
       },
       "variables": {
         "OTARI_DATABASE_URL": {
@@ -64,15 +65,21 @@
       "source": {
         "image": "ghcr.io/railwayapp-templates/postgres-ssl:18"
       },
-      "_comment": "Railway managed Postgres. Exposes DATABASE_URL (a composed reference like postgresql://${{POSTGRES_USER}}:${{POSTGRES_PASSWORD}}@${{RAILWAY_PRIVATE_DOMAIN}}:5432/${{POSTGRES_DB}}), which the otari service reads as ${{Postgres.DATABASE_URL}}. The variables below carry the standard postgres-ssl defaults so a deploying user is never prompted for them.",
+      "_comment": "Railway managed Postgres. The otari service reads DATABASE_URL as ${{Postgres.DATABASE_URL}}. The variables below carry the standard postgres-ssl defaults so a deploying user is never prompted for them; Railway refuses to publish a template while any of them lacks a description.",
       "variables": {
-        "PGDATA": { "defaultValue": "/var/lib/postgresql/data/pgdata", "isOptional": false },
-        "PGPORT": { "defaultValue": "5432", "isOptional": false },
-        "POSTGRES_DB": { "defaultValue": "railway", "isOptional": false },
-        "POSTGRES_USER": { "defaultValue": "postgres", "isOptional": false },
-        "POSTGRES_PASSWORD": { "defaultValue": "${{secret(32)}}", "isOptional": false },
-        "SSL_CERT_DAYS": { "defaultValue": "820", "isOptional": false },
-        "RAILWAY_DEPLOYMENT_DRAINING_SECONDS": { "defaultValue": "60", "isOptional": false }
+        "PGDATA": { "defaultValue": "/var/lib/postgresql/data/pgdata", "isOptional": false, "description": "Where Postgres keeps its data files on the volume. Leave as-is." },
+        "PGHOST": { "defaultValue": "${{RAILWAY_PRIVATE_DOMAIN}}", "isOptional": false, "description": "Private host name of this database. Set by Railway; leave as-is." },
+        "PGPORT": { "defaultValue": "5432", "isOptional": false, "description": "Port Postgres listens on. Leave as-is." },
+        "PGUSER": { "defaultValue": "${{POSTGRES_USER}}", "isOptional": false, "description": "Database user, copied from POSTGRES_USER. Leave as-is." },
+        "PGDATABASE": { "defaultValue": "${{POSTGRES_DB}}", "isOptional": false, "description": "Database name, copied from POSTGRES_DB. Leave as-is." },
+        "PGPASSWORD": { "defaultValue": "${{POSTGRES_PASSWORD}}", "isOptional": false, "description": "Database password, copied from POSTGRES_PASSWORD. Leave as-is." },
+        "POSTGRES_DB": { "defaultValue": "railway", "isOptional": false, "description": "Name of the database Otari uses." },
+        "POSTGRES_USER": { "defaultValue": "postgres", "isOptional": false, "description": "Name of the database superuser." },
+        "POSTGRES_PASSWORD": { "defaultValue": "${{ secret(32, \"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\") }}", "isOptional": false, "description": "Database password. Generated on deploy; leave as-is." },
+        "DATABASE_URL": { "defaultValue": "postgresql://${{PGUSER}}:${{POSTGRES_PASSWORD}}@${{RAILWAY_PRIVATE_DOMAIN}}:5432/${{PGDATABASE}}", "isOptional": false, "description": "Private connection string. Otari reads it as OTARI_DATABASE_URL; leave as-is." },
+        "DATABASE_PUBLIC_URL": { "defaultValue": "postgresql://${{PGUSER}}:${{POSTGRES_PASSWORD}}@${{RAILWAY_TCP_PROXY_DOMAIN}}:${{RAILWAY_TCP_PROXY_PORT}}/${{PGDATABASE}}", "isOptional": false, "description": "Public connection string through the TCP proxy, for backups or pg_dump. Leave as-is." },
+        "SSL_CERT_DAYS": { "defaultValue": "820", "isOptional": false, "description": "How many days the database's self-signed SSL certificate is valid." },
+        "RAILWAY_DEPLOYMENT_DRAINING_SECONDS": { "defaultValue": "60", "isOptional": false, "description": "Seconds Postgres gets to shut down cleanly on a redeploy." }
       }
     }
   }

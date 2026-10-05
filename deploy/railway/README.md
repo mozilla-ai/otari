@@ -13,7 +13,7 @@ The template stands up two services:
 
 | Service | Source | Notes |
 | --- | --- | --- |
-| **otari** | `docker.io/mzdotai/otari:0.14.1` | Target port `8000`, healthcheck `/api/v1/health`. Pulls the published image, pinned to a release; builds nothing. See [Upgrade](#upgrade). |
+| **otari** | `mzdotai/otari:0.14.1` (Docker Hub) | Target port `8000` with a public domain, healthcheck `/api/v1/health`. Pulls the published image, pinned to a release; builds nothing. See [Upgrade](#upgrade). |
 | **Postgres** | Railway managed | Durable storage for keys, users, budgets, and usage. |
 
 Otari is a good fit for a one-click deploy: the app is stateless, its only
@@ -66,11 +66,10 @@ Notes:
 ## Deploy
 
 1. Click **Deploy on Railway** above.
-2. Deploy. The master key and secret key are generated for you. Railway
-   provisions Postgres, pulls the Otari image, runs migrations on startup, and
-   bootstraps a first-use API key.
-3. Generate a public domain for the otari service (Settings → Networking).
-4. Open that domain, sign in with the master key (from the Variables tab), and
+2. Deploy. The keys are generated for you. Railway provisions Postgres, pulls
+   the Otari image, gives the otari service a public `*.up.railway.app` domain,
+   runs migrations on startup, and bootstraps a first-use API key.
+3. Open that domain (Settings → Networking), sign in with the master key (from the Variables tab), and
    add at least one provider on the Providers page.
 
 ## Verify
@@ -142,7 +141,8 @@ When changing the template:
    throwaway project and confirm a real `/api/v1/chat/completions` round-trip plus
    that the bootstrapped key works.
 2. Update [`template.json`](template.json) in the same change so the snapshot
-   matches the live config (services, variables, defaults, target port).
+   matches the live config (services, variables with their descriptions, defaults,
+   target port, public domain).
    The README on Railway is [`listing.md`](listing.md), not this file: Railway
    requires its own fixed sections and absolute links, and it drops anything in
    angle brackets as HTML. Edit `listing.md`, then paste it into the template
