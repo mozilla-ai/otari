@@ -5801,7 +5801,7 @@
         "type": "object"
       },
       "ExecutionState": {
-        "description": "Whether the remote tool may have run (R-ERR-2).\n\nA retry-safety classification, not a description of how the HTTP request\nwent. ``NOT_STARTED`` is Otari saying it knows the tool did not run;\n``OUTCOME_UNKNOWN`` is Otari saying it cannot know, which is the only honest\nanswer once the transport has begun writing ``tools/call``.",
+        "description": "Whether the remote tool may have run.\n\nA retry-safety classification, not a description of how the HTTP request\nwent. ``NOT_STARTED`` is Otari saying it knows the tool did not run;\n``OUTCOME_UNKNOWN`` is Otari saying it cannot know, which is the only honest\nanswer once the transport has begun writing ``tools/call``.",
         "enum": [
           "not_started",
           "outcome_unknown",
@@ -7461,7 +7461,7 @@
         "type": "object"
       },
       "McpErrorBody": {
-        "description": "The one error shape both stored-server endpoints return (R-ERR-1).",
+        "description": "The one error shape both stored-server endpoints return.",
         "properties": {
           "code": {
             "title": "Code",
@@ -7490,7 +7490,7 @@
       },
       "McpExecuteRequest": {
         "additionalProperties": false,
-        "description": "One stored server, and the exact call the application authorized.\n\nNo inline server fields (R-REQ-4): a caller registers a remote MCP server\nthrough the control plane once and refers to it by id afterwards, which\nkeeps URLs, credentials, revocation and allowlist policy on Otari's side of\nthe boundary instead of in every request.\n\nExtras are forbidden rather than ignored, so a caller still sending the old\ninline ``server`` block is told its configuration was not used instead of\nwatching Otari quietly execute against a different server than the one it\nnamed.",
+        "description": "One stored server, and the exact call the application authorized.\n\nNo inline server fields: a caller registers a remote MCP server\nthrough the control plane once and refers to it by id afterwards, which\nkeeps URLs, credentials, revocation and allowlist policy on Otari's side of\nthe boundary instead of in every request.\n\nExtras are forbidden rather than ignored, so a caller still sending the old\ninline ``server`` block is told its configuration was not used instead of\nwatching Otari quietly execute against a different server than the one it\nnamed.",
         "properties": {
           "arguments": {
             "additionalProperties": true,
@@ -7593,7 +7593,7 @@
         "type": "object"
       },
       "McpToolDefinition": {
-        "description": "One live tool a caller-orchestrated application may expose to its model.\n\n``annotations`` is the remote server's own metadata, passed through as\nuntrusted data. Otari never turns ``readOnlyHint`` into an authorization\ndecision (R-RISK-1); each application owns its risk policy, and a server\ncannot waive an application's approval gate by labeling itself read-only.",
+        "description": "One live tool a caller-orchestrated application may expose to its model.\n\n``annotations`` is the remote server's own metadata, passed through as\nuntrusted data. Otari never turns ``readOnlyHint`` into an authorization\ndecision; each application owns its risk policy, and a server\ncannot waive an application's approval gate by labeling itself read-only.",
         "properties": {
           "annotations": {
             "anyOf": [
@@ -7640,7 +7640,7 @@
         "type": "object"
       },
       "McpToolWarning": {
-        "description": "One tool that was omitted, and the code that omitted it (R-SCHEMA-3).",
+        "description": "One tool that was omitted, and the code that omitted it.",
         "properties": {
           "code": {
             "title": "Code",
@@ -7659,7 +7659,7 @@
         "type": "object"
       },
       "McpToolsResponse": {
-        "description": "The authorized catalog for one stored server.\n\nCarries no server URL, no credential, and no allowlist entry that the live\ncatalog did not return (R-DISC-2). ``server_revision`` is what an\napplication persists with a proposed call and sends back to\n``/api/v1/mcp/execute``, so a stored-configuration change between the two is\nrefused rather than executed.",
+        "description": "The authorized catalog for one stored server.\n\nCarries no server URL, no credential, and no allowlist entry that the live\ncatalog did not return. ``server_revision`` is what an\napplication persists with a proposed call and sends back to\n``/api/v1/mcp/execute``, so a stored-configuration change between the two is\nrefused rather than executed.",
         "properties": {
           "server_id": {
             "format": "uuid",

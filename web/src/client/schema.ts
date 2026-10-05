@@ -8244,7 +8244,7 @@ export interface components {
         };
         /**
          * ExecutionState
-         * @description Whether the remote tool may have run (R-ERR-2).
+         * @description Whether the remote tool may have run.
          *
          *     A retry-safety classification, not a description of how the HTTP request
          *     went. ``NOT_STARTED`` is Otari saying it knows the tool did not run;
@@ -9092,7 +9092,7 @@ export interface components {
         };
         /**
          * McpErrorBody
-         * @description The one error shape both stored-server endpoints return (R-ERR-1).
+         * @description The one error shape both stored-server endpoints return.
          */
         McpErrorBody: {
             /** Code */
@@ -9107,7 +9107,7 @@ export interface components {
          * McpExecuteRequest
          * @description One stored server, and the exact call the application authorized.
          *
-         *     No inline server fields (R-REQ-4): a caller registers a remote MCP server
+         *     No inline server fields: a caller registers a remote MCP server
          *     through the control plane once and refers to it by id afterwards, which
          *     keeps URLs, credentials, revocation and allowlist policy on Otari's side of
          *     the boundary instead of in every request.
@@ -9180,7 +9180,7 @@ export interface components {
          *
          *     ``annotations`` is the remote server's own metadata, passed through as
          *     untrusted data. Otari never turns ``readOnlyHint`` into an authorization
-         *     decision (R-RISK-1); each application owns its risk policy, and a server
+         *     decision; each application owns its risk policy, and a server
          *     cannot waive an application's approval gate by labeling itself read-only.
          */
         McpToolDefinition: {
@@ -9211,7 +9211,7 @@ export interface components {
         };
         /**
          * McpToolWarning
-         * @description One tool that was omitted, and the code that omitted it (R-SCHEMA-3).
+         * @description One tool that was omitted, and the code that omitted it.
          */
         McpToolWarning: {
             /** Code */
@@ -9224,7 +9224,7 @@ export interface components {
          * @description The authorized catalog for one stored server.
          *
          *     Carries no server URL, no credential, and no allowlist entry that the live
-         *     catalog did not return (R-DISC-2). ``server_revision`` is what an
+         *     catalog did not return. ``server_revision`` is what an
          *     application persists with a proposed call and sends back to
          *     ``/api/v1/mcp/execute``, so a stored-configuration change between the two is
          *     refused rather than executed.
