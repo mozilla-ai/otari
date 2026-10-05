@@ -31,6 +31,9 @@ class RateLimitRuleUpdate(BaseModel):
     models: list[str] | None = Field(
         default=None, description="The instance:model names a per: model rule limits; null for any other rule."
     )
+    keys: list[str] | None = Field(
+        default=None, description="The API key ids the rule is narrowed to; null covers every key."
+    )
     rpm: int | None = Field(default=None, ge=1, description="Requests per minute.")
     tpm: int | None = Field(default=None, ge=1, description="Tokens per minute.")
     max_concurrent: int | None = Field(default=None, ge=1, description="Requests in flight at once.")

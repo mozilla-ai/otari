@@ -201,6 +201,20 @@ skips a full model and tries its next candidate, and a request is refused with a
 A candidate that fails before responding gives back its tokens and its slot but
 keeps its request counted, since the provider was sent it.
 
+`keys` narrows any rule but a `per: model` one to requests made with the API
+keys it lists, by key id; a request made with another key, or with none, is not
+counted by it. That is how service keys give their end users different limits:
+one `per: user` rule per service key, each listing that key.
+
+```yaml
+rate_limits:
+  - name: smart-window-users
+    per: user
+    keys: ["<id of the smart-window service key>"]
+    rpm: 40
+    tpm: 2000
+```
+
 Rules can also be added, changed and removed from the dashboard (Settings, Rate
 limit rules) or through `/api/v1/rate-limits`. A change applies at once on the
 replica that served it and on every other replica within 30 seconds; a changed

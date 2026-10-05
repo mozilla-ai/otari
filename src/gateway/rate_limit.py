@@ -407,7 +407,7 @@ class RateLimitRules:
         try:
             for rule in tuple(self._config.rate_limits):
                 subject = subjects.get(rule.per)
-                if subject is None:
+                if subject is None or (rule.keys is not None and key_id not in rule.keys):
                     continue
                 await _count_rule(self._store, rule, subject, estimated_tokens, hold)
         except HTTPException:
