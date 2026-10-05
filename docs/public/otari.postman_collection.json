@@ -1418,7 +1418,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"token_limit\": 0\n}"
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"rpm_limit\": 0,\n  \"token_limit\": 0,\n  \"tpm_limit\": 0\n}"
             },
             "description": "Create a new budget.",
             "header": [
@@ -1478,7 +1478,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"token_limit\": 0\n}"
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"rpm_limit\": 0,\n  \"token_limit\": 0,\n  \"tpm_limit\": 0\n}"
             },
             "description": "Update a budget.",
             "header": [

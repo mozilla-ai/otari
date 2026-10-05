@@ -1970,6 +1970,17 @@
             ],
             "title": "Reset Alignment"
           },
+          "rpm_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rpm Limit"
+          },
           "token_limit": {
             "anyOf": [
               {
@@ -1990,6 +2001,17 @@
             "default": 0.0,
             "title": "Total Spend",
             "type": "number"
+          },
+          "tpm_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tpm Limit"
           },
           "updated_at": {
             "title": "Updated At",
@@ -4234,6 +4256,19 @@
             "description": "Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec",
             "title": "Reset Alignment"
           },
+          "rpm_limit": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Requests per minute for each user on this budget, across replicas; null is unlimited",
+            "title": "Rpm Limit"
+          },
           "token_limit": {
             "anyOf": [
               {
@@ -4247,6 +4282,19 @@
             ],
             "description": "Maximum tokens over the period. Independent of max_budget; null is unlimited",
             "title": "Token Limit"
+          },
+          "tpm_limit": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tokens per minute for each user on this budget, counted on what requests used: a request is admitted while the user's minute is under the limit. Null is unlimited",
+            "title": "Tpm Limit"
           }
         },
         "title": "CreateBudgetRequest",
@@ -16279,6 +16327,19 @@
             ],
             "title": "Reset Alignment"
           },
+          "rpm_limit": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Requests per minute for each user on this budget, across replicas; null is unlimited",
+            "title": "Rpm Limit"
+          },
           "token_limit": {
             "anyOf": [
               {
@@ -16292,6 +16353,19 @@
             ],
             "description": "Maximum tokens over the period. Independent of max_budget; null is unlimited",
             "title": "Token Limit"
+          },
+          "tpm_limit": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tokens per minute for each user on this budget, counted on what requests used: a request is admitted while the user's minute is under the limit. Null is unlimited",
+            "title": "Tpm Limit"
           }
         },
         "title": "UpdateBudgetRequest",

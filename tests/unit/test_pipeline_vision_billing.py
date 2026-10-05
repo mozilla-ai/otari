@@ -89,12 +89,16 @@ class _Recorder:
         async def fake_check_rate_limit(request: Any, user_id: str) -> None:
             return None
 
+        async def fake_minute_limits(*_args: object, **_kwargs: object) -> None:
+            return None
+
         monkeypatch.setattr(pipeline, "verify_api_key_or_master_key", fake_verify)
         monkeypatch.setattr(pipeline, "check_rate_limit", fake_check_rate_limit)
         monkeypatch.setattr(pipeline, "find_model_pricing", fake_find_pricing)
         monkeypatch.setattr(pipeline, "resolve_request_allowlist", fake_resolve_allowlist)
         monkeypatch.setattr(pipeline, "organization_for_workspace_id", fake_organization_for_workspace_id)
         monkeypatch.setattr(pipeline, "reserve_budget", fake_reserve)
+        monkeypatch.setattr(pipeline, "user_minute_limits", fake_minute_limits)
         monkeypatch.setattr(pipeline, "increase_reservation", fake_increase)
         monkeypatch.setattr(pipeline, "log_usage", fake_log_usage)
         monkeypatch.setattr(pipeline, "reconcile_reservation", fake_reconcile)

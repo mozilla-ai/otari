@@ -75,6 +75,7 @@ from gateway.services.budgets import (
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
+    user_minute_limits,
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
@@ -377,7 +378,13 @@ async def _dispatch_search(
     )
     # After the gates above, so a search they refuse is counted by no rule, and
     # before the reservation, so one the rules refuse holds no budget to refund.
-    rate_limit_grant = await admit_rate_limit_rules(raw_request, key_id=api_key_id, user_id=user_id, estimated_tokens=0)
+    rate_limit_grant = await admit_rate_limit_rules(
+        raw_request,
+        key_id=api_key_id,
+        user_id=user_id,
+        estimated_tokens=0,
+        budget_limits=await user_minute_limits(db, user_id),
+    )
     if rate_limit_grant is not None:
         # A `per: model` rule names a search tool by its pricing key, <provider>:<tool>.
         await rate_limit_grant.admit_model(tool.provider, tool.name)

@@ -28,7 +28,8 @@ from gateway.models.budgets import (
 from gateway.models.money import to_usd
 from gateway.models.pricing import ModelPricing
 from gateway.models.users import User
-from gateway.repositories.users_repository import get_active_user
+from gateway.rate_limit import BudgetMinuteLimits
+from gateway.repositories.users_repository import budget_minute_limits, get_active_user
 from gateway.services.budgets import _ledger as ledger
 from gateway.services.budgets._periods import budget_window
 from gateway.services.budgets._scoped_enforcement import (
@@ -1082,3 +1083,9 @@ async def increase_reservation(
             await db.commit()
             handle.estimate -= delta.estimate
             handle.token_estimate -= delta.token_estimate
+
+
+async def user_minute_limits(db: AsyncSession, user_id: str) -> BudgetMinuteLimits | None:
+    """The per-minute limits of ``user_id``'s own budget, for admission alongside ``rate_limits``."""
+    found = await budget_minute_limits(db, user_id)
+    return BudgetMinuteLimits(*found) if found is not None else None
