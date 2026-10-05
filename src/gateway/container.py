@@ -389,7 +389,7 @@ def _with_session(port: PortKey[T], adapter: Callable[[AsyncSession], T]) -> Por
     def factory(session: AsyncSession | None) -> T:
         if session is None:
             msg = f"a session is required where this deployment holds the rows behind {_port_name(port)}"
-            raise ValueError(msg)
+            raise ContainerError(msg)
         return adapter(session)
 
     return factory

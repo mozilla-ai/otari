@@ -153,7 +153,7 @@ def test_mcp_servers_refuse_a_deployment_that_holds_the_rows_and_has_no_session(
     """
     container = build_container(config=GatewayConfig())
 
-    with pytest.raises(ValueError, match="a session is required"):
+    with pytest.raises(ContainerError, match="a session is required"):
         container.resolve(McpServerPort, NO_SESSION)
 
 
@@ -179,7 +179,7 @@ def test_web_search_policy_refuses_a_deployment_that_holds_the_rows_and_has_no_s
     """A deployment reading its own policy rows cannot do so without the request's session."""
     container = build_container(config=GatewayConfig())
 
-    with pytest.raises(ValueError, match="a session is required"):
+    with pytest.raises(ContainerError, match="a session is required"):
         container.resolve(WebSearchPolicyPort, NO_SESSION)
 
 
@@ -205,7 +205,7 @@ def test_code_execution_policy_refuses_a_deployment_that_holds_the_rows_and_has_
     """A deployment reading its own policy rows cannot do so without the request's session."""
     container = build_container(config=GatewayConfig())
 
-    with pytest.raises(ValueError, match="a session is required"):
+    with pytest.raises(ContainerError, match="a session is required"):
         container.resolve(CodeExecutionPolicyPort, NO_SESSION)
 
 
