@@ -251,6 +251,42 @@ export function useOrganizationSpendCeilings(
   })
 }
 
+/**
+ * Every spend ceiling the organization holds, for the Budgets table.
+ *
+ * A walk rather than a page, because this read is grouped by budget rather than
+ * listed: the table draws one row per budget and names what that budget applies
+ * to, so a page boundary would truncate an "Applied to" cell rather than a list,
+ * and the cell would be wrong with nothing on screen saying so.
+ *
+ * Keyed under the paged read's head so `invalidateOrganizationSpend` moves both,
+ * and per organization for the reason the paged read is: the server scopes this
+ * by the session's active organization, so a walk still in flight when the
+ * caller switches answers about the organization just left.
+ */
+export function useOrganizationSpendCeilingsAll(enabled = true) {
+  const queryClient = useQueryClient()
+  const context = useOrganizationContext().data
+  return useQuery({
+    queryKey: [
+      ORGANIZATION_SPEND_CEILINGS,
+      context?.organization?.id ?? null,
+      "all",
+    ],
+    queryFn: () =>
+      fetchAllPaged<OrganizationSpendCeiling>(
+        "/organizations/me/spend-ceilings",
+      ),
+    staleTime: 60_000,
+    // The callback form, for the reason the paged read gives: this is an
+    // owners-and-admins-only read, and a role moves under a mounted query.
+    enabled: () =>
+      enabled &&
+      queryClient.getQueryData<OrganizationContext>(ORGANIZATION_CONTEXT) ===
+        context,
+  })
+}
+
 // Both keys move together on every write. A budget's figure is read *through*
 // the budget by every ceiling naming it, so changing one changes what those
 // ceilings report; and creating a ceiling changes a budget's `ceiling_count`,

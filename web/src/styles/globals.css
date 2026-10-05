@@ -2549,6 +2549,18 @@ main {
   width: 6rem;
   min-width: 6rem;
 }
+/* The organization's Budgets table. One row per budget, so the lanes that are
+   written down are the two that cannot be solved from content: the actions lane,
+   which is two glyphs and would otherwise follow the longest aria-label, and the
+   applied-to lane, which absorbs the slack so the reset cycle stays next to it. */
+.otari-org-budgets-table .table__column[data-key="applied"] {
+  min-width: 15rem;
+}
+.otari-org-budgets-table .table__column[data-key="actions"] {
+  width: 6rem;
+  min-width: 6rem;
+}
+
 .otari-budgets-table .table__row .table__cell {
   height: 3.625rem;
   padding-block: 0;

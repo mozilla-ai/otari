@@ -1012,7 +1012,7 @@ describe("BudgetsPage", () => {
     renderPage(<BudgetsPage />)
 
     expect(
-      await screen.findByRole("grid", { name: "Organization budgets" }),
+      await screen.findByRole("grid", { name: "Budgets" }),
     ).toBeInTheDocument()
     expect(
       screen.getByRole("grid", { name: "Organization spend ceilings" }),

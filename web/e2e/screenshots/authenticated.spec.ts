@@ -255,7 +255,7 @@ test.describe("organization rail", () => {
 })
 
 /**
- * The organization-admin view of Spend & budgets.
+ * The organization-admin view of Budgets.
  *
  * `/budgets` above captures the deployment-operator page, because `login`
  * exchanges the master key and that session is the bootstrap operator, so
@@ -401,7 +401,7 @@ test.describe("organization admin", () => {
     await stubAdminSpendView(page)
     await gotoRoute(page, "/budgets")
     await expect(
-      page.getByRole("heading", { name: /spend & budgets/i }).first(),
+      page.getByRole("heading", { name: /^budgets$/i }).first(),
     ).toBeVisible()
     // Awaited past the loading rows, so the capture is the populated tables
     // rather than two spinners.
