@@ -143,6 +143,10 @@ When changing the template:
    that the bootstrapped key works.
 2. Update [`template.json`](template.json) in the same change so the snapshot
    matches the live config (services, variables, defaults, target port).
+   The README on Railway is [`listing.md`](listing.md), not this file: Railway
+   requires its own fixed sections and absolute links, and it drops anything in
+   angle brackets as HTML. Edit `listing.md`, then paste it into the template
+   editor's README field.
 3. To move a new deploy to a newer release, change the image tag on the live
    template and in `template.json`. This does not touch existing deploys: each
    keeps the tag it was deployed with until its operator upgrades.
