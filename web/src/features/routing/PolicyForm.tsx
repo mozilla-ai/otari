@@ -8,7 +8,7 @@
  */
 
 import { Link } from "@tanstack/react-router"
-import { type RefObject, useMemo, useState } from "react"
+import { type RefObject, useEffect, useMemo, useState } from "react"
 import { FiArrowDown, FiArrowUp, FiTrash2 } from "react-icons/fi"
 
 import type { PolicyGuardrail, PolicySpec, User } from "@/client"
@@ -294,6 +294,11 @@ export function PolicyForm({
   const isRouted = candidates.length > 0
   const isWeighted = isRouted && backend === WEIGHTED_BACKEND
   const isPriority = isRouted && backend === PRIORITY_BACKEND
+  // The row a model was just moved to, for the focus effect below.
+  const [movedTo, setMovedTo] = useState<{
+    index: number
+    direction: "up" | "down"
+  } | null>(null)
   // Order is the whole of a priority policy, so its rows move; the other two
   // backends decide their own order and ignore the one written.
   const moveCandidate = (from: number, to: number) => {
@@ -306,7 +311,24 @@ export function PolicyForm({
     setCandidates(swap)
     setWeights(swap)
     setSafeIndex((prev) => (prev === from ? to : prev === to ? from : prev))
+    setMovedTo({ index: to, direction: to < from ? "up" : "down" })
   }
+  // Rows are keyed by position, so focus would stay on the row a model left.
+  // Follow the model instead, onto its other arrow when it reached an end.
+  useEffect(() => {
+    if (movedTo === null) return
+    const { index, direction } = movedTo
+    const other = direction === "up" ? "down" : "up"
+    const target = [direction, other]
+      .map((dir) => document.getElementById(`pool-move-${dir}-${index}`))
+      .find(
+        (button) =>
+          button !== null &&
+          !button.matches(":disabled, [aria-disabled='true']"),
+      )
+    target?.focus()
+    setMovedTo(null)
+  }, [movedTo])
   // An empty field parses to NaN rather than 0, so a share the operator cleared is
   // unfinished rather than a drain they did not ask for. "Infinity" and a negative
   // are rejected here too, matching what the API refuses.
@@ -912,6 +934,7 @@ export function PolicyForm({
                 <FieldAction>
                   <div className="flex gap-1">
                     <IconButton
+                      id={`pool-move-up-${index}`}
                       variant="ghost"
                       isIconOnly
                       label={`Move model ${index + 1} up`}
@@ -921,6 +944,7 @@ export function PolicyForm({
                       <FiArrowUp aria-hidden />
                     </IconButton>
                     <IconButton
+                      id={`pool-move-down-${index}`}
                       variant="ghost"
                       isIconOnly
                       label={`Move model ${index + 1} down`}

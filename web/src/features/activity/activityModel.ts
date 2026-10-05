@@ -207,10 +207,15 @@ export function displayStatus(entry: UsageEntry): string {
 }
 
 // Why a candidate was skipped, short enough for a row: "rate limit 'x' full" when
-// a per-model limit had no room, which is the one cause the gateway names.
+// a per-model limit had no room, "too large for rate limit 'x'" when the request's
+// token estimate alone is over it (`_count_rule` in `rate_limit.py`).
 function skipCause(entry: UsageEntry): string {
-  const rule = /^Rate limit '([^']+)'/.exec(describeSkip(entry))?.[1]
-  return rule ? `rate limit '${rule}' full` : "could not serve"
+  const reason = describeSkip(entry)
+  const rule = /rate limit '([^']+)'/i.exec(reason)?.[1]
+  if (!rule) return "could not serve"
+  return reason.startsWith("Request needs")
+    ? `too large for rate limit '${rule}'`
+    : `rate limit '${rule}' full`
 }
 
 function skipReason(entry: UsageEntry): string {
@@ -419,7 +424,7 @@ export interface GroupOutcome {
   servedBy: string | null
   servedPosition: number | null
   /** The candidates skipped before it, each as "target (why)", when the page holds their rows. */
-  spilledFrom?: string[]
+  spilledFrom: string[]
 }
 
 // Index the outcome of every group represented in `rows`. Built from rows the page

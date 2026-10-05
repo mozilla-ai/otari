@@ -121,8 +121,9 @@ not on the policy, so it is skipped the same way in `on_failure`, in a weighted
 pool, and in any other policy that names it; with Redis as `rate_limit_store`,
 the count holds across replicas. A candidate with room that fails before
 responding falls through to the next one, as in any policy. The caller gets a
-429 only when every candidate is full, naming the limit the last one hit but
-not the model, since a policy's targets are not the caller's to see.
+429 only when every candidate is full, naming the limit that frees up soonest
+(and its `Retry-After`) but not the model, since a policy's targets are not the
+caller's to see.
 
 The policy says which is which: `candidates` handles "full", `on_failure`
 handles "broke". `Otari-Router: off` skips the order and starts from the

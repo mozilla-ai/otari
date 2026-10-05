@@ -61,6 +61,17 @@ function parseLimit(text: string): number | "" | undefined {
   return value >= 1 ? value : undefined
 }
 
+/**
+ * `entry` as the gateway stores it, `instance:model` split at whichever of `:`
+ * or `/` comes first (`_canonical_model` in `core/config.py`), or `null` when
+ * either side is empty.
+ */
+function canonicalModel(entry: string): string | null {
+  const at = entry.search(/[:/]/)
+  if (at <= 0 || at === entry.length - 1) return null
+  return `${entry.slice(0, at)}:${entry.slice(at + 1)}`
+}
+
 function asText(value: number | null | undefined): string {
   return value ? String(value) : ""
 }
@@ -124,10 +135,12 @@ function RuleDialog({
   )
   const isPerModel = draft.per === "model"
   const models = draft.models.map((model) => model.trim())
+  const modelsFilled = models.every((model) => model !== "")
+  const canonical = models.map(canonicalModel)
+  const modelsWellFormed = canonical.every((model) => model !== null)
+  const modelsUnique = new Set(canonical).size === canonical.length
   const modelsReady =
-    !isPerModel ||
-    (models.every((model) => model !== "") &&
-      new Set(models).size === models.length)
+    !isPerModel || (modelsFilled && modelsWellFormed && modelsUnique)
   const isReady =
     draft.name.trim() !== "" &&
     nameError === "" &&
@@ -213,8 +226,8 @@ function RuleDialog({
                   value={model}
                   onChange={(value) =>
                     set({
-                      models: draft.models.map((m, i) =>
-                        i === index ? value : m,
+                      models: draft.models.map((entry, i) =>
+                        i === index ? value : entry,
                       ),
                     })
                   }
@@ -242,7 +255,11 @@ function RuleDialog({
               Add a model
             </Button>
           </div>
-          {models.every((m) => m !== "") && !modelsReady ? (
+          {modelsFilled && !modelsWellFormed ? (
+            <p className="text-caption text-danger">
+              Write each model as instance:model.
+            </p>
+          ) : modelsFilled && !modelsUnique ? (
             <p className="text-caption text-danger">Name each model once.</p>
           ) : null}
         </div>

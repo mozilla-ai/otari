@@ -650,10 +650,15 @@ async def _walk_admitted(
     full: set[str],
     behaviors: dict[str, Any] | None = None,
     skipped: list[tuple[str, Any]] | None = None,
-) -> tuple[tuple[Attempt, Any], list[str], list[str]]:
-    """Walk with every model in ``full`` refused admission; returns the result, models sent, and holds dropped."""
+    prepare_kwargs: Any = None,
+    retry_after: dict[str, str] | None = None,
+) -> tuple[tuple[Attempt, Any], list[str], list[tuple[str, bool]]]:
+    """Walk with every model in ``full`` refused admission.
+
+    Returns the result, the models sent, and each dropped hold with whether its model was sent.
+    """
     sent: list[str] = []
-    dropped: list[str] = []
+    dropped: list[tuple[str, bool]] = []
     skipped = skipped if skipped is not None else []
 
     async def on_skipped(attempt: Attempt, refusal: HTTPException) -> None:
@@ -661,10 +666,14 @@ async def _walk_admitted(
 
     async def admit(attempt: Attempt) -> Any:
         if attempt.model in full:
-            raise CandidateCannotServe(HTTPException(status_code=429, detail=f"{attempt.model} is full"))
+            wait = (retry_after or {}).get(attempt.model)
+            headers = {"Retry-After": wait} if wait is not None else None
+            raise CandidateCannotServe(
+                HTTPException(status_code=429, detail=f"{attempt.model} is full", headers=headers)
+            )
 
-        async def drop() -> None:
-            dropped.append(attempt.model)
+        async def drop(was_sent: bool) -> None:
+            dropped.append((attempt.model, was_sent))
 
         return drop
 
@@ -680,6 +689,7 @@ async def _walk_admitted(
         base_request_fields={"messages": [{"role": "user", "content": "hi"}]},
         run_attempt=run_attempt,
         max_tool_iterations=10,
+        prepare_kwargs=prepare_kwargs,
         admit_attempt=admit,
         on_skipped=on_skipped,
     )
@@ -711,7 +721,7 @@ async def test_a_failed_candidate_gives_back_what_it_was_admitted_with() -> None
 
     assert chosen.model == "b"
     assert sent == ["a", "b"]
-    assert dropped == ["a"]
+    assert dropped == [("a", True)]
 
 
 @pytest.mark.asyncio
@@ -731,3 +741,53 @@ async def test_a_skip_the_request_ends_on_is_its_outcome_not_a_record() -> None:
         await _walk_admitted([_attempt(1, "a"), _attempt(2, "b")], full={"a", "b"}, skipped=skipped)
 
     assert skipped == []
+
+
+@pytest.mark.asyncio
+async def test_every_candidate_full_answers_with_the_soonest_retry_after() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk_admitted([_attempt(1, "a"), _attempt(2, "b")], full={"a", "b"}, retry_after={"a": "5", "b": "40"})
+
+    assert exc_info.value.detail == "a is full"
+    assert exc_info.value.headers == {"Retry-After": "5"}
+
+
+@pytest.mark.asyncio
+async def test_a_full_candidate_is_not_prepared_for() -> None:
+    prepared: list[str] = []
+
+    async def prepare(instance: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        prepared.append(kwargs["model"].rsplit(":", 1)[-1])
+        return kwargs
+
+    await _walk_admitted([_attempt(1, "a"), _attempt(2, "b")], full={"a"}, prepare_kwargs=prepare)
+
+    assert prepared == ["b"]
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_that_cannot_be_prepared_keeps_nothing_it_was_admitted_with() -> None:
+    async def prepare(instance: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        if kwargs["model"].rsplit(":", 1)[-1] == "a":
+            raise CandidateCannotServe(HTTPException(status_code=400, detail="cannot hold copies"))
+        return kwargs
+
+    (chosen, _), sent, dropped = await _walk_admitted(
+        [_attempt(1, "a"), _attempt(2, "b")], full=set(), prepare_kwargs=prepare
+    )
+
+    assert chosen.model == "b"
+    assert sent == ["b"]
+    assert dropped == [("a", False)]
+
+
+@pytest.mark.asyncio
+async def test_a_skip_after_the_last_candidate_called_is_recorded_when_the_walk_fails() -> None:
+    skipped: list[tuple[str, Any]] = []
+
+    with pytest.raises(HTTPException):
+        await _walk_admitted(
+            [_attempt(1, "a"), _attempt(2, "b")], full={"b"}, behaviors={"a": _http_error(503)}, skipped=skipped
+        )
+
+    assert skipped == [("b", "b is full")]

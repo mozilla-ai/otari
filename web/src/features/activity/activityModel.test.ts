@@ -374,6 +374,32 @@ describe("indexGroupOutcomes", () => {
     )
   })
 
+  it("says a skipped candidate was too large for a limit rather than full", () => {
+    const rows = [
+      attempt({
+        id: "b",
+        status: "success",
+        attempt_position: 2,
+        provider: "overflow",
+        model: "gpt-4o-mini",
+      }),
+      attempt({
+        id: "a",
+        status: "absorbed",
+        status_code: 429,
+        error_message:
+          "Skipped: Request needs an estimated 5,000 tokens; rate limit 'flash-cap' allows 1,000 per minute",
+        attempt_position: 1,
+        provider: "primary",
+        model: "gpt-4o-mini",
+      }),
+    ]
+
+    expect(indexGroupOutcomes(rows).get("grp-1")?.spilledFrom).toEqual([
+      "primary:gpt-4o-mini (too large for rate limit 'flash-cap')",
+    ])
+  })
+
   it("records a terminal failure as a group with no server", () => {
     const rows = [
       attempt({ id: "a", status: "absorbed", attempt_position: 1 }),
@@ -399,7 +425,11 @@ describe("indexGroupOutcomes", () => {
 })
 
 describe("describeAttempt", () => {
-  const served = { servedBy: "openai:gpt-4o", servedPosition: 2 }
+  const served = {
+    servedBy: "openai:gpt-4o",
+    servedPosition: 2,
+    spilledFrom: [],
+  }
 
   it("names the model that served in an absorbed attempt's place", () => {
     expect(
@@ -415,6 +445,7 @@ describe("describeAttempt", () => {
       describeAttempt(attempt({ status: "absorbed", attempt_position: 1 }), {
         servedBy: null,
         servedPosition: null,
+        spilledFrom: [],
       }),
     ).toBe("attempt 1 of 2 failed, and the request ended in an error")
   })

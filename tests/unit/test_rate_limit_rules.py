@@ -297,6 +297,20 @@ async def test_a_dropped_attempt_gives_back_its_slot_and_tokens_but_keeps_its_re
 
 
 @pytest.mark.asyncio
+async def test_an_attempt_dropped_before_it_was_sent_keeps_nothing() -> None:
+    store = InMemoryRateLimitStore()
+    rules = _rules(store, {"name": "cap", "per": "model", "models": ["openai:gpt-4o"], "rpm": 5, "max_concurrent": 1})
+    grant = await _admit(rules)
+
+    hold = await grant.admit_model("openai", "gpt-4o")
+    assert hold is not None
+    await hold.drop(sent=False)
+    await grant.admit_model("openai", "gpt-4o")
+
+    assert (await store.hit("rule:cap:openai:gpt-4o:rpm", 5, 60)).count == 2
+
+
+@pytest.mark.asyncio
 async def test_a_served_attempt_is_settled_and_released_with_its_request() -> None:
     rules = _rules(
         InMemoryRateLimitStore(),

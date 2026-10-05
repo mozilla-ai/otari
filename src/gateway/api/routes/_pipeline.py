@@ -5008,7 +5008,7 @@ def _model_admission(ctx: RequestContext) -> AdmitAttempt | None:
     if grant is None:
         return None
 
-    async def _admit(attempt: Attempt) -> Callable[[], Awaitable[None]] | None:
+    async def _admit(attempt: Attempt) -> Callable[[bool], Awaitable[None]] | None:
         try:
             hold = await grant.admit_model(attempt.instance, attempt.model, name_model=False)
         except HTTPException as refusal:
@@ -5018,15 +5018,32 @@ def _model_admission(ctx: RequestContext) -> AdmitAttempt | None:
     return _admit
 
 
-async def _admit_only_candidate(ctx: RequestContext, instance: str, model: str) -> None:
-    """Admit the only candidate of a request under the ``per: model`` rate limits.
+async def _admitted_and_prepared(
+    ctx: RequestContext,
+    adapter: FormatAdapter[Any, Any],
+    prepare_kwargs: PrepareKwargs | None,
+    instance: str,
+    model: str,
+    call_kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    """Admit the only candidate of a request under the ``per: model`` rate limits, then prepare its kwargs.
+
+    Admitted first, so a full model is not prepared for; a candidate that then
+    cannot be prepared keeps nothing it was admitted with.
 
     Raises:
         HTTPException: 429 when a rule naming the model is full.
     """
+    hold = None
     if ctx.rate_limit_grant is not None:
         # A policy's target is not the caller's to see; a model the caller named is.
-        await ctx.rate_limit_grant.admit_model(instance, model, name_model=ctx.plan is None)
+        hold = await ctx.rate_limit_grant.admit_model(instance, model, name_model=ctx.plan is None)
+    try:
+        return await _prepared(adapter, prepare_kwargs, instance, call_kwargs)
+    except BaseException:
+        if hold is not None:
+            await hold.drop(sent=False)
+        raise
 
 
 async def run_single_attempt_stream(
@@ -5108,8 +5125,7 @@ async def run_single_attempt_stream(
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
             stream_attribution = _attribution_for(ctx, chosen)
         else:
-            call_kwargs = await _prepared(adapter, prepare_kwargs, provider, call_kwargs)
-            await _admit_only_candidate(ctx, provider, model)
+            call_kwargs = await _admitted_and_prepared(ctx, adapter, prepare_kwargs, provider, model, call_kwargs)
             stream = await open_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
             # A single-candidate policy still names a policy and a reason, and
             # both belong on the row.
@@ -5831,8 +5847,7 @@ async def run_standalone_non_stream(
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
             attribution = _attribution_for(ctx, chosen)
         else:
-            call_kwargs = await _prepared(adapter, prepare_kwargs, provider, call_kwargs)
-            await _admit_only_candidate(ctx, provider, model)
+            call_kwargs = await _admitted_and_prepared(ctx, adapter, prepare_kwargs, provider, model, call_kwargs)
             result = await dispatch_non_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
             # A single-candidate policy still has a name and a selection reason, and
             # both belong on the row: "served by its default target" is the answer to

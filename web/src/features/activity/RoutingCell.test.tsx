@@ -14,7 +14,11 @@ describe("RoutingCell", () => {
           attempt_position: 1,
           attempt_count: 2,
         })}
-        outcome={{ servedBy: "openai:gpt-4o", servedPosition: 2 }}
+        outcome={{
+          servedBy: "openai:gpt-4o",
+          servedPosition: 2,
+          spilledFrom: [],
+        }}
       />,
     )
 
@@ -39,6 +43,7 @@ describe("RoutingCell", () => {
         outcome={{
           servedBy: "anthropic:claude-haiku-4-5",
           servedPosition: 2,
+          spilledFrom: [],
         }}
       />,
     )

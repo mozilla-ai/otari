@@ -190,6 +190,52 @@ describe("RateLimitsCard", () => {
     )
   })
 
+  it("asks for each model as instance:model, and counts both spellings as one", async () => {
+    mockApi([])
+    const user = userEvent.setup()
+    renderCard()
+
+    await user.click(await screen.findByRole("button", { name: "Add rule" }))
+    const dialog = await screen.findByRole("dialog")
+    await user.type(within(dialog).getByLabelText(/^Name/), "flash-cap")
+    await user.click(
+      within(dialog).getByRole("button", { name: /Counted for/ }),
+    )
+    await user.click(await screen.findByRole("option", { name: "Each model" }))
+    await user.type(within(dialog).getByLabelText("Requests per minute"), "100")
+    await user.type(
+      within(dialog).getByRole("combobox", { name: /Model 1/ }),
+      "gpt-4o",
+    )
+    await user.keyboard("{Escape}")
+
+    expect(
+      within(dialog).getByText("Write each model as instance:model."),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole("button", { name: "Add rule" }),
+    ).toBeDisabled()
+
+    await user.clear(within(dialog).getByRole("combobox", { name: /Model 1/ }))
+    await user.type(
+      within(dialog).getByRole("combobox", { name: /Model 1/ }),
+      "openai/gpt-4o",
+    )
+    await user.keyboard("{Escape}")
+    await user.click(
+      within(dialog).getByRole("button", { name: "Add a model" }),
+    )
+    await user.type(
+      within(dialog).getByRole("combobox", { name: /Model 2/ }),
+      "openai:gpt-4o",
+    )
+    await user.keyboard("{Escape}")
+
+    expect(
+      within(dialog).getByText("Name each model once."),
+    ).toBeInTheDocument()
+  })
+
   it("refuses a limit that is not a whole number", async () => {
     mockApi([])
     const user = userEvent.setup()

@@ -1638,6 +1638,10 @@ describe("RoutingPage", () => {
     await user.keyboard("{Escape}")
     // Order is the policy, so the rows move, and the opt-out mark moves with its model.
     await user.click(screen.getByRole("button", { name: "Move model 2 up" }))
+    // Focus follows the model to the top, onto its one arrow that still moves it.
+    expect(
+      screen.getByRole("button", { name: "Move model 1 down" }),
+    ).toHaveFocus()
     await user.click(
       within(screen.getByRole("dialog")).getByRole("button", {
         name: "Create policy",

@@ -201,13 +201,17 @@ class ModelHold:
         self._grant = grant
         self._hold = hold
 
-    async def drop(self) -> None:
+    async def drop(self, sent: bool = True) -> None:
         """Charge the attempt no tokens and give back its slots, for an attempt the walk moves past.
 
-        Its requests stay counted, because the provider was sent them.
+        Its requests stay counted when ``sent``, because the provider was sent them;
+        otherwise nothing it took stays counted.
         """
         if self._hold in self._grant._holds:
             self._grant._holds.remove(self._hold)
+        if not sent:
+            await _undo(self._grant._store, self._hold)
+            return
         estimates, self._hold.estimates = self._hold.estimates, []
         for key, handle in estimates:
             await self._grant._store.settle(key, handle, 0)
