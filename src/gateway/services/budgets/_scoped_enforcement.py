@@ -32,7 +32,7 @@ from gateway.models.budgets import (
     ScopedBudget,
 )
 from gateway.models.tenancy import OrganizationMember, Workspace, WorkspaceMember
-from gateway.services.budgets._periods import period_window
+from gateway.services.budgets._periods import CycleSettings
 from gateway.services.workspace_scope import resolve_workspace_id
 
 if TYPE_CHECKING:
@@ -193,7 +193,7 @@ async def _resolve_identities(
 
 async def _roll_expired_periods(
     db: AsyncSession,
-    expired: Sequence[tuple[str, int | None, str | None]],
+    expired: Sequence[tuple[str, CycleSettings]],
     now: datetime,
 ) -> None:
     """Start a fresh window on every ceiling whose period has run out.
@@ -207,17 +207,18 @@ async def _roll_expired_periods(
     No backfill either way: a ceiling untouched for two months lands in the
     current window with fresh counters, not in each window it slept through.
     """
-    for budget_id, duration, alignment in expired:
+    for budget_id, settings in expired:
         try:
-            window = period_window(now, duration=duration, alignment=alignment)
+            window = settings.window(now)
         except ValueError:
-            # Only reachable by a write that went around the API, and the safe
-            # direction is to leave the exhausted window in place: not resetting
-            # refuses requests, while guessing a cadence would admit them.
+            # Only reachable by a write that went around the API and its CHECKs,
+            # and the safe direction is to leave the exhausted window in place:
+            # not resetting refuses requests, while guessing a cadence would
+            # admit them.
             logger.warning(
-                "Scoped budget %s has an unrecognized reset_alignment %r; leaving its period in place",
+                "Scoped budget %s has an unusable reset cycle %r; leaving its period in place",
                 budget_id,
-                alignment,
+                settings.cycle,
             )
             continue
         period_start, period_end = window if window is not None else (now, None)
@@ -276,8 +277,12 @@ async def applicable_budgets(
                 ScopedBudget.id,
                 ScopedBudget.scope_type,
                 ScopedBudget.provider_key_id,
-                Budget.budget_duration_sec,
-                Budget.reset_alignment,
+                Budget.reset_cycle,
+                Budget.reset_every_n,
+                Budget.reset_anchor_at,
+                Budget.reset_weekdays,
+                Budget.reset_month_day,
+                Budget.reset_month,
                 ScopedBudget.period_end,
                 Budget.token_limit,
                 Budget.request_limit,
@@ -291,8 +296,21 @@ async def applicable_budgets(
 
     now = datetime.now(UTC)
     expired = [
-        (budget_id, duration, alignment)
-        for budget_id, _scope_type, _provider, duration, alignment, period_end, _tokens, _requests in rows
+        (budget_id, CycleSettings(cycle, every_n, anchor_at, weekdays, month_day, month))
+        for (
+            budget_id,
+            _scope_type,
+            _provider,
+            cycle,
+            every_n,
+            anchor_at,
+            weekdays,
+            month_day,
+            month,
+            period_end,
+            _tokens,
+            _requests,
+        ) in rows
         if (parsed := _as_utc(period_end)) is not None and now >= parsed
     ]
     if expired:
@@ -306,7 +324,20 @@ async def applicable_budgets(
             token_limit=token_limit,
             request_limit=request_limit,
         )
-        for budget_id, scope_type, provider, _duration, _alignment, _period_end, token_limit, request_limit in rows
+        for (
+            budget_id,
+            scope_type,
+            provider,
+            _cycle,
+            _every_n,
+            _anchor_at,
+            _weekdays,
+            _month_day,
+            _month,
+            _period_end,
+            token_limit,
+            request_limit,
+        ) in rows
     ]
     # Most specific first, provider-narrowed before aggregate within a scope, then
     # the id so the order stays total when two ceilings tie on both.

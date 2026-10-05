@@ -19,7 +19,14 @@ from gateway.schemas.budgets import (
     CreateBudgetRequest,
     UpdateBudgetRequest,
 )
-from gateway.services.budgets import cadence_of, retime_ceilings_for_budget
+from gateway.services.budgets import (
+    CYCLE_FIELD_ORDER,
+    CYCLE_FIELDS,
+    CycleSettings,
+    cadence_of,
+    retime_ceilings_for_budget,
+    validate_cycle_settings,
+)
 
 router = APIRouter(
     prefix="/budgets",
@@ -33,19 +40,22 @@ SURFACE = Surface("budgets")
 _ZERO = Decimal(0)
 
 
-def _require_single_period_source(duration: int | None, alignment: str | None) -> None:
-    """Refuse the state the table's CHECK refuses, with a message instead of a 500.
+def _requested_cycle(request: object) -> CycleSettings:
+    """The cadence a create request names, as the tuple the validator reads."""
+    return CycleSettings(*(getattr(request, name) for name in CYCLE_FIELD_ORDER))
 
-    A period comes from a duration or from a calendar boundary. Both set is one
-    concept encoded twice, so the pair would need an "ignored when" rule to mean
-    anything. This moved here with the cadence itself, from the scoped-ceiling
-    route that used to own both.
+
+def _require_valid_cycle(settings: CycleSettings) -> None:
+    """Refuse the state the table's CHECKs refuse, with a message instead of a 500.
+
+    Each cycle carries exactly its own settings. Validating here is what names the
+    offending field; letting the write reach the constraints answers an
+    IntegrityError the caller cannot act on.
     """
-    if duration is not None and alignment is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A budget resets on budget_duration_sec or on reset_alignment, not both",
-        )
+    try:
+        validate_cycle_settings(settings)
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
 
 
 async def _budget_usage(db: AsyncSession, budget_id: str) -> tuple[int, float, float]:
@@ -72,14 +82,18 @@ async def create_budget(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> BudgetResponse:
     """Create a new budget."""
-    _require_single_period_source(request.budget_duration_sec, request.reset_alignment)
+    _require_valid_cycle(_requested_cycle(request))
     budget = Budget(
         name=request.name,
         max_budget=to_usd_or_none(request.max_budget),
         token_limit=request.token_limit,
         request_limit=request.request_limit,
-        budget_duration_sec=request.budget_duration_sec,
-        reset_alignment=request.reset_alignment,
+        reset_cycle=request.reset_cycle,
+        reset_every_n=request.reset_every_n,
+        reset_anchor_at=request.reset_anchor_at,
+        reset_weekdays=request.reset_weekdays,
+        reset_month_day=request.reset_month_day,
+        reset_month=request.reset_month,
     )
 
     db.add(budget)
@@ -176,7 +190,7 @@ async def update_budget(
 
     # Read before the mutation below, because it is what decides whether the
     # ceilings naming this budget have to be retimed.
-    cadence_before = cadence_of(budget.budget_duration_sec, budget.reset_alignment)
+    cadence_before = cadence_of(budget)
 
     # Name is tri-state: omit leaves it unchanged, while an explicit null clears
     # it back to unnamed (unlike the numeric fields, where null is not meaningful).
@@ -192,22 +206,22 @@ async def update_budget(
         budget.token_limit = request.token_limit
     if "request_limit" in request.model_fields_set:
         budget.request_limit = request.request_limit
-    # The two cadence fields settle together, because each is only legal in terms
-    # of the other: the pair that has to hold is the one the row ends up with, so
-    # an omitted field contributes what is stored. Switching a rolling budget to a
-    # calendar one is one request that nulls the duration and names the alignment.
-    if {"budget_duration_sec", "reset_alignment"} & request.model_fields_set:
-        duration = (
-            request.budget_duration_sec
-            if "budget_duration_sec" in request.model_fields_set
-            else budget.budget_duration_sec
+    # The cadence fields settle together, because each is only legal in terms of
+    # the others: the set that has to hold is the one the row ends up with, so an
+    # omitted field contributes what is stored. Switching a weekly budget to a
+    # monthly one is one request that names the cycle and the day, and the
+    # weekday mask it leaves behind is what `validate_cycle_settings` refuses, so
+    # a caller has to clear it rather than strand it.
+    if CYCLE_FIELDS & request.model_fields_set:
+        settled = CycleSettings(
+            *(
+                getattr(request, name) if name in request.model_fields_set else getattr(budget, name)
+                for name in CYCLE_FIELD_ORDER
+            )
         )
-        alignment = (
-            request.reset_alignment if "reset_alignment" in request.model_fields_set else budget.reset_alignment
-        )
-        _require_single_period_source(duration, alignment)
-        budget.budget_duration_sec = duration
-        budget.reset_alignment = alignment
+        _require_valid_cycle(settled)
+        for name, value in zip(CYCLE_FIELD_ORDER, settled, strict=True):
+            setattr(budget, name, value)
 
     # A ceiling holds its own window and reads the cadence through this budget, so
     # changing the cadence without rewriting the windows leaves the two
@@ -219,13 +233,8 @@ async def update_budget(
     # while this route still sees every one of them, so the ceilings stranded that
     # way may be a tenant's. Shared with the tenant-scoped surface rather than
     # written twice.
-    if cadence_of(budget.budget_duration_sec, budget.reset_alignment) != cadence_before:
-        await retime_ceilings_for_budget(
-            db,
-            budget_id=budget.budget_id,
-            duration=budget.budget_duration_sec,
-            alignment=budget.reset_alignment,
-        )
+    if cadence_of(budget) != cadence_before:
+        await retime_ceilings_for_budget(db, budget, budget_id=budget.budget_id)
 
     try:
         await db.commit()
@@ -323,9 +332,7 @@ async def list_budget_reset_logs(
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[BudgetResetLogResponse]:
     """List per-user reset events for a budget, newest first."""
-    budget = (
-        await db.execute(select(Budget.budget_id).where(Budget.budget_id == budget_id))
-    ).scalar_one_or_none()
+    budget = (await db.execute(select(Budget.budget_id).where(Budget.budget_id == budget_id))).scalar_one_or_none()
     if not budget:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

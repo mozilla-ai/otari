@@ -39,7 +39,7 @@ from gateway.schemas.budgets import (
     OrganizationScopedBudgetsPublic,
     OrganizationScopedBudgetUpdate,
 )
-from gateway.services.budgets._periods import period_window
+from gateway.services.budgets._periods import CYCLE_FIELD_ORDER, CycleSettings, budget_window, validate_cycle_settings
 from gateway.services.budgets._retiming import cadence_of
 from gateway.services.budgets._scopes import ScopeOwnership, lock_workspace_for_scope
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -47,10 +47,12 @@ from gateway.services.tenancy.organization_service import OrganizationService
 _MAX_LIST_LIMIT = 1000
 
 
-def _require_single_period_source(duration: int | None, alignment: str | None) -> None:
-    """Refuse a budget that resets on a duration and on a calendar boundary at once."""
-    if duration is not None and alignment is not None:
-        raise TenancyValidationError("A budget resets on budget_duration_sec or on reset_alignment, not both")
+def _require_valid_cycle(settings: CycleSettings) -> None:
+    """Refuse a cadence carrying the wrong settings for its cycle, naming the field."""
+    try:
+        validate_cycle_settings(settings)
+    except ValueError as error:
+        raise TenancyValidationError(str(error)) from error
 
 
 def _current_window(budget: Budget) -> tuple[datetime | None, datetime | None]:
@@ -58,7 +60,7 @@ def _current_window(budget: Budget) -> tuple[datetime | None, datetime | None]:
 
     An aligned budget opens on the current calendar boundary, so the first period is a partial one.
     """
-    window = period_window(datetime.now(UTC), duration=budget.budget_duration_sec, alignment=budget.reset_alignment)
+    window = budget_window(datetime.now(UTC), budget)
     return window if window is not None else (None, None)
 
 
@@ -125,7 +127,7 @@ class _OrganizationSurface:
 
     async def create_budget(self, *, user: User, request: OrganizationBudgetCreate) -> OrganizationBudgetPublic:
         organization = await self._get_managed_organization(user)
-        _require_single_period_source(request.budget_duration_sec, request.reset_alignment)
+        _require_valid_cycle(CycleSettings(*(getattr(request, name) for name in CYCLE_FIELD_ORDER)))
         budget = await self._repositories.budgets.add(
             Budget(
                 organization_id=organization.id,
@@ -133,8 +135,12 @@ class _OrganizationSurface:
                 max_budget=to_usd_or_none(request.max_budget),
                 token_limit=request.token_limit,
                 request_limit=request.request_limit,
-                budget_duration_sec=request.budget_duration_sec,
-                reset_alignment=request.reset_alignment,
+                reset_cycle=request.reset_cycle,
+                reset_every_n=request.reset_every_n,
+                reset_anchor_at=request.reset_anchor_at,
+                reset_weekdays=request.reset_weekdays,
+                reset_month_day=request.reset_month_day,
+                reset_month=request.reset_month,
             )
         )
         return OrganizationBudgetPublic.from_model(budget, organization_id=organization.id, ceiling_count=0)
@@ -252,17 +258,16 @@ class _OrganizationSurface:
         """
         organization = await self._get_managed_organization(user)
         budget = await self._require_own_budget(organization=organization, budget_id=budget_id)
-        cadence_before = cadence_of(budget.budget_duration_sec, budget.reset_alignment)
+        cadence_before = cadence_of(budget)
         changes: dict[str, Any] = request.model_dump(exclude_unset=True)
         if "max_budget" in changes:
             changes["max_budget"] = to_usd_or_none(changes["max_budget"])
-        # The resulting pair is what the CHECK constraint refuses, and neither submitted field alone looks wrong.
-        _require_single_period_source(
-            changes.get("budget_duration_sec", budget.budget_duration_sec),
-            changes.get("reset_alignment", budget.reset_alignment),
-        )
+        # The resulting set is what the CHECK constraints refuse, and no submitted
+        # field alone looks wrong: a cycle change that leaves the previous cycle's
+        # settings behind is two valid-looking fields and an impossible row.
+        _require_valid_cycle(CycleSettings(*(changes.get(name, getattr(budget, name)) for name in CYCLE_FIELD_ORDER)))
         budget = await self._repositories.budgets.update(budget, changes)
-        if cadence_of(budget.budget_duration_sec, budget.reset_alignment) != cadence_before:
+        if cadence_of(budget) != cadence_before:
             period_start, period_end = _current_window(budget)
             await self._repositories.ceilings.retime_for_budget(
                 budget.budget_id, period_start=period_start, period_end=period_end
@@ -300,4 +305,3 @@ class _OrganizationSurface:
             changes["period_start"], changes["period_end"] = _current_window(budget)
         ceiling = await self._repositories.ceilings.update(ceiling, changes)
         return OrganizationScopedBudgetPublic.from_model(ceiling, budget, organization_id=organization.id)
-

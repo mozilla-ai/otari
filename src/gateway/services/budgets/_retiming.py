@@ -11,29 +11,34 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.models.budgets import ScopedBudget
-from gateway.services.budgets._periods import period_window
+from gateway.services.budgets._periods import budget_window
 
 __all__ = ["cadence_of", "retime_ceilings_for_budget"]
 
 
-def cadence_of(duration: int | None, alignment: str | None) -> tuple[int | None, str | None]:
-    """The pair that decides whether a retiming is needed, as one comparable value.
+def cadence_of(budget: object) -> tuple[object, ...]:
+    """Everything that decides a window, as one comparable value.
 
     Exists so both callers compare the same thing, read before and after the
     mutation. Keyed on the cadence rather than on "an update happened", because
     retiming on every write would restart a period for a rename or a limit
     change, throwing away the part of it a ceiling had already spent.
+
+    The whole settings tuple rather than the cycle alone: moving a monthly budget
+    from the 1st to the 15th leaves ``reset_cycle`` where it was and is still a
+    different window, which a cycle-only comparison would miss.
     """
-    return (duration, alignment)
+    return (
+        getattr(budget, "reset_cycle", None),
+        getattr(budget, "reset_every_n", None),
+        getattr(budget, "reset_anchor_at", None),
+        getattr(budget, "reset_weekdays", None),
+        getattr(budget, "reset_month_day", None),
+        getattr(budget, "reset_month", None),
+    )
 
 
-async def retime_ceilings_for_budget(
-    db: AsyncSession,
-    *,
-    budget_id: str,
-    duration: int | None,
-    alignment: str | None,
-) -> None:
+async def retime_ceilings_for_budget(db: AsyncSession, budget: object, *, budget_id: str) -> None:
     """Rewrite the window on every ceiling naming this budget.
 
     One statement rather than a row per ceiling: the window is derived from the
@@ -50,9 +55,9 @@ async def retime_ceilings_for_budget(
     refused afterwards takes the retiming back with it.
 
     A cadence of neither kind clears the window rather than deriving one, which is
-    what "no reset" means and what ``period_window`` returns None for.
+    what "no reset" means and what ``budget_window`` returns None for.
     """
-    window = period_window(datetime.now(UTC), duration=duration, alignment=alignment)
+    window = budget_window(datetime.now(UTC), budget)
     period_start, period_end = window if window is not None else (None, None)
     await db.execute(
         update(ScopedBudget)

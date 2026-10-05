@@ -38,7 +38,7 @@ from gateway.schemas.budgets import (
     WorkspaceMemberBudgetPolicyPublic,
     WorkspaceMemberBudgetPolicyUpdate,
 )
-from gateway.services.budgets._periods import period_window
+from gateway.services.budgets._periods import budget_window
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 
@@ -233,9 +233,7 @@ class WorkspaceBudgetDefaultService:
         return created
 
     @staticmethod
-    def _build_member_budget(
-        member_id: uuid.UUID, default: WorkspaceBudgetDefault, budget: Budget
-    ) -> ScopedBudget:
+    def _build_member_budget(member_id: uuid.UUID, default: WorkspaceBudgetDefault, budget: Budget) -> ScopedBudget:
         """One member's ceiling, naming the budget the default hands out.
 
         Named rather than copied: the limit and the period are read through the
@@ -249,11 +247,7 @@ class WorkspaceBudgetDefaultService:
         budget lands them both on the same boundary, which is what the shared
         derivation is for.
         """
-        window = period_window(
-            datetime.now(UTC),
-            duration=budget.budget_duration_sec,
-            alignment=budget.reset_alignment,
-        )
+        window = budget_window(datetime.now(UTC), budget)
         period_start, period_end = window if window is not None else (None, None)
         return ScopedBudget(
             scope_type=SCOPE_WORKSPACE_MEMBER,
