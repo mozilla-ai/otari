@@ -25,9 +25,6 @@ from gateway.models.users import User
 from gateway.services.alias_service import all_alias_names
 from gateway.services.provider_kwargs import split_selector
 
-# Wire code used in 403 bodies so clients can branch on it programmatically.
-PERMISSION_CODE = "model_not_allowed"
-
 
 def effective_allowlist(api_key: APIKey | None, user: User | None = None) -> list[str] | None:
     """Resolve the allow-list that governs a request. ``None`` = unrestricted.

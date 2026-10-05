@@ -81,7 +81,6 @@ from gateway.services.tenancy.organization_service import OrganizationService
 # What a client is told about where a rate came from. The spellings are
 # ``models.pricing.PriceSource``, so the models panel and the Models page name
 # the same rungs to the same reader.
-PRICE_SOURCE_ORGANIZATION: PriceSource = "organization"
 PRICE_SOURCE_DEFAULT: PriceSource = "defaults"
 PRICE_SOURCE_DEPLOYMENT: PriceSource = "deployment"
 
@@ -134,7 +133,7 @@ def _same_rates(stored: OrganizationModelPricing, default: ModelPricing) -> bool
 
 def _priced_by_deployment(rate: EffectiveRate | None) -> bool:
     """Whether the deployment's own price list answers, which nothing here may reprice."""
-    return rate is not None and rate.source == "deployment"
+    return rate is not None and rate.source == PRICE_SOURCE_DEPLOYMENT
 
 
 def _repriceable(rate: EffectiveRate | None) -> bool:

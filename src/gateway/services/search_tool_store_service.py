@@ -82,11 +82,6 @@ def _row_to_entry(row: SearchToolCredential) -> dict[str, Any]:
     return entry
 
 
-def cached_search_tools() -> dict[str, dict[str, Any]]:
-    """The stored search-tool overlay this worker last loaded (decrypted)."""
-    return {name: dict(entry) for name, entry in _cache.items()}
-
-
 def cache_is_stale(ttl: float = SEARCH_TOOL_CACHE_TTL_SECONDS) -> bool:
     """Whether the cache has never been loaded or has outlived ``ttl``."""
     return _cached_at is None or (time.monotonic() - _cached_at) >= ttl

@@ -459,20 +459,6 @@ class WorkspaceProviderKeyOverrideRepository:
                 by_workspace[workspace_id].append((key, overridden.get((workspace_id, key.id))))
         return by_workspace
 
-    async def get_active_key_for_workspace_provider(
-        self,
-        *,
-        organization_id: uuid.UUID,
-        workspace_id: uuid.UUID,
-        provider: str,
-    ) -> OrgProviderKey | None:
-        candidates = await self.candidates_for_provider(
-            organization_id=organization_id,
-            provider=provider,
-            workspace_id=workspace_id,
-        )
-        return resolve_active_key(candidates)
-
 
 class WorkspaceProviderModelRestrictionRepository:
     """Repository for `workspace_provider_model_restrictions` rows."""

@@ -84,11 +84,6 @@ def _row_to_entry(row: ProviderCredential) -> dict[str, Any]:
     return entry
 
 
-def cached_providers() -> dict[str, dict[str, Any]]:
-    """The stored provider overlay this worker last loaded (decrypted)."""
-    return {name: dict(entry) for name, entry in _cache.items()}
-
-
 def cache_is_stale(ttl: float = PROVIDER_CACHE_TTL_SECONDS) -> bool:
     """Whether the cache has never been loaded or has outlived ``ttl``."""
     return _cached_at is None or (time.monotonic() - _cached_at) >= ttl

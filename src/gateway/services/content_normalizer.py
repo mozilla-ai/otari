@@ -105,14 +105,6 @@ class NormalizationStats:
             total_tokens=self.vision_prompt_tokens + self.vision_completion_tokens,
         )
 
-    def to_metadata(self) -> dict[str, Any]:
-        return {
-            "files_extracted": self.files_extracted,
-            "images_described": self.images_described,
-            "dropped": self.dropped,
-            "chars_added": self.chars_added,
-        }
-
 
 @dataclass
 class _Source:
