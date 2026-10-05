@@ -162,6 +162,8 @@ function RuleDialog({
           ? null
           : maxConcurrent,
       lease_sec: maxConcurrent === "" ? DEFAULT_LEASE_SEC : leaseSec,
+      // Not offered in the form yet, so an edit keeps what the rule has.
+      tpm_admission: rule?.tpm_admission ?? "estimate",
     }
     if (rule) {
       update.mutate({ name: rule.name, body: limits }, { onSuccess: onClose })

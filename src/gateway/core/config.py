@@ -383,6 +383,15 @@ class RateLimitRule(BaseModel):
             "budget_estimate_default_output_tokens) and charged what it used once it completes."
         ),
     )
+    tpm_admission: Literal["estimate", "used"] = Field(
+        default="estimate",
+        description=(
+            "How a tpm limit admits a request. 'estimate' holds the request's estimate and refuses "
+            "it when that does not fit. 'used' admits a request while the minute's tokens are under "
+            "the limit, holding none, and counts what it used once it completes, as LiteLLM does: "
+            "a client that always sends a large max_tokens is limited by its usage, not its ceiling."
+        ),
+    )
     max_concurrent: int | None = Field(default=None, ge=1, description="Requests in flight at once.")
     lease_sec: float = Field(
         default=900.0,

@@ -91,6 +91,20 @@ def test_a_changed_rule_applies_its_new_limit(client: TestClient) -> None:
     assert _chats(client, headers, 1) == [200]
 
 
+def test_tpm_admission_is_stored_and_changed(client: TestClient) -> None:
+    created = client.post(
+        _RULES, json={"name": "tpm-used", "per": "user", "tpm": 2000, "tpm_admission": "used"}, headers=_MASTER
+    )
+    changed = client.patch(f"{_RULES}/tpm-used", json={"tpm_admission": "estimate"}, headers=_MASTER)
+    listed = {rule["name"]: rule for rule in client.get(_RULES, headers=_MASTER).json()["rules"]}
+
+    assert created.status_code == 201, created.text
+    assert created.json()["tpm_admission"] == "used"
+    assert changed.json()["tpm_admission"] == "estimate"
+    assert listed["tpm-used"]["tpm_admission"] == "estimate"
+    assert listed["from-file"]["tpm_admission"] == "estimate"
+
+
 def test_a_deleted_rule_stops_applying(client: TestClient) -> None:
     headers = _key(client, "carol")
     client.post(_RULES, json={"name": "keys", "per": "key", "rpm": 1}, headers=_MASTER)

@@ -177,7 +177,10 @@ rate_limits:
   charged the tokens its provider reported before failing, usually none, and a
   request refused after admission (by its budget, say) is charged nothing. A
   request whose estimate alone exceeds the limit is always refused, with no
-  `Retry-After`, since waiting would not let it in.
+  `Retry-After`, since waiting would not let it in. `tpm_admission: used`
+  instead admits a request while the minute's tokens are under the limit and
+  counts only what it used, as LiteLLM does; choose it when clients send a
+  `max_tokens` far above what they use.
 - `max_concurrent`: requests in flight at once. A slot is given back when the
   response ends, streamed or not. `lease_sec` (15 minutes by default) bounds how
   long a slot outlives a process that dies holding it.

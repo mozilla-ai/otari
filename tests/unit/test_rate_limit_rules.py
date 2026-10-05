@@ -379,3 +379,18 @@ async def test_a_refused_attempt_is_counted_by_no_model_rule() -> None:
         await (await _admit(rules)).admit_model("openai", "gpt-4o")
 
     assert (await store.hit("rule:wide:openai:gpt-4o:rpm", 5, 60)).count == 2
+
+
+@pytest.mark.asyncio
+async def test_used_admission_admits_past_an_estimate_and_counts_what_was_used() -> None:
+    """MLPA sends max_tokens 8192 against a 2,000 tpm: only what a request used may count."""
+    rules = _rules(InMemoryRateLimitStore(), {"name": "tpm", "per": "user", "tpm": 2000, "tpm_admission": "used"})
+
+    first = await _admit(rules, tokens=8192)
+    await first.settle(1500)
+    second = await _admit(rules, tokens=8192)
+    await second.settle(600)
+    with pytest.raises(HTTPException) as exc_info:
+        await _admit(rules, tokens=8192)
+
+    assert exc_info.value.detail == "Rate limit 'tpm' exceeded: 2,000 tokens per minute"
