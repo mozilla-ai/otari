@@ -6,6 +6,7 @@ this package, so the two cannot share one.
 """
 
 from gateway.services.code_execution.containers import (
+    CONTAINER_AUTO,
     CONTAINER_CLAIM_TTL_S,
     CONTAINER_ID_PREFIX,
     ContainerBusyError,
@@ -13,10 +14,13 @@ from gateway.services.code_execution.containers import (
     ContainerNotFoundError,
     SandboxContainerRegistry,
     SandboxContainers,
+    check_container_on_credential,
     new_container_id,
+    requested_container,
 )
 
 __all__ = [
+    "CONTAINER_AUTO",
     "CONTAINER_CLAIM_TTL_S",
     "CONTAINER_ID_PREFIX",
     "ContainerBusyError",
@@ -24,5 +28,7 @@ __all__ = [
     "ContainerNotFoundError",
     "SandboxContainerRegistry",
     "SandboxContainers",
+    "check_container_on_credential",
     "new_container_id",
+    "requested_container",
 ]

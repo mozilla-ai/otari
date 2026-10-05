@@ -178,11 +178,13 @@ from gateway.services.budgets import (
     reserve_budget,
 )
 from gateway.services.code_execution import (
+    CONTAINER_AUTO,
     CONTAINER_ID_PREFIX,
     ContainerBusyError,
     ContainerLease,
     ContainerNotFoundError,
     SandboxContainerRegistry,
+    requested_container,
 )
 from gateway.services.files import ProviderFile, SandboxFileBridge, produced_files_for
 from gateway.services.guardrails import InProcessGuardrail
@@ -437,10 +439,6 @@ SANDBOX_UNAVAILABLE_DETAIL = "code_execution sandbox temporarily unavailable. Re
 # id never reveals which. The phrasing is the one clients of Anthropic's and
 # OpenAI's containers already recognize as "drop the id and start over".
 CONTAINER_GONE_DETAIL_TEMPLATE = "Container '{container_id}' has expired or does not exist."
-# What a request sends to ask for a sandbox that outlives it, in place of an id
-# it does not have yet. OpenAI's own spelling on a ``code_interpreter`` entry is
-# the object ``{"type": "auto"}``, which means the same thing.
-CONTAINER_AUTO = "auto"
 CONTAINER_NOT_GATEWAY_RUN_DETAIL = (
     "container names a sandbox this gateway holds, and the code execution for this request runs on the "
     "provider, which cannot reach it. Drop the field, or send Otari-Code-Execution: otari to run the "
@@ -3412,24 +3410,24 @@ async def _admit_code_execution(
     # ``auto`` asks to hold one, and an ID asks for that one back.
     sandbox_containers = backends.sandbox_containers if use_sandbox else None
     if use_sandbox:
-        requested_container = _requested_container(declared.container_id) or _requested_container(
+        container_request = requested_container(declared.container_id) or requested_container(
             (sandbox_tool_entry or {}).get("container")
         )
-        if requested_container is None:
+        if container_request is None:
             # Nothing asked for, so nothing is held.
             sandbox_containers = None
-        elif requested_container != CONTAINER_AUTO:
+        elif container_request != CONTAINER_AUTO:
             # An ID names one sandbox and its files, so a deployment that cannot honor it refuses.
             # It resolves against this caller's own leases before any new lease.
             gone = adapter.error(
                 400,
-                CONTAINER_GONE_DETAIL_TEMPLATE.format(container_id=_echoable_container_id(requested_container)),
+                CONTAINER_GONE_DETAIL_TEMPLATE.format(container_id=_echoable_container_id(container_request)),
                 ErrorKind.INVALID_REQUEST,
             )
             if sandbox_containers is None:
                 raise gone
             try:
-                sandbox_container_lease = await sandbox_containers.resolve(requested_container)
+                sandbox_container_lease = await sandbox_containers.resolve(container_request)
             except ContainerNotFoundError:
                 raise gone from None
             except ContainerBusyError:
@@ -4256,30 +4254,6 @@ def _loop_options(tool_ctx: ToolContext) -> dict[str, Any]:
     if tool_ctx.use_budget is not None:
         options["use_budget"] = tool_ctx.use_budget
     return options
-
-
-def _requested_container(value: Any) -> str | None:
-    """What a ``container`` field asks for: an id to resume, ``auto``, or nothing.
-
-    ``auto`` is how a request asks for a sandbox that outlives it, and is what
-    OpenAI's ``{"type": "auto"}`` object already means on a ``code_interpreter``
-    entry; the string spelling is for the dialects with no object form, which is
-    Anthropic's top-level field and the gateway's own entry. An id asks for that
-    sandbox back. Absent, which is every request written before this existed,
-    asks for neither and gets the sandbox released with the request.
-    """
-    if isinstance(value, str):
-        cleaned = value.strip()
-        if not cleaned:
-            return None
-        return CONTAINER_AUTO if cleaned.lower() == CONTAINER_AUTO else cleaned
-    if isinstance(value, dict):
-        nested = value.get("id")
-        if isinstance(nested, str) and nested.strip():
-            return nested.strip()
-        kind = value.get("type")
-        return CONTAINER_AUTO if isinstance(kind, str) and kind.strip().lower() == CONTAINER_AUTO else None
-    return None
 
 
 def _gateway_container_value(raw: Any) -> str | None:

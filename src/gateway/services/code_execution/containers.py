@@ -38,6 +38,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.tools_exceptions import ContainerOnManagedCredentialError
 from gateway.repositories.code_execution import (
     SandboxContainerRow,
     claim_container_row,
@@ -51,6 +52,10 @@ from gateway.repositories.code_execution import (
 # Anthropic ``container_``-prefixed ones, so a reserved prefix is what lets an
 # id the gateway minted be told from one that names a provider's container.
 CONTAINER_ID_PREFIX = "otari_cntr_"
+# What a request sends to ask for a sandbox that outlives it, in place of an id
+# it does not have yet. OpenAI's own spelling on a ``code_interpreter`` entry is
+# the object ``{"type": "auto"}``, which means the same thing.
+CONTAINER_AUTO = "auto"
 # How long a request's claim on a container lasts before another request may
 # take it. The ceiling on a sandbox session's lease
 # (``sandbox_backend._MAX_SESSION_TTL_S``), because a request cannot outlive the
@@ -62,6 +67,52 @@ CONTAINER_CLAIM_TTL_S = 3600.0
 def new_container_id() -> str:
     """A fresh container id, minted once per lease and kept across resumes."""
     return f"{CONTAINER_ID_PREFIX}{uuid.uuid4().hex}"
+
+
+def requested_container(value: object) -> str | None:
+    """What a ``container`` field asks for: an id to resume, ``auto``, or nothing.
+
+    ``auto`` is how a request asks for a sandbox that outlives it, and is what
+    OpenAI's ``{"type": "auto"}`` object already means on a ``code_interpreter``
+    entry; the string spelling is for the dialects with no object form, which is
+    Anthropic's top-level field and the gateway's own entry. An id asks for that
+    sandbox back. Absent, which is every request written before this existed,
+    asks for neither and gets the sandbox released with the request.
+    """
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        return CONTAINER_AUTO if cleaned.lower() == CONTAINER_AUTO else cleaned
+    if isinstance(value, dict):
+        nested = value.get("id")
+        if isinstance(nested, str) and nested.strip():
+            return nested.strip()
+        kind = value.get("type")
+        return CONTAINER_AUTO if isinstance(kind, str) and kind.strip().lower() == CONTAINER_AUTO else None
+    return None
+
+
+def check_container_on_credential(container: object, *, managed_credential: bool) -> None:
+    """Refuse a caller-chosen container id when the upstream account is not the caller's.
+
+    A container id names an execution environment and the files uploaded into it,
+    scoped to the *provider account* that minted it, not to an otari tenant. A
+    managed credential is one the platform owns and many workspaces share, so
+    forwarding an id the caller picked would let anyone holding one resume another
+    tenant's container and read its workspace. A container id is minted by the
+    provider and carries the caller's claim on it, so it cannot be namespaced:
+    forward or refuse are the only answers, and on a shared account the answer is
+    refuse.
+
+    ``auto`` passes: it names no container, only asks this gateway to hold its
+    own sandbox, and never reaches the provider.
+
+    Raises:
+        ContainerOnManagedCredentialError: ``managed_credential`` and ``container`` is not ``auto``.
+    """
+    if managed_credential and requested_container(container) != CONTAINER_AUTO:
+        raise ContainerOnManagedCredentialError()
 
 
 class ContainerNotFoundError(LookupError):

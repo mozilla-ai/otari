@@ -55,6 +55,18 @@ class WorkspaceMcpServerLimitReachedError(TenancyValidationError):
         super().__init__(f"Workspace {workspace_id} already has the maximum of {limit} MCP servers")
 
 
+class ContainerOnManagedCredentialError(Exception):
+    """A request named a container on a provider account this gateway shares across workspaces."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "container cannot be used on this route: it resolves to a provider account this gateway "
+            "manages on behalf of many workspaces, and a container id addresses state on that account "
+            "rather than on your workspace. Use a model served by your own provider key."
+        )
+        self.message = str(self)
+
+
 class WebAccessRefusedError(Exception):
     """A workspace's web search policy refuses the web access a request declared."""
 

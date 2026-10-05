@@ -40,14 +40,11 @@ from gateway.api.routes._normalize import (
     sandbox_requested,
 )
 from gateway.api.routes._pipeline import (
-    CONTAINER_AUTO,
     DB_UNAVAILABLE_DETAIL,
     NO_RESOLVABLE_PROVIDER_DETAIL,
     DeclaredTools,
     ErrorKind,
-    RequestContext,
     ToolBackends,
-    _requested_container,
     classify_provider_error,
     default_attempt_kwargs,
     domain_error,
@@ -77,10 +74,11 @@ from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
 from gateway.exceptions.files_exceptions import ProviderUploadFailedError
+from gateway.exceptions.tools_exceptions import ContainerOnManagedCredentialError
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
-from gateway.services.code_execution import ContainerLease
+from gateway.services.code_execution import ContainerLease, check_container_on_credential
 from gateway.services.files import StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
@@ -743,52 +741,6 @@ class _MessagesAdapter:
         return kwargs
 
 
-CONTAINER_ON_MANAGED_CREDENTIAL_DETAIL = (
-    "container cannot be used on this route: it resolves to a provider account this gateway "
-    "manages on behalf of many workspaces, and a container id addresses state on that account "
-    "rather than on your workspace. Use a model served by your own provider key."
-)
-
-
-def _reject_container_on_managed_credential(ctx: RequestContext, container: str | dict[str, Any]) -> None:
-    """Refuse a caller-chosen container id when the upstream account is not the caller's.
-
-    A container id names an execution environment and the files uploaded into it,
-    scoped to the *provider account* that minted it, not to an otari tenant. A
-    managed attempt runs on a credential the platform owns and many workspaces
-    share, so forwarding an id the caller picked would let anyone holding one
-    resume another tenant's container and read its workspace.
-
-    This is the container-shaped case of what :func:`scope_prompt_cache_key`
-    solves two calls later by namespacing the key. A container id is minted by
-    the provider and carries the caller's claim on it, so it cannot be
-    namespaced: forward or refuse are the only answers, and on a shared account
-    the answer is refuse.
-
-    Refused when *any* attempt on the route is managed, not only the first: which
-    attempt serves the request is decided during fallback, past this point. A
-    BYO-only route keeps the field, because there the account, and so the
-    container, is already the caller's own. Standalone never reaches this: its
-    credentials are the deployment operator's own, and the managed rung
-    (``_serve_from_hosted_credential``) answers ``None`` in every build that
-    mounts this route.
-
-    ``auto`` passes: it names no container, only asks this gateway to hold its
-    own sandbox, and never reaches the provider (``prepare_gateway_tools`` either
-    consumes it or refuses it as a gateway value on a provider-run request).
-    """
-    if _requested_container(container) == CONTAINER_AUTO:
-        return
-    route = ctx.route
-    if route is None or not any(attempt.managed for attempt in route.attempts):
-        return
-    raise _anthropic_error(
-        _ERR_INVALID_REQUEST,
-        CONTAINER_ON_MANAGED_CREDENTIAL_DETAIL,
-        status.HTTP_400_BAD_REQUEST,
-    )
-
-
 _ADAPTER = _MessagesAdapter()
 
 
@@ -906,15 +858,20 @@ async def create_message(
         # them in the Anthropic envelope so /api/v1/messages errors stay structured.
         raise _ensure_anthropic_error(exc) from exc
 
+    # Standalone credentials are the operator's own, so only hybrid can route to a managed one.
+    # Any managed attempt counts, not only the first: fallback decides which serves, past this point.
     if request.container is not None and ctx.hybrid_mode:
+        route = ctx.route
         try:
-            _reject_container_on_managed_credential(ctx, request.container)
-        except HTTPException:
-            # A no-op in hybrid, the only mode that reaches this gate, since
-            # hybrid reserves nothing locally. Kept so this exit already settles
+            check_container_on_credential(
+                request.container,
+                managed_credential=route is not None and any(attempt.managed for attempt in route.attempts),
+            )
+        except ContainerOnManagedCredentialError as exc:
+            # A no-op in hybrid, which reserves nothing locally. Kept so this exit already settles
             # if the gate ever covers a mode that does pre-debit the estimate.
             await release_reservation(ctx)
-            raise
+            raise _anthropic_error(_ERR_INVALID_REQUEST, exc.message, status.HTTP_400_BAD_REQUEST) from exc
 
     tool_ctx = await prepare_gateway_tools(
         adapter=_ADAPTER,

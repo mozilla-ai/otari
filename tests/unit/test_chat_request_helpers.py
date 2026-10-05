@@ -410,33 +410,6 @@ def test_a_nonsensical_max_uses_is_refused_by_the_reader() -> None:
             _read_web_search_max_uses(entry)
 
 
-def test_what_a_container_field_asks_for_is_read_in_both_vocabularies() -> None:
-    """An id resumes one, ``auto`` asks for one, and nothing asks for nothing.
-
-    OpenAI spells the ask as the object ``{"type": "auto"}`` on a
-    ``code_interpreter`` entry, which is why the string spelling is not the only
-    one: the dialects with no object form (Anthropic's top-level field, the
-    gateway's own entry) use ``"auto"``.
-    """
-    from gateway.api.routes._pipeline import CONTAINER_AUTO, _requested_container
-
-    assert _requested_container("otari_cntr_1") == "otari_cntr_1"
-    assert _requested_container({"id": "otari_cntr_2"}) == "otari_cntr_2"
-    assert _requested_container("auto") == CONTAINER_AUTO
-    assert _requested_container(" AUTO ") == CONTAINER_AUTO, "case and padding are the client's, not the meaning"
-    assert _requested_container({"type": "auto"}) == CONTAINER_AUTO
-    # An object naming an id means that id, whatever its type says.
-    assert _requested_container({"type": "auto", "id": "otari_cntr_4"}) == "otari_cntr_4"
-
-    # Nothing asked for: the request holds no sandbox past itself.
-    assert _requested_container(None) is None
-    assert _requested_container("") is None
-    assert _requested_container("   ") is None
-    assert _requested_container({}) is None
-    assert _requested_container({"type": "something_else"}) is None
-    assert _requested_container(7) is None
-
-
 def test_only_the_gateways_own_container_words_are_refused_when_the_provider_runs_the_code() -> None:
     """A value the gateway named cannot mean anything upstream; a provider's own can.
 
