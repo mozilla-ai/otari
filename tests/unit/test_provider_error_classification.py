@@ -251,19 +251,28 @@ def _rate_limited_with(retry_after: str) -> Exception:
 
 
 def test_retry_after_is_forwarded_on_a_429() -> None:
-    assert provider_error_headers(_rate_limited_with("34"), 429) == {"Retry-After": "34"}
+    assert provider_error_headers(_rate_limited_with("34"), 429) == {
+        "Otari-Error-Code": "upstream_rate_limited",
+        "Retry-After": "34",
+    }
 
 
 def test_retry_after_rounds_a_fraction_up() -> None:
     """A client honoring the header must not retry before the window the
     provider named, so 0.4s becomes 1s rather than 0s."""
-    assert provider_error_headers(_rate_limited_with("0.4"), 429) == {"Retry-After": "1"}
+    assert provider_error_headers(_rate_limited_with("0.4"), 429) == {
+        "Otari-Error-Code": "upstream_rate_limited",
+        "Retry-After": "1",
+    }
 
 
 def test_retry_after_is_clamped() -> None:
     """A provider does not get to tell this gateway's callers to sleep for a
     year."""
-    assert provider_error_headers(_rate_limited_with("99999999"), 429) == {"Retry-After": "86400"}
+    assert provider_error_headers(_rate_limited_with("99999999"), 429) == {
+        "Otari-Error-Code": "upstream_rate_limited",
+        "Retry-After": "86400",
+    }
 
 
 @pytest.mark.parametrize(
@@ -286,7 +295,7 @@ def test_retry_after_that_is_not_a_number_is_dropped(raw: str) -> None:
     """The value is re-serialized from a parsed number, never relayed as
     received: a header value is not a body, and CRLF in one is not a formatting
     problem."""
-    assert provider_error_headers(_rate_limited_with(raw), 429) is None
+    assert provider_error_headers(_rate_limited_with(raw), 429) == {"Otari-Error-Code": "upstream_rate_limited"}
 
 
 def test_retry_after_is_not_forwarded_on_a_gateway_fault() -> None:
@@ -297,8 +306,8 @@ def test_retry_after_is_not_forwarded_on_a_gateway_fault() -> None:
     assert provider_error_headers(exc, 502) is None
 
 
-def test_retry_after_absent_sends_no_header() -> None:
-    assert provider_error_headers(_StatusError(429), 429) is None
+def test_retry_after_absent_sends_only_the_error_code() -> None:
+    assert provider_error_headers(_StatusError(429), 429) == {"Otari-Error-Code": "upstream_rate_limited"}
 
 
 def test_retry_after_read_through_the_exception_chain() -> None:
@@ -310,7 +319,7 @@ def test_retry_after_read_through_the_exception_chain() -> None:
 def test_platform_terminal_exc_forwards_retry_after() -> None:
     exc = _provider_failure_http_exc(_rate_limited_with("34"), fallback_detail="LLM provider error")
     assert exc.status_code == 429
-    assert exc.headers == {"Retry-After": "34"}
+    assert exc.headers == {"Otari-Error-Code": "upstream_rate_limited", "Retry-After": "34"}
 
 
 @pytest.mark.parametrize("exc", [_StatusError(500), _StatusError(503), Exception(_RAW), ValueError(_RAW)])

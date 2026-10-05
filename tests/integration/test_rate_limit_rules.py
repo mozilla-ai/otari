@@ -93,6 +93,7 @@ def test_a_per_key_rule_refuses_the_request_past_its_limit(per_key_rpm_client: T
     assert bob_status == 200
     assert refused.json()["detail"] == "Rate limit 'keys' exceeded: 2 requests per minute"
     assert "Retry-After" in refused.headers
+    assert refused.headers["Otari-Error-Code"] == "rate_limited"
 
 
 def test_a_completed_request_is_charged_the_tokens_it_used(tpm_client: TestClient) -> None:

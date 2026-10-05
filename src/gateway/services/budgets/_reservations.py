@@ -14,6 +14,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core import error_codes
 from gateway.core.metered_pricing import estimate_metered_cost
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
@@ -507,11 +508,13 @@ async def reserve_budget(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User '{user_id}' not found",
+            headers=error_codes.error_headers(error_codes.USER_NOT_FOUND),
         )
     if user.blocked:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"User '{user_id}' is blocked",
+            headers=error_codes.error_headers(error_codes.USER_BLOCKED),
         )
 
     # Budget-exempt request (e.g. a key flagged exclude_from_budget): the user is
@@ -597,6 +600,7 @@ async def reserve_budget(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"{refused.subject} has exceeded {axis} limit",
+                headers=error_codes.error_headers(error_codes.BUDGET_EXCEEDED, budget_scope=refused.scope_type),
             )
 
     if budget is None:
@@ -722,6 +726,7 @@ async def reserve_budget(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"User '{user_id}' has exceeded {axis} limit",
+            headers=error_codes.error_headers(error_codes.BUDGET_EXCEEDED, budget_scope="user"),
         )
 
     return await _held_handle(
@@ -1005,6 +1010,7 @@ async def increase_reservation(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"{refused.subject} has exceeded {axis} limit",
+                headers=error_codes.error_headers(error_codes.BUDGET_EXCEEDED, budget_scope=refused.scope_type),
             )
         # Recorded here, next to the hold it describes, and before the per-user
         # call below can refuse: what the caller's refund releases is what the
