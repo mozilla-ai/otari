@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 
 from gateway.core.config import GatewayConfig
+from gateway.core.retry_after import bounded_retry_after
 from gateway.exceptions.control_plane_exceptions import (
     ControlPlaneNotConfiguredError,
     ControlPlaneRefusedError,
@@ -84,8 +85,8 @@ async def resolve(config: GatewayConfig, *, user_token: str, endpoint: ResolveEn
 
     Raises:
         ControlPlaneNotConfiguredError: no control plane address is set.
-        ControlPlaneRefusedError: the peer refused, carrying its status, its
-            detail where that is a safe string, and its ``Retry-After``.
+        ControlPlaneRefusedError: the peer refused, carrying its status,
+            its detail where that is a safe string, and its ``Retry-After`` capped at one day.
         ControlPlaneUnavailableError: a transport failure, an unreadable body or any other status,
             so nothing about the peer's internals reaches the caller.
     """
@@ -120,7 +121,7 @@ async def resolve(config: GatewayConfig, *, user_token: str, endpoint: ResolveEn
         raise ControlPlaneRefusedError(
             _safe_detail(response, endpoint.refusal_detail),
             status_code=response.status_code,
-            retry_after=response.headers.get("Retry-After") if rate_limited else None,
+            retry_after=bounded_retry_after(response.headers.get("Retry-After")) if rate_limited else None,
         )
 
     raise ControlPlaneUnavailableError(UNAVAILABLE_DETAIL)

@@ -214,7 +214,7 @@ its own tenant.
 
 | Status | Behavior |
 |---|---|
-| `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Authorization request rejected"`. |
+| `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` is relayed as whole seconds, rounded up and capped at one day. A value that is not a non-negative number of seconds, such as an HTTP date, is dropped. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Authorization request rejected"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
 | Network, timeout, protocol or proxy failure, or an undecodable body | Mapped to `502 Bad Gateway`. |
 
@@ -301,7 +301,7 @@ Nothing platform-side stores or returns a revision.
 
 | Status | Behavior |
 |---|---|
-| `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"MCP server resolution failed"`. |
+| `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` is relayed as whole seconds, rounded up and capped at one day. A value that is not a non-negative number of seconds, such as an HTTP date, is dropped. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"MCP server resolution failed"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
 | Network, timeout, protocol or proxy failure, or an undecodable body | Mapped to `502 Bad Gateway`. |
 
@@ -373,7 +373,7 @@ For Fetch, allowed and blocked domains form a mandatory policy that request-supp
 
 | Status | Behavior |
 |---|---|
-| `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Web search resolution failed"`. |
+| `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` is relayed as whole seconds, rounded up and capped at one day. A value that is not a non-negative number of seconds, such as an HTTP date, is dropped. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Web search resolution failed"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
 | Network, timeout, protocol or proxy failure, or an undecodable body | Mapped to `502 Bad Gateway`. |
 
@@ -447,7 +447,7 @@ response that resolves to nothing leaves the deployment's own settings in force.
 
 | Status | Behavior |
 |---|---|
-| `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Code execution resolution failed"`. |
+| `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` is relayed as whole seconds, rounded up and capped at one day. A value that is not a non-negative number of seconds, such as an HTTP date, is dropped. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Code execution resolution failed"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
 | Network, timeout, protocol or proxy failure, or an undecodable body | Mapped to `502 Bad Gateway`. |
 

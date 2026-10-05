@@ -118,6 +118,31 @@ async def test_only_a_rate_limit_carries_the_peers_retry_hint(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("raw", "relayed"),
+    [
+        ("2.5", "3"),
+        ("31536000", "86400"),
+        ("-1", None),
+        ("inf", None),
+        ("soon", None),
+        ("Wed, 21 Oct 2026 07:28:00 GMT", None),
+    ],
+)
+async def test_the_peers_retry_hint_is_bounded_or_dropped(
+    control_plane_transport: InstallControlPlane,
+    raw: str,
+    relayed: str | None,
+) -> None:
+    control_plane_transport(_answers(httpx.Response(429, json={"detail": "Slow down"}, headers={"Retry-After": raw})))
+
+    with pytest.raises(ControlPlaneRefusedError) as raised:
+        await _ask()
+
+    assert raised.value.retry_after == relayed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "response",
     [
         httpx.Response(500, json={"detail": "peer exploded"}),
