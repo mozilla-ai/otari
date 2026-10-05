@@ -244,9 +244,7 @@ def explain_router_ordering(
     if not backend_is_weighted(spec.router_backend):
         return None, []
     declared = spec.router_candidates
-    usable = usable_candidates(
-        config, declared, user_id=user_id, allowlist=allowlist, workspace_id=workspace_id
-    )
+    usable = usable_candidates(config, declared, user_id=user_id, allowlist=allowlist, workspace_id=workspace_id)
     weights = spec.router_weights
     shares = declared_shares(weights, usable)
     displayed: list[WeightedShare] = []

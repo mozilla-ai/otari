@@ -37,9 +37,7 @@ def _image_msg(url: str = _PNG_DATA_URL) -> list[dict[str, Any]]:
 async def test_string_content_untouched() -> None:
     cfg = GatewayConfig()
     msgs = [{"role": "user", "content": "plain text"}]
-    out, stats = await normalize_messages(
-        msgs, config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u"
-    )
+    out, stats = await normalize_messages(msgs, config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u")
     assert out == msgs
     assert not stats.touched
 
@@ -66,9 +64,7 @@ async def test_bare_string_messages_untouched() -> None:
 async def test_native_image_passthrough() -> None:
     cfg = GatewayConfig()
     msg = _image_msg()
-    out, stats = await normalize_messages(
-        msg, config=cfg, caps=_NATIVE, fmt="openai", files=None, user_id="u"
-    )
+    out, stats = await normalize_messages(msg, config=cfg, caps=_NATIVE, fmt="openai", files=None, user_id="u")
     block = out[0]["content"][1]
     assert block["type"] == "image_url"
     # An already-inline block must pass through byte-identical — no decode/
@@ -140,9 +136,7 @@ async def test_document_extracted_to_text(monkeypatch: pytest.MonkeyPatch) -> No
             "content": [{"type": "file", "file": {"file_data": pdf_data_url, "filename": "q3.pdf"}}],
         }
     ]
-    out, stats = await normalize_messages(
-        msgs, config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u"
-    )
+    out, stats = await normalize_messages(msgs, config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u")
     block = out[0]["content"][0]
     assert block["type"] == "text"
     assert "q3.pdf" in block["text"]
@@ -159,9 +153,7 @@ async def test_anthropic_image_passthrough_native() -> None:
             "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": _PNG_B64}}],
         }
     ]
-    out, stats = await normalize_messages(
-        msgs, config=cfg, caps=_NATIVE, fmt="anthropic", files=None, user_id="u"
-    )
+    out, stats = await normalize_messages(msgs, config=cfg, caps=_NATIVE, fmt="anthropic", files=None, user_id="u")
     assert out[0]["content"][0]["type"] == "image"
     assert out[0]["content"][0]["source"]["type"] == "base64"
     assert not stats.touched
@@ -171,9 +163,7 @@ async def test_anthropic_image_passthrough_native() -> None:
 async def test_responses_uses_input_text_block() -> None:
     cfg = GatewayConfig(vision_strategy="off")
     msgs = [{"role": "user", "content": [{"type": "input_image", "image_url": _PNG_DATA_URL}]}]
-    out, _ = await normalize_messages(
-        msgs, config=cfg, caps=_TEXT_ONLY, fmt="responses", files=None, user_id="u"
-    )
+    out, _ = await normalize_messages(msgs, config=cfg, caps=_TEXT_ONLY, fmt="responses", files=None, user_id="u")
     assert out[0]["content"][0]["type"] == "input_text"
 
 

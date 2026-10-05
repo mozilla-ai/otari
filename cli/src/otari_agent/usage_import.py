@@ -89,7 +89,6 @@ def import_claude_code(
 
     import httpx
 
-
     try:
         cutoff = parse_since(since) if since is not None else None
     except ValueError as exc:

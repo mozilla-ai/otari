@@ -144,7 +144,7 @@ def _stub_vendor(monkeypatch: pytest.MonkeyPatch) -> None:
         def create(_guardrail_name: Any, **_kwargs: Any) -> Any:
             return object()
 
-    monkeypatch.setattr(runner, 'AnyGuardrail', _Stub)
+    monkeypatch.setattr(runner, "AnyGuardrail", _Stub)
 
 
 def _hold(organization_id: uuid.UUID, definition: OrganizationGuardrailDefinitionPublic, *, guardrail: object) -> None:
@@ -878,9 +878,7 @@ async def test_disabling_a_definition_stops_it_on_the_worker_that_served_the_wri
     assert runner.handle(organization.id, created.id) is None
 
 
-async def test_deleting_a_definition_drops_what_the_worker_held(
-    async_db: AsyncSession, vendor: list[str]
-) -> None:
+async def test_deleting_a_definition_drops_what_the_worker_held(async_db: AsyncSession, vendor: list[str]) -> None:
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     service = _service(async_db)

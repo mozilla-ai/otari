@@ -52,9 +52,11 @@ def _spec_for(target: str) -> str:
 def upgrade() -> None:
     """Upgrade schema."""
     conn = op.get_bind()
-    rows = conn.execute(
-        sa.text("SELECT name, target, user_id, created_at, updated_at FROM model_aliases")
-    ).mappings().all()
+    rows = (
+        conn.execute(sa.text("SELECT name, target, user_id, created_at, updated_at FROM model_aliases"))
+        .mappings()
+        .all()
+    )
 
     for row in rows:
         # A policy of the same name and scope already existing would make this
@@ -114,9 +116,11 @@ def downgrade() -> None:
     ``f4c6a8b0d2e5``) is what makes the round trip lossless for the aliases.
     """
     conn = op.get_bind()
-    rows = conn.execute(
-        sa.text("SELECT id, name, spec, user_id, created_at, updated_at FROM routing_policies")
-    ).mappings().all()
+    rows = (
+        conn.execute(sa.text("SELECT id, name, spec, user_id, created_at, updated_at FROM routing_policies"))
+        .mappings()
+        .all()
+    )
 
     for row in rows:
         spec = row["spec"]

@@ -205,13 +205,17 @@ async def _existing_event_ids(db: AsyncSession, source: str, event_ids: list[str
         if not chunk:
             continue
         rows = (
-            await db.execute(
-                select(UsageLog.source_event_id).where(
-                    UsageLog.source == source,
-                    UsageLog.source_event_id.in_(chunk),
+            (
+                await db.execute(
+                    select(UsageLog.source_event_id).where(
+                        UsageLog.source == source,
+                        UsageLog.source_event_id.in_(chunk),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         found.update(row for row in rows if row is not None)
     return found
 
@@ -263,9 +267,7 @@ async def _load_pricing_index(
         chunk = list(keys)[start : start + _IN_CHUNK]
         if not chunk:
             continue
-        rows = (
-            await db.execute(select(ModelPricing).where(ModelPricing.model_key.in_(chunk)))
-        ).scalars().all()
+        rows = (await db.execute(select(ModelPricing).where(ModelPricing.model_key.in_(chunk)))).scalars().all()
         for row in rows:
             index.setdefault(row.model_key, []).append((normalize_effective_at(row.effective_at), row))
     for entries in index.values():
@@ -497,9 +499,9 @@ async def ingest_external_events(
     for start in range(0, len(candidate_users), _IN_CHUNK):
         chunk = candidate_users[start : start + _IN_CHUNK]
         active_users.update(
-            (
-                await db.execute(select(User.user_id).where(User.user_id.in_(chunk), User.deleted_at.is_(None)))
-            ).scalars().all()
+            (await db.execute(select(User.user_id).where(User.user_id.in_(chunk), User.deleted_at.is_(None))))
+            .scalars()
+            .all()
         )
     # The organization comes off the workspace the key named, never off the
     # request: the organization decides what an event costs, so taking it from

@@ -734,8 +734,7 @@ def test_main_fails_on_a_commit_outside_the_unit_of_work(tmp_path: Path, monkeyp
 
 
 _UNIT_OF_WORK_REMEDY = (
-    "a request takes one from get_unit_of_work and a worker job from "
-    "create_unit_of_work or create_log_unit_of_work"
+    "a request takes one from get_unit_of_work and a worker job from create_unit_of_work or create_log_unit_of_work"
 )
 _FACTORY_SOURCE = "def get_unit_of_work(db: object) -> UnitOfWork:\n    return UnitOfWork(db)\n"
 
@@ -807,9 +806,7 @@ def test_only_the_module_level_factory_is_exempt(tmp_path: Path) -> None:
     _write(
         tmp_path,
         "gateway/api/deps.py",
-        "class Deps:\n"
-        "    def get_unit_of_work(self, db: object) -> UnitOfWork:\n"
-        "        return UnitOfWork(db)\n",
+        "class Deps:\n    def get_unit_of_work(self, db: object) -> UnitOfWork:\n        return UnitOfWork(db)\n",
     )
     assert check.check_unit_of_work_construction(tmp_path) == [
         f"gateway/api/deps.py:3 constructs a UnitOfWork; {_UNIT_OF_WORK_REMEDY}"

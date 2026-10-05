@@ -157,7 +157,9 @@ def test_mcp_servers_refuse_a_deployment_that_holds_the_rows_and_has_no_session(
 
 def test_mcp_servers_need_no_session_where_a_peer_holds_the_rows() -> None:
     """A deployment with a peer reads no rows of its own, so it is built without one."""
-    container = build_container(config=GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}))
+    container = build_container(
+        config=GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"})
+    )
 
     assert isinstance(container.resolve(McpServerPort, NO_SESSION), RemoteMcpServers)
 
@@ -172,7 +174,9 @@ def test_web_search_policy_refuses_a_deployment_that_holds_the_rows_and_has_no_s
 
 def test_web_search_policy_needs_no_session_where_a_peer_holds_the_rows() -> None:
     """A deployment with a peer reads no rows of its own, so it is built without one."""
-    container = build_container(config=GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}))
+    container = build_container(
+        config=GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"})
+    )
 
     assert isinstance(container.resolve(WebSearchPolicyPort, NO_SESSION), RemoteWebSearchPolicy)
 

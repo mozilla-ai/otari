@@ -22,9 +22,7 @@ from gateway.models.budgets import (
 )
 from gateway.models.money import MAX_USD_LIMIT, as_float
 
-_PERIOD_DESCRIPTION = (
-    "Seconds between resets, counted from the last one. Mutually exclusive with reset_alignment"
-)
+_PERIOD_DESCRIPTION = "Seconds between resets, counted from the last one. Mutually exclusive with reset_alignment"
 _ALIGNMENT_DESCRIPTION = (
     "Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way "
     "to express a calendar month. Mutually exclusive with budget_duration_sec"

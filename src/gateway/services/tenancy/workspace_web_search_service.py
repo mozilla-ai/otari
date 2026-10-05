@@ -292,9 +292,7 @@ def read_web_search_policy(answer: Mapping[str, Any]) -> ResolvedWebSearchConfig
     ):
         raise ValueError(f"max_results must be an integer from 1 to {_MAX_RESULTS}")
     purpose_hint = answer.get("purpose_hint")
-    if purpose_hint is not None and (
-        not isinstance(purpose_hint, str) or len(purpose_hint) > _MAX_PURPOSE_HINT_LENGTH
-    ):
+    if purpose_hint is not None and (not isinstance(purpose_hint, str) or len(purpose_hint) > _MAX_PURPOSE_HINT_LENGTH):
         raise ValueError(f"purpose_hint must be a string of at most {_MAX_PURPOSE_HINT_LENGTH} characters")
     provider_options = answer.get("provider_options")
     if provider_options is not None and not isinstance(provider_options, dict):

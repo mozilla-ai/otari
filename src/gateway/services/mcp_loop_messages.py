@@ -324,9 +324,7 @@ def _maybe_fold_message_delta(event: Any, acc: _MessagesStreamAccumulator) -> An
             *(getattr(context_management, "applied_edits", None) or []),
         ]
         if context_management is not None and hasattr(context_management, "model_copy"):
-            event_update["context_management"] = context_management.model_copy(
-                update={"applied_edits": applied_edits}
-            )
+            event_update["context_management"] = context_management.model_copy(update={"applied_edits": applied_edits})
         else:
             event_update["context_management"] = BetaContextManagementResponse(applied_edits=applied_edits)
 
@@ -715,17 +713,11 @@ class _MessagesToolLoopStrategy:
             elif dtype == "text_delta":
                 block_dict["text"] = (block_dict.get("text") or "") + (getattr(delta, "text", "") or "")
             elif dtype == "compaction_delta":
-                block_dict["content"] = (block_dict.get("content") or "") + (
-                    getattr(delta, "content", "") or ""
-                )
+                block_dict["content"] = (block_dict.get("content") or "") + (getattr(delta, "content", "") or "")
             elif dtype == "thinking_delta":
-                block_dict["thinking"] = (block_dict.get("thinking") or "") + (
-                    getattr(delta, "thinking", "") or ""
-                )
+                block_dict["thinking"] = (block_dict.get("thinking") or "") + (getattr(delta, "thinking", "") or "")
             elif dtype == "signature_delta":
-                block_dict["signature"] = (block_dict.get("signature") or "") + (
-                    getattr(delta, "signature", "") or ""
-                )
+                block_dict["signature"] = (block_dict.get("signature") or "") + (getattr(delta, "signature", "") or "")
 
         elif event_type == "message_delta":
             state.stop_reason = getattr(event.delta, "stop_reason", None) or state.stop_reason  # type: ignore[union-attr]
@@ -834,9 +826,7 @@ class _MessagesToolLoopStrategy:
         """
         return [event for block in blocks for event in _content_block_events(block, acc)]
 
-    def synthetic_events(
-        self, state: _MessagesStreamState, acc: _MessagesStreamAccumulator
-    ) -> list[Any]:
+    def synthetic_events(self, state: _MessagesStreamState, acc: _MessagesStreamAccumulator) -> list[Any]:
         """Announce this iteration's gateway-run calls as native content blocks.
 
         The model's own ``tool_use`` events were swallowed, so each tool's native

@@ -32,9 +32,7 @@ async def _read_submission(request: Request) -> FeedbackSubmission:
     try:
         return FeedbackSubmission.model_validate_json(bytes(content))
     except ValidationError:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT, "Check the feedback text."
-        ) from None
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Check the feedback text.") from None
 
 
 @router.post(

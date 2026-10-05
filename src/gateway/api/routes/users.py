@@ -253,9 +253,7 @@ async def create_user(
     if budget is not None:
         now = datetime.now(UTC)
         window = budget_window(now, budget)
-        user.budget_started_at, user.next_budget_reset_at = (
-            window if window is not None else (now, None)
-        )
+        user.budget_started_at, user.next_budget_reset_at = window if window is not None else (now, None)
 
     try:
         await db.commit()
@@ -286,10 +284,7 @@ async def list_users(
     See ``repositories.users_repository.in_organization``.
     """
     result = await db.execute(
-        select(User)
-        .where(User.deleted_at.is_(None), in_organization(organization_id))
-        .offset(skip)
-        .limit(limit)
+        select(User).where(User.deleted_at.is_(None), in_organization(organization_id)).offset(skip).limit(limit)
     )
     users = result.scalars().all()
 
@@ -348,9 +343,7 @@ async def update_user(
             user.budget_id = request.budget_id
             now = datetime.now(UTC)
             window = budget_window(now, budget)
-            user.budget_started_at, user.next_budget_reset_at = (
-                window if window is not None else (now, None)
-            )
+            user.budget_started_at, user.next_budget_reset_at = window if window is not None else (now, None)
     if request.blocked is not None:
         user.blocked = request.blocked
     if request.metadata is not None:

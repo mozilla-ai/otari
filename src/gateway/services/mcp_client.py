@@ -46,9 +46,7 @@ def _effective_port(url: httpx.URL) -> int | None:
 
 def _is_allowed_mcp_redirect(base: httpx.URL, target: httpx.URL) -> bool:
     same_host = base.host == target.host
-    same_origin = (
-        same_host and base.scheme == target.scheme and _effective_port(base) == _effective_port(target)
-    )
+    same_origin = same_host and base.scheme == target.scheme and _effective_port(base) == _effective_port(target)
     https_upgrade = (
         same_host
         and base.scheme == "http"

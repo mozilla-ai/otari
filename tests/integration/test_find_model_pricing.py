@@ -347,9 +347,7 @@ async def test_resolve_pricing_reports_the_rung_that_answered(async_db: AsyncSes
     await async_db.commit()
 
     async def source_of(provider: str, model: str) -> str | None:
-        resolved = await resolve_model_pricing(
-            async_db, provider, model, as_of=as_of, organization_id=organization.id
-        )
+        resolved = await resolve_model_pricing(async_db, provider, model, as_of=as_of, organization_id=organization.id)
         return resolved.source if resolved is not None else None
 
     assert await source_of("openai", "gpt-4o") == "organization"

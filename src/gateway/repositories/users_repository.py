@@ -122,9 +122,7 @@ async def attribution_spend(db: AsyncSession, user_ids: Sequence[str]) -> dict[s
 
     if not user_ids:
         return {}
-    rows = (
-        await db.execute(select(User).where(User.user_id.in_(list(user_ids)), User.deleted_at.is_(None)))
-    ).scalars()
+    rows = (await db.execute(select(User).where(User.user_id.in_(list(user_ids)), User.deleted_at.is_(None)))).scalars()
     return {row.user_id: row for row in rows}
 
 

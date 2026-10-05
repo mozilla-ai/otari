@@ -200,9 +200,7 @@ async def update_budget(
             if "budget_duration_sec" in request.model_fields_set
             else budget.budget_duration_sec
         )
-        alignment = (
-            request.reset_alignment if "reset_alignment" in request.model_fields_set else budget.reset_alignment
-        )
+        alignment = request.reset_alignment if "reset_alignment" in request.model_fields_set else budget.reset_alignment
         _require_single_period_source(duration, alignment)
         budget.budget_duration_sec = duration
         budget.reset_alignment = alignment

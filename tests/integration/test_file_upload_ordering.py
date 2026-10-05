@@ -185,7 +185,6 @@ async def test_the_sweep_leaves_an_upload_still_within_its_grace(async_db: Async
     assert len(await _rows(async_db)) == 1
 
 
-
 async def test_a_pending_row_past_its_expiry_waits_for_its_grace(async_db: AsyncSession, tmp_path: Path) -> None:
     """Expiry does not reclaim a row still within its grace, because it may still be receiving its bytes."""
     store = _LeakyStore(tmp_path)
@@ -198,6 +197,7 @@ async def test_a_pending_row_past_its_expiry_waits_for_its_grace(async_db: Async
 
     assert batch == SweepBatch(reclaimed=0, seen=0, cursor=None)
     assert len(await _rows(async_db)) == 1
+
 
 async def test_a_stamp_that_lands_under_the_sweep_is_refused(async_db: AsyncSession, tmp_path: Path) -> None:
     """An upload that completes while the sweep is taking its row is told so, rather than told it succeeded."""

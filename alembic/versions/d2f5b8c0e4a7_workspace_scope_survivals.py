@@ -118,9 +118,7 @@ def _default_workspace_id(bind: sa.engine.Connection) -> uuid.UUID:
 
     # The id breaks a ``created_at`` tie so this and the runtime resolve the same
     # row when one transaction created two workspaces.
-    workspace_id = bind.execute(
-        sa.text("SELECT id FROM workspace ORDER BY created_at, id LIMIT 1")
-    ).scalar()
+    workspace_id = bind.execute(sa.text("SELECT id FROM workspace ORDER BY created_at, id LIMIT 1")).scalar()
     if workspace_id is not None:
         return uuid.UUID(str(workspace_id))
 

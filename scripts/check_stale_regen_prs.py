@@ -53,9 +53,7 @@ TRACKING_LABEL = "sdk-regen-stale"
 # NEUTRAL are deliberately absent: a fail-fast matrix cancels its siblings when
 # one leg fails, and reporting those as separate breakages just adds noise on top
 # of the real failure, which is reported anyway.
-FAILING_CONCLUSIONS = frozenset(
-    {"FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED", "ERROR"}
-)
+FAILING_CONCLUSIONS = frozenset({"FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED", "ERROR"})
 
 
 def parse_iso8601(value: str) -> datetime:
@@ -110,18 +108,12 @@ def flag_reasons(pr: dict[str, Any], max_age_days: float, now: datetime) -> list
     return reasons
 
 
-def select_flagged(
-    prs: list[dict[str, Any]], max_age_days: float, now: datetime
-) -> list[dict[str, Any]]:
+def select_flagged(prs: list[dict[str, Any]], max_age_days: float, now: datetime) -> list[dict[str, Any]]:
     """Return the PRs needing attention, oldest-first, annotated with ``reasons``.
 
     A PR at the age threshold is not yet stale; it must exceed it.
     """
-    flagged = [
-        {**pr, "reasons": reasons}
-        for pr in prs
-        if (reasons := flag_reasons(pr, max_age_days, now))
-    ]
+    flagged = [{**pr, "reasons": reasons} for pr in prs if (reasons := flag_reasons(pr, max_age_days, now))]
     return sorted(flagged, key=lambda pr: pr["createdAt"])
 
 
@@ -218,9 +210,7 @@ def _find_tracking_issue(tracking_repo: str, token: str | None) -> int | None:
     return int(issues[0]["number"]) if issues else None
 
 
-def sync_tracking_issue(
-    tracking_repo: str, flagged: list[dict[str, Any]], body: str, token: str | None = None
-) -> None:
+def sync_tracking_issue(tracking_repo: str, flagged: list[dict[str, Any]], body: str, token: str | None = None) -> None:
     """Open/update the tracking issue while PRs are flagged; close it once none are.
 
     A single issue (identified by the ``sdk-regen-stale`` label) is reused across
@@ -233,17 +223,51 @@ def sync_tracking_issue(
         if existing is None:
             # --force upserts the label so `gh issue create --label` cannot fail on a
             # missing label in a fresh repo.
-            _gh(["label", "create", TRACKING_LABEL, "--repo", tracking_repo, "--force",
-                 "--color", "B60205", "--description", "An SDK regeneration PR is lagging the spec"],
-                token=token)
-            _gh(["issue", "create", "--repo", tracking_repo, "--title", title,
-                 "--label", TRACKING_LABEL, "--body", body], token=token)
+            _gh(
+                [
+                    "label",
+                    "create",
+                    TRACKING_LABEL,
+                    "--repo",
+                    tracking_repo,
+                    "--force",
+                    "--color",
+                    "B60205",
+                    "--description",
+                    "An SDK regeneration PR is lagging the spec",
+                ],
+                token=token,
+            )
+            _gh(
+                [
+                    "issue",
+                    "create",
+                    "--repo",
+                    tracking_repo,
+                    "--title",
+                    title,
+                    "--label",
+                    TRACKING_LABEL,
+                    "--body",
+                    body,
+                ],
+                token=token,
+            )
         else:
             _gh(["issue", "edit", str(existing), "--repo", tracking_repo, "--body", body], token=token)
     elif existing is not None:
-        _gh(["issue", "comment", str(existing), "--repo", tracking_repo,
-             "--body", "All regeneration PRs are green and merged or within the freshness window. Closing."],
-            token=token)
+        _gh(
+            [
+                "issue",
+                "comment",
+                str(existing),
+                "--repo",
+                tracking_repo,
+                "--body",
+                "All regeneration PRs are green and merged or within the freshness window. Closing.",
+            ],
+            token=token,
+        )
         _gh(["issue", "close", str(existing), "--repo", tracking_repo], token=token)
 
 
@@ -281,9 +305,7 @@ def main() -> int:
     if args.apply:
         # PR reads above used the ambient GH_TOKEN (the cross-repo PAT); the
         # tracking issue on this repo uses OTARI_GH_TOKEN when supplied.
-        sync_tracking_issue(
-            args.tracking_repo, flagged, report, token=os.environ.get("OTARI_GH_TOKEN")
-        )
+        sync_tracking_issue(args.tracking_repo, flagged, report, token=os.environ.get("OTARI_GH_TOKEN"))
 
     return 0
 

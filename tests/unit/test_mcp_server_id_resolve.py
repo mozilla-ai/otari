@@ -245,9 +245,7 @@ async def test_an_explicit_empty_list_resolves_to_no_servers(
 
     control_plane_transport(fake_post)
 
-    out = await RemoteMcpServers(_config()).resolve_many(
-        _scope("tk"), [uuid.uuid4()]
-    )
+    out = await RemoteMcpServers(_config()).resolve_many(_scope("tk"), [uuid.uuid4()])
 
     assert out == []
 
@@ -281,8 +279,6 @@ async def test_an_unreadable_answer_is_a_resolution_failure(
     control_plane_transport(fake_post)
 
     with pytest.raises(McpServerResolutionFailedError) as raised:
-        await RemoteMcpServers(_config()).resolve_many(
-            _scope("tk"), [uuid.uuid4()]
-        )
+        await RemoteMcpServers(_config()).resolve_many(_scope("tk"), [uuid.uuid4()])
 
     assert raised.value.reason is reason

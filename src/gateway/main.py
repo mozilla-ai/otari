@@ -194,9 +194,7 @@ def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutin
     backends = FileBackends(
         storage=container.resolve(FileStoragePort, None), provider_files=container.resolve(ProviderFilePort, None)
     )
-    return run_file_sweeper(
-        config.files_sweep_interval_sec, lambda uow: build_file_service(uow, backends, config)
-    )
+    return run_file_sweeper(config.files_sweep_interval_sec, lambda uow: build_file_service(uow, backends, config))
 
 
 def _start_idempotency_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None]:
@@ -649,9 +647,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 # a fresh database (no workspace or key exists yet), the same
                 # posture load_providers_at_startup takes.
                 await load_org_provider_keys_at_startup(session)
-                await bootstrap_first_api_key(
-                    config, session, app.state.container.resolve(ApiKeyFormatPort, session)
-                )
+                await bootstrap_first_api_key(config, session, app.state.container.resolve(ApiKeyFormatPort, session))
                 await initialize_pricing_from_config(config, session)
                 await warn_if_require_pricing_without_pricing(config, session)
                 await warn_if_search_tools_lack_flat_pricing(config, session)
@@ -693,9 +689,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             app.state.log_writer = log_writer
             yield
         finally:
-            await _stop_refreshers(
-                [(task, f"{worker.name} refresher") for task, worker in workers] + feature_workers
-            )
+            await _stop_refreshers([(task, f"{worker.name} refresher") for task, worker in workers] + feature_workers)
             for _task, worker in workers:
                 if worker.reset is not None:
                     worker.reset()

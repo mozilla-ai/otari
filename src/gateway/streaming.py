@@ -298,6 +298,7 @@ async def streaming_generator(
             try:
                 if has_usage:
                     if keepalive_interval > 0:
+
                         async def _settle() -> S | None:
                             return await on_complete(usage)
 

@@ -209,8 +209,10 @@ async def load_overrides(session: AsyncSession) -> dict[str, SettingValue]:
     # Filter to the tool keys in the query: the runtime_settings table also holds
     # unrelated settings, so there is no need to fetch and scan those in Python.
     rows = (
-        await session.execute(select(RuntimeSetting).where(RuntimeSetting.key.in_(TOOL_SETTABLE_KEYS)))
-    ).scalars().all()
+        (await session.execute(select(RuntimeSetting).where(RuntimeSetting.key.in_(TOOL_SETTABLE_KEYS))))
+        .scalars()
+        .all()
+    )
     overrides: dict[str, SettingValue] = {}
     for row in rows:
         try:

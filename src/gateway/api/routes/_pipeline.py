@@ -563,11 +563,7 @@ _UNEXPECTED_KWARG = re.compile(r"unexpected keyword argument '([^']+)'")
 # either: the two definitions of "settable by a caller" are one definition, and
 # spelling it twice is how they drift.
 _FORWARDED_PARAMS: frozenset[str] = frozenset(
-    (
-        set(CompletionParams.model_fields)
-        | set(MessagesParams.model_fields)
-        | set(ResponsesParams.model_fields)
-    )
+    (set(CompletionParams.model_fields) | set(MessagesParams.model_fields) | set(ResponsesParams.model_fields))
     - SENSITIVE_PARAM_FIELDS
 )
 
@@ -1752,9 +1748,7 @@ async def _resolve_keyed_user_id(
         if uow is None:
             raise adapter.error(500, DB_UNAVAILABLE_DETAIL, ErrorKind.API)
         try:
-            return await get_budget_service(uow, db).resolve_end_user(
-                api_key=api_key, external_id=user_id_from_request
-            )
+            return await get_budget_service(uow, db).resolve_end_user(api_key=api_key, external_id=user_id_from_request)
         except TenancyError as exc:
             raise domain_error(adapter, exc) from exc
     try:
@@ -3116,9 +3110,7 @@ async def _admit_guardrails(
     A ``block`` flag refuses the request, and a ``monitor`` flag annotates ``response``.
     """
     # Merged here rather than in each route, so no completion endpoint can skip a mandate.
-    effective = merge_guardrail_layers(
-        ctx, declared.guardrails, await _resolve_organization_guardrails(adapter, ctx)
-    )
+    effective = merge_guardrail_layers(ctx, declared.guardrails, await _resolve_organization_guardrails(adapter, ctx))
     await apply_input_guardrails(
         effective.configs,
         declared.guardrail_text,
@@ -3147,9 +3139,7 @@ async def _admit_mcp_servers(
         await _validate_mcp_server_urls(adapter, mcp_servers)
     if declared.mcp_server_ids:
         stored_servers = await _resolve_mcp_server_ids(adapter, ctx, port, declared.mcp_server_ids)
-        await _validate_mcp_server_urls(
-            adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id
-        )
+        await _validate_mcp_server_urls(adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id)
         stored_name_counts = Counter(server.name for server in stored_servers)
         # Only a peer's answer can repeat a name. The caller cannot fix it, so the names go to the log.
         if len(stored_name_counts) != len(stored_servers):

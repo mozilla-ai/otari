@@ -185,9 +185,7 @@ def _resolve_batch_provider(
     return impl, get_provider_kwargs(config, impl, workspace_id=workspace_id)
 
 
-async def _lifecycle_workspace_id(
-    db: AsyncSession, record: BatchRecord | None, api_key: APIKey | None
-) -> uuid.UUID:
+async def _lifecycle_workspace_id(db: AsyncSession, record: BatchRecord | None, api_key: APIKey | None) -> uuid.UUID:
     """Which workspace's organization-scoped credentials a lifecycle call should use.
 
     The batch's own stored ``workspace_id`` when there is a record that has one
@@ -254,9 +252,7 @@ def _authorize_record(
         return
     requester = str(api_key.user_id) if api_key and api_key.user_id else None
     denied = record.user_id != requester or (
-        record.workspace_id is not None
-        and api_key is not None
-        and record.workspace_id != api_key.workspace_id
+        record.workspace_id is not None and api_key is not None and record.workspace_id != api_key.workspace_id
     )
     if denied:
         raise HTTPException(
@@ -373,9 +369,7 @@ async def create_batch(
     # refund. Master-key callers have api_key None -> unrestricted. A key with no
     # list of its own inherits its user's default.
     key_allowlist = await resolve_request_allowlist(db, api_key)
-    if key_allowlist is not None and not is_model_allowed(
-        key_allowlist, f"{resolved.instance}:{resolved.model}"
-    ):
+    if key_allowlist is not None and not is_model_allowed(key_allowlist, f"{resolved.instance}:{resolved.model}"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=model_not_allowed_detail(request.model),
@@ -641,11 +635,7 @@ async def list_batches(
             # Same pair as `_authorize_record`, and tolerant of a NULL workspace
             # for the same reason: a batch created before the column existed has
             # no workspace to compare against.
-            in_workspace = (
-                record.workspace_id is None
-                or api_key is None
-                or record.workspace_id == api_key.workspace_id
-            )
+            in_workspace = record.workspace_id is None or api_key is None or record.workspace_id == api_key.workspace_id
             return record.user_id == requester and in_workspace
         return _owns_batch(batch, api_key, is_master_key)
 

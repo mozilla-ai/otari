@@ -112,8 +112,7 @@ router = APIRouter(tags=["hosted-mode"], include_in_schema=False)
 def _detail(data_plane_url: str | None) -> str:
     target = data_plane_url or _GENERIC_TARGET
     return (
-        "This deployment is a control plane and does not serve inference. "
-        f"Send inference requests to {target} instead."
+        f"This deployment is a control plane and does not serve inference. Send inference requests to {target} instead."
     )
 
 

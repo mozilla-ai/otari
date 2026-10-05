@@ -231,9 +231,7 @@ async def _classify(
                 data = _decode_data_url(f"data:{src.get('media_type', '')};base64,{src.get('data', '')}")[0]
                 return _Source(_IMAGE, data, src.get("media_type", "image/png"), None, None)
             if src.get("type") == "file":
-                resolved = await _resolve_from_ref(
-                    src, files=files, user_id=user_id, workspace_id=workspace_id
-                )
+                resolved = await _resolve_from_ref(src, files=files, user_id=user_id, workspace_id=workspace_id)
                 if resolved:
                     return resolved.source(_IMAGE)
             return _Source(_IMAGE, None, "image/png", None, src.get("url"))
@@ -241,9 +239,7 @@ async def _classify(
         image_url = block.get("image_url")
         url = image_url.get("url") if isinstance(image_url, dict) else image_url
         if block.get("file_id"):
-            resolved = await _resolve_from_ref(
-                block, files=files, user_id=user_id, workspace_id=workspace_id
-            )
+            resolved = await _resolve_from_ref(block, files=files, user_id=user_id, workspace_id=workspace_id)
             if resolved:
                 return resolved.source(_IMAGE)
         if isinstance(url, str):
@@ -263,16 +259,12 @@ async def _classify(
                 data = _decode_data_url(f"data:{src.get('media_type', '')};base64,{src.get('data', '')}")[0]
                 return _Source(_DOCUMENT, data, src.get("media_type", "application/pdf"), None, None)
             if src.get("type") == "file":
-                resolved = await _resolve_from_ref(
-                    src, files=files, user_id=user_id, workspace_id=workspace_id
-                )
+                resolved = await _resolve_from_ref(src, files=files, user_id=user_id, workspace_id=workspace_id)
                 if resolved:
                     return resolved.source(_DOCUMENT)
             return _Source(_DOCUMENT, None, "application/pdf", None, src.get("url"))
         ref = block.get("file", block) if btype == "file" else block
-        resolved = await _resolve_from_ref(
-            ref, files=files, user_id=user_id, workspace_id=workspace_id
-        )
+        resolved = await _resolve_from_ref(ref, files=files, user_id=user_id, workspace_id=workspace_id)
         if resolved:
             return resolved.source(_DOCUMENT)
         return None

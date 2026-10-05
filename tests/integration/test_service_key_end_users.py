@@ -72,9 +72,7 @@ def _service_key(
 
 def _end_user(db_session: Session, owner: str, external_id: str) -> User | None:
     db_session.expire_all()
-    return (
-        db_session.query(User).filter(User.parent_user_id == owner, User.external_id == external_id).one_or_none()
-    )
+    return db_session.query(User).filter(User.parent_user_id == owner, User.external_id == external_id).one_or_none()
 
 
 def test_an_end_user_is_created_on_first_use_and_billed(

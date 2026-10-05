@@ -184,9 +184,7 @@ class OrganizationDomainService:
         # and the null is then dropped as well: both columns are NOT NULL, so a
         # PATCH naming one explicitly as null would otherwise fail on the
         # constraint rather than being the no-op the caller meant.
-        update_data = {
-            key: value for key, value in request.model_dump(exclude_unset=True).items() if value is not None
-        }
+        update_data = {key: value for key, value in request.model_dump(exclude_unset=True).items() if value is not None}
         updated = await self.domains.update_domain(row, update_data)
         await self.db.commit()
         await self.db.refresh(updated)

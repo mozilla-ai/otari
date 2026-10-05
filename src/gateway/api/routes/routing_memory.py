@@ -102,6 +102,7 @@ class ScoredExample(BaseModel):
             return None
         trimmed = value.strip()
         return trimmed or None
+
     scores: dict[str, Annotated[float, Field(ge=0.0, le=1.0)]] = Field(
         min_length=1,
         description=(
@@ -300,9 +301,7 @@ def _validated_scores(
             normalized[selector] = canonical
     if rejected:
         expected = (
-            f" Candidates this user's learned policies can use: {', '.join(sorted(known.values()))}."
-            if known
-            else ""
+            f" Candidates this user's learned policies can use: {', '.join(sorted(known.values()))}." if known else ""
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -332,9 +331,7 @@ def _validated_scores(
     return normalized
 
 
-def _learned_policies(
-    config: GatewayConfig, user_id: str | None, workspace_id: uuid.UUID
-) -> list[LearnedPolicy]:
+def _learned_policies(config: GatewayConfig, user_id: str | None, workspace_id: uuid.UUID) -> list[LearnedPolicy]:
     policies: list[LearnedPolicy] = []
     for name, spec in effective_policies(config, user_id, workspace_id=workspace_id).items():
         backend = spec.router_backend
@@ -415,9 +412,7 @@ async def rank_candidates(
         await db.commit()
     except SQLAlchemyError:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
-        ) from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
     normalized = _validated_scores(config, request.user_id, request.examples, workspace_id)
 
     recorded = 0
@@ -435,9 +430,7 @@ async def rank_candidates(
             )
         except SQLAlchemyError as exc:
             logger.warning("Router example write failed after %d example(s)", recorded)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
-            ) from exc
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from exc
         except Exception as exc:
             # Broad on purpose, and matching the read path: `knn.rank` catches bare
             # `Exception` around the same call because an embedding provider can fail
@@ -445,9 +438,7 @@ async def rank_candidates(
             # default target; the write path has nothing safe to do, so it says what
             # broke. Earlier examples in the batch are already committed, which the
             # message states rather than pretending the call was atomic.
-            logger.warning(
-                "Router example embedding failed after %d example(s): %s", recorded, type(exc).__name__
-            )
+            logger.warning("Router example embedding failed after %d example(s): %s", recorded, type(exc).__name__)
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=(
@@ -474,9 +465,7 @@ async def rank_candidates(
             await db.commit()
         except SQLAlchemyError:
             await db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
-            ) from None
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
 
     # Warmth of every pool this batch wrote into: each named partition, plus the
     # default pool when any example carried no task label.
@@ -527,9 +516,7 @@ async def routing_memory_status(
         k=backend.k,
         confidence_floor=backend.confidence_floor,
         default_pool=PoolStatus(records=total, warm=total >= seed),
-        tasks=[
-            TaskPool(task_id=task_id, records=count, warm=count >= seed) for task_id, count in per_task
-        ],
+        tasks=[TaskPool(task_id=task_id, records=count, warm=count >= seed) for task_id, count in per_task],
         policies=_learned_policies(config, user_id, target_workspace_id),
     )
 

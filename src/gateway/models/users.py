@@ -64,9 +64,7 @@ class User(Base):
     # (see ``APIKey.is_service_key``): the key's user, and the id as the caller
     # sent it. ``user_id`` is generated, so two services naming the same end user
     # get two rows. Both NULL on every other user.
-    parent_user_id: Mapped[str | None] = mapped_column(
-        ForeignKey("users.user_id", ondelete="CASCADE"), index=True
-    )
+    parent_user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
     external_id: Mapped[str | None] = mapped_column()
 
     budget = relationship("Budget", back_populates="users")

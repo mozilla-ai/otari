@@ -344,9 +344,7 @@ def _strip_gateway_minted_blocks(messages: Any) -> Any:
             continue
         # Two passes: identify our web-search results and our provenance-prefixed
         # MCP uses, then drop each complete pair. A provider's pair matches neither.
-        minted_web_ids = {
-            block.get("tool_use_id") for block in content if _is_gateway_minted_result(block)
-        }
+        minted_web_ids = {block.get("tool_use_id") for block in content if _is_gateway_minted_result(block)}
         minted_mcp_ids = {
             block.get("id") if block.get("type") == "mcp_tool_use" else block.get("tool_use_id")
             for block in content
@@ -501,12 +499,8 @@ def _billable_messages_usage(usage: Any) -> GatewayUsage:
         prompt_tokens=input_tokens,
         completion_tokens=output_tokens,
         total_tokens=input_tokens + output_tokens,
-        cache_read_tokens=sum(
-            (getattr(part, "cache_read_input_tokens", None) or 0) for part in billable_parts
-        ),
-        cache_write_tokens=sum(
-            (getattr(part, "cache_creation_input_tokens", None) or 0) for part in billable_parts
-        ),
+        cache_read_tokens=sum((getattr(part, "cache_read_input_tokens", None) or 0) for part in billable_parts),
+        cache_write_tokens=sum((getattr(part, "cache_creation_input_tokens", None) or 0) for part in billable_parts),
         cache_write_1h_tokens=sum(_cache_write_1h_tokens(part) for part in billable_parts),
         cache_tokens_in_prompt=False,
         reasoning_tokens=getattr(getattr(usage, "output_tokens_details", None), "thinking_tokens", None) or 0,

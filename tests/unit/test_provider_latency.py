@@ -103,9 +103,7 @@ def test_provider_latency_ms_of_none_on_non_finite_value() -> None:
 
 def test_provider_latency_ms_of_none_when_scaling_overflows() -> None:
     """A finite raw value can still overflow to inf after the unit multiplier, and round() raises on inf."""
-    huge_usage = CompletionUsage.model_construct(
-        prompt_tokens=1, completion_tokens=1, total_tokens=2, total_time=1e308
-    )
+    huge_usage = CompletionUsage.model_construct(prompt_tokens=1, completion_tokens=1, total_tokens=2, total_time=1e308)
     assert provider_latency_ms_of(huge_usage, "groq") is None
 
 

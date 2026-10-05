@@ -491,9 +491,7 @@ async def load_organization_override_index(
             # end", where ``normalize_effective_at`` would read it as "ends now".
             effective_to = normalize_effective_at(row.effective_to) if row.effective_to is not None else None
             index.setdefault(row.model_key, []).append(
-                OverridePeriod(
-                    normalize_effective_at(row.effective_from), effective_to, override_as_model_pricing(row)
-                )
+                OverridePeriod(normalize_effective_at(row.effective_from), effective_to, override_as_model_pricing(row))
             )
     for periods in index.values():
         periods.sort(key=lambda period: period.effective_from)

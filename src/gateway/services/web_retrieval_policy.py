@@ -163,9 +163,7 @@ def canonicalize_web_url(value: str, *, max_length: int = MAX_WEB_URL_LENGTH) ->
         explicit_or_default_port = parsed.port
     except httpx.InvalidURL as exc:
         raise WebURLValidationError("URL has an invalid port") from exc
-    effective_port = (
-        explicit_or_default_port if explicit_or_default_port is not None else _DEFAULT_PORTS[scheme]
-    )
+    effective_port = explicit_or_default_port if explicit_or_default_port is not None else _DEFAULT_PORTS[scheme]
     if not 1 <= effective_port <= 65535:
         raise WebURLValidationError("URL port is outside the valid range")
 

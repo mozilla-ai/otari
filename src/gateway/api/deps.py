@@ -526,9 +526,7 @@ async def require_deployment_operator(
     of its own, so admitting a non-operator is spelled at a router instead of
     hidden in one route's decorator.
     """
-    if session_identity is not None and not await DeploymentUserService(db).has_administration_access(
-        session_identity
-    ):
+    if session_identity is not None and not await DeploymentUserService(db).has_administration_access(session_identity):
         record_auth_failure("not_deployment_operator")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

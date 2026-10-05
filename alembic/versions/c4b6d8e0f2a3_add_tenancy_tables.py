@@ -139,9 +139,7 @@ def upgrade() -> None:
 
     # After the batch rebuild, so the copy_from definition above (which SQLite
     # replays to recreate the table) does not have to carry it.
-    op.create_index(
-        op.f("ix_organization_created_by_user_id"), "organization", ["created_by_user_id"], unique=False
-    )
+    op.create_index(op.f("ix_organization_created_by_user_id"), "organization", ["created_by_user_id"], unique=False)
 
     op.create_table(
         "organization_member",

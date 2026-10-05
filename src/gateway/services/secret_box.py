@@ -69,9 +69,7 @@ def get_secret_box() -> MultiFernet:
     """
     keys = _load_keys()
     if not keys:
-        raise SecretBoxUnavailableError(
-            "OTARI_SECRET_KEY is not set; it is required to store provider credentials."
-        )
+        raise SecretBoxUnavailableError("OTARI_SECRET_KEY is not set; it is required to store provider credentials.")
     try:
         fernets = [Fernet(key.encode()) for key in keys]
     except (ValueError, TypeError):

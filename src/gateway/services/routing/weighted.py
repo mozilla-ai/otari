@@ -83,9 +83,7 @@ def declared_shares(weights: Mapping[str, float], pool: Sequence[str]) -> dict[s
     return {selector: weight * 100.0 / total for selector, weight in raw.items()}
 
 
-def weighted_ordering(
-    pool: Sequence[str], weights: Mapping[str, float], rng: random.Random
-) -> list[str]:
+def weighted_ordering(pool: Sequence[str], weights: Mapping[str, float], rng: random.Random) -> list[str]:
     """Order ``pool`` by repeated weighted draw without replacement.
 
     The head is the request's provider; the rest is the order a failure walks, each

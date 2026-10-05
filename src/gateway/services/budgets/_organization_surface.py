@@ -301,4 +301,3 @@ class _OrganizationSurface:
             changes["period_start"], changes["period_end"] = _current_window(budget)
         ceiling = await self._repositories.ceilings.update(ceiling, changes)
         return OrganizationScopedBudgetPublic.from_model(ceiling, budget, organization_id=organization.id)
-

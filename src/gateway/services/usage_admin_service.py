@@ -301,13 +301,17 @@ async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> Us
         last_id = ""
         while True:
             rows = (
-                await db.execute(
-                    select(UsageLog)
-                    .where(*conditions, UsageLog.id > last_id)
-                    .order_by(UsageLog.id)
-                    .limit(_REPRICE_CHUNK)
+                (
+                    await db.execute(
+                        select(UsageLog)
+                        .where(*conditions, UsageLog.id > last_id)
+                        .order_by(UsageLog.id)
+                        .limit(_REPRICE_CHUNK)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             if not rows:
                 break
             for row in rows:
@@ -349,4 +353,3 @@ async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> Us
         request.by_filter,
     )
     return result
-

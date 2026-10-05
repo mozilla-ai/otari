@@ -498,8 +498,7 @@ class TrustedProxyAsyncHTTPTransport(PinnedAsyncHTTPTransport):
             if rule == "*":
                 return True
             if rule and any(
-                candidate == rule or (not host.is_ip and candidate.endswith(f".{rule}"))
-                for candidate in candidates
+                candidate == rule or (not host.is_ip and candidate.endswith(f".{rule}")) for candidate in candidates
             ):
                 return True
         return False

@@ -113,9 +113,7 @@ async def _execute_function_calls(
         if capped and budget is not None and budget.exhausted():
             if refused_call_ids is not None:
                 refused_call_ids.add(str(item.call_id))
-            out.append(
-                {"type": "function_call_output", "call_id": item.call_id, "output": MAX_USES_EXCEEDED_ERROR}
-            )
+            out.append({"type": "function_call_output", "call_id": item.call_id, "output": MAX_USES_EXCEEDED_ERROR})
             continue
         try:
             text = await pool.call_tool(item.name, args)
@@ -326,10 +324,7 @@ def _replay_items(output: list[Any], owned: list[Any]) -> list[Any]:
         item
         for item in output
         if getattr(item, "type", None) == "compaction"
-        or (
-            getattr(item, "type", None) == "function_call"
-            and getattr(item, "call_id", None) in owned_call_ids
-        )
+        or (getattr(item, "type", None) == "function_call" and getattr(item, "call_id", None) in owned_call_ids)
     ]
 
 
@@ -510,9 +505,7 @@ class _ResponsesToolLoopStrategy:
         refused_call_ids: set[str] = set()
         outputs = await _execute_function_calls(pool, owned, budget=self._budget, refused_call_ids=refused_call_ids)
         if acc is not None:
-            acc["native_items"].extend(
-                _native_items_for(owned, pool, refused_call_ids, tools=self._native_tools)
-            )
+            acc["native_items"].extend(_native_items_for(owned, pool, refused_call_ids, tools=self._native_tools))
         return outputs
 
     def filter_owned(self, result: Response, owned: list[Any], pool: ToolBackend) -> None:
@@ -526,8 +519,7 @@ class _ResponsesToolLoopStrategy:
                 item
                 for item in output
                 if not (
-                    getattr(item, "type", None) == "function_call"
-                    and getattr(item, "call_id", None) in owned_call_ids
+                    getattr(item, "type", None) == "function_call" and getattr(item, "call_id", None) in owned_call_ids
                 )
             ]
         except (AttributeError, TypeError):
@@ -560,11 +552,7 @@ class _ResponsesToolLoopStrategy:
         transcript.extend(outputs)
         if acc is not None:
             acc["compactions"].extend(_compaction_items(output))
-            acc["native_items"].extend(
-                _native_items_for(
-                    owned, pool, refused_call_ids, tools=self._native_tools
-                )
-            )
+            acc["native_items"].extend(_native_items_for(owned, pool, refused_call_ids, tools=self._native_tools))
 
     # ---- streaming hooks ----
 
@@ -722,9 +710,7 @@ class _ResponsesToolLoopStrategy:
         # request. Matches the non-streaming loop's mixed-batch handling, and like
         # it announces the runs natively before the round exits.
         if state.owned_specs:
-            await _execute_stream_owned(
-                state, pool, budget=self._budget, tools=self._native_tools
-            )
+            await _execute_stream_owned(state, pool, budget=self._budget, tools=self._native_tools)
             for event in self.synthetic_events(state, acc):
                 yield event
 
@@ -753,9 +739,7 @@ class _ResponsesToolLoopStrategy:
                 acc["output_tokens"] += getattr(iter_usage, "output_tokens", 0) or 0
         acc["compactions"].extend(state.compaction_items[index] for index in sorted(state.compaction_items))
 
-    def synthetic_events(
-        self, state: _ResponsesStreamState, acc: dict[str, Any]
-    ) -> list[ResponseStreamEvent]:
+    def synthetic_events(self, state: _ResponsesStreamState, acc: dict[str, Any]) -> list[ResponseStreamEvent]:
         """Announce this iteration's gateway-run calls in the Responses API's own vocabulary.
 
         The raw ``function_call`` events were swallowed (the client can never be sent
@@ -809,11 +793,7 @@ class _ResponsesToolLoopStrategy:
                     }
                 )
         transcript.extend(_items_to_dicts(replay_items))
-        transcript.extend(
-            await _execute_stream_owned(
-                state, pool, budget=self._budget, tools=self._native_tools
-            )
-        )
+        transcript.extend(await _execute_stream_owned(state, pool, budget=self._budget, tools=self._native_tools))
         return
         yield  # pragma: no cover - makes this a no-event async iterator
 

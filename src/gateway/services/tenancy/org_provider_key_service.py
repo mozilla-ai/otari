@@ -244,9 +244,7 @@ async def refresh_org_provider_cache(db: AsyncSession) -> None:
     # rather than on the ones offering a *served* row: a key whose every model is
     # switched off has to read as an empty allow-list, not an absent one. The
     # repository is what draws that distinction; see its docstring.
-    enabled_models_by_key = await OrgProviderKeyModelRepository(db).enabled_models_for_keys(
-        [key.id for key in keys]
-    )
+    enabled_models_by_key = await OrgProviderKeyModelRepository(db).enabled_models_for_keys([key.id for key in keys])
 
     new_cache: dict[tuple[uuid.UUID, str], dict[str, Any]] = {}
     new_restrictions: dict[tuple[uuid.UUID, str], list[str]] = {}

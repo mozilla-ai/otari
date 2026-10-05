@@ -363,8 +363,7 @@ async def create_search_tool(
     shadows_config = name in config_file_search_tools(config)
     if shadows_config:
         logger.warning(
-            "Stored search tool '%s' shadows the config.yml search tool of the same name; "
-            "the stored entry now wins.",
+            "Stored search tool '%s' shadows the config.yml search tool of the same name; the stored entry now wins.",
             name,
         )
     await _apply_write(db, config, name)

@@ -130,8 +130,7 @@ async def refresh_provider_cache(db: AsyncSession, config: GatewayConfig) -> set
             overlay[row.instance] = _row_to_entry(row)
         except (SecretBoxUnavailableError, SecretDecryptionError):
             logger.warning(
-                "Skipping stored provider '%s': its API key could not be decrypted "
-                "(check OTARI_SECRET_KEY).",
+                "Skipping stored provider '%s': its API key could not be decrypted (check OTARI_SECRET_KEY).",
                 row.instance,
             )
     _cache.clear()

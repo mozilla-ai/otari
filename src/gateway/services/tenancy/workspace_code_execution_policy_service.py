@@ -395,8 +395,7 @@ class WorkspaceCodeExecutionPolicyService:
                 "Set sandbox_allowed_session_images (or sandbox_session_image) on the gateway first."
             )
         raise SandboxImageNotAllowedError(
-            f"Sandbox image {candidate!r} is not one this deployment allows. "
-            f"Allowed: {', '.join(self.allowed_images)}."
+            f"Sandbox image {candidate!r} is not one this deployment allows. Allowed: {', '.join(self.allowed_images)}."
         )
 
     async def _commit(self) -> None:

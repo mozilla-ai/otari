@@ -233,9 +233,7 @@ class WorkspaceBudgetDefaultService:
         return created
 
     @staticmethod
-    def _build_member_budget(
-        member_id: uuid.UUID, default: WorkspaceBudgetDefault, budget: Budget
-    ) -> ScopedBudget:
+    def _build_member_budget(member_id: uuid.UUID, default: WorkspaceBudgetDefault, budget: Budget) -> ScopedBudget:
         """One member's ceiling, naming the budget the default hands out.
 
         Named rather than copied: the limit and the period are read through the

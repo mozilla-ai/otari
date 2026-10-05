@@ -271,9 +271,7 @@ class WebRetrievalBackend:
     async def __aenter__(self) -> WebRetrievalBackend:
         try:
             if self._enable_search:
-                self._client = await self._stack.enter_async_context(
-                    httpx.AsyncClient(timeout=self._search_timeout_s)
-                )
+                self._client = await self._stack.enter_async_context(httpx.AsyncClient(timeout=self._search_timeout_s))
             if self._retrieval_service is None:
                 transport = TrustedProxyAsyncHTTPTransport() if self._trust_env_proxy else PinnedAsyncHTTPTransport()
                 retrieval_client = await self._stack.enter_async_context(

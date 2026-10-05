@@ -115,6 +115,7 @@ class OrgProviderModelNotFoundError(TenancyNotFoundError):
     def __init__(self, model_id: object):
         super().__init__(f"Offered model {model_id} not found")
 
+
 class OrgProviderModelNameRequiredError(TenancyValidationError):
     """A model name that is blank once trimmed.
 
@@ -124,6 +125,7 @@ class OrgProviderModelNameRequiredError(TenancyValidationError):
 
     def __init__(self) -> None:
         super().__init__("A model name is required")
+
 
 class OrgProviderLastModelError(TenancyValidationError):
     """Removing the last offered model would widen the key rather than narrow it.
@@ -140,6 +142,7 @@ class OrgProviderLastModelError(TenancyValidationError):
             "model its provider does. Switch the model off instead."
         )
 
+
 class OrgProviderModelUnpricedError(TenancyValidationError):
     """Serving was asked for a model nothing prices.
 
@@ -154,6 +157,7 @@ class OrgProviderModelUnpricedError(TenancyValidationError):
             f"Nothing prices '{model}' yet, so it cannot be served. Set a rate for it, or refresh pricing "
             "if the community data has since caught up."
         )
+
 
 class OrgProviderModelAlreadyOfferedError(TenancyConflictError):
     """The model is already offered on this key.
