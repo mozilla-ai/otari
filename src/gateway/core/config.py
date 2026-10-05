@@ -2093,6 +2093,18 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             raise ValueError(msg)
         return self
 
+    @field_validator("master_key")
+    @classmethod
+    def _blank_master_key_is_unset(cls, value: str | None) -> str | None:
+        """Read a blank key as unset, so it falls back to a generated one.
+
+        ``${OTARI_MASTER_KEY}`` resolves to ``""`` when Compose forwards an unset
+        variable, and an empty configured key would accept an empty token.
+        """
+        if value is not None and not value.strip():
+            return None
+        return value
+
     @field_validator("web_search_provider")
     @classmethod
     def _validate_web_search_provider(cls, value: str | None) -> str | None:
