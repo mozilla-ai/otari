@@ -11,9 +11,16 @@ improvements to code quality and architecture.
 
 ## Scope
 
+Only files changed since `<window start>` in these areas, and the code they
+call into directly:
+
 - Gateway: `src/gateway/**`
 - Laptop CLI: `cli/src/otari_agent/**`
 - Dashboard: `web/src/**`
+
+List them with `git diff --name-only $(git rev-list -1 --before="<window start>" main) main`.
+Do not survey the rest of the tree, and stop once you have at most five
+fixes: the job is cancelled after 40 minutes, and a cancelled run opens no PR.
 
 ## Method
 
@@ -32,7 +39,7 @@ improvements to code quality and architecture.
 4. Apply only targeted refactors that preserve behavior.
 5. Validate with the commands below.
 6. Create a PR as [automation-pr.prompt.md](automation-pr.prompt.md) describes.
-   Include fixes for ALL validated in-scope issues found, not just one.
+   Include every validated fix you made, up to the five the scope allows.
 
 ## Guardrails
 
@@ -44,11 +51,11 @@ improvements to code quality and architecture.
 
 ## Validation Commands
 
-- `make lint`
-- `make typecheck`
-- `make test-unit`
-- `make test-integration` (needs Docker, which the runner has)
-- `pnpm --dir web run lint`, `pnpm --dir web run typecheck`, `pnpm --dir web test`
+- `make lint` and `make typecheck`
+- `uv run pytest` on the unit and integration test files that cover the
+  modules you touched, never the whole of either suite. Integration tests need
+  Docker, which the runner has. The rest of the suite runs on the PR in CI.
+- For dashboard changes: `pnpm --dir web run lint`, `pnpm --dir web run typecheck`,
+  and `pnpm --dir web test` limited to the touched components' test files.
 
-Run the most relevant subset for touched code.
 If no improvements are justified, say so and exit without creating a PR.
