@@ -42,15 +42,13 @@ _IDLE_POLL_SECONDS = 0.05
 
 
 def _wait_for_an_idle_pool(pool: AsyncAdaptedQueuePool) -> None:
-    """Wait out the work the lifespan does on this pool before measuring it.
+    """Wait out any work the lifespan still has on this pool before measuring it.
 
-    ``run_selector_index_refresher`` rebuilds once and sleeps afterwards, on a
-    ``create_session()`` from this engine, so a lifespan that has only just
-    started still has a checkout of its own in flight. Measuring across it
-    reads a baseline of one and a tail of zero, or the reverse, depending on
-    where the pass lands. Every other refresher sleeps first and so cannot tick
-    inside a single test; once this one has finished its pass it is a minute
-    from the next.
+    A lifespan task holding a ``create_session()`` checkout from this engine
+    while the test measures reads a baseline of one and a tail of zero, or the
+    reverse. ``tests/conftest.py`` keeps the refreshers that would do that out
+    of test lifespans, so a healthy run finds the pool idle at once; the wait
+    guards against a startup task that does not.
     """
     deadline = time.monotonic() + _IDLE_TIMEOUT_SECONDS
     while pool.checkedout() and time.monotonic() < deadline:
