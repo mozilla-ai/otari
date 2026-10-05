@@ -66,6 +66,14 @@ class ContainerOnManagedCredentialError(TenancyValidationError):
         )
 
 
+class WebToolDeclarationError(TenancyValidationError):
+    """A request's managed web tool declaration cannot be served as written."""
+
+
+class WebSearchInterceptedError(TenancyForbiddenError):
+    """A request asked the provider to run a web search this deployment runs on its own backend."""
+
+
 class WebAccessRefusedError(Exception):
     """A workspace's web search policy refuses the web access a request declared."""
 

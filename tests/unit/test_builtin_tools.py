@@ -7,13 +7,12 @@ from typing import Any
 import pytest
 
 from gateway.adapters.code_execution_adapter import ProtocolCodeExecutionAdapter
-from gateway.api.routes._tools import Tool
 from gateway.api.routes.tools import _managed_tools
 from gateway.api.routes.usage import GATEWAY_TOOL_NAMES
 from gateway.core.config import GatewayConfig
 from gateway.services._tool_loop import ToolBackend
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, SandboxBackend
-from gateway.services.tools import BUILTIN_TOOLS, BuiltinTool, Dialect, native_rendering
+from gateway.services.tools import BUILTIN_TOOLS, BuiltinTool, Dialect, Tool, native_rendering
 from gateway.services.web_retrieval_backend import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME, WebRetrievalBackend
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

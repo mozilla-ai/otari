@@ -6,15 +6,15 @@ from typing import Any
 
 import pytest
 
-from gateway.api.routes._tools import (
+from gateway.models.tools import CodeExecutor
+from gateway.services.tools import Dialect
+from gateway.services.tools._web_declarations import (
     claims_provider_web_search,
     first_provider_web_search_tool,
     parse_web_search_header,
     provider_runs_web_search_natively,
     web_search_header_conflicts,
 )
-from gateway.models.tools import CodeExecutor
-from gateway.services.tools import Dialect
 
 ANTHROPIC_DATED = {"type": "web_search_20250305", "name": "web_search"}
 OPENAI_BARE = {"type": "web_search"}

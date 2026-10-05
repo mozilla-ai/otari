@@ -16,7 +16,6 @@ from typing import Any
 
 import pytest
 
-from gateway.api.routes._pipeline import _canonicalize_web_search_request_domains
 from gateway.exceptions.tools_exceptions import WorkspaceWebSearchDomainsExcludedError
 from gateway.models.tools import ResolvedWebSearchConfig
 from gateway.services.tenancy.workspace_web_search_service import (
@@ -24,9 +23,10 @@ from gateway.services.tenancy.workspace_web_search_service import (
     InvalidStoredWebSearchDomainError,
     _normalize_domains,
     _stored_domains,
-    narrow_web_search_tool_entry,
     read_web_search_policy,
 )
+from gateway.services.tools._web_access import narrow_web_search_tool_entry
+from gateway.services.tools._web_admission import _canonicalize_web_search_request_domains
 from gateway.services.web_retrieval_policy import MAX_WEB_SEARCH_DOMAINS, canonicalize_domain_rule
 
 
@@ -218,7 +218,7 @@ def test_allow_list_intersection_canonicalizes_each_unique_rule_once(monkeypatch
         return canonicalize_domain_rule(value)
 
     monkeypatch.setattr(
-        "gateway.services.tenancy.workspace_web_search_service.canonicalize_domain_rule",
+        "gateway.services.tools._web_access.canonicalize_domain_rule",
         counted,
     )
     _narrow(

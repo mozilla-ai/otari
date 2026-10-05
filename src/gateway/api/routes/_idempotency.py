@@ -23,7 +23,7 @@ from fastapi.encoders import jsonable_encoder
 
 from gateway.api.deps import build_idempotency_service, get_config, get_unit_of_work_if_needed
 from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
-from gateway.api.routes._tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER
+from gateway.api.routes._tools import CODE_EXECUTION_HEADER
 from gateway.core.config import (
     CONVERSATION_HEADER,
     REQUEST_ID_HEADER,
@@ -42,6 +42,7 @@ from gateway.services.inference import (
     Replay,
     keep_claim_alive,
 )
+from gateway.services.tools import WEB_SEARCH_HEADER
 
 IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 IDEMPOTENT_REPLAYED_HEADER = "Otari-Idempotent-Replayed"

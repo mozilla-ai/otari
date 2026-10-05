@@ -83,6 +83,7 @@ from gateway.rate_limit import RateLimitInfo
 from gateway.services.budgets import ReservationHandle
 from gateway.services.pricing_service import ResolvedPricing
 from gateway.services.tool_usage import ToolUsageTally
+from gateway.services.tools._web_admission import WEB_FETCH_NOT_ENABLED_DETAIL
 
 ADAPTERS = [
     pytest.param(chat._ADAPTER, id="chat"),
@@ -1947,7 +1948,7 @@ async def test_disabled_fetch_releases_reservation_before_workspace_policy_io(
         await _call_prepare_gateway_tools(ctx, tools=[{"type": "otari_web_fetch"}], web_search_policy=policy)
 
     assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == pipeline.WEB_FETCH_NOT_ENABLED_DETAIL
+    assert exc_info.value.detail == WEB_FETCH_NOT_ENABLED_DETAIL
     assert settlement.refunded == 1
     assert policy.asked == []
 

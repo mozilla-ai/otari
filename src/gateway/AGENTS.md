@@ -164,7 +164,8 @@ cannot serve is skipped without reordering the plan (`CandidateCannotServe`).
 An `otari_*` tool type always runs in the gateway. Who runs a provider-native
 web-search type is described in
 [web-search interception](../../docs/tools.md#web-search-interception) and
-decided by `claims_provider_web_search` in `api/routes/_tools.py`. A provider-native
+decided by `claims_provider_web_search` in `services/tools/_web_declarations.py`, and
+the web tools' admission steps live beside it in `services/tools/`. A provider-native
 code-execution type is decided by the executor (`models/tools.py`,
 resolved in `api/routes/_tools.py`): a workspace pin wins over everything, the
 `Otari-Code-Execution` header wins over the deployment default, and `auto`

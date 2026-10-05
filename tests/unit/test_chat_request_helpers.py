@@ -20,17 +20,15 @@ from typing import Any
 
 import pytest
 
-from gateway.api.routes._pipeline import ToolContext, _read_web_search_max_uses
+from gateway.api.routes._pipeline import ToolContext
 from gateway.api.routes._tools import (
     _extract_code_execution_tool,
-    _extract_web_fetch_tool,
-    _extract_web_search_tool,
     _retargeted_tool_choice,
     _strip_gateway_fields,
-    _web_search_intercept_enabled,
 )
 from gateway.core.config import GatewayConfig
-from gateway.services.tools import Dialect
+from gateway.services.tools import Dialect, read_web_search_max_uses, web_search_intercept_enabled
+from gateway.services.tools._web_declarations import extract_web_fetch_tool, extract_web_search_tool
 
 
 def test_extracts_otari_code_execution() -> None:
@@ -122,49 +120,49 @@ def test_non_string_type_does_not_match() -> None:
 
 
 def test_web_search_extracts_otari_web_search() -> None:
-    entry, remaining = _extract_web_search_tool([{"type": "otari_web_search"}])
+    entry, remaining = extract_web_search_tool([{"type": "otari_web_search"}])
     assert entry == {"type": "otari_web_search"}
     assert remaining is None
 
 
 def test_web_fetch_extracts_only_the_canonical_type() -> None:
-    entry, remaining = _extract_web_fetch_tool([{"type": "otari_web_fetch"}, {"type": "web_fetch_20250910"}])
+    entry, remaining = extract_web_fetch_tool([{"type": "otari_web_fetch"}, {"type": "web_fetch_20250910"}])
     assert entry == {"type": "otari_web_fetch"}
     assert remaining == [{"type": "web_fetch_20250910"}]
 
 
 def test_web_search_passes_through_gateway_native_short_form() -> None:
-    entry, remaining = _extract_web_search_tool([{"type": "web_search"}])
+    entry, remaining = extract_web_search_tool([{"type": "web_search"}])
     assert entry is None
     assert remaining == [{"type": "web_search"}]
 
 
 def test_web_search_passes_through_anthropic_versioned_type() -> None:
-    entry, remaining = _extract_web_search_tool([{"type": "web_search_20250305"}])
+    entry, remaining = extract_web_search_tool([{"type": "web_search_20250305"}])
     assert entry is None
     assert remaining == [{"type": "web_search_20250305"}]
 
 
 def test_web_search_passes_through_future_anthropic_version() -> None:
-    entry, remaining = _extract_web_search_tool([{"type": "web_search_20991231"}])
+    entry, remaining = extract_web_search_tool([{"type": "web_search_20991231"}])
     assert entry is None
     assert remaining == [{"type": "web_search_20991231"}]
 
 
 def test_web_search_passes_through_unrelated_tools_alongside_otari() -> None:
     user_tool = {"type": "function", "function": {"name": "get_weather"}}
-    entry, remaining = _extract_web_search_tool([user_tool, {"type": "otari_web_search"}])
+    entry, remaining = extract_web_search_tool([user_tool, {"type": "otari_web_search"}])
     assert entry == {"type": "otari_web_search"}
     assert remaining == [user_tool]
 
 
 def test_web_search_does_not_match_code_execution() -> None:
-    entry, _ = _extract_web_search_tool([{"type": "otari_code_execution"}])
+    entry, _ = extract_web_search_tool([{"type": "otari_code_execution"}])
     assert entry is None
 
 
 def test_web_search_carries_per_tool_config_through() -> None:
-    entry, _ = _extract_web_search_tool(
+    entry, _ = extract_web_search_tool(
         [{"type": "otari_web_search", "max_results": 3, "allowed_domains": ["docs.python.org"]}]
     )
     assert entry is not None
@@ -176,36 +174,36 @@ def test_web_search_carries_per_tool_config_through() -> None:
 
 
 def test_intercept_claims_bare_web_search() -> None:
-    entry, remaining = _extract_web_search_tool([{"type": "web_search"}], intercept=True)
+    entry, remaining = extract_web_search_tool([{"type": "web_search"}], intercept=True)
     assert entry == {"type": "web_search"}
     assert remaining is None
 
 
 def test_intercept_claims_anthropic_versioned_type() -> None:
-    entry, remaining = _extract_web_search_tool([{"type": "web_search_20250305"}], intercept=True)
+    entry, remaining = extract_web_search_tool([{"type": "web_search_20250305"}], intercept=True)
     assert entry == {"type": "web_search_20250305"}
     assert remaining is None
 
 
 def test_intercept_claims_future_anthropic_version() -> None:
-    entry, _ = _extract_web_search_tool([{"type": "web_search_20991231"}], intercept=True)
+    entry, _ = extract_web_search_tool([{"type": "web_search_20991231"}], intercept=True)
     assert entry is not None
 
 
 def test_intercept_claims_openai_responses_preview_type() -> None:
-    entry, _ = _extract_web_search_tool([{"type": "web_search_preview"}], intercept=True)
+    entry, _ = extract_web_search_tool([{"type": "web_search_preview"}], intercept=True)
     assert entry is not None
 
 
 def test_intercept_claims_claude_code_shape_with_name_and_max_uses() -> None:
     claude_code = {"type": "web_search_20250305", "name": "web_search", "max_uses": 8}
-    entry, remaining = _extract_web_search_tool([claude_code], intercept=True)
+    entry, remaining = extract_web_search_tool([claude_code], intercept=True)
     assert entry == claude_code
     assert remaining is None
 
 
 def test_intercept_still_claims_the_canonical_otari_type() -> None:
-    entry, _ = _extract_web_search_tool([{"type": "otari_web_search"}], intercept=True)
+    entry, _ = extract_web_search_tool([{"type": "otari_web_search"}], intercept=True)
     assert entry == {"type": "otari_web_search"}
 
 
@@ -216,7 +214,7 @@ def test_intercept_never_claims_a_function_named_web_search() -> None:
     tool_call they can execute. LiteLLM excludes this case for the same reason.
     """
     own_tool = {"type": "function", "function": {"name": "web_search", "parameters": {}}}
-    entry, remaining = _extract_web_search_tool([own_tool], intercept=True)
+    entry, remaining = extract_web_search_tool([own_tool], intercept=True)
     assert entry is None
     assert remaining == [own_tool]
 
@@ -227,13 +225,13 @@ def test_intercept_does_not_claim_code_execution_or_unrelated_tools() -> None:
         {"type": "web_fetch_20250910"},
         {"type": "function", "function": {"name": "get_weather"}},
     ]
-    entry, remaining = _extract_web_search_tool(tools, intercept=True)
+    entry, remaining = extract_web_search_tool(tools, intercept=True)
     assert entry is None
     assert remaining == tools
 
 
 def test_intercept_off_is_the_default_and_passes_provider_keywords_through() -> None:
-    entry, remaining = _extract_web_search_tool([{"type": "web_search_20250305"}])
+    entry, remaining = extract_web_search_tool([{"type": "web_search_20250305"}])
     assert entry is None
     assert remaining == [{"type": "web_search_20250305"}]
 
@@ -243,29 +241,29 @@ def test_intercept_off_is_the_default_and_passes_provider_keywords_through() -> 
 
 def test_intercept_defaults_off(monkeypatch: Any) -> None:
     monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
-    assert _web_search_intercept_enabled(GatewayConfig()) is False
+    assert web_search_intercept_enabled(GatewayConfig()) is False
 
 
 def test_intercept_reads_the_config_field(monkeypatch: Any) -> None:
     monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
-    assert _web_search_intercept_enabled(GatewayConfig(web_search_intercept=True)) is True
+    assert web_search_intercept_enabled(GatewayConfig(web_search_intercept=True)) is True
 
 
 def test_intercept_falls_back_to_env(monkeypatch: Any) -> None:
     monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
-    assert _web_search_intercept_enabled(GatewayConfig()) is True
+    assert web_search_intercept_enabled(GatewayConfig()) is True
 
 
 def test_intercept_env_falsey_values_stay_off(monkeypatch: Any) -> None:
     for raw in ("0", "false", "no", "off", ""):
         monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", raw)
-        assert _web_search_intercept_enabled(GatewayConfig()) is False
+        assert web_search_intercept_enabled(GatewayConfig()) is False
 
 
 def test_config_false_wins_over_a_truthy_env(monkeypatch: Any) -> None:
     """An explicit off (dashboard override / YAML) is not overridden by the env."""
     monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
-    assert _web_search_intercept_enabled(GatewayConfig(web_search_intercept=False)) is False
+    assert web_search_intercept_enabled(GatewayConfig(web_search_intercept=False)) is False
 
 
 # --- tool_choice retargeting -------------------------------------------------
@@ -407,7 +405,7 @@ def test_a_nonsensical_max_uses_is_refused_by_the_reader() -> None:
     for value in (-1, True, False, "2", 1.5, 5.0):
         entry = {"type": "web_search_20250305", "max_uses": value}
         with pytest.raises(ValueError, match="non-negative integer"):
-            _read_web_search_max_uses(entry)
+            read_web_search_max_uses(entry)
 
 
 def test_only_the_gateways_own_container_words_are_refused_when_the_provider_runs_the_code() -> None:

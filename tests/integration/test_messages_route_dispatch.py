@@ -35,10 +35,10 @@ from any_llm.types.messages import (
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from gateway.api.routes._tools import WEB_SEARCH_HEADER
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX, MCP_CLIENT_BETA
+from gateway.services.tools import WEB_SEARCH_HEADER
 from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
 from gateway.types.normalization_target import NormalizationTarget
 

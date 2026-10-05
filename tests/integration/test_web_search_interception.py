@@ -24,8 +24,8 @@ from any_llm.types.completion import (
 )
 from fastapi.testclient import TestClient
 
-from gateway.api.routes._tools import WEB_SEARCH_HEADER
 from gateway.core.config import API_ROOT
+from gateway.services.tools import WEB_SEARCH_HEADER
 
 from .conftest import MODEL_NAME
 
