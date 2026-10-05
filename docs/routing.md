@@ -120,10 +120,12 @@ counts each one in `gateway_rate_limit_model_full{rule, model}`. The limit lives
 not on the policy, so it is skipped the same way in `on_failure`, in a weighted
 pool, and in any other policy that names it; with Redis as `rate_limit_store`,
 the count holds across replicas. A candidate with room that fails before
-responding falls through to the next one, as in any policy. The caller gets a
-429 only when every candidate is full, naming the limit that frees up soonest
-(and its `Retry-After`) but not the model, since a policy's targets are not the
-caller's to see.
+responding falls through to the next one, as in any policy. The per-model limits
+refuse a request with a 429 only when every candidate is full, naming the limit
+that frees up soonest (and its `Retry-After`) but not the model, since a
+policy's targets are not the caller's to see. A per-key, per-user or deployment
+rule is checked before routing, so it can still refuse a request while every
+candidate has room.
 
 The policy says which is which: `candidates` handles "full", `on_failure`
 handles "broke". `Otari-Router: off` skips the order and starts from the

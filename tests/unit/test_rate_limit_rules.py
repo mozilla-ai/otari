@@ -310,6 +310,36 @@ async def test_an_attempt_dropped_before_it_was_sent_keeps_nothing() -> None:
     assert (await store.hit("rule:cap:openai:gpt-4o:rpm", 5, 60)).count == 2
 
 
+class _BrokenStore(InMemoryRateLimitStore):
+    """A store whose window for ``broken_key`` fails, as a lost Redis connection would."""
+
+    def __init__(self, broken_key: str) -> None:
+        super().__init__()
+        self._broken_key = broken_key
+
+    async def hit(self, key: str, limit: int, window_sec: float, cost: int = 1) -> Any:
+        if key == self._broken_key:
+            raise ConnectionError("store unreachable")
+        return await super().hit(key, limit, window_sec, cost=cost)
+
+
+@pytest.mark.asyncio
+async def test_an_attempt_whose_admission_breaks_gives_back_what_it_took() -> None:
+    store = _BrokenStore("rule:second:openai:gpt-4o:rpm")
+    rules = _rules(
+        store,
+        {"name": "first", "per": "model", "models": ["openai:gpt-4o"], "max_concurrent": 1},
+        {"name": "second", "per": "model", "models": ["openai:gpt-4o"], "rpm": 5},
+    )
+    grant = await _admit(rules)
+
+    with pytest.raises(ConnectionError):
+        await grant.admit_model("openai", "gpt-4o")
+
+    lease = await store.acquire("rule:first:openai:gpt-4o:concurrent", 1, 900)
+    assert lease is not None, "the slot the first rule took was kept"
+
+
 @pytest.mark.asyncio
 async def test_a_served_attempt_is_settled_and_released_with_its_request() -> None:
     rules = _rules(

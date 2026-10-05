@@ -31,6 +31,30 @@ describe("RequestDetail", () => {
     ).toBeInTheDocument()
   })
 
+  it("shows a skipped candidate as a note, not as an error", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({
+          status: "absorbed",
+          status_code: 429,
+          error_message:
+            "Skipped: Rate limit 'flash-cap' exceeded: 2 requests per minute",
+        })}
+        onPriceModel={null}
+      />,
+    )
+    await flushRouter()
+
+    expect(screen.getByText("Skipped")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /^Rate limit 'flash-cap' exceeded: 2 requests per minute\. Routing moved/,
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Error (429)")).not.toBeInTheDocument()
+  })
+
   it("spells out the billed total beside the provider-reported one", async () => {
     mockApi()
     renderPage(

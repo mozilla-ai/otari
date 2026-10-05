@@ -36,6 +36,25 @@ describe("ActivityPage", () => {
     expect(within(row).getByText("Success")).toBeInTheDocument()
   })
 
+  it("shows a skipped candidate's status as Skipped, not Absorbed", async () => {
+    mockApi({
+      rows: [
+        entry({
+          model: "gpt-4o-mini",
+          status: "absorbed",
+          status_code: 429,
+          error_message:
+            "Skipped: Rate limit 'flash-cap' exceeded: 2 requests per minute",
+        }),
+      ],
+    })
+    renderPage(<ActivityPage />)
+
+    const row = (await screen.findByText("gpt-4o-mini")).closest("tr")!
+    expect(within(row).getByText("Skipped")).toBeInTheDocument()
+    expect(within(row).queryByText("Absorbed")).not.toBeInTheDocument()
+  })
+
   it("shows the api key column, and an em-dash for master-key rows", async () => {
     mockApi({
       rows: [

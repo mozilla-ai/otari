@@ -278,8 +278,10 @@ class RateLimitGrant:
         for rule in rules:
             try:
                 await _count_rule(self._store, rule, name, self._estimated_tokens, hold, label=label)
-            except HTTPException:
-                RATE_LIMIT_MODEL_FULL.labels(rule=rule.name, model=name).inc()
+            except BaseException as exc:
+                # The hold is not on the grant yet, so nothing else would give back what it took.
+                if isinstance(exc, HTTPException):
+                    RATE_LIMIT_MODEL_FULL.labels(rule=rule.name, model=name).inc()
                 await _undo(self._store, hold)
                 raise
         self._holds.append(hold)

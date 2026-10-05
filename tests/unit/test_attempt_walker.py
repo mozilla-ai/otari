@@ -652,13 +652,15 @@ async def _walk_admitted(
     skipped: list[tuple[str, Any]] | None = None,
     prepare_kwargs: Any = None,
     retry_after: dict[str, str] | None = None,
+    terminal: list[str] | None = None,
+    dropped: list[tuple[str, bool]] | None = None,
 ) -> tuple[tuple[Attempt, Any], list[str], list[tuple[str, bool]]]:
     """Walk with every model in ``full`` refused admission.
 
     Returns the result, the models sent, and each dropped hold with whether its model was sent.
     """
     sent: list[str] = []
-    dropped: list[tuple[str, bool]] = []
+    dropped = dropped if dropped is not None else []
     skipped = skipped if skipped is not None else []
 
     async def on_skipped(attempt: Attempt, refusal: HTTPException) -> None:
@@ -692,6 +694,7 @@ async def _walk_admitted(
         prepare_kwargs=prepare_kwargs,
         admit_attempt=admit,
         on_skipped=on_skipped,
+        on_terminal=(lambda attempt: terminal.append(attempt.model)) if terminal is not None else None,
     )
     return result, sent, dropped
 
@@ -750,6 +753,37 @@ async def test_every_candidate_full_answers_with_the_soonest_retry_after() -> No
 
     assert exc_info.value.detail == "a is full"
     assert exc_info.value.headers == {"Retry-After": "5"}
+
+
+@pytest.mark.asyncio
+async def test_an_all_full_refusal_is_reported_on_the_candidate_whose_refusal_answers() -> None:
+    terminal: list[str] = []
+
+    with pytest.raises(HTTPException):
+        await _walk_admitted(
+            [_attempt(1, "a"), _attempt(2, "b")],
+            full={"a", "b"},
+            retry_after={"a": "5", "b": "40"},
+            terminal=terminal,
+        )
+
+    assert terminal == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_before_the_provider_answers_gives_back_the_models_request() -> None:
+    """A refused reservation top-up is terminal, and the model was never called for it."""
+    dropped: list[tuple[str, bool]] = []
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk_admitted(
+            [_attempt(1, "a")],
+            full=set(),
+            behaviors={"a": HTTPException(status_code=402, detail="top-up refused")},
+            dropped=dropped,
+        )
+
+    assert exc_info.value.status_code == 402
+    assert dropped == [("a", False)]
 
 
 @pytest.mark.asyncio

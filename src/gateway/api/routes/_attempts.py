@@ -108,11 +108,11 @@ def classify_local_attempt_error(exc: BaseException) -> tuple[bool, str]:
     return True, "unknown"
 
 
-def _soonest_refusal(refusals: Sequence[HTTPException]) -> HTTPException:
-    """The refusal a caller can retry soonest, so ``Retry-After`` is not the last candidate's wait."""
+def _soonest_refusal(refusals: Sequence[tuple[Attempt, HTTPException]]) -> tuple[Attempt, HTTPException]:
+    """The candidate and refusal a caller can retry soonest, so ``Retry-After`` is not the last candidate's wait."""
 
-    def _retry_after(refusal: HTTPException) -> float:
-        value = (refusal.headers or {}).get("Retry-After")
+    def _retry_after(entry: tuple[Attempt, HTTPException]) -> float:
+        value = (entry[1].headers or {}).get("Retry-After")
         try:
             return float(value) if value is not None else math.inf
         except ValueError:
@@ -203,7 +203,7 @@ async def walk_attempts(
     failures: list[AttemptFailure] = []
     last_exc: BaseException | None = None
     cannot_serve: CandidateCannotServe | None = None
-    refusals: list[HTTPException] = []
+    refusals: list[tuple[Attempt, HTTPException]] = []
     # A failure is absorbed, and a skip recorded, only once another candidate is sent the request.
     unabsorbed: tuple[Attempt, BaseException] | None = None
     unrecorded_skips: list[tuple[Attempt, HTTPException]] = []
@@ -250,7 +250,7 @@ async def walk_attempts(
                 exc,
             )
             cannot_serve = exc
-            refusals.append(exc.refusal)
+            refusals.append((attempt, exc.refusal))
             unrecorded_skips.append((attempt, exc.refusal))
             if drop_admission is not None:
                 await drop_admission(False)
@@ -261,6 +261,9 @@ async def walk_attempts(
             # failure to try the next one for. Report the candidate it happened on:
             # the caller cannot infer it, and defaulting to the end of the plan
             # would name a provider that was never called.
+            if drop_admission is not None and not locked_in:
+                # Refused before the provider answered, so its request is not counted against the model.
+                await drop_admission(False)
             if on_terminal is not None:
                 on_terminal(attempt)
             raise
@@ -325,9 +328,10 @@ async def walk_attempts(
         return attempt, result
 
     if cannot_serve is not None and not failures:
+        refused_on, refusal = _soonest_refusal(refusals)
         if on_terminal is not None:
-            on_terminal(attempts[-1])
-        raise _soonest_refusal(refusals)
+            on_terminal(refused_on)
+        raise refusal
 
     if on_skipped is not None:
         for skipped, refusal in unrecorded_skips:
