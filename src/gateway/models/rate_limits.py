@@ -32,6 +32,7 @@ class StoredRateLimitRule(Base):
     keys: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     rpm: Mapped[int | None] = mapped_column(default=None)
     tpm: Mapped[int | None] = mapped_column(default=None)
+    tpm_admission: Mapped[str] = mapped_column(String, default="estimate", server_default="estimate")
     max_concurrent: Mapped[int | None] = mapped_column(default=None)
     lease_sec: Mapped[float] = mapped_column(default=900.0, server_default="900")
     created_at: Mapped[datetime] = mapped_column(

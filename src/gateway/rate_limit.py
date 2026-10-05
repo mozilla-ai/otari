@@ -332,7 +332,7 @@ async def _count_rule(
         hold.entries.append((f"{base}:rpm", window.handle))
     if rule.tpm is not None:
         # At least one token, so a request estimating none is still refused by a full window.
-        cost = max(estimated_tokens, 1)
+        cost = 1 if rule.tpm_admission == "used" else max(estimated_tokens, 1)
         if cost > rule.tpm:
             msg = (
                 f"Request needs an estimated {_count(cost, 'token')}; "

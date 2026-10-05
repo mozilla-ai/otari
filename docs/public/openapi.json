@@ -13164,6 +13164,16 @@
             ],
             "description": "Tokens per minute. A request is admitted on its estimate (prompt plus max output, or budget_estimate_default_output_tokens) and charged what it used once it completes.",
             "title": "Tpm"
+          },
+          "tpm_admission": {
+            "default": "estimate",
+            "description": "How a tpm limit admits a request. 'estimate' holds the request's estimate and refuses it when that does not fit. 'used' admits a request while the minute's tokens are under the limit, holding none, and counts what it used once it completes, as LiteLLM does: a client that always sends a large max_tokens is limited by its usage, not its ceiling.",
+            "enum": [
+              "estimate",
+              "used"
+            ],
+            "title": "Tpm Admission",
+            "type": "string"
           }
         },
         "required": [
@@ -13278,6 +13288,16 @@
             ],
             "description": "Tokens per minute. A request is admitted on its estimate (prompt plus max output, or budget_estimate_default_output_tokens) and charged what it used once it completes.",
             "title": "Tpm"
+          },
+          "tpm_admission": {
+            "default": "estimate",
+            "description": "How a tpm limit admits a request. 'estimate' holds the request's estimate and refuses it when that does not fit. 'used' admits a request while the minute's tokens are under the limit, holding none, and counts what it used once it completes, as LiteLLM does: a client that always sends a large max_tokens is limited by its usage, not its ceiling.",
+            "enum": [
+              "estimate",
+              "used"
+            ],
+            "title": "Tpm Admission",
+            "type": "string"
           },
           "updated_at": {
             "anyOf": [
@@ -13407,6 +13427,22 @@
             ],
             "description": "Tokens per minute.",
             "title": "Tpm"
+          },
+          "tpm_admission": {
+            "anyOf": [
+              {
+                "enum": [
+                  "estimate",
+                  "used"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "'estimate' holds a request's estimate; 'used' counts only what it used.",
+            "title": "Tpm Admission"
           }
         },
         "title": "RateLimitRuleUpdate",

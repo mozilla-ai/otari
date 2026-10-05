@@ -20,6 +20,7 @@ const FROM_FILE: RateLimitRule = {
   tpm: null,
   max_concurrent: 200,
   lease_sec: 900,
+  tpm_admission: "estimate",
   source: "config",
 }
 
@@ -30,6 +31,7 @@ const STORED: RateLimitRule = {
   tpm: 200000,
   max_concurrent: null,
   lease_sec: 900,
+  tpm_admission: "estimate",
   source: "dashboard",
   updated_at: "2026-10-03T12:00:00Z",
 }
@@ -102,6 +104,7 @@ describe("RateLimitsCard", () => {
         tpm: null,
         max_concurrent: null,
         lease_sec: 900,
+        tpm_admission: "estimate",
         source: "config",
       },
     ])
@@ -151,6 +154,7 @@ describe("RateLimitsCard", () => {
             tpm: null,
             max_concurrent: null,
             lease_sec: 900,
+            tpm_admission: "estimate",
           },
         },
       ]),
@@ -186,6 +190,7 @@ describe("RateLimitsCard", () => {
         tpm: null,
         max_concurrent: null,
         lease_sec: 900,
+        tpm_admission: "estimate",
       }),
     )
   })
@@ -276,6 +281,7 @@ describe("RateLimitsCard", () => {
             tpm: null,
             max_concurrent: null,
             lease_sec: 900,
+            tpm_admission: "estimate",
           },
         },
       ]),

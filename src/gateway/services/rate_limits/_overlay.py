@@ -34,6 +34,7 @@ def rule_of(row: StoredRateLimitRule) -> RateLimitRule:
         keys=row.keys,
         rpm=row.rpm,
         tpm=row.tpm,
+        tpm_admission=row.tpm_admission,  # type: ignore[arg-type]  # written from the Literal
         max_concurrent=row.max_concurrent,
         lease_sec=row.lease_sec,
     )

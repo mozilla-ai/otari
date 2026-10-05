@@ -11934,6 +11934,13 @@ export interface components {
              * @description Tokens per minute. A request is admitted on its estimate (prompt plus max output, or budget_estimate_default_output_tokens) and charged what it used once it completes.
              */
             tpm?: number | null;
+            /**
+             * Tpm Admission
+             * @description How a tpm limit admits a request. 'estimate' holds the request's estimate and refuses it when that does not fit. 'used' admits a request while the minute's tokens are under the limit, holding none, and counts what it used once it completes, as LiteLLM does: a client that always sends a large max_tokens is limited by its usage, not its ceiling.
+             * @default estimate
+             * @enum {string}
+             */
+            tpm_admission: "estimate" | "used";
         };
         /**
          * RateLimitRulePublic
@@ -11989,6 +11996,13 @@ export interface components {
              */
             tpm?: number | null;
             /**
+             * Tpm Admission
+             * @description How a tpm limit admits a request. 'estimate' holds the request's estimate and refuses it when that does not fit. 'used' admits a request while the minute's tokens are under the limit, holding none, and counts what it used once it completes, as LiteLLM does: a client that always sends a large max_tokens is limited by its usage, not its ceiling.
+             * @default estimate
+             * @enum {string}
+             */
+            tpm_admission: "estimate" | "used";
+            /**
              * Updated At
              * @description When a stored rule last changed.
              */
@@ -12039,6 +12053,11 @@ export interface components {
              * @description Tokens per minute.
              */
             tpm?: number | null;
+            /**
+             * Tpm Admission
+             * @description 'estimate' holds a request's estimate; 'used' counts only what it used.
+             */
+            tpm_admission?: ("estimate" | "used") | null;
         };
         /**
          * RateLimitRulesPublic
