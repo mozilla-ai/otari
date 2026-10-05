@@ -20,6 +20,8 @@ on:
       # otari-dashboard-parity.yml (Playwright, the flows the served bundle
       # walks). A path filter applies to a whole workflow, which is why those are
       # separate files rather than jobs here.
+      # The lint and type-check steps run make targets.
+      - 'Makefile'
       - '.github/workflows/otari-dashboard.yml'
   pull_request:
     branches: [ main ]
@@ -40,6 +42,8 @@ on:
       # otari-dashboard-parity.yml (Playwright, the flows the served bundle
       # walks). A path filter applies to a whole workflow, which is why those are
       # separate files rather than jobs here.
+      # The lint and type-check steps run make targets.
+      - 'Makefile'
       - '.github/workflows/otari-dashboard.yml'
   workflow_dispatch:
 
@@ -77,14 +81,18 @@ jobs:
 
     # Biome (web/biome.jsonc): formatting, the recommended rule set, and the layer
     # boundary (a feature may not import the composition root; shared/ may not import
-    # either; nothing may import an overlay's tree). `pnpm run lint` is `biome check`,
-    # which reports rather than rewrites, so a formatting drift fails here instead of
-    # landing as noise in the next person's diff. `pnpm run lint:fix` is the writing one.
-    - name: Lint and format check
-      run: pnpm run lint
+    # either; nothing may import an overlay's tree). `make lint-web` applies the fixes
+    # Biome can make, so the diff check after it fails on input nobody linted locally.
+    - name: Lint and format
+      working-directory: .
+      run: make lint-web
+
+    - name: Check lint left no changes
+      run: git diff --exit-code .
 
     - name: Type-check
-      run: pnpm run typecheck
+      working-directory: .
+      run: make typecheck-web
 
     - name: Test
       run: pnpm test

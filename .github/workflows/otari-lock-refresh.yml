@@ -110,11 +110,11 @@ jobs:
 
       - name: Lint
         if: steps.relock.outputs.changed == 'true'
-        run: make lint
+        run: make lint-python
 
       - name: Typecheck
         if: steps.relock.outputs.changed == 'true'
-        run: make typecheck
+        run: make typecheck-python
 
       - name: Unit tests
         if: steps.relock.outputs.changed == 'true'
@@ -154,7 +154,7 @@ jobs:
             changed: these are the newest versions the existing constraints already
             allowed, which Dependabot does not open PRs for.
 
-            The workflow ran `make lint`, `make typecheck`, the unit and
+            The workflow ran `make lint-python`, `make typecheck-python`, the unit and
             integration suites, and the OSS-edition smoke gate against this
             resolution before opening the PR. See the run summary for the
             package-level diff.

@@ -1,4 +1,4 @@
-.PHONY: help dev dashboard test test-unit test-integration lint check-architecture typecheck openapi-check postman postman-check changelog check-migrations railway-template-check
+.PHONY: help dev dashboard test test-unit test-integration lint lint-python lint-web check-architecture typecheck typecheck-python typecheck-web openapi-check postman postman-check changelog check-migrations railway-template-check
 
 help:
 	@printf "Available targets:\n"
@@ -7,9 +7,13 @@ help:
 	@printf "  test Run full test suite (unit + integration)\n"
 	@printf "  test-unit Run unit tests\n"
 	@printf "  test-integration Run integration tests\n"
-	@printf "  lint Run the pre-commit hooks: architecture, migrations, Ruff lint and format\n"
+	@printf "  lint Run every linter, fixing what it can (lint-python + lint-web)\n"
+	@printf "  lint-python Run the pre-commit hooks: architecture, migrations, Ruff lint and format\n"
+	@printf "  lint-web Run Biome over the dashboard\n"
 	@printf "  check-architecture Enforce gateway layer rules (also run by lint)\n"
-	@printf "  typecheck Run mypy type checks\n"
+	@printf "  typecheck Run every type checker (typecheck-python + typecheck-web)\n"
+	@printf "  typecheck-python Run mypy\n"
+	@printf "  typecheck-web Run tsc over the dashboard\n"
 	@printf "  openapi-check Verify the OpenAPI spec is up to date\n"
 	@printf "  postman Regenerate the Postman collection from the OpenAPI spec\n"
 	@printf "  postman-check Verify the Postman collection is up to date\n"
@@ -52,11 +56,16 @@ test-unit:
 test-integration:
 	uv run pytest -v tests/integration
 
-# NOTE: ruff format rewrites files in place, so a failing run can leave changes to commit.
-lint:
+# NOTE: The linters fix what they can in place, so a run can leave changes to commit.
+lint: lint-python lint-web
+
+lint-python:
 	uv run pre-commit run --all-files --show-diff-on-failure
 
-# Enforce gateway layer rules. Pure stdlib; runs as part of `make lint` (which
+lint-web: web/node_modules/.install-stamp
+	pnpm --dir web run lint:fix
+
+# Enforce gateway layer rules. Pure stdlib; runs as part of `make lint-python` (which
 # otari-lint.yml calls on every PR) and stays independently runnable.
 check-architecture:
 	uv run python scripts/check_architecture.py
@@ -67,8 +76,13 @@ check-architecture:
 check-migrations:
 	uv run python scripts/check_alembic_heads.py
 
-typecheck:
+typecheck: typecheck-python typecheck-web
+
+typecheck-python:
 	uv run mypy
+
+typecheck-web: web/node_modules/.install-stamp
+	pnpm --dir web run typecheck
 
 openapi-check:
 	uv run python scripts/generate_openapi.py --check

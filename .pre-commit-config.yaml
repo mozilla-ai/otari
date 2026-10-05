@@ -1,4 +1,4 @@
-# The single list of Python lint checks. `make lint` and CI run it with --all-files.
+# The single list of Python lint checks. `make lint-python` and CI run it with --all-files.
 # The hooks call the tools through uv, so they use the versions pinned in uv.lock.
 repos:
   - repo: local
@@ -17,7 +17,7 @@ repos:
         always_run: true
       - id: ruff-check
         name: ruff check
-        entry: uv run ruff check --force-exclude
+        entry: uv run ruff check --fix --force-exclude
         language: system
         types_or: [python, pyi]
         require_serial: true

@@ -170,7 +170,6 @@ Common checks:
 make test
 make lint
 make typecheck
-pnpm --dir web run lint
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.

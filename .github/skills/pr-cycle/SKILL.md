@@ -65,10 +65,11 @@ artifacts.
 
 From the repo root:
 
-- `make lint`: the hooks in `.pre-commit-config.yaml`, which are the architecture check, the
-  Alembic single-head check, then `ruff check` and `ruff format`. **Ruff alone is not equivalent.** A layer
-  violation fails here with a clean `ruff check`.
-- `make typecheck`: mypy.
+- `make lint`: `lint-python` then `lint-web`. Both fix what they can, so commit what a run
+  changes. `lint-python` runs the hooks in `.pre-commit-config.yaml`: the architecture check, the
+  Alembic single-head check, then `ruff check` and `ruff format`. **Ruff alone is not
+  equivalent.** A layer violation fails here with a clean `ruff check`.
+- `make typecheck`: mypy, then `tsc` over the dashboard.
 - `make test`: `tests/unit` and `tests/integration`. `make test-unit` and `make test-integration`
   split it while iterating.
 
@@ -87,10 +88,9 @@ A change to the app, the migrations, or dependency resolution also owes the OSS-
 gate: `uv run --frozen --no-dev python scripts/oss_edition_smoke.py`. It defaults to a throwaway
 SQLite file, so it needs no Docker.
 
-The dashboard has its own, which `make lint` does not touch: `pnpm --dir web run lint`,
-`pnpm --dir web run typecheck`, `pnpm --dir web test`. Screenshot baselines are gitignored and
-that suite runs on demand, so a PR that moves a page owes no PNGs; a PR that **adds** a page owes
-a screenshot entry so the page is covered when the suite becomes a gate.
+The dashboard tests are separate from `make test`: `pnpm --dir web test`. Screenshot baselines are
+gitignored and that suite runs on demand, so a PR that moves a page owes no PNGs; a PR that
+**adds** a page owes a screenshot entry so the page is covered when the suite becomes a gate.
 
 ## What CI runs on a PR, and the two ways it silently does not
 

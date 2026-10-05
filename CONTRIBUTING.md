@@ -128,8 +128,8 @@ git checkout -b fix/your-description
 After making changes:
 
 ```bash
-make lint        # pre-commit hooks: architecture, migrations, ruff check + format
-make typecheck   # mypy --strict
+make lint        # Python pre-commit hooks + dashboard Biome, fixing what they can
+make typecheck   # mypy --strict + dashboard tsc
 make test        # unit + integration
 ```
 
