@@ -1,0 +1,38 @@
+name: Otari Railway Template
+
+# Compares deploy/railway/template.json and listing.md with the live Railway
+# template (scripts/check_railway_template.py). The template is edited by hand
+# in the Railway editor, so the repo and the live object can drift apart in
+# either direction: a PR that edits the snapshot without the template, or an
+# editor change with no PR at all. The pull_request trigger catches the first;
+# the weekly schedule catches the second.
+#
+# Railway's API answers without a token, so this needs no secret and runs on
+# fork PRs too. The script is standard library only, so no environment is
+# installed.
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'deploy/railway/**'
+      - 'scripts/check_railway_template.py'
+      - '.github/workflows/otari-railway-template.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '0 7 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  railway-template:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Compare the repo with the live Railway template
+      run: python3 scripts/check_railway_template.py
