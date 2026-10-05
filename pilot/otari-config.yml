@@ -21,7 +21,7 @@ providers:
     provider_type: openai
     api_base: "http://127.0.0.1:9100/vertexai"
     api_key: fake
-    models: [gemini-3.1-flash-lite, qwen/qwen3-235b-a22b-instruct-2507-maas, mistral-small-2503, gemini-2.5-flash-lite-429]
+    models: [gemini-3.1-flash-lite, qwen/qwen3-235b-a22b-instruct-2507-maas, mistral-small-2503, gemini-2.5-flash-lite-429, gemini-2.5-flash-lite-tiny-context]
   mistral:                        # real: api_key ${MISTRAL_API_KEY}
     provider_type: openai
     api_base: "http://127.0.0.1:9100/mistral"
@@ -48,6 +48,7 @@ aliases:
   exa: exa_answers:exa
   liner: liner_answers:liner-quick-answer
   throttled: vertex_ai:gemini-2.5-flash-lite-429
+  tiny-context: vertex_ai:gemini-2.5-flash-lite-tiny-context
 
 pricing:
   vertex_ai:gemini-3.1-flash-lite: {input_price_per_million: 0.10, output_price_per_million: 0.40}

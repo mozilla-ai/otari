@@ -17,7 +17,7 @@ check.py (as desktop,   ┼──► MLPA :8080 ──► Otari :8100 ──► 
 
 ```bash
 ./run.sh up        # Postgres + Redis in Docker, then fakes, Otari, MLPA
-./run.sh check     # 28 end-to-end checks through MLPA
+./run.sh check     # 30 end-to-end checks through MLPA
 ./run.sh firefox   # Smart Window on a fresh profile, pointed at the local MLPA
 ./run.sh down      # stops everything and drops the databases
 ```
@@ -27,9 +27,10 @@ artifact build under `~/firefox`) is the Firefox `./run.sh firefox` starts. The
 Otari dashboard is at http://127.0.0.1:8100 with master key `sk-otari-pilot`.
 
 `up` provisions MLPA in Otari with MLPA's own script
-(`scripts/otari_provision.py`): per service type, an Otari budget named after
-MLPA's budget id, an owner user `mlpa-<service type>` with one service key, and
-a `rate_limits` rule `per: user`, narrowed to that key, with MLPA's RPM and TPM.
+(`scripts/otari_provision.py`), the only writer: per service type, an Otari
+budget named after MLPA's budget id, carrying MLPA's dollar cap and its per-user
+RPM and TPM, and an owner user `mlpa-<service type>` with one service key. MLPA
+itself only reads at startup.
 
 ## Firefox
 
@@ -57,26 +58,29 @@ streaming modes, and authenticates with an MLPA access token
 - **Billing.** Spend lands on the end user, under its service type's budget,
   for search as well as chat. MLPA's `metadata` never reaches a provider.
 - **Refusal codes.** Per-user budget gives `{error: 1}`, per-user RPM gives
-  `{error: 2}` (each service type separately), a provider 429 gives
-  `{error: 5}`, and an unknown model gives `{error: 8}`. MLPA maps these from
-  Otari's `Otari-Error-Code` header, with no text matching.
+  `{error: 2}` (each service type separately), a prompt too long for the model
+  gives `{error: 3}`, a provider 429 gives `{error: 5}`, and an unknown model
+  gives `{error: 8}`. MLPA maps these from Otari's error code, with no text
+  matching.
 - **Admin API.** MLPA's block, unblock, budget move, user info, list and
-  per-service-type counts, all backed by Otari's users API.
+  per-service-type counts, all backed by Otari's users API. Moving a user to
+  another budget moves its per-minute limits too.
 
 ## What it took
 
 Otari, branch `feat/mlpa-pilot`:
 
-- `Otari-Error-Code` on refusals. Budget refusals also send
-  `Otari-Budget-Scope`, which tells MLPA's per-user code 1 from its global
-  code 10.
-- `keys` on `rate_limits` rules, for per-service-type user limits.
-- `tpm_admission: used` on `rate_limits` rules. MLPA sends `max_tokens: 8192`
-  against a 2,000 TPM per user, so admitting on an estimate refused every
-  request.
-- Search bills a service key's end users and counts `rate_limits`.
-- `GET /users` filters (`parent_user_id`, `external_id`, `blocked`), plus
-  `GET /users/count`.
+- Stable refusal codes, as an `Otari-Error-Code` header, as `code` in the
+  body, and as `error.code` in a stream's error event. Budget refusals also
+  send `Otari-Budget-Scope`, which tells MLPA's per-user code 1 from its
+  global code 10.
+- `rpm_limit` and `tpm_limit` on budgets, per user, where LiteLLM keeps them.
+  Tokens count what requests used: MLPA sends `max_tokens: 8192` against a
+  2,000 TPM per user, so admitting on an estimate would refuse every request
+  (`tpm_admission: used` gives `rate_limits` rules the same option).
+- Search bills a service key's end users and counts the per-minute limits.
+- `GET /users` filters (`parent_user_id`, `external_id`, `blocked`) and
+  `include_total`.
 - Provider extras are copied under `provider_specific_fields`.
 
 MLPA, branch `otari-pilot`:
@@ -85,7 +89,9 @@ MLPA, branch `otari-pilot`:
   LiteLLM database service, so the admin API, signup cap and startup code are
   unchanged.
 - One service key per service type, plus the provision script.
-- Error mapping by code.
+- Error mapping by code, from the header or the body, and from a coded
+  stream error event.
+- Startup only reads; the provision script is the one writer.
 - Readiness and version read from Otari.
 - The stream parser now accepts OpenAI-shaped chunks (`usage: null`,
   `choices: []`).

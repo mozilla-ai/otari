@@ -4,7 +4,8 @@ One server, one path prefix per upstream, each OpenAI-compatible so Otari
 reaches it as a ``provider_type: openai`` instance:
 
 - ``/vertexai`` and ``/mistral``: chat completions, streamed or not, with usage.
-  A model named ``*-429`` answers 429, the provider throttling Otari.
+  A model named ``*-429`` answers 429, the provider throttling Otari, and one
+  named ``*-tiny-context`` refuses every prompt as too long.
 - ``/exa``: Exa's answer endpoint, which puts ``citations`` on the message.
 - ``/liner``: a shim from OpenAI chat completions to Liner's quick-answer agent
   API (``answer`` plus ``references``), returning the references as
@@ -129,6 +130,20 @@ class Handler(BaseHTTPRequestHandler):
         messages = request.get("messages", [])
         COUNTS[f"{upstream}:{model}"] = COUNTS.get(f"{upstream}:{model}", 0) + 1
         COUNTS["metadata_forwarded"] = COUNTS.get("metadata_forwarded", 0) + ("metadata" in request)
+        if model.endswith("-tiny-context"):
+            # OpenAI's shape for a prompt over the model's context window.
+            error = {
+                "message": "This model's maximum context length is 8 tokens.",
+                "type": "invalid_request_error",
+                "code": "context_length_exceeded",
+            }
+            body = json.dumps({"error": error}).encode()
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if model.endswith("-429"):
             body = json.dumps({"error": {"message": "Resource exhausted", "type": "rate_limit_error"}}).encode()
             self.send_response(429)

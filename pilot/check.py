@@ -177,6 +177,12 @@ other = chat(limited, "ai", "gemini-3.1-flash-lite")
 check("the same identity on another service type has its own limit", other.status_code == 200, other.text)
 r = chat(identity(), "ai", "throttled")
 check("provider 429 -> 429 {error: 5}", r.status_code == 429 and error_code(r) == 5, (r.status_code, r.text))
+r = chat(identity(), "ai", "tiny-context")
+check(
+    "prompt too long for the model -> 413 {error: 3}",
+    r.status_code == 413 and error_code(r) == 3,
+    (r.status_code, r.text),
+)
 r = chat(identity(), "ai", "no-such-model")
 check("unknown model -> 400 {error: 8}", r.status_code == 400 and error_code(r) == 8, (r.status_code, r.text))
 
@@ -194,11 +200,17 @@ check(
 client.post(f"{MLPA}/user/{blocked}:ai/unblock", headers=MLPA_ADMIN)
 r = chat(blocked, "ai", "gemini-3.1-flash-lite")
 check("admin: unblock lets the user back in", r.status_code == 200, r.text)
-r = client.post(f"{MLPA}/user/{blocked}:ai/budget", json={"service_type": "ai-dev"}, headers=MLPA_ADMIN)
+r = client.post(f"{MLPA}/user/{limited}:memories/budget", json={"service_type": "memories-dev"}, headers=MLPA_ADMIN)
 check(
     "admin: move a user to another budget",
-    r.status_code == 200 and r.json()["budget_id"] == "end-user-budget-ai-dev",
+    r.status_code == 200 and r.json()["budget_id"] == "end-user-budget-memories-dev",
     r.text,
+)
+r = chat(limited, "memories", "mistral-small-2603")
+check(
+    "the move lifts the user's rpm to the new budget's (memories-dev: 50/min)",
+    r.status_code == 200,
+    (r.status_code, r.text),
 )
 r = client.get(f"{MLPA}/user/{sw}:ai")
 check("user info: spend from Otari", r.status_code == 200 and r.json()["spend"] > 0, r.text)
