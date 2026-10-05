@@ -274,9 +274,9 @@ export function PolicyForm({
   const [safeIndex, setSafeIndex] = useState<number>(
     existing ? findFallthroughIndex(existing.spec) : 0,
   )
-  // Which backend orders the pool. The two share the pool control, because both are
-  // "these models, one of them per request"; they differ in what decides and in
-  // whether a share sits next to each entry.
+  // Which backend orders the pool. They share the pool control, because each is
+  // "these models, one of them per request"; they differ in what decides, and in
+  // whether a share or a move control sits next to each entry.
   const [backend, setBackend] = useState<RouterBackend>(() =>
     initialBackend(existing?.spec),
   )
@@ -819,9 +819,9 @@ export function PolicyForm({
         </div>
       ) : null}
 
-      {/* The routed pool: one control for both backends, because both are "these
+      {/* The routed pool: one control for every backend, because each is "these
               models, one of them per request". What differs is who decides, and
-              whether a share sits next to each entry. */}
+              whether a share or a move control sits next to each entry. */}
       {candidates.length > 0 ? (
         <div className="flex flex-col gap-3 border border-control-border p-3">
           <div className="flex items-start justify-between gap-3">
