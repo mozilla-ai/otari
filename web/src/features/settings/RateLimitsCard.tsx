@@ -238,7 +238,7 @@ function RuleLine({
   const isStored = rule.source === "dashboard"
 
   return (
-    <div className="flex flex-col gap-2 px-4 py-3 md:flex-row md:flex-wrap md:items-center">
+    <div className="flex flex-col gap-2 py-4 md:flex-row md:flex-wrap md:items-center">
       <code className={NAME_LANE}>{rule.name}</code>
       <span className={SCOPE_LANE}>{SCOPE_LABEL[rule.per]}</span>
       <span className="min-w-0 flex-1 text-caption tabular-nums">
@@ -316,7 +316,6 @@ export function RateLimitsCard() {
         onClose={() => setDialogOpen(false)}
       />
       <SettingsGroup
-        isBounded
         title="Rate limit rules"
         count={rules.data ? all.length : undefined}
         description="Requests per minute, tokens per minute and requests in flight, per API key, per user or for the whole deployment. A change applies on this replica at once and on every replica within 30 seconds."
@@ -328,12 +327,12 @@ export function RateLimitsCard() {
         }
       >
         {rules.error ? (
-          <div className="px-4 py-3">
+          <div className="py-4">
             <ErrorBanner error={rules.error} />
           </div>
         ) : null}
         {rules.data && all.length === 0 ? (
-          <p className="px-4 py-3 text-caption text-subtle">
+          <p className="py-4 text-caption text-subtle">
             No rules, so requests are limited only by rate_limit_rpm.
           </p>
         ) : null}

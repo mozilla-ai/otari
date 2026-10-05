@@ -12,7 +12,12 @@ import type {
   StoredProvider,
 } from "@/client"
 import { AuthProvider } from "@/features/auth/AuthContext"
-import { fieldMatches, SettingsPage } from "@/features/settings/SettingsPage"
+import {
+  fieldMatches,
+  rateLimitRulesMatch,
+  rulesCardAfter,
+  SettingsPage,
+} from "@/features/settings/SettingsPage"
 import { API_ROOT } from "@/shared/api/client"
 import { pickOption } from "@/tests/select"
 
@@ -42,6 +47,39 @@ describe("fieldMatches", () => {
 
   it("does not match unrelated text", () => {
     expect(fieldMatches(field, "database")).toBe(false)
+  })
+})
+
+describe("rulesCardAfter", () => {
+  const all = [
+    { name: "Server & database" },
+    { name: "Rate limiting & CORS" },
+    { name: "Observability" },
+  ]
+
+  it("follows the rate limiting group", () => {
+    expect(rulesCardAfter(all, all)).toBe(1)
+  })
+
+  it("keeps its place when a filter hides that group", () => {
+    const shown = [{ name: "Server & database" }, { name: "Observability" }]
+    expect(rulesCardAfter(shown, all)).toBe(0)
+    expect(rulesCardAfter([{ name: "Observability" }], all)).toBe(-1)
+  })
+
+  it("goes last when the settings name no rate limiting group", () => {
+    const other = [{ name: "Server & database" }, { name: "Observability" }]
+    expect(rulesCardAfter(other, other)).toBe(1)
+  })
+})
+
+describe("rateLimitRulesMatch", () => {
+  it("is found by what it limits and by its name", () => {
+    expect(rateLimitRulesMatch("")).toBe(true)
+    expect(rateLimitRulesMatch("rate")).toBe(true)
+    expect(rateLimitRulesMatch("tokens per minute")).toBe(true)
+    expect(rateLimitRulesMatch("rate_limits")).toBe(true)
+    expect(rateLimitRulesMatch("database")).toBe(false)
   })
 })
 
