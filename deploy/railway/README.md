@@ -13,7 +13,7 @@ The template stands up two services:
 
 | Service | Source | Notes |
 | --- | --- | --- |
-| **otari** | `mzdotai/otari:0.14.1` (Docker Hub) | Target port `8000` with a public domain, healthcheck `/api/v1/health`. Pulls the published image, pinned to a release; builds nothing. See [Upgrade](#upgrade). |
+| **otari** | `mzdotai/otari:0.14.1` (Docker Hub) | Target port `8000` with a public domain, healthcheck `/api/v1/health/readiness`, which fails while the database is unreachable. Pulls the published image, pinned to a release; builds nothing. See [Upgrade](#upgrade). |
 | **Postgres** | Railway managed | Durable storage for keys, users, budgets, and usage. |
 
 Otari is a good fit for a one-click deploy: the app is stateless, its only
@@ -80,7 +80,7 @@ Once both services are healthy:
 # Replace with your service's public domain.
 export OTARI_URL=https://your-otari.up.railway.app
 
-curl "$OTARI_URL/api/v1/health"
+curl "$OTARI_URL/api/v1/health/readiness"
 ```
 
 Grab the bootstrapped API key from the otari service's deploy logs (printed once
@@ -116,7 +116,7 @@ To upgrade:
 3. On the otari service, open Settings → Source and change the image tag to the
    target release (for example `0.15.0`). Railway
    redeploys, and Otari migrates the schema on startup.
-4. Check `/api/v1/health` and make one real request, as in [Verify](#verify).
+4. Check `/api/v1/health/readiness` and make one real request, as in [Verify](#verify).
 
 To take patch releases without doing this by hand, turn on Railway's
 [Image Auto Updates](https://docs.railway.com/deployments/image-auto-updates):

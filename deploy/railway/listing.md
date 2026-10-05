@@ -6,7 +6,7 @@
 
 This template runs two services: the Otari gateway from its published Docker image (`mzdotai/otari:0.14.1`, pinned to a release), and a managed PostgreSQL database. Otari is stateless; Postgres holds your keys, users, budgets, and usage.
 
-On first boot Otari runs its database migrations and prints a first-use API key in the deploy logs, so the gateway is usable right away. The template generates the master key, the key that encrypts stored provider credentials, and the provider account pepper for you. The gateway listens on port `8000`, with a healthcheck at `/api/v1/health`.
+On first boot Otari runs its database migrations and prints a first-use API key in the deploy logs, so the gateway is usable right away. The template generates the master key, the key that encrypts stored provider credentials, and the provider account pepper for you. The gateway listens on port `8000`, with a healthcheck at `/api/v1/health/readiness`, so a deploy that cannot reach its database does not go live.
 
 After the deploy:
 

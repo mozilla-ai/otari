@@ -11,7 +11,7 @@
       },
       "deploy": {
         "startCommand": null,
-        "healthcheckPath": "/api/v1/health"
+        "healthcheckPath": "/api/v1/health/readiness"
       },
       "networking": {
         "targetPort": 8000,
