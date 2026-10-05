@@ -16,9 +16,9 @@ from gateway.exceptions.tools_exceptions import (
     WebSearchNotEnabledError,
     WorkspaceWebSearchDomainsExcludedError,
 )
+from gateway.models.tools import WebTool
 from gateway.services.tenancy.workspace_web_search_service import narrow_web_search_tool_entry
 from gateway.services.tools._web_search_results import web_search_max_results_baseline
-from gateway.services.web_retrieval_backend import WEB_FETCH_TOOL_NAME
 from gateway.services.web_retrieval_policy import (
     DisjointDomainAllowListsError,
     DomainPolicy,
@@ -43,7 +43,7 @@ class WebAccessGrant:
 def apply_web_access_policy(
     policy: ResolvedWebSearchConfig | None,
     *,
-    requested_tools: Sequence[str],
+    requested_tools: Sequence[WebTool],
     search_tool_entry: dict[str, Any] | None,
     config: GatewayConfig,
 ) -> WebAccessGrant:
@@ -56,7 +56,7 @@ def apply_web_access_policy(
         WebAccessRefusedError: the policy refuses the request, and the subclass says why.
         WorkspaceWebSearchDomainsExcludedError: the request's domains share nothing with the workspace's.
     """
-    fetch_requested = WEB_FETCH_TOOL_NAME in requested_tools
+    fetch_requested = WebTool.FETCH in requested_tools
     workspace_domains = DomainPolicy()
     if policy is not None:
         if not policy.enabled:
@@ -65,7 +65,10 @@ def apply_web_access_policy(
             allowed=canonicalize_domain_rules(policy.allowed_domains or ()),
             blocked=canonicalize_domain_rules(policy.blocked_domains or ()),
         )
-        if policy.authorized_tools is not None and not set(requested_tools) <= policy.authorized_tools:
+        if (
+            policy.authorized_tools is not None
+            and not {tool.value for tool in requested_tools} <= policy.authorized_tools
+        ):
             raise WebAccessToolNotAuthorizedError()
     try:
         fetch_policy = _fetch_policy(workspace_domains, search_tool_entry if fetch_requested else None)

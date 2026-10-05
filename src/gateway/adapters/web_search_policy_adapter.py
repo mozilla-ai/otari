@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.tools_exceptions import WebSearchPolicyResolutionFailedError, WebSearchPolicyResolutionFailure
-from gateway.models.tools import ResolvedWebSearchConfig
+from gateway.models.tools import ResolvedWebSearchConfig, WebTool
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.services.control_plane import ResolveEndpoint, resolve
 from gateway.services.tenancy.workspace_web_search_service import (
@@ -22,7 +22,6 @@ from gateway.services.tenancy.workspace_web_search_service import (
     read_web_search_policy,
     resolve_workspace_web_search_config,
 )
-from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
 
 
 class LocalWebSearchPolicy(WebSearchPolicyPort):
@@ -32,7 +31,7 @@ class LocalWebSearchPolicy(WebSearchPolicyPort):
         self._session = session
 
     async def resolve(
-        self, scope: WebSearchPolicyScope, requested_tools: Sequence[str]
+        self, scope: WebSearchPolicyScope, requested_tools: Sequence[WebTool]
     ) -> ResolvedWebSearchConfig | None:
         # A stored row authorizes no tool by name, so the requested tools do not change the answer.
         del requested_tools
@@ -51,7 +50,7 @@ class RemoteWebSearchPolicy(WebSearchPolicyPort):
         self._config = config
 
     async def resolve(
-        self, scope: WebSearchPolicyScope, requested_tools: Sequence[str]
+        self, scope: WebSearchPolicyScope, requested_tools: Sequence[WebTool]
     ) -> ResolvedWebSearchConfig | None:
         if not scope.user_token:
             raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.NO_CALLER_CREDENTIAL)
@@ -59,7 +58,7 @@ class RemoteWebSearchPolicy(WebSearchPolicyPort):
             self._config,
             user_token=scope.user_token,
             endpoint=ResolveEndpoint.WEB_SEARCH,
-            body={"requested_tools": list(requested_tools)},
+            body={"requested_tools": [tool.value for tool in requested_tools]},
         )
         if not isinstance(answer, dict):
             raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.ANSWER_UNREADABLE)
@@ -71,9 +70,12 @@ class RemoteWebSearchPolicy(WebSearchPolicyPort):
 
 
 def _authorized_tools(answer: dict[str, Any]) -> frozenset[str]:
-    """The tool names the peer authorizes, read strictly so a malformed answer fails closed."""
+    """The tool names the peer authorizes, read strictly so a malformed answer fails closed.
+
+    Strings rather than :class:`WebTool`: a peer may name a tool this deployment does not know, which is ignored.
+    """
     # An answer without the field predates per-tool authorization and authorizes Search alone.
-    authorized = answer.get("authorized_tools", [WEB_SEARCH_TOOL_NAME])
+    authorized = answer.get("authorized_tools", [WebTool.SEARCH.value])
     if not isinstance(authorized, list) or any(not isinstance(tool, str) for tool in authorized):
         raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.ANSWER_UNREADABLE)
     return frozenset(authorized)

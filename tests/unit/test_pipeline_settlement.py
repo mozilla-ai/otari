@@ -74,7 +74,7 @@ from gateway.exceptions.tools_exceptions import (
 )
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.pricing import ModelPricing, PriceSource
-from gateway.models.tools import ResolvedCodeExecutionPolicy, ResolvedWebSearchConfig
+from gateway.models.tools import ResolvedCodeExecutionPolicy, ResolvedWebSearchConfig, WebTool
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyScope
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
@@ -151,7 +151,7 @@ class _Policy(WebSearchPolicyPort):
         self.asked: list[WebSearchPolicyScope] = []
 
     async def resolve(
-        self, scope: WebSearchPolicyScope, requested_tools: Sequence[str]
+        self, scope: WebSearchPolicyScope, requested_tools: Sequence[WebTool]
     ) -> ResolvedWebSearchConfig | None:
         self.asked.append(scope)
         return self._policy

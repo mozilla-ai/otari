@@ -339,6 +339,13 @@ class ResolvedCodeExecutionPolicy:
     executor: CodeExecutor | None = None
 
 
+class WebTool(StrEnum):
+    """A managed web tool a request can declare, named as the model and the control plane see it."""
+
+    SEARCH = "web_search"
+    FETCH = "web_fetch"
+
+
 @dataclass(frozen=True)
 class ResolvedWebSearchConfig:
     """A workspace's web search policy, as the request path reads it.

@@ -157,7 +157,7 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
 from gateway.models.pricing import ModelPricing, PriceSource
-from gateway.models.tools import CodeExecutor, ResolvedCodeExecutionPolicy
+from gateway.models.tools import CodeExecutor, ResolvedCodeExecutionPolicy, WebTool
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH, UsageLog
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort, CodeExecutionPolicyScope
 from gateway.ports.code_execution_port import CodeExecutionPort
@@ -3249,8 +3249,8 @@ async def _admit_web_access(
             fetch_policy=DomainPolicy(), search_auth_token=None, search_tool_entry=None, search_url=search_url
         )
     requested_tools = [
-        name
-        for name, entry in ((WEB_SEARCH_TOOL_NAME, web.search_tool_entry), (WEB_FETCH_TOOL_NAME, web.fetch_tool_entry))
+        tool
+        for tool, entry in ((WebTool.SEARCH, web.search_tool_entry), (WebTool.FETCH, web.fetch_tool_entry))
         if entry is not None
     ]
     # Forwarded to the search backend as `X-Gateway-Token`, and only where

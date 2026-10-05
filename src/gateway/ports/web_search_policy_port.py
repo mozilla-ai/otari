@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from gateway.exceptions.tools_exceptions import WebSearchPolicyResolutionFailedError
-from gateway.models.tools import ResolvedWebSearchConfig
+from gateway.models.tools import ResolvedWebSearchConfig, WebTool
 
 
 @dataclass(frozen=True)
@@ -32,7 +32,7 @@ class WebSearchPolicyPort(Protocol):
     """A workspace's web search policy."""
 
     async def resolve(
-        self, scope: WebSearchPolicyScope, requested_tools: Sequence[str]
+        self, scope: WebSearchPolicyScope, requested_tools: Sequence[WebTool]
     ) -> ResolvedWebSearchConfig | None:
         """The policy that governs ``requested_tools`` for this scope, or ``None`` where the workspace has none.
 
