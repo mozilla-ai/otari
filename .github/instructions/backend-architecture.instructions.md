@@ -75,8 +75,12 @@ same" as a reason.
 - Code outside a domain imports its service only through the package root,
   `gateway.services.<domain>`. Flag an import of a module whose name starts
   with `_` from outside its package.
-- Only the domain's own service package and `api/deps.py` import
-  `gateway.repositories.<domain>`.
+- Only the domain's own service and repository packages and `api/deps.py`
+  import `gateway.repositories.<domain>`. The check refuses any other import of
+  one, for each domain `docs/domains.md` gives a section, except from service
+  code outside every domain package, whose domain its path does not give.
+  Flag such an import added there, and an import of a repository package that
+  is not a domain yet from outside its own packages.
 - Flag an import that makes two domain services depend on each other in a
   cycle. A domain that must react to a change in a domain that does not depend
   on it receives a listener interface by constructor injection, defined by the
@@ -84,8 +88,8 @@ same" as a reason.
 - Flag a listener implementation that commits or rolls back. The caller owns
   the transaction.
 
-The boundary check does not enforce these import rules yet, so review is the
-only gate for them.
+The boundary check does not enforce the package root and cycle rules yet, so
+review is the only gate for them.
 
 ## Errors
 
