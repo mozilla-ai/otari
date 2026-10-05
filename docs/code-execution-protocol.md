@@ -43,7 +43,7 @@ policy. `tests/unit/test_code_execution_contract.py` fails when they disagree.
 | Control plane | The platform, in hybrid mode | Authorizes the workspace, returns its policy, issues a grant, meters usage |
 | Front door | A service in front of the backend, or the backend itself, in hybrid mode | Checks the grant, enforces its claims, injects tenancy |
 
-The backend does not authorize callers, enforce quota, or meter usage. Otari applies the workspace's policy itself, and a front door checking a grant's claims is an extra layer. In hybrid mode Otari does not yet apply the tool list, the timeout or the image, which [#1834](https://github.com/mozilla-ai/otari/issues/1834) fixes. In standalone mode there is no control plane at all: Otari addresses a backend it was configured with.
+The backend does not authorize callers, enforce quota, or meter usage. Otari applies the workspace's policy itself, and a front door checking a grant's claims is an extra layer. In hybrid mode the control plane's answer carries no image, so a hybrid data plane runs the deployment's own image. In standalone mode there is no control plane at all: Otari addresses a backend it was configured with.
 
 In hybrid mode the control plane authorizes the workspace and gives Otari a short-lived grant, and Otari presents it to a front door that admits the operation and forwards it to the backend. Code, files and results never pass through the control plane. The contract below is unchanged either way, which is what lets the same backend serve both. [#1603](https://github.com/mozilla-ai/otari/issues/1603) records the decision.
 
