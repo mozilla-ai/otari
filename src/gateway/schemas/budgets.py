@@ -382,7 +382,8 @@ class OrganizationScopedBudgetCreate(BaseModel):
         default=None,
         description=(
             "Narrow the cap to one provider instance; omit or null to cap spend across every provider. "
-            "Must name a real instance: a blank value would store a ceiling that never binds"
+            "A blank value would store a ceiling that never binds, so it is refused; this does not check "
+            "that the value names a configured provider instance"
         ),
     )
     budget_id: str = Field(
@@ -443,7 +444,8 @@ class WorkspaceMemberBudgetPolicyCreate(BaseModel):
         default=None,
         description=(
             "Narrow the default to one provider instance; omit or null to apply to every provider. "
-            "Must name a real instance: a blank value would materialize ceilings that never bind"
+            "A blank value would materialize ceilings that never bind, so it is refused; this does not check "
+            "that the value names a configured provider instance"
         ),
     )
 
