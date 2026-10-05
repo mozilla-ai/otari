@@ -323,6 +323,23 @@ class WorkspaceWebSearchConfig(Base):
 
 
 @dataclass(frozen=True)
+class ResolvedCodeExecutionPolicy:
+    """A workspace's code execution policy, as the request path reads it.
+
+    A value type rather than the ORM row, so a streaming response that outlives the request carries no ORM identity.
+    """
+
+    enabled: bool
+    default_purpose_hint: str | None
+    max_iterations: int | None
+    exec_timeout_s: int | None
+    image: str | None
+    tools: frozenset[str] | None
+    # ``None`` leaves the choice to the deployment and the request.
+    executor: CodeExecutor | None = None
+
+
+@dataclass(frozen=True)
 class ResolvedWebSearchConfig:
     """A workspace's web search policy, as the request path reads it.
 

@@ -155,7 +155,7 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
 from gateway.models.pricing import ModelPricing, PriceSource
-from gateway.models.tools import CodeExecutor
+from gateway.models.tools import CodeExecutor, ResolvedCodeExecutionPolicy
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH, UsageLog
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
@@ -239,7 +239,6 @@ from gateway.services.tenancy.organization_guardrail_service import (
 )
 from gateway.services.tenancy.workspace_code_execution_policy_service import (
     SERVED_TOOL_NAMES,
-    ResolvedCodeExecutionPolicy,
     read_code_execution_policy,
     resolve_workspace_code_execution_policy,
 )

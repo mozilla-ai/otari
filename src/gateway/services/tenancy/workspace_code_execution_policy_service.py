@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -28,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.exceptions.tools_exceptions import SandboxImageNotAllowedError, SandboxToolsUnrunnableError
 from gateway.models.tenancy import User, Workspace
-from gateway.models.tools import CodeExecutor, WorkspaceCodeExecutionPolicy
+from gateway.models.tools import CodeExecutor, ResolvedCodeExecutionPolicy, WorkspaceCodeExecutionPolicy
 from gateway.services.mcp_loop import MAX_TOOL_ITERATIONS_CAP
 from gateway.services.sandbox_backend import (
     CODE_EXECUTION_TOOL_NAME,
@@ -245,31 +244,6 @@ class WorkspaceCodeExecutionPolicyPublic(BaseModel):
         )
 
 
-@dataclass(frozen=True)
-class ResolvedCodeExecutionPolicy:
-    """What the request path reads off a stored policy.
-
-    A value type rather than the ORM row, so the admission check cannot lazily
-    touch the session after it has moved on, and so the tool context carries no
-    ORM identity into a streaming response that outlives the request handler.
-    """
-
-    enabled: bool
-    default_purpose_hint: str | None
-    max_iterations: int | None
-    exec_timeout_s: int | None
-    image: str | None
-    # ``frozenset`` rather than the stored list, because the request path only
-    # ever asks whether a tool kind is in it, and an immutable one cannot be
-    # edited by a backend it is handed to.
-    tools: frozenset[str] | None
-    # The workspace's pin on who runs code, or ``None`` for "the deployment and
-    # the request decide". Parsed on the way out, so a stored value outside the
-    # vocabulary (which the write refuses) reads as no pin rather than failing
-    # every request.
-    executor: CodeExecutor | None = None
-
-
 async def resolve_workspace_code_execution_policy(
     db: AsyncSession,
     workspace_id: uuid.UUID,
@@ -290,6 +264,7 @@ async def resolve_workspace_code_execution_policy(
         exec_timeout_s=policy.exec_timeout_s,
         image=policy.image,
         tools=frozenset(policy.tools) if policy.tools is not None else None,
+        # NOTE: a stored executor outside the vocabulary reads as no pin, so an old row does not fail every request.
         executor=CodeExecutor.parse(policy.executor),
     )
 
