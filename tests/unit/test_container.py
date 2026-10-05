@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
+from gateway.adapters.code_execution_policy_adapter import RemoteCodeExecutionPolicy
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
@@ -38,6 +39,7 @@ from gateway.container import (
 from gateway.core.config import GatewayConfig
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
+from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
@@ -173,6 +175,23 @@ def test_web_search_policy_needs_no_session_where_a_peer_holds_the_rows() -> Non
     container = build_container(config=GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}))
 
     assert isinstance(container.resolve(WebSearchPolicyPort, NO_SESSION), RemoteWebSearchPolicy)
+
+
+def test_code_execution_policy_refuses_a_deployment_that_holds_the_rows_and_has_no_session() -> None:
+    """A deployment reading its own policy rows cannot do so without the request's session."""
+    container = build_container(config=GatewayConfig())
+
+    with pytest.raises(ValueError, match="a session is required"):
+        container.resolve(CodeExecutionPolicyPort, NO_SESSION)
+
+
+def test_code_execution_policy_needs_no_session_where_a_peer_holds_the_rows() -> None:
+    """A deployment with a peer reads no rows of its own, so it is built without one."""
+    container = build_container(
+        config=GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"})
+    )
+
+    assert isinstance(container.resolve(CodeExecutionPolicyPort, NO_SESSION), RemoteCodeExecutionPolicy)
 
 
 def test_resolve_refuses_a_port_nothing_bound() -> None:

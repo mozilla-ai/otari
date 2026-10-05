@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.code_execution_adapter import build_code_execution_port, verify_code_execution_ready
+from gateway.adapters.code_execution_policy_adapter import build_code_execution_policy_port
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.file_storage_adapter import build_file_storage_port
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
@@ -46,6 +47,7 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
+from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
@@ -377,6 +379,22 @@ def _mcp_server_port_factory(config: GatewayConfig | None) -> PortFactory[McpSer
     return factory
 
 
+def _code_execution_policy_port_factory(config: GatewayConfig | None) -> PortFactory[CodeExecutionPolicyPort]:
+    """The core ``CodeExecutionPolicyPort`` factory, closed over this app's config.
+
+    Built per resolve rather than once, because the implementation that reads
+    rows needs the request's own session.
+    """
+
+    def factory(session: AsyncSession | None) -> CodeExecutionPolicyPort:
+        if config is None:
+            msg = "the code execution policy needs the deployment config; build the container with it"
+            raise ContainerError(msg)
+        return build_code_execution_policy_port(config, session)
+
+    return factory
+
+
 def _web_search_policy_port_factory(config: GatewayConfig | None) -> PortFactory[WebSearchPolicyPort]:
     """The core ``WebSearchPolicyPort`` factory, closed over this app's config.
 
@@ -456,6 +474,10 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
     # rows where it holds them, and asks its peer where it does not. An overlay
     # binds a source of its own and changes nothing above the port.
     container.bind(WebSearchPolicyPort, _web_search_policy_port_factory(config))
+    # A workspace's code execution policy: the base reads this deployment's own
+    # rows where it holds them, and asks its peer where it does not. An overlay
+    # binds a source of its own and changes nothing above the port.
+    container.bind(CodeExecutionPolicyPort, _code_execution_policy_port_factory(config))
     # Rate-limit counts: the base keeps them in this process, or in Redis
     # where ``rate_limit_store`` asks for one count shared by every replica.
     container.bind(RateLimitStorePort, _rate_limit_store_port_factory(config))
