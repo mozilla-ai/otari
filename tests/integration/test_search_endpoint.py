@@ -510,3 +510,40 @@ def test_search_is_tracked_while_its_provider_call_runs(client: TestClient, api_
     assert entry.policy_name is None
     # And it is gone afterwards, so the panel cannot accumulate a ghost.
     assert len(registry) == 0
+
+
+def test_a_service_key_bills_search_to_the_end_user_it_names(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """``user`` on a service key's search names an end user, created with the key's end-user budget."""
+    budget = client.post(
+        f"{API_ROOT}/budgets", json={"request_limit": 1, "budget_duration_sec": 86400}, headers=master_key_header
+    ).json()
+    key = client.post(
+        f"{API_ROOT}/keys",
+        json={
+            "key_name": "mlpa-search",
+            "user_id": "mlpa-search",
+            "is_service_key": True,
+            "end_user_budget_id": budget["budget_id"],
+        },
+        headers=master_key_header,
+    ).json()
+    headers = {API_KEY_HEADER: f"Bearer {key['key']}"}
+    body = {**SEARCH_PAYLOAD, "user": "fxa-123:search"}
+
+    with _mock_search():
+        first = client.post(f"{API_ROOT}/search/exa-search", json=body, headers=headers)
+        second = client.post(f"{API_ROOT}/search/exa-search", json=body, headers=headers)
+        other = client.post(
+            f"{API_ROOT}/search/exa-search", json={**SEARCH_PAYLOAD, "user": "fxa-456:search"}, headers=headers
+        )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 403, second.text
+    assert other.status_code == 200, other.text
+    users = client.get(f"{API_ROOT}/users", params={"parent_user_id": "mlpa-search"}, headers=master_key_header).json()
+    end_user = next(user for user in users if user["external_id"] == "fxa-123:search")
+    assert end_user["budget_id"] == budget["budget_id"]
+    assert len(_search_rows(client, master_key_header, end_user["user_id"])) >= 1

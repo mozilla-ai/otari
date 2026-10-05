@@ -294,3 +294,29 @@ def test_an_end_user_refused_by_its_budget_gets_a_stable_code(
     assert refused.headers["Otari-Error-Code"] == "budget_exceeded"
     assert refused.headers["Otari-Budget-Scope"] == "user"
     assert refused.json()["code"] == "budget_exceeded"
+
+
+def test_end_users_are_listed_and_counted_by_owner_and_external_id(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    budget_id = _budget(client, master_key_header, request_limit=5)
+    _, headers = _service_key(client, master_key_header, "svc-list", end_user_budget_id=budget_id)
+    for name in ("dora:ai", "erin:ai"):
+        assert _chat(client, headers, name).status_code == 200
+
+    by_owner = client.get(f"{API_ROOT}/users", params={"parent_user_id": "svc-list"}, headers=master_key_header)
+    one = client.get(
+        f"{API_ROOT}/users",
+        params={"parent_user_id": "svc-list", "external_id": "erin:ai"},
+        headers=master_key_header,
+    )
+    counted = client.get(
+        f"{API_ROOT}/users",
+        params={"parent_user_id": "svc-list", "limit": 1, "include_total": True},
+        headers=master_key_header,
+    )
+
+    assert sorted(user["external_id"] for user in by_owner.json()) == ["dora:ai", "erin:ai"]
+    assert [user["external_id"] for user in one.json()] == ["erin:ai"]
+    assert len(counted.json()) == 1
+    assert counted.headers["Otari-Total-Count"] == "2"

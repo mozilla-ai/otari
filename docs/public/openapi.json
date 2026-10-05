@@ -33248,7 +33248,7 @@
     },
     "/api/v1/search": {
       "post": {
-        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
+        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use with the key's end-user budget, and is billed and\n  rate limited as that end user, as on chat completions.",
         "operationId": "search-create_search",
         "requestBody": {
           "content": {
@@ -33543,7 +33543,7 @@
     },
     "/api/v1/search/{search_tool_name}": {
       "post": {
-        "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /api/v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
+        "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /api/v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use with the key's end-user budget, and is billed and\n  rate limited as that end user, as on chat completions.",
         "operationId": "search-create_search_for_tool",
         "parameters": [
           {
@@ -35866,7 +35866,7 @@
     },
     "/api/v1/users": {
       "get": {
-        "description": "List the users the caller's organization can name, with pagination.\n\n``users`` is deployment-global and has no organization column, so which of\nthem this organization can name is derived: a key, usage, or a roster row\nputs one in reach, and one reached from nowhere at all (the shared\n``default`` owner, or a user just created) is shared rather than hidden.\nSee ``repositories.users_repository.in_organization``.",
+        "description": "List the users the caller's organization can name, with pagination.\n\n``users`` is deployment-global and has no organization column, so which of\nthem this organization can name is derived: a key, usage, or a roster row\nputs one in reach, and one reached from nowhere at all (the shared\n``default`` owner, or a user just created) is shared rather than hidden.\nSee ``repositories.users_repository.in_organization``.\n\n``parent_user_id`` with ``external_id`` finds the end user a service key\ncreated for a ``user`` value, which is how a caller maps its own ids to\nOtari's. ``include_total`` adds an ``Otari-Total-Count`` header counting\nevery match, so ``limit=1`` with it counts a service key's end users.",
         "operationId": "users-list_users",
         "parameters": [
           {
@@ -35890,6 +35890,72 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Only the end users of this owner: the user a service key belongs to.",
+            "in": "query",
+            "name": "parent_user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the end users of this owner: the user a service key belongs to.",
+              "title": "Parent User Id"
+            }
+          },
+          {
+            "description": "Only the end user a service key names with this `user` value.",
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the end user a service key names with this `user` value.",
+              "title": "External Id"
+            }
+          },
+          {
+            "description": "Only blocked users (true) or only unblocked ones (false).",
+            "in": "query",
+            "name": "blocked",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only blocked users (true) or only unblocked ones (false).",
+              "title": "Blocked"
+            }
+          },
+          {
+            "description": "Also count every matching user, in the Otari-Total-Count response header.",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also count every matching user, in the Otari-Total-Count response header.",
+              "title": "Include Total",
+              "type": "boolean"
             }
           }
         ],

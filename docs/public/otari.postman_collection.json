@@ -7676,7 +7676,7 @@
               },
               "raw": "{\n  \"max_results\": 5,\n  \"query\": \"otari llm gateway\"\n}"
             },
-            "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
+            "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use with the key's end-user budget, and is billed and\n  rate limited as that end user, as on chat completions.",
             "header": [
               {
                 "key": "Content-Type",
@@ -7709,7 +7709,7 @@
               },
               "raw": "{\n  \"max_results\": 5,\n  \"query\": \"otari llm gateway\"\n}"
             },
-            "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /api/v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
+            "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /api/v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use with the key's end-user budget, and is billed and\n  rate limited as that end user, as on chat completions.",
             "header": [
               {
                 "key": "Content-Type",
@@ -8898,7 +8898,7 @@
         {
           "name": "List Users",
           "request": {
-            "description": "List the users the caller's organization can name, with pagination.\n\n``users`` is deployment-global and has no organization column, so which of\nthem this organization can name is derived: a key, usage, or a roster row\nputs one in reach, and one reached from nowhere at all (the shared\n``default`` owner, or a user just created) is shared rather than hidden.\nSee ``repositories.users_repository.in_organization``.",
+            "description": "List the users the caller's organization can name, with pagination.\n\n``users`` is deployment-global and has no organization column, so which of\nthem this organization can name is derived: a key, usage, or a roster row\nputs one in reach, and one reached from nowhere at all (the shared\n``default`` owner, or a user just created) is shared rather than hidden.\nSee ``repositories.users_repository.in_organization``.\n\n``parent_user_id`` with ``external_id`` finds the end user a service key\ncreated for a ``user`` value, which is how a caller maps its own ids to\nOtari's. ``include_total`` adds an ``Otari-Total-Count`` header counting\nevery match, so ``limit=1`` with it counts a service key's end users.",
             "header": [],
             "method": "GET",
             "url": {
@@ -8922,9 +8922,33 @@
                   "disabled": true,
                   "key": "limit",
                   "value": ""
+                },
+                {
+                  "description": "Only the end users of this owner: the user a service key belongs to.",
+                  "disabled": true,
+                  "key": "parent_user_id",
+                  "value": ""
+                },
+                {
+                  "description": "Only the end user a service key names with this `user` value.",
+                  "disabled": true,
+                  "key": "external_id",
+                  "value": ""
+                },
+                {
+                  "description": "Only blocked users (true) or only unblocked ones (false).",
+                  "disabled": true,
+                  "key": "blocked",
+                  "value": ""
+                },
+                {
+                  "description": "Also count every matching user, in the Otari-Total-Count response header.",
+                  "disabled": true,
+                  "key": "include_total",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/users?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/users?skip=&limit=&parent_user_id=&external_id=&blocked=&include_total="
             }
           }
         },

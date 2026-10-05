@@ -186,7 +186,7 @@ rate_limits:
 a dashboard session), and `per: user` does not limit one billed to no user. A request has to fit every rule that applies to it; one
 that does not is refused with a 429 naming the rule and the limit it hit, counted by none of them,
 and holds no budget. Rules count in `rate_limit_store`, so with Redis they hold
-across replicas. They apply to chat completions, messages and responses, after
+across replicas. They apply to chat completions, messages, responses and search, after
 `rate_limit_rpm`. A hybrid gateway does not enforce them yet, so it refuses to
 start with `rate_limits` set.
 
