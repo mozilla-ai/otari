@@ -1,7 +1,7 @@
 schema_version: "1.0"
 policy:
   id: otari/architecture/repository-imported-outside-its-domain
-  description: A domain's repositories are imported only by that domain's service package and the builders.
+  description: A repository import that the architecture check skips comes only from the code that owns the repository.
 
 gates:
 
@@ -16,8 +16,14 @@ gates:
       - "src/gateway/repositories/**"
       - "src/gateway/services/**"
     rubric: >-
-      Judge only the import lines this diff adds under src/gateway/. Fail if one of them
-      imports a module from gateway.repositories.<domain> and the importing module is
-      neither in services/<domain>/ for the same domain nor src/gateway/api/deps.py.
-      This is layer and import rule 4 in ARCHITECTURE.md, "The modular monolith". Pass
-      if the diff adds no such import.
+      Judge only the import lines this diff adds under src/gateway/. Fail in either of
+      two cases. First, a module under src/gateway/services/ that is not inside a
+      service package named for a domain in docs/domains.md imports
+      gateway.repositories.<domain> for such a domain, and the module does not belong
+      to that domain by what it does. A flat module such as services/pricing_service.py,
+      or a module in services/tenancy/, is such a module. Second, any module imports a
+      repository package whose name is not a domain docs/domains.md gives a section,
+      such as gateway.repositories.tenancy, and the module is neither in the service or
+      repository package of the same name nor src/gateway/api/deps.py. This is layer
+      and import rule 4 in ARCHITECTURE.md, "The modular monolith". The architecture
+      check covers every other import. Pass if the diff adds no such import.
