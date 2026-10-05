@@ -12,7 +12,8 @@ Compared per service (matched by name): the image (``docker.io/`` ignored),
 start command, healthcheck path, the public domain's port, and each variable's
 default, optional flag and description. Defaults are compared exactly, since a
 stray space there changes the value; descriptions ignore surrounding
-whitespace. The README ignores trailing whitespace.
+whitespace. Buckets are compared by name, which is all the serialized config
+carries about one. The README ignores trailing whitespace.
 
 Standard library only, like oss_edition_smoke.py, so CI runs it with no
 environment. Exits 0 when the two agree, 1 on drift, 2 when the fetch fails.
@@ -93,6 +94,10 @@ def _expected_ports(service: dict[str, Any]) -> list[int]:
     return [networking["targetPort"]] if networking.get("publicDomain") else []
 
 
+def _bucket_names(buckets: dict[str, Any] | None) -> set[str]:
+    return {bucket["name"] for bucket in (buckets or {}).values()}
+
+
 def _diff_variables(name: str, expected: dict[str, Any], live: dict[str, Any]) -> list[str]:
     problems = _one_side_only(f"{name}: variable", set(expected), set(live))
     for var in sorted(expected.keys() & live.keys()):
@@ -121,6 +126,9 @@ def diff_config(snapshot: dict[str, Any], live_config: dict[str, Any]) -> list[s
     live = {service["name"]: service for service in live_config.get("services", {}).values()}
 
     problems = _one_side_only("service", set(expected), set(live))
+    problems += _one_side_only(
+        "bucket", _bucket_names(snapshot.get("buckets")), _bucket_names(live_config.get("buckets"))
+    )
 
     for name in sorted(expected.keys() & live.keys()):
         want, got = expected[name], live[name]

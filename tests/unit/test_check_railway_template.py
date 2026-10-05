@@ -60,7 +60,11 @@ def _live_from(snapshot: dict[str, Any]) -> dict[str, Any]:
             port = networking["targetPort"]
             live["networking"] = {"serviceDomains": {f"<hasDomain>:{port}": {"port": port}}}
         services[f"00000000-0000-0000-0000-00000000000{index}"] = live
-    return {"buckets": {}, "services": services}
+    buckets = {
+        f"10000000-0000-0000-0000-00000000000{index}": {"name": bucket["name"]}
+        for index, bucket in enumerate(snapshot.get("buckets", {}).values())
+    }
+    return {"buckets": buckets, "services": services}
 
 
 def _live_service(live: dict[str, Any], name: str) -> dict[str, Any]:
@@ -162,6 +166,27 @@ def test_a_service_on_one_side_only_is_drift() -> None:
     assert len(problems) == 2
     assert any("Postgres" in p and "missing from the live template" in p for p in problems)
     assert any("Redis" in p and "not in template.json" in p for p in problems)
+
+
+def test_a_bucket_on_one_side_only_is_drift() -> None:
+    snapshot = _snapshot()
+    snapshot["buckets"] = {"otari-files": {"name": "otari-files"}}
+    live = _live_from(snapshot)
+    [bucket] = live["buckets"].values()
+    bucket["name"] = "uploads"
+
+    problems = check.diff_config(snapshot, live)
+    assert len(problems) == 2
+    assert any("bucket otari-files" in p and "missing from the live template" in p for p in problems)
+    assert any("bucket uploads" in p and "not in template.json" in p for p in problems)
+
+
+def test_a_snapshot_without_buckets_agrees_with_a_live_template_without_them() -> None:
+    snapshot = _snapshot()
+    snapshot.pop("buckets", None)
+    live = _live_from(snapshot)
+
+    assert check.diff_config(snapshot, live) == []
 
 
 def test_snapshot_is_not_mutated() -> None:
