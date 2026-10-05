@@ -1,4 +1,4 @@
-"""Unit tests for the first-party Tavily and Brave web-search providers.
+"""Unit tests for the first-party Tavily, Brave and Serply web-search providers.
 
 Covers the translation both ways (a query onto each provider's native request,
 its answer back onto SearXNG-shaped hits) and the failure modes that used to be
@@ -18,6 +18,7 @@ from gateway.services.web_search_providers import WebSearchProviderError, provid
 
 TAVILY_HOST = "api.tavily.com"
 BRAVE_HOST = "api.search.brave.com"
+SERPLY_HOST = "api.serply.io"
 
 
 class _Recorder(httpx.AsyncBaseTransport):
@@ -59,6 +60,21 @@ BRAVE_OK = {
             {"title": "no url", "description": "dropped"},
         ]
     }
+}
+
+SERPLY_OK = {
+    "results": [
+        {"link": "https://example.com/a", "title": "A", "description": "snippet a", "result_type": "organic"},
+        {"title": "no link", "description": "dropped"},
+    ]
+}
+
+# Serply answers ``num=10`` with whatever the SERP page holds, which is sometimes
+# one row more. Measured live: "buy running shoes" returns 11.
+SERPLY_OVERLONG = {
+    "results": [
+        {"link": f"https://example.com/{index}", "title": str(index), "description": "s"} for index in range(11)
+    ]
 }
 
 BRAVE_DATED = {
@@ -262,3 +278,64 @@ async def test_a_caller_ceiling_reaches_the_provider(provider: str) -> None:
     request = recorder.requests[0]
     asked = json.loads(request.content)["max_results"] if provider == "tavily" else request.url.params["count"]
     assert int(asked) == 15
+
+
+@pytest.mark.asyncio
+async def test_serply_maps_results_and_leaves_extraction_to_the_caller() -> None:
+    client, recorder = _client(httpx.Response(200, json=SERPLY_OK))
+    async with client:
+        results = await provider_search(provider="serply", api_key="srp-x", query="claude code", client=client)
+
+    assert results == [{"url": "https://example.com/a", "title": "A", "content": "snippet a"}]
+    request = recorder.requests[0]
+    assert request.url.host == SERPLY_HOST
+    assert request.headers["x-api-key"] == "srp-x"
+
+
+@pytest.mark.asyncio
+async def test_serply_trims_a_page_that_came_back_longer_than_asked() -> None:
+    """``num`` bounds the page Serply builds, it does not cap what the page holds.
+
+    Without the trim a deployment's ``web_search_max_results`` would be a number
+    the model's result block is allowed to exceed.
+    """
+    client, _ = _client(httpx.Response(200, json=SERPLY_OVERLONG))
+    async with client:
+        results = await provider_search(
+            provider="serply", api_key="srp-x", query="q", options={"max_results": 3}, client=client
+        )
+
+    assert len(results) == 3
+
+
+@pytest.mark.asyncio
+async def test_serply_clamps_max_results_to_the_page_it_will_serve() -> None:
+    """Serply serves one SERP page, and asking for more than it holds returns the
+    same page rather than an error, so the bound is ours to apply."""
+    client, recorder = _client(httpx.Response(200, json=SERPLY_OK))
+    async with client:
+        await provider_search(
+            provider="serply", api_key="srp-x", query="q", options={"max_results": 500}, client=client
+        )
+
+    assert recorder.requests[0].url.params["num"] == "10"
+
+
+@pytest.mark.parametrize(("time_range", "expected"), [("day", "qdr:d"), ("w", "qdr:w"), ("Month", "qdr:m")])
+@pytest.mark.asyncio
+async def test_serply_sends_time_range_as_a_google_window(time_range: str, expected: str) -> None:
+    client, recorder = _client(httpx.Response(200, json=SERPLY_OK))
+    async with client:
+        await provider_search(
+            provider="serply", api_key="srp-x", query="q", options={"time_range": time_range}, client=client
+        )
+
+    assert recorder.requests[0].url.params["tbs"] == expected
+
+
+@pytest.mark.asyncio
+async def test_serply_missing_results_list_is_an_error_not_an_empty_search() -> None:
+    client, _ = _client(httpx.Response(200, json={"query": "q", "total": 0}))
+    async with client:
+        with pytest.raises(WebSearchProviderError):
+            await provider_search(provider="serply", api_key="srp-x", query="q", client=client)
