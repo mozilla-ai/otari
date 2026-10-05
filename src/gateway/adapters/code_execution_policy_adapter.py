@@ -9,7 +9,6 @@ from __future__ import annotations
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
-from gateway.core.deployment import Plane, deployment_for
 from gateway.exceptions.tools_exceptions import (
     CodeExecutionPolicyResolutionFailedError,
     CodeExecutionPolicyResolutionFailure,
@@ -59,17 +58,3 @@ class RemoteCodeExecutionPolicy(CodeExecutionPolicyPort):
             raise CodeExecutionPolicyResolutionFailedError(
                 CodeExecutionPolicyResolutionFailure.ANSWER_UNREADABLE
             ) from None
-
-
-def build_code_execution_policy_port(config: GatewayConfig, session: AsyncSession | None) -> CodeExecutionPolicyPort:
-    """The implementation for the planes this deployment serves.
-
-    A deployment serving a control plane holds the policy and needs a session.
-    One that does not has a peer holding it, and needs none.
-    """
-    if deployment_for(config).supports(Plane.CONTROL):
-        if session is None:
-            msg = "a session is required where this deployment holds the code execution policy"
-            raise ValueError(msg)
-        return LocalCodeExecutionPolicy(session)
-    return RemoteCodeExecutionPolicy(config)

@@ -13,7 +13,6 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
-from gateway.core.deployment import Plane, deployment_for
 from gateway.exceptions.tools_exceptions import WebSearchPolicyResolutionFailedError, WebSearchPolicyResolutionFailure
 from gateway.models.tools import ResolvedWebSearchConfig
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
@@ -78,17 +77,3 @@ def _authorized_tools(answer: dict[str, Any]) -> frozenset[str]:
     if not isinstance(authorized, list) or any(not isinstance(tool, str) for tool in authorized):
         raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.ANSWER_UNREADABLE)
     return frozenset(authorized)
-
-
-def build_web_search_policy_port(config: GatewayConfig, session: AsyncSession | None) -> WebSearchPolicyPort:
-    """The implementation for the planes this deployment serves.
-
-    A deployment serving a control plane holds the policy and needs a session.
-    One that does not has a peer holding it, and needs none.
-    """
-    if deployment_for(config).supports(Plane.CONTROL):
-        if session is None:
-            msg = "a session is required where this deployment holds the web search policy"
-            raise ValueError(msg)
-        return LocalWebSearchPolicy(session)
-    return RemoteWebSearchPolicy(config)
