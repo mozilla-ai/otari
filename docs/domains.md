@@ -156,7 +156,7 @@ transactions, with output compensation and cleanup storage calls outside them.
 The tools the gateway runs itself: the tool loop, MCP, web search, web
 retrieval and code execution.
 
-It owns the code execution, MCP server and web search policy ports in `ports/`,
+It owns the code execution, code execution policy, MCP server and web search policy ports in `ports/`,
 and their adapters in `adapters/`.
 
 `mcp_server_port.py` names where a workspace's MCP servers come from. One
@@ -169,6 +169,10 @@ traffic.
 from, in the same two ways. The policy says who may search and how far. A
 tools service applies it to a request with one rule on every plane, and
 neither implementation carries a search.
+
+`code_execution_policy_port.py` names where a workspace's code execution
+policy comes from, in the same two ways. The policy says who may run code and
+within which limits, and neither implementation runs code.
 
 **The tool test.** A tool is something the model calls during a request. The
 domain holds the registry, the loop and each tool's settings. A capability the
