@@ -66,6 +66,15 @@ _ANTHROPIC_ERROR = json.dumps(
     {"type": "error", "error": {"type": "api_error", "message": "An error occurred during streaming"}}
 )
 
+
+def openai_error_event(fmt: StreamFormat, code: str | None) -> str:
+    """``fmt``'s error event, with ``code`` as the OpenAI error object's ``code`` when there is one."""
+    if code is None:
+        return fmt.error_payload
+    error = {"message": "An error occurred during streaming", "type": "server_error", "code": code}
+    return fmt.error_payload.replace(_OPENAI_ERROR, json.dumps({"error": error}))
+
+
 # An SSE comment line: conformant parsers (including the OpenAI SDKs) drop it, so
 # it keeps the socket warm without ever surfacing as content.
 _SSE_COMMENT_KEEPALIVE = ": keepalive\n\n"

@@ -279,3 +279,18 @@ def test_an_unknown_end_user_budget_is_refused_on_update_and_leaves_the_key_alon
     fetched = client.get(f"{API_ROOT}/keys/{key_id}", headers=master_key_header)
     assert fetched.json()["key_name"] == "svc"
     assert fetched.json()["end_user_budget_id"] is None
+
+
+def test_an_end_user_refused_by_its_budget_gets_a_stable_code(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    budget_id = _budget(client, master_key_header, request_limit=1)
+    _, headers = _service_key(client, master_key_header, "svc-code", end_user_budget_id=budget_id)
+
+    assert _chat(client, headers, "carol").status_code == 200
+    refused = _chat(client, headers, "carol")
+
+    assert refused.status_code == 403
+    assert refused.headers["Otari-Error-Code"] == "budget_exceeded"
+    assert refused.headers["Otari-Budget-Scope"] == "user"
+    assert refused.json()["code"] == "budget_exceeded"

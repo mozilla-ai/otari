@@ -49,7 +49,7 @@ from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Proto
 from urllib.parse import ParseResult, urlparse
 
 from any_llm import LLMProvider
-from any_llm.exceptions import AnyLLMError, InvalidRequestError, UnsupportedParameterError
+from any_llm.exceptions import AnyLLMError, ContextLengthExceededError, InvalidRequestError, UnsupportedParameterError
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -104,9 +104,12 @@ from gateway.core.config import ATTEMPT_ID_HEADER, REQUEST_ID_HEADER, GatewayCon
 from gateway.core.database import DATABASE_ERRORS, release_session
 from gateway.core.env import otari_env
 from gateway.core.error_codes import (
+    CONTEXT_LENGTH_EXCEEDED,
     INVALID_MODEL,
     MODEL_NOT_ALLOWED,
+    PRICING_REQUIRED,
     UPSTREAM_RATE_LIMITED,
+    error_code_of,
     error_headers,
 )
 from gateway.core.metered_pricing import calculate_metered_cost, quantize_cost
@@ -650,6 +653,8 @@ def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, st
     fixed-detail 502 the header would describe the gateway's own upstream
     account, which is not the caller's to read.
     """
+    if status_code == status.HTTP_400_BAD_REQUEST and _is_context_length_error(exc):
+        return error_headers(CONTEXT_LENGTH_EXCEEDED)
     if status_code != status.HTTP_429_TOO_MANY_REQUESTS:
         return None
     headers = error_headers(UPSTREAM_RATE_LIMITED)
@@ -657,6 +662,25 @@ def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, st
     if retry_after is not None:
         headers["Retry-After"] = retry_after
     return headers
+
+
+def _is_context_length_error(exc: BaseException) -> bool:
+    """Whether any-llm classified the failure as a prompt too long for the model."""
+    return any(isinstance(current, ContextLengthExceededError) for current in upstream_exception_chain(exc))
+
+
+def refusal_code(exc: BaseException) -> str | None:
+    """The ``Otari-Error-Code`` an exception ending a request stands for, or None.
+
+    Read by the stream error events, which go out after the headers that would
+    otherwise carry it.
+    """
+    if isinstance(exc, HTTPException):
+        return error_code_of(exc.headers)
+    mapping = classify_provider_error(exc)
+    if mapping is None:
+        return None
+    return error_code_of(provider_error_headers(exc, mapping.status_code))
 
 
 def failure_status_code(exc: BaseException) -> int:
@@ -1489,6 +1513,7 @@ async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) 
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail=no_pricing_error_detail(f"{attempt.instance}:{attempt.model}"),
+            headers=error_headers(PRICING_REQUIRED),
         )
     repriced = estimate_cost(
         pricing,
@@ -2165,6 +2190,7 @@ async def resolve_request_context(
                 402,
                 no_pricing_detail,
                 ErrorKind.INVALID_REQUEST,
+                headers=error_headers(PRICING_REQUIRED),
             )
 
         # Resolve uploaded attachments only once the request is authorized
