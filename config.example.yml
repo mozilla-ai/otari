@@ -9,9 +9,10 @@ host: "0.0.0.0"
 port: 8000
 
 # Deployment-wide management credential. Applications should use API keys.
-# Set OTARI_MASTER_KEY in .env rather than writing the value here, so the
-# credential stays in one place and out of a file you may want to commit.
-master_key: ${OTARI_MASTER_KEY}
+# Set it as OTARI_MASTER_KEY (in .env with Docker Compose) rather than here, so
+# it stays out of a file you may want to commit. Left unset, Otari generates one
+# on first boot and prints it once.
+# master_key: choose-a-strong-management-key
 
 # Common models use the bundled genai-prices snapshot when no stored price
 # exists. Explicit database pricing always wins.
