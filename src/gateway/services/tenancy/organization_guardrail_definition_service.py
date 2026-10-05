@@ -242,9 +242,7 @@ GuardrailBuildState = Literal["built", "failed", "pending", "disabled"]
 # imported: see the module docstring. Typed to the runner's three answers, so a
 # fourth one added there has to be accounted for here rather than narrowed away.
 BuildStateOf = Callable[[uuid.UUID, uuid.UUID, datetime], Literal["built", "failed", "pending"]]
-RebuildDefinition = Callable[
-    [UnitOfWork, uuid.UUID, uuid.UUID], Awaitable[Literal["built", "failed", "pending"]]
-]
+RebuildDefinition = Callable[[UnitOfWork, uuid.UUID, uuid.UUID], Awaitable[Literal["built", "failed", "pending"]]]
 
 
 class _Verdict(Protocol):

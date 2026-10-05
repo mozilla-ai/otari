@@ -223,9 +223,7 @@ async def create_own_key(
     # then refuses a request whose owner is deleted. Reviving it is therefore
     # restoring spend, which is not a member's to do for themselves, so this
     # refuses where ``POST /api/v1/keys`` refuses the same owner.
-    revoked = (
-        await db.execute(select(User.deleted_at).where(User.user_id == str(identity.id)))
-    ).scalar_one_or_none()
+    revoked = (await db.execute(select(User.deleted_at).where(User.user_id == str(identity.id)))).scalar_one_or_none()
     if revoked is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

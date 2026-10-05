@@ -281,6 +281,43 @@ async def test_streaming_generator_error_anthropic_format() -> None:
 
 
 @pytest.mark.asyncio
+async def test_streaming_generator_renders_the_error_for_the_exception_that_ended_it() -> None:
+    async def on_complete(usage: CompletionUsage) -> None:
+        pytest.fail("on_complete should not be called on error")
+
+    async def on_error(exc: BaseException) -> None:
+        return None
+
+    crash = RuntimeError(_PROVIDER_CRASHED)
+    rendered_for: list[BaseException] = []
+
+    def error_payload(exc: BaseException) -> str:
+        rendered_for.append(exc)
+        return "event: error\ndata: {}\n\n"
+
+    async def _failing_stream() -> AsyncIterator[str]:
+        raise crash
+        yield  # pragma: no cover
+
+    events = [
+        event
+        async for event in streaming_generator(
+            stream=_failing_stream(),
+            format_chunk=_format_chunk,
+            extract_usage=lambda _: None,
+            fmt=ANTHROPIC_STREAM_FORMAT,
+            on_complete=on_complete,
+            on_error=on_error,
+            label="test:model",
+            error_payload=error_payload,
+        )
+    ]
+
+    assert events == ["event: error\ndata: {}\n\n"]
+    assert rendered_for == [crash]
+
+
+@pytest.mark.asyncio
 async def test_streaming_generator_error_logging_failure_is_swallowed() -> None:
     async def on_complete(usage: CompletionUsage) -> None:
         pytest.fail("on_complete should not be called on error")

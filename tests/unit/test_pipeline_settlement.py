@@ -22,6 +22,7 @@ import re
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
@@ -45,6 +46,7 @@ import gateway.api.routes._pipeline as pipeline
 import gateway.streaming as streaming
 from conftest import InstallControlPlane
 from gateway.adapters.web_search_policy_adapter import RemoteWebSearchPolicy
+from gateway.api.deps import ToolPorts
 from gateway.api.routes import chat, messages, responses
 from gateway.api.routes._pipeline import (
     DeclaredTools,
@@ -64,6 +66,7 @@ from gateway.api.routes._pipeline import (
 from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, SettledCost
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.tools_exceptions import (
+    CodeExecutionPolicyResolutionFailure,
     WebAccessToolNotAuthorizedError,
     WebSearchNotEnabledError,
     WebSearchPolicyResolutionFailure,
@@ -71,7 +74,9 @@ from gateway.exceptions.tools_exceptions import (
 )
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.models.pricing import ModelPricing, PriceSource
-from gateway.models.tools import ResolvedWebSearchConfig
+from gateway.models.tools import ResolvedCodeExecutionPolicy, ResolvedWebSearchConfig, WebTool
+from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
+from gateway.ports.code_execution_policy_port import CodeExecutionPolicyScope
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.rate_limit import RateLimitInfo
@@ -146,7 +151,7 @@ class _Policy(WebSearchPolicyPort):
         self.asked: list[WebSearchPolicyScope] = []
 
     async def resolve(
-        self, scope: WebSearchPolicyScope, requested_tools: Sequence[str]
+        self, scope: WebSearchPolicyScope, requested_tools: Sequence[WebTool]
     ) -> ResolvedWebSearchConfig | None:
         self.asked.append(scope)
         return self._policy
@@ -537,6 +542,7 @@ def _build(
     workspace_id: uuid.UUID | None = None,
     started_at: float | None = None,
     tool_tally: ToolUsageTally | None = None,
+    request_id: str | None = None,
 ) -> Any:
     return build_streaming_response(
         adapter=chat._ADAPTER,
@@ -553,6 +559,7 @@ def _build(
         workspace_id=workspace_id,
         started_at=started_at,
         tool_tally=tool_tally,
+        request_id=request_id,
     )
 
 
@@ -716,6 +723,69 @@ async def test_client_disconnect_with_tool_work_records_ttft(monkeypatch: pytest
     assert logged["ttft_ms"] <= logged["latency_ms"]
 
 
+_PARTIAL_USAGE = CompletionUsage(prompt_tokens=120, completion_tokens=0, total_tokens=120)
+
+
+@pytest.mark.asyncio
+async def test_stream_error_after_reported_usage_bills_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stream that dies after the provider reported tokens still owes for them.
+
+    Refunding would record a request the provider charged for as free, and the
+    caller, who never received a cost, could not recover it by request id.
+    """
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk(_PARTIAL_USAGE)
+        raise RuntimeError("upstream broke")
+
+    await _drain(_build(stream(), GatewayConfig(), request_id="req-1"))
+
+    assert settlement.refunded == 0
+    assert settlement.reconciled == [Decimal("0.25")]
+    assert settlement.settled_tokens == [120]
+    (logged,) = settlement.logged
+    assert logged["usage_override"].prompt_tokens == 120
+    assert logged["error"] == "upstream broke"
+    assert logged["request_id"] == "req-1"
+
+
+@pytest.mark.asyncio
+async def test_client_disconnect_after_reported_usage_bills_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk(_PARTIAL_USAGE)
+        yield _chunk()
+
+    response = _build(stream(), GatewayConfig(), request_id="req-1")
+    iterator = response.body_iterator
+    await iterator.__anext__()
+    await iterator.aclose()
+
+    assert settlement.refunded == 0
+    assert settlement.reconciled == [Decimal("0.25")]
+    (logged,) = settlement.logged
+    assert logged["usage_override"].prompt_tokens == 120
+    assert logged["request_id"] == "req-1"
+
+
+@pytest.mark.asyncio
+async def test_completed_stream_row_carries_the_request_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk(_PARTIAL_USAGE)
+
+    await _drain(_build(stream(), GatewayConfig(), request_id="req-1"))
+
+    (logged,) = settlement.logged
+    assert logged["request_id"] == "req-1"
+
+
 class _FakeLogWriter:
     def __init__(self) -> None:
         self.put_rows: list[Any] = []
@@ -752,6 +822,27 @@ async def test_log_usage_skips_the_workspace_lookup_when_given_one(monkeypatch: 
     )
 
     assert lookups == 0
+
+
+@pytest.mark.asyncio
+async def test_log_usage_stores_the_request_id_as_the_group_of_an_unrouted_row() -> None:
+    """An unrouted row has no attribution, and is findable by ``Otari-Request-ID`` all the same."""
+    writer = _FakeLogWriter()
+
+    await log_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, writer),
+        api_key_id=None,
+        model="gpt-4",
+        provider="openai",
+        endpoint="/v1/chat/completions",
+        workspace_id=uuid.uuid4(),
+        request_id="req-1",
+    )
+
+    (row,) = writer.put_rows
+    assert row.request_group_id == "req-1"
+    assert row.policy_name is None
 
 
 @pytest.mark.asyncio
@@ -915,6 +1006,163 @@ async def test_priced_settlement_does_not_warn(
 
     assert row.cost is not None
     assert _unpriced_warnings(gateway_caplog) == []
+
+
+def _deployment_rate() -> ResolvedPricing:
+    pricing = ModelPricing(
+        model_key="gemini:gemini-2.5-flash", input_price_per_million=1.0, output_price_per_million=2.0
+    )
+    return ResolvedPricing(pricing, "deployment", "gemini:gemini-2.5-flash", datetime(2026, 9, 1, tzinfo=UTC))
+
+
+@pytest.mark.asyncio
+async def test_priced_settlement_records_its_provenance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The row names the rate that priced it, so it can say why it costs what it does (#782)."""
+    _stub_pricing(monkeypatch, _deployment_rate())
+
+    row = await _settle("gemini-2.5-flash")
+
+    assert row.cost is not None
+    assert row.pricing_source == "deployment"
+    assert row.pricing_reference == "gemini:gemini-2.5-flash"
+    assert row.pricing_effective_at == datetime(2026, 9, 1, tzinfo=UTC)
+    assert row.pricing_version is None
+    assert row.calculated_at == row.timestamp
+
+
+@pytest.mark.asyncio
+async def test_unpriced_settlement_records_no_provenance(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_pricing(monkeypatch, None)
+
+    row = await _settle("gemini-3.7-flash")
+
+    assert row.cost is None
+    assert (row.pricing_source, row.pricing_reference, row.pricing_effective_at, row.calculated_at) == (
+        None,
+        None,
+        None,
+        None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_cost_override_settlement_names_no_rate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fixed amount billed in place of the rate is not that rate's work."""
+    _stub_pricing(monkeypatch, _deployment_rate())
+    writer = _FakeLogWriter()
+
+    await log_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, writer),
+        api_key_id=None,
+        model="gemini-2.5-flash",
+        provider="gemini",
+        endpoint="/v1/chat/completions",
+        usage_override=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        cost_override=Decimal("0.5"),
+    )
+
+    row = writer.put_rows[0]
+    assert row.cost == Decimal("0.5")
+    assert (row.pricing_source, row.pricing_reference, row.pricing_effective_at) == (None, None, None)
+    assert row.calculated_at == row.timestamp
+
+
+@pytest.mark.asyncio
+async def test_oversized_pricing_reference_is_recorded_as_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A model key past the column's length must not fail the row's insert."""
+    rate = _deployment_rate()
+    _stub_pricing(monkeypatch, rate._replace(reference="k" * (PRICING_REFERENCE_MAX_LENGTH + 1)))
+
+    row = await _settle("gemini-2.5-flash")
+
+    assert row.cost is not None
+    assert row.pricing_source == "deployment"
+    assert row.pricing_reference is None
+
+
+@pytest.mark.asyncio
+async def test_log_usage_writes_provider_latency_ms_onto_the_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The one call site that actually populates the column (otari#337): a
+    unit test on ``provider_latency_ms_of`` alone never exercises this line."""
+    monkeypatch.setattr(pipeline, "organization_for_workspace_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(pipeline, "resolve_model_pricing", AsyncMock(return_value=None))
+    workspace_id = uuid.uuid4()
+    log_writer = _FakeLogWriter()
+
+    await log_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, log_writer),
+        api_key_id=None,
+        model="llama-3.1-8b-instant",
+        provider="groq",
+        endpoint="/v1/chat/completions",
+        workspace_id=workspace_id,
+        usage_override=CompletionUsage.model_construct(
+            prompt_tokens=10, completion_tokens=5, total_tokens=15, total_time=0.25
+        ),
+    )
+
+    assert log_writer.put_rows[0].provider_latency_ms == 250
+
+
+@pytest.mark.asyncio
+async def test_log_usage_provider_latency_lookup_uses_provider_type_not_instance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A named instance (``groq-prod``) does not appear in the latency table;
+    only its resolved implementation (``groq``) does. Without ``provider_type``
+    the lookup misses and the column stays NULL even though the field is
+    present, which is the bug coderabbitai flagged on PR #1117."""
+    monkeypatch.setattr(pipeline, "organization_for_workspace_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(pipeline, "resolve_model_pricing", AsyncMock(return_value=None))
+    log_writer = _FakeLogWriter()
+
+    await log_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, log_writer),
+        api_key_id=None,
+        model="llama-3.1-8b-instant",
+        provider="groq-prod",
+        provider_type="groq",
+        endpoint="/v1/chat/completions",
+        workspace_id=uuid.uuid4(),
+        usage_override=CompletionUsage.model_construct(
+            prompt_tokens=10, completion_tokens=5, total_tokens=15, total_time=0.25
+        ),
+    )
+
+    row = log_writer.put_rows[0]
+    assert row.provider_latency_ms == 250
+    # The instance name still keys the row, per the coderabbit note: latency
+    # resolution must not change what usage/pricing keys on.
+    assert row.provider == "groq-prod"
+
+
+@pytest.mark.asyncio
+async def test_log_usage_provider_latency_lookup_falls_back_to_provider_without_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller with no resolved provider_type (none exists yet) keeps the
+    prior behavior: latency capture is a no-op rather than wrong."""
+    monkeypatch.setattr(pipeline, "organization_for_workspace_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(pipeline, "resolve_model_pricing", AsyncMock(return_value=None))
+    log_writer = _FakeLogWriter()
+
+    await log_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, log_writer),
+        api_key_id=None,
+        model="llama-3.1-8b-instant",
+        provider="groq-prod",
+        endpoint="/v1/chat/completions",
+        workspace_id=uuid.uuid4(),
+        usage_override=CompletionUsage.model_construct(
+            prompt_tokens=10, completion_tokens=5, total_tokens=15, total_time=0.25
+        ),
+    )
+
+    assert log_writer.put_rows[0].provider_latency_ms is None
 
 
 @pytest.mark.asyncio
@@ -1578,7 +1826,15 @@ def _chunk_id(part: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+class _NoCodeExecutionPolicy:
+    """A workspace with no code execution policy, which narrows nothing."""
+
+    async def resolve(self, scope: CodeExecutionPolicyScope) -> ResolvedCodeExecutionPolicy | None:
+        return None
+
+
 _BACKEND_FIELDS = frozenset(field.name for field in dataclasses.fields(ToolBackends))
+_PORT_FIELDS = frozenset(field.name for field in dataclasses.fields(ToolPorts))
 _DECLARED_FIELDS = frozenset(field.name for field in dataclasses.fields(DeclaredTools))
 
 
@@ -1595,10 +1851,14 @@ async def _call_prepare_gateway_tools(ctx: RequestContext, **overrides: Any) -> 
         "tools_header": None,
     }
     declared.update({name: overrides.pop(name) for name in list(overrides) if name in _DECLARED_FIELDS})
-    backends: dict[str, Any] = {
-        "mcp_server_port": _Servers(_resolves_to_nothing),
-        "web_search_policy_port": _Policy(),
+    ports: dict[str, Any] = {
+        "code_execution": None,
+        "code_execution_policy": _NoCodeExecutionPolicy(),
+        "mcp_server": _Servers(_resolves_to_nothing),
+        "web_search_policy": _Policy(),
     }
+    ports.update({name: overrides.pop(name) for name in list(overrides) if name in _PORT_FIELDS})
+    backends: dict[str, Any] = {"ports": ToolPorts(**ports)}
     backends.update({name: overrides.pop(name) for name in list(overrides) if name in _BACKEND_FIELDS})
     kwargs: dict[str, Any] = {
         "adapter": chat._ADAPTER,
@@ -1684,7 +1944,7 @@ async def test_disabled_fetch_releases_reservation_before_workspace_policy_io(
     )
 
     with pytest.raises(HTTPException) as exc_info:
-        await _call_prepare_gateway_tools(ctx, tools=[{"type": "otari_web_fetch"}], web_search_policy_port=policy)
+        await _call_prepare_gateway_tools(ctx, tools=[{"type": "otari_web_fetch"}], web_search_policy=policy)
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == pipeline.WEB_FETCH_NOT_ENABLED_DETAIL
@@ -1814,6 +2074,34 @@ async def test_combined_standalone_request_domains_narrow_fetch_without_workspac
 
 
 @pytest.mark.asyncio
+async def test_a_disjoint_allow_list_gets_one_refusal_whether_or_not_fetch_is_declared() -> None:
+    workspace = ResolvedWebSearchConfig(
+        enabled=True,
+        max_results=None,
+        purpose_hint=None,
+        allowed_domains=("example.com",),
+        blocked_domains=None,
+        provider_options=None,
+        authorized_tools=None,
+    )
+    ctx = _ctx(
+        GatewayConfig(require_pricing=False, web_fetch_enabled=True, web_search_url="https://search.example"),
+        db=cast(Any, AsyncMock()),
+        workspace_id=uuid.uuid4(),
+    )
+    search = {"type": "otari_web_search", "allowed_domains": ["elsewhere.example"]}
+
+    refusals = []
+    for tools in ([dict(search)], [dict(search), {"type": "otari_web_fetch"}]):
+        with pytest.raises(HTTPException) as exc_info:
+            await _call_prepare_gateway_tools(ctx, tools=tools, web_search_policy=_Policy(workspace))
+        refusals.append((exc_info.value.status_code, exc_info.value.detail))
+
+    assert refusals[0] == refusals[1]
+    assert refusals[0][0] == 403
+
+
+@pytest.mark.asyncio
 async def test_combined_standalone_policy_narrows_fetch_domains() -> None:
     workspace = ResolvedWebSearchConfig(
         enabled=True,
@@ -1840,7 +2128,7 @@ async def test_combined_standalone_policy_narrows_fetch_domains() -> None:
             {"type": "otari_web_search", "allowed_domains": ["docs.example.com"]},
             {"type": "otari_web_fetch"},
         ],
-        web_search_policy_port=_Policy(workspace),
+        web_search_policy=_Policy(workspace),
     )
 
     assert [rule.value for rule in tool_ctx.web_fetch_policy.allowed] == ["docs.example.com"]
@@ -1866,7 +2154,7 @@ async def test_hybrid_legacy_policy_preserves_search(
 
     if enabled:
         tool_ctx = await _call_prepare_gateway_tools(
-            ctx, tools=[{"type": "otari_web_search"}], web_search_policy_port=RemoteWebSearchPolicy(ctx.config)
+            ctx, tools=[{"type": "otari_web_search"}], web_search_policy=RemoteWebSearchPolicy(ctx.config)
         )
         assert tool_ctx.use_web_search is True
         assert tool_ctx.use_web_fetch is False
@@ -1875,7 +2163,7 @@ async def test_hybrid_legacy_policy_preserves_search(
     else:
         with pytest.raises(HTTPException) as exc_info:
             await _call_prepare_gateway_tools(
-                ctx, tools=[{"type": "otari_web_search"}], web_search_policy_port=RemoteWebSearchPolicy(ctx.config)
+                ctx, tools=[{"type": "otari_web_search"}], web_search_policy=RemoteWebSearchPolicy(ctx.config)
             )
         assert exc_info.value.status_code == 403
         assert exc_info.value.detail == WebSearchNotEnabledError().message
@@ -1918,7 +2206,7 @@ async def test_hybrid_fetch_requires_explicit_authorization(
         requested_tools.insert(0, "web_search")
 
     with pytest.raises(HTTPException) as exc_info:
-        await _call_prepare_gateway_tools(ctx, tools=tools, web_search_policy_port=RemoteWebSearchPolicy(ctx.config))
+        await _call_prepare_gateway_tools(ctx, tools=tools, web_search_policy=RemoteWebSearchPolicy(ctx.config))
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == WebAccessToolNotAuthorizedError().message
@@ -1947,7 +2235,7 @@ async def test_hybrid_fetch_only_needs_no_search_backend(control_plane_transport
     )
 
     tool_ctx = await _call_prepare_gateway_tools(
-        ctx, tools=[{"type": "otari_web_fetch"}], web_search_policy_port=RemoteWebSearchPolicy(ctx.config)
+        ctx, tools=[{"type": "otari_web_fetch"}], web_search_policy=RemoteWebSearchPolicy(ctx.config)
     )
 
     assert tool_ctx.use_web_fetch is True
@@ -1989,7 +2277,7 @@ async def test_hybrid_web_tools_fail_closed_on_malformed_policy(
     ctx.config.web_search_url = "https://search.example"
     with pytest.raises(HTTPException) as exc_info:
         await _call_prepare_gateway_tools(
-            ctx, tools=[{"type": tool_type}], web_search_policy_port=RemoteWebSearchPolicy(ctx.config)
+            ctx, tools=[{"type": tool_type}], web_search_policy=RemoteWebSearchPolicy(ctx.config)
         )
 
     assert exc_info.value.status_code == 502
@@ -2038,7 +2326,7 @@ async def test_unknown_mcp_server_id_releases_reservation(monkeypatch: pytest.Mo
     with pytest.raises(HTTPException) as exc_info:
         await _call_prepare_gateway_tools(
             ctx,
-            mcp_server_port=_Servers(missing),
+            mcp_server=_Servers(missing),
             mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")],
         )
 
@@ -2086,7 +2374,7 @@ async def test_duplicate_mcp_server_name_against_a_stored_server_releases_reserv
     with pytest.raises(HTTPException) as exc_info:
         await _call_prepare_gateway_tools(
             ctx,
-            mcp_server_port=_Servers(stored),
+            mcp_server=_Servers(stored),
             mcp_servers=[McpServerConfig(name="tools", url="https://93.184.216.34/mcp")],
             mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")],
         )
@@ -2187,7 +2475,7 @@ async def test_stored_mcp_servers_sharing_a_name_are_an_operator_error(
     with pytest.raises(HTTPException) as exc_info:
         await _call_prepare_gateway_tools(
             ctx,
-            mcp_server_port=_Servers(stored),
+            mcp_server=_Servers(stored),
             mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")],
         )
 
@@ -2223,7 +2511,7 @@ async def test_a_database_failure_releases_the_reservation(monkeypatch: pytest.M
     with pytest.raises(SQLAlchemyError):
         await _call_prepare_gateway_tools(
             ctx,
-            mcp_server_port=_Servers(failing),
+            mcp_server=_Servers(failing),
             mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")],
         )
 
@@ -2256,7 +2544,7 @@ async def test_a_release_that_also_fails_reraises_the_original(monkeypatch: pyte
     with pytest.raises(SQLAlchemyError, match="connection reset"):
         await _call_prepare_gateway_tools(
             ctx,
-            mcp_server_port=_Servers(failing),
+            mcp_server=_Servers(failing),
             mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")],
         )
 
@@ -2648,3 +2936,17 @@ async def test_standalone_stream_has_no_first_chunk_deadline(monkeypatch: pytest
 
     assert chunks, "the slow first chunk was dropped: a first-chunk deadline is being applied"
     assert settlement.reconciled == [0.25]
+
+
+@pytest.mark.parametrize(
+    ("reason", "status_code"),
+    [
+        (CodeExecutionPolicyResolutionFailure.ANSWER_UNREADABLE, 502),
+        (CodeExecutionPolicyResolutionFailure.NO_CALLER_CREDENTIAL, 500),
+        (CodeExecutionPolicyResolutionFailure.NO_WORKSPACE, 500),
+    ],
+)
+def test_a_code_execution_policy_failure_renders_its_status(
+    reason: CodeExecutionPolicyResolutionFailure, status_code: int
+) -> None:
+    assert pipeline._code_execution_policy_failure_status(reason) == status_code

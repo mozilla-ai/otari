@@ -81,8 +81,12 @@ the corresponding startup value after the database is available.
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
+| `rate_limit_store` | Where `rate_limit_rpm` is counted: `memory` (the default) or `redis`. See [Rate limits across replicas](#rate-limits-across-replicas). |
+| `rate_limit_redis_url` | The Redis that the `redis` store counts in. |
+| `rate_limits` | Requests per minute, tokens per minute and requests in flight, per deployment, API key, user or model. Also managed from the dashboard. See [Rate limit rules](#rate-limit-rules). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
+| `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
 | `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
 | `mode` | `standalone`, `hosted`, or `hybrid`. See [Modes](modes.md). |
 
@@ -119,6 +123,111 @@ server-side, so the second one still ends a statement when the client is the
 stuck half. Configure the server-side value above the client-side one, which
 the defaults do and startup validation requires: set equal, whichever fires
 first is a race.
+
+### Rate limits across replicas
+
+`rate_limit_rpm` is counted in this process by default, so a deployment
+running N replicas (or N workers) admits up to N times the limit. To hold the
+limit for the deployment as a whole, count it in Redis:
+
+```yaml
+rate_limit_rpm: 600
+rate_limit_store: redis
+rate_limit_redis_url: redis://redis:6379/0
+```
+
+This needs the `redis` extra (`pip install gateway[redis]`), which the Docker
+image installs, and Redis 5 or later. Startup refuses `redis` without a URL or
+without the extra, because quietly counting per process would multiply the
+limit again.
+
+Each request is checked and counted in one step, against Redis's own clock, so
+replicas never both take the last slot and their clock skew does not matter.
+If Redis cannot be reached, each replica counts on its own instead of refusing
+traffic, and tries Redis again a few seconds later; the gateway log says when
+that starts and stops.
+
+### Rate limit rules
+
+`rate_limits` sets limits beyond `rate_limit_rpm`. Each rule names what one
+count is shared by (`per`) and sets any of three limits:
+
+```yaml
+rate_limits:
+  - name: keys          # each API key on its own
+    per: key
+    rpm: 600
+    tpm: 200000
+  - name: end-users     # each user, including a service key's end users
+    per: user
+    rpm: 30
+  - name: everyone      # one count for the whole deployment
+    per: deployment
+    max_concurrent: 200
+  - name: flash-cap     # each model listed, however a request reaches it
+    per: model
+    models: ["vertex:gemini-2.5-flash"]
+    rpm: 100
+```
+
+- `rpm`: requests per minute.
+- `tpm`: tokens per minute. A request is admitted on an estimate (its prompt
+  plus `max_tokens`, or `budget_estimate_default_output_tokens` when it sets
+  none) and charged what it used once it completes. A request that fails is
+  charged the tokens its provider reported before failing, usually none, and a
+  request refused after admission (by its budget, say) is charged nothing. A
+  request whose estimate alone exceeds the limit is always refused, with no
+  `Retry-After`, since waiting would not let it in.
+- `max_concurrent`: requests in flight at once. A slot is given back when the
+  response ends, streamed or not. `lease_sec` (15 minutes by default) bounds how
+  long a slot outlives a process that dies holding it.
+
+`per: key` does not limit a request made without an API key (the master key or
+a dashboard session), and `per: user` does not limit one billed to no user. A request has to fit every rule that applies to it; one
+that does not is refused with a 429 naming the rule and the limit it hit, counted by none of them,
+and holds no budget. Rules count in `rate_limit_store`, so with Redis they hold
+across replicas. They apply to chat completions, messages and responses, after
+`rate_limit_rpm`. A hybrid gateway does not enforce them yet, so it refuses to
+start with `rate_limits` set.
+
+`per: model` limits each model in `models`, written as `instance:model` (the
+provider instance it is called through, then the model). One count is kept per
+model and shared by every policy, alias and direct call that reaches it, so it
+can stand for a provider's quota. It is checked when an attempt is about to call
+the model, after any policy has picked its candidates, rather than at admission:
+a [routing policy](routing.md#spill-over-when-a-model-is-full-priority-routing)
+skips a full model and tries its next candidate, and a request is refused with a
+429 only when no candidate has room. A direct call to a full model is refused.
+A candidate that fails before responding gives back its tokens and its slot but
+keeps its request counted, since the provider was sent it.
+
+Rules can also be added, changed and removed from the dashboard (Settings, Rate
+limit rules) or through `/api/v1/rate-limits`. A change applies at once on the
+replica that served it and on every other replica within 30 seconds; a changed
+rule keeps the requests it already counted. Choose "Each model" to add a
+`per: model` rule and pick its models. The rules in config.yml are listed there read-only, and a stored rule cannot take the name of one. A stored rule
+whose name config.yml later declares is skipped with a warning at startup and
+left out of the list; `DELETE /api/v1/rate-limits/{name}` still removes it. A
+hosted control plane serves no inference, so its dashboard does not offer the
+rules.
+
+### Trace context propagation
+
+With `accept_incoming_trace_context: true`, Otari extracts incoming context with
+OpenTelemetry's configured propagators (`OTEL_PROPAGATORS`; W3C `traceparent`,
+`tracestate` and `baggage` by default) and makes it current for the request, so
+the spans the gateway creates join the caller's trace. The context is detached
+when the response, including a streamed body, finishes. Missing or invalid
+headers never reject a request; the gateway starts a new trace instead. Otari
+does not inject propagation headers into provider or platform requests.
+
+It is off by default because the headers are unauthenticated: the middleware
+runs before route auth, so any caller can choose the trace ID and sampling flag
+your collector ingests, and a malformed `tracestate` makes OpenTelemetry log a
+warning per offending member (`opentelemetry.trace.span`). Enable it for trusted
+service-to-service callers, ideally behind a proxy that strips these headers at
+the edge. Browsers cannot send them cross-origin: they are not in the CORS
+allow-list.
 
 ## Provider configuration
 
@@ -256,11 +365,12 @@ path, and `dashboard_login_rate_limit_per_minute` is sized for password
 attempts, not for browsing. Set it to `null` to remove the limit.
 
 Two limits of that throttle are worth knowing before a catalog is put on the
-open internet. The address is the socket's, and the bundled server is started
-without proxy headers, so behind a reverse proxy every visitor shares the
-proxy's address and one scraper exhausts the budget for everyone; put the
-throttle in the proxy instead. And the counter is per worker, so a deployment
-running N workers serves up to N times the configured number.
+open internet. Behind a reverse proxy every visitor shares the proxy's
+address, and one scraper exhausts the budget for everyone, unless
+`forwarded_allow_ips` trusts that proxy; see
+[Behind a reverse proxy](deployment.md#behind-a-reverse-proxy). And the counter
+is per worker, so a deployment running N workers serves up to N times the
+configured number.
 
 In hosted mode a visitor sees the same thing a visitor sees anywhere else: the
 process-wide `providers:` instances, which in that mode are the deployment's
@@ -316,6 +426,34 @@ search_tools:
 each requires an `api_key` or `api_base`. Provider options and request filters
 are covered in [Built-in tools](tools.md). A tool carrying an `api_key` must use
 an HTTPS `api_base`; a keyless local SearXNG endpoint may use HTTP.
+
+## Decision providers
+
+`decision_providers` configures the upstreams behind `POST /api/v1/decisions`. The
+key is the prefix callers write in `model`, so the entry below serves
+`typesafe:jev-latest`, `openrouter:typesafe/jev-1.13` and `local:openjev`:
+
+```yaml
+decision_providers:
+  typesafe:
+    api_key: ${TYPESAFE_API_KEY}
+  openrouter:
+    api_key: ${OPENROUTER_API_KEY}
+  local:
+    provider: llamacpp
+    api_base: "http://127.0.0.1:8080"
+```
+
+`provider` is one of `typesafe`, `openrouter` or `llamacpp`, and defaults to the
+key. TypeSafe and OpenRouter need an `api_key`, and their default `api_base` can be
+replaced with another https root. A `llamacpp` entry points at a `llama-server`
+running a decision model and needs an `api_base`; it may use plain http only when
+it has no `api_key`. `timeout` sets the seconds to wait for an answer (default 30).
+
+These entries are separate from `providers` because none of these upstreams serves
+chat: they never appear in `/api/v1/models` or provider health. Price a decision
+model like any other, as `<provider>:<model>` in `pricing`. Decisions are
+standalone-mode only.
 
 ## Mail
 

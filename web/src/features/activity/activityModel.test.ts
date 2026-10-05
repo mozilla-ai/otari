@@ -7,6 +7,7 @@ import {
   computeToolCost,
   describeAttempt,
   describeAttemptOutcome,
+  findGroupsMissingEarlierAttempts,
   formatElapsed,
   formatLatencyCell,
   formatToolUsage,
@@ -302,6 +303,28 @@ describe("computeToolCost", () => {
   })
 })
 
+describe("findGroupsMissingEarlierAttempts", () => {
+  it("names a served group whose skipped attempt fell on the next page", () => {
+    // Newest first, so a page that ends on the served row leaves its earlier
+    // attempt for the next page.
+    const page = [attempt({ id: "b", status: "success", attempt_position: 2 })]
+    expect(findGroupsMissingEarlierAttempts(page)).toEqual(["grp-1"])
+  })
+
+  it("leaves a group alone once every earlier attempt is on the page", () => {
+    const page = [
+      attempt({ id: "b", status: "success", attempt_position: 2 }),
+      attempt({ id: "a", status: "absorbed", attempt_position: 1 }),
+    ]
+    expect(findGroupsMissingEarlierAttempts(page)).toEqual([])
+  })
+
+  it("asks nothing of a request served on its first attempt", () => {
+    const page = [attempt({ id: "a", status: "success", attempt_position: 1 })]
+    expect(findGroupsMissingEarlierAttempts(page)).toEqual([])
+  })
+})
+
 describe("indexGroupOutcomes", () => {
   it("indexes the served target of a group by its outcome row", () => {
     const rows = [
@@ -317,7 +340,64 @@ describe("indexGroupOutcomes", () => {
     expect(indexGroupOutcomes(rows).get("grp-1")).toEqual({
       servedBy: "openai:gpt-4o-mini",
       servedPosition: 2,
+      spilledFrom: [],
     })
+  })
+
+  it("names the candidates a group skipped before the one that served", () => {
+    const rows = [
+      attempt({
+        id: "b",
+        status: "success",
+        attempt_position: 2,
+        provider: "overflow",
+        model: "gpt-4o-mini",
+      }),
+      attempt({
+        id: "a",
+        status: "absorbed",
+        status_code: 429,
+        error_message:
+          "Skipped: Rate limit 'flash-cap' exceeded: 2 requests per minute",
+        attempt_position: 1,
+        provider: "primary",
+        model: "gpt-4o-mini",
+      }),
+    ]
+    const outcome = indexGroupOutcomes(rows).get("grp-1") ?? null
+
+    expect(outcome?.spilledFrom).toEqual([
+      "primary:gpt-4o-mini (rate limit 'flash-cap' full)",
+    ])
+    expect(describeAttempt({ ...rows[0], attempt_count: 2 }, outcome)).toMatch(
+      /^served on attempt 2 of 2.*, spilled over from primary:gpt-4o-mini \(rate limit 'flash-cap' full\)$/,
+    )
+  })
+
+  it("says a skipped candidate was too large for a limit rather than full", () => {
+    const rows = [
+      attempt({
+        id: "b",
+        status: "success",
+        attempt_position: 2,
+        provider: "overflow",
+        model: "gpt-4o-mini",
+      }),
+      attempt({
+        id: "a",
+        status: "absorbed",
+        status_code: 429,
+        error_message:
+          "Skipped: Request needs an estimated 5,000 tokens; rate limit 'flash-cap' allows 1,000 per minute",
+        attempt_position: 1,
+        provider: "primary",
+        model: "gpt-4o-mini",
+      }),
+    ]
+
+    expect(indexGroupOutcomes(rows).get("grp-1")?.spilledFrom).toEqual([
+      "primary:gpt-4o-mini (too large for rate limit 'flash-cap')",
+    ])
   })
 
   it("records a terminal failure as a group with no server", () => {
@@ -328,6 +408,7 @@ describe("indexGroupOutcomes", () => {
     expect(indexGroupOutcomes(rows).get("grp-1")).toEqual({
       servedBy: null,
       servedPosition: null,
+      spilledFrom: [],
     })
   })
 
@@ -344,7 +425,11 @@ describe("indexGroupOutcomes", () => {
 })
 
 describe("describeAttempt", () => {
-  const served = { servedBy: "openai:gpt-4o", servedPosition: 2 }
+  const served = {
+    servedBy: "openai:gpt-4o",
+    servedPosition: 2,
+    spilledFrom: [],
+  }
 
   it("names the model that served in an absorbed attempt's place", () => {
     expect(
@@ -360,6 +445,7 @@ describe("describeAttempt", () => {
       describeAttempt(attempt({ status: "absorbed", attempt_position: 1 }), {
         servedBy: null,
         servedPosition: null,
+        spilledFrom: [],
       }),
     ).toBe("attempt 1 of 2 failed, and the request ended in an error")
   })

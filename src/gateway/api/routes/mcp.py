@@ -7,7 +7,7 @@ policy it has (a human approval prompt, an administrator rule, trusted
 read-only auto-authorization), and then asks Otari to execute that one exact
 call.
 
-**Otari does not verify a human approval and does not claim to** (R-AUTH-4).
+**Otari does not verify a human approval and does not claim to**.
 The calling application is the authorization boundary. What Otari enforces
 independently is authentication, that the stored server is one the authenticated
 workspace may reach, the stored tool allowlist, URL safety, and its own
@@ -117,7 +117,7 @@ TOOLS_ENDPOINT = "/v1/mcp/servers/{mcp_server_id}/tools"
 EXECUTE_LABEL = "mcp.execute"
 TOOLS_LABEL = "mcp.list_tools"
 
-# One fixed safe message per error code (R-ERR-1). Nothing here varies with the
+# One fixed safe message per error code. Nothing here varies with the
 # request, the resolver answer, or the remote server: a message that varied
 # would be the leak the whole error contract exists to prevent.
 SAFE_DETAILS: dict[str, str] = {
@@ -146,14 +146,14 @@ SAFE_DETAILS: dict[str, str] = {
 # The two failures that are transient by construction: a per-process slot did
 # not free up inside the admission deadline. Everything else this contract
 # returns is a decision, a bound, or an outcome Otari cannot know, and none of
-# those get better by being sent again (R-ERR-4). The one other status carrying
+# those get better by being sent again. The one other status carrying
 # this header is the 429, which keeps the limiter's own value.
 _RETRYABLE_CAPACITY_CODES = frozenset({CODE_CAPACITY_UNAVAILABLE, CODE_DISCOVERY_CAPACITY_UNAVAILABLE})
 RETRY_AFTER_ONE = {"Retry-After": "1"}
 
 
 class McpErrorBody(BaseModel):
-    """The one error shape both stored-server endpoints return (R-ERR-1)."""
+    """The one error shape both stored-server endpoints return."""
 
     detail: str
     code: str
@@ -232,8 +232,8 @@ def _classify(status_code: int) -> tuple[str, ExecutionState, int]:
 
     Every one of these is raised before dispatch, so all of them are
     ``not_started``. The platform's own detail is dropped rather than forwarded:
-    it may describe a workspace, a plan, or a stored server, and R-ERR-1 lets
-    nothing platform-side through.
+    it may describe a workspace, a plan, or a stored server, and each error code
+    carries one fixed message so that nothing platform-side gets through.
     """
     if status_code in {400, 422}:
         return CODE_INVALID_REQUEST, ExecutionState.NOT_STARTED, 422
@@ -270,7 +270,7 @@ router = APIRouter(prefix="/mcp", tags=["mcp"], route_class=_McpRoute)
 class McpExecuteRequest(BaseModel):
     """One stored server, and the exact call the application authorized.
 
-    No inline server fields (R-REQ-4): a caller registers a remote MCP server
+    No inline server fields: a caller registers a remote MCP server
     through the control plane once and refers to it by id afterwards, which
     keeps URLs, credentials, revocation and allowlist policy on Otari's side of
     the boundary instead of in every request.
@@ -332,7 +332,7 @@ async def _authenticate(
 ) -> _Principal:
     """Authenticate, and rate-limit the principal before any outbound access.
 
-    In hybrid mode the user token passes through to the platform resolver, which authorizes and rate-limits (R-ADM-2).
+    In hybrid mode the user token passes through to the platform resolver, which authorizes and rate-limits.
     A 429 from the platform resolver is passed on to the caller.
     In standalone mode the key is authenticated and the request is charged to that key's bucket.
     A master-key request is refused with a 404, because it has no workspace and would reach one tenant's servers.
@@ -351,7 +351,7 @@ async def _authenticate(
         raise McpExecutionError(CODE_SERVER_NOT_FOUND, ExecutionState.NOT_STARTED, 404)
     # The key's own bucket, falling back to the key when it names no user, so
     # every user-less key does not share one bucket keyed on ``"None"``.
-    check_rate_limit(raw_request, api_key.user_id or api_key.id)
+    await check_rate_limit(raw_request, api_key.user_id or api_key.id)
     await _refuse_blocked_user(db, api_key)
     return _Principal(user_token=None, workspace_id=await resolve_workspace_id(db, api_key))
 
@@ -381,7 +381,7 @@ async def _resolve_server(
     mcp_server_port: McpServerPort,
     mcp_server_id: uuid.UUID,
 ) -> ResolvedMcpServer:
-    """Resolve the stored server, applying the outcome ladder both modes share (R-RES-1).
+    """Resolve the stored server, applying the outcome ladder both modes share.
 
     No MCP network access happens here or in anything it raises, so a refusal on
     these grounds never reaches the remote server.
@@ -408,7 +408,7 @@ async def _resolve_server(
 
 
 def _require_allowed(server: ResolvedMcpServer, tool_name: str) -> None:
-    """Apply the stored allowlist to one tool name (R-RES-4).
+    """Apply the stored allowlist to one tool name.
 
     ``None`` admits every live tool, the meaning the column already carries in
     the managed loop; an explicit empty list is a deny-all, so it refuses here
@@ -419,7 +419,7 @@ def _require_allowed(server: ResolvedMcpServer, tool_name: str) -> None:
 
 
 async def _require_safe_url(server: ResolvedMcpServer) -> None:
-    """Run the existing MCP SSRF policy over the resolved URL (R-TRANSPORT-3)."""
+    """Run the existing MCP SSRF policy over the resolved URL."""
     try:
         await validate_mcp_url(server.url, has_authorization_token=bool(server.authorization_token))
     except UnsafeURLError:
@@ -431,7 +431,7 @@ class McpToolDefinition(BaseModel):
 
     ``annotations`` is the remote server's own metadata, passed through as
     untrusted data. Otari never turns ``readOnlyHint`` into an authorization
-    decision (R-RISK-1); each application owns its risk policy, and a server
+    decision; each application owns its risk policy, and a server
     cannot waive an application's approval gate by labeling itself read-only.
     """
 
@@ -445,7 +445,7 @@ class McpToolDefinition(BaseModel):
 
 
 class McpToolWarning(BaseModel):
-    """One tool that was omitted, and the code that omitted it (R-SCHEMA-3)."""
+    """One tool that was omitted, and the code that omitted it."""
 
     tool_name: str
     code: str
@@ -455,7 +455,7 @@ class McpToolsResponse(BaseModel):
     """The authorized catalog for one stored server.
 
     Carries no server URL, no credential, and no allowlist entry that the live
-    catalog did not return (R-DISC-2). ``server_revision`` is what an
+    catalog did not return. ``server_revision`` is what an
     application persists with a proposed call and sends back to
     ``/api/v1/mcp/execute``, so a stored-configuration change between the two is
     refused rather than executed.
@@ -520,7 +520,7 @@ async def list_mcp_tools(
 
             if server.allowed_tools == []:
                 # An operator's explicit deny-all is a complete answer already,
-                # so this opens no connection at all (R-RES-4).
+                # so this opens no connection at all.
                 response = McpToolsResponse(
                     server_id=server.id,
                     server_revision=server.revision,
@@ -640,7 +640,7 @@ async def execute_mcp_tool(
             _require_allowed(server, request.tool_name)
             if request.server_revision != server.revision:
                 # In memory, over the resolution both modes already needed, so this
-                # costs no database, platform or MCP round trip (R-RES-2).
+                # costs no database, platform or MCP round trip.
                 raise McpExecutionError(CODE_SERVER_CHANGED, ExecutionState.NOT_STARTED, 409)
 
             # Before DNS, before the concurrency wait, and before any MCP network I/O:
@@ -684,7 +684,7 @@ def _log_outcome(
     started: float,
     timings: dict[str, float],
 ) -> None:
-    """Record timings, outcome and correlation ids, and nothing else (R-OBS-1, R-OBS-2).
+    """Record timings, outcome and correlation IDs, and nothing else.
 
     Both ids are opaque: the caller's ``client_execution_id`` is a canonical
     UUID validated at parse time, and the Otari request id is generated here.

@@ -273,9 +273,7 @@ def _is_any_code_execution_tool_type(type_value: Any) -> bool:
 
 def declares_code_execution(tools: list[dict[str, Any]] | None) -> bool:
     """Whether ``tools`` asks for code execution in any vocabulary, the gateway's or a provider's."""
-    return any(
-        isinstance(entry, dict) and _is_any_code_execution_tool_type(entry.get("type")) for entry in tools or []
-    )
+    return any(isinstance(entry, dict) and _is_any_code_execution_tool_type(entry.get("type")) for entry in tools or [])
 
 
 def first_provider_code_execution_tool(tools: list[dict[str, Any]] | None) -> dict[str, Any] | None:

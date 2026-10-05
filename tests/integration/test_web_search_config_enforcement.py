@@ -197,6 +197,24 @@ def test_invalid_request_domain_rules_are_rejected_for_other_completion_shapes(
     )
 
 
+def test_a_request_domain_in_cookie_syntax_is_served_as_the_bare_host(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A request reads ``.example.com`` as a workspace's policy does, not as a 400."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+
+    response, seen = _post_with_search_patched(
+        client,
+        api_key_header,
+        {**_REQUEST, "tools": [{"type": "otari_web_search", "allowed_domains": [".example.com"]}]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert list(seen.backend_kwargs["allowed_domains"]) == ["example.com"]
+
+
 def test_invalid_legacy_domain_rule_fails_closed_but_remains_visible_for_repair(
     client: TestClient,
     api_key_header: dict[str, str],

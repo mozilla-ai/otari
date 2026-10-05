@@ -1,14 +1,17 @@
 import argparse
+import asyncio
+import contextlib
 import os
 import re
 import shutil
 import sys
 import zlib
-from collections.abc import Callable, Generator
+from collections.abc import AsyncIterator, Callable, Generator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+import anyio
 import httpx
 import pytest
 
@@ -214,6 +217,52 @@ def control_plane_transport(monkeypatch: pytest.MonkeyPatch) -> InstallControlPl
         monkeypatch.setattr("gateway.services.control_plane.transport.post", handler)
 
     return install
+
+
+class TaskGroupMcpTransport:
+    """A fake MCP transport that holds an anyio task group open, as the streamable HTTP client does.
+
+    ``may_open`` and ``may_close`` gate opening and closing.
+    ``ignore_cancel`` makes both gates outlast a cancellation.
+    """
+
+    def __init__(self) -> None:
+        self.may_open = asyncio.Event()
+        self.may_open.set()
+        self.may_close = asyncio.Event()
+        self.may_close.set()
+        self.ignore_cancel = False
+        self.close_error: BaseException | None = None
+        self.entered_in: asyncio.Task[Any] | None = None
+        self.exited_in: list[asyncio.Task[Any] | None] = []
+
+    async def _pass(self, gate: asyncio.Event) -> None:
+        while True:
+            try:
+                await gate.wait()
+                return
+            except asyncio.CancelledError:
+                if not self.ignore_cancel:
+                    raise
+
+    @contextlib.asynccontextmanager
+    async def __call__(self, *args: Any, **kwargs: Any) -> AsyncIterator[tuple[object, object, object]]:
+        await self._pass(self.may_open)
+        async with anyio.create_task_group():
+            self.entered_in = asyncio.current_task()
+            yield object(), object(), object()
+            await self._pass(self.may_close)
+            self.exited_in.append(asyncio.current_task())
+        if self.close_error is not None:
+            raise self.close_error
+
+
+@pytest.fixture
+def mcp_task_group_transport(monkeypatch: pytest.MonkeyPatch) -> TaskGroupMcpTransport:
+    """Serve every MCP connection through one :class:`TaskGroupMcpTransport`."""
+    transport = TaskGroupMcpTransport()
+    monkeypatch.setattr("gateway.services.mcp_client.streamablehttp_client", transport)
+    return transport
 
 
 def _new_sqlite_file(database_url: str) -> Path | None:

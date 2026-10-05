@@ -60,6 +60,7 @@ def _make_ctx(resolved_provider: object = None) -> MagicMock:
     # first) are both no-ops without a session, and are covered end to end in
     # tests/integration/test_gateway_rejection_logging.py.
     ctx.db = None
+    ctx.rate_limit_grant = None
     return ctx
 
 

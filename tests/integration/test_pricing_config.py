@@ -195,6 +195,29 @@ def test_pricing_for_unlisted_provider_is_skipped_not_fatal(
     )
 
 
+def test_pricing_for_a_decision_provider_is_loaded(postgres_url: str, test_db: Session) -> None:
+    """A decisions provider prices its models in ``pricing`` although it is not under ``providers``."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        decision_providers={"typesafe": {"api_key": "test-key"}},
+        pricing={"typesafe:jev-latest": PricingConfig(input_price_per_million=2.0, output_price_per_million=10.0)},
+    )
+
+    app = create_app(config)
+    override_get_db, dispose_override = build_async_session_override(postgres_url)
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app):
+            loaded = test_db.query(ModelPricing).filter(ModelPricing.model_key == "typesafe:jev-latest").first()
+            assert loaded is not None
+            assert loaded.input_price_per_million == 2.0
+    finally:
+        dispose_override()
+
+
 def test_pricing_loaded_from_config_normalizes_legacy_slash_format(postgres_url: str, test_db: Session) -> None:
     """Test that pricing configured with legacy slash format is normalized to colon format."""
     config = GatewayConfig(

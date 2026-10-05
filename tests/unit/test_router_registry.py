@@ -16,12 +16,14 @@ _DATA_PLANE_NEEDING_CONTROL = {
     "/audio/speech",
     "/audio/transcriptions",
     "/batches",
+    "/decisions",
     "/embeddings",
     "/files",
     "/images/generations",
     "/moderations",
     "/rerank",
     "/search",
+    "/systemone",
 }
 
 

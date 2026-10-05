@@ -11,6 +11,8 @@ the request shape apron-auth actually sends is one Google and GitHub accept, and
 nothing here can stand in for it.
 """
 
+import logging
+import re
 from base64 import urlsafe_b64encode
 from hashlib import sha256
 from http.cookies import SimpleCookie
@@ -29,6 +31,7 @@ from sqlmodel import col, select
 
 from gateway.api.routes import auth_oauth
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.log_config import logger as gateway_logger
 from gateway.models.tenancy import User
 from gateway.services import oauth_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
@@ -36,6 +39,9 @@ from gateway.services.oauth_service import FLOW_COOKIE_NAME, FLOW_COOKIE_PATH, O
 
 ORIGIN = "http://testserver"
 PASSWORD = "a-real-password"  # pragma: allowlist secret
+UNPROVEN_PASSWORD = "set-before-verification"  # pragma: allowlist secret
+
+_TOKEN_IN_LINK = re.compile(r"token=([\w-]+)")
 
 
 @pytest.fixture
@@ -497,6 +503,142 @@ def test_a_database_failure_while_staging_the_session_rolls_back_and_says_nothin
     assert response.json()["detail"] == "Database error"
     assert "pruning failed" not in response.text
     assert SESSION_COOKIE_NAME not in response.cookies
+
+
+@pytest.fixture
+def signup_configured(test_config: GatewayConfig, oauth_configured: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Let signup mail its verification link, on a deployment that also offers both providers."""
+    monkeypatch.setattr(test_config, "mail_transport", "console")
+
+
+def sign_up(client: TestClient, *, email: str, password: str) -> None:
+    """Set a password through signup and confirm that it was stored.
+
+    Signup answers 200 whether or not it wrote anything.
+    Sign-in answers 403 only for a correct password on an unverified address.
+    """
+    signed_up = client.post(f"{API_ROOT}/auth/signup", json={"email": email, "password": password})
+    assert signed_up.status_code == 200, signed_up.text
+    locked = client.post(f"{API_ROOT}/auth/session", json={"email": email, "password": password})
+    assert locked.status_code == 403, locked.text
+
+
+@pytest.mark.parametrize("open_signup", [True, False], ids=["open-signup", "admin-added"])
+def test_a_provider_sign_in_does_not_unlock_a_password_set_before_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    signup_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+    open_signup: bool,
+) -> None:
+    # The provider confirms who owns the address, not who set the password.
+    monkeypatch.setattr(test_config, "open_signup", open_signup)
+    if not open_signup:
+        add_member(client, master_key_header, email="ada@example.com")
+    sign_up(client, email="ada@example.com", password=UNPROVEN_PASSWORD)
+    stub_exchange(monkeypatch)
+
+    provider_sign_in = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+    assert provider_sign_in.status_code == 200, provider_sign_in.text
+    assert SESSION_COOKIE_NAME in provider_sign_in.cookies
+    client.cookies.clear()
+
+    password_sign_in = client.post(
+        f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": UNPROVEN_PASSWORD}
+    )
+
+    assert password_sign_in.status_code == 401, password_sign_in.text
+    identity = _identity(db_session, "ada@example.com")
+    assert identity.email_verified_at is not None
+    assert identity.hashed_password is None
+    assert identity.email_verification_token_hash is None
+    assert identity.email_verification_token_expires_at is None
+
+
+def test_a_password_on_an_already_verified_address_survives_linking_a_provider(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    signup_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    db_session: Session,
+) -> None:
+    # The mailed link proved that the password belongs to the owner of the address.
+    add_member(client, master_key_header, email="ada@example.com")
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.INFO, logger="gateway")
+    try:
+        sign_up(client, email="ada@example.com", password=PASSWORD)
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+    token = _TOKEN_IN_LINK.search(caplog.text)
+    assert token, caplog.text
+    assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token.group(1)}).status_code == 200
+    stub_exchange(monkeypatch)
+
+    assert client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"}).status_code == 200
+    client.cookies.clear()
+
+    assert _identity(db_session, "ada@example.com").oauth_provider == "google"
+    password_sign_in = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
+    assert password_sign_in.status_code == 200, password_sign_in.text
+
+
+def test_a_second_provider_sign_in_leaves_the_identity_as_the_first_left_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    signup_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    # The owner of the address set this password from the session of the first sign-in.
+    add_member(client, master_key_header, email="ada@example.com")
+    sign_up(client, email="ada@example.com", password=UNPROVEN_PASSWORD)
+    stub_exchange(monkeypatch)
+    assert client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"}).status_code == 200
+    assert client.put(f"{API_ROOT}/auth/password", json={"new_password": PASSWORD}).status_code == 200
+    client.cookies.clear()
+    first = _identity(db_session, "ada@example.com")
+    left = (first.hashed_password, first.email_verified_at, first.oauth_provider)
+    assert left[0] is not None
+    db_session.expire_all()
+
+    assert client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c2", "state": "s"}).status_code == 200
+    client.cookies.clear()
+
+    second = _identity(db_session, "ada@example.com")
+    assert (second.hashed_password, second.email_verified_at, second.oauth_provider) == left
+    password_sign_in = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
+    assert password_sign_in.status_code == 200, password_sign_in.text
+
+
+def test_a_refused_provider_sign_in_writes_nothing_to_a_deactivated_identity(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    signup_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    add_member(client, master_key_header, email="ada@example.com")
+    sign_up(client, email="ada@example.com", password=UNPROVEN_PASSWORD)
+    identity = _identity(db_session, "ada@example.com")
+    identity.is_active = False
+    db_session.add(identity)
+    db_session.commit()
+    stub_exchange(monkeypatch)
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+
+    assert response.status_code == 401
+    assert SESSION_COOKIE_NAME not in response.cookies
+    db_session.expire_all()
+    refused = _identity(db_session, "ada@example.com")
+    assert refused.oauth_provider is None
+    assert refused.email_verified_at is None
+    assert refused.hashed_password is not None
+    assert refused.email_verification_token_hash is not None
 
 
 # ---------- the state check, with nothing stubbed but the token endpoint ----------

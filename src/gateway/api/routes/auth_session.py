@@ -96,11 +96,7 @@ class CreateSessionRequest(BaseModel):
     which is the one shape the validator below refuses.
     """
 
-    model_config = {
-        "json_schema_extra": {
-            "example": {"email": "operator@example.com", "password": "a-real-password"}
-        }
-    }
+    model_config = {"json_schema_extra": {"example": {"email": "operator@example.com", "password": "a-real-password"}}}
 
     # Every field is bounded, because this endpoint is unauthenticated and the
     # validator below settles which credential arrived rather than how large it
@@ -318,9 +314,7 @@ async def create_session(
         # racing, which the service settles on its own, and a database that
         # cannot stage this cannot stage the session row either.
         await OrganizationDomainService(db).auto_join_for_user(identity)
-        token, expires_at = await create_dashboard_session(
-            db, config.dashboard_session_ttl_hours, user_id=identity.id
-        )
+        token, expires_at = await create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=identity.id)
         await db.commit()
     except SQLAlchemyError:
         await db.rollback()

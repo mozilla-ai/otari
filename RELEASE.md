@@ -34,6 +34,11 @@ The release runs in two halves so the changelog is reviewable before the tag:
    squash commit `v0.4.0` and publishes the GitHub Release with the git-cliff
    notes. Creating the Release is what creates the tag.
 
+The same workflow then sends an `otari-release-published` repository dispatch
+to `mozilla-ai/otari-ai`. The event carries the tag and the merge commit SHA.
+It is sent after the Release is published. The image workflow runs on its own,
+so the event can arrive before or after the image is pushed.
+
 For a local preview of what the next release notes will look like, run
 `make changelog` (set `GITHUB_TOKEN` to resolve PR and author links).
 
@@ -53,6 +58,17 @@ Three workflows react to the published Release:
   uploads the sdist, the pinned requirements and the formula to the Release,
   installs and `brew test`s the formula on a macOS runner, then commits it to
   the tap, so `brew install mozilla-ai/tap/otari` follows every release.
+
+One step stays manual. The Railway template (`deploy/railway/`) is a
+platform object that no workflow writes. After a release that changes the
+config a deploy needs (a new required variable, a new healthcheck path), or
+that should move new deploys to the new image tag, edit the live template on
+the mozilla-ai Railway account and update `deploy/railway/template.json` in a
+PR. When `deploy/railway/listing.md` changed, paste it into the template's
+README field. Then run `make railway-template-check`; it exits non-zero while
+the two disagree. The **Otari Railway Template** workflow
+(`otari-railway-template.yml`) runs the same check on such a PR and weekly. See
+[Maintaining the template](deploy/railway/README.md#maintaining-the-template).
 
 ### Continuous (non-release) builds
 
@@ -121,6 +137,13 @@ release PR body. It does not stop the release.
   repository to it. Until then the workflow's build and macOS jobs still run
   and the rendered formula sits on the Release as `otari.rb`; only the push to
   the tap fails.
+- `PLATFORM_DISPATCH_APP_PRIVATE_KEY`, used by `otari-docker.yml` and
+  `otari-tag-release.yml` to send events to `mozilla-ai/otari-ai`. It belongs
+  to the `otari-notification` GitHub App, which must be installed on
+  `mozilla-ai/otari-ai` with `contents: write`, the permission a repository
+  dispatch needs. `otari-docker.yml` identifies the App with the secret
+  `PLATFORM_DISPATCH_APP_ID`. `otari-tag-release.yml` identifies it with
+  `PLATFORM_DISPATCH_APP_CLIENT_ID` (a repository variable, not a secret).
 - `RELEASE_APP_CLIENT_ID` (a repository variable, not a secret) and
   `RELEASE_APP_PRIVATE_KEY`, used by `otari-release.yml` and
   `otari-tag-release.yml`. They identify the `otari-bot` GitHub App, org-owned

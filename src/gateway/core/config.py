@@ -6,14 +6,14 @@ import types
 import typing
 from collections.abc import Container
 from pathlib import Path
-from typing import Annotated, Any, NamedTuple
+from typing import Annotated, Any, Literal, NamedTuple
 from urllib.parse import urlsplit
 
 import yaml
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, PrivateAttr, ValidationInfo, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gateway.core.addresses import normalized_address
@@ -245,6 +245,61 @@ def validate_search_tool_entry(name: str, entry: Any) -> None:
         raise ValueError(msg)
 
 
+# Upstreams POST /api/v1/decisions can dispatch to. All take TypeSafe's
+# question-and-answer shape, which OpenRouter's alpha Decisions API and
+# llama-server's /v1/systemone adopted, and none is an any-llm provider, so they
+# are declared under ``decision_providers`` rather than ``providers``. Declared
+# here for the same reason as SEARCH_PROVIDERS.
+DECISION_PROVIDERS = ("typesafe", "openrouter", "llamacpp")
+# Self-hosted servers: no endpoint of their own to default to, and normally no key.
+DECISION_PROVIDERS_SELF_HOSTED = ("llamacpp",)
+
+
+def validate_decision_provider_entry(name: str, entry: Any) -> None:
+    """Validate one ``decision_providers`` entry, raising ``ValueError`` on any problem.
+
+    The name is the selector prefix a caller writes (``typesafe:jev-latest``),
+    so it follows the rules of a ``providers:`` instance name.
+    """
+    if not name or ":" in name or "/" in name:
+        msg = f"decision provider name '{name}' must be non-empty and must not contain ':' or '/'."
+        raise ValueError(msg)
+    if name in RESERVED_PROVIDER_INSTANCE_NAMES:
+        msg = f"decision provider name '{name}' is reserved."
+        raise ValueError(msg)
+    if not isinstance(entry, dict):
+        msg = f"decision_providers.{name} must be a mapping."
+        raise ValueError(msg)
+    provider = entry.get("provider") or name
+    if provider not in DECISION_PROVIDERS:
+        msg = (
+            f"decision_providers.{name}.provider '{provider}' is not a supported decision provider "
+            f"(one of: {', '.join(DECISION_PROVIDERS)})."
+        )
+        raise ValueError(msg)
+    self_hosted = provider in DECISION_PROVIDERS_SELF_HOSTED
+    api_key, api_base = entry.get("api_key"), entry.get("api_base")
+    if not api_key and not self_hosted:
+        msg = f"decision_providers.{name}.api_key is required for provider '{provider}'."
+        raise ValueError(msg)
+    if not api_base and self_hosted:
+        msg = f"decision_providers.{name}.api_base is required for provider '{provider}'."
+        raise ValueError(msg)
+    if api_base is not None:
+        try:
+            scheme = urlsplit(str(api_base).strip()).scheme.lower()
+        except ValueError:
+            scheme = ""
+        # Plain http only for a keyless self-hosted server, such as a llama-server on the same host.
+        if scheme != "https" and not (scheme == "http" and self_hosted and not api_key):
+            msg = f"decision_providers.{name}.api_base must use https when it carries an api_key."
+            raise ValueError(msg)
+    timeout = entry.get("timeout")
+    if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0):
+        msg = f"decision_providers.{name}.timeout must be a number of seconds greater than 0."
+        raise ValueError(msg)
+
+
 class _NonScalarField(Exception):
     """Raised when a config field is not a simple scalar settable from a plain env string."""
 
@@ -287,6 +342,92 @@ def provider_credential_env_names(provider_type: str) -> tuple[str, ...] | None:
         return ()
     candidates = (part.strip() for chunk in declared.split("/") for part in chunk.split(" and "))
     return tuple(candidate for candidate in candidates if candidate)
+
+
+class RateLimitRule(BaseModel):
+    """One limit from ``rate_limits``, counted separately for each deployment, API key, user or model.
+
+    ``per: key`` counts each API key on its own; a request with no key (the
+    master key, a dashboard session) is not limited by it. ``per: user`` counts
+    the user a request is billed to, so a service key's end users each get their
+    own count. ``per: deployment`` is one count shared by every request.
+
+    ``per: model`` counts each model in ``models`` on its own, whichever policy,
+    alias or direct call reaches it. It is checked when an attempt is about to
+    call the model rather than at admission, so a routing policy skips a full
+    model and tries its next candidate; a request with no candidate left is
+    refused.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        pattern=r"^[A-Za-z0-9_.-]+$",
+        description="Names the rule in a 429's detail and in the counter's key. Unique across rate_limits.",
+    )
+    per: Literal["deployment", "key", "user", "model"] = Field(description="What one count is shared by.")
+    models: list[str] | None = Field(
+        default=None,
+        description=(
+            "The models a `per: model` rule limits, each as instance:model (the provider instance the "
+            "model is called through, then the model), each counted on its own. Required there and "
+            "refused on any other rule."
+        ),
+    )
+    rpm: int | None = Field(default=None, ge=1, description="Requests per minute.")
+    tpm: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Tokens per minute. A request is admitted on its estimate (prompt plus max output, or "
+            "budget_estimate_default_output_tokens) and charged what it used once it completes."
+        ),
+    )
+    max_concurrent: int | None = Field(default=None, ge=1, description="Requests in flight at once.")
+    lease_sec: float = Field(
+        default=900.0,
+        gt=0,
+        description=(
+            "How long a max_concurrent slot is held at most. A slot is given back when its response "
+            "ends; this bounds what a process that dies mid-request keeps."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _requires_a_limit(self) -> "RateLimitRule":
+        if self.rpm is None and self.tpm is None and self.max_concurrent is None:
+            msg = f"rate limit rule '{self.name}' sets none of rpm, tpm or max_concurrent"
+            raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _models_belong_to_per_model(self) -> "RateLimitRule":
+        if self.per != "model":
+            if self.models is not None:
+                msg = f"rate limit rule '{self.name}' sets models, which only a per: model rule reads"
+                raise ValueError(msg)
+            return self
+        if not self.models:
+            msg = f"rate limit rule '{self.name}' is per: model and names no models"
+            raise ValueError(msg)
+        self.models = [_canonical_model(self.name, entry) for entry in self.models]
+        return self
+
+
+def _canonical_model(rule_name: str, entry: str) -> str:
+    """``entry`` as ``instance:model``, the spelling an attempt is matched on; ``instance/model`` is accepted too.
+
+    Split at whichever delimiter comes first, since a model id may contain the other one
+    (``together:meta-llama/Llama-3.3-70B``, ``ollama/llama3:latest``).
+    """
+    text = entry.strip()
+    positions = [index for index in (text.find(":"), text.find("/")) if index != -1]
+    split_at = min(positions) if positions else -1
+    instance, model = (text[:split_at], text[split_at + 1 :]) if split_at != -1 else ("", "")
+    if not instance or not model:
+        msg = f"rate limit rule '{rule_name}' names '{entry}'; write a model as instance:model"
+        raise ValueError(msg)
+    return f"{instance}:{model}"
 
 
 class ModelCapabilityConfig(BaseModel):
@@ -379,6 +520,17 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
         default="0.0.0.0", description="Host to bind the server to"
     )  # noqa: S104
     port: Annotated[int, Shown(SettingsGroup.SERVER)] = Field(default=8000, description="Port to bind the server to")
+    forwarded_allow_ips: Annotated[str | None, Shown(SettingsGroup.SERVER)] = Field(
+        default=None,
+        description=(
+            "Comma-separated addresses or networks of the proxies whose X-Forwarded-For and "
+            "X-Forwarded-Proto headers `otari serve` trusts, or '*' for any peer. The per-IP sign-in "
+            "and public-catalog limits key on the address these headers resolve to, so behind a "
+            "proxy that is not listed every visitor shares the proxy's address. Use '*' only where "
+            "the proxy is the sole path to the server, as on Railway. Unset leaves it to uvicorn: "
+            "FORWARDED_ALLOW_IPS if set, otherwise 127.0.0.1."
+        ),
+    )
 
     database_url: Annotated[str, Shown(SettingsGroup.SERVER)] = Field(
         default="sqlite:///./otari.db",
@@ -480,6 +632,29 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
     rate_limit_rpm: Annotated[int | None, Shown(SettingsGroup.RATE_LIMITING)] = Field(
         default=None, ge=1, description="Maximum requests per minute per user (None disables rate limiting)"
     )
+    rate_limit_store: Annotated[Literal["memory", "redis"], Shown(SettingsGroup.RATE_LIMITING)] = Field(
+        default="memory",
+        description=(
+            "Where rate_limit_rpm is counted: 'memory' (each process counts on its own, so N "
+            "replicas admit N times the limit) or 'redis' (every replica shares one count, at "
+            "rate_limit_redis_url). Needs the redis extra for 'redis'."
+        ),
+    )
+    rate_limit_redis_url: Annotated[str | None, SECRET] = Field(
+        default=None,
+        description=(
+            "Redis URL for the 'redis' rate-limit store, e.g. 'redis://redis:6379/0' or "
+            "'rediss://user:password@host:6380/0'. Required when rate_limit_store is 'redis'."
+        ),
+    )
+    rate_limits: Annotated[list[RateLimitRule], OMITTED] = Field(
+        default_factory=list,
+        description=(
+            "Limits on requests per minute, tokens per minute and requests in flight, each counted "
+            "per deployment, per API key, per user or per model, in rate_limit_store. Applies to chat "
+            "completions, messages and responses."
+        ),
+    )
     dashboard_login_rate_limit_per_minute: Annotated[int | None, Shown(SettingsGroup.RATE_LIMITING)] = Field(
         default=10,
         ge=1,
@@ -510,6 +685,20 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
     enable_metrics: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
         default=False,
         description="Enable Prometheus metrics endpoint at /metrics",
+    )
+    accept_incoming_trace_context: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
+        default=False,
+        description=(
+            "Honor incoming OpenTelemetry context propagation headers. The default "
+            "propagator uses W3C Trace Context (traceparent/tracestate); the "
+            "OTEL_PROPAGATORS environment variable controls the configured set. "
+            "Disabled by default: the headers are unauthenticated (the middleware "
+            "runs before route auth) and, once enabled, let any caller pick the "
+            "trace id, parent span id, and sampling flag that reach the operator's "
+            "collector. Enable only for backend/service-to-service deployments "
+            "where callers are trusted, ideally behind a proxy that strips these "
+            "headers from untrusted edges."
+        ),
     )
     enable_docs: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
         default=True,
@@ -810,6 +999,16 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             "bound, so the store grows without limit while each decision stays bounded."
         ),
     )
+    decision_providers: Annotated[dict[str, dict[str, Any]], OMITTED] = Field(
+        default_factory=dict,
+        description=(
+            "Upstreams served by POST /api/v1/decisions, keyed by the selector prefix callers "
+            "write ('typesafe:jev-latest'). Each entry may declare a 'provider' (one of: typesafe, "
+            "openrouter, llamacpp; defaults to the key), an 'api_key' (required except for llamacpp), "
+            "an 'api_base' (required for llamacpp; https whenever a key is set), and a 'timeout' "
+            "in seconds. Standalone-mode only."
+        ),
+    )
     search_tools: Annotated[dict[str, dict[str, Any]], OMITTED] = Field(
         default_factory=dict,
         description=(
@@ -982,18 +1181,29 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
         default=20,
         ge=0,
         description=(
-            "Most files one code-execution call may have stored from its sandbox workspace, "
-            "and most files one reply may have copied from a provider's own sandbox. "
-            "Files past the count are not stored."
+            "Most files one code-execution call may have stored from its sandbox workspace. "
+            "The same count separately bounds how many files one request may copy from a "
+            "provider's own sandbox, so a request that uses both has one allowance of each. "
+            "Files past a count are not stored."
         ),
     )
     files_output_max_bytes: Annotated[int, Shown(SettingsGroup.FILES)] = Field(
         default=64 * 1024 * 1024,
         ge=1,
         description=(
-            "Total bytes one code-execution call may have stored from its sandbox workspace, or one reply "
-            "may have copied from a provider's own sandbox, across all the files produced. "
-            "A file that would go past it is not stored."
+            "Total bytes one code-execution call may have stored from its sandbox workspace, across "
+            "all the files it produced. The same total separately bounds what one request may copy "
+            "from a provider's own sandbox. A file that would go past an allowance is not stored."
+        ),
+    )
+    files_provider_copy_max_sec: Annotated[float, Shown(SettingsGroup.FILES)] = Field(
+        default=60.0,
+        gt=0,
+        description=(
+            "How long one request may spend copying the files a provider's own sandbox produced, "
+            "across every call it makes. The copy runs before the caller sees a file id, so this "
+            "is time the reply or the stream waits; a stream emits its usual keepalive meanwhile "
+            "(streaming_keepalive_interval_ms). A file the limit cuts short is not stored."
         ),
     )
     files_retention_hours: Annotated[int | None, Shown(SettingsGroup.FILES)] = Field(
@@ -1291,8 +1501,7 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
     mcp_allow_loopback: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
         default=True,
         description=(
-            "SSRF gate: allow MCP server URLs that resolve to loopback (useful for same-host "
-            "sidecars). On by default."
+            "SSRF gate: allow MCP server URLs that resolve to loopback (useful for same-host sidecars). On by default."
         ),
     )
     mcp_allow_private_hosts: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
@@ -1337,6 +1546,10 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
     # The same idea for ``search_tools``: the config-file tools as loaded, before
     # any dashboard-stored tool is overlaid by ``search_tool_store_service``.
     _search_tool_baseline: dict[str, dict[str, Any]] | None = PrivateAttr(default=None)
+
+    # The same idea for ``rate_limits``: the config-file rules, before the
+    # dashboard's stored rules are added by the rate-limits service.
+    _rate_limit_baseline: list["RateLimitRule"] | None = PrivateAttr(default=None)
 
     # SHA-256 hash of a master key generated on first run (see
     # ``master_key_service``). Set at startup when no ``master_key`` is
@@ -1739,8 +1952,7 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
                 raise ValueError(msg)
             if ":" in name or "/" in name:
                 msg = (
-                    f"routing policy name '{name}' must not contain ':' or '/' "
-                    "(it would shadow a real model selector)."
+                    f"routing policy name '{name}' must not contain ':' or '/' (it would shadow a real model selector)."
                 )
                 raise ValueError(msg)
             if name in self.providers:
@@ -1833,10 +2045,7 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
                 try:
                     LLMProvider(impl)
                 except ValueError as exc:
-                    msg = (
-                        f"providers.{instance}.provider_type '{declared}' is not a known provider "
-                        "implementation."
-                    )
+                    msg = f"providers.{instance}.provider_type '{declared}' is not a known provider implementation."
                     raise ValueError(msg) from exc
             models = entry.get("models")
             if models is not None and not (isinstance(models, list) and all(isinstance(m, str) for m in models)):
@@ -2070,6 +2279,11 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             if provider in SEARCH_PROVIDERS_REQUIRING_API_BASE and not entry.get("api_base"):
                 validate_search_tool_transport(name, self.web_search_url, entry.get("api_key"))
 
+    def validate_decision_providers(self) -> None:
+        """Validate the ``decision_providers`` map at startup so misconfig fails fast."""
+        for name, entry in self.decision_providers.items():
+            validate_decision_provider_entry(name, entry)
+
     @model_validator(mode="after")
     def _validate_database_timeout_ordering(self) -> "GatewayConfig":
         """Keep the server-side statement timeout behind the client-side one.
@@ -2104,6 +2318,16 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
         if value is not None and not value.strip():
             return None
         return value
+
+    @field_validator("rate_limits")
+    @classmethod
+    def _validate_rate_limit_names(cls, rules: list[RateLimitRule]) -> list[RateLimitRule]:
+        names = [rule.name for rule in rules]
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            msg = f"rate_limits names must be unique, repeated: {', '.join(duplicates)}"
+            raise ValueError(msg)
+        return rules
 
     @field_validator("web_search_provider")
     @classmethod
@@ -2317,9 +2541,7 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             try:
                 inline_timeout = int(raw_inline_timeout)
             except (TypeError, ValueError):
-                raise ValueError(
-                    f"{inline_key} must be a positive integer, got {raw_inline_timeout!r}"
-                ) from None
+                raise ValueError(f"{inline_key} must be a positive integer, got {raw_inline_timeout!r}") from None
             if (
                 isinstance(raw_inline_timeout, bool)
                 or (isinstance(raw_inline_timeout, float) and not raw_inline_timeout.is_integer())
@@ -2609,6 +2831,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.validate_aliases()
     config.validate_routing_policies()
     config.validate_search_tools()
+    config.validate_decision_providers()
     config.validate_mail_transport()
     config.validate_webauthn_relying_party()
     config.warn_about_half_configured_oauth()

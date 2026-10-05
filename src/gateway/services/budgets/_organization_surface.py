@@ -184,7 +184,7 @@ class _OrganizationSurface:
         Ceilings and member policies are counted so the refusal can say which.
         A gateway user's assignment is counted but not named, because the admin cannot act on gateway users,
         and without the count the ORM would null the assignment out silently.
-        A reset record refuses at flush time instead, and is reported the same way.
+        The budget's reset history goes with it, as it does on the deployment's delete.
         """
         organization = await self._get_managed_organization(user)
         budget = await self._require_own_budget(organization=organization, budget_id=budget_id)
@@ -194,6 +194,7 @@ class _OrganizationSurface:
             raise OrganizationBudgetInUseError(budget.budget_id, ceilings=ceilings, defaults=defaults)
         if await self._repositories.budgets.count_users_for_budget(budget.budget_id):
             raise OrganizationBudgetHeldElsewhereError(budget.budget_id)
+        await self._repositories.budgets.remove_reset_logs(budget.budget_id)
         try:
             await self._repositories.budgets.remove(budget)
         except BudgetStillReferencedError:
@@ -300,4 +301,3 @@ class _OrganizationSurface:
             changes["period_start"], changes["period_end"] = _current_window(budget)
         ceiling = await self._repositories.ceilings.update(ceiling, changes)
         return OrganizationScopedBudgetPublic.from_model(ceiling, budget, organization_id=organization.id)
-

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from opentelemetry import trace
 
+from gateway.models.tools import WebTool
 from gateway.services._tool_loop import MaxToolIterationsExceeded
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.web_extraction import ExtractionError
@@ -50,12 +51,12 @@ if TYPE_CHECKING:
 tracer = trace.get_tracer(__name__)
 
 
-WEB_SEARCH_TOOL_NAME = "web_search"
+WEB_SEARCH_TOOL_NAME = WebTool.SEARCH.value
 # The dated and preview spellings of a provider's own web-search tool type
 # (``web_search_20250305``, ``web_search_preview``). A caller using one is asking in
 # the provider's own vocabulary rather than the gateway's.
 WEB_SEARCH_NATIVE_TYPE_PREFIX = "web_search_"
-WEB_FETCH_TOOL_NAME = "web_fetch"
+WEB_FETCH_TOOL_NAME = WebTool.FETCH.value
 MAX_WEB_RETRIEVAL_CALLS = 10
 
 # Gateway-controlled /search query params that provider_options must never override.
@@ -271,9 +272,7 @@ class WebRetrievalBackend:
     async def __aenter__(self) -> WebRetrievalBackend:
         try:
             if self._enable_search:
-                self._client = await self._stack.enter_async_context(
-                    httpx.AsyncClient(timeout=self._search_timeout_s)
-                )
+                self._client = await self._stack.enter_async_context(httpx.AsyncClient(timeout=self._search_timeout_s))
             if self._retrieval_service is None:
                 transport = TrustedProxyAsyncHTTPTransport() if self._trust_env_proxy else PinnedAsyncHTTPTransport()
                 retrieval_client = await self._stack.enter_async_context(

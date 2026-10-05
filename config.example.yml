@@ -59,6 +59,10 @@ providers:
 # Optional server controls.
 # rate_limit_rpm: 60
 # enable_metrics: true
+# Honor incoming OpenTelemetry trace context (traceparent/tracestate by
+# default). Off by default: the headers are unauthenticated, so enable it only
+# for trusted service callers.
+# accept_incoming_trace_context: true
 # cors_allow_origins:
 #   - "https://app.example.com"
 
@@ -98,6 +102,7 @@ providers:
 # files_max_bytes: 536870912
 # files_output_max_files: 20
 # files_output_max_bytes: 67108864
+# files_provider_copy_max_sec: 60
 # files_retention_hours: 168
 # files_sweep_interval_sec: 3600
 # A copy at the provider that runs a request's code, and how long it lives there:

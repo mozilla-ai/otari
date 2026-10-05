@@ -14,11 +14,9 @@ from pydantic import ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
-    CodeExecutionPortDep,
-    McpServerPortDep,
     ModelProviderPortDep,
     OptionalFileServiceDep,
-    WebSearchPolicyPortDep,
+    ToolPortsDep,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     get_config,
@@ -289,11 +287,13 @@ def _usage_to_completion_usage(
         return None
     details = getattr(usage, "input_tokens_details", None)
     cache_read_tokens = (getattr(details, "cached_tokens", 0) or 0) if details is not None else 0
+    output_details = getattr(usage, "output_tokens_details", None)
     return GatewayUsage(
         prompt_tokens=getattr(usage, "input_tokens", 0) or 0,
         completion_tokens=getattr(usage, "output_tokens", 0) or 0,
         total_tokens=getattr(usage, "total_tokens", 0) or 0,
         cache_read_tokens=cache_read_tokens,
+        reasoning_tokens=getattr(output_details, "reasoning_tokens", 0) or 0,
     )
 
 
@@ -340,6 +340,9 @@ class _ResponsesAdapter:
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=PROVIDER_ERROR_DETAIL,
         )
+
+    def stream_error_payload(self, exc: BaseException) -> str:
+        return self.stream_format.error_payload
 
     def format_chunk(self, chunk: ResponseStreamEvent) -> str:
         return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True)}\n\n"
@@ -522,9 +525,7 @@ async def create_response(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
-    code_execution_port: CodeExecutionPortDep,
-    mcp_server_port: McpServerPortDep,
-    web_search_policy_port: WebSearchPolicyPortDep,
+    tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
 ) -> dict[str, Any] | FastAPIResponse:
     """OpenAI-compatible Responses endpoint.
@@ -662,15 +663,13 @@ async def create_response(
             web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
         ),
         backends=ToolBackends(
-            code_execution_port=code_execution_port,
-            mcp_server_port=mcp_server_port,
-            web_search_policy_port=web_search_policy_port,
+            ports=tool_ports,
             sandbox_containers=build_sandbox_container_registry(
                 config=config,
                 uow=ctx.uow,
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
-                port=code_execution_port,
+                port=tool_ports.code_execution,
             ),
             sandbox_files=build_sandbox_file_bridge(
                 raw_request=raw_request,

@@ -79,6 +79,8 @@ DATA_PLANE_PREFIXES: tuple[tuple[str, str], ...] = (
     ("/images", "priced per image"),
     ("/audio", "transcription and speech, priced per second or per character"),
     ("/rerank", "priced per request"),
+    ("/decisions", "priced per token like a completion"),
+    ("/systemone", "the TypeSafe SDK's path for /decisions"),
     ("/moderations", "dispatches upstream even where the upstream charges nothing"),
     (
         "/search",
@@ -110,8 +112,7 @@ router = APIRouter(tags=["hosted-mode"], include_in_schema=False)
 def _detail(data_plane_url: str | None) -> str:
     target = data_plane_url or _GENERIC_TARGET
     return (
-        "This deployment is a control plane and does not serve inference. "
-        f"Send inference requests to {target} instead."
+        f"This deployment is a control plane and does not serve inference. Send inference requests to {target} instead."
     )
 
 

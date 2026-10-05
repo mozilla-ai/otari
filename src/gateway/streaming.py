@@ -15,6 +15,7 @@ from gateway.core.usage import (
     cache_tokens_in_prompt_of,
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
+    reasoning_tokens_of,
 )
 from gateway.log_config import logger
 from gateway.model_labeling import relabel_model
@@ -93,9 +94,13 @@ ANTHROPIC_STREAM_FORMAT = StreamFormat(
 )
 
 
-def _merge_usage(current: CompletionUsage, update: CompletionUsage) -> CompletionUsage:
+def merge_stream_usage(current: CompletionUsage, update: CompletionUsage) -> CompletionUsage:
     """Merge usage data, keeping the last non-zero value for each field."""
+    # Provider extras (e.g. Ollama's timing, read by provider_latency_ms_of) ride
+    # along; the update's win, as they arrive on the final chunk.
+    extras = GatewayUsage.external_extras(current) | GatewayUsage.external_extras(update)
     return GatewayUsage(
+        **extras,
         prompt_tokens=update.prompt_tokens or current.prompt_tokens,
         completion_tokens=update.completion_tokens or current.completion_tokens,
         total_tokens=update.total_tokens or current.total_tokens,
@@ -106,6 +111,7 @@ def _merge_usage(current: CompletionUsage, update: CompletionUsage) -> Completio
         # (Anthropic) if any chunk reported it that way, so the seed's default of
         # "in prompt" never masks the Anthropic shape.
         cache_tokens_in_prompt=cache_tokens_in_prompt_of(update) and cache_tokens_in_prompt_of(current),
+        reasoning_tokens=reasoning_tokens_of(update) or reasoning_tokens_of(current),
     )
 
 
@@ -165,6 +171,7 @@ async def streaming_generator(
     is_cost_carrier: Callable[[Any], bool] | None = None,
     attach_settlement: Callable[[Any, S], bool] | None = None,
     on_first_chunk: Callable[[], None] | None = None,
+    error_payload: Callable[[BaseException], str] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Shared SSE streaming generator with usage tracking and error handling.
 
@@ -203,6 +210,9 @@ async def streaming_generator(
             non-keepalive chunk is about to be formatted and yielded. Lets the
             caller record time-to-first-token without this generator knowing
             anything about how that timing gets used or persisted.
+        error_payload: Renders the SSE error event for the exception that ended
+            the stream, so a dialect can say what kind of failure it was. When
+            omitted, ``fmt.error_payload`` is sent for every failure.
 
     """
     usage = CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
@@ -244,7 +254,7 @@ async def streaming_generator(
                     continue
                 chunk_usage = extract_usage(chunk)
                 if chunk_usage:
-                    usage = _merge_usage(usage, chunk_usage)
+                    usage = merge_stream_usage(usage, chunk_usage)
                     has_usage = True
 
                 if settle_before_done and is_cost_carrier is not None and is_cost_carrier(chunk):
@@ -292,6 +302,7 @@ async def streaming_generator(
             try:
                 if has_usage:
                     if keepalive_interval > 0:
+
                         async def _settle() -> S | None:
                             return await on_complete(usage)
 
@@ -348,7 +359,7 @@ async def streaming_generator(
         for buffered_chunk in terminal_buffer:
             yield _format_and_mark_first(buffered_chunk)
         terminal_buffer.clear()
-        yield fmt.error_payload
+        yield error_payload(e) if error_payload is not None else fmt.error_payload
         if fmt.yield_done_on_error:
             yield fmt.done_marker
         settled = True

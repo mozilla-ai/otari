@@ -8,13 +8,12 @@ import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.tools_exceptions import (
-    WebAccessDomainsExcludedError,
     WebAccessNotEnabledError,
     WebAccessToolNotAuthorizedError,
     WebSearchNotEnabledError,
     WorkspaceWebSearchDomainsExcludedError,
 )
-from gateway.models.tools import ResolvedWebSearchConfig
+from gateway.models.tools import ResolvedWebSearchConfig, WebTool
 from gateway.services.tools import apply_web_access_policy
 
 
@@ -39,7 +38,7 @@ def _config() -> GatewayConfig:
 def test_no_policy_narrows_nothing() -> None:
     entry = {"type": "otari_web_search", "max_results": 3}
 
-    grant = apply_web_access_policy(None, requested_tools=["web_search"], search_tool_entry=entry, config=_config())
+    grant = apply_web_access_policy(None, requested_tools=[WebTool.SEARCH], search_tool_entry=entry, config=_config())
 
     assert grant.search_tool_entry == entry
     assert grant.fetch_policy.allowed == ()
@@ -49,15 +48,15 @@ def test_no_policy_narrows_nothing() -> None:
 @pytest.mark.parametrize(
     ("requested_tools", "error"),
     [
-        (["web_search"], WebSearchNotEnabledError),
-        (["web_fetch"], WebAccessNotEnabledError),
-        (["web_search", "web_fetch"], WebAccessNotEnabledError),
+        ([WebTool.SEARCH], WebSearchNotEnabledError),
+        ([WebTool.FETCH], WebAccessNotEnabledError),
+        ([WebTool.SEARCH, WebTool.FETCH], WebAccessNotEnabledError),
     ],
 )
 def test_a_disabled_policy_refuses_with_the_error_for_what_was_declared(
-    requested_tools: list[str], error: type[Exception]
+    requested_tools: list[WebTool], error: type[Exception]
 ) -> None:
-    entry = {"type": "otari_web_search"} if "web_search" in requested_tools else None
+    entry = {"type": "otari_web_search"} if WebTool.SEARCH in requested_tools else None
 
     with pytest.raises(error):
         apply_web_access_policy(
@@ -69,16 +68,27 @@ def test_a_tool_the_policy_does_not_authorize_is_refused() -> None:
     with pytest.raises(WebAccessToolNotAuthorizedError):
         apply_web_access_policy(
             _policy(authorized_tools=frozenset({"web_search"})),
-            requested_tools=["web_fetch"],
+            requested_tools=[WebTool.FETCH],
             search_tool_entry=None,
             config=_config(),
         )
 
 
+def test_a_tool_name_this_deployment_does_not_know_is_ignored() -> None:
+    grant = apply_web_access_policy(
+        _policy(authorized_tools=frozenset({"web_search", "web_crawl"})),
+        requested_tools=[WebTool.SEARCH],
+        search_tool_entry={"type": "otari_web_search"},
+        config=_config(),
+    )
+
+    assert grant.search_tool_entry is not None
+
+
 def test_search_domains_narrow_the_workspace_fetch_domains() -> None:
     grant = apply_web_access_policy(
         _policy(allowed_domains=("example.com",), blocked_domains=("blocked.example.com",)),
-        requested_tools=["web_search", "web_fetch"],
+        requested_tools=[WebTool.SEARCH, WebTool.FETCH],
         search_tool_entry={"type": "otari_web_search", "allowed_domains": ["docs.example.com"]},
         config=_config(),
     )
@@ -88,10 +98,10 @@ def test_search_domains_narrow_the_workspace_fetch_domains() -> None:
 
 
 def test_fetch_domains_that_share_nothing_with_the_workspace_are_refused() -> None:
-    with pytest.raises(WebAccessDomainsExcludedError):
+    with pytest.raises(WorkspaceWebSearchDomainsExcludedError):
         apply_web_access_policy(
             _policy(allowed_domains=("example.com",)),
-            requested_tools=["web_search", "web_fetch"],
+            requested_tools=[WebTool.SEARCH, WebTool.FETCH],
             search_tool_entry={"type": "otari_web_search", "allowed_domains": ["other.test"]},
             config=_config(),
         )
@@ -101,7 +111,7 @@ def test_search_domains_that_share_nothing_with_the_workspace_are_refused() -> N
     with pytest.raises(WorkspaceWebSearchDomainsExcludedError):
         apply_web_access_policy(
             _policy(allowed_domains=("example.com",)),
-            requested_tools=["web_search"],
+            requested_tools=[WebTool.SEARCH],
             search_tool_entry={"type": "otari_web_search", "allowed_domains": ["other.test"]},
             config=_config(),
         )
@@ -111,7 +121,7 @@ def test_the_workspace_ceiling_is_floored_against_the_deployment_default() -> No
     entry = {"type": "otari_web_search"}
 
     grant = apply_web_access_policy(
-        _policy(max_results=12), requested_tools=["web_search"], search_tool_entry=entry, config=_config()
+        _policy(max_results=12), requested_tools=[WebTool.SEARCH], search_tool_entry=entry, config=_config()
     )
 
     assert grant.search_tool_entry is not None

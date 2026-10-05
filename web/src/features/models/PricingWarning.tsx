@@ -2,8 +2,7 @@ import { Button } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
-import { isDeploymentOperator } from "@/features/organization/roles"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import { useDeploymentOperator } from "@/shared/api/organizations"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
 import { useFailureCount } from "@/shared/api/usage"
 import { formatNumber } from "@/shared/helpers/format"
@@ -29,15 +28,7 @@ export function PricingWarning() {
   // organization context, which the shell reads anyway, for the reason
   // `useProviderKeyEncryption` does: a second request to ask the same question
   // is the cost this removes.
-  const organization = useOrganizationContext()
-  // Fails open on a failed context read, which is what the rail does with the
-  // same class of gate: `/settings` is `require_deployment_operator`, so it
-  // refuses with a 403 rather than a 404, and `nav/types.ts` settles what that
-  // means with no answer. Here it costs more than a hidden row, because the
-  // banner is the only thing reporting that traffic is being dropped right now.
-  // The ordinary tenant path, a resolved context saying no, still asks nothing.
-  const isOperator =
-    isDeploymentOperator(organization.data) || organization.isError
+  const { isOperator } = useDeploymentOperator()
   const settings = useSettings(isOperator)
   const updateSettings = useUpdateSettings()
   const [dismissed, setDismissed] = useState(false)

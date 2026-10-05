@@ -11,6 +11,7 @@ from uvicorn.config import logger
 
 from gateway.core.config import API_ROOT, load_config
 from gateway.log_config import setup_logger
+from gateway.services.url_safety import redact_url_secrets
 
 _LOG_LEVEL_NAMES: dict[str, int] = {
     "DEBUG": logging.DEBUG,
@@ -147,6 +148,7 @@ def serve(
             app,
             host=gateway_config.host,
             port=gateway_config.port,
+            forwarded_allow_ips=gateway_config.forwarded_allow_ips,
         )
     except KeyboardInterrupt:
         logger.info("\nShutting down Otari...")
@@ -165,7 +167,7 @@ def init_db(config: str | None, database_url: str | None) -> None:
     if database_url:
         gateway_config.database_url = database_url
 
-    click.echo(f"Initializing database: {gateway_config.database_url}")
+    click.echo(f"Initializing database: {redact_url_secrets(gateway_config.database_url)}")
 
     db_init(gateway_config)
 
@@ -192,7 +194,7 @@ def migrate(config: str | None, database_url: str | None, revision: str) -> None
         click.echo("alembic command not found in PATH", err=True)
         sys.exit(1)
 
-    click.echo(f"Running migrations on: {gateway_config.database_url}")
+    click.echo(f"Running migrations on: {redact_url_secrets(gateway_config.database_url)}")
     click.echo(f"Target revision: {revision}")
 
     env = os.environ.copy()
@@ -295,7 +297,7 @@ def routing_explain(
     """
     from gateway.models.routing import PolicySpec
     from gateway.services.routing import BudgetState, NoEligibleCandidatesError, compile_policy
-    from gateway.services.routing.backends import backend_is_weighted
+    from gateway.services.routing.backends import backend_is_priority, backend_is_weighted
     from gateway.services.routing.decide import explain_router_ordering
 
     cfg = load_config(config)
@@ -371,6 +373,11 @@ def routing_explain(
             else "  weighted: no candidate in the split is usable by this caller, so the plan above is "
             "whatever the failure chain leaves. Every candidate in the split is listed as dropped, with "
             "the reason it went."
+        )
+    elif backend_is_priority(spec.router_backend):
+        click.echo(
+            "  priority: each request goes to the first candidate above that has room under its per: model "
+            "rate limits, then on_failure. A candidate that fails before responding falls to the next one."
         )
     elif spec.router_backend is not None:
         # The plan above is the *decline* path, because a router needs a live

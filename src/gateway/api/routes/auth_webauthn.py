@@ -188,9 +188,7 @@ async def register_passkey(
     return webauthn_service.to_public(credential, relying_party_id=credential.rp_id)
 
 
-@router.post(
-    "/authenticate/options", response_model=CeremonyOptions, dependencies=[Depends(require_passkey_support)]
-)
+@router.post("/authenticate/options", response_model=CeremonyOptions, dependencies=[Depends(require_passkey_support)])
 async def authentication_options(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -207,9 +205,7 @@ async def authentication_options(
     return options
 
 
-@router.post(
-    "/authenticate", response_model=PasskeySessionResponse, dependencies=[Depends(require_passkey_support)]
-)
+@router.post("/authenticate", response_model=PasskeySessionResponse, dependencies=[Depends(require_passkey_support)])
 async def authenticate_passkey(
     body: AuthenticatePasskeyRequest,
     request: Request,

@@ -1,19 +1,21 @@
 {
-  "_comment": "Reviewable snapshot of the Otari + Postgres Railway template. A Railway multi-service template is a platform-hosted object that cannot be fully round-tripped from a repo file, so this is the human source of truth for what the live template contains, not a file Railway imports. The live template lives on the mozilla-ai Railway account; its deploy link is the Deploy on Railway button in README.md. When the live template changes, update this snapshot and deploy/railway/README.md in the same PR.",
+  "_comment": "Reviewable snapshot of the Otari + Postgres Railway template. A Railway multi-service template is a platform-hosted object that cannot be fully round-tripped from a repo file, so this is the human source of truth for what the live template contains, not a file Railway imports. The live template lives on the mozilla-ai Railway account; its deploy link is the Deploy on Railway button in README.md. When the live template changes, update this snapshot and deploy/railway/README.md in the same PR. The template's README on Railway is deploy/railway/listing.md.",
   "name": "Otari",
+  "code": "otari",
   "description": "Self-hosted Otari, an OpenAI-compatible LLM gateway, in front of key-only providers (OpenAI, Anthropic, Mistral, Gemini), backed by a managed Postgres database. Add provider keys on the dashboard, get virtual API keys, budgets, and usage tracking.",
   "services": {
     "otari": {
       "name": "otari",
       "source": {
-        "image": "docker.io/mzdotai/otari:latest"
+        "image": "mzdotai/otari:0.14.1"
       },
       "deploy": {
         "startCommand": null,
-        "healthcheckPath": "/api/v1/health"
+        "healthcheckPath": "/api/v1/health/readiness"
       },
       "networking": {
-        "targetPort": 8000
+        "targetPort": 8000,
+        "publicDomain": true
       },
       "variables": {
         "OTARI_DATABASE_URL": {
@@ -45,6 +47,21 @@
           "defaultValue": "${{secret(43, \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_\")}}",
           "isOptional": false,
           "description": "Key that names the provider account a copy of an attached file is in. Otari refuses to start without it while provider copies are on. Auto-generated on deploy, independent of OTARI_SECRET_KEY; losing it only makes the next request copy each file again."
+        },
+        "OTARI_FORWARDED_ALLOW_IPS": {
+          "defaultValue": "*",
+          "isOptional": false,
+          "description": "Trust X-Forwarded-For from any peer, so the per-IP sign-in and public-catalog limits see the real client instead of Railway's ingress. Safe here because the ingress is the only path to the container. Without it every visitor shares a few ingress addresses, and ten wrong passwords from anyone lock the dashboard for everyone for a minute."
+        },
+        "OTARI_PUBLIC_BASE_URL": {
+          "defaultValue": "https://${{RAILWAY_PUBLIC_DOMAIN}}",
+          "isOptional": true,
+          "description": "This deployment's public URL, with no trailing slash. Builds OAuth redirect URIs, the passkey relying-party ID and the links in outgoing email. Pre-wired to the service's Railway domain; change it if you attach a custom domain."
+        },
+        "PORT": {
+          "defaultValue": "8000",
+          "isOptional": false,
+          "description": "The port Railway's deploy-time healthcheck probes. Otari listens on OTARI_PORT (8000, pinned in the image) and never reads PORT, so without this the healthcheck probes nothing and the deploy fails after its timeout. Keep it equal to the target port."
         }
       }
     },
@@ -53,15 +70,21 @@
       "source": {
         "image": "ghcr.io/railwayapp-templates/postgres-ssl:18"
       },
-      "_comment": "Railway managed Postgres. Exposes DATABASE_URL (a composed reference like postgresql://${{POSTGRES_USER}}:${{POSTGRES_PASSWORD}}@${{RAILWAY_PRIVATE_DOMAIN}}:5432/${{POSTGRES_DB}}), which the otari service reads as ${{Postgres.DATABASE_URL}}. The variables below carry the standard postgres-ssl defaults so a deploying user is never prompted for them.",
+      "_comment": "Railway managed Postgres. The otari service reads DATABASE_URL as ${{Postgres.DATABASE_URL}}. The variables below carry the standard postgres-ssl defaults so a deploying user is never prompted for them; Railway refuses to publish a template while any of them lacks a description.",
       "variables": {
-        "PGDATA": { "defaultValue": "/var/lib/postgresql/data/pgdata", "isOptional": false },
-        "PGPORT": { "defaultValue": "5432", "isOptional": false },
-        "POSTGRES_DB": { "defaultValue": "railway", "isOptional": false },
-        "POSTGRES_USER": { "defaultValue": "postgres", "isOptional": false },
-        "POSTGRES_PASSWORD": { "defaultValue": "${{secret(32)}}", "isOptional": false },
-        "SSL_CERT_DAYS": { "defaultValue": "820", "isOptional": false },
-        "RAILWAY_DEPLOYMENT_DRAINING_SECONDS": { "defaultValue": "60", "isOptional": false }
+        "PGDATA": { "defaultValue": "/var/lib/postgresql/data/pgdata", "isOptional": false, "description": "Where Postgres keeps its data files on the volume. Leave as-is." },
+        "PGHOST": { "defaultValue": "${{RAILWAY_PRIVATE_DOMAIN}}", "isOptional": false, "description": "Private host name of this database. Set by Railway; leave as-is." },
+        "PGPORT": { "defaultValue": "5432", "isOptional": false, "description": "Port Postgres listens on. Leave as-is." },
+        "PGUSER": { "defaultValue": "${{POSTGRES_USER}}", "isOptional": false, "description": "Database user, copied from POSTGRES_USER. Leave as-is." },
+        "PGDATABASE": { "defaultValue": "${{POSTGRES_DB}}", "isOptional": false, "description": "Database name, copied from POSTGRES_DB. Leave as-is." },
+        "PGPASSWORD": { "defaultValue": "${{POSTGRES_PASSWORD}}", "isOptional": false, "description": "Database password, copied from POSTGRES_PASSWORD. Leave as-is." },
+        "POSTGRES_DB": { "defaultValue": "railway", "isOptional": false, "description": "Name of the database Otari uses." },
+        "POSTGRES_USER": { "defaultValue": "postgres", "isOptional": false, "description": "Name of the database superuser." },
+        "POSTGRES_PASSWORD": { "defaultValue": "${{ secret(32, \"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\") }}", "isOptional": false, "description": "Database password. Generated on deploy; leave as-is." },
+        "DATABASE_URL": { "defaultValue": "postgresql://${{PGUSER}}:${{POSTGRES_PASSWORD}}@${{RAILWAY_PRIVATE_DOMAIN}}:5432/${{PGDATABASE}}", "isOptional": false, "description": "Private connection string. Otari reads it as OTARI_DATABASE_URL; leave as-is." },
+        "DATABASE_PUBLIC_URL": { "defaultValue": "postgresql://${{PGUSER}}:${{POSTGRES_PASSWORD}}@${{RAILWAY_TCP_PROXY_DOMAIN}}:${{RAILWAY_TCP_PROXY_PORT}}/${{PGDATABASE}}", "isOptional": false, "description": "Public connection string through the TCP proxy, for backups or pg_dump. Leave as-is." },
+        "SSL_CERT_DAYS": { "defaultValue": "820", "isOptional": false, "description": "How many days the database's self-signed SSL certificate is valid." },
+        "RAILWAY_DEPLOYMENT_DRAINING_SECONDS": { "defaultValue": "60", "isOptional": false, "description": "Seconds Postgres gets to shut down cleanly on a redeploy." }
       }
     }
   }

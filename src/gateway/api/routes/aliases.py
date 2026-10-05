@@ -160,10 +160,12 @@ async def list_aliases(
     config: Annotated[GatewayConfig, Depends(get_config)],
     workspace_id: Annotated[
         uuid.UUID | None,
-        Query(description=(
-            "Only stored entries in this workspace. Config-file entries are always included, "
-            "being deployment-wide. Omit to list the stored entries of every workspace."
-        )),
+        Query(
+            description=(
+                "Only stored entries in this workspace. Config-file entries are always included, "
+                "being deployment-wide. Omit to list the stored entries of every workspace."
+            )
+        ),
     ] = None,
 ) -> list[AliasResponse]:
     """List every alias in force, from config.yml and from storage.
@@ -332,10 +334,7 @@ async def delete_alias(
     user_id: Annotated[
         str | None,
         Query(
-            description=(
-                "Delete the alias scoped to this user. Omit to delete the workspace-wide alias "
-                "of that name."
-            )
+            description=("Delete the alias scoped to this user. Omit to delete the workspace-wide alias of that name.")
         ),
     ] = None,
     workspace_id: Annotated[

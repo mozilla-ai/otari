@@ -5,13 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
-from gateway.api.deps import get_db, require_deployment_operator
+from gateway.api.deps import BudgetServiceDep, get_db, require_deployment_operator
 from gateway.core.surface import Surface
-from gateway.models.budgets import Budget, BudgetResetLog, ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.budgets import Budget, BudgetResetLog
 from gateway.models.money import to_usd, to_usd_or_none
-from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.schemas.budgets import (
     BudgetResetLogResponse,
@@ -202,9 +200,7 @@ async def update_budget(
             if "budget_duration_sec" in request.model_fields_set
             else budget.budget_duration_sec
         )
-        alignment = (
-            request.reset_alignment if "reset_alignment" in request.model_fields_set else budget.reset_alignment
-        )
+        alignment = request.reset_alignment if "reset_alignment" in request.model_fields_set else budget.reset_alignment
         _require_single_period_source(duration, alignment)
         budget.budget_duration_sec = duration
         budget.reset_alignment = alignment
@@ -244,75 +240,21 @@ async def update_budget(
 
 
 @router.delete("/{budget_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_budget(
-    budget_id: str,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> None:
-    """Delete a budget.
+async def delete_budget(budget_id: str, service: BudgetServiceDep) -> None:
+    """Delete a budget the deployment owns.
 
-    Refused with 409 while anything still names this budget: a workspace handing
-    it to its members, or a scoped ceiling enforcing it. Both foreign keys are
-    ``RESTRICT``, so the database would refuse either anyway, but as an
-    ``IntegrityError`` reported as "Database error" with nothing naming what to
-    go and change. Checked here so the refusal can say which, and where.
+    Refused with 409 for an organization's budget: the operator may edit one
+    (``PATCH`` retimes its ceilings) but deleting it would take a budget the
+    tenant defined out from under them.
+
+    Refused with 409, too, while anything still names this budget: a workspace
+    handing it to its members, or a scoped ceiling enforcing it. The refusal says
+    which, and where.
+
+    Gateway users assigned to the budget are left uncapped, as the dashboard's
+    confirmation says, and its reset history is deleted with it.
     """
-    result = await db.execute(select(Budget).where(Budget.budget_id == budget_id))
-    budget = result.scalar_one_or_none()
-
-    if not budget:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Budget with id '{budget_id}' not found",
-        )
-
-    holders = (
-        (
-            await db.execute(
-                select(col(Workspace.name))
-                .join(WorkspaceBudgetDefault, WorkspaceBudgetDefault.workspace_id == col(Workspace.id))
-                .where(WorkspaceBudgetDefault.budget_id == budget_id)
-                .order_by(Workspace.name)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    if holders:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "This budget is the member default for "
-                f"{', '.join(holders)}. Change or remove that default on the workspace "
-                "(Organization > Workspaces > Edit) before deleting it."
-            ),
-        )
-
-    # The same refusal for the ceilings themselves, which name a budget directly
-    # and whose foreign key is RESTRICT too. Counted rather than named: a scope id
-    # is a bare uuid, so listing them would say less than the number does.
-    enforcing = (
-        await db.execute(select(func.count()).select_from(ScopedBudget).where(ScopedBudget.budget_id == budget_id))
-    ).scalar_one()
-    if enforcing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"This budget is enforced by {enforcing} spend "
-                f"{'ceiling' if enforcing == 1 else 'ceilings'}. A member's ceiling is "
-                "changed on Members & roles (Edit > Workspace access); others are managed "
-                "through /api/v1/scoped-budgets."
-            ),
-        )
-
-    await db.delete(budget)
-    try:
-        await db.commit()
-    except SQLAlchemyError:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+    await service.delete_deployment_budget(budget_id)
 
 
 @router.get("/{budget_id}/reset-logs")
@@ -323,9 +265,7 @@ async def list_budget_reset_logs(
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[BudgetResetLogResponse]:
     """List per-user reset events for a budget, newest first."""
-    budget = (
-        await db.execute(select(Budget.budget_id).where(Budget.budget_id == budget_id))
-    ).scalar_one_or_none()
+    budget = (await db.execute(select(Budget.budget_id).where(Budget.budget_id == budget_id))).scalar_one_or_none()
     if not budget:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -1,4 +1,5 @@
 import asyncio
+import importlib.util
 from collections.abc import AsyncGenerator, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from gateway import features
 from gateway.api.deps import build_file_service, build_idempotency_service, set_config
 from gateway.api.main import register_routers
 from gateway.container import Container, build_container
+from gateway.context_propagation import TraceContextPropagationMiddleware
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, dispose_db, init_db
 from gateway.core.feature import Worker
@@ -30,7 +32,8 @@ from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
-from gateway.rate_limit import RateLimiter
+from gateway.ports.rate_limit_store_port import RateLimitStorePort
+from gateway.rate_limit import RateLimiter, RateLimitGrantMiddleware, RateLimitRules, UserRateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
 from gateway.services.bootstrap_service import bootstrap_first_api_key
@@ -40,7 +43,7 @@ from gateway.services.code_execution.container_sweeper import run_sandbox_contai
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.files import FileBackends, run_file_sweeper
-from gateway.services.inference import run_idempotency_sweeper
+from gateway.services.inference import close_decision_client, run_idempotency_sweeper
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
 from gateway.services.model_catalog_service import (
@@ -75,6 +78,7 @@ from gateway.services.provider_store_service import (
     reset_provider_cache,
     run_provider_refresher,
 )
+from gateway.services.rate_limits import load_rate_limit_rules_at_startup, run_rate_limit_refresher
 from gateway.services.runtime_settings_service import apply_overrides_from_db
 from gateway.services.search_backend import close_search_client
 from gateway.services.search_tool_store_service import (
@@ -190,9 +194,7 @@ def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutin
     backends = FileBackends(
         storage=container.resolve(FileStoragePort, None), provider_files=container.resolve(ProviderFilePort, None)
     )
-    return run_file_sweeper(
-        config.files_sweep_interval_sec, lambda uow: build_file_service(uow, backends, config)
-    )
+    return run_file_sweeper(config.files_sweep_interval_sec, lambda uow: build_file_service(uow, backends, config))
 
 
 def _start_idempotency_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None]:
@@ -237,6 +239,8 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker(
         "search tool", lambda config, _container: run_search_tool_refresher(config), reset_search_tool_cache
     ),
+    # No reset: the stored rules live on the config, which the startup load rebuilds.
+    _LifespanWorker("rate limit rule", lambda config, _container: run_rate_limit_refresher(config)),
     _LifespanWorker("price snapshot", lambda _config, _container: run_price_snapshot_refresher()),
     # Started whatever ``pricing_refresh`` says, because that policy is
     # runtime-settable and each tick re-reads it.
@@ -384,6 +388,46 @@ def _validate_metrics_support(config: GatewayConfig) -> None:
             "enable_metrics is set but prometheus-client is not installed. "
             "Install it with: pip install gateway[metrics]"
         )
+        raise ValueError(msg)
+
+
+def install_rate_limits(app: FastAPI, config: GatewayConfig) -> None:
+    """Put the per-user limit and the ``rate_limits`` rules on the app, counting in the container's store.
+
+    A standalone gateway always holds the rules, because the dashboard can add
+    one at runtime; a hybrid one, which refuses ``rate_limits``, holds them only
+    for ``rate_limit_rpm``. Resolving the store opens no connection.
+    """
+    rules_possible = not config.is_hybrid_mode
+    store: RateLimitStorePort | None = (
+        app.state.container.resolve(RateLimitStorePort, None)
+        if config.rate_limit_rpm is not None or rules_possible
+        else None
+    )
+    app.state.rate_limit_store = store
+    rpm = config.rate_limit_rpm
+    app.state.rate_limiter = UserRateLimiter(store, rpm) if store is not None and rpm is not None else None
+    app.state.rate_limit_rules = RateLimitRules(store, config) if store is not None and rules_possible else None
+
+
+def _validate_rate_limit_store(config: GatewayConfig) -> None:
+    """Refuse to start a shared rate-limit store that has nowhere to count.
+
+    Falling back to counting per process would quietly multiply the limit by
+    the number of replicas, which is the thing a shared store was asked for to
+    prevent, so a missing URL or client library stops startup instead.
+    ``rate_limits`` is refused in hybrid mode, which does not enforce it yet.
+    """
+    if config.rate_limits and config.is_hybrid_mode:
+        msg = "rate_limits is not supported in hybrid mode yet"
+        raise ValueError(msg)
+    if config.rate_limit_store != "redis":
+        return
+    if not config.rate_limit_redis_url:
+        msg = "rate_limit_store is 'redis' but rate_limit_redis_url is not set"
+        raise ValueError(msg)
+    if importlib.util.find_spec("redis") is None:
+        msg = "rate_limit_store is 'redis' but redis is not installed. Install it with: pip install gateway[redis]"
         raise ValueError(msg)
 
 
@@ -572,6 +616,8 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 # so a tool added through the dashboard is one the backend-URL
                 # warning and the flat-pricing warning can see.
                 await load_search_tools_at_startup(session, config)
+                # Before the first request, so a stored rule never lets a burst through at boot.
+                await load_rate_limit_rules_at_startup(config)
                 # After the overrides, not at config load: the web-search URL a
                 # searxng search tool inherits can be the dashboard-stored one
                 # applied just above, and that tool is only broken if nothing
@@ -601,9 +647,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                 # a fresh database (no workspace or key exists yet), the same
                 # posture load_providers_at_startup takes.
                 await load_org_provider_keys_at_startup(session)
-                await bootstrap_first_api_key(
-                    config, session, app.state.container.resolve(ApiKeyFormatPort, session)
-                )
+                await bootstrap_first_api_key(config, session, app.state.container.resolve(ApiKeyFormatPort, session))
                 await initialize_pricing_from_config(config, session)
                 await warn_if_require_pricing_without_pricing(config, session)
                 await warn_if_search_tools_lack_flat_pricing(config, session)
@@ -645,9 +689,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             app.state.log_writer = log_writer
             yield
         finally:
-            await _stop_refreshers(
-                [(task, f"{worker.name} refresher") for task, worker in workers] + feature_workers
-            )
+            await _stop_refreshers([(task, f"{worker.name} refresher") for task, worker in workers] + feature_workers)
             for _task, worker in workers:
                 if worker.reset is not None:
                     worker.reset()
@@ -655,9 +697,14 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # nothing to stop, but the refreshers above still needed cancelling.
             if log_writer_started:
                 await log_writer.stop()
-            # POST /api/v1/search dispatches on one pooled client for the process, so
-            # shutdown owns closing it. A no-op when no search was ever served.
+            # POST /api/v1/search and /api/v1/decisions each dispatch on one pooled
+            # client for the process, so shutdown owns closing them. Each is a no-op
+            # when that endpoint was never served.
             await close_search_client()
+            await close_decision_client()
+            rate_limit_store: RateLimitStorePort | None = getattr(app.state, "rate_limit_store", None)
+            if rate_limit_store is not None:
+                await rate_limit_store.aclose()
             # After the log writer, whose final flush is the last thing to need
             # a session. Hybrid mode never opened an engine, so this is a no-op there.
             await dispose_db()
@@ -746,6 +793,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     _validate_platform_config(config)
     _warn_if_hosted_has_no_data_plane(config)
     _validate_metrics_support(config)
+    _validate_rate_limit_store(config)
     # A set-but-invalid OTARI_SECRET_KEY must not silently pass startup and then
     # break provider-credential storage at request time. Fail fast here instead.
     validate_secret_key()
@@ -930,7 +978,10 @@ def create_app(config: GatewayConfig) -> FastAPI:
         async def root_index() -> str:
             return ROOT_TUTORIAL_HTML
 
+    # Middleware stack is registered in reverse order (last-added runs first)
     app.add_middleware(SecurityHeadersMiddleware)
+    if config.accept_incoming_trace_context:
+        app.add_middleware(TraceContextPropagationMiddleware)
 
     if config.cors_allow_origins:
         allow_credentials = "*" not in config.cors_allow_origins
@@ -953,16 +1004,13 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # an entry never outlives its response (see gateway.inflight).
     app.state.inflight = InFlightRegistry()
     app.add_middleware(InFlightMiddleware, registry=app.state.inflight)
+    if not config.is_hybrid_mode:
+        app.add_middleware(RateLimitGrantMiddleware)
 
     if config.enable_metrics:
         from gateway.metrics import MetricsMiddleware
 
         app.add_middleware(MetricsMiddleware)
-
-    if config.rate_limit_rpm is not None:
-        app.state.rate_limiter = RateLimiter(config.rate_limit_rpm)
-    else:
-        app.state.rate_limiter = None
 
     if config.dashboard_login_rate_limit_per_minute is not None:
         app.state.login_rate_limiter = RateLimiter(config.dashboard_login_rate_limit_per_minute)
@@ -988,6 +1036,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # that cannot be loaded raises here, so a deployment that named one and got
     # it wrong fails to start instead of quietly running the plain build.
     app.state.container = build_container(config.bootstrap, config=config)
+    install_rate_limits(app, config)
 
     register_routers(app, config)
     app.add_exception_handler(TenancyError, _tenancy_error_handler)

@@ -36,6 +36,25 @@ describe("ActivityPage", () => {
     expect(within(row).getByText("Success")).toBeInTheDocument()
   })
 
+  it("shows a skipped candidate's status as Skipped, not Absorbed", async () => {
+    mockApi({
+      rows: [
+        entry({
+          model: "gpt-4o-mini",
+          status: "absorbed",
+          status_code: 429,
+          error_message:
+            "Skipped: Rate limit 'flash-cap' exceeded: 2 requests per minute",
+        }),
+      ],
+    })
+    renderPage(<ActivityPage />)
+
+    const row = (await screen.findByText("gpt-4o-mini")).closest("tr")!
+    expect(within(row).getByText("Skipped")).toBeInTheDocument()
+    expect(within(row).queryByText("Absorbed")).not.toBeInTheDocument()
+  })
+
   it("shows the api key column, and an em-dash for master-key rows", async () => {
     mockApi({
       rows: [
@@ -246,6 +265,24 @@ describe("ActivityPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Close" }))
     expect(screen.queryByText("Request detail")).not.toBeInTheDocument()
+  })
+
+  it("shows the provider-reported compute time in the detail panel", async () => {
+    // provider_latency_ms is a diagnostic alongside Total time (otari#337); this
+    // asserts the row's value actually reaches the "Provider time" field rather
+    // than only being present in the fixture shape.
+    const user = userEvent.setup()
+    mockApi({
+      rows: [entry({ provider: "groq", provider_latency_ms: 156 })],
+    })
+    renderPage(<ActivityPage />)
+
+    await user.click((await screen.findByText("gpt-4o")).closest("tr")!)
+
+    const label = screen.getByText("Provider time", {
+      selector: "span.text-overline",
+    })
+    expect(label.parentElement?.textContent).toContain("156 ms")
   })
 
   it("sends the status filter to the API", async () => {
@@ -2496,16 +2533,18 @@ describe("ActivityPage when the organization context fails", () => {
     })
     renderPage(<ActivityPage />)
 
-    // Falls back to the narrower surface, which is the safe direction: an
-    // operator reading their own organization understates, where the reverse
-    // would be a cross-tenant read.
+    // Takes the deployment-wide surface, as every operator gate does on a
+    // failed read (otari#876): an operator keeps their log, and the server
+    // refuses anyone else, so nothing crosses a tenant.
     await waitFor(() =>
-      expect(
-        calls.some((url) => url.includes(`${API_ROOT}/organizations/me/usage`)),
-      ).toBe(true),
+      expect(calls.some((url) => url.startsWith(`${API_ROOT}/usage`))).toBe(
+        true,
+      ),
     )
-    expect(calls.some((url) => url.startsWith(`${API_ROOT}/usage`))).toBe(false)
-    // And the refusal reaches the operator instead of an empty table.
+    expect(
+      calls.some((url) => url.includes(`${API_ROOT}/organizations/me/usage`)),
+    ).toBe(false)
+    // And the refusal reaches the caller instead of an empty table.
     expect(await screen.findByText(/context is gone/)).toBeInTheDocument()
   })
 })

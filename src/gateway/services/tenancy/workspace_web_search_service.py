@@ -42,10 +42,12 @@ from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.web_retrieval_backend import MAX_RESULTS_CAP
 from gateway.services.web_retrieval_policy import (
+    MAX_WEB_SEARCH_DOMAINS,
     CanonicalHost,
     DomainRuleValidationError,
     canonicalize_domain_rule,
     domain_rule_matches,
+    read_domain_list,
 )
 
 # The backend's own ceiling on returned hits. A stored value above it would read
@@ -53,62 +55,25 @@ from gateway.services.web_retrieval_policy import (
 # so it is refused at the write rather than silently clamped at resolve time.
 # Same call as `workspace_code_execution_policy_service` makes for its two.
 _MAX_RESULTS = MAX_RESULTS_CAP
-# Bound the two lists and the opaque bag so one workspace's row cannot grow
-# without limit; the same numbers the hosted `WorkspaceWebSearchConfigUpdate`
-# uses, since this is the same configuration.
-MAX_WEB_SEARCH_DOMAINS = 100
+# Bound the opaque bag so one workspace's row cannot grow without limit; the
+# same numbers the hosted `WorkspaceWebSearchConfigUpdate` uses, since this is
+# the same configuration.
 _MAX_DOMAINS = MAX_WEB_SEARCH_DOMAINS
 _MAX_PROVIDER_OPTION_KEYS = 30
 _MAX_PROVIDER_OPTIONS_BYTES = 4096
 _MAX_PURPOSE_HINT_LENGTH = 2048
-# The longest a DNS name can be. Not a policy, just the point past which a
-# string cannot be a host and is therefore a mistake worth naming at the write.
-_MAX_DOMAIN_LENGTH = 253
 
 
 class InvalidStoredWebSearchDomainError(ValueError):
     """A legacy workspace row contains a domain rule that cannot be enforced."""
 
 
-def _canonical_host(raw: str) -> str:
-    """Canonicalize one domain-list entry, accepting cookie-style leading dots.
-
-    A leading dot is stripped rather than refused: ``.example.com`` has exactly
-    one reading, and an entry here already covers its subdomains, so it is the
-    same rule written in cookie syntax. Raises
-    :class:`DomainRuleValidationError` for anything that is not a bare host.
-    """
-    candidate = raw.strip()
-    if candidate.startswith("."):
-        candidate = candidate[1:]
-    return canonicalize_domain_rule(candidate).value
-
-
 def _normalize_domains(value: list[str] | None) -> list[str] | None:
-    """Canonicalize, drop empty entries, and de-duplicate a domain list.
-
-    An all-blank list becomes ``None``.
-    """
+    """Read a domain list a caller wrote, where a blank entry is an empty form field and is dropped."""
     if value is None:
         return None
-    seen: dict[str, None] = {}
-    for raw in value:
-        if not raw.strip():
-            continue
-        try:
-            host = _canonical_host(raw)
-        except DomainRuleValidationError as exc:
-            raise ValueError(
-                f"{raw.strip()!r} is not a bare valid hostname; give a domain such as 'example.com', "
-                "with no scheme, port or path"
-            ) from exc
-        if len(host) > _MAX_DOMAIN_LENGTH:
-            raise ValueError(f"a domain may be at most {_MAX_DOMAIN_LENGTH} characters")
-        seen.setdefault(host, None)
-    cleaned = list(seen)
-    if len(cleaned) > _MAX_DOMAINS:
-        raise ValueError(f"at most {_MAX_DOMAINS} domains are allowed")
-    return cleaned or None
+    hosts = read_domain_list([raw for raw in value if not (isinstance(raw, str) and not raw.strip())])
+    return list(hosts) if hosts else None
 
 
 def _check_provider_options(value: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -264,8 +229,8 @@ async def resolve_workspace_web_search_config(
         enabled=config.enabled,
         max_results=config.max_results,
         purpose_hint=config.purpose_hint,
-        allowed_domains=_as_tuple(config.allowed_domains, stored=True),
-        blocked_domains=_as_tuple(config.blocked_domains, stored=True),
+        allowed_domains=_stored_domains(config.allowed_domains),
+        blocked_domains=_stored_domains(config.blocked_domains),
         provider_options=config.provider_options,
         authorized_tools=None,
     )
@@ -285,9 +250,7 @@ def read_web_search_policy(answer: Mapping[str, Any]) -> ResolvedWebSearchConfig
     ):
         raise ValueError(f"max_results must be an integer from 1 to {_MAX_RESULTS}")
     purpose_hint = answer.get("purpose_hint")
-    if purpose_hint is not None and (
-        not isinstance(purpose_hint, str) or len(purpose_hint) > _MAX_PURPOSE_HINT_LENGTH
-    ):
+    if purpose_hint is not None and (not isinstance(purpose_hint, str) or len(purpose_hint) > _MAX_PURPOSE_HINT_LENGTH):
         raise ValueError(f"purpose_hint must be a string of at most {_MAX_PURPOSE_HINT_LENGTH} characters")
     provider_options = answer.get("provider_options")
     if provider_options is not None and not isinstance(provider_options, dict):
@@ -297,8 +260,8 @@ def read_web_search_policy(answer: Mapping[str, Any]) -> ResolvedWebSearchConfig
         enabled=enabled,
         max_results=max_results,
         purpose_hint=_blank_to_none(purpose_hint),
-        allowed_domains=_answer_domains(answer.get("allowed_domains"), "allowed_domains"),
-        blocked_domains=_answer_domains(answer.get("blocked_domains"), "blocked_domains"),
+        allowed_domains=read_domain_list(answer.get("allowed_domains")),
+        blocked_domains=read_domain_list(answer.get("blocked_domains")),
         provider_options=provider_options,
         authorized_tools=None,
     )
@@ -376,48 +339,12 @@ def narrow_web_search_tool_entry(
     return narrowed
 
 
-def _as_tuple(value: list[str] | None, *, stored: bool = False) -> tuple[str, ...] | None:
-    """Read and canonicalize a JSON domain list without silently dropping rules."""
-    if value is None:
-        return None
-    if not isinstance(value, list):
-        if stored:
-            raise InvalidStoredWebSearchDomainError("stored web-search domain list is invalid")
-        return None
-    if not value:
-        return None
-    hosts: list[str] = []
-    for raw in value:
-        if not isinstance(raw, str) or not raw.strip():
-            if stored:
-                raise InvalidStoredWebSearchDomainError("stored web-search domain rule is invalid")
-            continue
-        try:
-            host = _canonical_host(raw)
-        except DomainRuleValidationError as exc:
-            if stored:
-                raise InvalidStoredWebSearchDomainError("stored web-search domain rule is invalid") from exc
-            continue
-        if host not in hosts:
-            hosts.append(host)
-    return tuple(hosts) or None
-
-
-def _answer_domains(value: Any, field: str) -> tuple[str, ...] | None:
-    """Canonicalize a domain list from the control plane's answer, refusing any entry that cannot be enforced."""
-    if value is None:
-        return None
-    if not isinstance(value, list) or len(value) > _MAX_DOMAINS:
-        raise ValueError(f"{field} must be a list of at most {_MAX_DOMAINS} domains")
-    hosts: dict[str, None] = {}
-    for raw in value:
-        if not isinstance(raw, str):
-            raise ValueError(f"{field} must contain only strings")
-        host = _canonical_host(raw)
-        if len(host) > _MAX_DOMAIN_LENGTH:
-            raise ValueError(f"a domain may be at most {_MAX_DOMAIN_LENGTH} characters")
-        hosts.setdefault(host, None)
-    return tuple(hosts) or None
+def _stored_domains(value: object) -> tuple[str, ...] | None:
+    """Read a stored row's domain list, refusing one that cannot be enforced."""
+    try:
+        return read_domain_list(value)
+    except ValueError as exc:
+        raise InvalidStoredWebSearchDomainError("stored web-search domain list is invalid") from exc
 
 
 def _entry_domains(value: Any) -> list[str] | None:

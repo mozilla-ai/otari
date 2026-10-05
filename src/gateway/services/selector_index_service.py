@@ -108,6 +108,7 @@ def seed_for(
         provider_type=provider_type,
         model_id=model_id,
         name=metadata.name if metadata else None,
+        canonical_id=metadata.canonical_model_id if metadata else None,
     )
     return seed, metadata, provider_type
 

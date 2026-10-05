@@ -920,13 +920,18 @@ export interface paths {
         post?: never;
         /**
          * Delete Budget
-         * @description Delete a budget.
+         * @description Delete a budget the deployment owns.
          *
-         *     Refused with 409 while anything still names this budget: a workspace handing
-         *     it to its members, or a scoped ceiling enforcing it. Both foreign keys are
-         *     ``RESTRICT``, so the database would refuse either anyway, but as an
-         *     ``IntegrityError`` reported as "Database error" with nothing naming what to
-         *     go and change. Checked here so the refusal can say which, and where.
+         *     Refused with 409 for an organization's budget: the operator may edit one
+         *     (``PATCH`` retimes its ceilings) but deleting it would take a budget the
+         *     tenant defined out from under them.
+         *
+         *     Refused with 409, too, while anything still names this budget: a workspace
+         *     handing it to its members, or a scoped ceiling enforcing it. The refusal says
+         *     which, and where.
+         *
+         *     Gateway users assigned to the budget are left uncapped, as the dashboard's
+         *     confirmation says, and its reset history is deleted with it.
          */
         delete: operations["budgets-delete_budget"];
         options?: never;
@@ -1057,6 +1062,34 @@ export interface paths {
          *     - API key without user field: Use the shared "default" user
          */
         post: operations["chat-chat_completions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Decision
+         * @description Answer typed questions (noul, choice, score) about a state.
+         *
+         *     ``model`` is ``<provider>:<model>``, where the provider is a ``decision_providers``
+         *     entry, for example ``typesafe:jev-latest`` or ``openrouter:typesafe/jev-1.13``.
+         *
+         *     Authentication modes:
+         *     - Master key: the ``user`` field is required and may name any existing user.
+         *     - API key: usage and spend bind to the key's own user; a ``user`` naming a
+         *       different user is rejected with 403 unless mismatch rejection is off.
+         */
+        post: operations["decisions-create_decision"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3838,6 +3871,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/rate-limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Rate Limit Rules
+         * @description List every rule in effect: the config.yml rules, then the ones stored here.
+         */
+        get: operations["rate-limits-list_rate_limit_rules"];
+        put?: never;
+        /**
+         * Create Rate Limit Rule
+         * @description Add a rule. It applies from the next request on this replica, and on every replica within 30 seconds.
+         */
+        post: operations["rate-limits-create_rate_limit_rule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rate-limits/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Rate Limit Rule
+         * @description Remove a stored rule. A config.yml rule answers 409.
+         */
+        delete: operations["rate-limits-delete_rate_limit_rule"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Rate Limit Rule
+         * @description Change a stored rule. Requests it already counted stay counted. A config.yml rule answers 409.
+         */
+        patch: operations["rate-limits-update_rate_limit_rule"];
+        trace?: never;
+    };
     "/api/v1/rerank": {
         parameters: {
             query?: never;
@@ -4402,6 +4483,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/systemone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Systemone Decision
+         * @description Answer typed questions at the path TypeSafe's SDK and llama-server use.
+         *
+         *     Identical to ``POST /api/v1/decisions``; point the client's base URL at the gateway's ``/api``.
+         */
+        post: operations["decisions-create_systemone_decision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tool-settings": {
         parameters: {
             query?: never;
@@ -4697,6 +4800,35 @@ export interface paths {
          *     ``requests`` is capped.
          */
         get: operations["usage-list_in_flight"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/usage/requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Request Settlement
+         * @description Look up a request's settled cost by the ``Otari-Request-ID`` it was sent (standalone).
+         *
+         *     This is how a caller recovers the cost of a request whose response never
+         *     carried one: a stream that failed or was disconnected mid-response, or a
+         *     request that errored. An API key sees only the requests it made; the master
+         *     key sees any. Returns 404 until the request has settled (its rows are written
+         *     by a background writer, so a lookup made the instant a stream closes can
+         *     precede them), and for an id that is unknown or belongs to another key, with
+         *     no way to tell those apart. A stream that ended before the provider reported
+         *     usage, and ran no gateway tools, writes no row, so its id stays 404.
+         */
+        get: operations["usage-get_request_settlement"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6671,6 +6803,11 @@ export interface components {
             tool_call: boolean;
         };
         /**
+         * CatalogCapability
+         * @enum {string}
+         */
+        CatalogCapability: "tool_call" | "reasoning" | "structured_output" | "attachment" | "open_weights";
+        /**
          * CatalogCredential
          * @description Whose key serves a catalog offering, which also says who may price it.
          * @enum {string}
@@ -6685,6 +6822,24 @@ export interface components {
             name: string;
             /** Provider Type */
             provider_type: string;
+        };
+        /**
+         * CatalogFacets
+         * @description The filter rail's choices, from the caller's whole authorized catalog rather than one page.
+         */
+        CatalogFacets: {
+            /**
+             * Providers
+             * @description Every provider instance offering an authorized model, sorted.
+             */
+            providers: string[];
+            /**
+             * Total Count
+             * @description Authorized models before any of the request's filters.
+             */
+            total_count: number;
+            /** Vendors */
+            vendors: components["schemas"]["CatalogVendorFacet"][];
         };
         /**
          * CatalogModelDetail
@@ -6959,7 +7114,7 @@ export interface components {
         CatalogResponse: {
             /**
              * Count
-             * @description Models matching the search, before the window, so a caller can page without reading them all.
+             * @description Models matching all filters before paging.
              */
             count: number;
             /**
@@ -6972,6 +7127,8 @@ export interface components {
              * @description When the accepted genai-prices snapshot was taken. Null while the bundled dataset serves.
              */
             defaults_as_of: string | null;
+            /** @description Present when include_facets is requested. */
+            facets?: components["schemas"]["CatalogFacets"] | null;
             /**
              * Metadata Available
              * @description False when models.dev could not be read; descriptions are then absent.
@@ -6979,6 +7136,16 @@ export interface components {
             metadata_available: boolean;
             /** Models */
             models: components["schemas"]["CatalogModelSummary"][];
+        };
+        /** CatalogVendorFacet */
+        CatalogVendorFacet: {
+            /**
+             * Value
+             * @description The vendor's name; empty for models whose vendor is unknown.
+             */
+            value: string;
+            /** Vendor Slug */
+            vendor_slug?: string | null;
         };
         /**
          * CeremonyOptions
@@ -7121,6 +7288,32 @@ export interface components {
              * @enum {string}
              */
             outcome: "pass" | "fail" | "error";
+        };
+        /**
+         * ChoiceQuestion
+         * @description A question answered with one of the named options.
+         */
+        ChoiceQuestion: {
+            /**
+             * Criteria
+             * @description Option name to what it means
+             */
+            criteria: {
+                [key: string]: string | {
+                    [key: string]: unknown;
+                } | unknown[] | null;
+            };
+            /** Instructions */
+            instructions: string | {
+                [key: string]: unknown;
+            } | unknown[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "choice";
+        } & {
+            [key: string]: unknown;
         };
         /**
          * CodeExecutor
@@ -7307,6 +7500,11 @@ export interface components {
              */
             capture_agent_telemetry?: boolean | null;
             /**
+             * End User Budget Id
+             * @description Budget each end user this key creates is capped at. Null leaves end users capped only by this key's own ceiling.
+             */
+            end_user_budget_id?: string | null;
+            /**
              * Exclude From Budget
              * @description When true, requests on this key are logged with cost but never reserved, reconciled into the user's spend, or gated by budget.
              * @default false
@@ -7317,6 +7515,12 @@ export interface components {
              * @description Optional expiration timestamp
              */
             expires_at?: string | null;
+            /**
+             * Is Service Key
+             * @description When true, a request may name an end user in its 'user' field. Each end user is created on first use, owned by this key's user, and billed to its own budget, while this key's own ceiling caps all of them together.
+             * @default false
+             */
+            is_service_key: boolean;
             /**
              * Key Name
              * @description Optional name for the key
@@ -7356,6 +7560,8 @@ export interface components {
             capture_agent_telemetry: boolean | null;
             /** Created At */
             created_at: string;
+            /** End User Budget Id */
+            end_user_budget_id: string | null;
             /** Exclude From Budget */
             exclude_from_budget: boolean;
             /** Expires At */
@@ -7364,6 +7570,8 @@ export interface components {
             id: string;
             /** Is Active */
             is_active: boolean;
+            /** Is Service Key */
+            is_service_key: boolean;
             /** Key */
             key: string;
             /** Key Name */
@@ -7612,6 +7820,124 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["PricingResponse"][];
+        };
+        /**
+         * DecisionAnswer
+         * @description One question's answer. Which value field is set follows ``type``.
+         */
+        DecisionAnswer: {
+            /**
+             * Choice
+             * @description The chosen option, for a choice question
+             */
+            choice?: string | null;
+            /** Confidence */
+            confidence?: number | null;
+            /** Legend */
+            legend?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Noul
+             * @description Probability of yes, for a noul question
+             */
+            noul?: number | null;
+            /** Probabilities */
+            probabilities?: {
+                [key: string]: number;
+            } | null;
+            /**
+             * Score
+             * @description The level, for a score question
+             */
+            score?: number | null;
+            /** Type */
+            type: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * DecisionRequest
+         * @description A decisions request: typed questions to answer about one state.
+         * @example {
+         *       "model": "typesafe:jev-latest",
+         *       "questions": {
+         *         "urgency": {
+         *           "instructions": "Does this message express urgency?",
+         *           "type": "noul"
+         *         }
+         *       },
+         *       "state": "The Stripe integration has failed for 3 days and I'm losing sales."
+         *     }
+         */
+        DecisionRequest: {
+            /**
+             * Images
+             * @description Images for a vision decision model, as data URLs (data:image/...;base64,...). An extension llama-server supports; a provider that does not refuses the request.
+             */
+            images?: string[] | null;
+            /**
+             * Model
+             * @description Decision provider and model, e.g. 'typesafe:jev-latest'
+             */
+            model: string;
+            /**
+             * Questions
+             * @description Questions, keyed by answer name
+             */
+            questions: {
+                [key: string]: components["schemas"]["NoulQuestion"] | components["schemas"]["ChoiceQuestion"] | components["schemas"]["ScoreQuestion"];
+            };
+            /**
+             * State
+             * @description The content the questions are about
+             */
+            state: string | {
+                [key: string]: unknown;
+            } | unknown[];
+            /**
+             * User
+             * @description User ID for usage attribution; not sent upstream
+             */
+            user?: string | null;
+        };
+        /**
+         * DecisionResponse
+         * @description The provider's answers, keyed like the request's questions.
+         */
+        DecisionResponse: {
+            /** Answers */
+            answers: {
+                [key: string]: components["schemas"]["DecisionAnswer"];
+            };
+            /** Model */
+            model: string;
+            usage?: components["schemas"]["DecisionUsage"] | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * DecisionUsage
+         * @description Token counts the provider reported, plus its own cost where it reports one.
+         */
+        DecisionUsage: {
+            /**
+             * Cost
+             * @description The provider's own charge in USD, when it reports one
+             */
+            cost?: number | null;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+        } & {
+            [key: string]: unknown;
         };
         /**
          * DeploymentAdminAccessPublic
@@ -7918,7 +8244,7 @@ export interface components {
         };
         /**
          * ExecutionState
-         * @description Whether the remote tool may have run (R-ERR-2).
+         * @description Whether the remote tool may have run.
          *
          *     A retry-safety classification, not a description of how the HTTP request
          *     went. ``NOT_STARTED`` is Otari saying it knows the tool did not run;
@@ -8107,6 +8433,11 @@ export interface components {
             output_tokens: number;
             /** Provider */
             provider: string;
+            /**
+             * Reasoning Tokens
+             * @default 0
+             */
+            reasoning_tokens: number;
             /** Session Label */
             session_label?: string | null;
             /** Source Event Id */
@@ -8556,6 +8887,8 @@ export interface components {
             capture_agent_telemetry: boolean | null;
             /** Created At */
             created_at: string;
+            /** End User Budget Id */
+            end_user_budget_id: string | null;
             /** Exclude From Budget */
             exclude_from_budget: boolean;
             /** Expires At */
@@ -8564,6 +8897,8 @@ export interface components {
             id: string;
             /** Is Active */
             is_active: boolean;
+            /** Is Service Key */
+            is_service_key: boolean;
             /** Key Name */
             key_name: string | null;
             /** Key Prefix */
@@ -8757,7 +9092,7 @@ export interface components {
         };
         /**
          * McpErrorBody
-         * @description The one error shape both stored-server endpoints return (R-ERR-1).
+         * @description The one error shape both stored-server endpoints return.
          */
         McpErrorBody: {
             /** Code */
@@ -8772,7 +9107,7 @@ export interface components {
          * McpExecuteRequest
          * @description One stored server, and the exact call the application authorized.
          *
-         *     No inline server fields (R-REQ-4): a caller registers a remote MCP server
+         *     No inline server fields: a caller registers a remote MCP server
          *     through the control plane once and refers to it by id afterwards, which
          *     keeps URLs, credentials, revocation and allowlist policy on Otari's side of
          *     the boundary instead of in every request.
@@ -8845,7 +9180,7 @@ export interface components {
          *
          *     ``annotations`` is the remote server's own metadata, passed through as
          *     untrusted data. Otari never turns ``readOnlyHint`` into an authorization
-         *     decision (R-RISK-1); each application owns its risk policy, and a server
+         *     decision; each application owns its risk policy, and a server
          *     cannot waive an application's approval gate by labeling itself read-only.
          */
         McpToolDefinition: {
@@ -8876,7 +9211,7 @@ export interface components {
         };
         /**
          * McpToolWarning
-         * @description One tool that was omitted, and the code that omitted it (R-SCHEMA-3).
+         * @description One tool that was omitted, and the code that omitted it.
          */
         McpToolWarning: {
             /** Code */
@@ -8889,7 +9224,7 @@ export interface components {
          * @description The authorized catalog for one stored server.
          *
          *     Carries no server URL, no credential, and no allowlist entry that the live
-         *     catalog did not return (R-DISC-2). ``server_revision`` is what an
+         *     catalog did not return. ``server_revision`` is what an
          *     application persists with a proposed call and sends back to
          *     ``/api/v1/mcp/execute``, so a stored-configuration change between the two is
          *     refused rather than executed.
@@ -9277,6 +9612,40 @@ export interface components {
             provider_raw?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /**
+         * NoulCriteria
+         * @description What a yes and a no each mean, for a ``noul`` question.
+         */
+        NoulCriteria: {
+            /** False */
+            false?: string | {
+                [key: string]: unknown;
+            } | unknown[] | null;
+            /** True */
+            true?: string | {
+                [key: string]: unknown;
+            } | unknown[] | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * NoulQuestion
+         * @description A yes-or-no question, answered with the probability of yes.
+         */
+        NoulQuestion: {
+            criteria?: components["schemas"]["NoulCriteria"] | null;
+            /** Instructions */
+            instructions: string | {
+                [key: string]: unknown;
+            } | unknown[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "noul";
+        } & {
+            [key: string]: unknown;
         };
         /**
          * OAuthCallbackRequest
@@ -10550,7 +10919,7 @@ export interface components {
             name?: string | null;
             /**
              * Provider Key Id
-             * @description Narrow the cap to one provider instance; omit or null to cap spend across every provider. Must name a real instance: a blank value would store a ceiling that never binds
+             * @description Narrow the cap to one provider instance; omit or null to cap spend across every provider. A blank value would store a ceiling that never binds, so it is refused; this does not check that the value names a configured provider instance
              */
             provider_key_id?: string | null;
             /**
@@ -11483,6 +11852,158 @@ export interface components {
             seed_count: number;
         };
         /**
+         * RateLimitRuleCreate
+         * @description A rule to add. The same fields, limits and validation as a ``rate_limits`` entry in config.yml.
+         * @example {
+         *       "name": "keys",
+         *       "per": "key",
+         *       "rpm": 600,
+         *       "tpm": 200000
+         *     }
+         */
+        RateLimitRuleCreate: {
+            /**
+             * Lease Sec
+             * @description How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.
+             * @default 900
+             */
+            lease_sec: number;
+            /**
+             * Max Concurrent
+             * @description Requests in flight at once.
+             */
+            max_concurrent?: number | null;
+            /**
+             * Models
+             * @description The models a `per: model` rule limits, each as instance:model (the provider instance the model is called through, then the model), each counted on its own. Required there and refused on any other rule.
+             */
+            models?: string[] | null;
+            /**
+             * Name
+             * @description Names the rule in a 429's detail and in the counter's key. Unique across rate_limits.
+             */
+            name: string;
+            /**
+             * Per
+             * @description What one count is shared by.
+             * @enum {string}
+             */
+            per: "deployment" | "key" | "user" | "model";
+            /**
+             * Rpm
+             * @description Requests per minute.
+             */
+            rpm?: number | null;
+            /**
+             * Tpm
+             * @description Tokens per minute. A request is admitted on its estimate (prompt plus max output, or budget_estimate_default_output_tokens) and charged what it used once it completes.
+             */
+            tpm?: number | null;
+        };
+        /**
+         * RateLimitRulePublic
+         * @description One rule in effect, and where it is defined.
+         */
+        RateLimitRulePublic: {
+            /**
+             * Lease Sec
+             * @description How long a max_concurrent slot is held at most. A slot is given back when its response ends; this bounds what a process that dies mid-request keeps.
+             * @default 900
+             */
+            lease_sec: number;
+            /**
+             * Max Concurrent
+             * @description Requests in flight at once.
+             */
+            max_concurrent?: number | null;
+            /**
+             * Models
+             * @description The models a `per: model` rule limits, each as instance:model (the provider instance the model is called through, then the model), each counted on its own. Required there and refused on any other rule.
+             */
+            models?: string[] | null;
+            /**
+             * Name
+             * @description Names the rule in a 429's detail and in the counter's key. Unique across rate_limits.
+             */
+            name: string;
+            /**
+             * Per
+             * @description What one count is shared by.
+             * @enum {string}
+             */
+            per: "deployment" | "key" | "user" | "model";
+            /**
+             * Rpm
+             * @description Requests per minute.
+             */
+            rpm?: number | null;
+            /**
+             * Source
+             * @description 'config' for a rule from config.yml, which is read-only here; 'dashboard' for a stored one.
+             * @enum {string}
+             */
+            source: "config" | "dashboard";
+            /**
+             * Tpm
+             * @description Tokens per minute. A request is admitted on its estimate (prompt plus max output, or budget_estimate_default_output_tokens) and charged what it used once it completes.
+             */
+            tpm?: number | null;
+            /**
+             * Updated At
+             * @description When a stored rule last changed.
+             */
+            updated_at?: string | null;
+        };
+        /**
+         * RateLimitRuleUpdate
+         * @description Fields to change on a stored rule. An omitted field keeps its value; ``null`` clears a limit.
+         *
+         *     The merged rule must still set at least one of rpm, tpm or max_concurrent.
+         * @example {
+         *       "rpm": 1200
+         *     }
+         */
+        RateLimitRuleUpdate: {
+            /**
+             * Lease Sec
+             * @description How long a max_concurrent slot is held at most.
+             */
+            lease_sec?: number | null;
+            /**
+             * Max Concurrent
+             * @description Requests in flight at once.
+             */
+            max_concurrent?: number | null;
+            /**
+             * Models
+             * @description The instance:model names a per: model rule limits; null for any other rule.
+             */
+            models?: string[] | null;
+            /**
+             * Per
+             * @description What one count is shared by.
+             */
+            per?: ("deployment" | "key" | "user" | "model") | null;
+            /**
+             * Rpm
+             * @description Requests per minute.
+             */
+            rpm?: number | null;
+            /**
+             * Tpm
+             * @description Tokens per minute.
+             */
+            tpm?: number | null;
+        };
+        /**
+         * RateLimitRulesPublic
+         * @description Every rule in effect: config-file rules first, then stored ones, each in name order.
+         */
+        RateLimitRulesPublic: {
+            /** Rules */
+            rules: components["schemas"]["RateLimitRulePublic"][];
+        };
+        /**
          * RecordedPool
          * @description How warm one pool is after the write.
          */
@@ -11505,6 +12026,12 @@ export interface components {
              */
             reencrypted: number;
             /**
+             * Skipped
+             * @description Number of rows whose stored key changed between the read and the write, so the re-encryption was not applied. They already hold whoever wrote them last.
+             * @default 0
+             */
+            skipped: number;
+            /**
              * Unreadable
              * @description Number of encrypted keys left untouched because they could not be decrypted.
              */
@@ -11520,6 +12047,12 @@ export interface components {
              * @description Number of stored search-tool keys re-encrypted.
              */
             reencrypted: number;
+            /**
+             * Skipped
+             * @description Number of rows whose stored key changed between the read and the write, so the re-encryption was not applied. They already hold whoever wrote them last.
+             * @default 0
+             */
+            skipped: number;
             /**
              * Unreadable
              * @description Number of encrypted keys left untouched because they could not be decrypted.
@@ -11559,6 +12092,35 @@ export interface components {
              * @description The same message whether or not the address has a password to reset.
              */
             message: string;
+        };
+        /**
+         * RequestSettlement
+         * @description What one request settled at, summed over every usage row it wrote.
+         *
+         *     A routed request writes a row per attempt and a vision-normalized one a row for
+         *     the describe call, all sharing the ``Otari-Request-ID`` the caller was sent as
+         *     their ``request_group_id``, so this is the request's whole bill rather than one
+         *     attempt's. ``cost_usd`` uses the inline ``usage.cost_usd`` format and is null
+         *     when no row was priced.
+         */
+        RequestSettlement: {
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Cost Usd */
+            cost_usd: string | null;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Request Id */
+            request_id: string;
+            /** Row Count */
+            row_count: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "success" | "error";
+            /** Total Tokens */
+            total_tokens: number;
         };
         /**
          * RequirementGroup
@@ -11897,6 +12459,30 @@ export interface components {
             token_limit: number | null;
             /** Updated At */
             updated_at: string;
+        };
+        /**
+         * ScoreQuestion
+         * @description A question answered with a level on an ordered scale.
+         */
+        ScoreQuestion: {
+            /**
+             * Criteria
+             * @description Level descriptions, lowest first
+             */
+            criteria: (string | {
+                [key: string]: unknown;
+            } | unknown[])[];
+            /** Instructions */
+            instructions: string | {
+                [key: string]: unknown;
+            } | unknown[];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "score";
+        } & {
+            [key: string]: unknown;
         };
         /**
          * ScoredExample
@@ -12580,12 +13166,16 @@ export interface components {
             allowed_models?: string[] | null;
             /** Capture Agent Telemetry */
             capture_agent_telemetry?: boolean | null;
+            /** End User Budget Id */
+            end_user_budget_id?: string | null;
             /** Exclude From Budget */
             exclude_from_budget?: boolean | null;
             /** Expires At */
             expires_at?: string | null;
             /** Is Active */
             is_active?: boolean | null;
+            /** Is Service Key */
+            is_service_key?: boolean | null;
             /** Key Name */
             key_name?: string | null;
             /** Metadata */
@@ -12910,6 +13500,10 @@ export interface components {
             prompt_tokens: number | null;
             /** Provider */
             provider: string | null;
+            /** Provider Latency Ms */
+            provider_latency_ms: number | null;
+            /** Reasoning Tokens */
+            reasoning_tokens?: number | null;
             /** Request Group Id */
             request_group_id?: string | null;
             /** Selection Reason */
@@ -13059,6 +13653,8 @@ export interface components {
             prompt_tokens: number | null;
             /** Provider */
             provider: string | null;
+            /** Provider Latency Ms */
+            provider_latency_ms: number | null;
             /** Status */
             status: string;
             /** Timestamp */
@@ -13286,6 +13882,11 @@ export interface components {
             error_count: number;
             /** Prompt Tokens */
             prompt_tokens: number;
+            /**
+             * Reasoning Tokens
+             * @default 0
+             */
+            reasoning_tokens: number;
             /** Request Count */
             request_count: number;
             /** Total Tokens */
@@ -13317,12 +13918,16 @@ export interface components {
             current_requests: number;
             /** Current Tokens */
             current_tokens: number;
+            /** External Id */
+            external_id?: string | null;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
             };
             /** Next Budget Reset At */
             next_budget_reset_at: string | null;
+            /** Parent User Id */
+            parent_user_id?: string | null;
             /** Reserved */
             reserved: number;
             /** Reserved Requests */
@@ -13742,7 +14347,7 @@ export interface components {
             budget_id: string;
             /**
              * Provider Key Id
-             * @description Narrow the default to one provider instance; omit or null to apply to every provider. Must name a real instance: a blank value would materialize ceilings that never bind
+             * @description Narrow the default to one provider instance; omit or null to apply to every provider. A blank value would materialize ceilings that never bind, so it is refused; this does not check that the value names a configured provider instance
              */
             provider_key_id?: string | null;
         };
@@ -15400,12 +16005,34 @@ export interface operations {
             query?: {
                 /** @description Compare prices for a request of this many input tokens: each model's minimum is taken from the pricing tier that request would settle at. Omitted, the base rates compare. */
                 at_context?: number | null;
-                /** @description Narrow to models whose name, catalog id or any selector contains this text, case-insensitively. */
+                /** @description Case-insensitive text in a model's name, vendor, id, selectors, or provider instances. */
                 search?: string | null;
-                /** @description Number of models to skip */
+                /** @description Number of matching models to skip. */
                 skip?: number;
-                /** @description Maximum number of models to return */
+                /** @description Maximum number of models to return. */
                 limit?: number;
+                /** @description Match any named provider instance. */
+                provider?: string[];
+                /** @description Match any vendor; an empty value names unknown vendors. */
+                vendor?: string[];
+                /** @description Require every input modality. */
+                input_modality?: string[];
+                /** @description Require every output modality. */
+                output_modality?: string[];
+                /** @description Require every capability. */
+                capability?: components["schemas"]["CatalogCapability"][];
+                /** @description Minimum context window; unknown windows do not match. */
+                min_context?: number;
+                /** @description Maximum cheapest input price per million tokens; unpriced models do not match. */
+                max_input?: number | null;
+                pricing?: "all" | "custom" | "default" | "priced" | "unpriced";
+                source?: "all" | "discovered" | "custom";
+                /** @description Release window ending today (UTC); zero disables it. Unknown and future releases do not match. */
+                released_within_days?: number;
+                sort?: "name" | "released" | "input" | "output" | "context" | "providers";
+                direction?: "asc" | "desc";
+                /** @description Include the filter choices drawn from the whole authorized catalog. */
+                include_facets?: boolean;
             };
             header?: never;
             path?: never;
@@ -15507,6 +16134,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "decisions-create_decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DecisionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -20155,6 +20815,123 @@ export interface operations {
             };
         };
     };
+    "rate-limits-list_rate_limit_rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RateLimitRulesPublic"];
+                };
+            };
+        };
+    };
+    "rate-limits-create_rate_limit_rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RateLimitRuleCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RateLimitRulePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "rate-limits-delete_rate_limit_rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "rate-limits-update_rate_limit_rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RateLimitRuleUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RateLimitRulePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "rerank-create_rerank": {
         parameters: {
             query?: never;
@@ -20990,6 +21767,39 @@ export interface operations {
             };
         };
     };
+    "decisions-create_systemone_decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DecisionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "tool-settings-get_tool_settings": {
         parameters: {
             query?: never;
@@ -21346,6 +22156,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InFlightResponse"];
+                };
+            };
+        };
+    };
+    "usage-get_request_settlement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestSettlement"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

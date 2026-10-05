@@ -20,6 +20,7 @@ from sqlalchemy import create_engine, text
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
+from gateway.services.password_service import hash_password_async
 from gateway.services.tenancy.provisioning_service import (
     DEFAULT_ORGANIZATION_SLUG,
     DEFAULT_WORKSPACE_NAME,
@@ -79,6 +80,19 @@ def _deactivate(tmp_path: Path, *, email: str) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'signup-test.db'}")
     with engine.begin() as connection:
         connection.execute(text('UPDATE "user" SET is_active = 0 WHERE email = :email'), {"email": email})
+    engine.dispose()
+
+
+def _mark_verified_by_a_provider(tmp_path: Path, *, email: str) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'signup-test.db'}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE \"user\" SET email_verified_at = CURRENT_TIMESTAMP, oauth_provider = 'google' "
+                "WHERE email = :email"
+            ),
+            {"email": email},
+        )
     engine.dispose()
 
 
@@ -206,6 +220,61 @@ def test_signup_on_a_deactivated_identity_writes_nothing(tmp_path: Path, caplog:
 
         assert response.status_code == 200
         assert response.json() == _signup(client, email="nobody@example.com").json()
+        assert "mail:console" not in caplog.text
+
+    assert _credentials(tmp_path, email="ada@example.com") == (None, None)
+
+
+def test_signup_cannot_set_a_password_on_a_verified_identity(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        _add_member(client, email="ada@example.com")
+        _mark_verified_by_a_provider(tmp_path, email="ada@example.com")
+
+        assert _signup(client, email="ada@example.com").status_code == 200
+        response = client.post(f"{API_ROOT}/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
+
+    assert response.status_code == 401
+
+
+def test_signup_on_a_verified_identity_writes_nothing(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    with _client(tmp_path) as client:
+        _add_member(client, email="ada@example.com")
+        _mark_verified_by_a_provider(tmp_path, email="ada@example.com")
+
+        gateway_logger.addHandler(caplog.handler)
+        caplog.set_level(logging.INFO, logger="gateway")
+        try:
+            response = _signup(client, email="ada@example.com")
+        finally:
+            gateway_logger.removeHandler(caplog.handler)
+
+        assert response.status_code == 200
+        assert response.json() == _signup(client, email="nobody@example.com").json()
+        assert "mail:console" not in caplog.text
+
+    assert _credentials(tmp_path, email="ada@example.com") == (None, None)
+
+
+def test_signup_writes_nothing_when_the_address_is_verified_after_its_check(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def verify_then_hash(password: str) -> str:
+        _mark_verified_by_a_provider(tmp_path, email="ada@example.com")
+        return await hash_password_async(password)
+
+    with _client(tmp_path) as client:
+        _add_member(client, email="ada@example.com")
+        # Signup hashes the password between its check and its write.
+        monkeypatch.setattr("gateway.services.tenancy.user_service.hash_password_async", verify_then_hash)
+
+        gateway_logger.addHandler(caplog.handler)
+        caplog.set_level(logging.INFO, logger="gateway")
+        try:
+            response = _signup(client, email="ada@example.com")
+        finally:
+            gateway_logger.removeHandler(caplog.handler)
+
+        assert response.status_code == 200
         assert "mail:console" not in caplog.text
 
     assert _credentials(tmp_path, email="ada@example.com") == (None, None)

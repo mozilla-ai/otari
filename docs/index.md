@@ -34,7 +34,7 @@ Running and managing a gateway.
 - [Admin dashboard](dashboard.md): sign-in, setup, and management surfaces.
 - [Access control](access-control.md): identities, organizations, workspaces, keys, and budgets.
 - [Models](models.md): selectors, providers, discovery, aliases, and capabilities.
-- [Routing policies](routing.md): failover, conditions, weighted and learned routing, and mandatory guardrails.
+- [Routing policies](routing.md): failover, conditions, weighted, priority and learned routing, and mandatory guardrails.
 - [OpenAI provider guide](providers/openai.md): configure OpenAI and route your first request through Otari.
 
 ### For integrators

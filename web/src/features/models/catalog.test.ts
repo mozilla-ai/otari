@@ -3,10 +3,9 @@ import { describe, expect, it } from "vitest"
 import type { CatalogModelSummary } from "@/client"
 import {
   activeFilterCount,
-  compareModels,
+  catalogRequest,
   credentialLabel,
   EMPTY_FILTERS,
-  filterModels,
   makerKeyOf,
   priceSourceLabel,
   providerOptions,
@@ -76,171 +75,61 @@ const GLM = model({
   min_input_price_per_million: 0.5,
   min_output_price_per_million: 2,
 })
-const KIMI = model({
-  id: "moonshotai/kimi-k2.6",
-  name: "Kimi K2.6",
-  vendor: "Moonshot AI",
-  input_modalities: ["image", "text"],
-  context_window: 262_144,
-  release_date: "2026-05-01",
-  providers: ["nebius"],
-  selector: null,
-  resolves_to: null,
-  selectors: ["nebius:moonshotai/Kimi-K2.6"],
-  price_sources: ["defaults"],
-  unpriced_count: 0,
-  discovered: true,
-  min_input_price_per_million: 0.6,
-  min_output_price_per_million: 2.4,
-})
 const LOCAL = model({ id: "qwen3-32b", providers: ["home_lab"] })
 
 const ANY = {
   ...EMPTY_FILTERS,
 }
 
-describe("filterModels", () => {
-  it("searches the name, the vendor and the id", () => {
-    expect(filterModels([GLM, KIMI], { ...ANY, query: "moonshot" })).toEqual([
-      KIMI,
-    ])
-    expect(filterModels([GLM, KIMI], { ...ANY, query: "glm-5" })).toEqual([GLM])
-  })
-
-  it("narrows by provider instance, the way the Providers page links here", () => {
+describe("catalogRequest", () => {
+  it("maps the complete filter state and page to the API", () => {
     expect(
-      filterModels([GLM, KIMI, LOCAL], { ...ANY, providers: ["fireworks"] }),
-    ).toEqual([GLM])
-    expect(
-      filterModels([GLM, KIMI, LOCAL], { ...ANY, providers: ["nebius"] }),
-    ).toEqual([GLM, KIMI])
-  })
-
-  it("treats an unknown vendor as its own bucket", () => {
-    expect(filterModels([GLM, LOCAL], { ...ANY, vendors: [""] })).toEqual([
-      LOCAL,
-    ])
-  })
-
-  it("tests a capability against the model's own flags", () => {
-    expect(
-      filterModels([GLM, KIMI], { ...ANY, inputModalities: ["image"] }),
-    ).toEqual([KIMI])
-    expect(
-      filterModels([GLM, KIMI], { ...ANY, capabilities: ["reasoning"] }),
-    ).toEqual([GLM])
-  })
-
-  it("drops a model whose context is unknown from a context floor", () => {
-    expect(
-      filterModels([GLM, KIMI, LOCAL], { ...ANY, minContext: 250_000 }),
-    ).toEqual([KIMI])
-  })
-})
-
-describe("filterModels, the price and release filters", () => {
-  const priced = [
-    GLM,
-    KIMI,
-    model({
-      id: "old-and-free",
-      release_date: "2022-01-01",
-      price_sources: [],
-      unpriced_count: 1,
-      discovered: false,
-    }),
-  ]
-  const now = new Date("2026-09-10T00:00:00Z")
-
-  it("searches selectors and provider instances too", () => {
-    expect(
-      filterModels(priced, { ...ANY, query: "accounts/fireworks" }).map(
-        (m) => m.id,
+      catalogRequest(
+        {
+          ...ANY,
+          query: "  moonshot  ",
+          providers: ["nebius", "fireworks"],
+          vendors: [""],
+          inputModalities: ["text", "image"],
+          outputModalities: ["audio"],
+          capabilities: ["reasoning", "tool_call"],
+          minContext: 128000,
+          maxInput: 3,
+          pricing: "custom",
+          source: "discovered",
+          releasedWithinDays: 365,
+        },
+        "input",
+        "desc",
+        2,
+        25,
       ),
-    ).toEqual(["z-ai/glm-5.3"])
-    expect(
-      filterModels(priced, { ...ANY, query: "nebius" }).map((m) => m.id),
-    ).toEqual(["z-ai/glm-5.3", "moonshotai/kimi-k2.6"])
+    ).toEqual({
+      search: "moonshot",
+      provider: ["fireworks", "nebius"],
+      vendor: [""],
+      input_modality: ["image", "text"],
+      output_modality: ["audio"],
+      capability: ["reasoning", "tool_call"],
+      min_context: 128000,
+      max_input: 3,
+      pricing: "custom",
+      source: "discovered",
+      released_within_days: 365,
+      sort: "input",
+      direction: "desc",
+      skip: 50,
+      limit: 25,
+      include_facets: true,
+    })
   })
 
-  it("narrows by where a price came from", () => {
-    const ids = (pricing: string) =>
-      filterModels(priced, { ...ANY, pricing }).map((m) => m.id)
-    expect(ids("custom")).toEqual(["z-ai/glm-5.3"])
-    expect(ids("default")).toEqual(["z-ai/glm-5.3", "moonshotai/kimi-k2.6"])
-    expect(ids("priced")).toEqual(["z-ai/glm-5.3", "moonshotai/kimi-k2.6"])
-    expect(ids("unpriced")).toEqual(["old-and-free"])
-  })
-
-  it("narrows by whether a provider discovered the model", () => {
-    expect(
-      filterModels(priced, { ...ANY, source: "custom" }).map((m) => m.id),
-    ).toEqual(["old-and-free"])
-    expect(filterModels(priced, { ...ANY, source: "discovered" })).toHaveLength(
-      2,
-    )
-  })
-
-  it("caps the cheapest input rate, dropping the unpriced", () => {
-    expect(
-      filterModels(priced, { ...ANY, maxInput: 0.55 }).map((m) => m.id),
-    ).toEqual(["z-ai/glm-5.3"])
-  })
-
-  it("keeps only a release inside the window, and none with no date", () => {
-    expect(
-      filterModels(priced, { ...ANY, releasedWithinDays: 365 }, now).map(
-        (m) => m.id,
-      ),
-    ).toEqual(["z-ai/glm-5.3", "moonshotai/kimi-k2.6"])
-    expect(
-      filterModels(priced, { ...ANY, releasedWithinDays: 3 * 365 }, now).map(
-        (m) => m.id,
-      ),
-    ).toEqual(["z-ai/glm-5.3", "moonshotai/kimi-k2.6"])
-    expect(
-      filterModels(priced, { ...ANY, releasedWithinDays: 5 * 365 }, now),
-    ).toHaveLength(3)
-  })
-
-  it("drops a release dated after today from every window", () => {
-    const withFuture = [
-      ...priced,
-      model({ id: "not-out-yet", release_date: "2027-01-01" }),
-    ]
-    for (const releasedWithinDays of [365, 5 * 365]) {
-      expect(
-        filterModels(withFuture, { ...ANY, releasedWithinDays }, now).map(
-          (m) => m.id,
-        ),
-      ).not.toContain("not-out-yet")
-    }
-  })
-})
-
-describe("compareModels", () => {
-  it("puts an unpriced model last whichever way the price sorts", () => {
-    const asc = [LOCAL, KIMI, GLM].sort(compareModels("input", "asc"))
-    expect(asc.map((m) => m.id)).toEqual([
-      "z-ai/glm-5.3",
-      "moonshotai/kimi-k2.6",
-      "qwen3-32b",
-    ])
-    const desc = [LOCAL, KIMI, GLM].sort(compareModels("input", "desc"))
-    expect(desc.map((m) => m.id)).toEqual([
-      "moonshotai/kimi-k2.6",
-      "z-ai/glm-5.3",
-      "qwen3-32b",
-    ])
-  })
-
-  it("sorts release dates lexically, which is chronological for ISO dates", () => {
-    const newest = [GLM, KIMI, LOCAL].sort(compareModels("released", "desc"))
-    expect(newest.map((m) => m.id)).toEqual([
-      "z-ai/glm-5.3",
-      "moonshotai/kimi-k2.6",
-      "qwen3-32b",
-    ])
+  it("omits inactive numeric filters and blank search", () => {
+    const params = catalogRequest(ANY, "name", "asc", 0, 25)
+    expect(params.search).toBeUndefined()
+    expect(params.min_context).toBeUndefined()
+    expect(params.max_input).toBeUndefined()
+    expect(params.released_within_days).toBeUndefined()
   })
 })
 
@@ -270,24 +159,21 @@ describe("options", () => {
   it("lists vendors with the unknown bucket named", () => {
     // `markKey` is the vendor slug a mark is keyed on, carried alongside because
     // the filter matches on the display string and only a row knows both.
-    expect(vendorOptions([GLM, LOCAL])).toEqual([
+    expect(
+      vendorOptions([
+        { value: "Z.ai", vendor_slug: "z-ai" },
+        { value: "", vendor_slug: null },
+      ]),
+    ).toEqual([
       { value: "", label: "Unknown vendor", markKey: undefined },
       { value: "Z.ai", label: "Z.ai", markKey: "z-ai" },
     ])
   })
 
   it("lists every provider instance once", () => {
-    expect(providerOptions([GLM, KIMI]).map((o) => o.value)).toEqual([
-      "fireworks",
-      "nebius",
-    ])
-  })
-
-  it("narrows by what a model produces", () => {
-    const image = model({ id: "painter", output_modalities: ["image"] })
     expect(
-      filterModels([GLM, KIMI, image], { ...ANY, outputModalities: ["image"] }),
-    ).toEqual([image])
+      providerOptions(["fireworks", "nebius"]).map((o) => o.value),
+    ).toEqual(["fireworks", "nebius"])
   })
 
   it("counts the choices in force, and not the search", () => {

@@ -13,7 +13,7 @@ import secrets
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import API_KEY_PREFIX, MIN_API_KEY_LENGTH
-from gateway.ports.api_key_format_port import KeyRoute, Local
+from gateway.ports.api_key_format_port import ApiKeyFormatPort, KeyRoute, Local
 
 # Random characters kept after the prefix in the stored fingerprint. The prefix
 # alone names every key alike; seven more tell them apart on the Keys page.
@@ -50,7 +50,7 @@ def validate_api_key_format(api_key: str) -> None:
         raise ValueError(msg)
 
 
-class DefaultApiKeyFormatAdapter:
+class DefaultApiKeyFormatAdapter(ApiKeyFormatPort):
     """Mints ``tk-`` keys and checks every presented key locally.
 
     Constructible with a session like every core adapter, because the container

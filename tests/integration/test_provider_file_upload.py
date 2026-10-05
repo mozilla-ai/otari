@@ -227,9 +227,7 @@ def test_a_deployment_that_makes_no_copies_refuses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     file_id = _upload_file(client, api_key_header)
-    monkeypatch.setattr(
-        cast(Any, client.app).state.config, "files_provider_upload_enabled", False, raising=True
-    )
+    monkeypatch.setattr(cast(Any, client.app).state.config, "files_provider_upload_enabled", False, raising=True)
 
     response, forwarded = _run(client, api_key_header, file_id)
 

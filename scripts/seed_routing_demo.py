@@ -166,9 +166,7 @@ def main() -> int:
             "demo-guarded",
             {
                 "select": [{"default": args.model}],
-                "guardrails": [
-                    {"profile": "prompt-injection", "mode": "block", "on_unavailable": "monitor"}
-                ],
+                "guardrails": [{"profile": "prompt-injection", "mode": "block", "on_unavailable": "monitor"}],
             },
         ),
     ]

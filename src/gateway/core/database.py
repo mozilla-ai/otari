@@ -145,9 +145,7 @@ def translate_timeout_error(context: Any) -> None:
     """
     original = context.original_exception
     if isinstance(original, TimeoutError) and not isinstance(original, SQLAlchemyError):
-        raise OperationalError(
-            "database statement timed out (db_command_timeout)", None, original
-        ) from original
+        raise OperationalError("database statement timed out (db_command_timeout)", None, original) from original
 
 
 def _install_timeout_translation(engine: AsyncEngine) -> None:

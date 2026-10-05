@@ -27,16 +27,26 @@ GIF_OUT="assets/otari-demo.gif"
 # demo. Not a secret: the DB is ephemeral and holds only fake provider keys.
 export OTARI_SECRET_KEY="${OTARI_SECRET_KEY:-wdhWKyd1gwpMjxj9h4EbpW9B6pilzfrNTe0wTnwqPHg=}"
 export OTARI_PROVIDER_ACCOUNT_PEPPER="${OTARI_PROVIDER_ACCOUNT_PEPPER:-demo-provider-account-pepper-not-a-secret}"
-# Playwright ships no native arm64 Linux Chromium, so on arm64 force its Ubuntu
-# 24.04 arm64 build and skip the host-requirements re-check. On x86_64 (or any
-# other arch) leave Playwright's native detection and host checks alone, so the
+# Playwright ships no native arm64 Linux Chromium, so on arm64 Linux force its Ubuntu
+# 24.04 arm64 build and skip the host-requirements re-check. Elsewhere (macOS
+# included) leave Playwright's native detection and host checks alone, so the
 # pipeline does not select an incompatible Chromium there. Caller-set values win.
-case "$(uname -m)" in
-  aarch64 | arm64)
+case "$(uname -s)-$(uname -m)" in
+  Linux-aarch64 | Linux-arm64)
     export PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="${PLAYWRIGHT_HOST_PLATFORM_OVERRIDE:-ubuntu24.04-arm64}"
     export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS="${PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS:-1}"
     ;;
 esac
+
+# Refuse to start beside another listener: the gateway would fail to bind, the
+# health probe would get its answer from whatever holds the port, and the tour
+# would record that instead.
+for port in 8000 8099; do
+  if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+    echo "port $port is already in use; stop whatever is listening there and rerun"
+    exit 1
+  fi
+done
 
 echo ">> Resetting demo database"
 rm -f "$DB" "$DB-wal" "$DB-shm"
@@ -49,22 +59,24 @@ uv run otari migrate --config "$CONFIG"
 echo ">> Seeding demo data"
 uv run python "$DIR/seed.py" "sqlite:///./$DB"
 
-echo ">> Starting gateway"
+echo ">> Starting mock provider and gateway"
+uv run python "$DIR/mock_provider.py" >"$ART/mock.log" 2>&1 &
+MOCK_PID=$!
 uv run otari serve --config "$CONFIG" >"$ART/server.log" 2>&1 &
 SERVER_PID=$!
 cleanup() {
   if [[ "$KEEP_SERVER" != "1" ]]; then
-    kill "$SERVER_PID" 2>/dev/null || true
+    kill "$SERVER_PID" "$MOCK_PID" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT
 
 echo ">> Waiting for /health"
 for _ in $(seq 1 60); do
-  if curl -sf http://127.0.0.1:8000/health >/dev/null 2>&1; then break; fi
+  if curl -sf http://127.0.0.1:8000/api/v1/health >/dev/null 2>&1; then break; fi
   sleep 1
 done
-curl -sf http://127.0.0.1:8000/health >/dev/null || { echo "gateway did not come up"; cat "$ART/server.log"; exit 1; }
+curl -sf http://127.0.0.1:8000/api/v1/health >/dev/null || { echo "gateway did not come up"; cat "$ART/server.log"; exit 1; }
 
 echo ">> Recording tour"
 OUT_DIR="$ART" BASE_URL="http://127.0.0.1:8000" node "$DIR/tour.mjs"
@@ -94,5 +106,5 @@ gifsicle -O3 --lossy="$LOSSY" "$ART/otari-demo-raw.gif" -o "$ART/otari-demo.gif"
 cp "$ART/otari-demo.gif" "$GIF_OUT"
 BYTES=$(wc -c <"$GIF_OUT")
 echo ">> Wrote $GIF_OUT ($((BYTES/1024)) KB)"
-[[ "$KEEP_SERVER" == "1" ]] && echo "server left running (pid $SERVER_PID)"
+[[ "$KEEP_SERVER" == "1" ]] && echo "server left running (gateway pid $SERVER_PID, mock provider pid $MOCK_PID)"
 true

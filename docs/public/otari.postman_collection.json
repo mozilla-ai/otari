@@ -1512,7 +1512,7 @@
         {
           "name": "Delete Budget",
           "request": {
-            "description": "Delete a budget.\n\nRefused with 409 while anything still names this budget: a workspace handing\nit to its members, or a scoped ceiling enforcing it. Both foreign keys are\n``RESTRICT``, so the database would refuse either anyway, but as an\n``IntegrityError`` reported as \"Database error\" with nothing naming what to\ngo and change. Checked here so the refusal can say which, and where.",
+            "description": "Delete a budget the deployment owns.\n\nRefused with 409 for an organization's budget: the operator may edit one\n(``PATCH`` retimes its ceilings) but deleting it would take a budget the\ntenant defined out from under them.\n\nRefused with 409, too, while anything still names this budget: a workspace\nhanding it to its members, or a scoped ceiling enforcing it. The refusal says\nwhich, and where.\n\nGateway users assigned to the budget are left uncapped, as the dashboard's\nconfirmation says, and its reset history is deleted with it.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -1607,25 +1607,103 @@
                   "value": ""
                 },
                 {
-                  "description": "Narrow to models whose name, catalog id or any selector contains this text, case-insensitively.",
+                  "description": "Case-insensitive text in a model's name, vendor, id, selectors, or provider instances.",
                   "disabled": true,
                   "key": "search",
                   "value": ""
                 },
                 {
-                  "description": "Number of models to skip",
+                  "description": "Number of matching models to skip.",
                   "disabled": true,
                   "key": "skip",
                   "value": ""
                 },
                 {
-                  "description": "Maximum number of models to return",
+                  "description": "Maximum number of models to return.",
                   "disabled": true,
                   "key": "limit",
                   "value": ""
+                },
+                {
+                  "description": "Match any named provider instance.",
+                  "disabled": true,
+                  "key": "provider",
+                  "value": ""
+                },
+                {
+                  "description": "Match any vendor; an empty value names unknown vendors.",
+                  "disabled": true,
+                  "key": "vendor",
+                  "value": ""
+                },
+                {
+                  "description": "Require every input modality.",
+                  "disabled": true,
+                  "key": "input_modality",
+                  "value": ""
+                },
+                {
+                  "description": "Require every output modality.",
+                  "disabled": true,
+                  "key": "output_modality",
+                  "value": ""
+                },
+                {
+                  "description": "Require every capability.",
+                  "disabled": true,
+                  "key": "capability",
+                  "value": ""
+                },
+                {
+                  "description": "Minimum context window; unknown windows do not match.",
+                  "disabled": true,
+                  "key": "min_context",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum cheapest input price per million tokens; unpriced models do not match.",
+                  "disabled": true,
+                  "key": "max_input",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "pricing",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "source",
+                  "value": ""
+                },
+                {
+                  "description": "Release window ending today (UTC); zero disables it. Unknown and future releases do not match.",
+                  "disabled": true,
+                  "key": "released_within_days",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "sort",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "direction",
+                  "value": ""
+                },
+                {
+                  "description": "Include the filter choices drawn from the whole authorized catalog.",
+                  "disabled": true,
+                  "key": "include_facets",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context=&search=&skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context=&search=&skip=&limit=&provider=&vendor=&input_modality=&output_modality=&capability=&min_context=&max_input=&pricing=&source=&released_within_days=&sort=&direction=&include_facets="
             }
           }
         },
@@ -1719,6 +1797,77 @@
         }
       ],
       "name": "chat"
+    },
+    {
+      "item": [
+        {
+          "name": "Create Decision",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"typesafe:jev-latest\",\n  \"questions\": {\n    \"urgency\": {\n      \"instructions\": \"Does this message express urgency?\",\n      \"type\": \"noul\"\n    }\n  },\n  \"state\": \"The Stripe integration has failed for 3 days and I'm losing sales.\"\n}"
+            },
+            "description": "Answer typed questions (noul, choice, score) about a state.\n\n``model`` is ``<provider>:<model>``, where the provider is a ``decision_providers``\nentry, for example ``typesafe:jev-latest`` or ``openrouter:typesafe/jev-1.13``.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user; a ``user`` naming a\n  different user is rejected with 403 unless mismatch rejection is off.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "decisions"
+              ],
+              "raw": "{{baseUrl}}/api/v1/decisions"
+            }
+          }
+        },
+        {
+          "name": "Create Systemone Decision",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"typesafe:jev-latest\",\n  \"questions\": {\n    \"urgency\": {\n      \"instructions\": \"Does this message express urgency?\",\n      \"type\": \"noul\"\n    }\n  },\n  \"state\": \"The Stripe integration has failed for 3 days and I'm losing sales.\"\n}"
+            },
+            "description": "Answer typed questions at the path TypeSafe's SDK and llama-server use.\n\nIdentical to ``POST /api/v1/decisions``; point the client's base URL at the gateway's ``/api``.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "systemone"
+              ],
+              "raw": "{{baseUrl}}/api/v1/systemone"
+            }
+          }
+        }
+      ],
+      "name": "decisions"
     },
     {
       "item": [
@@ -2261,7 +2410,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"user_id\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"end_user_budget_id\": \"string\",\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_service_key\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"user_id\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
             },
             "description": "Create a new API key in the caller's organization.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, the key is associated with the shared \"default\" user, which is created\non first use. Keys without an explicit owner therefore share one identity, and so share budget,\nusage, and files.\n\n``workspace_id`` names a workspace in the caller's organization, and omitting\nit mints into that organization's default workspace. A key resolves that\norganization's provider credentials and bills there, so minting into another\norganization's workspace would spend its budget on its credentials.",
             "header": [
@@ -2321,7 +2470,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"end_user_budget_id\": \"string\",\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"is_service_key\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
             },
             "description": "Update an API key in the caller's organization.\n\nRequires master key authentication.",
             "header": [
@@ -7033,6 +7182,131 @@
     {
       "item": [
         {
+          "name": "List Rate Limit Rules",
+          "request": {
+            "description": "List every rule in effect: the config.yml rules, then the ones stored here.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rate-limits"
+              ],
+              "raw": "{{baseUrl}}/api/v1/rate-limits"
+            }
+          }
+        },
+        {
+          "name": "Create Rate Limit Rule",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"name\": \"keys\",\n  \"per\": \"key\",\n  \"rpm\": 600,\n  \"tpm\": 200000\n}"
+            },
+            "description": "Add a rule. It applies from the next request on this replica, and on every replica within 30 seconds.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rate-limits"
+              ],
+              "raw": "{{baseUrl}}/api/v1/rate-limits"
+            }
+          }
+        },
+        {
+          "name": "Update Rate Limit Rule",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"rpm\": 1200\n}"
+            },
+            "description": "Change a stored rule. Requests it already counted stay counted. A config.yml rule answers 409.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rate-limits",
+                ":name"
+              ],
+              "raw": "{{baseUrl}}/api/v1/rate-limits/:name",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "name",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Rate Limit Rule",
+          "request": {
+            "description": "Remove a stored rule. A config.yml rule answers 409.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rate-limits",
+                ":name"
+              ],
+              "raw": "{{baseUrl}}/api/v1/rate-limits/:name",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "name",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "rate-limits"
+    },
+    {
+      "item": [
+        {
           "name": "Create Rerank",
           "request": {
             "body": {
@@ -8199,6 +8473,34 @@
                 "in-flight"
               ],
               "raw": "{{baseUrl}}/api/v1/usage/in-flight"
+            }
+          }
+        },
+        {
+          "name": "Get Request Settlement",
+          "request": {
+            "description": "Look up a request's settled cost by the ``Otari-Request-ID`` it was sent (standalone).\n\nThis is how a caller recovers the cost of a request whose response never\ncarried one: a stream that failed or was disconnected mid-response, or a\nrequest that errored. An API key sees only the requests it made; the master\nkey sees any. Returns 404 until the request has settled (its rows are written\nby a background writer, so a lookup made the instant a stream closes can\nprecede them), and for an id that is unknown or belongs to another key, with\nno way to tell those apart. A stream that ended before the provider reported\nusage, and ran no gateway tools, writes no row, so its id stays 404.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usage",
+                "requests",
+                ":request_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/usage/requests/:request_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "request_id",
+                  "value": ""
+                }
+              ]
             }
           }
         },

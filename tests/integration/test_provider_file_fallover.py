@@ -176,6 +176,10 @@ def test_a_fallover_to_a_provider_that_cannot_hold_a_copy_is_not_sent_the_reques
     assert response.status_code == 502, response.text
     assert provider.await_count == 1, "the request reached a candidate that cannot open the file"
     rows = db_session.scalars(select(UsageLog)).all()
-    assert [(row.provider, row.status) for row in rows] == [("claude-a", "error")], (
+    assert [(row.provider, row.status) for row in rows if row.status == "error"] == [("claude-a", "error")], (
         "the failure was not recorded against the only provider called"
     )
+    # The candidate that could not hold a copy is on record as skipped, not as failed.
+    skipped = [row for row in rows if row.status == "absorbed"]
+    assert [row.provider for row in skipped] == ["openai"]
+    assert (skipped[0].error_message or "").startswith("Skipped: ")

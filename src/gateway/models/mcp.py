@@ -22,7 +22,7 @@ MAX_MCP_SERVER_IDS = 50
 
 # Hex characters kept from the revision digest. 32 leaves collision risk far
 # below the chance of a stored-server change going unnoticed for any other
-# reason, and stays well inside the 1-to-128-character wire format (R-DISC-3).
+# reason, and stays well inside the 1-to-128-character wire format.
 REVISION_LENGTH = 32
 
 
@@ -78,7 +78,7 @@ class ResolvedMcpServer(BaseModel):
     def revision(self) -> str:
         """The opaque revision of this server's execution-relevant configuration.
 
-        Derived rather than stored (R-RES-3): a pure function of the four fields
+        Derived rather than stored: a pure function of the four fields
         that change what an execution does, so every worker and replica agrees
         by construction and the value moves atomically with the configuration it
         covers. ``name`` and ``purpose_hint`` are excluded, so retitling a server

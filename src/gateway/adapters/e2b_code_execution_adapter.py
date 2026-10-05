@@ -28,6 +28,7 @@ from typing import Any
 
 from gateway.log_config import logger
 from gateway.ports.code_execution_port import (
+    CodeExecutionPort,
     CodeExecutionSession,
     OutputOverBudget,
     SandboxFileEntry,
@@ -51,7 +52,7 @@ _TIMEOUT_EXIT_CODE = 124
 _RETRY_AFTER_S = "5"
 
 
-class E2BCodeExecutionAdapter:
+class E2BCodeExecutionAdapter(CodeExecutionPort):
     """Leases E2B sandboxes through the provider's async SDK.
 
     Takes nothing: which sandboxes it leases is E2B's own ``E2B_API_KEY``, read
@@ -135,7 +136,7 @@ class E2BCodeExecutionAdapter:
                     logger.warning("E2B sandbox %s cleanup failed", sandbox.sandbox_id, exc_info=True)
 
 
-class _E2BSession:
+class _E2BSession(CodeExecutionSession):
     """One E2B sandbox, answering the port's six operations."""
 
     def __init__(self, sandbox: Any, sdk: Any, *, holds_across_requests: bool = False) -> None:

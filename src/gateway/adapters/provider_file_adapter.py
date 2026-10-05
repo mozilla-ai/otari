@@ -84,7 +84,7 @@ def _container_file_request(file: ProviderFile, credential: ResolvedCredential) 
     )
 
 
-class _AnyLlmFileSession:
+class _AnyLlmFileSession(ProviderFileSession):
     """Reads and writes one provider account's files through any-llm, with the credential that reaches it.
 
     Owns the connection its calls run on, so a caller closes it with

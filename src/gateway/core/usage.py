@@ -12,6 +12,9 @@ as plain integers (rather than relying on ``prompt_tokens_details``) lets the re
 builder forward them uniformly across providers, including Anthropic cache writes.
 """
 
+import math
+from typing import Any
+
 from any_llm.types.completion import CompletionUsage
 
 
@@ -37,6 +40,21 @@ class GatewayUsage(CompletionUsage):
     convention (see ``_compute_cost`` in ``_pipeline.py``). Defaults to ``True`` so a
     plain ``CompletionUsage`` and every OpenAI-style path need no change.
     """
+    reasoning_tokens: int = 0
+    """Reasoning (OpenAI) or thinking (Anthropic) tokens, a subset of ``completion_tokens``.
+
+    Recorded for attribution only: the provider already bills them as output, so they
+    are never priced on top of ``completion_tokens``.
+    """
+
+    @staticmethod
+    def external_extras(usage: CompletionUsage) -> dict[str, Any]:
+        """``usage.model_extra`` with any key that names a ``GatewayUsage`` field dropped.
+
+        Extras are provider-controlled and splatted into the constructor, so an
+        unfiltered key such as ``cache_write_tokens`` would set a billed field.
+        """
+        return {k: v for k, v in (usage.model_extra or {}).items() if k not in GatewayUsage.model_fields}
 
     @classmethod
     def from_completion_usage(
@@ -47,6 +65,7 @@ class GatewayUsage(CompletionUsage):
         cache_write_tokens: int | None = None,
         cache_write_1h_tokens: int | None = None,
         cache_tokens_in_prompt: bool | None = None,
+        reasoning_tokens: int | None = None,
     ) -> "GatewayUsage":
         """Build a ``GatewayUsage`` from a base ``CompletionUsage`` plus cache counts.
 
@@ -66,7 +85,12 @@ class GatewayUsage(CompletionUsage):
             cache_write_1h_tokens = cache_write_1h_tokens_of(usage)
         if cache_tokens_in_prompt is None:
             cache_tokens_in_prompt = cache_tokens_in_prompt_of(usage)
-        return cls(
+        if reasoning_tokens is None:
+            reasoning_tokens = reasoning_tokens_of(usage)
+        # Forward any-llm's own extras (otari#337) so provider_latency_ms_of can
+        # still read them; external_extras drops any that name one of our fields.
+        fields = cls.external_extras(usage)
+        fields.update(
             prompt_tokens=usage.prompt_tokens,
             completion_tokens=usage.completion_tokens,
             total_tokens=usage.total_tokens,
@@ -76,7 +100,9 @@ class GatewayUsage(CompletionUsage):
             cache_write_tokens=cache_write_tokens,
             cache_write_1h_tokens=cache_write_1h_tokens,
             cache_tokens_in_prompt=cache_tokens_in_prompt,
+            reasoning_tokens=reasoning_tokens,
         )
+        return cls(**fields)
 
 
 def cache_read_tokens_of(usage: CompletionUsage) -> int:
@@ -116,3 +142,62 @@ def cache_tokens_in_prompt_of(usage: CompletionUsage) -> bool:
     if isinstance(usage, GatewayUsage):
         return usage.cache_tokens_in_prompt
     return True
+
+
+def reasoning_tokens_of(usage: CompletionUsage) -> int:
+    """Return the reasoning-token count carried by ``usage``.
+
+    Handles both :class:`GatewayUsage` (explicit field) and a plain
+    ``CompletionUsage`` (falls back to ``completion_tokens_details.reasoning_tokens``).
+    """
+    if isinstance(usage, GatewayUsage):
+        return usage.reasoning_tokens
+    if usage.completion_tokens_details is not None:
+        return usage.completion_tokens_details.reasoning_tokens or 0
+    return 0
+
+
+# Provider-specific field(s) any-llm leaves in ``usage.model_extra`` that sum to
+# actual compute time, and the multiplier that converts the sum's unit to
+# milliseconds (otari#337). Absent here means "not reported": most providers
+# expose no server-side timing in the response body at all.
+#
+# Ollama's own ``total_duration`` is the whole server-side request, including
+# ``load_duration`` (loading the model into memory), which dominates on a cold
+# model and is not compute time in the sense this column reports for Groq.
+# any-llm forwards ``prompt_eval_duration`` and ``eval_duration`` separately
+# (see any_llm.providers.ollama.utils._extract_ollama_timing_details); their
+# sum is Ollama's actual prompt+generation compute time, excluding load.
+_PROVIDER_LATENCY_FIELDS: dict[str, tuple[tuple[str, ...], float]] = {
+    "groq": (("total_time",), 1_000.0),  # seconds
+    "ollama": (("prompt_eval_duration", "eval_duration"), 1e-6),  # nanoseconds
+}
+
+
+def provider_latency_ms_of(usage: CompletionUsage, provider: str | None) -> int | None:
+    """Best-effort provider-reported compute time for ``provider``, in ms.
+
+    ``None`` when the provider is not in the table, any of its fields is
+    absent, negative, or not a plain finite number: this only enriches a
+    row and must never raise or affect billing.
+    """
+    if provider is None:
+        return None
+    field = _PROVIDER_LATENCY_FIELDS.get(provider)
+    if field is None:
+        return None
+    keys, to_ms = field
+    extras = usage.model_extra or {}
+    raw_values: list[int | float] = []
+    for key in keys:
+        raw = extras.get(key)
+        if isinstance(raw, bool) or not isinstance(raw, int | float) or raw < 0:
+            return None
+        raw_values.append(raw)
+    try:
+        scaled = sum(raw_values) * to_ms
+    except OverflowError:
+        return None
+    if not math.isfinite(scaled):
+        return None
+    return round(scaled)

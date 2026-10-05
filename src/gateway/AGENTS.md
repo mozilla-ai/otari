@@ -224,7 +224,7 @@ and use the shared renderer and header sanitization.
 usage row served by this deployment. Imported and absorbed rows do not count,
 and neither does a Playground row: the guide marks somebody integrating Otari
 from their own code, so it filters on the endpoint label as well as the source
-(`core/usage_source.integration_traffic`).
+(`_integration_traffic`).
 The activation-state table stores only dismissal and setup-key state.
 
 Key issuance requires workspace management authority and rotates the existing

@@ -4,10 +4,12 @@ from typing import Never
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.elements import ColumnElement
+from sqlmodel import col
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.budget_exceptions import MemberBudgetPolicyAlreadyExistsError
 from gateway.models.budgets import WorkspaceBudgetDefault
+from gateway.models.tenancy import Workspace
 from gateway.repositories.base_repository import BaseRepository
 
 
@@ -56,6 +58,16 @@ class WorkspaceBudgetDefaultRepository(BaseRepository[WorkspaceBudgetDefault, Ne
             .where(WorkspaceBudgetDefault.budget_id == budget_id)
         )
         return result.scalar_one()
+
+    async def workspace_names_for_budget(self, budget_id: str) -> list[str]:
+        """Return the names of the workspaces whose policies hand out this budget, alphabetically."""
+        result = await self.db.execute(
+            select(col(Workspace.name))
+            .join(WorkspaceBudgetDefault, WorkspaceBudgetDefault.workspace_id == col(Workspace.id))
+            .where(WorkspaceBudgetDefault.budget_id == budget_id)
+            .order_by(Workspace.name)
+        )
+        return list(result.scalars().all())
 
     async def for_workspace(self, workspace_id: uuid.UUID) -> list[WorkspaceBudgetDefault]:
         """Return every policy on a workspace."""

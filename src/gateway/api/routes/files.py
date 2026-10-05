@@ -76,9 +76,7 @@ async def _require_files_enabled(config: Annotated[GatewayConfig, Depends(get_co
         raise FilesDisabledError
 
 
-router = APIRouter(
-    tags=["files"], dependencies=[Depends(_require_files_enabled), Depends(_refuse_files_beta)]
-)
+router = APIRouter(tags=["files"], dependencies=[Depends(_require_files_enabled), Depends(_refuse_files_beta)])
 
 # OpenAI's documented file purposes plus a generic default. We don't enforce the
 # enum (forward-compat), but normalise the empty case to "user_data".
@@ -182,9 +180,9 @@ def _content_disposition(filename: str) -> str:
     ``filename`` for legacy clients plus an RFC 5987 percent-encoded
     ``filename*`` for the real (possibly non-ASCII) name.
     """
-    ascii_name = "".join(c for c in filename if c.isprintable() and c not in '"\\').encode(
-        "ascii", "ignore"
-    ).decode("ascii")
+    ascii_name = (
+        "".join(c for c in filename if c.isprintable() and c not in '"\\').encode("ascii", "ignore").decode("ascii")
+    )
     ascii_name = ascii_name.strip() or "download"
     encoded = quote(filename, safe="")
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"

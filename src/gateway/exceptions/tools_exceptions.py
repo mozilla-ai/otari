@@ -63,13 +63,6 @@ class WebAccessRefusedError(Exception):
         self.message = message
 
 
-class WebAccessDomainsExcludedError(WebAccessRefusedError):
-    """A request's Fetch domains share nothing with its workspace's."""
-
-    def __init__(self) -> None:
-        super().__init__("The request and workspace web-access domain policies do not overlap")
-
-
 class WebAccessNotEnabledError(WebAccessRefusedError):
     """A workspace with web access turned off refuses a request that declares Fetch."""
 
@@ -175,6 +168,44 @@ class SandboxImageNotAllowedError(TenancyValidationError):
     """
 
 
+class CodeExecutionPolicyResolutionFailure(StrEnum):
+    """Why a workspace's code execution policy could not be resolved.
+
+    A member carries the message a caller sees.
+    Its value names the cause, which a caller never sees.
+    """
+
+    def __new__(cls, cause: str, message: str) -> "CodeExecutionPolicyResolutionFailure":
+        member = str.__new__(cls, cause)
+        member._value_ = cause
+        member.message = message
+        return member
+
+    message: str
+
+    ANSWER_UNREADABLE = (
+        "the answer could not be read",
+        "Authorization service returned a malformed code-execution policy",
+    )
+    NO_CALLER_CREDENTIAL = (
+        "the request carried no caller credential",
+        "Code execution policy could not be resolved for this request",
+    )
+    NO_WORKSPACE = (
+        "the request named no workspace",
+        "Code execution policy could not be resolved for this request",
+    )
+
+
+class CodeExecutionPolicyResolutionFailedError(Exception):
+    """A workspace's code execution policy could not be resolved."""
+
+    def __init__(self, reason: CodeExecutionPolicyResolutionFailure) -> None:
+        super().__init__(reason.message)
+        self.message = reason.message
+        self.reason = reason
+
+
 class McpResolutionFailure(StrEnum):
     """Why an MCP server could not be resolved.
 
@@ -206,12 +237,21 @@ class McpServerResolutionFailedError(TenancyError):
         self.reason = reason
 
 
+class McpSessionsInterruptedError(Exception):
+    """A request's MCP sessions were canceled while they opened, by something other than the request."""
+
+    def __init__(self) -> None:
+        super().__init__("MCP sessions were canceled before they opened")
+
+
 __all__ = [
+    "CodeExecutionPolicyResolutionFailedError",
+    "CodeExecutionPolicyResolutionFailure",
     "McpResolutionFailure",
     "McpServerResolutionFailedError",
+    "McpSessionsInterruptedError",
     "SandboxImageNotAllowedError",
     "SandboxToolsUnrunnableError",
-    "WebAccessDomainsExcludedError",
     "WebAccessNotEnabledError",
     "WebAccessRefusedError",
     "WebAccessToolNotAuthorizedError",

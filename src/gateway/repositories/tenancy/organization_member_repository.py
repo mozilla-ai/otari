@@ -336,9 +336,7 @@ class OrganizationMemberRepository(
         if status is not None:
             conditions.append(col(OrganizationMember.status) == status)
 
-        count_result = await self.db.execute(
-            select(func.count()).select_from(OrganizationMember).where(*conditions)
-        )
+        count_result = await self.db.execute(select(func.count()).select_from(OrganizationMember).where(*conditions))
         count = count_result.scalar_one()
 
         result = await self.db.execute(
@@ -350,8 +348,6 @@ class OrganizationMemberRepository(
             .limit(limit)
         )
         return [(member, organization) for member, organization in result.all()], count
-
-
 
     async def placements_for_users(
         self,

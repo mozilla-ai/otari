@@ -218,9 +218,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         result = cast(
             "CursorResult[Any]",
             await self.db.execute(
-                statement.values(hashed_password=hashed_password, **values).execution_options(
-                    synchronize_session=False
-                )
+                statement.values(hashed_password=hashed_password, **values).execution_options(synchronize_session=False)
             ),
         )
         return bool(result.rowcount)

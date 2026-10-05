@@ -113,6 +113,9 @@ The organization view contains tenant-wide administration:
 Settings shows the effective non-secret configuration. Some values can be changed
 at runtime and others require a restart. The server marks that distinction in the
 settings response.
+Its Rate limit rules card adds, edits and removes limits on requests per minute,
+tokens per minute and requests in flight; rules from config.yml are listed there
+read-only.
 
 What a page shows can also depend on who is signed in, not only on the
 deployment. Spend and budgets is the clearest case: an organization owner or

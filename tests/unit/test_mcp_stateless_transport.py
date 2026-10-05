@@ -1,4 +1,4 @@
-"""The stateless transport's own bounds (R-TRANSPORT-1, R-TRANSPORT-2, R-ADM-1).
+"""The stateless transport's own bounds.
 
 Everything here is defense against the remote MCP server, which is untrusted:
 its response may be arbitrarily large, and it may answer a credentialed request
@@ -169,7 +169,7 @@ async def test_a_refused_slot_is_released_for_the_next_caller() -> None:
 
 @pytest.mark.asyncio
 async def test_discovery_load_cannot_exhaust_execution_capacity() -> None:
-    """Separate gates (R-ADM-1), so hostile discovery cannot starve an approved call."""
+    """Separate gates, so hostile discovery cannot starve an approved call."""
     from gateway.services.mcp_stateless import DISCOVERY_GATE, EXECUTION_GATE
 
     assert DISCOVERY_GATE is not EXECUTION_GATE

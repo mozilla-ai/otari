@@ -188,8 +188,8 @@ aspect so it is never stretched.
 ## Checks
 
 ```bash
-pnpm --dir web run lint
-pnpm --dir web run typecheck
+make lint-web
+make typecheck-web
 pnpm --dir web test
 pnpm --dir web run build
 ```

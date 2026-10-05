@@ -14,11 +14,10 @@ from pydantic import Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
-    CodeExecutionPortDep,
-    McpServerPortDep,
     ModelProviderPortDep,
     OptionalFileServiceDep,
-    WebSearchPolicyPortDep,
+    ToolPorts,
+    ToolPortsDep,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     get_config,
@@ -55,15 +54,12 @@ from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_
 from gateway.api.routes._tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.core.usage import GatewayUsage
-from gateway.core.usage_source import PLAYGROUND_USAGE_ENDPOINT
+from gateway.core.usage import GatewayUsage, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
-from gateway.ports.code_execution_port import CodeExecutionPort
-from gateway.ports.mcp_server_port import McpServerPort
+from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.ports.model_provider_port import ModelProviderPort
-from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.services.files import FileService, StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import (
@@ -84,10 +80,6 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 # The label written to a usage-log row. An identifier, not a URL: it stays as
 # it is so new rows compare with old ones.
 USAGE_ENDPOINT = "/v1/chat/completions"
-
-# The label a Playground request carries instead, declared in
-# ``core/usage_source`` because the activation guide filters on it and a service
-# may not import this layer. That module says which readers care and why.
 
 __all__ = [
     "ChatCompletionRequest",
@@ -215,6 +207,9 @@ class _ChatAdapter:
             detail=PROVIDER_ERROR_DETAIL,
         )
 
+    def stream_error_payload(self, exc: BaseException) -> str:
+        return self.stream_format.error_payload
+
     def format_chunk(self, chunk: ChatCompletionChunk) -> str:
         return f"data: {chunk.model_dump_json()}\n\n"
 
@@ -222,13 +217,18 @@ class _ChatAdapter:
         if not chunk.usage:
             return None
         details = chunk.usage.prompt_tokens_details
-        return GatewayUsage(
+        # Forward provider extras (streamed timing lands in the final chunk's
+        # usage), as GatewayUsage.from_completion_usage does.
+        fields = GatewayUsage.external_extras(chunk.usage)
+        fields.update(
             prompt_tokens=chunk.usage.prompt_tokens or 0,
             completion_tokens=chunk.usage.completion_tokens or 0,
             total_tokens=chunk.usage.total_tokens or 0,
             prompt_tokens_details=details,
             cache_read_tokens=(details.cached_tokens or 0) if details is not None else 0,
+            reasoning_tokens=reasoning_tokens_of(chunk.usage),
         )
+        return GatewayUsage(**fields)
 
     def extract_usage(self, result: ChatCompletion) -> CompletionUsage | None:
         if result.usage is None:
@@ -405,9 +405,7 @@ async def chat_completions(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
-    code_execution_port: CodeExecutionPortDep,
-    mcp_server_port: McpServerPortDep,
-    web_search_policy_port: WebSearchPolicyPortDep,
+    tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
 ) -> ChatCompletion | Response:
     """OpenAI-compatible chat completions endpoint.
@@ -431,9 +429,7 @@ async def chat_completions(
         config=config,
         log_writer=log_writer,
         model_provider=model_provider,
-        code_execution_port=code_execution_port,
-        mcp_server_port=mcp_server_port,
-        web_search_policy_port=web_search_policy_port,
+        tool_ports=tool_ports,
         idempotency=idempotency,
     )
 
@@ -450,9 +446,7 @@ async def run_chat_completion(
     config: GatewayConfig,
     log_writer: LogWriter,
     model_provider: ModelProviderPort,
-    code_execution_port: CodeExecutionPort | None,
-    mcp_server_port: McpServerPort,
-    web_search_policy_port: WebSearchPolicyPort,
+    tool_ports: ToolPorts,
     session_principal: SessionPrincipal | None = None,
     idempotency: IdempotencyGuard | None = None,
 ) -> ChatCompletion | Response:
@@ -470,8 +464,7 @@ async def run_chat_completion(
     endpoint, which keeps its API-key-or-master-key rule exactly as it was; see
     :class:`SessionPrincipal` for what a caller owes before building one. It is
     also what picks the usage row's endpoint label, so a Playground request is
-    countable separately from a customer's; ``PLAYGROUND_USAGE_ENDPOINT`` says
-    who reads that distinction and why.
+    countable separately from a customer's (``PLAYGROUND_USAGE_ENDPOINT``).
     """
     adapter = _PLAYGROUND_ADAPTER if session_principal is not None else _ADAPTER
     if not request.model.strip():
@@ -555,15 +548,13 @@ async def run_chat_completion(
             web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
         ),
         backends=ToolBackends(
-            code_execution_port=code_execution_port,
-            mcp_server_port=mcp_server_port,
-            web_search_policy_port=web_search_policy_port,
+            ports=tool_ports,
             sandbox_containers=build_sandbox_container_registry(
                 config=config,
                 uow=ctx.uow,
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
-                port=code_execution_port,
+                port=tool_ports.code_execution,
             ),
             sandbox_files=build_sandbox_file_bridge(
                 raw_request=raw_request,

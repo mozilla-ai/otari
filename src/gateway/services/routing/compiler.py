@@ -310,9 +310,7 @@ def compile_policy(
         except (ValueError, AnyLLMError) as exc:
             # Startup validation rejects an unresolvable selector, so reaching
             # this means the provider set changed under a running gateway.
-            dropped.append(
-                DroppedCandidate(selector, "unresolvable", f"could not be resolved to a provider ({exc})")
-            )
+            dropped.append(DroppedCandidate(selector, "unresolvable", f"could not be resolved to a provider ({exc})"))
             continue
 
         canonical = f"{resolved.instance}:{resolved.model}"
@@ -320,9 +318,7 @@ def compile_policy(
             dropped.append(DroppedCandidate(selector, "duplicate", "already in the plan at an earlier position"))
             continue
         if not is_model_allowed(allowlist, canonical):
-            dropped.append(
-                DroppedCandidate(selector, "not_allowed", "is not in allowed_models for this caller")
-            )
+            dropped.append(DroppedCandidate(selector, "not_allowed", "is not in allowed_models for this caller"))
             continue
         # Organization-scoped model restriction (otari#643), same disjointness
         # condition `provider_kwargs.get_provider_kwargs` uses: only a selector
@@ -343,9 +339,7 @@ def compile_policy(
                 )
                 continue
         if len(attempts) >= MAX_CANDIDATES:
-            dropped.append(
-                DroppedCandidate(selector, "over_cap", f"exceeds the {MAX_CANDIDATES}-candidate cap")
-            )
+            dropped.append(DroppedCandidate(selector, "over_cap", f"exceeds the {MAX_CANDIDATES}-candidate cap"))
             continue
 
         seen.add(canonical)

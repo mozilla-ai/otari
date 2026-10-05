@@ -306,7 +306,7 @@ async def resolve_workspace_mcp_server(
     disabled server instead of skipping it, because a disabled server is a
     named 404 here rather than one entry quietly missing from a list; and it
     returns the id, so a revision can be derived over the configuration that
-    was actually resolved (R-RES-3).
+    was actually resolved.
 
     ``None`` means no such server *in this workspace*, which covers an id
     belonging to another one: the same non-oracle answer the plural resolver

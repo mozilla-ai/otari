@@ -156,7 +156,7 @@ transactions, with output compensation and cleanup storage calls outside them.
 The tools the gateway runs itself: the tool loop, MCP, web search, web
 retrieval and code execution.
 
-It owns the code execution, MCP server and web search policy ports in `ports/`,
+It owns the code execution, code execution policy, MCP server and web search policy ports in `ports/`,
 and their adapters in `adapters/`.
 
 `mcp_server_port.py` names where a workspace's MCP servers come from. One
@@ -169,6 +169,10 @@ traffic.
 from, in the same two ways. The policy says who may search and how far. A
 tools service applies it to a request with one rule on every plane, and
 neither implementation carries a search.
+
+`code_execution_policy_port.py` names where a workspace's code execution
+policy comes from, in the same two ways. The policy says who may run code and
+within which limits, and neither implementation runs code.
 
 **The tool test.** A tool is something the model calls during a request. The
 domain holds the registry, the loop and each tool's settings. A capability the
@@ -218,6 +222,17 @@ grow into a route for the data plane's own traffic.
 plane, and the value that says which of them a process serves. `surface.py`
 says which deployments publish a dashboard page and `feature.py` shapes an
 optional feature, so the three together are how a build describes itself.
+
+### rate-limits
+
+The `rate_limits` rules an operator adds, changes and removes from the
+dashboard, stored beside the ones config.yml declares. The service keeps the
+stored rules in `config.rate_limits`, and the request path reads that list on
+every request, so this domain holds no enforcement. Counting stays in
+`gateway/rate_limit.py`, over the rate-limit store port. A config.yml rule is
+listed and never edited here.
+
+Built in the target shape from the start.
 
 ### alerts
 

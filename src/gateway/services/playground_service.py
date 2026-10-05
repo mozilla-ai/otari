@@ -485,10 +485,7 @@ async def read_conversation_messages(
         .scalars()
         .all()
     )
-    return [
-        PlaygroundMessagePublic(role=row.role, content=row.content, reasoning=row.reasoning)
-        for row in rows
-    ]
+    return [PlaygroundMessagePublic(role=row.role, content=row.content, reasoning=row.reasoning) for row in rows]
 
 
 async def delete_conversation(

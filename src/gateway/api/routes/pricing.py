@@ -201,8 +201,7 @@ def _preview_response(preview: PricingRefreshPreview, protected_model_count: int
         removed_count=preview.removed_count,
         protected_model_count=protected_model_count,
         changes=[
-            PricingRefreshChangeResponse(model_key=change.model_key, change=change.change)
-            for change in preview.changes
+            PricingRefreshChangeResponse(model_key=change.model_key, change=change.change) for change in preview.changes
         ],
         changes_truncated=preview.changes_truncated,
     )
@@ -256,9 +255,7 @@ async def preview_pricing_refresh(
             detail="Unable to fetch the latest genai-prices data",
         ) from None
 
-    protected_model_count = (
-        await db.execute(select(func.count(distinct(ModelPricing.model_key))))
-    ).scalar_one()
+    protected_model_count = (await db.execute(select(func.count(distinct(ModelPricing.model_key))))).scalar_one()
     return _preview_response(preview, protected_model_count)
 
 
@@ -280,9 +277,7 @@ async def get_pending_pricing_refresh(
         ) from None
     if preview is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending genai-prices refresh")
-    protected_model_count = (
-        await db.execute(select(func.count(distinct(ModelPricing.model_key))))
-    ).scalar_one()
+    protected_model_count = (await db.execute(select(func.count(distinct(ModelPricing.model_key))))).scalar_one()
     return _preview_response(preview, protected_model_count)
 
 
@@ -317,9 +312,7 @@ async def list_pricing_drift(
     now = normalize_effective_at(None)
     rows: list[PricingDriftRow] = []
     defaults_on = default_pricing_enabled()
-    in_force = await rates_in_force(
-        db, as_of=now, limit=limit, exclude_key_prefix=f"{GATEWAY_TOOL_PRICING_PROVIDER}:"
-    )
+    in_force = await rates_in_force(db, as_of=now, limit=limit, exclude_key_prefix=f"{GATEWAY_TOOL_PRICING_PROVIDER}:")
     for pricing in in_force:
         provider_part, separator, model_part = pricing.model_key.partition(":")
         provider = provider_part if separator else None

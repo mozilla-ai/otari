@@ -66,7 +66,7 @@ async def _open_handle(path: Path, mode: str) -> AsyncIterator[IO[bytes]]:
             logger.warning("_open_handle: failed to close %s: %s", path, close_exc)
 
 
-class LocalDirFileStore:
+class LocalDirFileStore(FileStoragePort):
     """Filesystem-backed :class:`FileStoragePort`.
 
     Files are sharded into 256 subdirectories by the first two hex characters of
@@ -195,7 +195,7 @@ def _translate_s3_errors(storage_ref: str) -> Iterator[None]:
         raise OSError(msg) from exc
 
 
-class S3FileStore:
+class S3FileStore(FileStoragePort):
     """S3-compatible object-storage :class:`FileStoragePort` (AWS S3, MinIO, or any
     S3 API-compatible endpoint via ``endpoint_url``).
 
@@ -348,7 +348,7 @@ def _translate_fsspec_errors(storage_ref: str) -> Iterator[None]:
         raise OSError(msg) from exc
 
 
-class FsspecFileStore:
+class FsspecFileStore(FileStoragePort):
     """A :class:`FileStoragePort` over any `fsspec <https://filesystem-spec.readthedocs.io>`_ filesystem.
 
     ``url`` names the root the store writes under, ``s3://bucket/otari-files``,

@@ -12,6 +12,7 @@ from conftest import InstallControlPlane
 from gateway.adapters.web_search_policy_adapter import LocalWebSearchPolicy, RemoteWebSearchPolicy
 from gateway.exceptions.control_plane_exceptions import ControlPlaneError, ControlPlaneRefusedError
 from gateway.exceptions.tools_exceptions import WebSearchPolicyResolutionFailedError, WebSearchPolicyResolutionFailure
+from gateway.models.tools import WebTool
 from gateway.ports.web_search_policy_port import WebSearchPolicyScope
 
 
@@ -59,7 +60,7 @@ async def test_resolve_reads_the_policy(control_plane_transport: InstallControlP
         control_plane_transport,
     )
 
-    policy = await RemoteWebSearchPolicy(_config()).resolve(_scope(), ["web_search"])
+    policy = await RemoteWebSearchPolicy(_config()).resolve(_scope(), [WebTool.SEARCH])
 
     assert policy is not None
     assert policy.enabled is True
@@ -79,11 +80,26 @@ async def test_resolve_sends_the_requested_web_tools(control_plane_transport: In
         control_plane_transport,
     )
 
-    policy = await RemoteWebSearchPolicy(_config()).resolve(_scope(), ["web_search", "web_fetch"])
+    policy = await RemoteWebSearchPolicy(_config()).resolve(_scope(), [WebTool.SEARCH, WebTool.FETCH])
 
     assert captured["body"] == {"requested_tools": ["web_search", "web_fetch"]}
     assert policy is not None
     assert policy.authorized_tools == frozenset({"web_search", "web_fetch"})
+
+
+@pytest.mark.asyncio
+async def test_a_tool_name_this_deployment_does_not_know_is_read_not_refused(
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    _answer(
+        httpx.Response(200, json={"enabled": True, "authorized_tools": ["web_search", "web_crawl"]}),
+        control_plane_transport,
+    )
+
+    policy = await RemoteWebSearchPolicy(_config()).resolve(_scope(), [WebTool.SEARCH])
+
+    assert policy is not None
+    assert policy.authorized_tools == frozenset({"web_search", "web_crawl"})
 
 
 @pytest.mark.asyncio
@@ -102,7 +118,7 @@ async def test_an_unreadable_answer_is_a_resolution_failure(
     _answer(response, control_plane_transport)
 
     with pytest.raises(WebSearchPolicyResolutionFailedError) as ei:
-        await RemoteWebSearchPolicy(_config()).resolve(_scope(), ["web_search"])
+        await RemoteWebSearchPolicy(_config()).resolve(_scope(), [WebTool.SEARCH])
 
     assert ei.value.reason is WebSearchPolicyResolutionFailure.ANSWER_UNREADABLE
 
@@ -110,7 +126,7 @@ async def test_an_unreadable_answer_is_a_resolution_failure(
 @pytest.mark.asyncio
 async def test_a_scope_without_a_caller_token_is_a_resolution_failure() -> None:
     with pytest.raises(WebSearchPolicyResolutionFailedError) as ei:
-        await RemoteWebSearchPolicy(_config()).resolve(_scope(user_token=None), ["web_search"])
+        await RemoteWebSearchPolicy(_config()).resolve(_scope(user_token=None), [WebTool.SEARCH])
 
     assert ei.value.reason is WebSearchPolicyResolutionFailure.NO_CALLER_CREDENTIAL
 
@@ -120,7 +136,7 @@ async def test_resolve_403_passes_through(control_plane_transport: InstallContro
     _answer(httpx.Response(403, json={"detail": "web search disabled"}), control_plane_transport)
 
     with pytest.raises(ControlPlaneRefusedError) as ei:
-        await RemoteWebSearchPolicy(_config()).resolve(_scope(), ["web_search"])
+        await RemoteWebSearchPolicy(_config()).resolve(_scope(), [WebTool.SEARCH])
 
     assert ei.value.status_code == 403
     assert ei.value.message == "web search disabled"
@@ -131,7 +147,7 @@ async def test_resolve_429_passthrough_with_retry_after(control_plane_transport:
     _answer(httpx.Response(429, json={"detail": "slow down"}, headers={"Retry-After": "30"}), control_plane_transport)
 
     with pytest.raises(ControlPlaneRefusedError) as ei:
-        await RemoteWebSearchPolicy(_config()).resolve(_scope(), ["web_search"])
+        await RemoteWebSearchPolicy(_config()).resolve(_scope(), [WebTool.SEARCH])
 
     assert ei.value.status_code == 429
     assert ei.value.retry_after == "30"
@@ -153,7 +169,7 @@ async def test_an_unusable_status_maps_to_502(
     _answer(response, control_plane_transport)
 
     with pytest.raises(ControlPlaneError) as ei:
-        await RemoteWebSearchPolicy(_config()).resolve(_scope(), ["web_search"])
+        await RemoteWebSearchPolicy(_config()).resolve(_scope(), [WebTool.SEARCH])
 
     assert ei.value.status_code == 502
 
@@ -166,7 +182,7 @@ async def test_resolve_network_error_maps_to_502(control_plane_transport: Instal
     control_plane_transport(fake_post)
 
     with pytest.raises(ControlPlaneError) as ei:
-        await RemoteWebSearchPolicy(_config()).resolve(_scope(), ["web_search"])
+        await RemoteWebSearchPolicy(_config()).resolve(_scope(), [WebTool.SEARCH])
 
     assert ei.value.status_code == 502
 
@@ -174,7 +190,7 @@ async def test_resolve_network_error_maps_to_502(control_plane_transport: Instal
 @pytest.mark.asyncio
 async def test_resolve_misconfigured_platform_500() -> None:
     with pytest.raises(ControlPlaneError) as ei:
-        await RemoteWebSearchPolicy(_config(base_url=None)).resolve(_scope(), ["web_search"])
+        await RemoteWebSearchPolicy(_config(base_url=None)).resolve(_scope(), [WebTool.SEARCH])
 
     assert ei.value.status_code == 500
 
@@ -182,6 +198,6 @@ async def test_resolve_misconfigured_platform_500() -> None:
 @pytest.mark.asyncio
 async def test_a_local_scope_without_a_workspace_is_a_resolution_failure() -> None:
     with pytest.raises(WebSearchPolicyResolutionFailedError) as ei:
-        await LocalWebSearchPolicy(MagicMock()).resolve(_scope(), ["web_search"])
+        await LocalWebSearchPolicy(MagicMock()).resolve(_scope(), [WebTool.SEARCH])
 
     assert ei.value.reason is WebSearchPolicyResolutionFailure.NO_WORKSPACE

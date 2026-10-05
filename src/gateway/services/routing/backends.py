@@ -20,6 +20,10 @@ this build does not have serves its default target and warns once.
 * ``weighted`` → :class:`gateway.services.routing.weighted.WeightedRouterBackend`,
   a load balancer: one candidate per request, drawn in proportion to the weights
   the policy declares.
+* ``priority`` → :class:`PriorityRouterBackend`, which keeps the candidates in
+  declared order. The walker skips a candidate a ``per: model`` rate limit has
+  no room for, so traffic stays on the first candidate until its limit is
+  reached and then spills to the next.
 """
 
 from __future__ import annotations
@@ -36,11 +40,14 @@ if TYPE_CHECKING:
 __all__ = [
     "KNN_BACKEND",
     "NOOP_BACKEND",
+    "PRIORITY_BACKEND",
     "WEIGHTED_BACKEND",
     "NoOpRouterBackend",
+    "PriorityRouterBackend",
     "RouterBackend",
     "RoutingContext",
     "RoutingDecision",
+    "backend_is_priority",
     "backend_is_weighted",
     "backend_pool_is_teachable",
     "backend_requires_pricing",
@@ -52,6 +59,7 @@ __all__ = [
 
 KNN_BACKEND = "knn"
 NOOP_BACKEND = "noop"
+PRIORITY_BACKEND = "priority"
 
 
 @dataclass
@@ -131,6 +139,27 @@ class NoOpRouterBackend:
         return RoutingDecision.decline("noop backend: always defers to the policy default")
 
 
+class PriorityRouterBackend:
+    """Backend that keeps the pool in declared order: the first candidate with room serves.
+
+    Room is not decided here. The walker admits each candidate under the
+    ``per: model`` rate limits as it reaches it, so a full candidate is skipped
+    the same way in every policy, alias and fallback chain that names it.
+    """
+
+    async def rank(self, ctx: RoutingContext) -> RoutingDecision:
+        pool = list(ctx.candidate_pool)
+        if not pool:
+            return RoutingDecision.decline("no candidate in the pool is usable by this caller")
+        return RoutingDecision(
+            ordered_models=pool,
+            confidence=1.0,
+            rationale=f"priority order ({', '.join(pool)})",
+            # Every request decides the same thing; the usage row records which candidate served.
+            log_decision=False,
+        )
+
+
 # The kNN backend carries per-process mutable state (the trace-sticky decision
 # cache), so a fresh instance per request would reset that cache and break
 # stickiness across the turns of one conversation. Cached per backend-config
@@ -162,7 +191,7 @@ def clear_router_backend_cache() -> None:
 
 def known_backends() -> tuple[str, ...]:
     """Backend names this build resolves, for an error message that lists them."""
-    return (KNN_BACKEND, NOOP_BACKEND, WEIGHTED_BACKEND)
+    return (KNN_BACKEND, NOOP_BACKEND, PRIORITY_BACKEND, WEIGHTED_BACKEND)
 
 
 def backend_is_weighted(name: str | None) -> bool:
@@ -175,6 +204,11 @@ def backend_is_weighted(name: str | None) -> bool:
     return name is not None and name.strip().lower() == WEIGHTED_BACKEND
 
 
+def backend_is_priority(name: str | None) -> bool:
+    """Whether this name selects the priority router, whose order is the declared one."""
+    return name is not None and name.strip().lower() == PRIORITY_BACKEND
+
+
 def backend_pool_is_teachable(name: str | None) -> bool:
     """Whether this policy's candidates are a pool routing memory is taught about.
 
@@ -185,12 +219,12 @@ def backend_pool_is_teachable(name: str | None) -> bool:
     build, and treating its pool as teachable keeps the typo guard on rather than
     silently widening what ``POST /v1/routing/preferences/rank`` accepts.
 
-    False only for ``weighted``, whose split is written in the policy document. It
-    reads no examples and has no warmth to report, so counting it would report a
-    pool it never consults and would let its candidates decide which score keys a
-    user may teach.
+    False for ``weighted`` and ``priority``, whose order is written in the policy
+    document. They read no examples and have no warmth to report, so counting them
+    would report a pool they never consult and would let their candidates decide
+    which score keys a user may teach.
     """
-    return name is not None and not backend_is_weighted(name)
+    return name is not None and not backend_is_weighted(name) and not backend_is_priority(name)
 
 
 def backend_requires_pricing(name: str | None) -> bool:
@@ -230,6 +264,8 @@ def get_router_backend(config: GatewayConfig, name: str) -> RouterBackend | None
     backend = name.strip().lower()
     if backend == NOOP_BACKEND:
         return NoOpRouterBackend()
+    if backend == PRIORITY_BACKEND:
+        return PriorityRouterBackend()
     if backend == WEIGHTED_BACKEND:
         # Instantiated per call rather than cached, because the backend is stateless:
         # everything it reads about the policy arrives on the RoutingContext, and the

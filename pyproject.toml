@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=84.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -94,7 +94,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.0",
     "sqlmodel>=0.0.24",
     "trafilatura>=2.0.0",
-    "uvicorn[standard]>=0.30.0",
+    "uvicorn[standard]>=0.53.0",
     "opentelemetry-proto>=1.39.1",
     "webauthn>=2.5.0",
 ]
@@ -133,6 +133,12 @@ e2b = [
     "e2b>=2.0.0",
     "e2b-code-interpreter>=2.0.0",
 ]
+# A rate-limit store every gateway process shares (`rate_limit_store: redis`),
+# so a limit holds across replicas rather than per process. The adapter imports
+# the client only when that store is selected.
+redis = [
+    "redis>=5.0.1",
+]
 # Prometheus scrape at /metrics. Optional so a deployment that never scrapes
 # pays neither the import (prometheus_client.exposition pulls in http.server and
 # wsgiref.simple_server, which nothing else here needs) nor the collection; when
@@ -161,6 +167,7 @@ dev = [
     # [project.dependencies], in the regression test for #689, instead of
     # relying on packaging being pulled in transitively.
     "packaging>=24.0",
+    "pre-commit>=4.6.2",
     "pytest>=9.0.3,<10",
     "pytest-asyncio>=0.26.0",
     "pytest-cov>=6.2.1,<8",
@@ -171,7 +178,7 @@ dev = [
     # The fsspec file store test reaches a real S3-compatible store through s3fs.
     # Its aiobotocore dependency pins botocore, so it also bounds the boto3 this lock can take.
     "s3fs>=2026.3.0",
-    "testcontainers[postgres]>=4.0.0",
+    "testcontainers[postgres,redis]>=4.0.0",
 ]
 
 [tool.uv]

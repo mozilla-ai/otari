@@ -2,12 +2,12 @@ import uuid
 from collections.abc import Sequence
 from typing import Never
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.budget_exceptions import BudgetStillReferencedError
-from gateway.models.budgets import Budget
+from gateway.models.budgets import Budget, BudgetResetLog
 from gateway.models.users import User
 from gateway.repositories.base_repository import BaseRepository
 
@@ -59,6 +59,14 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    async def remove_reset_logs(self, budget_id: str) -> None:
+        """Stage the deletion of the budget's reset history.
+
+        ``budget_reset_logs.budget_id`` is NOT NULL with no ``ondelete``, so a budget that has ever reset
+        cannot be removed until its history is.
+        """
+        await self.db.execute(delete(BudgetResetLog).where(BudgetResetLog.budget_id == budget_id))
 
     async def remove(self, budget: Budget) -> None:
         """Stage the deletion of a budget.

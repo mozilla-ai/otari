@@ -112,6 +112,7 @@ else:
         def generate_latest(registry: Any = None) -> bytes:  # noqa: D103
             return b""
 
+
 __all__ = [
     "PROMETHEUS_AVAILABLE",
     "REGISTRY",
@@ -224,9 +225,5 @@ class MetricsMiddleware:
             duration = time.monotonic() - start
             ACTIVE_REQUESTS.dec()
             endpoint, api_version = _endpoint_label(scope)
-            REQUESTS.labels(
-                method=method, endpoint=endpoint, api_version=api_version, status=str(status_code)
-            ).inc()
-            REQUEST_DURATION_SECONDS.labels(method=method, endpoint=endpoint, api_version=api_version).observe(
-                duration
-            )
+            REQUESTS.labels(method=method, endpoint=endpoint, api_version=api_version, status=str(status_code)).inc()
+            REQUEST_DURATION_SECONDS.labels(method=method, endpoint=endpoint, api_version=api_version).observe(duration)

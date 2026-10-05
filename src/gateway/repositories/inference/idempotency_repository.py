@@ -85,9 +85,7 @@ class IdempotencyRepository(BaseRepository[IdempotencyRecord, Never, Never]):
         await self.db.flush()
         return bool(result.rowcount)
 
-    async def extend_lease(
-        self, scope: str, idempotency_key: str, *, claim_token: str, locked_until: datetime
-    ) -> bool:
+    async def extend_lease(self, scope: str, idempotency_key: str, *, claim_token: str, locked_until: datetime) -> bool:
         """Push out the lease on the claim this caller still holds, returning whether it still holds it."""
         result = cast(
             "CursorResult[Any]",

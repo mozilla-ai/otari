@@ -31,6 +31,30 @@ describe("RequestDetail", () => {
     ).toBeInTheDocument()
   })
 
+  it("shows a skipped candidate as a note, not as an error", async () => {
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({
+          status: "absorbed",
+          status_code: 429,
+          error_message:
+            "Skipped: Rate limit 'flash-cap' exceeded: 2 requests per minute",
+        })}
+        onPriceModel={null}
+      />,
+    )
+    await flushRouter()
+
+    expect(screen.getByText("Skipped")).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /^Rate limit 'flash-cap' exceeded: 2 requests per minute\. Routing moved/,
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Error (429)")).not.toBeInTheDocument()
+  })
+
   it("spells out the billed total beside the provider-reported one", async () => {
     mockApi()
     renderPage(
@@ -58,6 +82,29 @@ describe("RequestDetail", () => {
     expect(
       screen.getByTitle(/the tokens this request was priced on/),
     ).toHaveTextContent("1,200")
+  })
+
+  it("shows the reasoning tokens, and a dash for a row that never recorded them", async () => {
+    mockApi()
+    const { unmount } = renderPage(
+      <RequestDetail
+        entry={entry({ reasoning_tokens: 1234 })}
+        onPriceModel={null}
+      />,
+    )
+    await flushRouter()
+
+    expect(
+      screen.getByText("Reasoning tokens").parentElement,
+    ).toHaveTextContent("1,234")
+    unmount()
+
+    renderPage(<RequestDetail entry={entry()} onPriceModel={null} />)
+    await flushRouter()
+
+    expect(
+      screen.getByText("Reasoning tokens").parentElement,
+    ).toHaveTextContent("—")
   })
 
   it("names a row's tool calls and what they cost", async () => {
@@ -189,5 +236,24 @@ describe("RequestDetail", () => {
     expect(screen.getByText("Billed meters")).toBeInTheDocument()
     expect(screen.getByText(/200 at \$10.00 \/ 1M/)).toBeInTheDocument()
     expect(screen.getByText(/2 at .* each/)).toBeInTheDocument()
+  })
+
+  it("shows the provider-reported compute time alongside Total time", async () => {
+    // provider_latency_ms is a diagnostic alongside Total time (otari#337); this
+    // asserts the row's value actually reaches the "Provider time" field rather
+    // than only being present in the fixture shape.
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({ provider: "groq", provider_latency_ms: 156 })}
+        onPriceModel={null}
+      />,
+    )
+    await flushRouter()
+
+    const label = screen.getByText("Provider time", {
+      selector: "span.text-overline",
+    })
+    expect(label.parentElement?.textContent).toContain("156 ms")
   })
 })

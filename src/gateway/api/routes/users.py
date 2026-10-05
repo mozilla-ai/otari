@@ -73,6 +73,10 @@ class UserResponse(BaseModel):
     created_at: str
     updated_at: str
     metadata: dict[str, Any]
+    # Set on an end user a service key created: the key's user, and the id the
+    # service named it by. Null on every other user.
+    parent_user_id: str | None = None
+    external_id: str | None = None
 
     @classmethod
     def from_model(cls, user: User) -> "UserResponse":
@@ -95,6 +99,8 @@ class UserResponse(BaseModel):
             created_at=user.created_at.isoformat(),
             updated_at=user.updated_at.isoformat(),
             metadata=dict(user.metadata_) if user.metadata_ else {},
+            parent_user_id=user.parent_user_id,
+            external_id=user.external_id,
         )
 
 
@@ -125,6 +131,7 @@ class UsageLogResponse(BaseModel):
     status: str
     error_message: str | None
     latency_ms: int | None
+    provider_latency_ms: int | None
 
     @classmethod
     def from_model(cls, log: UsageLog) -> "UsageLogResponse":
@@ -143,6 +150,7 @@ class UsageLogResponse(BaseModel):
             status=log.status,
             error_message=log.error_message,
             latency_ms=log.latency_ms,
+            provider_latency_ms=log.provider_latency_ms,
         )
 
 
@@ -245,9 +253,7 @@ async def create_user(
     if budget is not None:
         now = datetime.now(UTC)
         window = budget_window(now, budget)
-        user.budget_started_at, user.next_budget_reset_at = (
-            window if window is not None else (now, None)
-        )
+        user.budget_started_at, user.next_budget_reset_at = window if window is not None else (now, None)
 
     try:
         await db.commit()
@@ -278,10 +284,7 @@ async def list_users(
     See ``repositories.users_repository.in_organization``.
     """
     result = await db.execute(
-        select(User)
-        .where(User.deleted_at.is_(None), in_organization(organization_id))
-        .offset(skip)
-        .limit(limit)
+        select(User).where(User.deleted_at.is_(None), in_organization(organization_id)).offset(skip).limit(limit)
     )
     users = result.scalars().all()
 
@@ -340,9 +343,7 @@ async def update_user(
             user.budget_id = request.budget_id
             now = datetime.now(UTC)
             window = budget_window(now, budget)
-            user.budget_started_at, user.next_budget_reset_at = (
-                window if window is not None else (now, None)
-            )
+            user.budget_started_at, user.next_budget_reset_at = window if window is not None else (now, None)
     if request.blocked is not None:
         user.blocked = request.blocked
     if request.metadata is not None:

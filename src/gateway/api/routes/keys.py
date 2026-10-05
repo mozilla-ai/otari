@@ -9,7 +9,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.api.deps import ApiKeyFormatPortDep, CallerOrganization, get_config, get_db, require_deployment_operator
+from gateway.api.deps import (
+    ApiKeyFormatPortDep,
+    BudgetServiceDep,
+    CallerOrganization,
+    get_config,
+    get_db,
+    require_deployment_operator,
+)
 from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
@@ -121,6 +128,17 @@ class CreateKeyRequest(BaseModel):
         "commits, pull requests, active time) from POST /otlp/v1/metrics. Usage capture and billing are "
         "unaffected either way.",
     )
+    is_service_key: bool = Field(
+        default=False,
+        description="When true, a request may name an end user in its 'user' field. Each end user is "
+        "created on first use, owned by this key's user, and billed to its own budget, while this key's "
+        "own ceiling caps all of them together.",
+    )
+    end_user_budget_id: str | None = Field(
+        default=None,
+        description="Budget each end user this key creates is capped at. Null leaves end users capped "
+        "only by this key's own ceiling.",
+    )
     workspace_id: uuid.UUID | None = Field(
         default=None,
         description="Workspace this key belongs to, which must be one in the caller's "
@@ -149,6 +167,8 @@ class CreateKeyResponse(BaseModel):
     exclude_from_budget: bool
     reject_user_mismatch: bool | None
     capture_agent_telemetry: bool | None
+    is_service_key: bool
+    end_user_budget_id: str | None
     metadata: dict[str, Any]
 
 
@@ -171,6 +191,8 @@ class KeyInfo(BaseModel):
     exclude_from_budget: bool
     reject_user_mismatch: bool | None
     capture_agent_telemetry: bool | None
+    is_service_key: bool
+    end_user_budget_id: str | None
     workspace_id: uuid.UUID
     metadata: dict[str, Any]
 
@@ -193,6 +215,8 @@ class KeyInfo(BaseModel):
             capture_agent_telemetry=(
                 None if key.capture_agent_telemetry is None else bool(key.capture_agent_telemetry)
             ),
+            is_service_key=bool(key.is_service_key),
+            end_user_budget_id=key.end_user_budget_id,
             metadata=dict(key.metadata_) if key.metadata_ else {},
         )
 
@@ -216,6 +240,10 @@ class UpdateKeyRequest(BaseModel):
     # unrestricted, [] = deny all, list = restrict. A plain default cannot tell
     # "absent" from "explicit null", so the handler checks model_fields_set.
     allowed_models: list[str] | None = None
+    is_service_key: bool | None = None
+    # Tri-state via model_fields_set: absent = unchanged, null = end users this
+    # key creates from now on are uncapped. End users already created keep theirs.
+    end_user_budget_id: str | None = None
     metadata: dict[str, Any] | None = None
 
 
@@ -226,6 +254,7 @@ async def create_key(
     config: Annotated[GatewayConfig, Depends(get_config)],
     organization_id: CallerOrganization,
     key_format: ApiKeyFormatPortDep,
+    budgets: BudgetServiceDep,
 ) -> CreateKeyResponse:
     """Create a new API key in the caller's organization.
 
@@ -245,6 +274,10 @@ async def create_key(
         allowed_models = validate_allowed_models(config, request.allowed_models)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    # Before anything is staged: the check runs in a Unit of Work block, and the
+    # block's commit would store whatever this route had added by then.
+    if request.end_user_budget_id is not None:
+        await budgets.require_end_user_budget(request.end_user_budget_id)
 
     api_key = key_format.mint()
     key_hash = hash_key(api_key)
@@ -330,6 +363,8 @@ async def create_key(
         exclude_from_budget=request.exclude_from_budget,
         reject_user_mismatch=request.reject_user_mismatch,
         capture_agent_telemetry=request.capture_agent_telemetry,
+        is_service_key=request.is_service_key,
+        end_user_budget_id=request.end_user_budget_id,
         metadata_=request.metadata,
     )
 
@@ -400,12 +435,16 @@ async def update_key(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     organization_id: CallerOrganization,
+    budgets: BudgetServiceDep,
 ) -> KeyInfo:
     """Update an API key in the caller's organization.
 
     Requires master key authentication.
     """
     key = await _load_key_in_organization(db, key_id, organization_id)
+    # Before the key is changed, for the reason create_key gives.
+    if request.end_user_budget_id is not None:
+        await budgets.require_end_user_budget(request.end_user_budget_id)
 
     # Tri-state via model_fields_set, like allowed_models below: both columns
     # are nullable and the dashboard's edit form sends null to clear them
@@ -439,6 +478,10 @@ async def update_key(
             if not is_allowlist_subset(new_allowed, user_default):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_KEY_EXCEEDS_USER_DETAIL)
         key.allowed_models = new_allowed
+    if request.is_service_key is not None:
+        key.is_service_key = request.is_service_key
+    if "end_user_budget_id" in request.model_fields_set:
+        key.end_user_budget_id = request.end_user_budget_id
     if request.metadata is not None:
         key.metadata_ = request.metadata
 

@@ -2,6 +2,7 @@ import secrets
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import aclosing
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -21,6 +22,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdirected
 from gateway.ports.billing_port import BillingPort
+from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
@@ -37,6 +39,7 @@ from gateway.repositories.files import FileRepositories
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.repositories.providers import OrgProviderKeyModelRepository
+from gateway.repositories.rate_limits import RateLimitRuleRepository
 from gateway.repositories.tenancy import OrganizationGuardrailDefinitionRepository, OrgProviderKeyRepository
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultService
@@ -50,6 +53,7 @@ from gateway.services.master_key_service import hash_master_key, is_generated_ma
 from gateway.services.organization_pricing_service import OrganizationPricingService
 from gateway.services.overview.overview_service import OverviewService
 from gateway.services.providers import OrgProviderModelService
+from gateway.services.rate_limits import RateLimitService
 from gateway.services.routing import clear_router_backend_cache
 from gateway.services.tenancy import OrganizationService, organization_guardrail_runner
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
@@ -522,9 +526,7 @@ async def require_deployment_operator(
     of its own, so admitting a non-operator is spelled at a router instead of
     hidden in one route's decorator.
     """
-    if session_identity is not None and not await DeploymentUserService(db).has_administration_access(
-        session_identity
-    ):
+    if session_identity is not None and not await DeploymentUserService(db).has_administration_access(session_identity):
         record_auth_failure("not_deployment_operator")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -940,6 +942,11 @@ def get_telemetry_storage_port(
     return container.resolve(TelemetryStoragePort, db)
 
 
+def get_code_execution_policy_port(db: PortSessionDep, container: ContainerDep) -> CodeExecutionPolicyPort:
+    """Resolve the code execution policy adapter this build bound at startup."""
+    return container.resolve(CodeExecutionPolicyPort, db)
+
+
 def get_web_search_policy_port(db: PortSessionDep, container: ContainerDep) -> WebSearchPolicyPort:
     """Resolve the web search policy adapter this build bound at startup."""
     return container.resolve(WebSearchPolicyPort, db)
@@ -1027,6 +1034,7 @@ OrganizationGuardrailDefinitionServiceDep = Annotated[
 
 ApiKeyFormatPortDep = Annotated[ApiKeyFormatPort, Depends(get_api_key_format_port)]
 BillingPortDep = Annotated[BillingPort, Depends(get_billing_port)]
+CodeExecutionPolicyPortDep = Annotated[CodeExecutionPolicyPort, Depends(get_code_execution_policy_port)]
 EntitlementPortDep = Annotated[EntitlementPort, Depends(get_entitlement_port)]
 GrowthSignalPortDep = Annotated[GrowthSignalPort, Depends(get_growth_signal_port)]
 IdentityProviderPortDep = Annotated[IdentityProviderPort, Depends(get_identity_provider_port)]
@@ -1060,8 +1068,47 @@ def get_org_provider_model_service(
 
 
 OrgProviderModelServiceDep = Annotated[OrgProviderModelService, Depends(get_org_provider_model_service)]
+
+
+def get_rate_limit_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> RateLimitService:
+    """Build the rate-limit rules service on the request's unit of work."""
+    return RateLimitService(uow, RateLimitRuleRepository(uow), config)
+
+
+RateLimitServiceDep = Annotated[RateLimitService, Depends(get_rate_limit_service)]
 TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_storage_port)]
 WebSearchPolicyPortDep = Annotated[WebSearchPolicyPort, Depends(get_web_search_policy_port)]
+
+
+@dataclass(frozen=True, kw_only=True)
+class ToolPorts:
+    """The ports a request's tools reach."""
+
+    code_execution: CodeExecutionPort | None
+    code_execution_policy: CodeExecutionPolicyPort
+    mcp_server: McpServerPort
+    web_search_policy: WebSearchPolicyPort
+
+
+def get_tool_ports(
+    code_execution: CodeExecutionPortDep,
+    code_execution_policy: CodeExecutionPolicyPortDep,
+    mcp_server: McpServerPortDep,
+    web_search_policy: WebSearchPolicyPortDep,
+) -> ToolPorts:
+    """Resolve the ports a request's tools reach."""
+    return ToolPorts(
+        code_execution=code_execution,
+        code_execution_policy=code_execution_policy,
+        mcp_server=mcp_server,
+        web_search_policy=web_search_policy,
+    )
+
+
+ToolPortsDep = Annotated[ToolPorts, Depends(get_tool_ports)]
 
 
 def require_capability(capability: str) -> Callable[[EntitlementPort], Awaitable[None]]:
@@ -1169,6 +1216,7 @@ async def get_feedback_service(
 
 __all__ = [
     "BillingPortDep",
+    "CodeExecutionPolicyPortDep",
     "ContainerDep",
     "CallerOrganization",
     "CurrentIdentity",
@@ -1181,7 +1229,10 @@ __all__ = [
     "McpServerPortDep",
     "ModelProviderPortDep",
     "OrgProviderModelServiceDep",
+    "RateLimitServiceDep",
     "TelemetryStoragePortDep",
+    "ToolPorts",
+    "ToolPortsDep",
     "WebSearchPolicyPortDep",
     "get_config",
     "get_container",

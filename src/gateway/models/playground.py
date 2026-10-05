@@ -352,9 +352,7 @@ class PlaygroundFavoriteModelsUpdate(SQLModel):
     # first caps how many pins one person keeps, the second is the column's own
     # width. Refused rather than truncated, because a truncated key is a pin
     # that can never match a model again and nothing says why.
-    model_keys: list[Annotated[str, Field(max_length=MAX_MODEL_KEY_LENGTH)]] = Field(
-        max_length=MAX_FAVORITE_MODELS
-    )
+    model_keys: list[Annotated[str, Field(max_length=MAX_MODEL_KEY_LENGTH)]] = Field(max_length=MAX_FAVORITE_MODELS)
 
 
 class PlaygroundFavoriteModelsPublic(SQLModel):

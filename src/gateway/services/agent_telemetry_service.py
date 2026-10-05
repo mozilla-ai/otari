@@ -267,9 +267,6 @@ def compute_series_increment(
     )
 
 
-
-
-
 async def ingest(
     db: AsyncSession,
     records: Iterable[TelemetryRecord],

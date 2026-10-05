@@ -55,6 +55,7 @@ def entry(**overrides: object) -> UsageEntry:
         "error_message": None,
         "status_code": None,
         "latency_ms": None,
+        "provider_latency_ms": None,
         "source": "gateway",
         "source_label": None,
         "counts_toward_budget": True,

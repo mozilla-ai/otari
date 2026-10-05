@@ -1,4 +1,4 @@
-"""Hybrid resolution of one stored MCP server (R-RES-1, R-RES-2, R-RES-3).
+"""Hybrid resolution of one stored MCP server.
 
 The resolver answer is the authorization input for both stored-server
 endpoints. A current peer can echo the requested id and enabled state; a legacy
@@ -139,7 +139,7 @@ async def test_an_absent_allowlist_stays_absent(
     monkeypatch: pytest.MonkeyPatch,
     control_plane_transport: InstallControlPlane,
 ) -> None:
-    """``null`` and a missing key both mean "every live tool" (R-RES-4)."""
+    """``null`` and a missing key both mean "every live tool"."""
     entry = _entry()
     del entry["allowed_tools"]
     _platform_returns({"servers": [entry]}, control_plane_transport)

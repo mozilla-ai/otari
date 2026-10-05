@@ -12,7 +12,6 @@ lock-in semantics, and the terminal all-failed status mapping uniformly.
 from __future__ import annotations
 
 import asyncio
-import math
 from collections.abc import Awaitable, Callable, Iterator
 from typing import Any, Literal, NamedTuple, TypeVar
 
@@ -27,6 +26,7 @@ from openai import APITimeoutError as _OpenAIAPITimeoutError
 from pydantic import BaseModel, Field, ValidationError
 
 from gateway.core.config import ATTEMPT_ID_HEADER, GatewayConfig
+from gateway.core.retry_after import bounded_retry_after
 from gateway.core.usage import (
     cache_read_tokens_of,
     cache_write_1h_tokens_of,
@@ -518,8 +518,11 @@ async def _post_resolve(
     """Ask the control plane, and render its refusal as this endpoint's own.
 
     The service raises domain errors so that nothing below the API layer has to
-    know about HTTP. The callers here answer a request, so they need the status
+    know about HTTP. The caller here answers a request, so it needs the status
     back, and a 429 needs the peer's ``Retry-After`` with it.
+
+    A caller that answers in a route's own error format has a ``FormatAdapter``
+    to render through, so it reads the domain error and leaves this alone.
     """
     try:
         return await resolve(
@@ -785,25 +788,11 @@ def upstream_error_message(exc: BaseException) -> str:
     return " ".join(parts)
 
 
-# A day. A provider (or a confused proxy in front of one) does not get to tell
-# this gateway's callers to sleep for a year.
-_MAX_RETRY_AFTER_SECONDS = 86400
-
-
 def upstream_retry_after(exc: BaseException) -> str | None:
-    """The upstream ``Retry-After`` as whole seconds, or ``None``.
+    """Return the upstream ``Retry-After`` as whole seconds capped at one day, or ``None``.
 
-    Read from the exception's own headers or its attached response's, whichever
-    carries them, walking the ``original_exception`` chain like the other
-    upstream readers here.
-
-    The value is re-serialized from a parsed number rather than relayed as
-    received, so nothing a provider chooses reaches a response header the
-    gateway emits: a header value is not a body, and CRLF in one is not a
-    formatting problem. Fractional seconds round up, since a client honoring
-    the header must not retry before the window the provider named. The
-    HTTP-date form is dropped rather than parsed, because no provider sends one
-    here and a value that cannot be bounded is not one to relay.
+    The value comes from the first exception in the ``original_exception`` chain
+    whose own headers or response headers carry a usable one.
     """
     for current in upstream_exception_chain(exc):
         for holder in (current, getattr(current, "response", None)):
@@ -812,20 +801,9 @@ def upstream_retry_after(exc: BaseException) -> str | None:
             get_header = getattr(getattr(holder, "headers", None), "get", None)
             if not callable(get_header):
                 continue
-            raw = get_header("retry-after") or get_header("Retry-After")
-            if not isinstance(raw, str):
-                continue
-            try:
-                parsed = float(raw.strip())
-            except ValueError:
-                continue
-            # ``float`` accepts "inf" and "1e400", and ``math.ceil`` raises
-            # OverflowError on both. This runs inside error handling, so an
-            # exception here would turn a rate limit into a 500.
-            if not math.isfinite(parsed) or parsed < 0:
-                continue
-            seconds = math.ceil(parsed)
-            return str(min(seconds, _MAX_RETRY_AFTER_SECONDS))
+            seconds = bounded_retry_after(get_header("retry-after") or get_header("Retry-After"))
+            if seconds is not None:
+                return seconds
     return None
 
 
@@ -877,26 +855,6 @@ def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:
         return True, f"http_{status_code}"
 
     return True, "unknown"
-
-
-async def _resolve_platform_code_execution(
-    config: GatewayConfig,
-    user_token: str,
-) -> dict[str, Any]:
-    """Resolve the workspace's code-execution policy from the control plane.
-
-    Returns the parsed answer on 200 (``{enabled, tools, default_purpose_hint,
-    max_iterations, exec_timeout_s}``, soft limits already clamped to the
-    operator's ceilings on the peer's side), and an empty policy for anything
-    else, which narrows nothing.
-    """
-    payload = await _post_resolve(
-        config,
-        user_token=user_token,
-        endpoint=ResolveEndpoint.CODE_EXECUTION,
-        body={},
-    )
-    return payload if isinstance(payload, dict) else {}
 
 
 async def _report_platform_usage(

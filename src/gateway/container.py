@@ -32,19 +32,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.code_execution_adapter import build_code_execution_port, verify_code_execution_ready
+from gateway.adapters.code_execution_policy_adapter import LocalCodeExecutionPolicy, RemoteCodeExecutionPolicy
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.file_storage_adapter import build_file_storage_port
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import RosterIdentityProviderAdapter
-from gateway.adapters.mcp_server_adapter import build_mcp_server_port
+from gateway.adapters.mcp_server_adapter import LocalMcpServers, RemoteMcpServers
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
 from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
+from gateway.adapters.rate_limit_store_adapter import build_rate_limit_store
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
-from gateway.adapters.web_search_policy_adapter import build_web_search_policy_port
+from gateway.adapters.web_search_policy_adapter import LocalWebSearchPolicy, RemoteWebSearchPolicy
 from gateway.core.config import GatewayConfig
+from gateway.core.deployment import Plane, deployment_for
 from gateway.log_config import logger
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
+from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
 from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
@@ -53,6 +57,7 @@ from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
+from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 
@@ -337,36 +342,76 @@ def _file_storage_port_factory(config: GatewayConfig | None) -> PortFactory[File
     return factory
 
 
-def _mcp_server_port_factory(config: GatewayConfig | None) -> PortFactory[McpServerPort]:
-    """The core ``McpServerPort`` factory, closed over this app's config.
+def _rate_limit_store_port_factory(config: GatewayConfig | None) -> PortFactory[RateLimitStorePort]:
+    """The core ``RateLimitStorePort`` factory, closed over this app's config.
 
-    Built per resolve rather than once, because the implementation that reads
-    rows needs the request's own session.
+    Built on first resolve and reused, so every request counts in one store and
+    a process holds one connection pool to it.
+    A container built without config resolves this port only to raise.
     """
+    store: RateLimitStorePort | None = None
 
-    def factory(session: AsyncSession | None) -> McpServerPort:
+    def factory(session: AsyncSession | None) -> RateLimitStorePort:
+        del session
+        nonlocal store
         if config is None:
-            msg = "McpServerPort needs the deployment config; build the container with it"
+            msg = "RateLimitStorePort needs the deployment config; build the container with it"
             raise ContainerError(msg)
-        return build_mcp_server_port(config, session)
+        if store is None:
+            store = build_rate_limit_store(config)
+        return store
 
     return factory
 
 
-def _web_search_policy_port_factory(config: GatewayConfig | None) -> PortFactory[WebSearchPolicyPort]:
-    """The core ``WebSearchPolicyPort`` factory, closed over this app's config.
+def _requires_config(port: PortKey[T]) -> PortFactory[T]:
+    """A factory that refuses every resolve, for a container built without config."""
 
-    Built per resolve rather than once, because the implementation that reads
-    rows needs the request's own session.
-    """
-
-    def factory(session: AsyncSession | None) -> WebSearchPolicyPort:
-        if config is None:
-            msg = "the web search policy needs the deployment config; build the container with it"
-            raise ContainerError(msg)
-        return build_web_search_policy_port(config, session)
+    def factory(session: AsyncSession | None) -> T:
+        del session
+        msg = f"{_port_name(port)} needs the deployment config; build the container with it"
+        raise ContainerError(msg)
 
     return factory
+
+
+def _shared(adapter: T) -> PortFactory[T]:
+    """A factory that serves the one ``adapter`` to every request.
+
+    NOTE: The adapter must hold no per-request state, because concurrent requests share it.
+    """
+    return lambda session: adapter
+
+
+def _with_session(port: PortKey[T], adapter: Callable[[AsyncSession], T]) -> PortFactory[T]:
+    """A factory that builds ``adapter`` over each request's own session, which it requires."""
+
+    def factory(session: AsyncSession | None) -> T:
+        if session is None:
+            msg = f"a session is required where this deployment holds the rows behind {_port_name(port)}"
+            raise ContainerError(msg)
+        return adapter(session)
+
+    return factory
+
+
+def _bind_workspace_ports(container: Container, config: GatewayConfig | None) -> None:
+    """Bind each workspace port to this deployment's own rows, or to its peer where a peer holds them.
+
+    The planes a deployment serves are fixed for the life of the process, so they are read once, here.
+    """
+    if config is None:
+        container.bind(CodeExecutionPolicyPort, _requires_config(CodeExecutionPolicyPort))
+        container.bind(McpServerPort, _requires_config(McpServerPort))
+        container.bind(WebSearchPolicyPort, _requires_config(WebSearchPolicyPort))
+    elif deployment_for(config).supports(Plane.CONTROL):
+        container.bind(CodeExecutionPolicyPort, _with_session(CodeExecutionPolicyPort, LocalCodeExecutionPolicy))
+        container.bind(McpServerPort, _with_session(McpServerPort, LocalMcpServers))
+        container.bind(WebSearchPolicyPort, _with_session(WebSearchPolicyPort, LocalWebSearchPolicy))
+    else:
+        container.bind(CodeExecutionPolicyPort, _shared(RemoteCodeExecutionPolicy(config)))
+        container.bind(McpServerPort, _shared(RemoteMcpServers(config)))
+        container.bind(WebSearchPolicyPort, _shared(RemoteWebSearchPolicy(config)))
 
 
 def build_container(bootstrap_selector: str | None = None, config: GatewayConfig | None = None) -> Container:
@@ -424,14 +469,12 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
     # credential a request dispatches with. An overlay that must not hand a
     # managed credential to this process binds a transfer of its own.
     container.bind(ProviderFilePort, _provider_file_adapter)
-    # A workspace's MCP servers: the base reads this deployment's own rows
-    # where it holds them, and asks its peer where it does not. An overlay
-    # binds a source of its own and changes nothing above the port.
-    container.bind(McpServerPort, _mcp_server_port_factory(config))
-    # A workspace's web search policy: the base reads this deployment's own
-    # rows where it holds them, and asks its peer where it does not. An overlay
-    # binds a source of its own and changes nothing above the port.
-    container.bind(WebSearchPolicyPort, _web_search_policy_port_factory(config))
+    # A workspace's MCP servers and its web search and code execution policies.
+    # An overlay binds a source of its own and changes nothing above the port.
+    _bind_workspace_ports(container, config)
+    # Rate-limit counts: the base keeps them in this process, or in Redis
+    # where ``rate_limit_store`` asks for one count shared by every replica.
+    container.bind(RateLimitStorePort, _rate_limit_store_port_factory(config))
     if config is not None:
         # Asked once, at build, rather than per request: selecting a hosted
         # provider is itself what publishes code execution on ``/v1/tools``, in

@@ -1,3 +1,4 @@
+import json
 import math
 import uuid
 from collections.abc import AsyncIterator, Callable
@@ -18,11 +19,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
-    CodeExecutionPortDep,
-    McpServerPortDep,
     ModelProviderPortDep,
     OptionalFileServiceDep,
-    WebSearchPolicyPortDep,
+    ToolPortsDep,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     extract_credential_token,
@@ -69,6 +68,8 @@ from gateway.api.routes._platform import (
     ResolvedAttempt,
     SettledCost,
     _resolve_platform_credentials,
+    upstream_exception_chain,
+    upstream_exception_shape,
 )
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, _strip_gateway_fields
@@ -343,9 +344,7 @@ def _strip_gateway_minted_blocks(messages: Any) -> Any:
             continue
         # Two passes: identify our web-search results and our provenance-prefixed
         # MCP uses, then drop each complete pair. A provider's pair matches neither.
-        minted_web_ids = {
-            block.get("tool_use_id") for block in content if _is_gateway_minted_result(block)
-        }
+        minted_web_ids = {block.get("tool_use_id") for block in content if _is_gateway_minted_result(block)}
         minted_mcp_ids = {
             block.get("id") if block.get("type") == "mcp_tool_use" else block.get("tool_use_id")
             for block in content
@@ -451,6 +450,41 @@ def _ensure_anthropic_error(exc: HTTPException) -> HTTPException:
     )
 
 
+_ERR_OVERLOADED = "overloaded_error"
+
+# A failure after the stream committed can only be reported in the SSE error
+# event, so its type is what tells a client whether retrying makes sense. Only
+# transient upstream conditions are named; every other failure stays the generic
+# ``api_error``, and the message is always the gateway's own text, never the
+# provider's.
+_STREAM_ERROR_MESSAGES = {
+    _ERR_OVERLOADED: "The upstream provider is overloaded. Retry the request.",
+    _ERR_RATE_LIMIT: "The upstream provider rate limited the request. Retry the request later.",
+}
+_STREAM_ERROR_STATUS_TYPES = {
+    status.HTTP_429_TOO_MANY_REQUESTS: _ERR_RATE_LIMIT,
+    529: _ERR_OVERLOADED,
+}
+
+
+def _upstream_stream_error_type(exc: BaseException) -> str | None:
+    """The transient Anthropic ``error.type`` behind a mid-stream failure, if any.
+
+    Anthropic reports a failure after the stream began as an SSE ``error`` event,
+    which its SDK raises as an ``APIStatusError`` whose status is the stream's
+    original 200 and whose ``body`` holds the event. The body's type is the
+    signal; the status is read only for a provider that failed with a real one.
+    """
+    for candidate in upstream_exception_chain(exc):
+        body = getattr(candidate, "body", None)
+        error = body.get("error") if isinstance(body, dict) else None
+        error_type = error.get("type") if isinstance(error, dict) else None
+        if error_type in _STREAM_ERROR_MESSAGES:
+            return str(error_type)
+    _kind, status_code = upstream_exception_shape(exc)
+    return _STREAM_ERROR_STATUS_TYPES.get(status_code) if status_code is not None else None
+
+
 _MASTER_KEY_USER_REQUIRED = "When using master key, 'metadata.user_id' is required in request body"
 _USER_FORBIDDEN = "'metadata.user_id' does not match the authenticated API key's user"
 _PROVIDER_ERROR = "The request could not be completed by the provider"
@@ -465,14 +499,11 @@ def _billable_messages_usage(usage: Any) -> GatewayUsage:
         prompt_tokens=input_tokens,
         completion_tokens=output_tokens,
         total_tokens=input_tokens + output_tokens,
-        cache_read_tokens=sum(
-            (getattr(part, "cache_read_input_tokens", None) or 0) for part in billable_parts
-        ),
-        cache_write_tokens=sum(
-            (getattr(part, "cache_creation_input_tokens", None) or 0) for part in billable_parts
-        ),
+        cache_read_tokens=sum((getattr(part, "cache_read_input_tokens", None) or 0) for part in billable_parts),
+        cache_write_tokens=sum((getattr(part, "cache_creation_input_tokens", None) or 0) for part in billable_parts),
         cache_write_1h_tokens=sum(_cache_write_1h_tokens(part) for part in billable_parts),
         cache_tokens_in_prompt=False,
+        reasoning_tokens=getattr(getattr(usage, "output_tokens_details", None), "thinking_tokens", None) or 0,
     )
 
 
@@ -565,6 +596,13 @@ class _MessagesAdapter:
                 provider_error_headers(exc, mapping.status_code),
             )
         return _anthropic_error(_ERR_API, _PROVIDER_ERROR, status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def stream_error_payload(self, exc: BaseException) -> str:
+        error_type = _upstream_stream_error_type(exc)
+        if error_type is None:
+            return self.stream_format.error_payload
+        event = {"type": "error", "error": {"type": error_type, "message": _STREAM_ERROR_MESSAGES[error_type]}}
+        return f"event: error\ndata: {json.dumps(event)}\n\n"
 
     def format_chunk(self, chunk: MessageStreamEvent) -> str:
         return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True)}\n\n"
@@ -766,9 +804,7 @@ async def create_message(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
-    code_execution_port: CodeExecutionPortDep,
-    mcp_server_port: McpServerPortDep,
-    web_search_policy_port: WebSearchPolicyPortDep,
+    tool_ports: ToolPortsDep,
     idempotency: IdempotencyGuardDep,
 ) -> dict[str, Any] | Response:
     """Anthropic Messages API-compatible endpoint.
@@ -900,15 +936,13 @@ async def create_message(
             container_id=request.container,
         ),
         backends=ToolBackends(
-            code_execution_port=code_execution_port,
-            mcp_server_port=mcp_server_port,
-            web_search_policy_port=web_search_policy_port,
+            ports=tool_ports,
             sandbox_containers=build_sandbox_container_registry(
                 config=config,
                 uow=ctx.uow,
                 user_id=ctx.user_id,
                 workspace_id=ctx.workspace_id,
-                port=code_execution_port,
+                port=tool_ports.code_execution,
             ),
             sandbox_files=build_sandbox_file_bridge(
                 raw_request=raw_request,

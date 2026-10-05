@@ -311,7 +311,7 @@ export function OrganizationProvidersPage() {
   // fired and refused, the way `OrganizationGuardrailsPage` gates its own reads
   // and WorkspacesPage withholds the operator-only budget ones.
   //
-  // Not widened to `isDeploymentOperator`: the server gates these rows on the
+  // Not widened to `useDeploymentOperator`: the server gates these rows on the
   // organization role alone, and operating the deployment grants no role.
   const canEdit = canManage(context.data)
   const keys = useOrgProviderKeys(canEdit)

@@ -323,6 +323,30 @@ class WorkspaceWebSearchConfig(Base):
 
 
 @dataclass(frozen=True)
+class ResolvedCodeExecutionPolicy:
+    """A workspace's code execution policy, as the request path reads it.
+
+    A value type rather than the ORM row, so a streaming response that outlives the request carries no ORM identity.
+    """
+
+    enabled: bool
+    default_purpose_hint: str | None
+    max_iterations: int | None
+    exec_timeout_s: int | None
+    image: str | None
+    tools: frozenset[str] | None
+    # ``None`` leaves the choice to the deployment and the request.
+    executor: CodeExecutor | None = None
+
+
+class WebTool(StrEnum):
+    """A managed web tool a request can declare, named as the model and the control plane see it."""
+
+    SEARCH = "web_search"
+    FETCH = "web_fetch"
+
+
+@dataclass(frozen=True)
 class ResolvedWebSearchConfig:
     """A workspace's web search policy, as the request path reads it.
 
@@ -369,4 +393,3 @@ class SandboxContainer(Base):
     # same workspace at the same time. Cleared when the request records its
     # lease; the timestamp releases one a crashed gateway never gave back.
     in_use_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
-

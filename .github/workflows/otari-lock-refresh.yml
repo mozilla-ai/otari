@@ -69,7 +69,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: 3.14
           activate-environment: true
@@ -110,11 +110,11 @@ jobs:
 
       - name: Lint
         if: steps.relock.outputs.changed == 'true'
-        run: make lint
+        run: make lint-python
 
       - name: Typecheck
         if: steps.relock.outputs.changed == 'true'
-        run: make typecheck
+        run: make typecheck-python
 
       - name: Unit tests
         if: steps.relock.outputs.changed == 'true'
@@ -154,7 +154,7 @@ jobs:
             changed: these are the newest versions the existing constraints already
             allowed, which Dependabot does not open PRs for.
 
-            The workflow ran `make lint`, `make typecheck`, the unit and
+            The workflow ran `make lint-python`, `make typecheck-python`, the unit and
             integration suites, and the OSS-edition smoke gate against this
             resolution before opening the PR. See the run summary for the
             package-level diff.

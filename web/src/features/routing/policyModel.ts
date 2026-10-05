@@ -22,6 +22,7 @@ export type RoutingRow = RoutingPolicyResponse & { kind: "policy" | "alias" }
  *  than rewritten as one of these on save. */
 export const KNN_BACKEND = "knn"
 export const WEIGHTED_BACKEND = "weighted"
+export const PRIORITY_BACKEND = "priority"
 
 /** Server-side cap on a compiled plan (`MAX_CANDIDATES` in models/routing.py). */
 export const MAX_CANDIDATES = 5

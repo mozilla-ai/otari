@@ -9,12 +9,14 @@ import { providerDisplayName } from "@/shared/helpers/providers"
 import {
   buildTokenComposition,
   computeToolCost,
+  describeSkip,
   describeSource,
   findPricingSelector,
   formatLatencyCell,
   formatTokenCount,
   formatToolUsage,
   formatUSD,
+  isSkippedAttempt,
   listToolUsage,
   sortChargeLines,
 } from "./activityModel"
@@ -50,9 +52,20 @@ export function RequestDetail({
   // treated as uncosted.
   const isUncosted = entry.cost === null
   const pricingKey = findPricingSelector(entry)
+  const isSkipped = isSkippedAttempt(entry)
   return (
     <div className="flex flex-col gap-4 px-4 py-4">
-      {entry.error_message ? (
+      {/* A skip is the walk moving past a full model, not a failure, so it is
+          worded and styled as a note rather than an error. */}
+      {isSkipped ? (
+        <div className="flex flex-col gap-1.5">
+          <span className="text-overline">Skipped</span>
+          <p className="rounded-lg border border-border bg-surface p-3 text-xs text-foreground">
+            {describeSkip(entry)}. Routing moved this request to the next
+            candidate without calling this one.
+          </p>
+        </div>
+      ) : entry.error_message ? (
         <div className="flex flex-col gap-1.5">
           <span className="text-overline">
             Error{entry.status_code !== null ? ` (${entry.status_code})` : ""}
@@ -138,8 +151,17 @@ export function RequestDetail({
         <DetailField label="1h cache writes">
           {formatTokenCount(entry.cache_write_1h_tokens ?? null)}
         </DetailField>
+        <DetailField label="Reasoning tokens">
+          {formatTokenCount(entry.reasoning_tokens ?? null)}
+        </DetailField>
         <DetailField label="Total time">
           {formatLatencyCell(entry.latency_ms)}
+        </DetailField>
+        {/* Provider-reported compute time, best-effort (Groq, Ollama today).
+            formatLatencyCell's null placeholder means not reported, not zero.
+            Diagnostic only: Total time above stays the canonical measure. */}
+        <DetailField label="Provider time">
+          {formatLatencyCell(entry.provider_latency_ms)}
         </DetailField>
         <DetailField label="Request ID" copyValue={entry.id}>
           {entry.id}

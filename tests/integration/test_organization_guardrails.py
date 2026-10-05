@@ -387,9 +387,7 @@ async def test_a_mandate_names_one_backend_or_the_other(async_db: AsyncSession) 
     service = OrganizationGuardrailService(async_db)
 
     with pytest.raises(OrganizationGuardrailSingleBackendError):
-        await service.create_guardrail(
-            user=owner, request=_create(url=PUBLIC_URL, definition_id=definition.id)
-        )
+        await service.create_guardrail(user=owner, request=_create(url=PUBLIC_URL, definition_id=definition.id))
 
 
 async def test_a_credential_beside_a_definition_is_refused_as_the_contradiction(

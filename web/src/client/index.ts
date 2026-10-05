@@ -269,6 +269,11 @@ export type PricingTier = Schemas["PricingTier"]
 // The catalog folded by model (`/v1/catalog`): one summary per model in the
 // list, and one detail carrying every offering of it the caller may use.
 export type CatalogResponse = Schemas["CatalogResponse"]
+export type CatalogFacets = Schemas["CatalogFacets"]
+export type CatalogVendorFacet = Schemas["CatalogVendorFacet"]
+export type CatalogQueryParams = NonNullable<
+  operations["catalog-list_catalog"]["parameters"]["query"]
+>
 export type CatalogModelSummary = Schemas["CatalogModelSummary"]
 export type CatalogModelDetail = Schemas["CatalogModelDetail"]
 export type CatalogOffering = Schemas["CatalogOffering"]
@@ -436,6 +441,14 @@ export type BuiltInGuardrailCatalog = Schemas["BuiltInGuardrailCatalog"]
 export type BuiltInGuardrailSpec = Schemas["BuiltInGuardrailSpec"]
 export type GuardrailCategory = Schemas["GuardrailCategory"]
 export type RequirementGroup = Schemas["RequirementGroup"]
+
+// ---------------------------------------------------------------------------
+// Rate limit rules
+// ---------------------------------------------------------------------------
+export type RateLimitRule = Schemas["RateLimitRulePublic"]
+export type RateLimitRules = Schemas["RateLimitRulesPublic"]
+export type CreateRateLimitRuleRequest = Schemas["RateLimitRuleCreate"]
+export type UpdateRateLimitRuleRequest = Schemas["RateLimitRuleUpdate"]
 
 // ---------------------------------------------------------------------------
 // Search tools

@@ -5,7 +5,7 @@ gateway in front of key-only providers (OpenAI, Anthropic, Mistral, Gemini),
 backed by a managed Postgres database. No local setup: deploy, then add your
 provider keys on the dashboard.
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/otari-railway-template-demo)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/otari)
 
 ## What you get
 
@@ -13,7 +13,7 @@ The template stands up two services:
 
 | Service | Source | Notes |
 | --- | --- | --- |
-| **otari** | `docker.io/mzdotai/otari:latest` | Target port `8000`, healthcheck `/api/v1/health`. Pulls the published image; builds nothing. |
+| **otari** | `mzdotai/otari:0.14.1` (Docker Hub) | Target port `8000` with a public domain, healthcheck `/api/v1/health/readiness`, which fails while the database is unreachable. Pulls the published image, pinned to a release; builds nothing. See [Upgrade](#upgrade). |
 | **Postgres** | Railway managed | Durable storage for keys, users, budgets, and usage. |
 
 Otari is a good fit for a one-click deploy: the app is stateless, its only
@@ -35,6 +35,9 @@ the snapshot of what the template sets lives in [`template.json`](template.json)
 | `OTARI_PROVIDER_ACCOUNT_PEPPER` | auto-generated (`${{secret(43)}}`) | Names the provider account a copy of an attached file is in. Otari refuses to start without it while provider copies are on. |
 | `OTARI_REQUIRE_PRICING` | `false` | Pre-set, so a fresh deploy serves models that have no configured pricing. |
 | `OTARI_DEFAULT_PRICING` | `true` | Pre-set, so common models are metered from the bundled genai-prices dataset without configuring each one. Prices you set in the dashboard or via `/api/v1/pricing` always override it. |
+| `OTARI_FORWARDED_ALLOW_IPS` | `*` | Pre-set, so the per-IP sign-in and public-catalog limits see the real client, not Railway's ingress. Safe here because the ingress is the only path to the container; see [Behind a reverse proxy](../../docs/deployment.md#behind-a-reverse-proxy). |
+| `OTARI_PUBLIC_BASE_URL` | `https://${{RAILWAY_PUBLIC_DOMAIN}}` | Pre-wired to the service's Railway domain. OAuth redirect URIs, the passkey relying-party ID and email links are built from it. Change it if you attach a custom domain. |
+| `PORT` | `8000` | Pre-set for Railway's deploy-time healthcheck, which probes the port in `PORT`, not the target port. Otari listens on `OTARI_PORT` (pinned to `8000` in the image) and never reads `PORT`, so keep the two equal. |
 
 Notes:
 
@@ -64,11 +67,10 @@ Notes:
 ## Deploy
 
 1. Click **Deploy on Railway** above.
-2. Deploy. The master key and secret key are generated for you. Railway
-   provisions Postgres, pulls the Otari image, runs migrations on startup, and
-   bootstraps a first-use API key.
-3. Generate a public domain for the otari service (Settings → Networking).
-4. Open that domain, sign in with the master key (from the Variables tab), and
+2. Deploy. The keys are generated for you. Railway provisions Postgres, pulls
+   the Otari image, gives the otari service a public `*.up.railway.app` domain,
+   runs migrations on startup, and bootstraps a first-use API key.
+3. Open that domain (Settings → Networking), sign in with the master key (from the Variables tab), and
    add at least one provider on the Providers page.
 
 ## Verify
@@ -79,7 +81,7 @@ Once both services are healthy:
 # Replace with your service's public domain.
 export OTARI_URL=https://your-otari.up.railway.app
 
-curl "$OTARI_URL/api/v1/health"
+curl "$OTARI_URL/api/v1/health/readiness"
 ```
 
 Grab the bootstrapped API key from the otari service's deploy logs (printed once
@@ -98,6 +100,34 @@ curl "$OTARI_URL/api/v1/chat/completions" \
 Use a provider you added (for example `anthropic:...`, `mistral:...`, or
 `gemini:...`).
 
+## Upgrade
+
+The template pins the Otari image to a release tag, not `latest`. Otari runs
+its migrations on startup, and Railway redeploys on its own (a crash restart, a
+host move, a variable change). On a moving tag, any of those could pull a newer
+release and migrate your schema without you choosing to upgrade. Migrations
+only go forward, so going back needs a database restore.
+
+To upgrade:
+
+1. Back up Postgres. Railway's Postgres service has a **Backups** tab; or run
+   `pg_dump` against its public URL.
+2. Read the [release notes](https://github.com/mozilla-ai/otari/releases) for
+   every release between yours and the target.
+3. On the otari service, open Settings → Source and change the image tag to the
+   target release (for example `0.15.0`). Railway
+   redeploys, and Otari migrates the schema on startup.
+4. Check `/api/v1/health/readiness` and make one real request, as in [Verify](#verify).
+
+To take patch releases without doing this by hand, turn on Railway's
+[Image Auto Updates](https://docs.railway.com/deployments/image-auto-updates):
+on the otari service, open Settings → Source → **Configure Auto Updates**,
+choose **Patches only**, and pick a maintenance window. Railway then moves the
+pinned tag within its minor line (`0.14.1` to `0.14.2`) and notifies workspace
+admins. Avoid **Minor updates and patches**: a minor release can migrate the
+schema, and the backup Railway takes before an update covers the otari
+service's volumes, not the Postgres service.
+
 ## Maintaining the template
 
 A Railway multi-service template (the Postgres service, the env-var input form,
@@ -112,9 +142,27 @@ When changing the template:
    throwaway project and confirm a real `/api/v1/chat/completions` round-trip plus
    that the bootstrapped key works.
 2. Update [`template.json`](template.json) in the same change so the snapshot
-   matches the live config (services, variables, defaults, target port).
-3. If the deploy link changes, update the **Deploy on Railway** button here, in
-   the project root `README.md`, and in `docs/deployment.md`.
+   matches the live config (services, variables with their descriptions, defaults,
+   target port, public domain).
+   The README on Railway is [`listing.md`](listing.md), not this file: Railway
+   requires its own fixed sections and absolute links, and it drops anything in
+   angle brackets as HTML. Edit `listing.md`, then paste it into the template
+   editor's README field.
+3. To move a new deploy to a newer release, change the image tag on the live
+   template and in `template.json`. This does not touch existing deploys: each
+   keeps the tag it was deployed with until its operator upgrades.
+4. The deploy link is `https://railway.com/deploy/<code>`, where the code is
+   set in the template editor (it is `otari`). If it changes, update every
+   **Deploy on Railway** button (`grep -rn railway.com/deploy`) and the
+   `code` in `template.json`.
+5. Run `make railway-template-check`. It reads the live template from
+   Railway's public API (no token) and lists every difference from
+   `template.json` and `listing.md`: images, healthcheck path, domain port,
+   and each variable's default, optional flag and description. Fix either side
+   until it passes. CI runs the same check on every PR that touches this
+   directory and once a week, so an edit made in the Railway editor without a
+   PR still shows up. After a release that changes required config, do steps
+   1 to 5 again.
 
 Listing the template in Railway's public marketplace is optional: the deploy
 link works without it. Publishing only adds marketplace discoverability and

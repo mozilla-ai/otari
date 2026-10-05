@@ -16,7 +16,6 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
-from gateway.core.deployment import Plane, deployment_for
 from gateway.exceptions.tools_exceptions import McpResolutionFailure, McpServerResolutionFailedError
 from gateway.models.mcp import McpServerConfig, ResolvedMcpServer
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
@@ -114,17 +113,3 @@ class RemoteMcpServers(McpServerPort):
         if resolved.id != server_id:
             raise McpServerResolutionFailedError(McpResolutionFailure.ID_MISMATCH)
         return resolved
-
-
-def build_mcp_server_port(config: GatewayConfig, session: AsyncSession | None) -> McpServerPort:
-    """The implementation for the planes this deployment serves.
-
-    A deployment serving a control plane holds the rows and needs a session.
-    One that does not has a peer holding them, and needs none.
-    """
-    if deployment_for(config).supports(Plane.CONTROL):
-        if session is None:
-            msg = "a session is required when this deployment holds its own MCP server rows"
-            raise ValueError(msg)
-        return LocalMcpServers(session)
-    return RemoteMcpServers(config)

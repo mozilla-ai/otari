@@ -9,8 +9,10 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.ports.billing_port import BillingPort
 
-class NullBillingAdapter:
+
+class NullBillingAdapter(BillingPort):
     """``BillingPort`` adapter for a deployment that does not bill.
 
     Holds no state, so the request's database session is unused.

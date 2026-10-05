@@ -69,7 +69,7 @@ async def verify_hook_caller(
     await verify_api_key_or_master_key(request, db, config)
 
 
-# The gate lives on the router, not the route: matches usage.ingest_router, so
+# The gate lives on the router, not the route: matches usage.key_router, so
 # a route added here later inherits it rather than needing to remember it.
 router = APIRouter(
     prefix="/hooks",
