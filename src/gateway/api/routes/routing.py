@@ -44,9 +44,9 @@ from gateway.services.routing import (
     NoEligibleCandidatesError,
     backend_requires_pricing,
     compile_policy,
+    explain_router_ordering,
+    unpriced_router_candidates,
 )
-from gateway.services.routing.decide import explain_router_ordering
-from gateway.services.routing.knn import unpriced_router_candidates
 
 router = APIRouter(
     prefix="/routing/policies",

@@ -56,7 +56,7 @@ from gateway.services.inference import IdempotencyService
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.organization_pricing_service import OrganizationPricingService
-from gateway.services.overview.overview_service import OverviewService
+from gateway.services.overview import OverviewService
 from gateway.services.providers import OrgProviderModelService, ProviderEndpointService, refresh_provider_endpoint_cache
 from gateway.services.rate_limits import RateLimitService
 from gateway.services.routing import clear_router_backend_cache

@@ -24,6 +24,8 @@ from gateway.services.routing.backends import (
     RouterBackend,
     RoutingContext,
     RoutingDecision,
+    backend_is_priority,
+    backend_is_weighted,
     backend_pool_is_teachable,
     backend_requires_pricing,
     clear_router_backend_cache,
@@ -39,6 +41,8 @@ from gateway.services.routing.compiler import (
     needs_budget_state,
     selection_consults_router,
 )
+from gateway.services.routing.decide import RoutingSignal, decide_ordering, explain_router_ordering
+from gateway.services.routing.knn import KnnRoutingMemory, unpriced_router_candidates
 from gateway.types.budget_state import BudgetState
 
 __all__ = [
@@ -49,17 +53,24 @@ __all__ = [
     "BudgetState",
     "CompiledPlan",
     "DroppedCandidate",
+    "KnnRoutingMemory",
     "NoEligibleCandidatesError",
     "RouterBackend",
     "RouterOrdering",
     "RoutingContext",
     "RoutingDecision",
+    "RoutingSignal",
+    "backend_is_priority",
+    "backend_is_weighted",
     "backend_pool_is_teachable",
     "backend_requires_pricing",
     "clear_router_backend_cache",
     "compile_policy",
+    "decide_ordering",
+    "explain_router_ordering",
     "get_router_backend",
     "known_backends",
     "needs_budget_state",
     "selection_consults_router",
+    "unpriced_router_candidates",
 ]

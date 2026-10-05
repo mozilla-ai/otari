@@ -15,8 +15,8 @@ this build does not have serves its default target and warns once.
 
 * ``noop`` → :class:`NoOpRouterBackend`, which declines every request. Useful to
   hold a policy's shape while its pool is still being taught.
-* ``knn`` → :class:`gateway.services.routing.knn.KnnRoutingMemory`, imported
-  lazily so a gateway with no learned policy never loads the embedding path.
+* ``knn`` → :class:`gateway.services.routing.knn.KnnRoutingMemory`, the
+  learned router.
 * ``weighted`` → :class:`gateway.services.routing.weighted.WeightedRouterBackend`,
   a load balancer: one candidate per request, drawn in proportion to the weights
   the policy declares.
@@ -276,8 +276,7 @@ def get_router_backend(config: GatewayConfig, name: str) -> RouterBackend | None
 
         return WeightedRouterBackend()
     if backend == KNN_BACKEND:
-        # Imported lazily: the kNN backend pulls in any_llm embeddings and the
-        # example store, neither of which a gateway without a learned policy needs.
+        # NOTE: knn imports this module, so a module-level import would be a cycle.
         from gateway.services.routing.knn import KnnRoutingMemory
 
         signature = _knn_signature(config)
