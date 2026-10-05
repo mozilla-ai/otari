@@ -195,8 +195,7 @@ async def test_concurrent_claims_of_one_address_leave_exactly_one_holder(
     # this the test passes whether the racers overlapped or not: a serialized
     # run refuses them at the ``_claimable_email`` preflight, which raises the
     # very same ``EmailAlreadyInUseError``, so the outcome assertions below
-    # cannot tell the two routes apart and would green-light a fix that never
-    # runs.
+    # cannot tell the two routes apart.
     mapped: list[bool] = []
     real_detector = user_service._is_email_conflict
 
@@ -206,6 +205,21 @@ async def test_concurrent_claims_of_one_address_leave_exactly_one_holder(
         return verdict
 
     monkeypatch.setattr(user_service, "_is_email_conflict", counting_detector)
+
+    # Hold every racer at the end of its preflight until all of them have passed
+    # it. Left to the scheduler, a racer slow to open its connection can run the
+    # preflight after the winner committed, be refused there, and fail the
+    # mapping count above although nothing is wrong.
+    real_preflight = user_service._claimable_email
+    all_preflighted = asyncio.Barrier(_RACERS)
+
+    async def preflight_then_wait(db: AsyncSession, identity: User, email: str) -> str:
+        candidate = await real_preflight(db, identity, email)
+        async with asyncio.timeout(_CHECKPOINT_TIMEOUT):
+            await all_preflighted.wait()
+        return candidate
+
+    monkeypatch.setattr(user_service, "_claimable_email", preflight_then_wait)
 
     users = UserRepository(async_db)
     racer_ids = [
