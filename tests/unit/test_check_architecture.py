@@ -1104,3 +1104,76 @@ def test_main_fails_on_an_import_of_another_domains_repositories(
     assert check.main() == 0
     _write(tmp_path, "src/gateway/core/thing.py", "from gateway.repositories.things import ThingRepository\n")
     assert check.main() == 1
+
+
+_SERVICE_PACKAGE_REMEDY = "code outside a domain imports what its service package root exports"
+
+
+def _write_things_service(src_root: Path) -> None:
+    _write(src_root, "gateway/services/things/__init__.py", "from ._store import Store\n")
+    _write(src_root, "gateway/services/things/_store.py", "")
+    _write(src_root, "gateway/services/things/store.py", "")
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "source", "module"),
+    [
+        (
+            "gateway/api/routes/things.py",
+            "from gateway.services.things._store import Store\n",
+            "gateway.services.things._store",
+        ),
+        (
+            "gateway/api/routes/things.py",
+            "from gateway.services.things import _store\n",
+            "gateway.services.things._store",
+        ),
+        ("gateway/api/deps.py", "import gateway.services.things.store\n", "gateway.services.things.store"),
+        ("gateway/services/widgets/_service.py", "from ..things.store import Store\n", "gateway.services.things.store"),
+        (
+            "gateway/services/thing_service.py",
+            "from gateway.services.things.store import Store\n",
+            "gateway.services.things.store",
+        ),
+    ],
+)
+def test_importing_below_another_domains_service_package_root_is_flagged(
+    tmp_path: Path, relative_path: str, source: str, module: str
+) -> None:
+    _write_things_service(tmp_path)
+    _write(tmp_path, relative_path, source)
+    assert check.check_service_package_imports(tmp_path, _DOMAINS) == [
+        f"{relative_path}:1 imports {module}; {_SERVICE_PACKAGE_REMEDY}"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "source"),
+    [
+        ("gateway/api/routes/things.py", "from gateway.services.things import Store\n"),
+        ("gateway/api/routes/things.py", "from gateway.services import things\n"),
+        ("gateway/services/things/_service.py", "from gateway.services.things._store import Store\n"),
+        ("gateway/services/things/_service.py", "from ._store import Store\n"),
+        ("gateway/api/routes/things.py", "from gateway.services.thing_service import ThingService\n"),
+        ("gateway/api/routes/things.py", "from gateway.services.legacy._store import Store\n"),
+    ],
+)
+def test_importing_a_service_package_root_own_modules_or_a_non_domain_package_is_clean(
+    tmp_path: Path, relative_path: str, source: str
+) -> None:
+    _write_things_service(tmp_path)
+    _write(tmp_path, "gateway/services/thing_service.py", "")
+    _write(tmp_path, "gateway/services/legacy/__init__.py", "")
+    _write(tmp_path, "gateway/services/legacy/_store.py", "")
+    _write(tmp_path, relative_path, source)
+    assert check.check_service_package_imports(tmp_path, _DOMAINS) == []
+
+
+def test_main_fails_on_an_import_below_a_service_package_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(tmp_path, "src/gateway/services/things/__init__.py", "")
+    _write(tmp_path, "src/gateway/services/things/_store.py", "")
+    _write(tmp_path, "tests/__init__.py", "")
+    _point_main_at(tmp_path, monkeypatch)
+    assert check.main() == 0
+    _write(tmp_path, "src/gateway/core/thing.py", "from gateway.services.things._store import Store\n")
+    assert check.main() == 1

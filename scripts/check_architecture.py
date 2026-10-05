@@ -55,6 +55,9 @@ Enforces:
     service. A domain is one that docs/domains.md gives a section. Service code
     outside every domain package is not checked, because its path does not
     say which domain owns it.
+21. Service package imports: code outside a domain's service package
+    imports only its root, so the root's exports are the domain's whole
+    public API.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -1013,6 +1016,48 @@ def check_repository_imports(src_root: Path, domains: set[str]) -> list[str]:
     ]
 
 
+def _package_members(package_root: Path) -> set[str]:
+    """Return the name of each module and subpackage directly inside a package, spelled as it is on disk.
+
+    NOTE: A path test on a case-insensitive file system would match a class such as Mailer to mailer.py.
+    """
+    return {
+        entry.stem if entry.is_file() else entry.name
+        for entry in package_root.iterdir()
+        if (entry.suffix == ".py" and entry.name != "__init__.py") or (entry / "__init__.py").is_file()
+    }
+
+
+def _below_root_service_import(modules: list[str], relative_path: str, members: dict[str, set[str]]) -> str | None:
+    """Return the first of an import's modules that lies below another domain's service package root, or None."""
+    for module in modules:
+        domain = _imported_domain(module, SERVICE_SCOPE, members)
+        if domain is None or relative_path.startswith(f"{SERVICE_SCOPE}/{domain}/"):
+            continue
+        package_root = f"{SERVICE_SCOPE.replace('/', '.')}.{domain}."
+        if module.removeprefix(package_root).split(".")[0] in members[domain]:
+            return module
+    return None
+
+
+def check_service_package_imports(src_root: Path, domains: set[str]) -> list[str]:
+    """Check that code outside a domain service package imports only the package root."""
+    members = {
+        package: _package_members(src_root / SERVICE_SCOPE / package)
+        for package in _domain_packages(src_root, SERVICE_SCOPE, domains)
+    }
+    found: list[tuple[str, int, str]] = []
+    for relative_path, tree in _parsed_modules(src_root, "gateway"):
+        for line, modules in _import_statements(tree, src_root / relative_path, src_root):
+            module = _below_root_service_import(modules, relative_path, members)
+            if module is not None:
+                found.append((relative_path, line, module))
+    return [
+        f"{relative_path}:{line} imports {module}; code outside a domain imports what its service package root exports"
+        for relative_path, line, module in sorted(found)
+    ]
+
+
 def main() -> int:
     """Run the architecture checks over the gateway package, the light CLI and the OSS test suite."""
     # All must exist: silently skipping one would let its rules (including
@@ -1054,6 +1099,7 @@ def main() -> int:
     domains, domains_page_violations = read_domains_page(REPO_ROOT / DOMAINS_DOC)
     domain_name_violations = domains_page_violations + (check_domain_names(SRC_ROOT, domains) if domains else [])
     repository_import_violations = check_repository_imports(SRC_ROOT, domains)
+    service_package_import_violations = check_service_package_imports(SRC_ROOT, domains)
 
     if import_violations:
         print("❌ Architecture violations found:\n")
@@ -1110,6 +1156,12 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal repository import violations: {len(repository_import_violations)}")
 
+    if service_package_import_violations:
+        print("\n❌ Service package import violations:\n")
+        for violation in service_package_import_violations:
+            print(f"  {violation}")
+        print(f"\nTotal service package import violations: {len(service_package_import_violations)}")
+
     if (
         import_violations
         or naming_violations
@@ -1120,6 +1172,7 @@ def main() -> int:
         or flat_module_violations
         or domain_name_violations
         or repository_import_violations
+        or service_package_import_violations
     ):
         print("\n💡 See ARCHITECTURE.md for the intended layering")
         return 1

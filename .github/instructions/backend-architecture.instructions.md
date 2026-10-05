@@ -73,8 +73,9 @@ same" as a reason.
 ## Imports between domains
 
 - Code outside a domain imports its service only through the package root,
-  `gateway.services.<domain>`. Flag an import of a module whose name starts
-  with `_` from outside its package.
+  `gateway.services.<domain>`. The check refuses an import below the root
+  from outside the package, for each domain `docs/domains.md` gives a section.
+  Flag such an import into a service package that is not a domain yet.
 - Only the domain's own service and repository packages and `api/deps.py`
   import `gateway.repositories.<domain>`. The check refuses any other import of
   one, for each domain `docs/domains.md` gives a section, except from service
@@ -88,8 +89,8 @@ same" as a reason.
 - Flag a listener implementation that commits or rolls back. The caller owns
   the transaction.
 
-The boundary check does not enforce the package root and cycle rules yet, so
-review is the only gate for them.
+The boundary check does not enforce the cycle rule yet, so review is the only
+gate for it.
 
 ## Errors
 
