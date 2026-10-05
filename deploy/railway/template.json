@@ -3,6 +3,12 @@
   "name": "Otari",
   "code": "otari",
   "description": "Self-hosted Otari, an OpenAI-compatible LLM gateway, in front of key-only providers (OpenAI, Anthropic, Mistral, Gemini), backed by a managed Postgres database. Add provider keys on the dashboard, get virtual API keys, budgets, and usage tracking.",
+  "buckets": {
+    "otari-files": {
+      "name": "otari-files",
+      "_comment": "Railway bucket (S3-compatible object storage) for the bytes behind /api/v1/files. The otari service reads it through the ${{otari-files.*}} references below. Without it the files backend is the container disk, which Railway discards on every redeploy and does not share between replicas. Railway serializes nothing about a bucket but its name; the region is chosen when the template is deployed."
+    }
+  },
   "services": {
     "otari": {
       "name": "otari",
@@ -57,6 +63,36 @@
           "defaultValue": "https://${{RAILWAY_PUBLIC_DOMAIN}}",
           "isOptional": true,
           "description": "This deployment's public URL, with no trailing slash. Builds OAuth redirect URIs, the passkey relying-party ID and the links in outgoing email. Pre-wired to the service's Railway domain; change it if you attach a custom domain."
+        },
+        "OTARI_FILES_BACKEND": {
+          "defaultValue": "s3",
+          "isOptional": false,
+          "description": "Keep uploaded files in the otari-files bucket rather than on the container's disk, which Railway discards on every redeploy and does not share between replicas. Leave as-is."
+        },
+        "OTARI_FILES_S3_BUCKET": {
+          "defaultValue": "${{otari-files.BUCKET}}",
+          "isOptional": false,
+          "description": "S3 name of the otari-files bucket. Wired to the bucket; leave as-is."
+        },
+        "OTARI_FILES_S3_ENDPOINT_URL": {
+          "defaultValue": "${{otari-files.ENDPOINT}}",
+          "isOptional": false,
+          "description": "S3 endpoint of the otari-files bucket. Wired to the bucket; leave as-is."
+        },
+        "OTARI_FILES_S3_REGION": {
+          "defaultValue": "${{otari-files.REGION}}",
+          "isOptional": false,
+          "description": "S3 region of the otari-files bucket (Railway reports auto). Wired to the bucket; leave as-is."
+        },
+        "AWS_ACCESS_KEY_ID": {
+          "defaultValue": "${{otari-files.ACCESS_KEY_ID}}",
+          "isOptional": false,
+          "description": "Access key of the otari-files bucket, under the name boto3 reads. This is the bucket's key, not an AWS account key. Wired to the bucket; leave as-is."
+        },
+        "AWS_SECRET_ACCESS_KEY": {
+          "defaultValue": "${{otari-files.SECRET_ACCESS_KEY}}",
+          "isOptional": false,
+          "description": "Secret key of the otari-files bucket, under the name boto3 reads. Wired to the bucket; leave as-is."
         },
         "PORT": {
           "defaultValue": "8000",
