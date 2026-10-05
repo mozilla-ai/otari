@@ -243,7 +243,6 @@ from gateway.services.tenancy.workspace_code_execution_policy_service import (
     SERVED_TOOL_NAMES,
     resolve_workspace_code_execution_policy,
 )
-from gateway.services.tenancy.workspace_web_search_service import MAX_WEB_SEARCH_DOMAINS, read_domain_list
 from gateway.services.tool_usage import (
     MAX_TOOL_NAMES,
     OVERFLOW_TOOL_NAME,
@@ -260,7 +259,7 @@ from gateway.services.web_retrieval_backend import (
     WebRetrievalCounter,
     WebSearchNotReachableError,
 )
-from gateway.services.web_retrieval_policy import DomainPolicy
+from gateway.services.web_retrieval_policy import MAX_WEB_SEARCH_DOMAINS, DomainPolicy, read_domain_list
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     resolve_workspace_id,

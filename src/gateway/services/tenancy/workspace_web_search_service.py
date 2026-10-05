@@ -42,10 +42,12 @@ from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.web_retrieval_backend import MAX_RESULTS_CAP
 from gateway.services.web_retrieval_policy import (
+    MAX_WEB_SEARCH_DOMAINS,
     CanonicalHost,
     DomainRuleValidationError,
     canonicalize_domain_rule,
     domain_rule_matches,
+    read_domain_list,
 )
 
 # The backend's own ceiling on returned hits. A stored value above it would read
@@ -53,10 +55,9 @@ from gateway.services.web_retrieval_policy import (
 # so it is refused at the write rather than silently clamped at resolve time.
 # Same call as `workspace_code_execution_policy_service` makes for its two.
 _MAX_RESULTS = MAX_RESULTS_CAP
-# Bound the two lists and the opaque bag so one workspace's row cannot grow
-# without limit; the same numbers the hosted `WorkspaceWebSearchConfigUpdate`
-# uses, since this is the same configuration.
-MAX_WEB_SEARCH_DOMAINS = 100
+# Bound the opaque bag so one workspace's row cannot grow without limit; the
+# same numbers the hosted `WorkspaceWebSearchConfigUpdate` uses, since this is
+# the same configuration.
 _MAX_DOMAINS = MAX_WEB_SEARCH_DOMAINS
 _MAX_PROVIDER_OPTION_KEYS = 30
 _MAX_PROVIDER_OPTIONS_BYTES = 4096
@@ -65,52 +66,6 @@ _MAX_PURPOSE_HINT_LENGTH = 2048
 
 class InvalidStoredWebSearchDomainError(ValueError):
     """A legacy workspace row contains a domain rule that cannot be enforced."""
-
-
-def _canonical_host(raw: str) -> str:
-    """Canonicalize one domain-list entry, accepting cookie-style leading dots.
-
-    A leading dot is stripped rather than refused: ``.example.com`` has exactly
-    one reading, and an entry here already covers its subdomains, so it is the
-    same rule written in cookie syntax. Raises
-    :class:`DomainRuleValidationError` for anything that is not a bare host.
-    """
-    candidate = raw.strip()
-    if candidate.startswith("."):
-        candidate = candidate[1:]
-    return canonicalize_domain_rule(candidate).value
-
-
-def read_domain_list(value: object) -> tuple[str, ...] | None:
-    """Canonicalize and bound one domain list, whichever source it came from.
-
-    A workspace's policy and a request's web search declaration both read their lists here,
-    so a rule one of them accepts the other accepts too.
-
-    ``None`` and an empty list both mean no list.
-    Duplicates collapse, and the first occurrence keeps its place.
-
-    Raises ``ValueError`` naming the first problem: a value that is not a list, more than ``_MAX_DOMAINS`` entries,
-    or an entry that is not a bare hostname.
-    """
-    if value is None:
-        return None
-    if not isinstance(value, list):
-        raise ValueError("a domain list must be a list of hostnames")
-    if len(value) > _MAX_DOMAINS:
-        raise ValueError(f"at most {_MAX_DOMAINS} domains are allowed")
-    hosts: dict[str, None] = {}
-    for raw in value:
-        if not isinstance(raw, str):
-            raise ValueError("a domain list must be a list of hostnames")
-        try:
-            hosts.setdefault(_canonical_host(raw), None)
-        except DomainRuleValidationError as exc:
-            raise ValueError(
-                f"{raw.strip()!r} is not a bare valid hostname; give a domain such as 'example.com', "
-                "with no scheme, port or path"
-            ) from exc
-    return tuple(hosts) or None
 
 
 def _normalize_domains(value: list[str] | None) -> list[str] | None:

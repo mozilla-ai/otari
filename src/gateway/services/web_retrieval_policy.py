@@ -19,6 +19,9 @@ IPAddress: TypeAlias = ipaddress.IPv4Address | ipaddress.IPv6Address
 _ALLOWED_SCHEMES = frozenset({"http", "https"})
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 MAX_WEB_URL_LENGTH = 8192
+# One allow- or block-list, from a workspace's policy or a request; the same
+# bound the hosted `WorkspaceWebSearchConfigUpdate` uses.
+MAX_WEB_SEARCH_DOMAINS = 100
 
 
 class WebURLValidationError(ValueError):
@@ -214,6 +217,52 @@ def canonicalize_domain_rule(value: str) -> CanonicalHost:
             raise DomainRuleValidationError("domain rule has malformed IPv6 brackets")
         value = value[1:-1]
     return canonicalize_host(value, error_type=DomainRuleValidationError)
+
+
+def _canonical_host(raw: str) -> str:
+    """Canonicalize one domain-list entry, accepting cookie-style leading dots.
+
+    A leading dot is stripped rather than refused: ``.example.com`` has exactly
+    one reading, and an entry here already covers its subdomains, so it is the
+    same rule written in cookie syntax. Raises
+    :class:`DomainRuleValidationError` for anything that is not a bare host.
+    """
+    candidate = raw.strip()
+    if candidate.startswith("."):
+        candidate = candidate[1:]
+    return canonicalize_domain_rule(candidate).value
+
+
+def read_domain_list(value: object) -> tuple[str, ...] | None:
+    """Canonicalize and bound one domain list, whichever source it came from.
+
+    A workspace's policy and a request's web search declaration both read their lists here,
+    so a rule one of them accepts the other accepts too.
+
+    ``None`` and an empty list both mean no list.
+    Duplicates collapse, and the first occurrence keeps its place.
+
+    Raises ``ValueError`` naming the first problem: a value that is not a list,
+    more than ``MAX_WEB_SEARCH_DOMAINS`` entries, or an entry that is not a bare hostname.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise ValueError("a domain list must be a list of hostnames")
+    if len(value) > MAX_WEB_SEARCH_DOMAINS:
+        raise ValueError(f"at most {MAX_WEB_SEARCH_DOMAINS} domains are allowed")
+    hosts: dict[str, None] = {}
+    for raw in value:
+        if not isinstance(raw, str):
+            raise ValueError("a domain list must be a list of hostnames")
+        try:
+            hosts.setdefault(_canonical_host(raw), None)
+        except DomainRuleValidationError as exc:
+            raise ValueError(
+                f"{raw.strip()!r} is not a bare valid hostname; give a domain such as 'example.com', "
+                "with no scheme, port or path"
+            ) from exc
+    return tuple(hosts) or None
 
 
 def domain_rule_matches(rule: CanonicalHost, host: CanonicalHost) -> bool:
