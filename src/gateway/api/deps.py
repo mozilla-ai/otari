@@ -2,6 +2,7 @@ import secrets
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import aclosing
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -1084,6 +1085,27 @@ TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_
 WebSearchPolicyPortDep = Annotated[WebSearchPolicyPort, Depends(get_web_search_policy_port)]
 
 
+@dataclass(frozen=True, kw_only=True)
+class ToolPorts:
+    """The ports a request's tools reach."""
+
+    code_execution: CodeExecutionPort | None
+    mcp_server: McpServerPort
+    web_search_policy: WebSearchPolicyPort
+
+
+def get_tool_ports(
+    code_execution: CodeExecutionPortDep,
+    mcp_server: McpServerPortDep,
+    web_search_policy: WebSearchPolicyPortDep,
+) -> ToolPorts:
+    """Resolve the ports a request's tools reach."""
+    return ToolPorts(code_execution=code_execution, mcp_server=mcp_server, web_search_policy=web_search_policy)
+
+
+ToolPortsDep = Annotated[ToolPorts, Depends(get_tool_ports)]
+
+
 def require_capability(capability: str) -> Callable[[EntitlementPort], Awaitable[None]]:
     """Build a dependency that refuses a request unless the deployment is entitled.
 
@@ -1204,6 +1226,8 @@ __all__ = [
     "OrgProviderModelServiceDep",
     "RateLimitServiceDep",
     "TelemetryStoragePortDep",
+    "ToolPorts",
+    "ToolPortsDep",
     "WebSearchPolicyPortDep",
     "get_config",
     "get_container",

@@ -62,12 +62,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     ApiKeyFormatPortDep,
-    CodeExecutionPortDep,
     CurrentIdentity,
     FileServiceDep,
-    McpServerPortDep,
     ModelProviderPortDep,
-    WebSearchPolicyPortDep,
+    ToolPortsDep,
     get_config,
     get_db,
     get_log_writer,
@@ -184,9 +182,7 @@ async def playground_chat_completions(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
-    code_execution_port: CodeExecutionPortDep,
-    mcp_server_port: McpServerPortDep,
-    web_search_policy_port: WebSearchPolicyPortDep,
+    tool_ports: ToolPortsDep,
     key_format: ApiKeyFormatPortDep,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
 ) -> ChatCompletion | Response:
@@ -228,9 +224,7 @@ async def playground_chat_completions(
             key_format=key_format,
         )
     return await run_chat_completion(
-        code_execution_port=code_execution_port,
-        mcp_server_port=mcp_server_port,
-        web_search_policy_port=web_search_policy_port,
+        tool_ports=tool_ports,
         raw_request=raw_request,
         response=response,
         background_tasks=background_tasks,

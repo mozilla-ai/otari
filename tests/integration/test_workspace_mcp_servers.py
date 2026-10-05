@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.adapters.mcp_server_adapter import build_mcp_server_port
 from gateway.adapters.web_search_policy_adapter import build_web_search_policy_port
+from gateway.api.deps import ToolPorts
 from gateway.api.routes import chat, messages
 from gateway.api.routes._pipeline import DeclaredTools, RequestContext, ToolBackends, prepare_gateway_tools
 from gateway.api.routes.chat import ChatCompletionRequest
@@ -669,8 +670,11 @@ async def test_prepare_gateway_tools_hands_the_tool_loop_the_workspaces_servers(
         adapter=chat._ADAPTER,
         ctx=_request_context(async_db, workspace.id, organization.id),
         backends=ToolBackends(
-            mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
-            web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+            ports=ToolPorts(
+                code_execution=None,
+                mcp_server=build_mcp_server_port(GatewayConfig(), async_db),
+                web_search_policy=build_web_search_policy_port(GatewayConfig(), async_db),
+            ),
         ),
         response=Response(),
         declared=DeclaredTools(
@@ -702,8 +706,11 @@ async def test_prepare_gateway_tools_merges_stored_servers_after_inline_ones(asy
         adapter=chat._ADAPTER,
         ctx=_request_context(async_db, workspace.id, organization.id),
         backends=ToolBackends(
-            mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
-            web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+            ports=ToolPorts(
+                code_execution=None,
+                mcp_server=build_mcp_server_port(GatewayConfig(), async_db),
+                web_search_policy=build_web_search_policy_port(GatewayConfig(), async_db),
+            ),
         ),
         response=Response(),
         declared=DeclaredTools(
@@ -736,8 +743,11 @@ async def test_prepare_gateway_tools_is_unchanged_when_nothing_is_configured(asy
         adapter=chat._ADAPTER,
         ctx=_request_context(async_db, workspace.id, organization.id),
         backends=ToolBackends(
-            mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
-            web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+            ports=ToolPorts(
+                code_execution=None,
+                mcp_server=build_mcp_server_port(GatewayConfig(), async_db),
+                web_search_policy=build_web_search_policy_port(GatewayConfig(), async_db),
+            ),
         ),
         response=Response(),
         declared=DeclaredTools(
@@ -794,8 +804,11 @@ async def test_a_stored_servers_unsafe_url_is_not_named_to_the_caller(
             adapter=chat._ADAPTER,
             ctx=_request_context(async_db, workspace.id, organization.id),
             backends=ToolBackends(
-            mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
-            web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+            ports=ToolPorts(
+                code_execution=None,
+                mcp_server=build_mcp_server_port(GatewayConfig(), async_db),
+                web_search_policy=build_web_search_policy_port(GatewayConfig(), async_db),
+            ),
         ),
             response=Response(),
             declared=DeclaredTools(
@@ -825,8 +838,11 @@ async def test_prepare_gateway_tools_refuses_an_unknown_id(async_db: AsyncSessio
             adapter=chat._ADAPTER,
             ctx=_request_context(async_db, workspace.id, organization.id),
             backends=ToolBackends(
-            mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
-            web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+            ports=ToolPorts(
+                code_execution=None,
+                mcp_server=build_mcp_server_port(GatewayConfig(), async_db),
+                web_search_policy=build_web_search_policy_port(GatewayConfig(), async_db),
+            ),
         ),
             response=Response(),
             declared=DeclaredTools(
@@ -854,8 +870,11 @@ async def test_the_anthropic_envelope_names_an_unknown_id_as_not_found(async_db:
             adapter=messages._ADAPTER,
             ctx=_request_context(async_db, workspace.id, organization.id),
             backends=ToolBackends(
-            mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
-            web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+            ports=ToolPorts(
+                code_execution=None,
+                mcp_server=build_mcp_server_port(GatewayConfig(), async_db),
+                web_search_policy=build_web_search_policy_port(GatewayConfig(), async_db),
+            ),
         ),
             response=Response(),
             declared=DeclaredTools(

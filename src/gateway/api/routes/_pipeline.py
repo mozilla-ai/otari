@@ -64,7 +64,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import extract_credential_token, get_budget_service, verify_api_key_or_master_key
+from gateway.api.deps import ToolPorts, extract_credential_token, get_budget_service, verify_api_key_or_master_key
 from gateway.api.routes._attempts import CandidateCannotServe, PrepareKwargs, walk_attempts
 from gateway.api.routes._helpers import apply_input_guardrails, resolve_user_id
 from gateway.api.routes._idempotency import (
@@ -3004,11 +3004,9 @@ class DeclaredTools:
 class ToolBackends:
     """What runs the tools a request may use."""
 
-    code_execution_port: CodeExecutionPort | None = None
-    mcp_server_port: McpServerPort
+    ports: ToolPorts
     sandbox_containers: SandboxContainerRegistry | None = None
     sandbox_files: SandboxFileBridge | None = None
-    web_search_policy_port: WebSearchPolicyPort
 
 
 async def prepare_gateway_tools(
@@ -3030,12 +3028,12 @@ async def prepare_gateway_tools(
     try:
         claim_web_search = _admit_web_declarations(adapter, ctx, declared)
         await _admit_guardrails(adapter, ctx, response, declared)
-        mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.mcp_server_port)
+        mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.ports.mcp_server)
         code = await _admit_code_execution(adapter, ctx, declared, backends, mcp_servers_declared=bool(mcp_servers))
         web = _extract_web_tools(adapter, ctx, code.tools_after_sandbox, claim_web_search=claim_web_search)
         if web.declared_any and (code.use_sandbox or mcp_servers):
             raise adapter.error(400, WEB_SEARCH_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
-        web_access = await _admit_web_access(adapter, ctx, web, backends.web_search_policy_port)
+        web_access = await _admit_web_access(adapter, ctx, web, backends.ports.web_search_policy)
         await _require_tool_pricing(
             adapter,
             ctx,
@@ -3078,7 +3076,7 @@ async def prepare_gateway_tools(
         mcp_server_configs=mcp_servers,
         use_sandbox=code.use_sandbox,
         sandbox_tool_entry=code.tool_entry,
-        code_execution_port=backends.code_execution_port,
+        code_execution_port=backends.ports.code_execution,
         sandbox_exec_timeout_s=code.exec_timeout_s,
         sandbox_session_image=code.session_image,
         sandbox_allowed_tools=code.allowed_tools,
