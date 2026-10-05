@@ -29,6 +29,7 @@ from gateway.exceptions.organizations_exceptions import (
     WorkspaceMemberAlreadyExistsError,
     WorkspaceMemberNotFoundError,
     WorkspaceNameRequiredError,
+    WorkspaceNotFoundError,
 )
 from gateway.models.tenancy import (
     MANAGEMENT_ROLES,
@@ -361,15 +362,27 @@ class WorkspaceService:
         # member gets neither.
         await self.workspaces.lock(workspace.id)
 
-        # As in create_workspace: the pre-check races the insert, and the unique
-        # constraint is what actually decides.
+        # As in create_workspace: the pre-check races the insert, and the database
+        # is what actually decides. The savepoint lets a refused insert still ask
+        # which constraint refused it: the unique pair means a concurrent add won,
+        # the workspace foreign key means a concurrent delete did. The listener
+        # runs inside it too, because on SQLite nothing before it has begun a
+        # transaction, so releasing it commits.
         try:
-            member = await self.members.create(workspace_id=workspace.id, user_id=user_id, role=role)
-            await self._membership_listener.member_joined(member)
-            await self.db.commit()
+            async with self.db.begin_nested():
+                member = await self.members.create(workspace_id=workspace.id, user_id=user_id, role=role)
+                await self._membership_listener.member_joined(member)
         except IntegrityError:
+            refusal: WorkspaceMemberAlreadyExistsError | WorkspaceNotFoundError | None = None
+            if await self.members.get_by_workspace_and_user(workspace.id, user_id) is not None:
+                refusal = WorkspaceMemberAlreadyExistsError(user_id)
+            elif not await self.workspaces.exists(workspace.id):
+                refusal = WorkspaceNotFoundError(workspace.id)
             await self.db.rollback()
-            raise WorkspaceMemberAlreadyExistsError(user_id) from None
+            if refusal is None:
+                raise
+            raise refusal from None
+        await self.db.commit()
         return WorkspaceMemberPublic.model_validate(member)
 
     async def update_member_role(
