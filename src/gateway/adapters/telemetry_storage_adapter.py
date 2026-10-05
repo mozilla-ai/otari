@@ -39,6 +39,7 @@ from gateway.ports.telemetry_storage_port import (
     TelemetryGroupBy,
     TelemetryRecord,
     TelemetryScanTooLargeError,
+    TelemetryStoragePort,
 )
 
 # TelemetryRecord fields that feed a dedup key but are not their own
@@ -127,7 +128,7 @@ async def _insert_same_source_batch(db: AsyncSession, source: str, rows: list[Ag
     return IngestResult(accepted=accepted, duplicate=duplicate + still_duplicate)
 
 
-class DatabaseTelemetryStorageAdapter:
+class DatabaseTelemetryStorageAdapter(TelemetryStoragePort):
     """Core adapter: telemetry lives in this deployment's own database.
 
     Session-bound, unlike the stateless core adapters beside it: every method

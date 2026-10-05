@@ -110,7 +110,7 @@ _REDIS_RETRY_AFTER_SEC = 5.0
 _LOCAL_PREFIX = "local:"
 
 
-class InMemoryRateLimitStore:
+class InMemoryRateLimitStore(RateLimitStorePort):
     """Counts in this process, so each replica admits the full limit on its own.
 
     Keys whose every lease has run out are dropped every ``_CLEANUP_INTERVAL``
@@ -158,7 +158,7 @@ class InMemoryRateLimitStore:
         return None
 
 
-class RedisRateLimitStore:
+class RedisRateLimitStore(RateLimitStorePort):
     """Counts in Redis, so a limit holds across every replica that shares it.
 
     When Redis cannot answer, the store counts in this process instead rather

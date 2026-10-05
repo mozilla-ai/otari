@@ -24,11 +24,12 @@ from gateway.exceptions.identity_exceptions import (
     OAuthIdentityUnknownError,
 )
 from gateway.models.tenancy import User
+from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.tenancy.email_address import validated_email
 
 
-class RosterIdentityProviderAdapter:
+class RosterIdentityProviderAdapter(IdentityProviderPort):
     """Resolves an OAuth identity onto an account an operator already added.
 
     The adapter stages its writes on the request's session and does not commit them.

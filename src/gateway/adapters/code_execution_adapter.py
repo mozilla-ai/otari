@@ -61,7 +61,7 @@ def _contract_violation(exc: ValidationError) -> str:
     return f"response does not match the code-execution contract ({fields})"
 
 
-class ProtocolCodeExecutionAdapter:
+class ProtocolCodeExecutionAdapter(CodeExecutionPort):
     """A backend of the operator's own, reached over the published contract."""
 
     def __init__(self, sandbox_url: str) -> None:
@@ -177,7 +177,7 @@ class ProtocolCodeExecutionAdapter:
             raise SandboxNotReachableError(f"sandbox session {session_id} could not be resumed: {exc}") from exc
 
 
-class _ProtocolSession:
+class _ProtocolSession(CodeExecutionSession):
     """The six operations, against one session of a contract-speaking backend."""
 
     def __init__(
