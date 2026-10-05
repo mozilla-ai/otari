@@ -18,9 +18,11 @@ call into directly:
 - Laptop CLI: `cli/src/otari_agent/**`
 - Dashboard: `web/src/**`
 
-List them with `git diff --name-only $(git rev-list -1 --before="<window start>" main) main`.
+List them with `git diff --name-only $(git rev-list -1 --before="<window start>" main) main -- src/gateway/ cli/src/otari_agent/ web/src/`,
+then find their direct callees from those files.
 Do not survey the rest of the tree, and stop once you have at most five
-fixes: the job is cancelled after 40 minutes, and a cancelled run opens no PR.
+fixes: the job is cancelled after 40 minutes, and opening the PR is the last
+step, so leave time for validation and the PR.
 
 ## Method
 
@@ -56,6 +58,7 @@ fixes: the job is cancelled after 40 minutes, and a cancelled run opens no PR.
   modules you touched, never the whole of either suite. Integration tests need
   Docker, which the runner has. The rest of the suite runs on the PR in CI.
 - For dashboard changes: `pnpm --dir web run lint`, `pnpm --dir web run typecheck`,
-  and `pnpm --dir web test` limited to the touched components' test files.
+  and `pnpm --dir web test <test files>` with the touched components' test
+  files; without them it runs the whole Vitest suite.
 
 If no improvements are justified, say so and exit without creating a PR.
