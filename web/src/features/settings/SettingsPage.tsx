@@ -21,6 +21,7 @@ import {
   useStoredProviders,
 } from "@/shared/api/providers"
 import { useSettings, useUpdateSettings } from "@/shared/api/settings"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 
 // A single settable field maps onto one key of UpdateSettingsRequest. The keys
 // come from the backend's `settable` marking, so cast at this one boundary.
@@ -612,6 +613,7 @@ function groupFields(
 export function SettingsPage() {
   const settings = useSettings()
   const updateSettings = useUpdateSettings()
+  const { deployment_type } = useDeployment()
 
   const data = settings.data
   const isPending = updateSettings.isPending
@@ -650,7 +652,11 @@ export function SettingsPage() {
   // Shown under "Settable only" too: the rules are editable even though the
   // rows in the group beside them are startup-only. Not before the settings
   // answer, or the card would render first and then move under its group.
-  const showRules = data !== undefined && rateLimitRulesMatch(search)
+  // Not on a hosted control plane, which serves no request a rule could limit.
+  const showRules =
+    data !== undefined &&
+    deployment_type !== "hosted" &&
+    rateLimitRulesMatch(search)
   const rulesAfter = rulesCardAfter(groups, groupFields(allFields))
 
   return (

@@ -81,14 +81,13 @@ function draftOf(rule: RateLimitRule | undefined): RuleDraft {
   }
 }
 
+/** Mounted only while open, so each open starts from the rule as it is now. */
 function RuleDialog({
   rule,
-  isOpen,
   onClose,
 }: {
   /** The stored rule to edit, or `undefined` to add one. */
   rule: RateLimitRule | undefined
-  isOpen: boolean
   onClose: () => void
 }) {
   const create = useCreateRateLimitRule()
@@ -151,7 +150,7 @@ function RuleDialog({
 
   return (
     <FormDialog
-      isOpen={isOpen}
+      isOpen
       onOpenChange={(open) => {
         if (!open) onClose()
       }}
@@ -267,22 +266,24 @@ function RuleLine({
           config.yml
         </span>
       )}
-      <ConfirmDialog
-        isOpen={isDeleteOpen}
-        // Cleared on the way out, so a refusal does not greet the next open.
-        onOpenChange={(open) => {
-          setDeleteOpen(open)
-          if (!open) remove.reset()
-        }}
-        heading="Remove rate limit rule"
-        body={`${rule.name} stops limiting requests on this replica at once, and on every replica within 30 seconds.`}
-        confirmLabel="Remove rule"
-        isPending={remove.isPending}
-        error={remove.error}
-        onConfirm={() => {
-          remove.mutate(rule.name, { onSuccess: () => setDeleteOpen(false) })
-        }}
-      />
+      {isDeleteOpen ? (
+        <ConfirmDialog
+          isOpen
+          // Cleared on the way out, so a refusal does not greet the next open.
+          onOpenChange={(open) => {
+            setDeleteOpen(open)
+            if (!open) remove.reset()
+          }}
+          heading="Remove rate limit rule"
+          body={`${rule.name} stops limiting requests on this replica at once, and on every replica within 30 seconds.`}
+          confirmLabel="Remove rule"
+          isPending={remove.isPending}
+          error={remove.error}
+          onConfirm={() => {
+            remove.mutate(rule.name, { onSuccess: () => setDeleteOpen(false) })
+          }}
+        />
+      ) : null}
     </div>
   )
 }
@@ -296,25 +297,19 @@ export function RateLimitsCard() {
   const rules = useRateLimitRules()
   const [editing, setEditing] = useState<RateLimitRule | undefined>()
   const [isDialogOpen, setDialogOpen] = useState(false)
-  const [openCount, setOpenCount] = useState(0)
 
   const all = rules.data?.rules ?? []
   const open = (rule: RateLimitRule | undefined) => {
     setEditing(rule)
-    setOpenCount((count) => count + 1)
     setDialogOpen(true)
   }
 
   return (
     <>
-      {/* Outside the group, whose rows are a divide-y container; keyed on the
-          open count so each open starts from the rule as it is now. */}
-      <RuleDialog
-        key={openCount}
-        rule={editing}
-        isOpen={isDialogOpen}
-        onClose={() => setDialogOpen(false)}
-      />
+      {/* Outside the group, whose rows are a divide-y container. */}
+      {isDialogOpen ? (
+        <RuleDialog rule={editing} onClose={() => setDialogOpen(false)} />
+      ) : null}
       <SettingsGroup
         title="Rate limit rules"
         count={rules.data ? all.length : undefined}

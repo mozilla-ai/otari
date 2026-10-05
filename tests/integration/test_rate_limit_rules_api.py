@@ -124,7 +124,7 @@ def test_an_update_that_leaves_no_limit_is_refused(client: TestClient) -> None:
 
     response = client.patch(f"{_RULES}/keys", json={"rpm": None}, headers=_MASTER)
 
-    assert response.status_code == 400
+    assert response.status_code == 422
     assert client.get(_RULES, headers=_MASTER).json()["rules"][1]["rpm"] == 1
 
 

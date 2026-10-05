@@ -190,7 +190,11 @@ Rules can also be added, changed and removed from the dashboard (Settings, Rate
 limit rules) or through `/api/v1/rate-limits`. A change applies at once on the
 replica that served it and on every other replica within 30 seconds; a changed
 rule keeps the requests it already counted. The rules in config.yml are listed
-there read-only, and a stored rule cannot take the name of one.
+there read-only, and a stored rule cannot take the name of one. A stored rule
+whose name config.yml later declares is skipped with a warning at startup and
+left out of the list; `DELETE /api/v1/rate-limits/{name}` still removes it. A
+hosted control plane serves no inference, so its dashboard does not offer the
+rules.
 
 ### Trace context propagation
 

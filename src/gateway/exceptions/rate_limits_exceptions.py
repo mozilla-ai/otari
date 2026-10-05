@@ -3,6 +3,8 @@
 Each carries the HTTP status it renders as.
 """
 
+from fastapi import status
+
 from gateway.exceptions import TenancyConflictError, TenancyNotFoundError, TenancyValidationError
 
 
@@ -24,4 +26,9 @@ class RateLimitRuleInConfigError(TenancyConflictError):
 
 
 class RateLimitRuleInvalidError(TenancyValidationError):
-    """An update would leave the rule invalid, such as with no limit at all."""
+    """An update would leave the rule invalid, such as with no limit at all.
+
+    A 422, the status a create carrying the same mistake gets from request validation.
+    """
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
