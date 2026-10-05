@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 
+from gateway.api.routes._pipeline import _canonicalize_web_search_request_domains
 from gateway.exceptions.tools_exceptions import WorkspaceWebSearchDomainsExcludedError
 from gateway.models.tools import ResolvedWebSearchConfig
 from gateway.services.tenancy.workspace_web_search_service import (
@@ -110,15 +111,29 @@ def test_every_source_refuses_the_same_domain_list(value: list[Any]) -> None:
         _stored_domains(value)
     with pytest.raises(ValueError):
         read_web_search_policy({"enabled": True, "allowed_domains": value})
+    with pytest.raises(ValueError):
+        _canonicalize_web_search_request_domains({"allowed_domains": value})
 
 
 def test_every_source_reads_the_same_domain_list() -> None:
-    value = [".Docs.Python.org", "docs.python.org", "bücher.example"]
+    value = [".Docs.Python.org", " docs.python.org ", "bücher.example"]
     expected = ("docs.python.org", "xn--bcher-kva.example")
+    request_entry: dict[str, Any] = {"allowed_domains": value, "blocked_domains": value}
 
     assert tuple(_normalize_domains(value) or ()) == expected
     assert _stored_domains(value) == expected
     assert read_web_search_policy({"enabled": True, "allowed_domains": value}).allowed_domains == expected
+    _canonicalize_web_search_request_domains(request_entry)
+    assert tuple(request_entry["allowed_domains"]) == expected
+    assert tuple(request_entry["blocked_domains"]) == expected
+
+
+def test_a_request_keeps_an_empty_domain_list_empty() -> None:
+    request_entry: dict[str, Any] = {"allowed_domains": [], "blocked_domains": None}
+
+    _canonicalize_web_search_request_domains(request_entry)
+
+    assert request_entry == {"allowed_domains": [], "blocked_domains": None}
 
 
 def test_a_blank_entry_is_refused_unless_a_caller_wrote_it() -> None:

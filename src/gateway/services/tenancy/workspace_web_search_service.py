@@ -81,8 +81,11 @@ def _canonical_host(raw: str) -> str:
     return canonicalize_domain_rule(candidate).value
 
 
-def _read_domains(value: object) -> tuple[str, ...] | None:
+def read_domain_list(value: object) -> tuple[str, ...] | None:
     """Canonicalize and bound one domain list, whichever source it came from.
+
+    A workspace's policy and a request's web search declaration both read their lists here,
+    so a rule one of them accepts the other accepts too.
 
     ``None`` and an empty list both mean no list.
     Duplicates collapse, and the first occurrence keeps its place.
@@ -114,7 +117,7 @@ def _normalize_domains(value: list[str] | None) -> list[str] | None:
     """Read a domain list a caller wrote, where a blank entry is an empty form field and is dropped."""
     if value is None:
         return None
-    hosts = _read_domains([raw for raw in value if not (isinstance(raw, str) and not raw.strip())])
+    hosts = read_domain_list([raw for raw in value if not (isinstance(raw, str) and not raw.strip())])
     return list(hosts) if hosts else None
 
 
@@ -304,8 +307,8 @@ def read_web_search_policy(answer: Mapping[str, Any]) -> ResolvedWebSearchConfig
         enabled=enabled,
         max_results=max_results,
         purpose_hint=_blank_to_none(purpose_hint),
-        allowed_domains=_read_domains(answer.get("allowed_domains")),
-        blocked_domains=_read_domains(answer.get("blocked_domains")),
+        allowed_domains=read_domain_list(answer.get("allowed_domains")),
+        blocked_domains=read_domain_list(answer.get("blocked_domains")),
         provider_options=provider_options,
         authorized_tools=None,
     )
@@ -386,7 +389,7 @@ def narrow_web_search_tool_entry(
 def _stored_domains(value: object) -> tuple[str, ...] | None:
     """Read a stored row's domain list, refusing one that cannot be enforced."""
     try:
-        return _read_domains(value)
+        return read_domain_list(value)
     except ValueError as exc:
         raise InvalidStoredWebSearchDomainError("stored web-search domain list is invalid") from exc
 

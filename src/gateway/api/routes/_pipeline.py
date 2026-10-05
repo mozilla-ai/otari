@@ -243,7 +243,7 @@ from gateway.services.tenancy.workspace_code_execution_policy_service import (
     SERVED_TOOL_NAMES,
     resolve_workspace_code_execution_policy,
 )
-from gateway.services.tenancy.workspace_web_search_service import MAX_WEB_SEARCH_DOMAINS
+from gateway.services.tenancy.workspace_web_search_service import MAX_WEB_SEARCH_DOMAINS, read_domain_list
 from gateway.services.tool_usage import (
     MAX_TOOL_NAMES,
     OVERFLOW_TOOL_NAME,
@@ -260,11 +260,7 @@ from gateway.services.web_retrieval_backend import (
     WebRetrievalCounter,
     WebSearchNotReachableError,
 )
-from gateway.services.web_retrieval_policy import (
-    DomainPolicy,
-    DomainRuleValidationError,
-    canonicalize_domain_rules,
-)
+from gateway.services.web_retrieval_policy import DomainPolicy
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     resolve_workspace_id,
@@ -2905,16 +2901,15 @@ async def _resolve_mcp_server_ids(
 
 
 def _canonicalize_web_search_request_domains(tool_entry: dict[str, Any]) -> None:
-    """Validate and canonicalize caller-supplied Search domain rules in place."""
+    """Canonicalize caller-supplied Search domain rules in place, by the rules a workspace's policy is read with.
+
+    Raises:
+        ValueError: a list ``read_domain_list`` refuses.
+    """
     for field in ("allowed_domains", "blocked_domains"):
         values = tool_entry.get(field)
-        if values is None:
-            continue
-        if not isinstance(values, list) or len(values) > MAX_WEB_SEARCH_DOMAINS:
-            raise DomainRuleValidationError(f"{field} must contain at most {MAX_WEB_SEARCH_DOMAINS} hostnames")
-        if any(not isinstance(value, str) for value in values):
-            raise DomainRuleValidationError(f"{field} must be a list of hostnames")
-        tool_entry[field] = [rule.value for rule in canonicalize_domain_rules(values)]
+        if values is not None:
+            tool_entry[field] = list(read_domain_list(values) or ())
 
 
 _WEB_SEARCH_DECLARATION_FIELDS = frozenset(
@@ -3239,7 +3234,7 @@ def _extract_web_tools(
             raise adapter.error(400, WEB_SEARCH_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
         try:
             _canonicalize_web_search_request_domains(search_tool_entry)
-        except DomainRuleValidationError as exc:
+        except ValueError as exc:
             raise adapter.error(400, WEB_SEARCH_REQUEST_DOMAIN_INVALID_DETAIL, ErrorKind.INVALID_REQUEST) from exc
     return _DeclaredWebTools(
         fetch_tool_entry=fetch_tool_entry,
