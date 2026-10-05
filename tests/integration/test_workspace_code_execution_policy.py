@@ -27,9 +27,8 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAMES
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAMES, SERVED_TOOL_NAMES
 from gateway.services.tenancy.workspace_code_execution_policy_service import (
-    SERVED_TOOL_NAMES,
     WorkspaceCodeExecutionPolicyService,
     WorkspaceCodeExecutionPolicyUpdate,
     resolve_workspace_code_execution_policy,

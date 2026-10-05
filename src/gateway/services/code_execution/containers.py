@@ -93,6 +93,22 @@ def requested_container(value: object) -> str | None:
     return None
 
 
+def gateway_container_value(raw: object) -> str | None:
+    """A ``container`` value only this gateway could have named, or ``None``.
+
+    Which is an id it minted, or its own ``auto`` spelling. Deliberately string
+    only: the object form is the provider's own (OpenAI's ``{"type": "auto"}``
+    on a ``code_interpreter`` entry), which means something upstream and must
+    reach it untouched. A provider's own id is not ours either, and passes.
+    """
+    if not isinstance(raw, str):
+        return None
+    cleaned = raw.strip()
+    if cleaned.lower() == CONTAINER_AUTO or cleaned.startswith(CONTAINER_ID_PREFIX):
+        return cleaned
+    return None
+
+
 def check_container_on_credential(container: object, *, managed_credential: bool) -> None:
     """Refuse a caller-chosen container id when the upstream account is not the caller's.
 

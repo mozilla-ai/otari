@@ -61,6 +61,7 @@ __all__ = [
     "CODE_EXECUTION_TOOL_NAME",
     "CODE_EXECUTION_TOOL_NAMES",
     "CONTAINER_ID_PREFIX",
+    "SERVED_TOOL_NAMES",
     "CodeExecution",
     "SandboxBackend",
     "SandboxFiles",
@@ -83,6 +84,11 @@ CODE_EXECUTION_TOOL_NAMES: tuple[str, ...] = (
     "bash_code_execution",
     "text_editor_code_execution",
 )
+# The tool kinds this deployment's sandbox backend actually serves, as opposed to
+# the vocabulary a policy may be written in. One today. A stored list intersects
+# with this, so a list sharing nothing with it narrows to an empty set, which is
+# refused rather than stored (see the workspace code execution policy service).
+SERVED_TOOL_NAMES: tuple[str, ...] = (CODE_EXECUTION_TOOL_NAME,)
 # The execution budget one call gets when nothing narrows it. Public because a
 # workspace code-execution policy floors its own ceiling against this value
 # rather than carrying a second idea of the default (see

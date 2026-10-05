@@ -1,6 +1,6 @@
 """Who runs a provider-native code-execution declaration: the executor decision.
 
-Pure logic in ``gateway.api.routes._tools``, the settings that feed it, and the
+Pure logic in ``gateway.services.tools``, the settings that feed it, and the
 workspace policy write schema. The request-path wiring (claiming the keyword,
 the policy pin, the header) is covered by
 ``tests/integration/test_code_execution_executor.py``.
@@ -15,24 +15,24 @@ from any_llm import LLMProvider
 from pydantic import ValidationError
 
 from gateway.api.routes._normalize import provider_container_requested, sandbox_requested
-from gateway.api.routes._tools import (
-    CODE_EXECUTION_HEADER,
-    _extract_code_execution_tool,
-    code_execution_declaration_forms,
-    decide_code_executor,
-    first_provider_code_execution_tool,
-    native_code_execution_dialect,
-    parse_code_execution_header,
-    provider_runs_code_natively,
-    resolve_code_executor_preference,
-)
 from gateway.core.config import GatewayConfig
 from gateway.models.tools import CodeExecutor
 from gateway.services.tenancy.workspace_code_execution_policy_service import (
     WorkspaceCodeExecutionPolicyUpdate,
 )
 from gateway.services.tool_settings_service import get_field_options, validate_value
-from gateway.services.tools import Dialect
+from gateway.services.tools import (
+    CODE_EXECUTION_HEADER,
+    Dialect,
+    code_execution_declaration_forms,
+    decide_code_executor,
+    extract_code_execution_tool,
+    first_provider_code_execution_tool,
+    native_code_execution_dialect,
+    parse_code_execution_header,
+    provider_runs_code_natively,
+    resolve_code_executor_preference,
+)
 
 ANTHROPIC_DATED = {"type": "code_execution_20250825", "name": "code_execution"}
 OPENAI_INTERPRETER = {"type": "code_interpreter", "container": {"type": "auto"}}
@@ -208,13 +208,13 @@ def test_a_function_named_code_execution_is_the_callers_own() -> None:
 
 def test_intercept_claims_the_provider_keyword_and_leaves_the_rest() -> None:
     user_tool = {"type": "function", "function": {"name": "get_weather"}}
-    entry, remaining = _extract_code_execution_tool([user_tool, ANTHROPIC_DATED], intercept=True)
+    entry, remaining = extract_code_execution_tool([user_tool, ANTHROPIC_DATED], intercept=True)
     assert entry == ANTHROPIC_DATED
     assert remaining == [user_tool]
 
 
 def test_intercept_off_still_leaves_the_provider_keyword_alone() -> None:
-    entry, remaining = _extract_code_execution_tool([ANTHROPIC_DATED])
+    entry, remaining = extract_code_execution_tool([ANTHROPIC_DATED])
     assert entry is None
     assert remaining == [ANTHROPIC_DATED]
 

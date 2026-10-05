@@ -69,7 +69,7 @@ from gateway.api.routes._platform import (
     upstream_exception_shape,
 )
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
-from gateway.api.routes._tools import CODE_EXECUTION_HEADER, _strip_gateway_fields
+from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
@@ -92,7 +92,13 @@ from gateway.services.mcp_loop_messages import (
 from gateway.services.provider_kwargs import ProviderAccounts
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
-from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX, WEB_SEARCH_HEADER, Dialect, ToolUseBudget
+from gateway.services.tools import (
+    CODE_EXECUTION_HEADER,
+    SERVER_TOOL_USE_ID_PREFIX,
+    WEB_SEARCH_HEADER,
+    Dialect,
+    ToolUseBudget,
+)
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget

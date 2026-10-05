@@ -66,6 +66,18 @@ class ContainerOnManagedCredentialError(TenancyValidationError):
         )
 
 
+class CodeExecutionDeclarationError(TenancyValidationError):
+    """A request's code execution declaration or container cannot be served as written."""
+
+
+class CodeExecutionRefusedError(TenancyForbiddenError):
+    """A workspace's code execution policy refuses the code execution a request declared."""
+
+
+class CodeExecutionContainerBusyError(TenancyConflictError):
+    """The container a request resumes is serving another request, so a retry can succeed."""
+
+
 class WebToolDeclarationError(TenancyValidationError):
     """A request's managed web tool declaration cannot be served as written."""
 

@@ -910,7 +910,7 @@ async def test_served_tool_names_is_what_the_backend_actually_advertises() -> No
     advertising nothing, which is the silently-successful request both guards
     exist to prevent.
     """
-    from gateway.services.tenancy.workspace_code_execution_policy_service import SERVED_TOOL_NAMES
+    from gateway.services.sandbox_backend import SERVED_TOOL_NAMES
 
     backend = _sandbox()
     advertised = tuple(tool["function"]["name"] for tool in backend.openai_tools)

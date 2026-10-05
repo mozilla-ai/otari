@@ -15,6 +15,7 @@ from gateway.services.code_execution.containers import (
     SandboxContainerRegistry,
     SandboxContainers,
     check_container_on_credential,
+    gateway_container_value,
     new_container_id,
     requested_container,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "SandboxContainerRegistry",
     "SandboxContainers",
     "check_container_on_credential",
+    "gateway_container_value",
     "new_container_id",
     "requested_container",
 ]

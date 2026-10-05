@@ -1,4 +1,4 @@
-"""Unit tests for the tool-extraction helpers in `gateway.api.routes._tools`.
+"""Unit tests for the tool-extraction helpers in `gateway.services.tools`.
 
 By default only the explicit gateway-managed types (`otari_code_execution` /
 `otari_web_search`) are extracted and run by the gateway. Provider-named
@@ -22,48 +22,52 @@ import pytest
 
 from gateway.api.routes._pipeline import ToolContext
 from gateway.api.routes._tools import (
-    _extract_code_execution_tool,
     _retargeted_tool_choice,
     _strip_gateway_fields,
 )
 from gateway.core.config import GatewayConfig
-from gateway.services.tools import Dialect, read_web_search_max_uses, web_search_intercept_enabled
+from gateway.services.tools import (
+    Dialect,
+    extract_code_execution_tool,
+    read_web_search_max_uses,
+    web_search_intercept_enabled,
+)
 from gateway.services.tools._web_declarations import extract_web_fetch_tool, extract_web_search_tool
 
 
 def test_extracts_otari_code_execution() -> None:
-    entry, remaining = _extract_code_execution_tool([{"type": "otari_code_execution"}])
+    entry, remaining = extract_code_execution_tool([{"type": "otari_code_execution"}])
     assert entry == {"type": "otari_code_execution"}
     assert remaining is None
 
 
 def test_passes_through_gateway_native_short_form() -> None:
-    entry, remaining = _extract_code_execution_tool([{"type": "code_execution"}])
+    entry, remaining = extract_code_execution_tool([{"type": "code_execution"}])
     assert entry is None
     assert remaining == [{"type": "code_execution"}]
 
 
 def test_passes_through_openai_code_interpreter() -> None:
-    entry, remaining = _extract_code_execution_tool([{"type": "code_interpreter"}])
+    entry, remaining = extract_code_execution_tool([{"type": "code_interpreter"}])
     assert entry is None
     assert remaining == [{"type": "code_interpreter"}]
 
 
 def test_passes_through_anthropic_versioned_type() -> None:
-    entry, remaining = _extract_code_execution_tool([{"type": "code_execution_20250825"}])
+    entry, remaining = extract_code_execution_tool([{"type": "code_execution_20250825"}])
     assert entry is None
     assert remaining == [{"type": "code_execution_20250825"}]
 
 
 def test_passes_through_future_anthropic_version() -> None:
-    entry, remaining = _extract_code_execution_tool([{"type": "code_execution_20991231"}])
+    entry, remaining = extract_code_execution_tool([{"type": "code_execution_20991231"}])
     assert entry is None
     assert remaining == [{"type": "code_execution_20991231"}]
 
 
 def test_passes_through_unrelated_tools_alongside_otari() -> None:
     user_tool = {"type": "function", "function": {"name": "get_weather"}}
-    entry, remaining = _extract_code_execution_tool([user_tool, {"type": "otari_code_execution"}])
+    entry, remaining = extract_code_execution_tool([user_tool, {"type": "otari_code_execution"}])
     assert entry == {"type": "otari_code_execution"}
     assert remaining == [user_tool]
 
@@ -72,7 +76,7 @@ def test_provider_keywords_stay_in_remaining_for_passthrough() -> None:
     # A request mixing the gateway-managed type with a provider-named one:
     # the gateway runs the otari_* entry, the provider-named entry passes
     # through untouched.
-    entry, remaining = _extract_code_execution_tool(
+    entry, remaining = extract_code_execution_tool(
         [
             {"type": "otari_code_execution", "purpose_hint": "first"},
             {"type": "code_interpreter"},
@@ -83,7 +87,7 @@ def test_provider_keywords_stay_in_remaining_for_passthrough() -> None:
 
 
 def test_takes_only_the_first_otari_entry() -> None:
-    entry, remaining = _extract_code_execution_tool(
+    entry, remaining = extract_code_execution_tool(
         [
             {"type": "otari_code_execution", "purpose_hint": "first"},
             {"type": "otari_code_execution", "purpose_hint": "second"},
@@ -94,25 +98,25 @@ def test_takes_only_the_first_otari_entry() -> None:
 
 
 def test_returns_no_entry_when_absent() -> None:
-    entry, remaining = _extract_code_execution_tool([{"type": "function", "function": {"name": "f"}}])
+    entry, remaining = extract_code_execution_tool([{"type": "function", "function": {"name": "f"}}])
     assert entry is None
     assert remaining == [{"type": "function", "function": {"name": "f"}}]
 
 
 def test_empty_tools_returns_no_entry() -> None:
-    entry, remaining = _extract_code_execution_tool(None)
+    entry, remaining = extract_code_execution_tool(None)
     assert entry is None
     assert remaining is None
 
 
 def test_does_not_match_unrelated_types_starting_with_otari() -> None:
-    entry, remaining = _extract_code_execution_tool([{"type": "otari_code_review"}])
+    entry, remaining = extract_code_execution_tool([{"type": "otari_code_review"}])
     assert entry is None
     assert remaining == [{"type": "otari_code_review"}]
 
 
 def test_non_string_type_does_not_match() -> None:
-    entry, _ = _extract_code_execution_tool([{"type": None}, {"type": 42}])
+    entry, _ = extract_code_execution_tool([{"type": None}, {"type": 42}])
     assert entry is None
 
 
@@ -415,15 +419,15 @@ def test_only_the_gateways_own_container_words_are_refused_when_the_provider_run
     provider's own spelling on its own tool entry, so it has to reach them
     untouched even though it normalizes to the same ask here.
     """
-    from gateway.api.routes._pipeline import _gateway_container_value
+    from gateway.services.code_execution import gateway_container_value
 
-    assert _gateway_container_value("auto") == "auto"
-    assert _gateway_container_value(" AUTO ") == "AUTO"
-    assert _gateway_container_value("otari_cntr_abc") == "otari_cntr_abc"
+    assert gateway_container_value("auto") == "auto"
+    assert gateway_container_value(" AUTO ") == "AUTO"
+    assert gateway_container_value("otari_cntr_abc") == "otari_cntr_abc"
 
     # The provider's, so it is forwarded rather than refused.
-    assert _gateway_container_value("container_01ABC") is None
-    assert _gateway_container_value({"type": "auto"}) is None
-    assert _gateway_container_value({"id": "container_01ABC"}) is None
-    assert _gateway_container_value(None) is None
-    assert _gateway_container_value("") is None
+    assert gateway_container_value("container_01ABC") is None
+    assert gateway_container_value({"type": "auto"}) is None
+    assert gateway_container_value({"id": "container_01ABC"}) is None
+    assert gateway_container_value(None) is None
+    assert gateway_container_value("") is None

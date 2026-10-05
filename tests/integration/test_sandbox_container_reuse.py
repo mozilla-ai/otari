@@ -22,7 +22,6 @@ from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.routes._tools import CODE_EXECUTION_HEADER
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.ports.code_execution_port import SandboxFileEntry, SandboxSessionGoneError
@@ -34,6 +33,7 @@ from gateway.repositories.code_execution import (
 )
 from gateway.services.code_execution import CONTAINER_ID_PREFIX
 from gateway.services.code_execution.container_sweeper import sweep_expired_containers
+from gateway.services.tools import CODE_EXECUTION_HEADER
 
 from .conftest import build_test_client
 

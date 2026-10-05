@@ -24,14 +24,6 @@ from any_llm import AnyLLM, LLMProvider
 from fastapi import HTTPException
 
 from gateway.api.routes._attempts import CandidateCannotServe, PrepareKwargs
-from gateway.api.routes._tools import (
-    _extract_code_execution_tool,
-    decide_code_executor,
-    first_provider_code_execution_tool,
-    parse_code_execution_header,
-    provider_runs_code_natively,
-    resolve_code_executor_preference,
-)
 from gateway.core.config import GatewayConfig
 from gateway.exceptions import TenancyError
 from gateway.exceptions.files_exceptions import (
@@ -53,7 +45,15 @@ from gateway.services.content_normalizer import (
 from gateway.services.files import FileService, StagedFile, provider_holds_copies
 from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.provider_kwargs import ProviderAccounts, effective_credential
-from gateway.services.tools import Dialect
+from gateway.services.tools import (
+    Dialect,
+    decide_code_executor,
+    extract_code_execution_tool,
+    first_provider_code_execution_tool,
+    parse_code_execution_header,
+    provider_runs_code_natively,
+    resolve_code_executor_preference,
+)
 
 
 def _executor_preference(
@@ -91,7 +91,7 @@ def provider_container_requested(
     provider. A file the request attaches then has to be one that provider holds,
     so it is copied there rather than read for the model.
     """
-    explicit, remaining = _extract_code_execution_tool(tools)
+    explicit, remaining = extract_code_execution_tool(tools)
     if explicit is not None:
         return False
     keyword = first_provider_code_execution_tool(remaining)
@@ -125,7 +125,7 @@ def sandbox_requested(
     and the deployment default, against the dispatched provider. A header outside
     the vocabulary answers false here and is refused at admission.
     """
-    explicit, remaining = _extract_code_execution_tool(tools)
+    explicit, remaining = extract_code_execution_tool(tools)
     if explicit is not None:
         return True
     keyword = first_provider_code_execution_tool(remaining)

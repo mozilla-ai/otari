@@ -1,9 +1,10 @@
 """Admit the managed web tools one request declared, before any search runs.
 
-The pipeline calls the three steps in order: :func:`claim_web_declarations` decides
+The pipeline calls the four steps in order: :func:`claim_web_declarations` decides
 whether the gateway claims a provider's own search keyword and refuses an ambiguous
 declaration, :func:`extract_web_tools` takes the managed web tools out of the
-request, and :func:`admit_web_access` applies the workspace's web search policy.
+request, :func:`check_web_tools_alone` refuses them beside a sandbox or MCP server,
+and :func:`admit_web_access` applies the workspace's web search policy.
 """
 
 from __future__ import annotations
@@ -52,6 +53,10 @@ WEB_FETCH_DECLARATION_INVALID_DETAIL = "otari_web_fetch declarations may contain
 WEB_SEARCH_DECLARATION_INVALID_DETAIL = "otari_web_search declarations contain an unsupported field"
 WEB_TOOL_DUPLICATE_DETAIL = "A managed web tool may be declared at most once"
 WEB_TOOL_RESERVED_NAME_DETAIL = "A caller-defined function uses a reserved managed web-tool name"
+WEB_SEARCH_CONFLICT_DETAIL = (
+    "otari_web_search and otari_web_fetch cannot be combined with otari_code_execution or "
+    "mcp_servers in the same request yet; pick one."
+)
 WEB_SEARCH_REQUEST_DOMAIN_INVALID_DETAIL = (
     "Web search allowed_domains and blocked_domains must each contain at most "
     f"{MAX_WEB_SEARCH_DOMAINS} bare valid hostnames"
@@ -223,6 +228,16 @@ def extract_web_tools(
         remaining_user_tools=remaining_user_tools,
         search_tool_entry=search_tool_entry,
     )
+
+
+def check_web_tools_alone(web: DeclaredWebTools, *, use_sandbox: bool, mcp_servers_declared: bool) -> None:
+    """Refuse the managed web tools beside the gateway's sandbox or MCP servers, which one request cannot combine yet.
+
+    Raises:
+        WebToolDeclarationError: the request declares a web tool and either of the others.
+    """
+    if web.declared_any and (use_sandbox or mcp_servers_declared):
+        raise WebToolDeclarationError(WEB_SEARCH_CONFLICT_DETAIL)
 
 
 async def admit_web_access(

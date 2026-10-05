@@ -30,9 +30,9 @@ from gateway.models.tenancy import User, Workspace
 from gateway.models.tools import CodeExecutor, ResolvedCodeExecutionPolicy, WorkspaceCodeExecutionPolicy
 from gateway.services.mcp_loop import MAX_TOOL_ITERATIONS_CAP
 from gateway.services.sandbox_backend import (
-    CODE_EXECUTION_TOOL_NAME,
     CODE_EXECUTION_TOOL_NAMES,
     DEFAULT_EXEC_TIMEOUT_S,
+    SERVED_TOOL_NAMES,
 )
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -45,11 +45,6 @@ _MAX_EXEC_TIMEOUT_S = int(DEFAULT_EXEC_TIMEOUT_S)
 # Matches the hosted column's own bound. An image reference longer than this is
 # already pathological, and the column is ``String(255)``.
 _MAX_IMAGE_LENGTH = 255
-# The tool kinds this deployment's sandbox backend actually serves, as opposed to
-# the vocabulary a policy may be written in. One today. A stored list intersects
-# with this, so a list sharing nothing with it narrows to an empty set, which is
-# refused rather than stored (see ``_require_runnable_tools``).
-SERVED_TOOL_NAMES: tuple[str, ...] = (CODE_EXECUTION_TOOL_NAME,)
 
 
 class WorkspaceCodeExecutionPolicyUpdate(BaseModel):

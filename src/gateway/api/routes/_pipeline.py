@@ -100,19 +100,7 @@ from gateway.api.routes._platform import (
     default_attempt_kwargs as default_attempt_kwargs,  # explicit re-export for the route modules
 )
 from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
-from gateway.api.routes._tools import (
-    CODE_EXECUTION_HEADER,
-    _build_web_retrieval_backend,
-    _extract_code_execution_tool,
-    _resolve_sandbox_purpose_hint,
-    decide_code_executor,
-    declares_code_execution,
-    first_provider_code_execution_tool,
-    native_code_execution_dialect,
-    parse_code_execution_header,
-    provider_runs_code_natively,
-    resolve_code_executor_preference,
-)
+from gateway.api.routes._tools import _build_web_retrieval_backend, _resolve_sandbox_purpose_hint
 from gateway.core.config import ATTEMPT_ID_HEADER, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, release_session
 from gateway.core.env import otari_env
@@ -129,8 +117,11 @@ from gateway.core.usage import (
 from gateway.exceptions import TenancyError
 from gateway.exceptions.control_plane_exceptions import ControlPlaneError
 from gateway.exceptions.tools_exceptions import (
+    CodeExecutionContainerBusyError,
+    CodeExecutionDeclarationError,
     CodeExecutionPolicyResolutionFailedError,
     CodeExecutionPolicyResolutionFailure,
+    CodeExecutionRefusedError,
     McpServerResolutionFailedError,
     WebAccessRefusedError,
     WebSearchInterceptedError,
@@ -171,13 +162,8 @@ from gateway.services.budgets import (
     reserve_budget,
 )
 from gateway.services.code_execution import (
-    CONTAINER_AUTO,
-    CONTAINER_ID_PREFIX,
-    ContainerBusyError,
     ContainerLease,
-    ContainerNotFoundError,
     SandboxContainerRegistry,
-    requested_container,
 )
 from gateway.services.files import ProviderFile, SandboxFileBridge, produced_files_for
 from gateway.services.guardrails import InProcessGuardrail
@@ -241,7 +227,6 @@ from gateway.services.tenancy.organization_guardrail_service import (
     resolve_organization_guardrails,
 )
 from gateway.services.tenancy.workspace_code_execution_policy_service import (
-    SERVED_TOOL_NAMES,
     resolve_workspace_code_execution_policy,
 )
 from gateway.services.tool_usage import (
@@ -251,12 +236,18 @@ from gateway.services.tool_usage import (
     ToolUsageTally,
 )
 from gateway.services.tools import (
+    CONTAINER_GONE_DETAIL_TEMPLATE,
+    AdmittedCodeExecution,
     DeclaredWebTools,
     Dialect,
     ToolUseBudget,
+    admit_code_execution,
     admit_web_access,
+    check_web_tools_alone,
     claim_web_declarations,
+    declares_code_execution,
     extract_web_tools,
+    native_code_execution_dialect,
     native_rendering,
     read_web_search_max_uses,
     web_search_intercept_enabled,
@@ -365,43 +356,6 @@ PROVIDER_RATE_LIMITED_DETAIL = "The provider rate-limited this request"
 ALL_PROVIDERS_FAILED_DETAIL = "All upstream providers failed"
 ALL_PROVIDERS_TIMED_OUT_DETAIL = "All upstream providers timed out"
 ALL_PROVIDERS_RATE_LIMITED_DETAIL = "All upstream providers rate-limited this request"
-SANDBOX_NOT_CONFIGURED_DETAIL = (
-    "otari_code_execution tool requested but no sandbox is configured on this gateway. "
-    "Set OTARI_SANDBOX_URL on the gateway, or remove otari_code_execution from `tools`."
-)
-CODE_EXECUTOR_NOT_CONFIGURED_DETAIL = (
-    "code execution was asked to run on this gateway but no sandbox is configured. "
-    "Set OTARI_SANDBOX_URL on the gateway, or let the provider run it."
-)
-CODE_EXECUTION_HEADER_INVALID_DETAIL = f"{CODE_EXECUTION_HEADER} must be one of auto, otari, provider"
-CODE_EXECUTOR_PINNED_DETAIL = (
-    f"this workspace's code-execution policy decides who runs code; the {CODE_EXECUTION_HEADER} "
-    "header cannot choose otherwise"
-)
-SANDBOX_MCP_CONFLICT_DETAIL = (
-    "otari_code_execution and mcp_servers cannot be combined in the same request yet; "
-    "pick one. Multi-backend dispatch is a planned refinement."
-)
-SANDBOX_PROVIDER_TOOL_CONFLICT_DETAIL = (
-    "otari_code_execution cannot be combined with a provider-native code-execution tool "
-    "(code_execution, code_interpreter, code_execution_<date>) in the same request; pick one. "
-    "The gateway sandbox and the provider's own are separate environments, and a request "
-    "addressing both has no single place its files and state live."
-)
-WEB_SEARCH_CONFLICT_DETAIL = (
-    "otari_web_search and otari_web_fetch cannot be combined with otari_code_execution or "
-    "mcp_servers in the same request yet; pick one."
-)
-SANDBOX_NOT_ENABLED_DETAIL = "code execution is not enabled for this workspace"
-SANDBOX_TOOLS_EXCLUDED_DETAIL = (
-    "code execution is not available to this workspace: its policy's tool list excludes "
-    "every tool kind this gateway's sandbox serves."
-)
-# Says what happened and nothing an API caller cannot act on. The setting to
-# change is named on the management surface, which the operator reaches; naming
-# it here would send an operator instruction to a data-plane caller, which is the
-# boundary ``SANDBOX_NOT_ENABLED_DETAIL`` next door already respects.
-SANDBOX_IMAGE_NOT_ALLOWED_DETAIL = "this workspace's code-execution policy pins a sandbox image that is not allowed"
 ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL = "Organization guardrails could not be resolved for this request"
 ORGANIZATION_GUARDRAIL_CREDENTIAL_UNREADABLE_DETAIL = (
     "A configured organization guardrail's credential could not be read"
@@ -416,23 +370,6 @@ SANDBOX_UNREACHABLE_DETAIL = (
     "Tools settings, or OTARI_SANDBOX_URL, and that the container is running."
 )
 SANDBOX_UNAVAILABLE_DETAIL = "code_execution sandbox temporarily unavailable. Retry later."
-# One detail for an unknown, expired, foreign or other-provider container, so an
-# id never reveals which. The phrasing is the one clients of Anthropic's and
-# OpenAI's containers already recognize as "drop the id and start over".
-CONTAINER_GONE_DETAIL_TEMPLATE = "Container '{container_id}' has expired or does not exist."
-CONTAINER_NOT_GATEWAY_RUN_DETAIL = (
-    "container names a sandbox this gateway holds, and the code execution for this request runs on the "
-    "provider, which cannot reach it. Drop the field, or send Otari-Code-Execution: otari to run the "
-    "code here."
-)
-CONTAINER_BUSY_DETAIL = (
-    "Container is in use by another request. A sandbox runs one request at a time; retry when it finishes."
-)
-# The id is echoed back so a client can tell which of several it should drop,
-# and it arrives from the request body as an unbounded string, so what is echoed
-# is clipped and stripped of anything that is not a plain printable character.
-# A real one is ``otari_cntr_`` and 32 hex digits.
-_CONTAINER_ID_ECHO_LIMIT = 64
 WEB_SEARCH_UNREACHABLE_DETAIL = (
     "web_search backend unreachable. Check the search URL in the dashboard's Tools "
     "settings, or OTARI_WEB_SEARCH_URL, and that the backend is running."
@@ -2940,9 +2877,9 @@ async def prepare_gateway_tools(
         await _admit_guardrails(adapter, ctx, response, declared)
         mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.ports.mcp_server)
         code = await _admit_code_execution(adapter, ctx, declared, backends, mcp_servers_declared=bool(mcp_servers))
-        web = _extract_web_tools(adapter, ctx, code.tools_after_sandbox, claim_web_search=claim_web_search)
-        if web.declared_any and (code.use_sandbox or mcp_servers):
-            raise adapter.error(400, WEB_SEARCH_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
+        web = _extract_web_tools(
+            adapter, ctx, code, claim_web_search=claim_web_search, mcp_servers_declared=bool(mcp_servers)
+        )
         web_access = await _admit_web_access(adapter, ctx, web, backends.ports.web_search_policy)
         await _require_tool_pricing(
             adapter,
@@ -3083,14 +3020,42 @@ def _admit_web_declarations(adapter: FormatAdapter[Any, Any], ctx: RequestContex
 def _extract_web_tools(
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
-    tools: list[dict[str, Any]] | None,
+    code: AdmittedCodeExecution,
     *,
     claim_web_search: bool,
+    mcp_servers_declared: bool,
 ) -> DeclaredWebTools:
-    """Take the managed web tools out of ``tools``, refusing one this deployment cannot serve."""
+    """Take the managed web tools out of what code execution left, refusing one this deployment cannot serve."""
     try:
-        return extract_web_tools(tools, config=ctx.config, claim_web_search=claim_web_search)
+        web = extract_web_tools(code.tools_after_sandbox, config=ctx.config, claim_web_search=claim_web_search)
+        check_web_tools_alone(web, use_sandbox=code.use_sandbox, mcp_servers_declared=mcp_servers_declared)
     except WebToolDeclarationError as exc:
+        raise domain_error(adapter, exc) from exc
+    return web
+
+
+async def _admit_code_execution(
+    adapter: FormatAdapter[Any, Any],
+    ctx: RequestContext,
+    declared: DeclaredTools,
+    backends: ToolBackends,
+    *,
+    mcp_servers_declared: bool,
+) -> AdmittedCodeExecution:
+    """Decide who runs the request's code, and the sandbox it runs in when the gateway does."""
+    try:
+        return await admit_code_execution(
+            declared.tools,
+            container_id=declared.container_id,
+            code_execution_header=declared.code_execution_header,
+            config=ctx.config,
+            dispatch_provider=_dispatch_provider_name(ctx),
+            dialect=adapter.name,
+            resolve_policy=lambda: _resolve_code_execution_policy(adapter, ctx, backends.ports.code_execution_policy),
+            container_registry=backends.sandbox_containers,
+            mcp_servers_declared=mcp_servers_declared,
+        )
+    except (CodeExecutionDeclarationError, CodeExecutionRefusedError, CodeExecutionContainerBusyError) as exc:
         raise domain_error(adapter, exc) from exc
 
 
@@ -3135,179 +3100,6 @@ async def _admit_web_access(
         search_auth_token=search_auth_token,
         search_tool_entry=grant.search_tool_entry,
         search_url=search_url,
-    )
-
-
-@dataclass(frozen=True)
-class _AdmittedCodeExecution:
-    """Who runs a request's code, and the sandbox it runs in when the gateway does."""
-
-    allowed_tools: frozenset[str] | None
-    container_lease: ContainerLease | None
-    containers: SandboxContainerRegistry | None
-    exec_timeout_s: int | None
-    executor: CodeExecutor | None
-    max_iterations: int | None
-    session_image: str | None
-    tool_entry: dict[str, Any] | None
-    tools_after_sandbox: list[dict[str, Any]] | None
-    use_sandbox: bool
-
-
-async def _admit_code_execution(
-    adapter: FormatAdapter[Any, Any],
-    ctx: RequestContext,
-    declared: DeclaredTools,
-    backends: ToolBackends,
-    *,
-    mcp_servers_declared: bool,
-) -> _AdmittedCodeExecution:
-    """Decide who runs the request's code, and the sandbox it runs in when the gateway does."""
-    # The deployment decides whether code can run here, because a hosted provider has no URL.
-    sandbox_available = ctx.config.sandbox_configured()
-    try:
-        requested_executor = parse_code_execution_header(declared.code_execution_header)
-    except ValueError:
-        raise adapter.error(400, CODE_EXECUTION_HEADER_INVALID_DETAIL, ErrorKind.INVALID_REQUEST) from None
-
-    # The explicit gateway type always runs here.
-    # A provider's keyword is only found here, and the executor decides it below.
-    sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(declared.tools)
-    provider_code_entry = first_provider_code_execution_tool(tools_after_sandbox)
-    if sandbox_tool_entry is not None and not sandbox_available:
-        raise adapter.error(400, SANDBOX_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
-
-    # A sandbox ID this gateway minted pins the code here, so a model change between turns keeps the sandbox.
-    # An explicit header or a workspace pin still wins over it.
-    names_held_sandbox = any(
-        (_gateway_container_value(raw) or "").startswith(CONTAINER_ID_PREFIX)
-        for raw in (
-            declared.container_id,
-            (sandbox_tool_entry or {}).get("container"),
-            (provider_code_entry or {}).get("container"),
-        )
-    )
-    # Only with a sandbox, so a stale ID gets the container refusal rather than the executor one.
-    if names_held_sandbox and sandbox_available and requested_executor in (None, CodeExecutor.AUTO):
-        requested_executor = CodeExecutor.OTARI
-
-    sandbox_max_iterations: int | None = None
-    sandbox_exec_timeout_s: int | None = None
-    # A workspace policy below may only narrow the image and the tool kinds from the deployment's defaults.
-    sandbox_session_image: str | None = ctx.config.effective_sandbox_image()
-    sandbox_allowed_tools: frozenset[str] | None = None
-    code_execution_executor: CodeExecutor | None = None
-    code_execution_policy: ResolvedCodeExecutionPolicy | None = None
-    sandbox_container_lease: ContainerLease | None = None
-    use_sandbox = False
-
-    # Without a sandbox, a provider's keyword is forwarded and no policy is read.
-    if sandbox_available and (sandbox_tool_entry is not None or provider_code_entry is not None):
-        deployment_executor = ctx.config.effective_code_executor()
-        native_available = provider_runs_code_natively(
-            provider_code_entry, provider=_dispatch_provider_name(ctx), dialect=adapter.name
-        )
-        code_execution_policy = await _resolve_code_execution_policy(adapter, ctx, backends.ports.code_execution_policy)
-
-        executor_preference, executor_conflict = resolve_code_executor_preference(
-            requested=requested_executor,
-            workspace=code_execution_policy.executor if code_execution_policy is not None else None,
-            deployment=deployment_executor,
-        )
-        # A pin decides only a provider's keyword. The explicit type runs here whatever the pin says.
-        if executor_conflict and provider_code_entry is not None:
-            raise adapter.error(403, CODE_EXECUTOR_PINNED_DETAIL, ErrorKind.PERMISSION)
-        code_execution_executor = decide_code_executor(
-            executor_preference, sandbox_configured=True, native_available=native_available
-        )
-
-        if provider_code_entry is not None and code_execution_executor is CodeExecutor.OTARI:
-            # The claimed keyword keeps the caller's declaration shape, and so the result blocks it expects.
-            # An explicit type beside it is folded in and adds only its hint.
-            claimed, tools_after_sandbox = _extract_code_execution_tool(tools_after_sandbox, intercept=True)
-            assert claimed is not None  # ``provider_code_entry`` was found in the same list
-            if sandbox_tool_entry is not None and not claimed.get("purpose_hint"):
-                if sandbox_tool_entry.get("purpose_hint"):
-                    claimed["purpose_hint"] = sandbox_tool_entry["purpose_hint"]
-            sandbox_tool_entry = claimed
-        elif provider_code_entry is not None and sandbox_tool_entry is not None:
-            # Two sandboxes would split the caller's state across two places, so the request is refused.
-            raise adapter.error(400, SANDBOX_PROVIDER_TOOL_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
-        use_sandbox = sandbox_tool_entry is not None
-    elif requested_executor is CodeExecutor.OTARI and provider_code_entry is not None:
-        raise adapter.error(400, CODE_EXECUTOR_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
-
-    if use_sandbox:
-        assert sandbox_tool_entry is not None
-        if mcp_servers_declared:
-            raise adapter.error(400, SANDBOX_MCP_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
-        # The policy only narrows what the deployment allows. No policy means no narrowing.
-        if code_execution_policy is not None:
-            if not code_execution_policy.enabled:
-                raise adapter.error(403, SANDBOX_NOT_ENABLED_DETAIL, ErrorKind.PERMISSION)
-            if not sandbox_tool_entry.get("purpose_hint") and code_execution_policy.default_purpose_hint:
-                sandbox_tool_entry["purpose_hint"] = code_execution_policy.default_purpose_hint
-            sandbox_max_iterations = code_execution_policy.max_iterations
-            sandbox_exec_timeout_s = code_execution_policy.exec_timeout_s
-            if code_execution_policy.tools is not None:
-                # An empty intersection is refused, because a tool with nothing to run fails silently.
-                # It uses the same served set as the check on a policy write.
-                if not code_execution_policy.tools & set(SERVED_TOOL_NAMES):
-                    raise adapter.error(403, SANDBOX_TOOLS_EXCLUDED_DETAIL, ErrorKind.PERMISSION)
-                sandbox_allowed_tools = code_execution_policy.tools
-            if code_execution_policy.image is not None:
-                # Re-checked because an operator may remove an image after a workspace pinned it.
-                if code_execution_policy.image not in ctx.config.pinnable_sandbox_images():
-                    raise adapter.error(403, SANDBOX_IMAGE_NOT_ALLOWED_DETAIL, ErrorKind.PERMISSION)
-                sandbox_session_image = code_execution_policy.image
-
-    # A request that names no container has its sandbox released with it.
-    # ``auto`` asks to hold one, and an ID asks for that one back.
-    sandbox_containers = backends.sandbox_containers if use_sandbox else None
-    if use_sandbox:
-        container_request = requested_container(declared.container_id) or requested_container(
-            (sandbox_tool_entry or {}).get("container")
-        )
-        if container_request is None:
-            # Nothing asked for, so nothing is held.
-            sandbox_containers = None
-        elif container_request != CONTAINER_AUTO:
-            # An ID names one sandbox and its files, so a deployment that cannot honor it refuses.
-            # It resolves against this caller's own leases before any new lease.
-            gone = adapter.error(
-                400,
-                CONTAINER_GONE_DETAIL_TEMPLATE.format(container_id=_echoable_container_id(container_request)),
-                ErrorKind.INVALID_REQUEST,
-            )
-            if sandbox_containers is None:
-                raise gone
-            try:
-                sandbox_container_lease = await sandbox_containers.resolve(container_request)
-            except ContainerNotFoundError:
-                raise gone from None
-            except ContainerBusyError:
-                # The caller owns this ID, so a retry can succeed.
-                raise adapter.error(409, CONTAINER_BUSY_DETAIL, ErrorKind.INVALID_REQUEST) from None
-        # ``auto`` without container reuse is not an error, and the response names no container.
-    else:
-        # The provider runs this code, so a container ID that only this gateway mints is refused.
-        # ``auto`` can change the executor between turns, so a client can send one unchanged.
-        stray = _gateway_container_value(declared.container_id) or _gateway_container_value(
-            (provider_code_entry or {}).get("container")
-        )
-        if stray is not None:
-            raise adapter.error(400, CONTAINER_NOT_GATEWAY_RUN_DETAIL, ErrorKind.INVALID_REQUEST)
-    return _AdmittedCodeExecution(
-        allowed_tools=sandbox_allowed_tools,
-        container_lease=sandbox_container_lease,
-        containers=sandbox_containers,
-        exec_timeout_s=sandbox_exec_timeout_s,
-        executor=code_execution_executor,
-        max_iterations=sandbox_max_iterations,
-        session_image=sandbox_session_image,
-        tool_entry=sandbox_tool_entry,
-        tools_after_sandbox=tools_after_sandbox,
-        use_sandbox=use_sandbox,
     )
 
 
@@ -4109,34 +3901,6 @@ def _loop_options(tool_ctx: ToolContext) -> dict[str, Any]:
     if tool_ctx.use_budget is not None:
         options["use_budget"] = tool_ctx.use_budget
     return options
-
-
-def _gateway_container_value(raw: Any) -> str | None:
-    """A ``container`` value only this gateway could have named, or ``None``.
-
-    Which is an id it minted, or its own ``auto`` spelling. Deliberately string
-    only: the object form is the provider's own (OpenAI's ``{"type": "auto"}``
-    on a ``code_interpreter`` entry), which means something upstream and must
-    reach it untouched. A provider's own id is not ours either, and passes.
-    """
-    if not isinstance(raw, str):
-        return None
-    cleaned = raw.strip()
-    if cleaned.lower() == CONTAINER_AUTO or cleaned.startswith(CONTAINER_ID_PREFIX):
-        return cleaned
-    return None
-
-
-def _echoable_container_id(value: str) -> str:
-    """The caller's container id, safe to put in an error body.
-
-    Printable ASCII only and bounded: the field is a bare string on the wire, so
-    without this a megabyte of anything the caller likes comes back in the 400.
-    """
-    cleaned = "".join(char for char in value if char.isascii() and char.isprintable())
-    if len(cleaned) > _CONTAINER_ID_ECHO_LIMIT:
-        return cleaned[:_CONTAINER_ID_ECHO_LIMIT] + "…"
-    return cleaned
 
 
 def _container_loop_option(adapter: FormatAdapter[Any, Any], backend: Any) -> dict[str, Any]:
