@@ -14,11 +14,14 @@ on:
         description: "Path of the task's prompt file"
         required: true
         type: string
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
 
 jobs:
   review:
-    # Holds CLAUDE_CODE_OAUTH_TOKEN, shared with review-pr.yml. Its deployment
-    # branches are restricted to main.
+    # Restricted to main. Its CLAUDE_CODE_OAUTH_TOKEN, shared with review-pr.yml,
+    # takes precedence over the repository copy the caller passes in.
     environment: pr-review
     runs-on: ubuntu-latest
     timeout-minutes: 40

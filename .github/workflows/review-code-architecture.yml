@@ -9,6 +9,8 @@ permissions: {}
 jobs:
   review:
     uses: ./.github/workflows/automation-review.yml
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     permissions:
       contents: read
       actions: read
