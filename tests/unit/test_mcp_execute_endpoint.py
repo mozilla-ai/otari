@@ -1,7 +1,7 @@
 """``POST /api/v1/mcp/execute``: the caller-orchestrated execution contract.
 
 Otari executes one exact call an application has already authorized. It proves
-no approval and claims none (R-AUTH-4); what it enforces is authentication,
+no approval and claims none; what it enforces is authentication,
 stored-server access, the stored allowlist, URL safety, and its own bounds.
 
 Exercised in hybrid mode, where the platform resolver is the only seam that has
@@ -247,7 +247,7 @@ def test_an_absent_allowlist_admits_any_live_tool(
     platform: _Platform,
     session: _FakeSession,
 ) -> None:
-    """R-RES-4: ``null`` carries the same meaning it does in the managed loop."""
+    """``null`` carries the same meaning it does in the managed loop."""
     stored = _stored(allowed_tools=None)
     platform.servers = [stored.model_dump(mode="json")]
 
@@ -290,7 +290,7 @@ def test_a_user_token_for_another_region_is_misdirected_without_the_host(
 ) -> None:
     """The platform's 421 keeps its status and gets this contract's own code.
 
-    The host the platform's detail named is dropped with the detail (R-ERR-1);
+    The host the platform's detail named is dropped with the detail;
     a caller learns it from any endpoint outside this contract.
     """
     platform.status_code = 421
@@ -330,7 +330,7 @@ def test_a_stale_revision_is_refused_without_a_second_resolver_call(
     platform: _Platform,
     session: _FakeSession,
 ) -> None:
-    """R-RES-2: the comparison is in memory, over the resolution already needed."""
+    """The comparison is in memory, over the resolution already needed."""
     response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body(server_revision="stale-revision"))
 
     assert response.status_code == 409, response.text
@@ -502,7 +502,7 @@ def test_an_invalid_request_is_refused_before_resolution_or_logging(
     session: _FakeSession,
     overrides: dict[str, Any],
 ) -> None:
-    """R-REQ-3: arbitrary caller text must not reach a resolver, a log, or telemetry."""
+    """Arbitrary caller text must not reach a resolver, a log, or telemetry."""
     response = client.post(f"{API_ROOT}/mcp/execute", headers=USER_AUTH, json=_body(**overrides))
 
     assert response.status_code == 422, response.text
@@ -570,7 +570,7 @@ def test_an_inline_server_configuration_is_not_accepted(
     platform: _Platform,
     session: _FakeSession,
 ) -> None:
-    """R-REQ-4: a caller never transmits a URL, a credential, or a policy."""
+    """A caller never transmits a URL, a credential, or a policy."""
     body = _body()
     body["server"] = {"name": "github", "url": "https://attacker.example.com/mcp"}
 
@@ -700,7 +700,7 @@ def test_no_error_body_carries_a_url_credential_argument_or_exception_text(
     session: _FakeSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """R-OBS-2, at the one boundary a caller can read."""
+    """Nothing sensitive reaches the one boundary a caller can read."""
     warning = Mock()
     monkeypatch.setattr(log_config.logger, "warning", warning)
     session.call_error = RuntimeError(f"{PUBLIC_URL} server-secret title=Approved title")
@@ -722,7 +722,7 @@ def test_a_capacity_refusal_is_the_only_failure_that_invites_a_retry(
     monkeypatch: pytest.MonkeyPatch,
     path: str,
 ) -> None:
-    """R-ERR-4: capacity is transient, so it says so; nothing else advertises a retry."""
+    """Capacity is transient, so it says so; nothing else advertises a retry."""
     gate = mcp_stateless.ConcurrencyGate(limit=1, admission_timeout_s=0.01)
     monkeypatch.setattr(mcp_stateless, "EXECUTION_GATE", gate)
     monkeypatch.setattr(mcp_stateless, "DISCOVERY_GATE", gate)

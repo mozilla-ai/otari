@@ -1,4 +1,4 @@
-"""Per-tool admission of a live MCP descriptor (R-SCHEMA-1 to R-SCHEMA-3).
+"""Per-tool admission of a live MCP descriptor.
 
 An ``inputSchema`` is untrusted JSON Schema *data*. Otari does not validate it
 against a dialect, rewrite it, or drop keywords it does not recognize; it
@@ -46,7 +46,7 @@ def test_a_tool_name_execution_cannot_accept_is_omitted(name: str) -> None:
 
 
 def test_an_unknown_dialect_or_keyword_is_admitted_unchanged() -> None:
-    """Unknown keywords are preserved, not rejected (R-SCHEMA-1, R-SCHEMA-2)."""
+    """Unknown keywords are preserved, not rejected."""
     schema = {
         "$schema": "https://example.com/draft/2044-01/schema",
         "type": "object",

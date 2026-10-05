@@ -977,7 +977,7 @@ async def test_single_resolution_returns_the_stored_server_and_its_revision(asyn
 
 
 async def test_single_resolution_of_an_unchanged_server_is_stable(async_db: AsyncSession) -> None:
-    """R-RES-3: the revision has to survive being derived twice, on any worker."""
+    """The revision has to survive being derived twice, on any worker."""
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     workspace = await _workspace(async_db, organization, owner=owner)
