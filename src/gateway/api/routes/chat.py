@@ -61,6 +61,7 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.provider_fields import surface_provider_fields
 from gateway.services.files import FileService, StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import (
@@ -212,7 +213,7 @@ class _ChatAdapter:
         return openai_error_event(self.stream_format, refusal_code(exc))
 
     def format_chunk(self, chunk: ChatCompletionChunk) -> str:
-        return f"data: {chunk.model_dump_json()}\n\n"
+        return f"data: {surface_provider_fields(chunk).model_dump_json()}\n\n"
 
     def extract_stream_usage(self, chunk: ChatCompletionChunk) -> CompletionUsage | None:
         if not chunk.usage:
@@ -652,7 +653,7 @@ async def run_chat_completion(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Internal error: missing route context",
             )
-        return await run_platform_non_stream(
+        platform_result = await run_platform_non_stream(
             adapter=adapter,
             route=route,
             base_request_fields=request_fields,
@@ -663,6 +664,7 @@ async def run_chat_completion(
             rate_limit_info=ctx.rate_limit_info,
             session_label=request.session_label,
         )
+        return surface_provider_fields(platform_result)
 
     resolved = await resolve_dispatch_provider(
         ctx, config, request.model, adapter=adapter, model_provider=model_provider
@@ -679,6 +681,7 @@ async def run_chat_completion(
         display_model=resolved.alias,
         base_request_fields=request_fields,
     )
+    surface_provider_fields(result)
     if idempotency is not None:
         await idempotency.complete(result, response)
     return result

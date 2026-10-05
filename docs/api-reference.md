@@ -83,6 +83,13 @@ rate that priced the model: `organization` (an organization's override),
 genai-prices dataset). Hybrid mode attaches the platform's settlement instead;
 see [Hybrid mode protocol](hybrid-mode-protocol.md#inline-response-fields).
 
+### Provider-specific fields
+
+A field a provider adds to a chat completion's message beyond the OpenAI schema
+(Exa's `citations`, for instance) is kept where the provider put it and copied
+under `message.provider_specific_fields` (`delta.provider_specific_fields` on a
+stream), where clients written against LiteLLM look for it.
+
 ### Cost of a failed or interrupted request
 
 A stream that fails mid-response ends in an error event, and one the client
