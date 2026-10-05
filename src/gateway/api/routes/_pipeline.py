@@ -103,6 +103,12 @@ from gateway.api.routes._tools import _build_web_retrieval_backend, _resolve_san
 from gateway.core.config import ATTEMPT_ID_HEADER, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, release_session
 from gateway.core.env import otari_env
+from gateway.core.error_codes import (
+    INVALID_MODEL,
+    MODEL_NOT_ALLOWED,
+    UPSTREAM_RATE_LIMITED,
+    error_headers,
+)
 from gateway.core.metered_pricing import calculate_metered_cost, quantize_cost
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import (
@@ -637,20 +643,20 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
 def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, str] | None:
     """Response headers for a classified provider failure, or ``None``.
 
-    Forwards the upstream ``Retry-After`` on a 429, which is the one header a
-    rate-limited caller can act on and the one piece of a provider's rate-limit
-    response that its message body cannot always carry. Restricted to the 429:
-    on the statuses that surface as a fixed-detail 502 the header would describe
-    the gateway's own upstream account, which is not the caller's to read.
-
-    Returns ``None`` rather than an empty dict when there is nothing to send, so
-    ``HTTPException(headers=...)`` stays unset instead of being handed a dict
-    that adds nothing.
+    On a 429, ``Otari-Error-Code: upstream_rate_limited`` (so a caller can tell
+    the provider's limit from the gateway's own) and the upstream ``Retry-After``,
+    the one piece of a provider's rate-limit response that its message body cannot
+    always carry. Restricted to the 429: on the statuses that surface as a
+    fixed-detail 502 the header would describe the gateway's own upstream
+    account, which is not the caller's to read.
     """
     if status_code != status.HTTP_429_TOO_MANY_REQUESTS:
         return None
+    headers = error_headers(UPSTREAM_RATE_LIMITED)
     retry_after = upstream_retry_after(exc)
-    return {"Retry-After": retry_after} if retry_after is not None else None
+    if retry_after is not None:
+        headers["Retry-After"] = retry_after
+    return headers
 
 
 def failure_status_code(exc: BaseException) -> int:
@@ -1042,6 +1048,7 @@ def _raise_for_unresolvable_model(model_selector: str, exc: Exception) -> NoRetu
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=unresolvable_model_detail(model_selector),
+        headers=error_headers(INVALID_MODEL),
     ) from exc
 
 
@@ -1983,7 +1990,7 @@ async def resolve_request_context(
                 started_at=started_at,
                 request_id=request_id,
             )
-            raise adapter.error(403, not_allowed_detail, ErrorKind.PERMISSION)
+            raise adapter.error(403, not_allowed_detail, ErrorKind.PERMISSION, headers=error_headers(MODEL_NOT_ALLOWED))
 
         # Organization-scoped model restriction (otari#643): the org key
         # resolved for this workspace+provider may narrow which models it
@@ -2014,7 +2021,9 @@ async def resolve_request_context(
                     started_at=started_at,
                     request_id=request_id,
                 )
-                raise adapter.error(403, not_allowed_detail, ErrorKind.PERMISSION)
+                raise adapter.error(
+                    403, not_allowed_detail, ErrorKind.PERMISSION, headers=error_headers(MODEL_NOT_ALLOWED)
+                )
 
         if idempotency is not None and session_principal is None:
             try:

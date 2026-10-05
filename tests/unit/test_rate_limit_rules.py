@@ -126,7 +126,8 @@ async def test_a_request_larger_than_the_limit_is_not_told_to_retry() -> None:
     with pytest.raises(HTTPException) as exc_info:
         await _admit(rules, tokens=1001)
 
-    assert exc_info.value.headers is None
+    assert exc_info.value.headers is not None
+    assert "Retry-After" not in exc_info.value.headers
     assert exc_info.value.detail == "Request needs an estimated 1,001 tokens; rate limit 'tpm' allows 1,000 per minute"
 
 
@@ -150,7 +151,11 @@ async def test_a_full_concurrency_limit_refuses_until_a_slot_is_given_back() -> 
     grant = await _admit(rules)
     with pytest.raises(HTTPException) as exc_info:
         await _admit(rules)
-    assert exc_info.value.headers == {"Retry-After": "1"}
+    assert exc_info.value.headers == {
+        "Retry-After": "1",
+        "Otari-Error-Code": "rate_limited",
+        "Otari-Rate-Limit-Rule": "inflight",
+    }
     assert exc_info.value.detail == "Rate limit 'inflight' exceeded: 1 request in flight"
 
     await grant.release()

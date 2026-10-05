@@ -249,6 +249,25 @@ Gateway-side failures use fixed public messages. Diagnose them with protected
 logs and safe metadata such as request ID, provider, model, and status. Do not
 log provider keys, prompts, responses, or raw upstream bodies.
 
+## Error codes
+
+A refusal a caller is expected to act on carries an `Otari-Error-Code` header
+beside its human-readable `detail`. Map refusals by the code: it keeps its
+meaning across releases, while the `detail` text may be reworded.
+
+| `Otari-Error-Code` | Status | Meaning | Also sent |
+|---|---|---|---|
+| `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope (`api_token`, `workspace`, `organization`, ...) |
+| `user_blocked` | 403 | The billed user is blocked | |
+| `user_not_found` | 404 | The billed user does not exist | |
+| `rate_limited` | 429 | A gateway rate limit is full | `Otari-Rate-Limit-Rule` for a `rate_limits` rule; `Retry-After` when waiting helps |
+| `upstream_rate_limited` | 429 | The provider rate limited the gateway | `Retry-After` when the provider sent one |
+| `invalid_model` | 400 | The model selector names no configured provider | |
+| `model_not_allowed` | 403 | The key may not use the model | |
+
+A refusal after a stream has started arrives as an error event instead, and has
+no headers to carry a code.
+
 ## Caller-orchestrated MCP
 
 Two stored-server endpoints let an application own its own MCP tool loop, as an
