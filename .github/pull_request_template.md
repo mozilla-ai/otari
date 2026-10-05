@@ -32,6 +32,26 @@
 - [ ] If the API contract changed, I regenerated the OpenAPI spec (`uv run python scripts/generate_openapi.py`).
 - [ ] If this changes a rule in `ARCHITECTURE.md` or `scripts/check_architecture.py`, the description names the rule and says why.
 
+## Schema changes
+<!-- Delete this section if the PR adds no migration and changes nothing under
+     `src/gateway/models/`. Otherwise fill it in: a migration that has run
+     against production cannot be reverted the way code can, and the budget and
+     usage tables decide refusals and carry money. -->
+
+- [ ] This PR changes the database schema.
+- [ ] **A named human has reviewed the schema by hand.** An automated review is
+      not sign-off for this section. Who: <!-- @handle -->
+- [ ] Every data conversion is named below, with the direction of each arm and
+      whether any of them makes an existing limit, window or permission *more
+      permissive* than it was.
+- [ ] `downgrade()` restores what `upgrade()` changed, and I ran upgrade,
+      downgrade, upgrade on both SQLite and PostgreSQL.
+- [ ] Rows that predate a new non-nullable column get a `server_default` that is
+      correct for them, not merely valid.
+
+<!-- What the reviewer should check, in your words. Name the columns, the
+     conversions and anything you are unsure about. -->
+
 ## AI Usage
 <!-- Check one -->
 
