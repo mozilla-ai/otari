@@ -262,9 +262,11 @@ log provider keys, prompts, responses, or raw upstream bodies.
 
 ## Error codes
 
-A refusal a caller is expected to act on carries an `Otari-Error-Code` header
-beside its human-readable `detail`. Map refusals by the code: it keeps its
-meaning across releases, while the `detail` text may be reworded.
+A refusal a caller is expected to act on carries a stable code, both as an
+`Otari-Error-Code` header and as `code` in the body beside the human-readable
+`detail`: `{"detail": "...", "code": "budget_exceeded"}`. Map refusals by the
+code: it keeps its meaning across releases, while the `detail` text may be
+reworded.
 
 | `Otari-Error-Code` | Status | Meaning | Also sent |
 |---|---|---|---|
@@ -275,9 +277,12 @@ meaning across releases, while the `detail` text may be reworded.
 | `upstream_rate_limited` | 429 | The provider rate limited the gateway | `Retry-After` when the provider sent one |
 | `invalid_model` | 400 | The model selector names no configured provider | |
 | `model_not_allowed` | 403 | The key may not use the model | |
+| `context_length_exceeded` | 400 | The prompt is too long for the model | |
+| `pricing_required` | 402 | `require_pricing` is on and the model has no price | |
 
-A refusal after a stream has started arrives as an error event instead, and has
-no headers to carry a code.
+A failure after a stream has started arrives as an error event, which carries
+the code as `error.code` on Chat Completions and Responses:
+`{"error": {"message": "...", "type": "server_error", "code": "upstream_rate_limited"}}`.
 
 ## Caller-orchestrated MCP
 

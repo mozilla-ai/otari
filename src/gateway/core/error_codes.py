@@ -1,9 +1,12 @@
 """Stable, machine-readable codes for the refusals a caller is expected to act on.
 
-Sent as the ``Otari-Error-Code`` response header beside the human-readable
-``detail``, so a client maps a refusal by its code rather than by matching text
-that may be reworded. A code, once sent, keeps its meaning.
+Sent as the ``Otari-Error-Code`` response header and as ``code`` in the error
+body, beside the human-readable ``detail``, so a client maps a refusal by its
+code rather than by matching text that may be reworded. A streamed error event
+carries it as ``error.code``. A code, once sent, keeps its meaning.
 """
+
+from collections.abc import Mapping
 
 ERROR_CODE_HEADER = "Otari-Error-Code"
 # Which budget refused: ``user`` for the billed user's own budget, otherwise the
@@ -19,6 +22,8 @@ RATE_LIMITED = "rate_limited"
 UPSTREAM_RATE_LIMITED = "upstream_rate_limited"
 INVALID_MODEL = "invalid_model"
 MODEL_NOT_ALLOWED = "model_not_allowed"
+CONTEXT_LENGTH_EXCEEDED = "context_length_exceeded"
+PRICING_REQUIRED = "pricing_required"
 
 
 def error_headers(code: str, **extra: str | None) -> dict[str, str]:
@@ -27,3 +32,8 @@ def error_headers(code: str, **extra: str | None) -> dict[str, str]:
     names = {"budget_scope": BUDGET_SCOPE_HEADER, "rule": RATE_LIMIT_RULE_HEADER}
     headers.update({names[name]: value for name, value in extra.items() if value is not None})
     return headers
+
+
+def error_code_of(headers: Mapping[str, str] | None) -> str | None:
+    """The code a refusal's headers carry, or None."""
+    return (headers or {}).get(ERROR_CODE_HEADER)

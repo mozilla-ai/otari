@@ -7,11 +7,13 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, Response, status
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from typing_extensions import override
 
@@ -22,6 +24,7 @@ from gateway.container import Container, build_container
 from gateway.context_propagation import TraceContextPropagationMiddleware
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, dispose_db, init_db
+from gateway.core.error_codes import error_code_of
 from gateway.core.feature import Worker
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.exceptions import TenancyError
@@ -712,6 +715,24 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
     return lifespan
 
 
+async def _http_exception_handler(request: Request, exc: Exception) -> Response:
+    """FastAPI's own HTTPException response, with the refusal's ``Otari-Error-Code`` as ``code`` in the body too.
+
+    A body field survives where a header does not (a proxy that drops it, an SDK
+    that surfaces only the body), so a client can map the refusal from either.
+    """
+    if not isinstance(exc, StarletteHTTPException):
+        raise exc
+    code = error_code_of(exc.headers)
+    if code is None:
+        return await http_exception_handler(request, exc)
+    return JSONResponse(
+        {"detail": exc.detail, "code": code},
+        status_code=exc.status_code,
+        headers=exc.headers,
+    )
+
+
 async def _tenancy_error_handler(_: Request, exc: Exception) -> Response:
     """Render a tenancy domain error as the status it carries.
 
@@ -1039,6 +1060,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     install_rate_limits(app, config)
 
     register_routers(app, config)
+    app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     app.add_exception_handler(TenancyError, _tenancy_error_handler)
     app.add_exception_handler(ControlPlaneError, _control_plane_error_handler)
     app.add_exception_handler(RequestValidationError, _validation_error_handler)

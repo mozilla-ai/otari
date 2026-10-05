@@ -293,6 +293,7 @@ def test_an_end_user_refused_by_its_budget_gets_a_stable_code(
     assert refused.status_code == 403
     assert refused.headers["Otari-Error-Code"] == "budget_exceeded"
     assert refused.headers["Otari-Budget-Scope"] == "user"
+    assert refused.json()["code"] == "budget_exceeded"
 
 
 def test_end_users_are_listed_and_counted_by_owner_and_external_id(

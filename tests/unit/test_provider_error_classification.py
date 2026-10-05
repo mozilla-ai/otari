@@ -13,11 +13,12 @@ upstream text.
 """
 
 import asyncio
+import json
 
 import httpx
 import pytest
 from anthropic import APITimeoutError as AnthropicAPITimeoutError
-from any_llm.exceptions import UnsupportedParameterError
+from any_llm.exceptions import ContextLengthExceededError, UnsupportedParameterError
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from gateway.api.routes._pipeline import (
@@ -31,11 +32,13 @@ from gateway.api.routes._pipeline import (
     classify_provider_error,
     failure_status_code,
     provider_error_headers,
+    refusal_code,
 )
 from gateway.api.routes._platform import _provider_failure_http_exc, upstream_retry_after
 from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.upstream_redaction import MAX_EXPOSED_DETAIL_CHARS, redact_upstream_message
+from gateway.streaming import OPENAI_STREAM_FORMAT, openai_error_event
 
 _RAW = "raw provider detail SECRET token=abc123"
 
@@ -732,3 +735,22 @@ def test_failure_status_code_keeps_the_upstream_status_for_billing() -> None:
     of my error rate is an empty wallet" stays answerable even though the caller
     saw a 502."""
     assert failure_status_code(_ParamError(400, None, _ANTHROPIC_BILLING_MSG)) == 400
+
+
+def test_a_prompt_too_long_for_the_model_has_its_own_code() -> None:
+    exc = ContextLengthExceededError("prompt is too long", status_code=400)
+
+    mapping = classify_provider_error(exc)
+
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert provider_error_headers(exc, 400) == {"Otari-Error-Code": "context_length_exceeded"}
+    assert refusal_code(exc) == "context_length_exceeded"
+
+
+def test_a_stream_error_event_carries_the_code_that_ended_it() -> None:
+    event = openai_error_event(OPENAI_STREAM_FORMAT, refusal_code(_rate_limited_with("3")))
+
+    payload = json.loads(event.removeprefix("data: "))
+    assert payload["error"]["code"] == "upstream_rate_limited"
+    assert openai_error_event(OPENAI_STREAM_FORMAT, None) == OPENAI_STREAM_FORMAT.error_payload

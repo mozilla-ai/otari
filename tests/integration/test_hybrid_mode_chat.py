@@ -1341,7 +1341,10 @@ def test_hybrid_mode_streaming_returns_429_when_all_attempts_are_rate_limited(
     )
 
     assert response.status_code == 429
-    assert response.json() == {"detail": "All upstream providers rate-limited this request"}
+    assert response.json() == {
+        "detail": "All upstream providers rate-limited this request",
+        "code": "upstream_rate_limited",
+    }
     assert response.headers["Otari-Attempt-ID"] == "att-b"
     # A 429 advances the plan, so both attempts really ran: the aggregate is
     # reached by exhausting the route, not by one attempt failing outright.

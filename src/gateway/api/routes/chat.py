@@ -41,6 +41,7 @@ from gateway.api.routes._pipeline import (
     provider_error_headers,
     raise_all_streaming_attempts_failed,
     rate_limit_headers,
+    refusal_code,
     resolve_dispatch_provider,
     resolve_request_context,
     run_platform_non_stream,
@@ -71,7 +72,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop_stream,
 )
 from gateway.services.tools import Dialect, ToolUseBudget
-from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
+from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
 from gateway.types.session_principal import SessionPrincipal
@@ -209,7 +210,7 @@ class _ChatAdapter:
         )
 
     def stream_error_payload(self, exc: BaseException) -> str:
-        return self.stream_format.error_payload
+        return openai_error_event(self.stream_format, refusal_code(exc))
 
     def format_chunk(self, chunk: ChatCompletionChunk) -> str:
         return f"data: {surface_provider_fields(chunk).model_dump_json()}\n\n"
