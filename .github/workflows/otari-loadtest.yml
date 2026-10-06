@@ -84,13 +84,14 @@ jobs:
       - name: Start the stack
         run: ./loadtest/run.sh up
 
-      # A PR runs 20s phases at 3,000 RPM, which is still enough to drain the
-      # shared-budget scenario's pool. Nightly runs every scenario at its
-      # defaults.
+      # A PR runs 20s phases, with a shared pool small enough to run dry in
+      # one. The rate stays at 1,000 RPM: past that a 4-vCPU runner saturates,
+      # requests queue into the concurrency limit, and the checks fail on 429s
+      # the runner caused. Nightly runs every scenario at its defaults.
       - name: Run scenarios
         env:
           DURATION: ${{ github.event_name == 'schedule' && '120' || '20' }}
-          RPM_HIGH: ${{ github.event_name == 'schedule' && '1000' || '3000' }}
+          SHARED_POOL_USD: ${{ github.event_name == 'schedule' && '0.50' || '0.15' }}
           SCENARIOS: ${{ github.event_name != 'schedule' && 'steady spill shared-budget provider-429 stream-fail' || '' }}
         run: ./loadtest/run.sh all
 
@@ -172,6 +173,8 @@ jobs:
         run: ./loadtest/run.sh up
 
       - name: Compare base and head
+        env:
+          AB_RESTORE: 0
         run: ./loadtest/run.sh ab otari:base otari:head
 
       - name: Job summary

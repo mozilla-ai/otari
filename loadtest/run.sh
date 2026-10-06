@@ -31,6 +31,8 @@
 # and AB_FLAGS (passed to ab.py report).
 set -euo pipefail
 cd "$(dirname "$0")"
+# What `all` re-runs; "$0" may be relative to the directory this just left.
+SELF="$PWD/$(basename "$0")"
 
 DURATION=${DURATION:-120}
 RPM_LOW=${RPM_LOW:-300}
@@ -43,7 +45,16 @@ FAKE="http://127.0.0.1:${LOADTEST_FAKE_PORT:-19000}"
 FAILED=0
 
 dc() { docker compose "$@"; }
-tool() { dc --progress quiet run --rm --no-deps tools "$@"; }
+# `up` leaves a tools container running, so each call is an exec rather than a
+# fresh container and uv environment, which costs seconds a call on a CI runner.
+TOOLS_DAEMON="${COMPOSE_PROJECT_NAME:-otari-loadtest}-tools"
+tool() {
+  if [[ $(docker inspect -f '{{.State.Running}}' "$TOOLS_DAEMON" 2>/dev/null) == true ]]; then
+    docker exec "$TOOLS_DAEMON" uv run --quiet "$@"
+  else
+    dc --progress quiet run --rm --no-deps tools "$@"
+  fi
+}
 
 fake() {
   local body=${2:-'{}'}
@@ -143,7 +154,8 @@ scenario_shared_budget() {
   fake_defaults
   # About $0.60 a minute at 1,000 RPM, so a $0.50 pool runs dry inside the
   # first minute and every later request must be refused, by the budget.
-  setup --name shared-budget --pool-usd 0.50
+  # SHARED_POOL_USD shrinks it for a shorter run.
+  setup --name shared-budget --pool-usd "${SHARED_POOL_USD:-0.50}"
   USERS=${USERS_MANY:-2000} load shared-budget --phase "$RPM_HIGH:$DURATION"
   check shared-budget
 }
@@ -251,16 +263,19 @@ count_statements() {
   tool profile.py statements --requests 100 --db "$db" --out "$out.txt" --json-out "$out.json"
 }
 
-# use_build VARIANT IMAGE: run IMAGE on both replicas against database ab_VARIANT.
-# One replica at a time, since startup migrates; then nginx restarts, because it
-# resolved the replicas' addresses when it started.
+# use_build VARIANT IMAGE [migrated]: run IMAGE on both replicas against database
+# ab_VARIANT. One replica at a time on a fresh database, since startup migrates;
+# both at once once it has been. Then nginx restarts, because it resolved the
+# replicas' addresses when it started.
 use_build() {
   export OTARI_IMAGE=$2 OTARI_DATABASE_URL="postgresql://otari:otari@postgres:5432/ab_$1"
   echo ">>> $1: $2"
-  local replica
-  for replica in otari-1 otari-2; do
-    dc up -d --no-deps --no-build --force-recreate --wait "$replica" >/dev/null 2>&1 \
-      || { dc logs --tail 50 "$replica"; return 1; }
+  local group groups=(otari-1 otari-2)
+  [[ -z ${3:-} ]] || groups=("otari-1 otari-2")
+  for group in "${groups[@]}"; do
+    # shellcheck disable=SC2086
+    dc up -d --no-deps --no-build --force-recreate --wait $group >/dev/null 2>&1 \
+      || { dc logs --tail 50 otari-1 otari-2; return 1; }
   done
   dc restart lb >/dev/null 2>&1
   for _ in $(seq 30); do
@@ -277,8 +292,10 @@ use_build() {
 # Redis and fresh fake-provider counters, so each sees Model 1's cap the same.
 ab() {
   local base=${1:?ab needs a base image} head=${2:?and a head image}
-  local rounds=${AB_ROUNDS:-3} seconds=${AB_SECONDS:-20} rpm=${AB_RPM:-3000}
-  local dir seq=0 current="" variant label ready=" "
+  # 1,000 RPM keeps a 4-vCPU CI runner short of saturation; past it, requests
+  # queue and the overhead figure measures the queue rather than the gateway.
+  local rounds=${AB_ROUNDS:-3} seconds=${AB_SECONDS:-20} rpm=${AB_RPM:-1000}
+  local dir seq=0 current="" variant label ready=" " configured=${OTARI_IMAGE:-otari:loadtest}
   dir="results/ab-$(date +%Y%m%d-%H%M%S)"
   mkdir -p "$dir/runs"
   image_of() { if [[ $1 == base ]]; then echo "$base"; else echo "$head"; fi; }
@@ -292,9 +309,14 @@ ab() {
   done
   for variant in "${order[@]}"; do
     if [[ $variant != "$current" ]]; then
-      use_build "$variant" "$(image_of "$variant")"
+      if [[ $ready == *" $variant "* ]]; then
+        use_build "$variant" "$(image_of "$variant")" migrated
+      else
+        use_build "$variant" "$(image_of "$variant")"
+        setup --name "ab-$variant" >/dev/null
+        ready+="$variant "
+      fi
       current=$variant
-      [[ $ready == *" $variant "* ]] || { setup --name "ab-$variant" >/dev/null; ready+="$variant "; }
       # Discarded: the first requests on a fresh process pay for its warm-up.
       tool loadgen.py --key-file "state/ab-$variant.json" --label warm --out results/warm --users "$USERS" \
         --stream-share "$STREAM_SHARE" --phase "$rpm:5" >/dev/null
@@ -312,7 +334,7 @@ ab() {
   # Statements are counted, not timed, so their order does not matter: the build
   # already running goes first, saving a swap.
   for variant in "$current" $([[ $current == head ]] && echo base || echo head); do
-    [[ $variant == "$current" ]] || { use_build "$variant" "$(image_of "$variant")"; current=$variant; }
+    [[ $variant == "$current" ]] || { use_build "$variant" "$(image_of "$variant")" migrated; current=$variant; }
     for mode in direct spill; do
       COUNT_WARM_SECONDS=6 count_statements "ab_$variant" "ab-$variant" "$mode" "$dir/statements-$variant-$mode" \
         | grep '^Statements per request' | sed "s/^/$variant $mode: /" || true
@@ -327,15 +349,26 @@ ab() {
   # shellcheck disable=SC2086
   tool ab.py report "$dir" ${AB_FLAGS:-} || FAILED=$((FAILED + 1))
   echo "report: $dir/report.md"
+  # Back on the configured image and database, so a scenario run next checks the
+  # database its requests went to. AB_RESTORE=0 skips it where nothing runs next.
+  if [[ "${AB_RESTORE:-1}" != 0 ]]; then
+    unset OTARI_DATABASE_URL
+    export OTARI_IMAGE=$configured
+    dc up -d --no-deps --no-build --force-recreate --wait otari-1 otari-2 >/dev/null 2>&1
+    dc restart lb >/dev/null 2>&1
+    echo ">>> replicas back on $configured and the configured database"
+  fi
 }
 
 case "${1:-}" in
   up)
     mkdir -p results state
     if [[ "${LOADTEST_BUILD:-1}" == 0 ]]; then dc up -d --no-build --wait; else dc up -d --build --wait; fi
+    docker rm -f "$TOOLS_DAEMON" >/dev/null 2>&1 || true
+    dc --progress quiet run -d --no-deps --name "$TOOLS_DAEMON" --entrypoint sleep tools infinity >/dev/null
     echo "stack up: load balancer on 127.0.0.1:${LOADTEST_LB_PORT:-18080}, fake provider on $FAKE"
     ;;
-  down) dc --profile tools down -v ;;
+  down) docker rm -f "$TOOLS_DAEMON" >/dev/null 2>&1 || true; dc --profile tools down -v ;;
   logs) dc logs -f otari-1 otari-2 ;;
   baseline) scenario_baseline ;;
   steady) scenario_steady ;;
@@ -352,10 +385,10 @@ case "${1:-}" in
   check) shift; check "$@" ;;
   all)
     for s in ${SCENARIOS:-baseline steady spill shared-budget budget-reset provider-429 stream-fail redis-down kill-replica}; do
-      echo "===== $s ====="; "$0" "$s" || { echo "!!! $s failed"; FAILED=$((FAILED + 1)); }
+      echo "===== $s ====="; "$SELF" "$s" || { echo "!!! $s failed"; FAILED=$((FAILED + 1)); }
     done
     ;;
-  *) sed -n '2,31p' "$0"; exit 1 ;;
+  *) sed -n '2,31p' "$SELF"; exit 1 ;;
 esac
 
 (( FAILED == 0 )) || { echo "$FAILED failure(s)"; exit 1; }

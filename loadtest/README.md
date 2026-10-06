@@ -116,8 +116,11 @@ OTARI_IMAGE=otari:head LOADTEST_BUILD=0 ./run.sh up
 Each image gets a database of its own (`ab_base`, `ab_head`), since a migration
 in head would break base on a shared one. Swapping recreates both replicas and
 restarts nginx. The images alternate base, head, head, base, base, head
-(`AB_ROUNDS`, default 3), each run `AB_SECONDS` (20) at `AB_RPM` (3,000) after a
-discarded warm-up, so drift in the machine's speed lands on both. Then each
+(`AB_ROUNDS`, default 3), each run `AB_SECONDS` (20) at `AB_RPM` (1,000) after a
+discarded warm-up, so drift in the machine's speed lands on both. Keep the rate
+below what the machine saturates at: past it requests queue, and overhead
+measures the queue rather than the gateway. A 4-vCPU CI runner saturates
+somewhere under 3,000. Then each
 counts its statements per request, direct and spilled, and head's tenant is
 checked. `ab.py report` writes `results/ab-TIMESTAMP/report.md` and fails on:
 
@@ -132,10 +135,11 @@ runs spread, but only `AB_FLAGS=--enforce-timing` makes them fail;
 
 `.github/workflows/otari-loadtest.yml` runs on a PR that touches `src/`, the
 migrations, dependencies, the Dockerfile or this directory, as two jobs on
-separate runners, each about five minutes with the image cache warm:
+separate runners:
 
 - **scenarios**: `steady`, `spill`, `shared-budget`, `provider-429` and
-  `stream-fail` at 20s phases and 3,000 RPM, with every check.
+  `stream-fail` at 20s phases, with every check, and a $0.15 shared pool
+  (`SHARED_POOL_USD`) so it runs dry within one.
 - **ab**: the PR's merge commit against its base, as above. The report is the
   job summary. For a cost that is deliberate, add the `perf-accepted` label and
   re-run the job.
