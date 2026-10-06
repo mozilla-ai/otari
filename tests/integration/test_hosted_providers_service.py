@@ -1,10 +1,8 @@
 """The deployment's hosted providers, against a real database.
 
-Exercised at the service layer: what is pinned is the store, the offer rule,
-the seeding, the sweep and the runtime resolve, none of which is about whether
-any-llm can reach a provider. Model discovery and the community price dataset
-are stubbed throughout; a case that dialed for real would be testing the
-network.
+Exercised at the service layer: the store, the offer rule, the seeding, the
+sweep and the runtime resolve. Model discovery and the community price dataset
+are stubbed; a case that dialed for real would be testing the network.
 """
 
 import uuid
@@ -14,9 +12,8 @@ from decimal import Decimal
 
 import pytest
 from any_llm.types.model import Model
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
@@ -26,11 +23,13 @@ from gateway.exceptions.providers_exceptions import (
     HostedModelNameRequiredError,
     HostedModelNotFoundError,
     HostedProviderAlreadyExistsError,
+    HostedProviderClientArgsUnreadableError,
+    HostedProviderKeyRequiredError,
     HostedProviderNotFoundError,
-    HostedProviderSecretStorageError,
     HostedProviderUnknownProviderError,
 )
-from gateway.models.pricing import API_ORIGIN, ModelPricing, OrganizationModelPricing
+from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
+from gateway.models.pricing import API_ORIGIN, SEED_ORIGIN, ModelPricing, OrganizationModelPricing
 from gateway.models.providers import HostedProvider, HostedProviderModel
 from gateway.models.secret_fields import REDACTED_VALUE
 from gateway.models.tenancy import Organization
@@ -45,18 +44,24 @@ from gateway.schemas.providers import (
 )
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.pricing import DeploymentPricingService
+from gateway.services.pricing_service import configure_default_pricing
 from gateway.services.providers import HostedProviderService
 from gateway.services.secret_box import generate_secret_key
 
 pytestmark = pytest.mark.asyncio
 
 KEY = "sk-live-hosted-1234"
+DIAL = "gateway.services.providers._hosted_provider_service.test_provider_credentials"
+DATASET = "gateway.services.pricing._deployment_pricing_service.default_model_pricing"
 
 
 @pytest.fixture(autouse=True)
-def _secret_key(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def _secret_key_and_default_pricing(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """A secret box to store under, and the community dataset switched on, as a priced deployment runs."""
     monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    configure_default_pricing(True)
     yield
+    configure_default_pricing(False)
 
 
 def _service(db: AsyncSession, config: GatewayConfig | None = None) -> HostedProviderService:
@@ -67,6 +72,7 @@ def _service(db: AsyncSession, config: GatewayConfig | None = None) -> HostedPro
         providers=HostedProviderRepository(uow),
         models=HostedProviderModelRepository(uow),
         pricing=DeploymentPricingService(uow, pricing=ModelPricingRepository(uow)),
+        live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
     )
 
 
@@ -87,7 +93,7 @@ def _discovery(
             discovery_unsupported=unsupported,
         )
 
-    monkeypatch.setattr("gateway.services.providers._hosted_provider_service.test_provider_credentials", _stub)
+    monkeypatch.setattr(DIAL, _stub)
     return calls
 
 
@@ -106,13 +112,11 @@ def _defaults(monkeypatch: pytest.MonkeyPatch, rates: dict[str, tuple[str, str]]
             unit="tokens",
         )
 
-    monkeypatch.setattr("gateway.services.pricing._deployment_pricing_service.default_model_pricing", _stub)
+    monkeypatch.setattr(DATASET, _stub)
 
 
 async def _offered(db: AsyncSession, provider: str) -> dict[str, bool]:
-    rows = (
-        await db.execute(select(HostedProviderModel).where(col(HostedProviderModel.provider) == provider))
-    ).scalars()
+    rows = (await db.execute(select(HostedProviderModel).where(HostedProviderModel.provider == provider))).scalars()
     return {row.model: row.enabled for row in rows}
 
 
@@ -177,6 +181,11 @@ async def _own_key(db: AsyncSession, organization: Organization, provider: str) 
     await db.commit()
 
 
+async def _provider(service: HostedProviderService, monkeypatch: pytest.MonkeyPatch, *models: str) -> None:
+    _discovery(monkeypatch, *models)
+    await service.create_provider(HostedProviderCreateRequest(provider="openai", api_key=KEY))
+
+
 # --------------------------------------------------------------------------- #
 # Providers
 # --------------------------------------------------------------------------- #
@@ -200,7 +209,7 @@ async def test_creating_a_provider_offers_what_it_lists_and_returns_no_key(
     assert await _offered(async_db, "openai") == {"gpt-4o": True, "gpt-4o-mini": False}
     [seeded] = await _versions(async_db, "openai:gpt-4o")
     assert seeded.input_price_per_million == Decimal("2.5")
-    assert seeded.origin == API_ORIGIN
+    assert seeded.origin == SEED_ORIGIN
     assert await _versions(async_db, "openai:gpt-4o-mini") == []
 
 
@@ -220,10 +229,23 @@ async def test_client_args_are_encrypted_at_rest_and_read_back_whole(
     assert row.encrypted_client_args is not None
     assert "shh" not in row.encrypted_client_args
     assert "eu-west-1" not in row.encrypted_client_args
-    assert not hasattr(row, "client_args")
     resolved = await service.resolve("bedrock")
     assert resolved is not None
     assert resolved.client_args == {"region": "eu-west-1", "aws_secret_access_key": "shh"}
+
+
+async def test_with_default_pricing_off_nothing_is_seeded_and_models_arrive_switched_off(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rate copied from a dataset the operator switched off would be a rate they did not choose."""
+    configure_default_pricing(False)
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    await _price(async_db, "openai:o3", "20", "80")
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "gpt-4o", "o3")
+
+    assert await _offered(async_db, "openai") == {"gpt-4o": False, "o3": True}
+    assert await _versions(async_db, "openai:gpt-4o") == []
 
 
 async def test_a_provider_that_will_not_list_still_lands(
@@ -269,9 +291,10 @@ async def test_a_second_provider_for_the_same_implementation_is_refused(
 async def test_without_a_secret_key_nothing_is_stored(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OTARI_SECRET_KEY")
 
-    with pytest.raises(HostedProviderSecretStorageError):
+    with pytest.raises(SecretBoxUnavailableTenancyError) as refused:
         await _service(async_db).create_provider(HostedProviderCreateRequest(provider="openai", api_key=KEY))
 
+    assert "Fernet" not in refused.value.message
     assert (await async_db.execute(select(HostedProvider))).scalars().all() == []
 
 
@@ -302,16 +325,23 @@ async def test_rotating_the_key_replaces_it(async_db: AsyncSession, monkeypatch:
     assert resolved.api_key == "sk-live-rotated-9876"
 
 
-async def test_a_blank_endpoint_clears_it_rather_than_storing_an_empty_string(
+async def test_repointing_the_base_at_another_host_needs_the_key_again(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Without this, an operator who cannot read the key could have it sent to a host of their choosing."""
     _discovery(monkeypatch)
     service = _service(async_db)
-    await service.create_provider(HostedProviderCreateRequest(provider="openai", api_key=KEY, api_base="http://a/v1"))
+    await service.create_provider(HostedProviderCreateRequest(provider="openai", api_key=KEY, api_base="https://a/v1"))
 
-    public = await service.update_provider("openai", HostedProviderUpdateRequest(api_base="  "))
-
-    assert public.api_base is None
+    with pytest.raises(HostedProviderKeyRequiredError):
+        await service.update_provider("openai", HostedProviderUpdateRequest(api_base="https://evil.example/v1"))
+    # The same host on another path, a cleared base, and a move that brings the key are all fine.
+    assert (await service.update_provider("openai", HostedProviderUpdateRequest(api_base="https://a/v2"))).api_base
+    assert (await service.update_provider("openai", HostedProviderUpdateRequest(api_base="  "))).api_base is None
+    moved = await service.update_provider(
+        "openai", HostedProviderUpdateRequest(api_base="https://b/v1", api_key="sk-live-moved-4321")
+    )
+    assert (moved.api_base, moved.api_key_last4) == ("https://b/v1", "4321")
 
 
 async def test_echoing_the_mask_back_keeps_the_stored_secret_and_null_clears_it(
@@ -336,6 +366,34 @@ async def test_echoing_the_mask_back_keeps_the_stored_secret_and_null_clears_it(
 
     cleared = await service.update_provider("bedrock", HostedProviderUpdateRequest(client_args=None))
     assert cleared.client_args is None
+
+
+async def test_a_mask_with_nothing_readable_behind_it_is_refused_rather_than_stored(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After a key rotation the stored extras will not decrypt, and the form still echoes the mask."""
+    _discovery(monkeypatch)
+    service = _service(async_db)
+    await service.create_provider(
+        HostedProviderCreateRequest(provider="bedrock", api_key=KEY, client_args={"aws_secret_access_key": "shh"})
+    )
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+
+    with pytest.raises(HostedProviderClientArgsUnreadableError):
+        await service.update_provider(
+            "bedrock",
+            HostedProviderUpdateRequest(
+                api_key="sk-live-new-0001", client_args={"aws_secret_access_key": REDACTED_VALUE}
+            ),
+        )
+    # Entered in full, the same request lands.
+    full = await service.update_provider(
+        "bedrock", HostedProviderUpdateRequest(api_key="sk-live-new-0001", client_args={"aws_secret_access_key": "new"})
+    )
+    assert full.client_args == {"aws_secret_access_key": REDACTED_VALUE}
+    resolved = await service.resolve("bedrock")
+    assert resolved is not None
+    assert resolved.client_args == {"aws_secret_access_key": "new"}
 
 
 async def test_an_unknown_provider_is_not_found_on_every_path(async_db: AsyncSession) -> None:
@@ -365,14 +423,26 @@ async def test_removing_a_provider_takes_its_roster_and_leaves_its_rates(
     assert await service.resolve("openai") is None
 
 
+async def test_a_provider_added_again_keeps_following_the_dataset(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Provenance lives on the price version, so removing and re-adding loses nothing."""
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "gpt-4o")
+    await service.delete_provider("openai")
+    await _provider(service, monkeypatch, "gpt-4o")
+
+    _defaults(monkeypatch, {"gpt-4o": ("2", "8")})
+    outcome = await service.refresh_models("openai")
+
+    assert outcome.repriced == ["gpt-4o"]
+    assert (await _versions(async_db, "openai:gpt-4o"))[-1].input_price_per_million == Decimal("2")
+
+
 # --------------------------------------------------------------------------- #
 # Offered models and their prices
 # --------------------------------------------------------------------------- #
-
-
-async def _provider(service: HostedProviderService, monkeypatch: pytest.MonkeyPatch, *models: str) -> None:
-    _discovery(monkeypatch, *models)
-    await service.create_provider(HostedProviderCreateRequest(provider="openai", api_key=KEY))
 
 
 async def test_the_model_list_carries_each_models_current_price(
@@ -472,7 +542,7 @@ async def test_a_toggle_travels_alone_and_repricing_makes_the_rate_the_operators
     )
     assert (repriced.price_source, repriced.input_price_per_million) == ("deployment", 5.0)
     assert repriced.enabled is False
-    assert len(await _versions(async_db, "openai:gpt-4o")) == 2
+    assert [version.origin for version in await _versions(async_db, "openai:gpt-4o")] == [SEED_ORIGIN, API_ORIGIN]
 
 
 async def test_a_model_under_another_provider_is_not_found(
@@ -541,6 +611,44 @@ async def test_refresh_leaves_a_price_an_operator_chose(
 
     assert outcome.repriced == []
     assert (await _versions(async_db, "openai:gpt-4o"))[-1].input_price_per_million == Decimal("5")
+
+
+async def test_refresh_prices_a_model_whose_rates_were_deleted_or_switches_it_off(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The offer rule holds after the fact: an unpriced model is not served."""
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10"), "o3": ("20", "80")})
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "gpt-4o", "o3")
+    await async_db.execute(delete(ModelPricing).where(ModelPricing.model_key.in_(["openai:gpt-4o", "openai:o3"])))
+    await async_db.commit()
+
+    _defaults(monkeypatch, {"gpt-4o": ("2", "8")})
+    outcome = await service.refresh_models("openai")
+
+    assert outcome.repriced == ["gpt-4o"]
+    assert await _offered(async_db, "openai") == {"gpt-4o": True, "o3": False}
+    [reseeded] = await _versions(async_db, "openai:gpt-4o")
+    assert (reseeded.origin, reseeded.input_price_per_million) == (SEED_ORIGIN, Decimal("2"))
+
+
+async def test_two_refreshes_racing_leave_the_loser_with_a_conflict_not_a_crash(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _defaults(monkeypatch, {})
+    service = _service(async_db)
+    await _provider(service, monkeypatch)
+    _discovery(monkeypatch, "gpt-5")
+    # The other refresh offered the model between this one's read and its write.
+    monkeypatch.setattr(HostedProviderModelRepository, "names_for_provider", _nothing_offered)
+    await service.add_model("openai", HostedModelCreateRequest(model="gpt-5"))
+
+    with pytest.raises(HostedModelAlreadyOfferedError):
+        await service.refresh_models("openai")
+
+
+async def _nothing_offered(_self: object, _provider: str) -> set[str]:
+    return set()
 
 
 async def test_refresh_reports_a_provider_that_will_not_answer(
@@ -612,7 +720,11 @@ async def test_a_sweep_takes_unoffered_prices_off_the_list_and_the_preview_names
     assert len(await _versions(async_db, "nebius:llama")) == 1
 
     applied = await service.refresh_catalog(apply=True)
-    assert applied.removed == ["nebius:llama"]
+    assert (applied.removed, applied.removed_price_rows, applied.removed_override_rows) == (
+        preview.removed,
+        preview.removed_price_rows,
+        preview.removed_override_rows,
+    )
     assert await _versions(async_db, "nebius:llama") == []
     assert len(await _versions(async_db, "otari:web_search")) == 1
     assert len(await _versions(async_db, "openai:gpt-4o")) == 1
@@ -657,6 +769,33 @@ async def test_a_sweep_offers_what_a_provider_newly_lists_before_judging(
     applied = await service.refresh_catalog(apply=True)
     assert applied.providers[0].added == ["gpt-5"]
     assert await _offered(async_db, "openai") == {"gpt-4o": True, "gpt-5": True}
+
+
+async def test_a_sweep_offers_nothing_on_a_provider_removed_while_it_dialed(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without the foreign key the roster would keep rows with nothing to own them."""
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10"), "gpt-5": ("3", "12")})
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "gpt-4o")
+    _discovery(monkeypatch, "claude")
+    await service.create_provider(HostedProviderCreateRequest(provider="anthropic", api_key=KEY))
+
+    async def _dial_and_remove(impl_name: str, **_: object) -> ProviderDiscovery:
+        if impl_name == "openai":
+            await service.delete_provider("openai")
+        return ProviderDiscovery(
+            provider=impl_name, models=[Model(id="gpt-5", object="model", created=0, owned_by=impl_name)]
+        )
+
+    monkeypatch.setattr(DIAL, _dial_and_remove)
+    applied = await service.refresh_catalog(apply=True)
+
+    [anthropic, openai] = sorted(applied.providers, key=lambda answer: answer.provider)
+    assert openai.added == []
+    assert openai.error is not None
+    assert anthropic.added == ["gpt-5"]
+    assert await _offered(async_db, "openai") == {}
 
 
 async def test_a_sweep_refuses_while_nothing_is_offered(
@@ -707,6 +846,7 @@ async def test_the_runtime_resolves_the_row_the_surface_wrote(
 
     assert resolved is not None
     assert (resolved.api_key, resolved.api_base, resolved.client_args) == (KEY, "http://a/v1", {"x": 1})
+    assert await service.resolve("openai-compatible", "gpt-4o") is not None
     assert await service.resolve("anthropic") is None
 
 
@@ -735,8 +875,6 @@ async def test_the_listing_answers_for_exactly_what_resolves(
 
     advertised = await service.serveable_models()
 
-    # The switched-off provider is absent, and under the serving one only the
-    # model that is switched on is advertised.
     assert advertised == {"openai": frozenset({"gpt-4o"})}
     assert await service.resolve("anthropic", "claude") is None
 
@@ -750,5 +888,4 @@ async def test_a_credential_no_configured_key_can_read_is_unserved_rather_than_f
 
     assert await service.resolve("openai") is None
     assert await service.serveable_models() == {}
-    # The row is intact and the page still lists it, by its tail.
     assert (await service.list_providers()).data[0].api_key_last4 == "1234"

@@ -89,14 +89,14 @@ def classify_priced_keys(
     that key's own roster and priced from its own override first. The override
     itself is spared by the repository, not by this classification.
 
-    **Not every rate on the list prices a model.** A gateway-run tool is keyed
+    NOTE: not every rate on the list prices a model. A gateway-run tool is keyed
     under the reserved ``otari`` provider, and a configured search tool is keyed
     ``<provider>:<tool>`` off ``config.search_tools`` rather than
     ``config.providers``, so ``search_providers`` has to be passed or a
     deployment with ``search_tools:`` configured loses the rate ``POST
     /v1/search`` reserves against.
 
-    **The one gap this cannot close.** A provider credentialed from the
+    NOTE: a provider credentialed from the
     environment alone, with no ``providers:`` entry and no hosted provider, is
     invisible to every set below. An operator-set rate for one of those
     classifies as removable. The preview covers it: every key is named before
