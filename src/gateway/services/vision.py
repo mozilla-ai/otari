@@ -9,12 +9,12 @@ model for best quality.
 
 from __future__ import annotations
 
-from any_llm import acompletion
 from any_llm.types.completion import CompletionUsage
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services.provider_kwargs import resolve_provider_selector
+from gateway.services.providers import acompletion
 
 _DESCRIBE_PROMPT = (
     "You are assisting a text-only language model that cannot see images. "

@@ -171,8 +171,8 @@ class BatchLogWriter:
 
     async def _write(self, rows: list[UsageLog]) -> None:
         async with create_log_session() as db:
-            # Spend is reconciled inline via the budget reservation path, not
-            # here — see SingleLogWriter.put. The writer only persists rows.
+            # The writer only persists rows; spend is reconciled inline by the
+            # budget reservation path (see SingleLogWriter.put).
             db.add_all(rows)
             await db.commit()
 

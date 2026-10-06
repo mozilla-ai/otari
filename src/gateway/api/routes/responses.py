@@ -2,7 +2,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
-from any_llm import LLMProvider, aresponses
+from any_llm import LLMProvider
 from any_llm.types.completion import CompletionUsage
 from any_llm.types.responses import Response as ResponsesResponse
 from any_llm.types.responses import ResponsesParams, ResponseStreamEvent
@@ -69,6 +69,7 @@ from gateway.services.mcp_loop_responses import (
     responses_tool_loop_stream,
 )
 from gateway.services.provider_kwargs import apply_endpoint_defaults
+from gateway.services.providers import aresponses
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
 from gateway.services.tools import (
     CODE_EXECUTION_HEADER,

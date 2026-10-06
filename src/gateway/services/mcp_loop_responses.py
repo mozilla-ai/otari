@@ -28,7 +28,6 @@ from contextlib import aclosing
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from any_llm import aresponses
 from openai.types.responses.response_output_item_added_event import ResponseOutputItemAddedEvent
 from openai.types.responses.response_output_item_done_event import ResponseOutputItemDoneEvent
 
@@ -47,6 +46,7 @@ from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
     ToolBackend,
 )
+from gateway.services.providers import aresponses
 from gateway.services.tool_format import openai_to_responses_tools
 from gateway.services.tool_usage import is_tool_error
 from gateway.services.tools import (

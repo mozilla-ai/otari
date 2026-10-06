@@ -23,7 +23,6 @@ from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
 from typing import TYPE_CHECKING, Any
 
-from any_llm import acompletion
 from any_llm.types.completion import PromptTokensDetails
 
 from gateway.core.env import otari_env
@@ -37,6 +36,7 @@ from gateway.services._tool_loop import (
     run_tool_loop_stream,
     tool_failure_detail,
 )
+from gateway.services.providers import acompletion
 from gateway.services.tools import MAX_TOOL_ITERATIONS_CAP, MAX_USES_EXCEEDED_ERROR, ToolUseBudget, is_capped_call
 
 if TYPE_CHECKING:

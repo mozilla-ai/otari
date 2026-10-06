@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING, Any, Protocol, TypedDict, runtime_checkable
 
 from anthropic.types.beta import BetaMCPToolResultBlock, BetaMCPToolUseBlock
 from anthropic.types.beta.beta_container import BetaContainer
-from any_llm import amessages
 from any_llm.types.messages import (
     BetaContextManagementResponse,
     ContentBlockStartEvent,
@@ -44,6 +43,7 @@ from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
     ToolBackend,
 )
+from gateway.services.providers import amessages
 from gateway.services.tool_format import openai_to_anthropic_tools
 from gateway.services.tool_usage import is_tool_error
 from gateway.services.tools import (

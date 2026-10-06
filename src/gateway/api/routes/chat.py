@@ -2,7 +2,6 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
-from any_llm import acompletion
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -73,6 +72,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop_stream,
 )
 from gateway.services.provider_kwargs import apply_endpoint_defaults
+from gateway.services.providers import acompletion
 from gateway.services.tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, Dialect, ToolUseBudget
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt

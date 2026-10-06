@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator, Callable
 from functools import partial
 from typing import Annotated, Any, Literal
 
-from any_llm import AnyLLM, amessages
+from any_llm import AnyLLM
 from any_llm.types.completion import CompletionUsage
 from any_llm.types.messages import (
     MessageDeltaEvent,
@@ -96,6 +96,7 @@ from gateway.services.mcp_loop_messages import (
     anthropic_tool_loop_stream,
 )
 from gateway.services.provider_kwargs import ProviderAccounts, apply_endpoint_defaults
+from gateway.services.providers import amessages
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
 from gateway.services.tools import (
