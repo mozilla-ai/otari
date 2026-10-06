@@ -9692,6 +9692,170 @@
         "title": "OrgProviderModelsRefreshPublic",
         "type": "object"
       },
+      "OrgWebSearchKeyCreateRequest": {
+        "description": "What a caller sends to add a key. The service keeps only its ciphertext and ``last4``.",
+        "properties": {
+          "api_key": {
+            "minLength": 1,
+            "title": "Api Key",
+            "type": "string"
+          },
+          "name": {
+            "description": "How the organization tells this key apart from its others.",
+            "maxLength": 255,
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "description": "The search provider the key is for: tavily or brave.",
+            "maxLength": 255,
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "name",
+          "api_key"
+        ],
+        "title": "OrgWebSearchKeyCreateRequest",
+        "type": "object"
+      },
+      "OrgWebSearchKeyPublic": {
+        "description": "One key as the API shows it: never the key itself, only ``last4``.",
+        "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_org_default": {
+            "title": "Is Org Default",
+            "type": "boolean"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "usable": {
+            "description": "False when this deployment cannot decrypt the stored key, so no search uses it. It is still listed, because replacing or deleting it is what fixes it.",
+            "title": "Usable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "provider",
+          "name",
+          "is_org_default",
+          "usable",
+          "created_at"
+        ],
+        "title": "OrgWebSearchKeyPublic",
+        "type": "object"
+      },
+      "OrgWebSearchKeyUpdateRequest": {
+        "description": "A partial update: only what is set is applied.",
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "OrgWebSearchKeyUpdateRequest",
+        "type": "object"
+      },
+      "OrgWebSearchKeysPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/OrgWebSearchKeyPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "OrgWebSearchKeysPublic",
+        "type": "object"
+      },
       "OrganizationBudgetCreate": {
         "description": "Create one budget owned by the caller's organization.",
         "properties": {
@@ -20581,6 +20745,116 @@
         "title": "WorkspaceWebSearchConfigUpdate",
         "type": "object"
       },
+      "WorkspaceWebSearchKeyOverrideRequest": {
+        "description": "Tri-state: an omitted flag keeps its value.\n\nPinning a key re-enables it and unpins any other key of the workspace, and turning a\nkey off unpins it. Sending both flags true is refused. Both false deletes the override.",
+        "properties": {
+          "disabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabled"
+          },
+          "is_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Default"
+          }
+        },
+        "title": "WorkspaceWebSearchKeyOverrideRequest",
+        "type": "object"
+      },
+      "WorkspaceWebSearchKeyPublic": {
+        "description": "One of the organization's keys, as one workspace sees it.",
+        "properties": {
+          "disabled": {
+            "description": "The workspace turned this key off.",
+            "title": "Disabled",
+            "type": "boolean"
+          },
+          "is_default": {
+            "description": "The workspace pinned this key as its own.",
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "is_effective": {
+            "description": "This is the key the workspace's searches use.",
+            "title": "Is Effective",
+            "type": "boolean"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "org_web_search_key_id": {
+            "format": "uuid",
+            "title": "Org Web Search Key Id",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "usable": {
+            "title": "Usable",
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "org_web_search_key_id",
+          "workspace_id",
+          "provider",
+          "name",
+          "is_default",
+          "disabled",
+          "is_effective",
+          "usable"
+        ],
+        "title": "WorkspaceWebSearchKeyPublic",
+        "type": "object"
+      },
+      "WorkspaceWebSearchKeysPublic": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceWebSearchKeyPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "WorkspaceWebSearchKeysPublic",
+        "type": "object"
+      },
       "WorkspacesPublic": {
         "properties": {
           "count": {
@@ -31065,6 +31339,396 @@
         ]
       }
     },
+    "/api/v1/organizations/me/web-search-keys": {
+      "get": {
+        "description": "List the caller's organization's web search keys. Organization owners and admins only.",
+        "operationId": "web-search-keys-list_org_web_search_keys",
+        "parameters": [
+          {
+            "description": "Include archived keys.",
+            "in": "query",
+            "name": "include_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include archived keys.",
+              "title": "Include Archived",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgWebSearchKeysPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Org Web Search Keys",
+        "tags": [
+          "web-search-keys"
+        ]
+      },
+      "post": {
+        "description": "Add a web search key to the caller's organization. Organization owners and admins only.\n\nA workspace with a usable key searches with it rather than with the deployment's search.",
+        "operationId": "web-search-keys-create_org_web_search_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrgWebSearchKeyCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgWebSearchKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Org Web Search Key",
+        "tags": [
+          "web-search-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/web-search-keys/{key_id}": {
+      "delete": {
+        "description": "Delete an archived web search key. Organization owners and admins only.",
+        "operationId": "web-search-keys-delete_org_web_search_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Org Web Search Key",
+        "tags": [
+          "web-search-keys"
+        ]
+      },
+      "patch": {
+        "description": "Rename a web search key or replace its secret. Organization owners and admins only.",
+        "operationId": "web-search-keys-update_org_web_search_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrgWebSearchKeyUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgWebSearchKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Org Web Search Key",
+        "tags": [
+          "web-search-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/web-search-keys/{key_id}/archive": {
+      "post": {
+        "description": "Take a web search key out of use. Organization owners and admins only.",
+        "operationId": "web-search-keys-archive_org_web_search_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgWebSearchKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Archive Org Web Search Key",
+        "tags": [
+          "web-search-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/web-search-keys/{key_id}/default": {
+      "post": {
+        "description": "Make a web search key its provider's organization default. Organization owners and admins only.",
+        "operationId": "web-search-keys-set_org_default_web_search_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgWebSearchKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Org Default Web Search Key",
+        "tags": [
+          "web-search-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/web-search-keys/{key_id}/restore": {
+      "post": {
+        "description": "Put an archived web search key back in use. Organization owners and admins only.",
+        "operationId": "web-search-keys-restore_org_web_search_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgWebSearchKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Restore Org Web Search Key",
+        "tags": [
+          "web-search-keys"
+        ]
+      }
+    },
     "/api/v1/overview": {
       "get": {
         "description": "Summarize what the dashboard overview shows beside its usage chart.\n\nThe counts and the budget judgment in one answer, so the page does not read\nfour collections to compute them. A workspace outside the caller's\norganization is treated as none given rather than refused, because the id\ncomes from a switcher whose contents can go stale.",
@@ -39575,6 +40239,190 @@
         "summary": "Set Workspace Web Search Config",
         "tags": [
           "workspace-web-search"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/web-search-keys": {
+      "get": {
+        "description": "The organization's web search keys as this workspace sees them, and which one it searches with.\n\nAny member of the workspace may read it.",
+        "operationId": "web-search-keys-list_workspace_web_search_keys",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceWebSearchKeysPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Workspace Web Search Keys",
+        "tags": [
+          "web-search-keys"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/web-search-keys/{key_id}": {
+      "delete": {
+        "description": "Return this workspace to inheriting the key. Idempotent.",
+        "operationId": "web-search-keys-reset_workspace_web_search_key_override",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceWebSearchKeysPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Reset Workspace Web Search Key Override",
+        "tags": [
+          "web-search-keys"
+        ]
+      },
+      "patch": {
+        "description": "Pin a web search key as this workspace's own, or turn it off for this workspace.\n\nOrganization owners and admins, or this workspace's owners and admins.",
+        "operationId": "web-search-keys-set_workspace_web_search_key_override",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceWebSearchKeyOverrideRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceWebSearchKeysPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Workspace Web Search Key Override",
+        "tags": [
+          "web-search-keys"
         ]
       }
     },

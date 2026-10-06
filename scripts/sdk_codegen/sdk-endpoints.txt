@@ -433,6 +433,16 @@ DELETE /api/v1/workspaces/{workspace_id}/provider-keys/{key_id}               # 
 GET /api/v1/workspaces/{workspace_id}/provider-keys/{key_id}/models           # dashboard-only
 POST /api/v1/workspaces/{workspace_id}/provider-keys/{key_id}/models          # dashboard-only
 DELETE /api/v1/workspaces/{workspace_id}/provider-keys/{key_id}/models/{model} # dashboard-only
+GET /api/v1/organizations/me/web-search-keys                                  # dashboard-only
+POST /api/v1/organizations/me/web-search-keys                                 # dashboard-only
+PATCH /api/v1/organizations/me/web-search-keys/{key_id}                       # dashboard-only
+DELETE /api/v1/organizations/me/web-search-keys/{key_id}                      # dashboard-only
+POST /api/v1/organizations/me/web-search-keys/{key_id}/archive                # dashboard-only
+POST /api/v1/organizations/me/web-search-keys/{key_id}/restore                # dashboard-only
+POST /api/v1/organizations/me/web-search-keys/{key_id}/default                # dashboard-only
+GET /api/v1/workspaces/{workspace_id}/web-search-keys                         # dashboard-only
+PATCH /api/v1/workspaces/{workspace_id}/web-search-keys/{key_id}              # dashboard-only
+DELETE /api/v1/workspaces/{workspace_id}/web-search-keys/{key_id}             # dashboard-only
 # Workspace-scoped MCP servers (otari#658): a master-key operator surface for
 # registering the endpoints a workspace's requests may reach, alongside the
 # tenancy admin rows above. An SDK caller does not manage these; it names them

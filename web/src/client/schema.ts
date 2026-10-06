@@ -3169,6 +3169,116 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/web-search-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Org Web Search Keys
+         * @description List the caller's organization's web search keys. Organization owners and admins only.
+         */
+        get: operations["web-search-keys-list_org_web_search_keys"];
+        put?: never;
+        /**
+         * Create Org Web Search Key
+         * @description Add a web search key to the caller's organization. Organization owners and admins only.
+         *
+         *     A workspace with a usable key searches with it rather than with the deployment's search.
+         */
+        post: operations["web-search-keys-create_org_web_search_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/web-search-keys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Org Web Search Key
+         * @description Delete an archived web search key. Organization owners and admins only.
+         */
+        delete: operations["web-search-keys-delete_org_web_search_key"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Org Web Search Key
+         * @description Rename a web search key or replace its secret. Organization owners and admins only.
+         */
+        patch: operations["web-search-keys-update_org_web_search_key"];
+        trace?: never;
+    };
+    "/api/v1/organizations/me/web-search-keys/{key_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive Org Web Search Key
+         * @description Take a web search key out of use. Organization owners and admins only.
+         */
+        post: operations["web-search-keys-archive_org_web_search_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/web-search-keys/{key_id}/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Org Default Web Search Key
+         * @description Make a web search key its provider's organization default. Organization owners and admins only.
+         */
+        post: operations["web-search-keys-set_org_default_web_search_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/web-search-keys/{key_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Org Web Search Key
+         * @description Put an archived web search key back in use. Organization owners and admins only.
+         */
+        post: operations["web-search-keys-restore_org_web_search_key"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/overview": {
         parameters: {
             query?: never;
@@ -5680,6 +5790,54 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/web-search-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workspace Web Search Keys
+         * @description The organization's web search keys as this workspace sees them, and which one it searches with.
+         *
+         *     Any member of the workspace may read it.
+         */
+        get: operations["web-search-keys-list_workspace_web_search_keys"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/web-search-keys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Reset Workspace Web Search Key Override
+         * @description Return this workspace to inheriting the key. Idempotent.
+         */
+        delete: operations["web-search-keys-reset_workspace_web_search_key_override"];
+        options?: never;
+        head?: never;
+        /**
+         * Set Workspace Web Search Key Override
+         * @description Pin a web search key as this workspace's own, or turn it off for this workspace.
+         *
+         *     Organization owners and admins, or this workspace's owners and admins.
+         */
+        patch: operations["web-search-keys-set_workspace_web_search_key_override"];
         trace?: never;
     };
     "/otlp/v1/logs": {
@@ -10262,6 +10420,79 @@ export interface components {
             error?: string | null;
             /** Repriced */
             repriced: string[];
+        };
+        /**
+         * OrgWebSearchKeyCreateRequest
+         * @description What a caller sends to add a key. The service keeps only its ciphertext and ``last4``.
+         */
+        OrgWebSearchKeyCreateRequest: {
+            /** Api Key */
+            api_key: string;
+            /**
+             * Name
+             * @description How the organization tells this key apart from its others.
+             */
+            name: string;
+            /**
+             * Provider
+             * @description The search provider the key is for: tavily or brave.
+             */
+            provider: string;
+        };
+        /**
+         * OrgWebSearchKeyPublic
+         * @description One key as the API shows it: never the key itself, only ``last4``.
+         */
+        OrgWebSearchKeyPublic: {
+            /** Archived At */
+            archived_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Is Org Default */
+            is_org_default: boolean;
+            /** Last4 */
+            last4?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /** Provider */
+            provider: string;
+            /** Updated At */
+            updated_at?: string | null;
+            /**
+             * Usable
+             * @description False when this deployment cannot decrypt the stored key, so no search uses it. It is still listed, because replacing or deleting it is what fixes it.
+             */
+            usable: boolean;
+        };
+        /**
+         * OrgWebSearchKeyUpdateRequest
+         * @description A partial update: only what is set is applied.
+         */
+        OrgWebSearchKeyUpdateRequest: {
+            /** Api Key */
+            api_key?: string | null;
+            /** Name */
+            name?: string | null;
+        };
+        /** OrgWebSearchKeysPublic */
+        OrgWebSearchKeysPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["OrgWebSearchKeyPublic"][];
         };
         /**
          * OrganizationBudgetCreate
@@ -15041,6 +15272,63 @@ export interface components {
              * @description Search only: hint used when a request declares otari_web_search without one of its own
              */
             purpose_hint?: string | null;
+        };
+        /**
+         * WorkspaceWebSearchKeyOverrideRequest
+         * @description Tri-state: an omitted flag keeps its value.
+         *
+         *     Pinning a key re-enables it and unpins any other key of the workspace, and turning a
+         *     key off unpins it. Sending both flags true is refused. Both false deletes the override.
+         */
+        WorkspaceWebSearchKeyOverrideRequest: {
+            /** Disabled */
+            disabled?: boolean | null;
+            /** Is Default */
+            is_default?: boolean | null;
+        };
+        /**
+         * WorkspaceWebSearchKeyPublic
+         * @description One of the organization's keys, as one workspace sees it.
+         */
+        WorkspaceWebSearchKeyPublic: {
+            /**
+             * Disabled
+             * @description The workspace turned this key off.
+             */
+            disabled: boolean;
+            /**
+             * Is Default
+             * @description The workspace pinned this key as its own.
+             */
+            is_default: boolean;
+            /**
+             * Is Effective
+             * @description This is the key the workspace's searches use.
+             */
+            is_effective: boolean;
+            /** Last4 */
+            last4?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Org Web Search Key Id
+             * Format: uuid
+             */
+            org_web_search_key_id: string;
+            /** Provider */
+            provider: string;
+            /** Usable */
+            usable: boolean;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /** WorkspaceWebSearchKeysPublic */
+        WorkspaceWebSearchKeysPublic: {
+            /** Data */
+            data: components["schemas"]["WorkspaceWebSearchKeyPublic"][];
         };
         /** WorkspacesPublic */
         WorkspacesPublic: {
@@ -20334,6 +20622,232 @@ export interface operations {
             };
         };
     };
+    "web-search-keys-list_org_web_search_keys": {
+        parameters: {
+            query?: {
+                /** @description Include archived keys. */
+                include_archived?: boolean;
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgWebSearchKeysPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "web-search-keys-create_org_web_search_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrgWebSearchKeyCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgWebSearchKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "web-search-keys-delete_org_web_search_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "web-search-keys-update_org_web_search_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrgWebSearchKeyUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgWebSearchKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "web-search-keys-archive_org_web_search_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgWebSearchKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "web-search-keys-set_org_default_web_search_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgWebSearchKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "web-search-keys-restore_org_web_search_key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgWebSearchKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "overview-get_overview": {
         parameters: {
             query?: {
@@ -24513,6 +25027,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceWebSearchConfigPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "web-search-keys-list_workspace_web_search_keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceWebSearchKeysPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "web-search-keys-reset_workspace_web_search_key_override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceWebSearchKeysPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "web-search-keys-set_workspace_web_search_key_override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceWebSearchKeyOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceWebSearchKeysPublic"];
                 };
             };
             /** @description Validation Error */

@@ -6268,6 +6268,359 @@
     {
       "item": [
         {
+          "name": "List Org Web Search Keys",
+          "request": {
+            "description": "List the caller's organization's web search keys. Organization owners and admins only.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "web-search-keys"
+              ],
+              "query": [
+                {
+                  "description": "Include archived keys.",
+                  "disabled": true,
+                  "key": "include_archived",
+                  "value": ""
+                },
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/web-search-keys?include_archived=&skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Create Org Web Search Key",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"provider\": \"string\",\n  \"name\": \"string\",\n  \"api_key\": \"string\"\n}"
+            },
+            "description": "Add a web search key to the caller's organization. Organization owners and admins only.\n\nA workspace with a usable key searches with it rather than with the deployment's search.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "web-search-keys"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/web-search-keys"
+            }
+          }
+        },
+        {
+          "name": "Update Org Web Search Key",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"api_key\": \"string\",\n  \"name\": \"string\"\n}"
+            },
+            "description": "Rename a web search key or replace its secret. Organization owners and admins only.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "web-search-keys",
+                ":key_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/web-search-keys/:key_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Org Web Search Key",
+          "request": {
+            "description": "Delete an archived web search key. Organization owners and admins only.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "web-search-keys",
+                ":key_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/web-search-keys/:key_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Archive Org Web Search Key",
+          "request": {
+            "description": "Take a web search key out of use. Organization owners and admins only.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "web-search-keys",
+                ":key_id",
+                "archive"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/web-search-keys/:key_id/archive",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Set Org Default Web Search Key",
+          "request": {
+            "description": "Make a web search key its provider's organization default. Organization owners and admins only.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "web-search-keys",
+                ":key_id",
+                "default"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/web-search-keys/:key_id/default",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Restore Org Web Search Key",
+          "request": {
+            "description": "Put an archived web search key back in use. Organization owners and admins only.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "web-search-keys",
+                ":key_id",
+                "restore"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/web-search-keys/:key_id/restore",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Workspace Web Search Keys",
+          "request": {
+            "description": "The organization's web search keys as this workspace sees them, and which one it searches with.\n\nAny member of the workspace may read it.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "web-search-keys"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/web-search-keys",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Set Workspace Web Search Key Override",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"disabled\": false,\n  \"is_default\": false\n}"
+            },
+            "description": "Pin a web search key as this workspace's own, or turn it off for this workspace.\n\nOrganization owners and admins, or this workspace's owners and admins.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "web-search-keys",
+                ":key_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/web-search-keys/:key_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reset Workspace Web Search Key Override",
+          "request": {
+            "description": "Return this workspace to inheriting the key. Idempotent.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "web-search-keys",
+                ":key_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/web-search-keys/:key_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "web-search-keys"
+    },
+    {
+      "item": [
+        {
           "name": "Get Overview",
           "request": {
             "description": "Summarize what the dashboard overview shows beside its usage chart.\n\nThe counts and the budget judgment in one answer, so the page does not read\nfour collections to compute them. A workspace outside the caller's\norganization is treated as none given rather than refused, because the id\ncomes from a switcher whose contents can go stale.",
