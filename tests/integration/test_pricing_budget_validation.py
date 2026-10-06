@@ -61,17 +61,22 @@ def test_negative_budget_rejected(client: TestClient, master_key_header: dict[st
 
 
 def test_zero_duration_rejected(client: TestClient, master_key_header: dict[str, str]) -> None:
-    """Test that zero budget_duration_sec is rejected."""
+    """Test that a zero interval is rejected."""
     response = client.post(
         f"{API_ROOT}/budgets",
-        json={"max_budget": 100.0, "budget_duration_sec": 0},
+        json={
+            "max_budget": 100.0,
+            "reset_cycle": "every_n_hours",
+            "reset_every_n": 0,
+            "reset_anchor_at": "2026-01-01T00:00:00Z",
+        },
         headers=master_key_header,
     )
     assert response.status_code == 422
 
 
 def test_negative_duration_rejected(client: TestClient, master_key_header: dict[str, str]) -> None:
-    """Test that negative budget_duration_sec is rejected."""
+    """Test that a negative interval is rejected."""
     response = client.post(
         f"{API_ROOT}/budgets",
         json={"max_budget": 100.0, "budget_duration_sec": -86400},
@@ -84,7 +89,7 @@ def test_valid_budget_accepted(client: TestClient, master_key_header: dict[str, 
     """Test that valid budget values are accepted."""
     response = client.post(
         f"{API_ROOT}/budgets",
-        json={"max_budget": 100.0, "budget_duration_sec": 86400},
+        json={"max_budget": 100.0, "reset_cycle": "daily"},
         headers=master_key_header,
     )
     assert response.status_code == 200
@@ -125,7 +130,7 @@ def test_update_budget_negative_max_budget_rejected(client: TestClient, master_k
 
 
 def test_update_budget_zero_duration_rejected(client: TestClient, master_key_header: dict[str, str]) -> None:
-    """Test that updating a budget with zero budget_duration_sec is rejected."""
+    """Test that updating a budget with a zero interval is rejected."""
     create_response = client.post(
         f"{API_ROOT}/budgets",
         json={"max_budget": 100.0},
@@ -135,14 +140,14 @@ def test_update_budget_zero_duration_rejected(client: TestClient, master_key_hea
 
     response = client.patch(
         f"{API_ROOT}/budgets/{budget_id}",
-        json={"budget_duration_sec": 0},
+        json={"reset_cycle": "every_n_hours", "reset_every_n": 0, "reset_anchor_at": "2026-01-01T00:00:00Z"},
         headers=master_key_header,
     )
     assert response.status_code == 422
 
 
 def test_update_budget_negative_duration_rejected(client: TestClient, master_key_header: dict[str, str]) -> None:
-    """Test that updating a budget with negative budget_duration_sec is rejected."""
+    """Test that updating a budget with a negative interval is rejected."""
     create_response = client.post(
         f"{API_ROOT}/budgets",
         json={"max_budget": 100.0},

@@ -794,9 +794,9 @@ async def test_a_stored_servers_unsafe_url_is_not_named_to_the_caller(
             adapter=chat._ADAPTER,
             ctx=_request_context(async_db, workspace.id, organization.id),
             backends=ToolBackends(
-            mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
-            web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
-        ),
+                mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
+                web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+            ),
             response=Response(),
             declared=DeclaredTools(
                 guardrails=None,
@@ -825,9 +825,9 @@ async def test_prepare_gateway_tools_refuses_an_unknown_id(async_db: AsyncSessio
             adapter=chat._ADAPTER,
             ctx=_request_context(async_db, workspace.id, organization.id),
             backends=ToolBackends(
-            mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
-            web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
-        ),
+                mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
+                web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+            ),
             response=Response(),
             declared=DeclaredTools(
                 guardrails=None,
@@ -854,9 +854,9 @@ async def test_the_anthropic_envelope_names_an_unknown_id_as_not_found(async_db:
             adapter=messages._ADAPTER,
             ctx=_request_context(async_db, workspace.id, organization.id),
             backends=ToolBackends(
-            mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
-            web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
-        ),
+                mcp_server_port=build_mcp_server_port(GatewayConfig(), async_db),
+                web_search_policy_port=build_web_search_policy_port(GatewayConfig(), async_db),
+            ),
             response=Response(),
             declared=DeclaredTools(
                 guardrails=None,

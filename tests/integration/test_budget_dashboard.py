@@ -194,7 +194,7 @@ def test_an_explicit_null_budget_detaches_and_clears_the_reset_clock(
     # clearing below is visible rather than vacuously true.
     created = client.post(
         f"{API_ROOT}/budgets",
-        json={"max_budget": 100.0, "budget_duration_sec": 86400},
+        json={"max_budget": 100.0, "reset_cycle": "daily"},
         headers=master_key_header,
     )
     assert created.status_code == 200, created.text
@@ -226,18 +226,18 @@ def test_a_calendar_aligned_budget_gives_a_user_a_boundary_reset(
 ) -> None:
     """The user plane reads both cadences, not just the duration.
 
-    ``/api/v1/budgets`` accepts ``reset_alignment``, and the assignment path used to
+    ``/api/v1/budgets`` accepts ``reset_cycle``, and the assignment path used to
     read only ``budget_duration_sec``, so a user on a calendar-aligned budget got
     a null next reset. A null next reset never fires, so their spend never
     refilled and they were eventually refused permanently.
     """
     monthly = client.post(
         f"{API_ROOT}/budgets",
-        json={"max_budget": 100.0, "reset_alignment": "calendar_month"},
+        json={"max_budget": 100.0, "reset_cycle": "monthly", "reset_month_day": 1},
         headers=master_key_header,
     )
     assert monthly.status_code == 200, monthly.text
-    assert monthly.json()["reset_alignment"] == "calendar_month"
+    assert monthly.json()["reset_cycle"] == "monthly"
 
     assert client.post(f"{API_ROOT}/users", json={"user_id": "bruno"}, headers=master_key_header).status_code == 200
     assigned = client.patch(
@@ -301,7 +301,7 @@ def test_a_cadence_change_retimes_the_ceilings_naming_the_budget(
 
     patched = client.patch(
         f"{API_ROOT}/budgets/{budget_id}",
-        json={"reset_alignment": "calendar_month"},
+        json={"reset_cycle": "monthly", "reset_month_day": 1},
         headers=master_key_header,
     )
     assert patched.status_code == 200, patched.json()
@@ -320,7 +320,7 @@ def test_dropping_a_cadence_clears_the_ceiling_window(
 ) -> None:
     """The reverse, which would otherwise roll once at a boundary that no longer means anything."""
     created = client.post(
-        f"{API_ROOT}/budgets", json={"max_budget": 100.0, "reset_alignment": "calendar_day"}, headers=master_key_header
+        f"{API_ROOT}/budgets", json={"max_budget": 100.0, "reset_cycle": "daily"}, headers=master_key_header
     ).json()
     budget_id = created["budget_id"]
     ceiling = ScopedBudget(
@@ -335,7 +335,7 @@ def test_dropping_a_cadence_clears_the_ceiling_window(
 
     patched = client.patch(
         f"{API_ROOT}/budgets/{budget_id}",
-        json={"reset_alignment": None},
+        json={"reset_cycle": None},
         headers=master_key_header,
     )
     assert patched.status_code == 200, patched.json()
@@ -358,7 +358,7 @@ def test_a_rename_does_not_restart_a_ceiling_period(
     period its ceilings had already spent.
     """
     created = client.post(
-        f"{API_ROOT}/budgets", json={"max_budget": 100.0, "reset_alignment": "calendar_day"}, headers=master_key_header
+        f"{API_ROOT}/budgets", json={"max_budget": 100.0, "reset_cycle": "daily"}, headers=master_key_header
     ).json()
     budget_id = created["budget_id"]
     start, end = datetime(2026, 8, 1, tzinfo=UTC), datetime(2026, 8, 2, tzinfo=UTC)

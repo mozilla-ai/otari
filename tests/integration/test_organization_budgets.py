@@ -79,7 +79,12 @@ _CEILINGS = f"{API_ROOT}/organizations/me/spend-ceilings"
 
 
 def _budget_body(**overrides: Any) -> dict[str, Any]:
-    body: dict[str, Any] = {"name": "Engineering monthly", "max_budget": 250.0, "reset_alignment": "calendar_month"}
+    body: dict[str, Any] = {
+        "name": "Engineering monthly",
+        "max_budget": 250.0,
+        "reset_cycle": "monthly",
+        "reset_month_day": 1,
+    }
     body.update(overrides)
     return body
 
@@ -92,7 +97,7 @@ def test_a_budget_is_created_listed_changed_and_deleted(
     assert created.status_code == status.HTTP_201_CREATED, created.text
     budget = created.json()
     assert budget["max_budget"] == 250.0
-    assert budget["reset_alignment"] == "calendar_month"
+    assert budget["reset_cycle"] == "monthly"
     # Nothing names it yet, which is what makes it deletable below.
     assert budget["ceiling_count"] == 0
     # Stamped with the caller's organization rather than left for the client to
@@ -112,7 +117,7 @@ def test_a_budget_is_created_listed_changed_and_deleted(
     assert changed.status_code == status.HTTP_200_OK, changed.text
     assert changed.json()["max_budget"] == 500.0
     # Untouched by a patch that did not mention it.
-    assert changed.json()["reset_alignment"] == "calendar_month"
+    assert changed.json()["reset_cycle"] == "monthly"
 
     deleted = client.delete(f"{_BUDGETS}/{budget['budget_id']}", headers=master_key_header)
     assert deleted.status_code == status.HTTP_200_OK, deleted.text
@@ -126,7 +131,7 @@ def test_a_budget_refuses_two_period_sources(
     """``ck_budgets_single_period_source`` as a 400 naming the pair, not a 500."""
     refused = client.post(
         _BUDGETS,
-        json=_budget_body(budget_duration_sec=86_400, reset_alignment="calendar_month"),
+        json=_budget_body(reset_cycle="monthly", reset_month_day=1),
         headers=master_key_header,
     )
     assert refused.status_code == status.HTTP_400_BAD_REQUEST, refused.text
@@ -146,14 +151,14 @@ def test_a_patch_that_would_state_both_periods_is_refused(
 
     refused = client.patch(
         f"{_BUDGETS}/{budget['budget_id']}",
-        json={"budget_duration_sec": 86_400},
+        json={"reset_cycle": "daily"},
         headers=master_key_header,
     )
     assert refused.status_code == status.HTTP_400_BAD_REQUEST, refused.text
 
 
 @pytest.mark.parametrize("alignment", ["weekly", "calendar_fortnight", "CALENDAR_DAY", ""])
-def test_an_unrecognized_reset_alignment_is_refused_on_the_request(
+def test_an_unrecognized_reset_cycle_is_refused_on_the_request(
     client: TestClient,
     master_key_header: dict[str, str],
     alignment: str,
@@ -168,13 +173,13 @@ def test_an_unrecognized_reset_alignment_is_refused_on_the_request(
     """
     refused = client.post(
         _BUDGETS,
-        json={"name": "Monthly", "max_budget": 100.0, "reset_alignment": alignment},
+        json={"name": "Monthly", "max_budget": 100.0, "reset_cycle": alignment},
         headers=master_key_header,
     )
     assert refused.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, refused.text
 
 
-def test_an_unrecognized_reset_alignment_is_refused_on_an_update(
+def test_an_unrecognized_reset_cycle_is_refused_on_an_update(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
@@ -183,7 +188,7 @@ def test_an_unrecognized_reset_alignment_is_refused_on_an_update(
 
     refused = client.patch(
         f"{_BUDGETS}/{budget['budget_id']}",
-        json={"reset_alignment": "weekly"},
+        json={"reset_cycle": "fortnightly"},
         headers=master_key_header,
     )
     assert refused.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, refused.text
@@ -197,11 +202,11 @@ def test_every_recognized_alignment_is_accepted(
     for alignment in ("calendar_day", "calendar_week", "calendar_month"):
         created = client.post(
             _BUDGETS,
-            json={"name": alignment, "max_budget": 10.0, "reset_alignment": alignment},
+            json={"name": alignment, "max_budget": 10.0, "reset_cycle": alignment},
             headers=master_key_header,
         )
         assert created.status_code == status.HTTP_201_CREATED, created.text
-        assert created.json()["reset_alignment"] == alignment
+        assert created.json()["reset_cycle"] == alignment
 
 
 def test_a_gateway_user_may_not_be_created_on_an_organizations_budget(
@@ -282,7 +287,7 @@ def test_a_ceiling_is_created_listed_relabeled_and_deleted(
     # The figure and the period are read through the budget and carried here, so
     # a page can render a ceiling without fetching every budget to resolve one id.
     assert ceiling["max_budget"] == 250.0
-    assert ceiling["reset_alignment"] == "calendar_month"
+    assert ceiling["reset_cycle"] == "monthly"
     # A calendar-aligned budget opens a window immediately, rather than on first
     # spend, so a periodic cap has a defined end before any request arrives.
     assert ceiling["period_start"] is not None
@@ -539,7 +544,7 @@ async def _workspace(db: AsyncSession, organization: Organization, *, name: str,
 
 
 def _create(**overrides: Any) -> OrganizationBudgetCreate:
-    fields: dict[str, Any] = {"name": "Monthly", "max_budget": 100.0, "reset_alignment": "calendar_month"}
+    fields: dict[str, Any] = {"name": "Monthly", "max_budget": 100.0, "reset_cycle": "monthly", "reset_month_day": 1}
     fields.update(overrides)
     return OrganizationBudgetCreate(**fields)
 
@@ -717,7 +722,7 @@ async def test_giving_a_cadence_to_a_budget_that_had_none_retimes_its_ceilings(a
     service = _service(async_db)
     budget = await service.create_organization_budget(
         user=owner,
-        request=_create(name="No reset", reset_alignment=None, max_budget=50.0),
+        request=_create(name="No reset", reset_cycle=None, max_budget=50.0),
     )
     ceiling = await service.create_organization_ceiling(
         user=owner,
@@ -733,13 +738,13 @@ async def test_giving_a_cadence_to_a_budget_that_had_none_retimes_its_ceilings(a
     await service.update_organization_budget(
         user=owner,
         budget_id=budget.budget_id,
-        request=OrganizationBudgetUpdate(reset_alignment="calendar_month"),
+        request=OrganizationBudgetUpdate(reset_cycle="monthly", reset_month_day=1),
     )
 
     retimed = (await service.list_organization_ceilings(user=owner)).data[0]
     assert retimed.period_start is not None
     assert retimed.period_end is not None
-    assert retimed.reset_alignment == "calendar_month"
+    assert retimed.reset_cycle == "calendar_month"
 
 
 @pytest.mark.asyncio
@@ -766,7 +771,7 @@ async def test_taking_a_cadence_away_clears_the_window(async_db: AsyncSession) -
     await service.update_organization_budget(
         user=owner,
         budget_id=budget.budget_id,
-        request=OrganizationBudgetUpdate(reset_alignment=None),
+        request=OrganizationBudgetUpdate(reset_cycle=None),
     )
 
     cleared = (await service.list_organization_ceilings(user=owner)).data[0]
@@ -803,7 +808,7 @@ async def test_retiming_keeps_the_spend_already_recorded(async_db: AsyncSession)
     await service.update_organization_budget(
         user=owner,
         budget_id=budget.budget_id,
-        request=OrganizationBudgetUpdate(reset_alignment="calendar_day"),
+        request=OrganizationBudgetUpdate(reset_cycle="daily"),
     )
 
     kept = (await service.list_organization_ceilings(user=owner)).data[0]
@@ -857,7 +862,7 @@ async def test_a_ceiling_on_a_deployment_budget_is_listed_but_not_manageable(asy
     """
     organization = await _organization(async_db, slug="acme-migrated")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
-    deployment_budget = Budget(name="Shaped by the cutover", max_budget=None, budget_duration_sec=86_400)
+    deployment_budget = Budget(name="Shaped by the cutover", max_budget=None, reset_cycle="daily")
     async_db.add(deployment_budget)
     await async_db.flush()
     async_db.add(
@@ -875,7 +880,7 @@ async def test_a_ceiling_on_a_deployment_budget_is_listed_but_not_manageable(asy
     assert listed.count == 1
     assert listed.data[0].manageable is False
     # Its real figures, so the page is not lying about what binds.
-    assert listed.data[0].budget_duration_sec == 86_400
+    assert listed.data[0].reset_cycle == "daily"
 
 
 @pytest.mark.asyncio
@@ -888,7 +893,7 @@ async def test_such_a_ceiling_can_be_moved_onto_the_organizations_own_budget(asy
     """
     organization = await _organization(async_db, slug="acme-repoint")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
-    deployment_budget = Budget(name="Shared", max_budget=None, budget_duration_sec=86_400)
+    deployment_budget = Budget(name="Shared", max_budget=None, reset_cycle="daily")
     async_db.add(deployment_budget)
     await async_db.flush()
     ceiling = ScopedBudget(
@@ -912,7 +917,7 @@ async def test_such_a_ceiling_can_be_moved_onto_the_organizations_own_budget(asy
     # The budget it stopped naming is untouched, still holding what it held.
     still_there = await async_db.get(Budget, deployment_budget.budget_id)
     assert still_there is not None
-    assert still_there.budget_duration_sec == 86_400
+    assert still_there.reset_cycle == "daily"
 
 
 @pytest.mark.asyncio

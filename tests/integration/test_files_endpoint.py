@@ -929,9 +929,7 @@ def test_a_storage_failure_answers_a_generic_500(
         def get_stream(self, storage_ref: str) -> Any:
             raise OSError("disk gone")
 
-    resp = client.post(
-        f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"payload", "text/plain")}
-    )
+    resp = client.post(f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"payload", "text/plain")})
     assert resp.status_code == 200, resp.text
     file_id = resp.json()["id"]
 
@@ -961,9 +959,7 @@ def test_one_unusable_id_does_not_fail_a_batch_lookup(
     from gateway.core.unit_of_work import UnitOfWork
     from gateway.repositories.files import FileRepository
 
-    resp = client.post(
-        f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"payload", "text/plain")}
-    )
+    resp = client.post(f"{API_ROOT}/files", headers=api_key_header, files={"file": ("a.txt", b"payload", "text/plain")})
     assert resp.status_code == 200, resp.text
     stored = str(resp.json()["id"])
 

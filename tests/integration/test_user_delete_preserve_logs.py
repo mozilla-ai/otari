@@ -65,7 +65,12 @@ def test_delete_user_preserves_budget_reset_logs(
     """Soft-deleting a user preserves FK links in budget reset logs."""
     budget_resp = client.post(
         f"{API_ROOT}/budgets",
-        json={"max_budget": 100.0, "budget_duration_sec": 60},
+        json={
+            "max_budget": 100.0,
+            "reset_cycle": "every_n_hours",
+            "reset_every_n": 1,
+            "reset_anchor_at": "2026-01-01T00:00:00Z",
+        },
         headers=master_key_header,
     )
     budget_id = budget_resp.json()["budget_id"]

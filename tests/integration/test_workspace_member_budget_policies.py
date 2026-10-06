@@ -98,7 +98,7 @@ async def test_create_materializes_onto_existing_members_but_skips_an_override(a
         user=owner,
         workspace_id=workspace.id,
         request=WorkspaceMemberBudgetPolicyCreate(
-            budget_id=await create_budget(async_db, name="Default", max_budget=50.0, budget_duration_sec=86400)
+            budget_id=await create_budget(async_db, name="Default", max_budget=50.0, reset_cycle="daily")
         ),
     )
     assert created.max_budget == 50.0
@@ -110,7 +110,7 @@ async def test_create_materializes_onto_existing_members_but_skips_an_override(a
     assert await _limit(async_db, owner_budget) == 50.0
     owner_limit = await async_db.get(Budget, owner_budget.budget_id)
     assert owner_limit is not None
-    assert owner_limit.budget_duration_sec == 86400
+    assert owner_limit.reset_cycle == "daily"
     # The window is the member's own, stamped when they were materialized.
     assert owner_budget.period_end is not None
 
@@ -575,7 +575,7 @@ async def test_a_calendar_aligned_budget_materializes_a_window_that_rolls(async_
         user=owner,
         workspace_id=workspace.id,
         request=WorkspaceMemberBudgetPolicyCreate(
-            budget_id=await create_budget(async_db, max_budget=500.0, reset_alignment="calendar_month")
+            budget_id=await create_budget(async_db, max_budget=500.0, reset_cycle="monthly", reset_month_day=1)
         ),
     )
 
@@ -677,15 +677,15 @@ async def test_the_read_surface_reports_a_calendar_alignment(async_db: AsyncSess
         user=owner,
         workspace_id=workspace.id,
         request=WorkspaceMemberBudgetPolicyCreate(
-            budget_id=await create_budget(async_db, max_budget=250.0, reset_alignment="calendar_month")
+            budget_id=await create_budget(async_db, max_budget=250.0, reset_cycle="monthly", reset_month_day=1)
         ),
     )
 
-    assert created.reset_alignment == "calendar_month"
+    assert created.reset_cycle == "calendar_month"
     assert created.budget_duration_sec is None
 
     listed = await service.list_defaults(user=owner, workspace_id=workspace.id)
-    assert [one.reset_alignment for one in listed.data] == ["calendar_month"]
+    assert [one.reset_cycle for one in listed.data] == ["calendar_month"]
 
 
 async def test_a_rolling_budget_still_reads_back_with_no_alignment(async_db: AsyncSession) -> None:
@@ -698,12 +698,12 @@ async def test_a_rolling_budget_still_reads_back_with_no_alignment(async_db: Asy
         user=owner,
         workspace_id=workspace.id,
         request=WorkspaceMemberBudgetPolicyCreate(
-            budget_id=await create_budget(async_db, max_budget=250.0, budget_duration_sec=86400)
+            budget_id=await create_budget(async_db, max_budget=250.0, reset_cycle="daily")
         ),
     )
 
-    assert created.budget_duration_sec == 86400
-    assert created.reset_alignment is None
+    assert created.reset_cycle == "daily"
+    assert created.reset_cycle is None
 
 
 async def test_bootstrap_provisioning_materializes_the_default_workspaces_defaults(
@@ -727,7 +727,7 @@ async def test_bootstrap_provisioning_materializes_the_default_workspaces_defaul
     workspace = await workspaces.get_by_organization_and_name(organization.id, DEFAULT_WORKSPACE_NAME)
     assert workspace is not None
 
-    budget_id = await create_budget(async_db, max_budget=125.0, reset_alignment="calendar_month")
+    budget_id = await create_budget(async_db, max_budget=125.0, reset_cycle="monthly", reset_month_day=1)
     async_db.add(WorkspaceBudgetDefault(workspace_id=workspace.id, budget_id=budget_id))
     await async_db.commit()
 

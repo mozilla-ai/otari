@@ -227,9 +227,7 @@ def test_a_deployment_that_makes_no_copies_refuses(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     file_id = _upload_file(client, api_key_header)
-    monkeypatch.setattr(
-        cast(Any, client.app).state.config, "files_provider_upload_enabled", False, raising=True
-    )
+    monkeypatch.setattr(cast(Any, client.app).state.config, "files_provider_upload_enabled", False, raising=True)
 
     response, forwarded = _run(client, api_key_header, file_id)
 
@@ -301,7 +299,7 @@ def priced_model(client: TestClient, master_key_header: dict[str, str]) -> None:
 def budgeted_key_header(client: TestClient, master_key_header: dict[str, str]) -> dict[str, str]:
     """A key for a user with a budget, so a request holds a reservation against it."""
     budget = client.post(
-        f"{API_ROOT}/budgets", json={"max_budget": 100.0, "budget_duration_sec": 86400}, headers=master_key_header
+        f"{API_ROOT}/budgets", json={"max_budget": 100.0, "reset_cycle": "daily"}, headers=master_key_header
     )
     assert budget.status_code == 200, budget.text
     user = client.post(
