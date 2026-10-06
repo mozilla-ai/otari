@@ -70,6 +70,7 @@ class _EndUsers:
                 existing.deleted_at = None
             return ResolvedEndUser(existing.user_id, existing.budget_id)
 
+        _check_new_external_id(external_id)
         budget = requested
         if budget is None and api_key.end_user_budget_id:
             budget = await self._repositories.budgets.get(api_key.end_user_budget_id)
@@ -94,6 +95,7 @@ class _EndUsers:
         owner_user_id = str(api_key.user_id)
         user = await self._repositories.end_users.find(owner_user_id, external_id)
         if user is None:
+            _check_new_external_id(external_id)
             user = _new_end_user(owner_user_id, external_id, budget)
             if await self._repositories.end_users.add(user):
                 return EndUserPublic.from_model(user), True
@@ -145,7 +147,16 @@ class _EndUsers:
 
 def _check_external_id(external_id: str) -> None:
     if len(external_id) > MAX_EXTERNAL_ID_LENGTH:
-        raise EndUserIdInvalidError(MAX_EXTERNAL_ID_LENGTH)
+        raise EndUserIdInvalidError(f"must be at most {MAX_EXTERNAL_ID_LENGTH} characters")
+
+
+def _check_new_external_id(external_id: str) -> None:
+    """Refuse an id for a new end user that the end-user routes could not address as one path segment.
+
+    Checked on creation only, so an end user created before the rule still bills.
+    """
+    if "/" in external_id:
+        raise EndUserIdInvalidError("must not contain '/'")
 
 
 def _require_service_key(api_key: APIKey) -> None:

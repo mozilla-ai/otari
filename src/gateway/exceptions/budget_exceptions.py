@@ -97,6 +97,13 @@ class DeploymentBudgetOwnedByOrganizationError(TenancyConflictError):
         )
 
 
+class DeploymentBudgetNotReplaceableError(TenancyConflictError):
+    """A PUT named the id of an organization's budget, which only that organization replaces."""
+
+    def __init__(self, budget_id: str) -> None:
+        super().__init__(f"Budget '{budget_id}' belongs to an organization; change it on that organization's budgets")
+
+
 class DeploymentBudgetIsMemberDefaultError(TenancyConflictError):
     """A workspace hands the budget to its members, so the delete is refused by workspace name."""
 
@@ -217,8 +224,8 @@ class NotAServiceKeyError(TenancyValidationError):
 class EndUserIdInvalidError(TenancyValidationError):
     """A service key named an end user by an id it cannot be stored under."""
 
-    def __init__(self, max_length: int):
-        super().__init__(f"'user' must be at most {max_length} characters to name an end user")
+    def __init__(self, requirement: str):
+        super().__init__(f"'user' {requirement} to name an end user")
 
 
 class EndUserOwnerUnavailableError(TenancyForbiddenError):

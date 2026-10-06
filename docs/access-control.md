@@ -116,7 +116,9 @@ would on any other key. Blocking the key's user stops its end users too.
 Each distinct `user` value creates an end user, whether or not the request is
 then admitted, and nothing else caps how many a key can create. Set a rate
 limit on a deployment that issues service keys, and send a stable id per end
-user rather than a per-session or per-request value.
+user rather than a per-session or per-request value. An id is at most 256
+characters, and a new one may not contain `/`, so that it can be named in the
+path of the end user routes below.
 
 ### Several budgets on one key
 
@@ -169,10 +171,12 @@ An end user is addressed by the key and the id the service named it by:
 | `PUT /api/v1/keys/{key_id}/end-users/{external_id}` `{"budget_id": ...}` | Puts the end user on a budget, creating it first if it has not made a request yet (201) |
 | `PATCH /api/v1/keys/{key_id}/end-users/{external_id}` `{"blocked": true}` or `{"budget_id": ...}` | Blocks, unblocks or moves the end user |
 
-A budget set this way must be on the key's list too. Moving an end user starts
-a new period on the new budget, and it takes that budget's per-minute limits
-with it. End users belong to the key's user, so every service key of one user
-reaches the same end users.
+A budget set this way must be on the key's list too. Moving an end user
+restarts its period on the new budget and applies that budget's per-minute
+limits, but keeps its spend, tokens and requests so far, as moving a user
+through `/api/v1/users` does: an end user that used up one budget can be over
+the next one's limits until that period resets. End users belong to the key's
+user, so every service key of one user reaches the same end users.
 
 To list end users, use `/api/v1/users`, where each one carries
 `parent_user_id` (the key's user) and `external_id`.

@@ -1516,7 +1516,8 @@ export interface paths {
          * Update End User
          * @description Block, unblock or move an end user of a service key.
          *
-         *     A move starts a new period on the new budget, and the budget must be on the key's ``end_user_budget_ids``.
+         *     A move restarts the end user's period on the new budget but keeps what it has spent and used so far, as the users
+         *     API does. The budget must be on the key's ``end_user_budget_ids``.
          */
         patch: operations["keys-update_end_user"];
         trace?: never;

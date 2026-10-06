@@ -6,6 +6,8 @@ from gateway.models.tenancy import User
 from gateway.rate_limit import BudgetMinuteLimits
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.schemas.budgets import (
+    BudgetResponse,
+    CreateBudgetRequest,
     EndUserPublic,
     OrganizationBudgetCreate,
     OrganizationBudgetPublic,
@@ -120,6 +122,11 @@ class BudgetService:
         """
         async with self._uow:
             return await self._organization.list_ceilings(user=user, skip=skip, limit=limit)
+
+    async def put_deployment_budget(self, budget_id: str, request: CreateBudgetRequest) -> tuple[BudgetResponse, bool]:
+        """Create a deployment budget under an id the caller chose, or replace it; True when created."""
+        async with self._uow:
+            return await self._deployment.put_budget(budget_id, request)
 
     async def require_end_user_budgets(self, budget_ids: list[str]) -> None:
         """Refuse end-user budgets a service key may not cap its end users at: an unknown one, or a tenant's."""

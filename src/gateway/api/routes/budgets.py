@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import BudgetServiceDep, get_db, require_deployment_operator
@@ -246,54 +246,6 @@ async def update_budget(
     )
 
 
-async def _write_budget(db: AsyncSession, budget_id: str, request: CreateBudgetRequest) -> tuple[Budget, bool]:
-    """Create or replace the deployment budget ``budget_id`` and commit, saying whether it was created.
-
-    Raises ``IntegrityError`` when another request created the id between the read and the commit.
-    """
-    budget = (await db.execute(select(Budget).where(Budget.budget_id == budget_id))).scalar_one_or_none()
-    created = budget is None
-    if budget is None:
-        budget = Budget(budget_id=budget_id)
-        db.add(budget)
-    elif budget.organization_id is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Budget '{budget_id}' belongs to an organization; change it on that organization's budgets",
-        )
-    cadence_before = cadence_of(budget.budget_duration_sec, budget.reset_alignment)
-    budget.name = request.name
-    budget.max_budget = to_usd_or_none(request.max_budget)
-    budget.token_limit = request.token_limit
-    budget.request_limit = request.request_limit
-    budget.rpm_limit = request.rpm_limit
-    budget.tpm_limit = request.tpm_limit
-    budget.budget_duration_sec = request.budget_duration_sec
-    budget.reset_alignment = request.reset_alignment
-    # As on PATCH: a ceiling holds its own window, so a new cadence rewrites it.
-    if not created and cadence_of(budget.budget_duration_sec, budget.reset_alignment) != cadence_before:
-        await retime_ceilings_for_budget(
-            db, budget_id=budget_id, duration=budget.budget_duration_sec, alignment=budget.reset_alignment
-        )
-
-    try:
-        await db.commit()
-    except IntegrityError:
-        if not created:
-            await db.rollback()
-            raise _database_error() from None
-        raise
-    except SQLAlchemyError:
-        await db.rollback()
-        raise _database_error() from None
-    await db.refresh(budget)
-    return budget, created
-
-
-def _database_error() -> HTTPException:
-    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
-
-
 @router.put("/{budget_id}")
 async def put_budget(
     budget_id: Annotated[
@@ -307,7 +259,7 @@ async def put_budget(
     ],
     request: CreateBudgetRequest,
     response: Response,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    service: BudgetServiceDep,
 ) -> BudgetResponse:
     """Create a budget under an id you choose, or replace the one with that id.
 
@@ -316,25 +268,10 @@ async def put_budget(
     the budget. Users on a budget it replaces stay on it, and its ceilings follow
     a change of reset period. A budget an organization owns is not replaced.
     """
-    _require_single_period_source(request.budget_duration_sec, request.reset_alignment)
-    try:
-        budget, created = await _write_budget(db, budget_id, request)
-    except IntegrityError:
-        # A concurrent PUT created the id first, so this one replaces what it wrote.
-        await db.rollback()
-        try:
-            budget, created = await _write_budget(db, budget_id, request)
-        except IntegrityError:
-            await db.rollback()
-            raise _database_error() from None
-
+    budget, created = await service.put_deployment_budget(budget_id, request)
     if created:
         response.status_code = status.HTTP_201_CREATED
-        return BudgetResponse.from_model(budget)
-    user_count, total_spend, total_reserved = await _budget_usage(db, budget_id)
-    return BudgetResponse.from_model(
-        budget, user_count=user_count, total_spend=total_spend, total_reserved=total_reserved
-    )
+    return budget
 
 
 @router.delete("/{budget_id}", status_code=status.HTTP_204_NO_CONTENT)

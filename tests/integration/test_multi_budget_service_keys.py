@@ -8,6 +8,7 @@ are managed by the id the service names them by.
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -16,7 +17,9 @@ from sqlmodel import col
 from gateway.core.config import API_KEY_HEADER, API_ROOT
 from gateway.models.budgets import Budget
 from gateway.models.tenancy import Organization
-from gateway.services.budgets import cadence_of
+from gateway.models.users import User
+from gateway.repositories.budgets.budget_repository import BudgetRepository
+from gateway.services.secret_box import generate_secret_key
 
 from .conftest import MODEL_NAME
 
@@ -204,6 +207,24 @@ def test_a_budget_off_the_list_is_refused_with_a_code(client: TestClient, master
     assert _end_user(client, master_key_header, key_id, "new-user").status_code == 404
 
 
+def test_a_replay_repeats_the_budget_and_a_retry_naming_another_is_refused(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Stored responses are encrypted, so replaying one needs a key.
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _, headers = _mlpa(client, master_key_header)
+    keyed = {**headers, "Idempotency-Key": "provision-once"}
+
+    first = _chat(client, keyed, "fxa3:memories", budget="eu-memories")
+    replayed = _chat(client, keyed, "fxa3:memories", budget="eu-memories")
+    renamed = _chat(client, keyed, "fxa3:memories", budget="eu-ai")
+
+    assert first.status_code == 200, first.text
+    assert replayed.headers["Otari-Idempotent-Replayed"] == "true"
+    assert replayed.headers[BUDGET_HEADER] == "eu-memories"
+    assert renamed.status_code == 422, renamed.text
+
+
 def test_each_end_user_is_held_to_the_budget_it_started_on(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
@@ -334,21 +355,52 @@ def test_end_users_are_scoped_to_the_keys_owner(client: TestClient, master_key_h
     assert _end_user(client, master_key_header, "no-such-key", "alice").status_code == 404
 
 
+def test_a_new_end_user_id_may_not_contain_a_slash(client: TestClient, master_key_header: dict[str, str]) -> None:
+    key_id, headers = _mlpa(client, master_key_header)
+
+    chat = _chat(client, headers, "org/alice")
+    put = client.put(
+        f"{API_ROOT}/keys/{key_id}/end-users/org/alice", json={"budget_id": "eu-ai"}, headers=master_key_header
+    )
+
+    assert chat.status_code == 400, chat.text
+    assert put.status_code == 400, put.text
+    assert _end_user(client, master_key_header, key_id, "org/alice").status_code == 404
+
+
+def test_an_end_user_created_with_a_slash_before_the_rule_still_works(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    key_id, headers = _mlpa(client, master_key_header)
+    db_session.add(
+        User(user_id="eu_legacy", alias="org/bob", parent_user_id="mlpa", external_id="org/bob", budget_id="eu-ai")
+    )
+    db_session.commit()
+
+    served = _chat(client, headers, "org/bob")
+    fetched = _end_user(client, master_key_header, key_id, "org/bob")
+    blocked = client.patch(
+        f"{API_ROOT}/keys/{key_id}/end-users/org/bob", json={"blocked": True}, headers=master_key_header
+    )
+
+    assert served.status_code == 200, served.text
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["user_id"] == "eu_legacy"
+    assert blocked.json()["blocked"] is True
+
+
 def test_put_replaces_a_budget_a_concurrent_put_created_first(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:
     """Two provisioning runs racing on a new id both succeed, and the later body wins."""
-    raced = False
+    original = BudgetRepository.add_if_absent
 
-    def create_first(*args: Any) -> Any:
-        nonlocal raced
-        if not raced:
-            raced = True
-            db_session.add(Budget(budget_id="raced", request_limit=1))
-            db_session.commit()
-        return cadence_of(*args)
+    async def create_first(self: BudgetRepository, budget: Budget) -> bool:
+        db_session.add(Budget(budget_id="raced", request_limit=1))
+        db_session.commit()
+        return await original(self, budget)
 
-    with patch("gateway.api.routes.budgets.cadence_of", create_first):
+    with patch.object(BudgetRepository, "add_if_absent", create_first):
         response = _put_budget(client, master_key_header, "raced", request_limit=7)
 
     assert response.status_code == 200, response.text

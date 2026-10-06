@@ -621,7 +621,7 @@ async def delete_key(
 ExternalId = Annotated[str, Path(description="The id the service names the end user by in a request's user field")]
 
 
-@router.get("/{key_id}/end-users/{external_id}")
+@router.get("/{key_id}/end-users/{external_id:path}")
 async def get_end_user(
     key_id: str,
     external_id: ExternalId,
@@ -637,7 +637,7 @@ async def get_end_user(
     return await budgets.get_end_user(api_key=key, external_id=external_id)
 
 
-@router.put("/{key_id}/end-users/{external_id}")
+@router.put("/{key_id}/end-users/{external_id:path}")
 async def put_end_user(
     key_id: str,
     external_id: ExternalId,
@@ -660,7 +660,7 @@ async def put_end_user(
     return end_user
 
 
-@router.patch("/{key_id}/end-users/{external_id}")
+@router.patch("/{key_id}/end-users/{external_id:path}")
 async def update_end_user(
     key_id: str,
     external_id: ExternalId,
@@ -671,7 +671,8 @@ async def update_end_user(
 ) -> EndUserPublic:
     """Block, unblock or move an end user of a service key.
 
-    A move starts a new period on the new budget, and the budget must be on the key's ``end_user_budget_ids``.
+    A move restarts the end user's period on the new budget but keeps what it has spent and used so far, as the users
+    API does. The budget must be on the key's ``end_user_budget_ids``.
     """
     key = await _load_key_in_organization(db, key_id, organization_id)
     return await budgets.update_end_user(
