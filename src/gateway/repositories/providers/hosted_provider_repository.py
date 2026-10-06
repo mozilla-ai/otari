@@ -6,9 +6,9 @@ goes through ``sqlmodel.col()``, as the SQLModel tables require.
 
 import uuid
 from collections.abc import Collection, Sequence
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import func, select
+from sqlalchemy import CursorResult, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import col
 
@@ -266,14 +266,13 @@ class HostedProviderModelRepository(
 
         What the database would do with a foreign key, done here instead,
         because the roster is keyed on the provider's name so it can outlive a
-        row (a provider declared in configuration has none).
+        row (a provider declared in configuration has none). One statement
+        rather than a delete per row: a provider can offer several hundred
+        models.
         """
-        rows = (
-            (await self.db.execute(select(HostedProviderModel).where(col(HostedProviderModel.provider) == provider)))
-            .scalars()
-            .all()
+        result = cast(
+            CursorResult[Any],
+            await self.db.execute(delete(HostedProviderModel).where(col(HostedProviderModel.provider) == provider)),
         )
-        for row in rows:
-            await self.db.delete(row)
         await self.db.flush()
-        return len(rows)
+        return result.rowcount
