@@ -16,9 +16,8 @@ import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import {
   asMembershipRole,
-  MEMBERSHIP_ROLES,
+  MEMBERSHIP_ROLE_OPTIONS,
   memberLabel,
-  membershipLabel,
 } from "@/features/organization/roles"
 import {
   useAddWorkspaceMember,
@@ -30,15 +29,8 @@ import {
 // A workspace's roster and the dialog that adds to it, kept out of the page so
 // the rules they encode (a workspace's members are a subset of the
 // organization's, and the roles are the organization's four) live with the
-// roster rather than with whichever page shows it.
-
-// The workspace vocabulary is the organization one: four fixed roles, the same
-// spellings, published on both requests. `asMembershipRole` narrows a picker's
-// string back to it.
-const ROLE_OPTIONS = MEMBERSHIP_ROLES.map((role) => ({
-  value: role,
-  label: membershipLabel(role),
-}))
+// roster rather than with whichever page shows it. The workspace role
+// vocabulary is the organization one, so its options come from `roles`.
 
 /**
  * Put somebody from the organization into this workspace.
@@ -139,7 +131,7 @@ export function AddWorkspaceMemberDialog({
             label="Role"
             value={role}
             onChange={(value) => setRole(asMembershipRole(value) ?? "member")}
-            options={ROLE_OPTIONS}
+            options={MEMBERSHIP_ROLE_OPTIONS}
             shouldReserveMessage={false}
           />
         </>
@@ -209,7 +201,7 @@ export function WorkspaceMembersPanel({
                   ariaLabel={`Role for ${nameByUserId.get(member.user_id) ?? member.user_id} in ${workspaceName}`}
                   value={member.role}
                   disabled={!canManageWorkspace || updateRole.isPending}
-                  options={ROLE_OPTIONS}
+                  options={MEMBERSHIP_ROLE_OPTIONS}
                   onChange={(value) => {
                     const role = asMembershipRole(value)
                     if (role) {

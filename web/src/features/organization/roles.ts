@@ -75,6 +75,12 @@ export function membershipLabel(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
+/** `MEMBERSHIP_ROLES` as role picker options. */
+export const MEMBERSHIP_ROLE_OPTIONS = MEMBERSHIP_ROLES.map((role) => ({
+  value: role,
+  label: membershipLabel(role),
+}))
+
 /** The roles that may manage an organization or a workspace. */
 const MANAGEMENT_ROLES: readonly string[] = ["owner", "admin"]
 
