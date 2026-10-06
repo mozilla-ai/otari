@@ -62,3 +62,6 @@ node_modules
 
 # GitBook site built by scripts/prepare_gitbook_site.py
 /site/
+
+# What Claude Code lays into a plugin folder it loads in place (editor typings).
+plugins/*/.claude-plugin/types/
