@@ -1,0 +1,195 @@
+name: Otari Load Test
+
+# The loadtest/ stack (two replicas behind nginx, Postgres, Redis and a fake
+# provider) on a PR that changes what a request does. Two jobs, on separate
+# runners so the one that times things has the machine to itself:
+#
+# - scenarios: short runs of the scenarios whose checks are pass/fail (ledgers
+#   against usage rows, nothing left held, Model 1's cap, no 429/5xx/cut
+#   stream). Nightly, every scenario at full length, including the replica kill
+#   and the Redis outage.
+# - ab: the PR's merge commit and its base, built on the same runner and run in
+#   turn by `./run.sh ab`, so the two share the runner's noise. Statements per
+#   request and failed requests are enforced. CPU per request and overhead are
+#   reported in the job summary but not enforced, until the nightly A/A run
+#   (main against itself) has shown how far they move on their own; then
+#   AB_FLAGS gains --enforce-timing.
+#
+# A deliberate cost: add the `perf-accepted` label and re-run the ab job. The
+# label is read when the job runs, not from the event, so a re-run sees it.
+#
+# The fake provider answers in 50 ms rather than its default 300: the overhead
+# figure subtracts it either way, and short requests make each run cheaper.
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'cli/src/**'
+      - 'alembic/**'
+      - 'alembic.ini'
+      - 'pyproject.toml'
+      - 'cli/pyproject.toml'
+      - 'uv.lock'
+      - 'Dockerfile'
+      - 'loadtest/**'
+      - '.github/workflows/otari-loadtest.yml'
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      base:
+        description: 'Ref to compare against (the ab job)'
+        default: main
+
+permissions:
+  contents: read
+
+env:
+  FAKE_LATENCY_MS: 50
+  FAKE_TTFT_MS: 50
+  FAKE_CHUNKS: 5
+  FAKE_CHUNK_INTERVAL_MS: 10
+  # Images are built by the workflow, not by compose.
+  LOADTEST_BUILD: 0
+  OTARI_IMAGE: otari:head
+
+jobs:
+  scenarios:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ github.event_name == 'schedule' && 75 || 20 }}
+    concurrency:
+      group: loadtest-scenarios-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Reads the cache otari-docker.yml writes on main and writes none back,
+      # as otari-docker-build.yml does: a fork PR cannot.
+      - name: Build image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: otari:head
+          cache-from: type=gha
+
+      - name: Start the stack
+        run: ./loadtest/run.sh up
+
+      # A PR runs 20s phases at 3,000 RPM, which is still enough to drain the
+      # shared-budget scenario's pool. Nightly runs every scenario at its
+      # defaults.
+      - name: Run scenarios
+        env:
+          DURATION: ${{ github.event_name == 'schedule' && '120' || '20' }}
+          RPM_HIGH: ${{ github.event_name == 'schedule' && '1000' || '3000' }}
+          SCENARIOS: ${{ github.event_name != 'schedule' && 'steady spill shared-budget provider-429 stream-fail' || '' }}
+        run: ./loadtest/run.sh all
+
+      - name: Gateway logs
+        if: failure()
+        run: docker compose -f loadtest/docker-compose.yml logs --tail 200 otari-1 otari-2
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: loadtest-scenarios
+          path: loadtest/results/
+          if-no-files-found: ignore
+
+  ab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+    concurrency:
+      group: loadtest-ab-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # A PR's checkout is its merge commit, so against the base branch's tip
+      # the difference is the PR alone. Nightly compares main with itself.
+      - name: Checkout base
+        if: github.event_name != 'schedule'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || inputs.base }}
+          path: base
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build head image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: otari:head
+          cache-from: type=gha
+
+      - name: Build base image
+        if: github.event_name != 'schedule'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: base
+          load: true
+          tags: otari:base
+          cache-from: type=gha
+
+      # Nightly, the same image on both sides: what the timed figures do when
+      # nothing changed is what their allowances should be set from.
+      - name: Use head as base (A/A)
+        if: github.event_name == 'schedule'
+        run: docker tag otari:head otari:base
+
+      - name: Read the perf-accepted label
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          if gh pr view "$PR" --repo "$REPO" --json labels -q '.labels[].name' | grep -qx perf-accepted; then
+            echo "AB_FLAGS=--allow-regression" >> "$GITHUB_ENV"
+          fi
+
+      - name: Start the stack
+        run: ./loadtest/run.sh up
+
+      - name: Compare base and head
+        run: ./loadtest/run.sh ab otari:base otari:head
+
+      - name: Job summary
+        if: always()
+        run: |
+          # One ab run per job, so at most one report.
+          for report in loadtest/results/ab-*/report.md; do
+            if [[ -f "$report" ]]; then cat "$report" >> "$GITHUB_STEP_SUMMARY"; fi
+          done
+
+      - name: Gateway logs
+        if: failure()
+        run: docker compose -f loadtest/docker-compose.yml logs --tail 200 otari-1 otari-2
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: loadtest-ab
+          path: loadtest/results/
+          if-no-files-found: ignore

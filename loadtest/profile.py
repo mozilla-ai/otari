@@ -8,6 +8,7 @@
     uv run profile.py sample --out results/profile-steady --seconds 240
     uv run profile.py end    --out results/profile-steady
     uv run profile.py statements --requests 100        # queries per request
+    uv run profile.py statements --db ab_head --json-out results/ab/statements-head.json
     uv run profile.py analyze results/profile-steady/otari-1.txt
 
 ``begin`` snapshots each replica's /metrics and zeroes pg_stat_statements and
@@ -313,8 +314,8 @@ def analyze(recording: Path, top: int = 15) -> list[str]:
     return lines
 
 
-def statements(requests: int, out: Path | None) -> None:
-    """Queries per request since pg_stat_statements was zeroed.
+def statements(requests: int, out: Path | None, db: str = "otari", json_out: Path | None = None) -> None:
+    """Queries per request since pg_stat_statements was zeroed, on database ``db``.
 
     The profiler's own queries and PostgreSQL's foreign-key checks are left out.
     """
@@ -323,22 +324,36 @@ def statements(requests: int, out: Path | None) -> None:
             """
             SELECT calls, left(regexp_replace(query, '\\s+', ' ', 'g'), 110)
             FROM pg_stat_statements
-            WHERE dbid = (SELECT oid FROM pg_database WHERE datname = 'otari')
+            WHERE dbid = (SELECT oid FROM pg_database WHERE datname = %s)
               AND query NOT LIKE '%%pg_stat%%'
               AND query NOT LIKE 'SELECT 1 FROM ONLY%%'
               AND query NOT LIKE 'SELECT $_ FROM ONLY%%'
               AND calls >= %s
             ORDER BY calls DESC
             """,
-            (max(requests // 2, 1),),
+            (db, max(requests // 2, 1)),
         ).fetchall()
     per_request = [(calls / requests, query) for calls, query in rows]
-    lines = [f"Statements per request: {sum(n for n, _ in per_request):.1f} over {requests} requests", ""]
+    total = sum(n for n, _ in per_request)
+    lines = [f"Statements per request: {total:.1f} over {requests} requests", ""]
     lines += [f"{n:6.2f}  {query}" for n, query in per_request]
     text = "\n".join(lines) + "\n"
     if out is not None:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(text)
+    if json_out is not None:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(
+            json.dumps(
+                {
+                    "per_request": round(total, 2),
+                    # Background work (the sweeper, log flushes) adds fractions,
+                    # mostly to BEGIN and COMMIT; a request's own statements are whole.
+                    "per_request_rounded": sum(round(n) for n, _ in per_request),
+                    "statements": [[round(n, 2), q] for n, q in per_request],
+                }
+            )
+        )
     print(text)
 
 
@@ -348,6 +363,8 @@ def main() -> int:
     parser.add_argument("recordings", nargs="*", help="py-spy raw recordings, for analyze")
     parser.add_argument("--out")
     parser.add_argument("--requests", type=int, default=100, help="for statements")
+    parser.add_argument("--db", default="otari", help="for statements: the database whose statements count")
+    parser.add_argument("--json-out", help="for statements: also write the figures as JSON")
     parser.add_argument("--seconds", type=float, default=120)
     parser.add_argument("--interval", type=float, default=0.25)
     args = parser.parse_args()
@@ -358,7 +375,7 @@ def main() -> int:
             print("\n".join(analyze(Path(recording))) + "\n")
         return 0
     if args.step == "statements":
-        statements(args.requests, out)
+        statements(args.requests, out, args.db, Path(args.json_out) if args.json_out else None)
         return 0
     if args.step == "reset-statements":
         with psycopg.connect(DSN, autocommit=True) as conn:

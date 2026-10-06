@@ -161,7 +161,9 @@ async def one_request(
                         result.served_by = content.split("served-by:")[-1][:2]
             result.latency_ms = (time.perf_counter() - started) * 1000
             return result
-    except httpx.HTTPError as exc:
+    # Anything else (a body that is not the JSON it should be) is recorded too:
+    # raised, it would surface in gather() and lose the whole run's results.
+    except Exception as exc:  # noqa: BLE001
         return Result(wall, 0, (time.perf_counter() - started) * 1000, stream, error=type(exc).__name__)
 
 

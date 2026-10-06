@@ -64,14 +64,19 @@ Knobs: `DURATION` (seconds per phase, default 120), `RPM_LOW`/`RPM_HIGH`
 - **Nothing held after drain.** No reserved spend, tokens or requests on any end
   user or on the shared budget, and no reservation left `active`.
 - **Resets.** No end user reset more often than its period allows.
-- **Shared budget overspend.** The ceiling on the key never went past its cap by
-  more than what was in flight.
+- **Shared budget overspend.** The ceiling on the key ended no more than $0.05
+  over its cap (`--overspend-slack`), which is room for the holds in flight when
+  it ran dry.
 - **Model 1's cap.** The most Model 1 accepted in any 60s window, as the fake
   provider counted it, and how many calls the provider had to refuse. The fake
   enforces the same 100 RPM as the gateway, so a refusal there means the
   gateway let one through. Skipped where the scenario breaks it on purpose.
 - **Client side.** No 429, no 5xx, no dropped connection, and every stream
-  ended in `[DONE]` or an error event.
+  ended in `[DONE]` or an error event. `kill-replica` keeps only the 429 check,
+  since the requests on the killed replica fail by design.
+
+`run.sh` exits non-zero when any check failed, so `./run.sh all` can gate.
+`SCENARIOS="steady spill" ./run.sh all` runs a subset.
 
 Overhead is the client's latency on a non-streamed call minus the fake
 provider's fixed latency. It includes nginx and the network hops, so compare
@@ -95,6 +100,50 @@ budget and then on one with it, profiling both, and checks each afterwards.
 `count` sends 100 identical non-streamed requests on end users that already
 exist and reads `pg_stat_statements`, leaving out PostgreSQL's own foreign-key
 checks; the list says which statements a request runs and how often.
+
+## Comparing two builds
+
+`./run.sh ab BASE_IMAGE HEAD_IMAGE` runs two images on this machine in turn
+and compares them, which is how CI judges a PR:
+
+```bash
+docker build -t otari:base /path/to/main-checkout
+docker build -t otari:head ..
+OTARI_IMAGE=otari:head LOADTEST_BUILD=0 ./run.sh up
+./run.sh ab otari:base otari:head
+```
+
+Each image gets a database of its own (`ab_base`, `ab_head`), since a migration
+in head would break base on a shared one. Swapping recreates both replicas and
+restarts nginx. The images alternate base, head, head, base, base, head
+(`AB_ROUNDS`, default 3), each run `AB_SECONDS` (20) at `AB_RPM` (3,000) after a
+discarded warm-up, so drift in the machine's speed lands on both. Then each
+counts its statements per request, direct and spilled, and head's tenant is
+checked. `ab.py report` writes `results/ab-TIMESTAMP/report.md` and fails on:
+
+- **statements per request** growing by more than 0.5, direct or spilled;
+- **any failed request** on head (not a 200, or a stream cut short).
+
+CPU per request and overhead p50 are compared too, against how far base's own
+runs spread, but only `AB_FLAGS=--enforce-timing` makes them fail;
+`AB_FLAGS=--allow-regression` reports and passes.
+
+## In CI
+
+`.github/workflows/otari-loadtest.yml` runs on a PR that touches `src/`, the
+migrations, dependencies, the Dockerfile or this directory, as two jobs on
+separate runners, each about five minutes with the image cache warm:
+
+- **scenarios**: `steady`, `spill`, `shared-budget`, `provider-429` and
+  `stream-fail` at 20s phases and 3,000 RPM, with every check.
+- **ab**: the PR's merge commit against its base, as above. The report is the
+  job summary. For a cost that is deliberate, add the `perf-accepted` label and
+  re-run the job.
+
+Nightly, `scenarios` runs every scenario at full length and `ab` compares main
+with itself. That A/A run is what the timed allowances should be set from
+before `--enforce-timing` is turned on. The fake provider answers in 50 ms in
+CI rather than 300.
 
 ## Profiling
 

@@ -7,13 +7,16 @@ x-otari: &otari
     # Any checkout can be under test: OTARI_BUILD_CONTEXT=../../otari-pr1948.
     context: ${OTARI_BUILD_CONTEXT:-..}
     dockerfile: Dockerfile
-  image: otari:loadtest
+  # ./run.sh ab swaps the image under test (and its database) between runs.
+  image: ${OTARI_IMAGE:-otari:loadtest}
   command: ["otari", "serve", "--config", "/app/config.yml", "--log-level", "${OTARI_LOG_LEVEL:-WARNING}"]
   volumes:
     - ${OTARI_LOADTEST_CONFIG:-./otari-config.yml}:/app/config.yml:ro
   environment:
     - OTARI_PROVIDER_ACCOUNT_PEPPER=loadtest-pepper-not-a-secret-0123456789abcdef
     - OTARI_SECRET_KEY=${OTARI_SECRET_KEY:-}
+    # Unset unless ./run.sh ab sets it, so the config file's database applies.
+    - OTARI_DATABASE_URL
   restart: "no"
   deploy:
     resources:
@@ -98,7 +101,6 @@ services:
 
   otari-2:
     <<: *otari
-    image: otari:loadtest
     pull_policy: never
     build: !reset null
     depends_on:

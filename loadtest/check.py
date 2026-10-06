@@ -22,7 +22,8 @@ Checks:
 6. Model 1 at the fake provider never accepted more than its cap in any 60s
    window (only meaningful once the gateway caps it, see README).
 7. The client saw no 429 while a candidate had room, and every failed stream
-   ended in an error event.
+   ended in an error event. ``--allow-dropped`` keeps only the 429 check, for a
+   scenario that kills a replica mid-request on purpose.
 """
 
 from __future__ import annotations
@@ -76,6 +77,17 @@ def main() -> int:
     parser.add_argument("--cap-slack", type=int, default=5, help="requests over the cap still counted a pass")
     parser.add_argument("--loadgen-result", help="a loadgen JSON result to check client-side outcomes")
     parser.add_argument("--skip-cap", action="store_true", help="skip check 6 (no per-model cap configured)")
+    parser.add_argument(
+        "--allow-dropped",
+        action="store_true",
+        help="a replica was killed on purpose: 5xx, dropped connections and cut streams are expected",
+    )
+    parser.add_argument(
+        "--overspend-slack",
+        type=Decimal,
+        default=Decimal("0.05"),
+        help="USD the shared pool may end over its cap, for the holds in flight when it ran dry",
+    )
     parser.add_argument(
         "--drain-timeout",
         type=float,
@@ -170,8 +182,8 @@ def main() -> int:
             )
             overspend = current_spend - Decimal(str(state["pool_usd"]))
             report(
-                overspend <= Decimal("0.05"),
-                "shared pool overspend within in-flight holds",
+                overspend <= args.overspend_slack,
+                f"shared pool overspend within ${args.overspend_slack}",
                 f"cap {state['pool_usd']}, spent {current_spend}, over by {max(overspend, Decimal(0))}",
             )
 
@@ -210,16 +222,22 @@ def main() -> int:
         report(refused == 0, "client saw no 429", json.dumps(result["refusals_429"])[:300])
         five_xx = sum(n for status, n in result["status_counts"].items() if status.startswith("5"))
         conn_errors = sum(result["client_errors"].values())
-        report(
-            five_xx == 0 and conn_errors == 0,
-            "client saw no 5xx or dropped connection",
-            f"{five_xx} 5xx, {conn_errors} connection errors",
-        )
-        report(
-            result["streams_without_done"] == 0,
-            "every stream ended in [DONE] or an error event",
-            f"{result['streams_without_done']} streams just stopped",
-        )
+        if args.allow_dropped:
+            print(
+                f"      expected with a replica killed: {five_xx} 5xx, {conn_errors} connection errors, "
+                f"{result['streams_without_done']} streams cut"
+            )
+        else:
+            report(
+                five_xx == 0 and conn_errors == 0,
+                "client saw no 5xx or dropped connection",
+                f"{five_xx} 5xx, {conn_errors} connection errors",
+            )
+            report(
+                result["streams_without_done"] == 0,
+                "every stream ended in [DONE] or an error event",
+                f"{result['streams_without_done']} streams just stopped",
+            )
         print(f"      client: {json.dumps(result['status_counts'])}, served by {json.dumps(result['served_by'])}")
         print(f"      latency {json.dumps(result['latency_ms'])}")
         print(f"      overhead {json.dumps(result['gateway_overhead_ms'])}")
