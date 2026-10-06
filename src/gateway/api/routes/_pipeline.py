@@ -2810,6 +2810,11 @@ async def prepare_gateway_tools(
             error_kind_for_status(exc.status_code),
             {"Retry-After": retry_after} if retry_after else None,
         ) from exc
+    except TenancyError as exc:
+        # The admission steps render their own refusals; this keeps the hold from leaking
+        # should a new one escape them. After `ControlPlaneError`, which is a `TenancyError`.
+        await release_reservation(ctx)
+        raise domain_error(adapter, exc) from exc
     except HTTPException:
         await release_reservation(ctx)
         raise

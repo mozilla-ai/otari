@@ -65,6 +65,7 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, SettledCost
 from gateway.core.config import GatewayConfig
+from gateway.exceptions import TenancyValidationError
 from gateway.exceptions.tools_exceptions import (
     CodeExecutionPolicyResolutionFailure,
     WebAccessToolNotAuthorizedError,
@@ -2523,6 +2524,26 @@ async def test_a_database_failure_releases_the_reservation(monkeypatch: pytest.M
 
     assert settlement.refunded == 1
     assert db.rollback.await_count == 1, "the session is rolled back first, or the release cannot run"
+
+
+@pytest.mark.asyncio
+async def test_a_domain_error_no_admission_step_renders_releases_the_reservation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tools service refusal that escapes its step's wrapper still answers in the route's shape without the hold."""
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def refusing(*args: Any, **kwargs: Any) -> None:
+        raise TenancyValidationError("refused")
+
+    monkeypatch.setattr(pipeline, "_admit_guardrails", refusing)
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(ctx)
+
+    assert exc_info.value.status_code == 400
+    assert settlement.refunded == 1
 
 
 @pytest.mark.asyncio
