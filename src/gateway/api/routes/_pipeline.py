@@ -1539,7 +1539,9 @@ async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) 
             attempt.instance,
             attempt.model,
         )
-        raise HTTPException(status_code=exc.status_code, detail=budget_exhausted_mid_failover_detail()) from exc
+        raise HTTPException(
+            status_code=exc.status_code, detail=budget_exhausted_mid_failover_detail(), headers=exc.headers
+        ) from exc
 
 
 def budget_exhausted_mid_failover_detail() -> str:

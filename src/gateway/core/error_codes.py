@@ -10,7 +10,7 @@ from collections.abc import Mapping
 
 ERROR_CODE_HEADER = "Otari-Error-Code"
 # Which budget refused: ``user`` for the billed user's own budget, otherwise the
-# scope of the ceiling (``api_token``, ``workspace``, ``organization``, ...).
+# scope of the ceiling (one of ``models.budgets.ScopeType``).
 BUDGET_SCOPE_HEADER = "Otari-Budget-Scope"
 # The ``rate_limits`` rule a 429 names.
 RATE_LIMIT_RULE_HEADER = "Otari-Rate-Limit-Rule"
@@ -26,11 +26,13 @@ CONTEXT_LENGTH_EXCEEDED = "context_length_exceeded"
 PRICING_REQUIRED = "pricing_required"
 
 
-def error_headers(code: str, **extra: str | None) -> dict[str, str]:
+def error_headers(code: str, *, budget_scope: str | None = None, rule: str | None = None) -> dict[str, str]:
     """``Otari-Error-Code`` plus any of the extra headers that have a value."""
     headers = {ERROR_CODE_HEADER: code}
-    names = {"budget_scope": BUDGET_SCOPE_HEADER, "rule": RATE_LIMIT_RULE_HEADER}
-    headers.update({names[name]: value for name, value in extra.items() if value is not None})
+    if budget_scope is not None:
+        headers[BUDGET_SCOPE_HEADER] = budget_scope
+    if rule is not None:
+        headers[RATE_LIMIT_RULE_HEADER] = rule
     return headers
 
 
