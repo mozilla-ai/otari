@@ -17,6 +17,7 @@ The OpenAPI spec is the source of truth here; regenerate it first with
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any, cast
@@ -83,6 +84,16 @@ def resolve_ref(ref: str, spec: dict[str, Any]) -> dict[str, Any]:
     for part in ref.lstrip("#/").split("/"):
         node = node[part]
     return cast(dict[str, Any], node)
+
+
+def _number_example(schema: dict[str, Any], *, integer: bool) -> int | float:
+    """Return zero, or the smallest value the schema's lower bound admits when zero is below it."""
+    value: float = 0
+    if "minimum" in schema:
+        value = max(value, schema["minimum"])
+    if "exclusiveMinimum" in schema and value <= schema["exclusiveMinimum"]:
+        value = math.floor(schema["exclusiveMinimum"]) + 1 if integer else schema["exclusiveMinimum"] + 1
+    return int(value) if integer else value
 
 
 def example_for_schema(
@@ -153,10 +164,8 @@ def example_for_schema(
         if fmt == "uuid":
             return "00000000-0000-0000-0000-000000000000"
         return "string"
-    if schema_type == "integer":
-        return 0
-    if schema_type == "number":
-        return 0
+    if schema_type in ("integer", "number"):
+        return _number_example(schema, integer=schema_type == "integer")
     if schema_type == "boolean":
         return False
 
