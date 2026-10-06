@@ -19,9 +19,10 @@ from typing import Any, Self
 from pydantic import model_validator
 from sqlmodel import Field, SQLModel
 
-from gateway.models.pricing import PriceSource
+from gateway.models.money import as_float
+from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.provider_keys import OrgProviderKey
-from gateway.models.providers import ProviderEndpoint
+from gateway.models.providers import HostedProvider, HostedProviderModel, ProviderEndpoint
 from gateway.models.secret_fields import redact_secret_like_values
 
 
@@ -379,6 +380,24 @@ class HostedProviderPublic(SQLModel):
     created_at: datetime
     updated_at: datetime | None = None
 
+    @classmethod
+    def from_row(cls, row: HostedProvider, *, client_args: dict[str, Any] | None) -> HostedProviderPublic:
+        """Read one row for the API: no key, and the extras with credential-shaped values masked.
+
+        ``client_args`` is passed in decrypted, because the row holds them
+        encrypted and the service is what reads them back.
+        """
+        return cls(
+            id=row.id,
+            provider=row.provider,
+            api_key_last4=row.api_key_last4,
+            api_base=row.api_base,
+            client_args=redact_secret_like_values(client_args),
+            enabled=row.enabled,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
 
 class HostedProvidersPublic(SQLModel):
     """A page of hosted providers, and how many there are in total."""
@@ -451,6 +470,29 @@ class HostedModelUpdateRequest(SQLModel):
         return self
 
 
+class HostedModelRates(SQLModel):
+    """The rates a hosted model is currently served at, and which rung of the deployment's ladder said so."""
+
+    source: PriceSource
+    input_price_per_million: float
+    output_price_per_million: float
+    cache_read_price_per_million: float | None = None
+    cache_write_price_per_million: float | None = None
+    cache_write_1h_price_per_million: float | None = None
+
+    @classmethod
+    def from_version(cls, version: ModelPricing, source: PriceSource) -> HostedModelRates:
+        """Read one pricing version, stored or transient, into the display shape."""
+        return cls(
+            source=source,
+            input_price_per_million=float(version.input_price_per_million),
+            output_price_per_million=float(version.output_price_per_million),
+            cache_read_price_per_million=as_float(version.cache_read_price_per_million),
+            cache_write_price_per_million=as_float(version.cache_write_price_per_million),
+            cache_write_1h_price_per_million=as_float(version.cache_write_1h_price_per_million),
+        )
+
+
 class HostedModelPublic(SQLModel):
     """One offered model, with the price the deployment currently serves it at.
 
@@ -473,6 +515,24 @@ class HostedModelPublic(SQLModel):
     enabled: bool
     created_at: datetime
     updated_at: datetime | None = None
+
+    @classmethod
+    def from_row(cls, row: HostedProviderModel, *, rates: HostedModelRates | None) -> HostedModelPublic:
+        """Read one offered row for the API, with whatever currently prices it."""
+        return cls(
+            id=row.id,
+            provider=row.provider,
+            model=row.model,
+            input_price_per_million=rates.input_price_per_million if rates else None,
+            output_price_per_million=rates.output_price_per_million if rates else None,
+            cache_read_price_per_million=rates.cache_read_price_per_million if rates else None,
+            cache_write_price_per_million=rates.cache_write_price_per_million if rates else None,
+            cache_write_1h_price_per_million=rates.cache_write_1h_price_per_million if rates else None,
+            price_source=rates.source if rates else None,
+            enabled=row.enabled,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
 
 
 class HostedModelsPublic(SQLModel):
@@ -564,6 +624,7 @@ __all__ = [
     "HostedCatalogRefreshPublic",
     "HostedModelCreateRequest",
     "HostedModelPublic",
+    "HostedModelRates",
     "HostedModelUpdateRequest",
     "HostedModelsPublic",
     "HostedModelsRefreshPublic",

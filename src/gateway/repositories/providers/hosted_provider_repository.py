@@ -256,6 +256,10 @@ class HostedProviderModelRepository(
         await self.db.refresh(row)
         return row
 
+    async def flush(self) -> None:
+        """Flush rows edited in place, in one round trip rather than one per row."""
+        await self.db.flush()
+
     async def delete_row(self, row: HostedProviderModel) -> None:
         """Stop offering one model. The caller owns the transaction."""
         await self.db.delete(row)

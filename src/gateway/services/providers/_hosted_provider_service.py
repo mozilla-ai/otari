@@ -35,8 +35,10 @@ timeout. Every method reads in one block, dials, then writes in another.
 """
 
 import json
+import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from any_llm import LLMProvider
@@ -55,10 +57,9 @@ from gateway.exceptions.providers_exceptions import (
     HostedProviderUnsafeApiBaseError,
 )
 from gateway.log_config import logger
-from gateway.models.money import as_float
 from gateway.models.pricing import ModelPricing, PriceSource
 from gateway.models.providers import HostedProvider, HostedProviderModel
-from gateway.models.secret_fields import redact_secret_like_values, restore_redacted_values
+from gateway.models.secret_fields import restore_redacted_values
 from gateway.repositories.providers import (
     HostedModelConflict,
     HostedProviderConflict,
@@ -71,6 +72,7 @@ from gateway.schemas.providers import (
     HostedCatalogRefreshPublic,
     HostedModelCreateRequest,
     HostedModelPublic,
+    HostedModelRates,
     HostedModelsPublic,
     HostedModelsRefreshPublic,
     HostedModelUpdateRequest,
@@ -118,18 +120,6 @@ class ResolvedHostedProvider:
     client_args: dict[str, Any] | None
 
 
-@dataclass(frozen=True)
-class _Price:
-    """The rates a model is currently served at, and which rung said so."""
-
-    source: PriceSource
-    input_price_per_million: float
-    output_price_per_million: float
-    cache_read_price_per_million: float | None
-    cache_write_price_per_million: float | None
-    cache_write_1h_price_per_million: float | None
-
-
 def _last4(api_key: str) -> str | None:
     """The tail of a key, for telling one stored credential from another.
 
@@ -174,35 +164,6 @@ def _normalize_provider(provider: str) -> str:
     return implementation
 
 
-def _price_from(version: ModelPricing, source: PriceSource) -> _Price:
-    """Read one pricing version, stored or transient, into the display shape."""
-    return _Price(
-        source=source,
-        input_price_per_million=float(version.input_price_per_million),
-        output_price_per_million=float(version.output_price_per_million),
-        cache_read_price_per_million=as_float(version.cache_read_price_per_million),
-        cache_write_price_per_million=as_float(version.cache_write_price_per_million),
-        cache_write_1h_price_per_million=as_float(version.cache_write_1h_price_per_million),
-    )
-
-
-def _model_public(row: HostedProviderModel, price: _Price | None) -> HostedModelPublic:
-    return HostedModelPublic(
-        id=row.id,
-        provider=row.provider,
-        model=row.model,
-        input_price_per_million=price.input_price_per_million if price else None,
-        output_price_per_million=price.output_price_per_million if price else None,
-        cache_read_price_per_million=price.cache_read_price_per_million if price else None,
-        cache_write_price_per_million=price.cache_write_price_per_million if price else None,
-        cache_write_1h_price_per_million=price.cache_write_1h_price_per_million if price else None,
-        price_source=price.source if price else None,
-        enabled=row.enabled,
-        created_at=row.created_at,
-        updated_at=row.updated_at,
-    )
-
-
 def _encrypt_client_args(client_args: dict[str, Any] | None) -> str | None:
     """Encrypt the SDK client extras for storage, as one JSON document.
 
@@ -227,20 +188,6 @@ def _decrypt_client_args(ciphertext: str | None) -> dict[str, Any] | None:
         return None
     decrypted: dict[str, Any] = json.loads(decrypt_secret(ciphertext))
     return decrypted
-
-
-def _public(row: HostedProvider, client_args: dict[str, Any] | None) -> HostedProviderPublic:
-    """Render a row for the API: no key, and ``client_args`` with credential-shaped values masked."""
-    return HostedProviderPublic(
-        id=row.id,
-        provider=row.provider,
-        api_key_last4=row.api_key_last4,
-        api_base=row.api_base,
-        client_args=redact_secret_like_values(client_args),
-        enabled=row.enabled,
-        created_at=row.created_at,
-        updated_at=row.updated_at,
-    )
 
 
 class HostedProviderService:
@@ -327,7 +274,7 @@ class HostedProviderService:
                 # a 500 rather than the 409 it is.
                 raise HostedProviderAlreadyExistsError(conflict.provider) from conflict
             await self._offer(provider, discovered, defaults)
-            return _public(row, request.client_args)
+            return HostedProviderPublic.from_row(row, client_args=request.client_args)
 
     async def update_provider(self, provider: str, request: HostedProviderUpdateRequest) -> HostedProviderPublic:
         """Rotate the key, repoint the base, or toggle a provider.
@@ -396,7 +343,9 @@ class HostedProviderService:
             row = await self._provider_or_raise(provider)
             rows, count = await self.models.list_for_provider(row.provider, skip=skip, limit=limit)
         prices = await self._current_prices(row.provider, rows)
-        return HostedModelsPublic(data=[_model_public(model, prices.get(model.model)) for model in rows], count=count)
+        return HostedModelsPublic(
+            data=[HostedModelPublic.from_row(model, rates=prices.get(model.model)) for model in rows], count=count
+        )
 
     async def add_model(self, provider: str, request: HostedModelCreateRequest) -> HostedModelPublic:
         """Offer a model on a provider, with its custom price when one was given.
@@ -436,10 +385,10 @@ class HostedProviderService:
             except HostedModelConflict as conflict:
                 raise HostedModelAlreadyOfferedError(provider, conflict.model) from conflict
         prices = await self._current_prices(provider, [model])
-        return _model_public(model, prices.get(name))
+        return HostedModelPublic.from_row(model, rates=prices.get(name))
 
     async def update_model(
-        self, provider: str, model_id: object, request: HostedModelUpdateRequest
+        self, provider: str, model_id: uuid.UUID, request: HostedModelUpdateRequest
     ) -> HostedModelPublic:
         """Reprice one offered model, toggle whether it is served, or both.
 
@@ -463,9 +412,9 @@ class HostedProviderService:
             if priced or request.enabled is not None:
                 await self.models.save(model)
         prices = await self._current_prices(provider, [model])
-        return _model_public(model, prices.get(model.model))
+        return HostedModelPublic.from_row(model, rates=prices.get(model.model))
 
-    async def remove_model(self, provider: str, model_id: object) -> None:
+    async def remove_model(self, provider: str, model_id: uuid.UUID) -> None:
         """Stop offering a model. Its pricing history stays.
 
         Deliberately: usage already settled against those rows, and a model
@@ -789,17 +738,18 @@ class HostedProviderService:
             version = latest.get(keys_by_model[row.model])
             if version is None or not _same_instant(version.effective_at, row.seeded_price_at):
                 # An operator priced it since, or its versions are gone. Either
-                # way it is no longer this surface's to move.
+                # way it is not this surface's to move.
                 row.seeded_price_at = None
-                await self.models.save(row)
                 continue
             default = defaults.get(row.model)
             if default is None or self.pricing.rates_match(version, default):
                 continue
             moved[keys_by_model[row.model]] = default
             row.seeded_price_at = now
-            await self.models.save(row)
             repriced.append(row.model)
+        # One flush for every row edited above, not one per row: a provider can
+        # offer several hundred seeded models.
+        await self.models.flush()
         await self.pricing.store_defaults(moved, now)
         return sorted(repriced)
 
@@ -830,7 +780,7 @@ class HostedProviderService:
             },
         )
 
-    async def _current_prices(self, provider: str, rows: Sequence[HostedProviderModel]) -> dict[str, _Price]:
+    async def _current_prices(self, provider: str, rows: Sequence[HostedProviderModel]) -> dict[str, HostedModelRates]:
         """What each offered model is currently served at, keyed by model name.
 
         Two rungs of the deployment's ladder, in its order: the stored version,
@@ -846,15 +796,17 @@ class HostedProviderService:
         keys = {f"{provider}:{row.model}": row.model for row in rows}
         seeded_at = {row.model: row.seeded_price_at for row in rows}
         versions = await self.pricing.current_versions(keys, now)
-        prices: dict[str, _Price] = {}
+        prices: dict[str, HostedModelRates] = {}
         for key, version in versions.items():
             model = keys[key]
             seeded = _same_instant(version.effective_at, seeded_at[model])
-            prices[model] = _price_from(version, PRICE_SOURCE_DEFAULT if seeded else PRICE_SOURCE_DEPLOYMENT)
+            prices[model] = HostedModelRates.from_version(
+                version, PRICE_SOURCE_DEFAULT if seeded else PRICE_SOURCE_DEPLOYMENT
+            )
         if default_pricing_enabled():
             missing = [model for model in keys.values() if model not in prices]
             for model, default in (await self.pricing.defaults_for(provider, missing)).items():
-                prices[model] = _price_from(default, PRICE_SOURCE_DEFAULT)
+                prices[model] = HostedModelRates.from_version(default, PRICE_SOURCE_DEFAULT)
         return prices
 
     async def _dial(self, provider: str, credential: ResolvedHostedProvider) -> ProviderDiscovery:
@@ -911,8 +863,8 @@ class HostedProviderService:
             return None
 
     def _public(self, row: HostedProvider) -> HostedProviderPublic:
-        """Render a stored row for the API, decrypting its extras to mask them."""
-        return _public(row, self._client_args(row, quiet=True))
+        """Render a stored row for the API, decrypting its extras so the schema can mask them."""
+        return HostedProviderPublic.from_row(row, client_args=self._client_args(row, quiet=True))
 
     @staticmethod
     def _encrypt(api_key: str) -> str:
@@ -952,19 +904,19 @@ class HostedProviderService:
             raise HostedProviderNotFoundError(provider)
         return row
 
-    async def _model_or_raise(self, provider: str, model_id: object) -> HostedProviderModel:
+    async def _model_or_raise(self, provider: str, model_id: uuid.UUID) -> HostedProviderModel:
         """Load one offered model, scoped to its provider.
 
         Raises:
             HostedModelNotFoundError: no such model on that provider.
         """
-        model = await self.models.get_in_provider(_as_uuid(model_id), provider)
+        model = await self.models.get_in_provider(model_id, provider)
         if model is None:
             raise HostedModelNotFoundError(model_id)
         return model
 
 
-def _same_instant(version_at: object, seeded_at: object) -> bool:
+def _same_instant(version_at: datetime | None, seeded_at: datetime | None) -> bool:
     """Whether a version's timestamp is the one the row recorded when it seeded it.
 
     Normalized on both sides because ``model_pricing`` reads back naive on
@@ -973,12 +925,7 @@ def _same_instant(version_at: object, seeded_at: object) -> bool:
     """
     if seeded_at is None or version_at is None:
         return False
-    return normalize_effective_at(version_at) == normalize_effective_at(seeded_at)  # type: ignore[arg-type]
-
-
-def _as_uuid(model_id: object) -> Any:
-    """Pass a model id through as the repository's key type."""
-    return model_id
+    return normalize_effective_at(version_at) == normalize_effective_at(seeded_at)
 
 
 __all__ = ["HostedProviderService", "ResolvedHostedProvider"]
