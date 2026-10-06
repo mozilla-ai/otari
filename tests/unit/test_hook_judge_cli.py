@@ -379,7 +379,7 @@ def test_judge_gates_run_concurrently_not_sequentially(monkeypatch: pytest.Monke
         for i in range(gate_count)
     )
 
-    monkeypatch.setattr(hook_cli, "_hook_collect_diff", lambda repo_root: "diff")
+    monkeypatch.setattr(hook_cli, "_hook_collect_diff", lambda repo_root, diff_range: "diff")
     # Sequential execution leaves the first caller alone at the barrier until
     # the timeout breaks it, so the test fails rather than hangs.
     barrier = threading.Barrier(gate_count, timeout=10)
@@ -400,11 +400,7 @@ def test_judge_gates_run_concurrently_not_sequentially(monkeypatch: pytest.Monke
     monkeypatch.setattr(hook_cli, "_hook_run_judge", fake_run_judge)
 
     results = hook_cli._hook_collect_judge_verdicts(
-        parse_policy(gates_yaml, source="test.yml"),
-        repo,
-        None,
-        [],
-        judge_model=None,
+        parse_policy(gates_yaml, source="test.yml"), hook_cli._JudgedChange(repo, []), hook_cli._JudgeSettings()
     )
 
     assert [result.gate_id for result in results] == [f"g{i}" for i in range(gate_count)]

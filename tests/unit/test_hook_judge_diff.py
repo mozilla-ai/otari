@@ -184,3 +184,48 @@ def test_an_unreadable_file_is_named_rather_than_dropped(tmp_path: Path, monkeyp
     assert "b/locked.py" in diff
     assert "Unreadable, content not shown." in diff
     assert "+readable = True" in diff, "one refused file must not drop the others"
+
+
+def _commit(repo: Path) -> str:
+    """Commit the whole working tree and return the new commit's SHA."""
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "change"],
+        cwd=repo,
+        check=True,
+    )
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def test_a_range_ending_at_a_commit_reads_only_the_commits(tmp_path: Path) -> None:
+    """A range with a head reads Git objects, so nothing in the working tree reaches it."""
+    repo = _repo(tmp_path)
+    (repo / "kept.py").write_text("value = 2\n", encoding="utf-8")
+    (repo / "committed.py").write_text("committed = True\n", encoding="utf-8")
+    head = _commit(repo)
+    (repo / "kept.py").write_text("value = 3\n", encoding="utf-8")
+    (repo / "untracked.py").write_text("untracked = True\n", encoding="utf-8")
+
+    diff = hook_cli._hook_collect_diff(repo, hook_cli._DiffRange(f"{head}~1", head))
+
+    assert diff is not None
+    assert "+value = 2" in diff
+    assert "+committed = True" in diff
+    assert "value = 3" not in diff
+    assert "untracked.py" not in diff
+
+
+def test_a_range_ending_at_the_working_tree_starts_at_its_base(tmp_path: Path) -> None:
+    """Committed and uncommitted changes since the base both reach the diff."""
+    repo = _repo(tmp_path)
+    (repo / "committed.py").write_text("committed = True\n", encoding="utf-8")
+    head = _commit(repo)
+    (repo / "untracked.py").write_text("untracked = True\n", encoding="utf-8")
+
+    diff = hook_cli._hook_collect_diff(repo, hook_cli._DiffRange(f"{head}~1"))
+
+    assert diff is not None
+    assert "+committed = True" in diff
+    assert "+untracked = True" in diff

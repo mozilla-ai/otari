@@ -1103,33 +1103,33 @@ def _hook_collect_untracked_diff(repo_root: Path, budget: int) -> str | None:
     return "".join(rendered)
 
 
-def _hook_collect_diff(repo_root: Path) -> str | None:
-    """The working tree's own diff against HEAD, for a judge gate's prompt.
+class _DiffRange(NamedTuple):
+    """A change runs from the commit `base` to the commit `head`, or to the working tree when `head` is None."""
 
-    `git diff HEAD` for tracked changes, then every untracked file appended as
-    a new-file hunk. Both halves matter: the rule most of these gates check is
-    about what a change *adds*, and a change that adds a capability is mostly
-    files Git has never seen, so a tracked-only diff shows a judge the edits
-    and hides the new code. Returns None only when
-    Git itself could not answer (no HEAD yet, not a repository, a timeout, or
-    `git` itself missing), mirroring `_hook_collect_changed_paths`'s own
-    fail-open sentinel: a diff collection failure must degrade this one
-    judge gate's own evidence, never crash `otari hook` and take every other
-    gate in the policy, mechanical and required ones included, down with it
-    (confirmed: an uncaught `subprocess.run` exception here does exactly
-    that, exiting nonzero before any gate is evaluated).
+    base: str = "HEAD"
+    head: str | None = None
 
-    `errors="replace"`: `git diff` emits a tracked file's own content bytes,
-    which are not necessarily valid UTF-8 (a Latin-1-encoded tracked file, a
-    binary blob committed by mistake, ...); `encoding="utf-8"` alone decodes
-    strictly and raises `UnicodeDecodeError` from inside `subprocess.run`
-    itself on the first non-UTF-8 byte (confirmed against a real repo with
-    such a file), which is not one of the exceptions below and would
-    otherwise still crash this command outright.
+    def git_diff_args(self) -> list[str]:
+        """Return the revision arguments `git diff` takes for this range."""
+        return [self.base] if self.head is None else [self.base, self.head]
+
+
+def _hook_collect_diff(repo_root: Path, diff_range: _DiffRange = _DiffRange()) -> str | None:
+    """Return the diff over `diff_range` for a judge gate's prompt, or None when Git cannot produce it.
+
+    The diff is capped in length.
+
+    A range ending at the working tree adds every untracked file as a new-file hunk,
+    because a change that adds a capability is mostly files Git has never seen.
+    A range ending at a commit is read from Git objects alone, so nothing in the working tree reaches it.
+
+    NOTE: None is distinct from an empty diff, and a failure never raises.
+    An exception here would stop every other gate in the policy from being evaluated.
+    Output is decoded with `errors="replace"`, because a tracked file's bytes need not be valid UTF-8.
     """
     try:
         result = subprocess.run(  # noqa: S603 - fixed argv, no shell, explicit cwd
-            ["git", "diff", "HEAD"],
+            ["git", "diff", *diff_range.git_diff_args()],
             cwd=repo_root,
             capture_output=True,
             text=True,
@@ -1143,13 +1143,14 @@ def _hook_collect_diff(repo_root: Path) -> str | None:
     if result.returncode != 0:
         return None
     diff = result.stdout
-    # Tracked first, and it keeps whatever of the budget it needs: an edit to
-    # an existing file is the more precise evidence, since its hunk carries the
-    # surrounding code a new file has none of.
-    untracked = _hook_collect_untracked_diff(repo_root, _HOOK_JUDGE_MAX_DIFF_CHARS - len(diff))
-    if untracked is None:
-        return None
-    diff += untracked
+    if diff_range.head is None:
+        # Tracked first, and it keeps whatever of the budget it needs: an edit to
+        # an existing file is the more precise evidence, since its hunk carries the
+        # surrounding code a new file has none of.
+        untracked = _hook_collect_untracked_diff(repo_root, _HOOK_JUDGE_MAX_DIFF_CHARS - len(diff))
+        if untracked is None:
+            return None
+        diff += untracked
     if len(diff) > _HOOK_JUDGE_MAX_DIFF_CHARS:
         click.echo(
             f"otari hook: diff is {len(diff):,} characters, over the {_HOOK_JUDGE_MAX_DIFF_CHARS:,} limit; "
@@ -1569,16 +1570,26 @@ def _hook_run_judge(
     return outcome, reasoning
 
 
+class _JudgedChange(NamedTuple):
+    """A judge gate reads a change's paths, its diff and, for a session, the transcript that made it."""
+
+    repo_root: Path
+    changed_paths: list[str]
+    diff_range: _DiffRange = _DiffRange()
+    transcript_path: str | None = None
+
+
+class _JudgeSettings(NamedTuple):
+    """One run of the judge gates uses a model, a dry-run flag, a transcript format and a CLI fallback order."""
+
+    model: str | None = None
+    dry_run: bool = False
+    harness: str = "claude-code"
+    cli_override: tuple[str, ...] | None = None
+
+
 def _hook_collect_judge_verdicts(
-    spec: PolicySpec,
-    repo_root: Path,
-    transcript_path: str | None,
-    changed_paths: list[str],
-    *,
-    judge_model: str | None,
-    judge_dry_run: bool = False,
-    harness: str = "claude-code",
-    judge_cli_override: tuple[str, ...] | None = None,
+    spec: PolicySpec, change: _JudgedChange, settings: _JudgeSettings
 ) -> list[JudgeVerdict]:
     """Run every applicable judge gate in the local policy, one model-CLI call each,
     up to `_HOOK_GATE_MAX_WORKERS` of them concurrently.
@@ -1589,7 +1600,7 @@ def _hook_collect_judge_verdicts(
 
     A judge gate with `when_changed` is skipped locally, before ever reading
     the diff/transcript or shelling out to `claude -p`, when none of
-    `changed_paths` matches its globs (`domain.evaluators.matched_changed_paths`,
+    `change.changed_paths` matches its globs (`domain.evaluators.matched_changed_paths`,
     the same grammar `evaluate_judge`'s own applicability check uses). This
     skips work only: submitting no verdict
     for a skipped gate resolves `not_applicable` there independently, the
@@ -1597,22 +1608,15 @@ def _hook_collect_judge_verdicts(
     anyway. A gate with no `when_changed` at all keeps its unconditional,
     every-Stop-event behavior.
 
-    `judge_dry_run` (see `hook`'s own `--judge-dry-run`) still runs this whole
-    applicability check, still reads the diff and transcript, and still
-    writes the same `_hook_log_judge_call` audit lines; only `_hook_run_judge`
-    itself skips the real model-CLI call. This is what makes the resulting
-    log a real count of how often the model would have been invoked, not a
-    guess: everything up to the call itself runs exactly as it would for real.
+    `settings.dry_run` runs everything except the model call itself, audit lines included.
+    The audit log therefore counts the calls a real run would make.
 
-    `harness` picks which transcript format `transcript_path` is read as
-    (Claude Code's Message-API transcript vs. Codex's rollout JSONL). It also
-    supplies the *default* judge_cli order (`_JUDGE_CLI_DEFAULT_BY_HARNESS`)
-    for a gate that names none of its own: precedence, most specific first,
-    is a gate's own `JudgeGate.judge_cli`, then this call's own
-    `judge_cli_override` (`hook`'s own `--judge-cli`/`OTARI_HOOK_JUDGE_CLI`),
-    then that harness default. A gate or override naming more than one CLI is
-    an ordered fallback list, resolved by `_hook_resolve_judge_cli`: the first
-    entry whose own binary is on PATH is what actually gets invoked.
+    `settings.harness` picks the transcript format `change.transcript_path` is read as,
+    Claude Code's Message-API transcript or Codex's rollout JSONL.
+    It also supplies the default judge CLI order (`_JUDGE_CLI_DEFAULT_BY_HARNESS`) for a gate that names none.
+    Precedence, most specific first, is the gate's own `JudgeGate.judge_cli`, then `settings.cli_override`,
+    then that harness default.
+    A list naming more than one CLI is an ordered fallback, and the first one found on PATH is invoked.
 
     Gates run concurrently (a `ThreadPoolExecutor`, not `asyncio`: each
     worker's own time is spent blocked inside `subprocess.run`, ordinary
@@ -1627,7 +1631,7 @@ def _hook_collect_judge_verdicts(
     `ThreadPoolExecutor.map` yields results in the order its inputs were
     given, not completion order.
     """
-    changed_paths_tuple = tuple(changed_paths)
+    changed_paths_tuple = tuple(change.changed_paths)
     judge_gates = by_priority(
         [
             gate
@@ -1653,11 +1657,13 @@ def _hook_collect_judge_verdicts(
     # used to, sends the model a diff-less prompt indistinguishable from a
     # real empty one, and a model asked to judge a change it cannot see can
     # (and, verified against a real call, does) still say "pass".
-    diff = _hook_collect_diff(repo_root)
+    diff = _hook_collect_diff(change.repo_root, change.diff_range)
     diff_collection_failed = diff is None
     diff = diff or ""
-    extract_transcript = _hook_extract_codex_judge_transcript if harness == "codex" else _hook_extract_judge_transcript
-    transcript = extract_transcript(Path(transcript_path)) if transcript_path else ""
+    extract_transcript = (
+        _hook_extract_codex_judge_transcript if settings.harness == "codex" else _hook_extract_judge_transcript
+    )
+    transcript = extract_transcript(Path(change.transcript_path)) if change.transcript_path else ""
     if len(transcript) > _HOOK_JUDGE_MAX_TRANSCRIPT_CHARS:
         click.echo(
             f"otari hook: transcript is {len(transcript):,} characters, over the "
@@ -1681,25 +1687,29 @@ def _hook_collect_judge_verdicts(
         # invocation must still show up in the audit trail rather than
         # silently vanishing along with the process that would have logged
         # its outcome.
-        _hook_log_judge_call(repo_root, gate.id, "invoking")
+        _hook_log_judge_call(change.repo_root, gate.id, "invoking")
         if diff_collection_failed:
             # No model call at all: a diff this gate cannot see is not
             # evidence to judge against, and every other pre-flight failure
             # here (no configured judge_cli found on PATH, an exhausted time
             # budget) already reports "error" without one either.
-            outcome, reasoning = "error", "could not collect the working tree diff"
+            outcome, reasoning = "error", "could not collect the diff to judge"
         else:
-            judge_cli = gate.judge_cli or judge_cli_override or _JUDGE_CLI_DEFAULT_BY_HARNESS.get(harness, ("claude",))
+            judge_cli = (
+                gate.judge_cli
+                or settings.cli_override
+                or _JUDGE_CLI_DEFAULT_BY_HARNESS.get(settings.harness, ("claude",))
+            )
             outcome, reasoning = _hook_run_judge(
                 gate.rubric,
                 diff,
                 transcript,
                 judge_cli=judge_cli,
-                model=judge_model,
+                model=settings.model,
                 deadline=deadline,
-                dry_run=judge_dry_run,
+                dry_run=settings.dry_run,
             )
-        _hook_log_judge_call(repo_root, gate.id, outcome, detail=reasoning if judge_dry_run else None)
+        _hook_log_judge_call(change.repo_root, gate.id, outcome, detail=reasoning if settings.dry_run else None)
         return JudgeVerdict(gate_id=gate.id, outcome=cast(_VerdictOutcome, outcome), reasoning=reasoning)
 
     with ThreadPoolExecutor(max_workers=min(len(judge_gates), _HOOK_GATE_MAX_WORKERS)) as executor:
@@ -2268,13 +2278,8 @@ def hook(
 
         judge_results = _hook_collect_judge_verdicts(
             spec,
-            root,
-            transcript_path,
-            paths,
-            judge_model=judge_model,
-            judge_dry_run=judge_dry_run,
-            harness=harness,
-            judge_cli_override=judge_cli,
+            _JudgedChange(repo_root=root, changed_paths=paths, transcript_path=transcript_path),
+            _JudgeSettings(model=judge_model, dry_run=judge_dry_run, harness=harness, cli_override=judge_cli),
         )
         check_results = _hook_collect_check_verdicts(spec, root, paths, _verifier_scopes(guardrail.origins, root))
     else:
