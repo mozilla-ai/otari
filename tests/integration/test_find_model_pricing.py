@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.db import ModelPricing
-from gateway.services.pricing_service import configure_default_pricing, find_model_pricing
+from gateway.services.pricing_service import RequestPrices, configure_default_pricing, find_model_pricing
 
 
 @pytest.mark.asyncio
@@ -406,3 +406,25 @@ async def test_resolve_pricing_names_the_entry_that_answered(async_db: AsyncSess
     assert reference is not None
     assert reference == default_pricing_reference("anthropic", "claude-sonnet-4", as_of)
     assert effective_at is None
+
+
+@pytest.mark.asyncio
+async def test_a_memoized_rate_survives_a_rollback(async_db: AsyncSession) -> None:
+    """Settlement reads the rate admission resolved, after anything in between rolled the session back."""
+    async_db.add(
+        ModelPricing(
+            model_key="openai:memo-model",
+            input_price_per_million=Decimal("1.5"),
+            output_price_per_million=Decimal("2.5"),
+            effective_at=datetime.now(UTC) - timedelta(days=1),
+        )
+    )
+    await async_db.commit()
+    prices = RequestPrices(None)
+
+    resolved = await prices.resolve(async_db, "openai", "memo-model")
+    await async_db.rollback()
+
+    assert resolved is not None
+    assert resolved.pricing.input_price_per_million == Decimal("1.5")
+    assert await prices.resolve(async_db, "openai", "memo-model") is resolved

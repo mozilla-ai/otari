@@ -11,7 +11,7 @@ same reason: the admission gate prices only the head, so an unpriced model that
 would 402 when named directly would otherwise serve, and log ``cost=null``,
 purely by being reached as a fallback.
 
-These are pure unit tests. ``find_model_pricing`` and ``increase_reservation``
+These are pure unit tests. ``resolve_model_pricing`` and ``increase_reservation``
 are stubbed, so what is pinned is the decision logic: when the hold grows, by how
 much, when it does not, and which failure the caller sees.
 """
@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import gateway.api.routes._pipeline as pipeline
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import BUDGET_EXCEEDED, error_headers
+from gateway.services import pricing_service
 from gateway.services.budgets import ReservationHandle
 from gateway.types.attempt import Attempt
 
@@ -71,6 +72,8 @@ def _ctx(
         # organization has no rate override", so the top-up prices against the
         # deployment list, which is what ``_PRICES`` below stands in for.
         organization_id=None,
+        # No memo, as for a context the preamble priced nothing on: the top-up resolves its own.
+        prices=None,
         reservation=reservation
         or ReservationHandle(
             user_id="user-1",
@@ -99,7 +102,10 @@ def increases(monkeypatch: pytest.MonkeyPatch) -> list[Decimal]:
         # default it would bind cleanly and the regression would pass silently,
         # which is the opposite of what naming it here is for.
         price = _PRICES.get((instance, model))
-        return None if price is None else SimpleNamespace(price=price)
+        if price is None:
+            return None
+        rate = SimpleNamespace(price=price, input_price_per_million=price, output_price_per_million=price)
+        return SimpleNamespace(pricing=rate)
 
     def fake_estimate_cost(pricing: Any, **_kwargs: Any) -> Decimal:
         return Decimal(0) if pricing is None else Decimal(str(pricing.price))
@@ -107,7 +113,8 @@ def increases(monkeypatch: pytest.MonkeyPatch) -> list[Decimal]:
     async def fake_increase(_db: Any, _handle: Any, delta: Decimal, **_kwargs: Any) -> None:
         recorded.append(delta)
 
-    monkeypatch.setattr(pipeline, "find_model_pricing", fake_find_pricing)
+    # The top-up prices through the request's price memo, which resolves here.
+    monkeypatch.setattr(pricing_service, "resolve_model_pricing", fake_find_pricing)
     monkeypatch.setattr(pipeline, "estimate_cost", fake_estimate_cost)
     monkeypatch.setattr(pipeline, "increase_reservation", fake_increase)
     return recorded

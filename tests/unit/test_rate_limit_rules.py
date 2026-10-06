@@ -121,12 +121,12 @@ async def test_a_refusal_by_several_rules_names_the_first_in_order() -> None:
     rules = _rules(store, {"name": "first", "per": "user", "rpm": 1}, {"name": "second", "per": "key", "rpm": 1})
 
     await _admit(rules)
-    before = RATE_LIMIT_HITS._value.get()  # type: ignore[attr-defined]
+    before = RATE_LIMIT_HITS._value.get()
     with pytest.raises(HTTPException, match="'first'"):
         await _admit(rules)
 
     # One refused request, counted once however many rules it did not fit.
-    assert RATE_LIMIT_HITS._value.get() - before == 1  # type: ignore[attr-defined]
+    assert RATE_LIMIT_HITS._value.get() - before == 1
 
 
 class _CountingStore(InMemoryRateLimitStore):

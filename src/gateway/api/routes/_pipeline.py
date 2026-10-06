@@ -211,8 +211,10 @@ from gateway.services.model_access import is_model_allowed, model_not_allowed_de
 from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
+    RequestPrices,
     find_model_pricing,
     gateway_tool_pricing_key,
+    is_free_pricing,
     no_pricing_error_detail,
     price_tool_calls,
     pricing_required_but_missing,
@@ -979,6 +981,7 @@ class RequestContext:
         resolved_provider: ResolvedProvider | None = None,
         plan: CompiledPlan | None = None,
         estimate_inputs: "EstimateInputs | None" = None,
+        prices: RequestPrices | None = None,
         request_group_id: str | None = None,
         organization_id: uuid.UUID | None = None,
         code_execution_policy: ResolvedCodeExecutionPolicy | None = None,
@@ -1061,6 +1064,9 @@ class RequestContext:
         # hold rather than serving a pricier model against a cheaper model's
         # reservation. `None` when nothing was reserved.
         self.estimate_inputs = estimate_inputs
+        # The rates this request resolved, shared by admission, any top-up and
+        # settlement so each model is priced once. `None` when nothing was priced.
+        self.prices = prices
         # Ties this request's usage rows together. A routed request can write more
         # than one (the attempt that served, plus one per absorbed failure), and
         # without a shared id they would be unrelated rows in the activity log.
@@ -1577,12 +1583,9 @@ async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) 
     """
     if ctx.db is None or ctx.reservation is None or ctx.estimate_inputs is None:
         return
-    pricing = await find_model_pricing(
-        ctx.db,
-        attempt.instance,
-        attempt.model,
-        organization_id=ctx.organization_id,
-    )
+    prices = ctx.prices if ctx.prices is not None else RequestPrices(ctx.organization_id)
+    resolved = await prices.resolve(ctx.db, attempt.instance, attempt.model)
+    pricing = resolved.pricing if resolved is not None else None
     # `require_pricing` is a billing safety gate: it refuses a request the gateway
     # cannot price, because it then cannot debit it. The gate at admission prices
     # only the head candidate, so without this an unpriced model that 402s when
@@ -1618,6 +1621,7 @@ async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) 
             ctx.reservation,
             delta,
             model=f"{attempt.instance}:{attempt.model}",
+            model_is_free=is_free_pricing(pricing),
             strategy=ctx.config.budget_strategy,
         )
     except HTTPException as exc:
@@ -1961,6 +1965,7 @@ async def resolve_request_context(
     resolved_provider: ResolvedProvider | None = None
     plan: CompiledPlan | None = None
     estimate_inputs: EstimateInputs | None = None
+    prices: RequestPrices | None = None
     rate_limit_grant: RateLimitGrant | None = None
     request_id: str
 
@@ -2202,12 +2207,9 @@ async def resolve_request_context(
         # lookup is deliberately never memoized, so re-deriving it here would
         # pay that cost twice for one request.
         organization_id = await organization_for_workspace_id(db, workspace_id)
-        gate_pricing = await find_model_pricing(
-            db,
-            gate_instance,
-            gate_model,
-            organization_id=organization_id,
-        )
+        prices = RequestPrices(organization_id)
+        gate_resolved = await prices.resolve(db, gate_instance, gate_model)
+        gate_pricing = gate_resolved.pricing if gate_resolved is not None else None
         # Captured so a fallover can reprice against a different candidate; see
         # `top_up_reservation_for_attempt`.
         estimate_inputs = EstimateInputs(
@@ -2268,6 +2270,7 @@ async def resolve_request_context(
                 # Already resolved for the pricing gate above, so the free-model
                 # check reads the same rate the estimate was built from.
                 organization_id=organization_id,
+                model_is_free=is_free_pricing(gate_pricing),
                 # The completion path is the one reserve site with the config
                 # object to hand, so it is the one that can honor a deployment's
                 # own TTL; the batch, search and pass-through sites take the
@@ -2472,6 +2475,7 @@ async def resolve_request_context(
         resolved_provider=resolved_provider,
         plan=plan,
         estimate_inputs=estimate_inputs,
+        prices=prices,
         request_group_id=request_id if plan is not None else None,
         organization_id=organization_id,
         request_id=request_id,
@@ -3453,8 +3457,12 @@ async def record_usage(
     workspace_id: uuid.UUID | None = None,
     request_id: str | None = None,
     tags: dict[str, str] | None = None,
+    prices: RequestPrices | None = None,
 ) -> LoggedUsage:
     """Log API usage to the database and return the computed cost and its source.
+
+    ``prices`` holds the rates the request already resolved; a model it priced is
+    settled at that rate instead of being looked up again.
 
     Spend is not written here; the budget reservation reconcile path owns
     ``users.spend``. This returns the cost it computed so the caller can
@@ -3569,13 +3577,16 @@ async def record_usage(
         # gate estimated against. Both lookups are memoized on immutable columns,
         # so this is dictionary reads rather than queries after the first request
         # on a key.
-        resolved = await resolve_model_pricing(
-            db,
-            provider,
-            model,
-            as_of=usage_log.timestamp,
-            organization_id=await organization_for_workspace_id(db, usage_log.workspace_id),
-        )
+        if prices is not None:
+            resolved = await prices.resolve(db, provider, model)
+        else:
+            resolved = await resolve_model_pricing(
+                db,
+                provider,
+                model,
+                as_of=usage_log.timestamp,
+                organization_id=await organization_for_workspace_id(db, usage_log.workspace_id),
+            )
         if resolved is not None:
             cost, meters, breakdown = calculate_metered_cost(resolved.pricing, usage_data)
             pricing_source = resolved.source
@@ -4260,6 +4271,7 @@ def build_streaming_response(
     extra_headers: dict[str, str] | None = None,
     rate_limit_grant: RateLimitGrant | None = None,
     tags: dict[str, str] | None = None,
+    prices: RequestPrices | None = None,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
 
@@ -4349,6 +4361,7 @@ def build_streaming_response(
             workspace_id=workspace_id,
             request_id=request_id,
             tags=tags,
+            prices=prices,
         )
         if reservation is not None:
             await reconcile_reservation(
@@ -4836,6 +4849,7 @@ async def run_single_attempt_stream(
         rate_limit_info=ctx.rate_limit_info,
         reservation=ctx.reservation,
         rate_limit_grant=ctx.rate_limit_grant,
+        prices=ctx.prices,
         started_at=ctx.started_at,
         workspace_id=ctx.workspace_id,
         platform_correlation_id=platform_correlation_id,
@@ -5594,6 +5608,7 @@ async def run_standalone_non_stream(
                     workspace_id=ctx.workspace_id,
                     request_id=ctx.request_id,
                     tags=ctx.tags,
+                    prices=ctx.prices,
                 )
             if ctx.reservation is not None:
                 await reconcile_reservation(

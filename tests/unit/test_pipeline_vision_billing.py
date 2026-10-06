@@ -22,6 +22,7 @@ from gateway.api.routes import chat
 from gateway.container import build_container
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
+from gateway.services import pricing_service
 from gateway.services.budgets import ReservationHandle, estimate_tokens
 from gateway.types.normalization_target import NormalizationTarget
 
@@ -95,7 +96,8 @@ class _Recorder:
 
         monkeypatch.setattr(pipeline, "verify_api_key_or_master_key", fake_verify)
         monkeypatch.setattr(pipeline, "check_rate_limit", fake_check_rate_limit)
-        monkeypatch.setattr(pipeline, "find_model_pricing", fake_find_pricing)
+        # The preamble prices through the request's price memo, which resolves here.
+        monkeypatch.setattr(pricing_service, "resolve_model_pricing", fake_find_pricing)
         monkeypatch.setattr(pipeline, "resolve_request_allowlist", fake_resolve_allowlist)
         monkeypatch.setattr(pipeline, "organization_for_workspace_id", fake_organization_for_workspace_id)
         monkeypatch.setattr(pipeline, "reserve_budget", fake_reserve)
@@ -205,6 +207,8 @@ async def test_reservation_uses_the_resolved_provider_for_pricing(monkeypatch: p
         # reservation, so the free-model shortcut prices at the same rate the
         # request settles at. None here is the stub above saying "no override".
         "organization_id": None,
+        # Priced for the gate already, so the free-model check is answered, not looked up.
+        "model_is_free": False,
         # The completion path is the one reserve site with the config object to
         # hand, so it is the one that passes the deployment's own reservation TTL
         # rather than letting the ledger fall back to its module default.

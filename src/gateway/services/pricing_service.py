@@ -8,7 +8,7 @@ from typing import NamedTuple
 
 from genai_prices import Usage, calc_price
 from genai_prices.types import PriceCalculation, TieredPrices
-from sqlalchemy import case, distinct, func, or_, select, true
+from sqlalchemy import case, distinct, func, inspect, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
@@ -695,6 +695,11 @@ async def current_rates_page(
     return rows, count or 0
 
 
+def is_free_pricing(pricing: ModelPricing | None) -> bool:
+    """Whether a resolved rate charges nothing: zero for input and for output."""
+    return pricing is not None and pricing.input_price_per_million == 0 and pricing.output_price_per_million == 0
+
+
 async def find_model_pricing(
     db: AsyncSession,
     provider: str | None,
@@ -890,6 +895,39 @@ def gateway_tool_pricing_key(tool: str) -> str:
     backend URL.
     """
     return f"{GATEWAY_TOOL_PRICING_PROVIDER}:{tool}"
+
+
+def _detach(row: object) -> None:
+    """Take an ORM row out of its session, keeping what it has loaded; anything else is left alone."""
+    state = inspect(row, raiseerr=False)
+    if state is not None and state.session is not None:
+        state.session.expunge(row)
+
+
+class RequestPrices:
+    """The rates one request has resolved, so each model it bills is priced once.
+
+    Admission, a fallover's top-up and settlement each price the model they are
+    about to bill. A request is short, so they share the first resolution rather
+    than reading the price list again; a rate that takes effect while a request
+    is in flight applies from the next request on.
+    """
+
+    def __init__(self, organization_id: uuid.UUID | None) -> None:
+        self.organization_id = organization_id
+        self._resolved: dict[tuple[str | None, str], ResolvedPricing | None] = {}
+
+    async def resolve(self, db: AsyncSession, provider: str | None, model: str) -> ResolvedPricing | None:
+        """:func:`resolve_model_pricing` for this request's organization, once per model."""
+        key = (provider, model)
+        if key not in self._resolved:
+            resolved = await resolve_model_pricing(db, provider, model, organization_id=self.organization_id)
+            # Detached, so a rollback between admission and settlement, which
+            # expires every instance in the session, cannot expire the rate too.
+            if resolved is not None:
+                _detach(resolved.pricing)
+            self._resolved[key] = resolved
+        return self._resolved[key]
 
 
 async def price_tool_calls(

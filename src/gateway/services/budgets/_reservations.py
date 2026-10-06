@@ -40,7 +40,7 @@ from gateway.services.budgets._scoped_enforcement import (
 from gateway.services.budgets._scoped_enforcement import release as release_scoped
 from gateway.services.budgets._scoped_enforcement import reserve as reserve_scoped
 from gateway.services.budgets._scoped_enforcement import settle as settle_scoped
-from gateway.services.pricing_service import find_model_pricing
+from gateway.services.pricing_service import find_model_pricing, is_free_pricing
 from gateway.services.provider_kwargs import provider_key
 from gateway.types.budget_state import BudgetState
 
@@ -191,8 +191,7 @@ async def _is_model_free(
         else:
             model_name = model
         pricing = await find_model_pricing(db, pricing_provider, model_name, organization_id=organization_id)
-        if pricing:
-            return pricing.input_price_per_million == 0 and pricing.output_price_per_million == 0
+        return is_free_pricing(pricing)
     except (AnyLLMError, ValueError, SQLAlchemyError) as e:
         logger.warning("Failed to determine provider pricing: %s", e)
 
@@ -466,6 +465,7 @@ async def reserve_budget(
     counts_toward_budget: bool = True,
     scope: BudgetScopeRequest | None = None,
     organization_id: uuid.UUID | None = None,
+    model_is_free: bool | None = None,
     reservation_ttl_sec: int = DEFAULT_RESERVATION_TTL_SEC,
     record_reservation: bool = True,
 ) -> ReservationHandle:
@@ -475,6 +475,7 @@ async def reserve_budget(
     No row lock is held across the provider call.
     ``organization_id`` selects the rate overrides that decide whether ``model`` is free.
     Without it the deployment price list decides.
+    ``model_is_free`` is that answer from a caller that already priced ``model``, and skips the lookup.
     A caller that passes no token estimate holds no tokens, so a token ceiling binds it at settlement.
     ``requests`` is 1 for a request that takes its own hold and 0 for a top-up.
     ``new_request=False`` marks a top-up, which is checked only for whether the delta fits.
@@ -563,7 +564,11 @@ async def reserve_budget(
     # nothing caps a count does the whole reservation drop away, which keeps the
     # hot path for a free model on a dollars-only budget exactly what it was.
     usd: Decimal | None = held
-    if model and await _is_model_free(db, model, pricing_provider=pricing_provider, organization_id=organization_id):
+    if model_is_free is None and model:
+        model_is_free = await _is_model_free(
+            db, model, pricing_provider=pricing_provider, organization_id=organization_id
+        )
+    if model_is_free:
         budget_caps_counts = budget is not None and (budget.token_limit is not None or budget.request_limit is not None)
         if not budget_caps_counts and not any(ceiling.caps_counts for ceiling in scoped):
             return no_reservation
@@ -952,6 +957,7 @@ async def increase_reservation(
     *,
     additional_tokens: int = 0,
     model: str | None = None,
+    model_is_free: bool | None = None,
     strategy: str = "for_update",
 ) -> None:
     """Grow an existing reservation atomically when the request size increases.
@@ -1031,6 +1037,7 @@ async def increase_reservation(
         requests=0,
         new_request=False,
         model=model,
+        model_is_free=model_is_free,
         strategy=strategy,
         record_reservation=False,
     )
