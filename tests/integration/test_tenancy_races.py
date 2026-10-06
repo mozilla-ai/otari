@@ -79,7 +79,7 @@ from gateway.schemas.budgets import (
 )
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultService
-from gateway.services.password_service import verify_password_async
+from gateway.services.password_service import verify_absent_password_async, verify_password_async
 from gateway.services.tenancy import OrganizationService, WorkspaceService, user_service
 from gateway.services.tenancy.organization_service import SignupRegistration
 from gateway.services.tenancy.provisioning_service import (
@@ -1035,6 +1035,14 @@ async def test_concurrent_open_signups_of_one_address_register_one_identity(
 ) -> None:
     """One signup of an address registers it, and every concurrent loser is refused like any other."""
     _register_together(monkeypatch)
+    refusals = 0
+
+    async def counting_absent_password_check(password: str) -> bool:
+        nonlocal refusals
+        refusals += 1
+        return await verify_absent_password_async(password)
+
+    monkeypatch.setattr(user_service, "verify_absent_password_async", counting_absent_password_check)
     config = GatewayConfig(mail_transport="console", public_base_url="https://gw.example.com", open_signup=True)
     organizations_before = await _organization_count(async_db)
 
@@ -1057,6 +1065,8 @@ async def test_concurrent_open_signups_of_one_address_register_one_identity(
         registered[0].id
     ]
     assert await _organization_count(async_db) == organizations_before + 1
+    # Each loser answers in about the time a registration takes, like every other refusal.
+    assert refusals == _RACERS - 1
 
 
 async def test_concurrent_first_oauth_sign_ins_of_one_address_share_one_identity(

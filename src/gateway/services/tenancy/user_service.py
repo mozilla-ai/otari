@@ -328,6 +328,7 @@ async def create_user_for_signup(
         )
         if not registration.created:
             # This answers like every other enumeration-safe refusal.
+            await verify_absent_password_async(password)
             return None
         identity = registration.identity
 
