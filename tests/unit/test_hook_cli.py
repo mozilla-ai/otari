@@ -2406,8 +2406,12 @@ def test_a_first_stop_block_does_not_mention_the_budget(monkeypatch: pytest.Monk
     assert "already blocked once" not in result.output
 
 
-def _repo_origins(spec: PolicySpec) -> dict[str, hook_cli.GuardrailOrigin]:
-    return {gate.id: hook_cli.GuardrailOrigin.REPO for gate in spec.gates}
+def _repo_scope(root: Path) -> hook_cli._VerifierScope:
+    return hook_cli._verifier_scope(root, hook_cli.GuardrailOrigin.REPO)
+
+
+def _repo_scopes(spec: PolicySpec, root: Path) -> dict[str, hook_cli._VerifierScope]:
+    return {gate.id: _repo_scope(root) for gate in spec.gates}
 
 
 def _write_verifier(tmp_path: Path, name: str, body: str) -> Path:
@@ -2434,7 +2438,7 @@ def test_hook_run_check_verifier_passes_on_real_exit_zero(tmp_path: Path) -> Non
     """No mocking: a real script, run as a real subprocess, exiting 0."""
     _write_verifier(tmp_path, "v.sh", "exit 0")
     outcome, detail = hook_cli._hook_run_check_verifier(
-        tmp_path, "v.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 10
+        tmp_path, "v.sh", scope=_repo_scope(tmp_path), deadline=time.monotonic() + 10
     )
     assert outcome == "pass"
     assert detail == ""
@@ -2443,7 +2447,7 @@ def test_hook_run_check_verifier_passes_on_real_exit_zero(tmp_path: Path) -> Non
 def test_hook_run_check_verifier_fails_on_real_exit_one_and_captures_stdout(tmp_path: Path) -> None:
     _write_verifier(tmp_path, "v.sh", 'echo "conflicted.txt:2"\nexit 1')
     outcome, detail = hook_cli._hook_run_check_verifier(
-        tmp_path, "v.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 10
+        tmp_path, "v.sh", scope=_repo_scope(tmp_path), deadline=time.monotonic() + 10
     )
     assert outcome == "fail"
     assert detail == "conflicted.txt:2\n"
@@ -2453,14 +2457,14 @@ def test_hook_run_check_verifier_fails_on_real_exit_one_and_captures_stdout(tmp_
 def test_hook_run_check_verifier_errors_on_other_exit_codes(tmp_path: Path, exit_code: int) -> None:
     _write_verifier(tmp_path, "v.sh", f"exit {exit_code}")
     outcome, _detail = hook_cli._hook_run_check_verifier(
-        tmp_path, "v.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 10
+        tmp_path, "v.sh", scope=_repo_scope(tmp_path), deadline=time.monotonic() + 10
     )
     assert outcome == "error"
 
 
 def test_hook_run_check_verifier_errors_when_the_script_does_not_exist(tmp_path: Path) -> None:
     outcome, detail = hook_cli._hook_run_check_verifier(
-        tmp_path, "does-not-exist.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 10
+        tmp_path, "does-not-exist.sh", scope=_repo_scope(tmp_path), deadline=time.monotonic() + 10
     )
     assert outcome == "error"
     assert "does not exist" in detail
@@ -2471,7 +2475,7 @@ def test_hook_run_check_verifier_errors_when_the_script_is_not_executable(tmp_pa
     script.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     # Deliberately not chmod +x: exec must raise PermissionError (an OSError).
     outcome, detail = hook_cli._hook_run_check_verifier(
-        tmp_path, "v.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 10
+        tmp_path, "v.sh", scope=_repo_scope(tmp_path), deadline=time.monotonic() + 10
     )
     assert outcome == "error"
     assert "v.sh" in detail
@@ -2492,7 +2496,7 @@ def test_hook_run_check_verifier_rejects_a_verifier_that_resolves_outside_the_re
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     outcome, detail = hook_cli._hook_run_check_verifier(
-        repo_root, f"../{outside.name}", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 10
+        repo_root, f"../{outside.name}", scope=_repo_scope(repo_root), deadline=time.monotonic() + 10
     )
     assert outcome == "error"
     assert "outside the repo root" in detail
@@ -2501,7 +2505,7 @@ def test_hook_run_check_verifier_rejects_a_verifier_that_resolves_outside_the_re
 def test_hook_run_check_verifier_errors_when_the_deadline_has_already_passed(tmp_path: Path) -> None:
     _write_verifier(tmp_path, "v.sh", "exit 0")
     outcome, detail = hook_cli._hook_run_check_verifier(
-        tmp_path, "v.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() - 1
+        tmp_path, "v.sh", scope=_repo_scope(tmp_path), deadline=time.monotonic() - 1
     )
     assert outcome == "error"
     assert "budget exhausted" in detail
@@ -2512,7 +2516,7 @@ def test_hook_run_check_verifier_times_out_on_a_real_slow_script(tmp_path: Path)
     # A near-zero remaining budget forces subprocess.run's own `timeout=` well
     # under the script's real 5s sleep, without waiting for _HOOK_CHECK_TIMEOUT_SECONDS.
     outcome, detail = hook_cli._hook_run_check_verifier(
-        tmp_path, "v.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 0.05
+        tmp_path, "v.sh", scope=_repo_scope(tmp_path), deadline=time.monotonic() + 0.05
     )
     assert outcome == "error"
     assert "did not respond" in detail
@@ -2532,7 +2536,7 @@ def test_hook_run_check_verifier_timeout_also_kills_a_background_child(tmp_path:
     # to reach `echo $!` before the kill, or there is no recorded child to
     # assert about.
     outcome, detail = hook_cli._hook_run_check_verifier(
-        tmp_path, "v.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 1
+        tmp_path, "v.sh", scope=_repo_scope(tmp_path), deadline=time.monotonic() + 1
     )
     assert outcome == "error"
     assert "did not respond" in detail
@@ -2557,7 +2561,7 @@ def test_hook_run_check_verifier_replaces_undecodable_output(tmp_path: Path) -> 
     """
     _write_verifier(tmp_path, "v.sh", r"""printf 'bad: \xff\xfe'""" + "\nexit 1")
     outcome, detail = hook_cli._hook_run_check_verifier(
-        tmp_path, "v.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 10
+        tmp_path, "v.sh", scope=_repo_scope(tmp_path), deadline=time.monotonic() + 10
     )
     assert outcome == "fail"
     assert detail.startswith("bad: ")
@@ -2567,7 +2571,7 @@ def test_hook_run_check_verifier_replaces_undecodable_output(tmp_path: Path) -> 
 def test_hook_run_check_verifier_caps_detail_length(tmp_path: Path) -> None:
     _write_verifier(tmp_path, "v.sh", 'printf "%0.sx" {1..10000}\nexit 1')
     outcome, detail = hook_cli._hook_run_check_verifier(
-        tmp_path, "v.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 10
+        tmp_path, "v.sh", scope=_repo_scope(tmp_path), deadline=time.monotonic() + 10
     )
     assert outcome == "fail"
     assert len(detail) == hook_cli._HOOK_MAX_CHECK_DETAIL_LENGTH
@@ -2592,7 +2596,7 @@ def test_verifier_gates_run_concurrently_not_sequentially(tmp_path: Path) -> Non
     spec = parse_policy(gates_yaml, source="test.yml")
 
     start = time.monotonic()
-    results = hook_cli._hook_collect_check_verdicts(spec, tmp_path, [], _repo_origins(spec))
+    results = hook_cli._hook_collect_check_verdicts(spec, tmp_path, [], _repo_scopes(spec, tmp_path))
     elapsed = time.monotonic() - start
 
     assert [result.gate_id for result in results] == [f"g{i}" for i in range(gate_count)]
@@ -2776,7 +2780,7 @@ def test_collect_check_verdicts_skips_gates_over_the_per_run_limit(tmp_path: Pat
     )
     spec = parse_policy("\n".join(gates_yaml) + "\n", source="test.yml")
 
-    results = hook_cli._hook_collect_check_verdicts(spec, tmp_path, [], _repo_origins(spec))
+    results = hook_cli._hook_collect_check_verdicts(spec, tmp_path, [], _repo_scopes(spec, tmp_path))
     assert len(results) == hook_cli._HOOK_CHECK_MAX_GATES_PER_RUN
     assert {r.outcome for r in results} == {"pass"}
 
@@ -2799,7 +2803,7 @@ def test_collect_check_verdicts_keeps_the_highest_priority_gates_over_the_limit(
     )
     spec = parse_policy("\n".join(gates_yaml) + "\n", source="test.yml")
 
-    results = hook_cli._hook_collect_check_verdicts(spec, tmp_path, [], _repo_origins(spec))
+    results = hook_cli._hook_collect_check_verdicts(spec, tmp_path, [], _repo_scopes(spec, tmp_path))
     ran = [result.gate_id for result in results]
     assert ran[0] == f"g{over_the_limit - 1}"
     assert len(ran) == hook_cli._HOOK_CHECK_MAX_GATES_PER_RUN
@@ -3310,7 +3314,10 @@ def test_a_user_level_verifier_outside_the_verifiers_directory_is_refused(tmp_pa
     (isolated_home / ".otari").mkdir()
     _write_verifier(isolated_home / ".otari", "elsewhere.sh", "exit 0")
     outcome, detail = hook_cli._hook_run_check_verifier(
-        tmp_path, ".otari/elsewhere.sh", origin=hook_cli.GuardrailOrigin.USER, deadline=time.monotonic() + 10
+        tmp_path,
+        ".otari/elsewhere.sh",
+        scope=hook_cli._verifier_scope(tmp_path, hook_cli.GuardrailOrigin.USER),
+        deadline=time.monotonic() + 10,
     )
     assert outcome == "error"
     assert "resolves outside ~/.otari/verifiers/" in detail
@@ -3320,7 +3327,7 @@ def test_a_repo_verifier_does_not_resolve_against_home(tmp_path: Path, isolated_
     (isolated_home / ".otari/verifiers").mkdir(parents=True)
     _write_verifier(isolated_home / ".otari/verifiers", "check.sh", "exit 0")
     outcome, detail = hook_cli._hook_run_check_verifier(
-        tmp_path, ".otari/verifiers/check.sh", origin=hook_cli.GuardrailOrigin.REPO, deadline=time.monotonic() + 10
+        tmp_path, ".otari/verifiers/check.sh", scope=_repo_scope(tmp_path), deadline=time.monotonic() + 10
     )
     assert outcome == "error"
     assert "does not exist" in detail

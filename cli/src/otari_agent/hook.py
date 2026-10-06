@@ -1752,6 +1752,11 @@ def _verifier_scope(repo_root: Path, origin: GuardrailOrigin) -> _VerifierScope:
     return _VerifierScope(repo_root, repo_root, "", "the repo root")
 
 
+def _verifier_scopes(origins: Mapping[str, GuardrailOrigin], guardrail_root: Path) -> dict[str, _VerifierScope]:
+    """Return each gate's verifier scope by gate ID, for a guardrail whose repo files live in `guardrail_root`."""
+    return {gate_id: _verifier_scope(guardrail_root, origin) for gate_id, origin in origins.items()}
+
+
 def _resolve_verifier(scope: _VerifierScope, verifier: str) -> Path | None:
     """The script `verifier` names, or None when it resolves outside the scope's boundary."""
     script_path = (scope.base / verifier).resolve()
@@ -1759,7 +1764,7 @@ def _resolve_verifier(scope: _VerifierScope, verifier: str) -> Path | None:
 
 
 def _hook_run_check_verifier(
-    repo_root: Path, verifier: str, *, origin: GuardrailOrigin, deadline: float
+    repo_root: Path, verifier: str, *, scope: _VerifierScope, deadline: float
 ) -> tuple[str, str]:
     """Run one verifier gate's verifier script; return (outcome, detail).
 
@@ -1769,16 +1774,15 @@ def _hook_run_check_verifier(
     what lets `enforcement: required` genuinely block for this gate type,
     unlike `judge`: the contract is reproducible, not a model's opinion.
 
-    `verifier` is resolved against `repo_root` and, before it is ever run,
-    confirmed to still resolve inside it (mirrors the same guard the
+    `verifier` is resolved against `scope.base` and, before it is ever run,
+    confirmed to still resolve inside `scope.boundary` (mirrors the same guard the
     PreToolUse edit-path branch above applies to its own target path): a
     policy naming `../../etc/passwd` or an absolute path domain.policy
     already rejects at parse time, but a relative path can still climb out
     with enough `..` segments, and running whatever that resolves to would
     be a materially different, undocumented capability, not "run a
     repo-local script".
-    A user-level gate's `verifier` resolves against the home directory instead,
-    and must stay inside `~/.otari/verifiers/`.
+    The scope can lie outside `repo_root`, as a user-level gate's `~/.otari/verifiers/` does.
 
     No sandboxing beyond that check, and no guard requiring the script to
     predate the diff under check, deliberately: see VerifierGate's own
@@ -1810,7 +1814,6 @@ def _hook_run_check_verifier(
     if remaining <= 0:
         return "error", "check time budget exhausted before this verifier could run"
 
-    scope = _verifier_scope(repo_root, origin)
     script_path = _resolve_verifier(scope, verifier)
     if script_path is None:
         return "error", f"verifier {verifier!r} resolves outside {scope.boundary_label}"
@@ -1879,12 +1882,12 @@ def _hook_collect_check_verdicts(
     spec: PolicySpec,
     repo_root: Path,
     changed_paths: list[str],
-    origins: Mapping[str, GuardrailOrigin],
+    scopes: Mapping[str, _VerifierScope],
 ) -> list[CheckVerdict]:
     """Run every applicable verifier gate's verifier locally; return check_results.
 
-    `origins` says, per gate ID, whether the repo or the user owns the gate,
-    which decides where its script is looked up.
+    `scopes` says, per gate ID, where its script is looked up.
+    Every script runs with `repo_root` as its working directory.
 
     Structured exactly like `_hook_collect_judge_verdicts`, and reads its
     gates off the same already-parsed policy the caller evaluates below.
@@ -1939,7 +1942,7 @@ def _hook_collect_check_verdicts(
     deadline = time.monotonic() + _HOOK_CHECK_TOTAL_BUDGET_SECONDS
 
     def run_one(gate: VerifierGate) -> CheckVerdict:
-        outcome, detail = _hook_run_check_verifier(repo_root, gate.verifier, origin=origins[gate.id], deadline=deadline)
+        outcome, detail = _hook_run_check_verifier(repo_root, gate.verifier, scope=scopes[gate.id], deadline=deadline)
         return CheckVerdict(gate_id=gate.id, outcome=cast(_VerdictOutcome, outcome), detail=detail)
 
     with ThreadPoolExecutor(max_workers=min(len(check_gates), _HOOK_GATE_MAX_WORKERS)) as executor:
@@ -2273,7 +2276,7 @@ def hook(
             harness=harness,
             judge_cli_override=judge_cli,
         )
-        check_results = _hook_collect_check_verdicts(spec, root, paths, guardrail.origins)
+        check_results = _hook_collect_check_verdicts(spec, root, paths, _verifier_scopes(guardrail.origins, root))
     else:
         return  # An event this harness integration does not check yet.
 
