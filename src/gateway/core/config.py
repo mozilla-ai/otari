@@ -257,6 +257,50 @@ DECISION_PROVIDERS = ("typesafe", "openrouter", "llamacpp")
 DECISION_PROVIDERS_SELF_HOSTED = ("llamacpp",)
 
 
+DEFAULT_AGENT_MODEL_CANDIDATES: dict[str, str | None] = {
+    "haiku": (
+        "Simple, well-specified, mechanical work: find files or symbols, search, list, read and "
+        "report, summarize short material. Little judgment needed."
+    ),
+    "sonnet": (
+        "Moderate reasoning: explore several files and connect what they do, make a contained code "
+        "change, follow a plan with clear constraints, write tests for known behavior."
+    ),
+    "opus": (
+        "Hard reasoning: architecture or design choices, subtle or cross-cutting bugs, ambiguous or "
+        "underspecified goals, large refactors, security-sensitive changes."
+    ),
+}
+"""The models a subagent may be sent to unless ``agent_recommender_candidates`` says otherwise.
+
+Claude Code's own aliases, so each follows the current generation without an edit.
+"""
+
+MAX_AGENT_MODEL_CANDIDATES = 255
+"""The most options a choice question takes, so a longer list fails at startup, not per request."""
+
+
+def validate_agent_recommender(model: str, candidates: dict[str, str | None]) -> None:
+    """Validate the agent recommender's settings, raising ``ValueError`` on any problem.
+
+    The decision provider itself is resolved per request, so a deployment that
+    never asks for a recommendation need not configure one.
+    """
+    provider, _, bare_model = model.partition(":")
+    if not provider.strip() or not bare_model.strip():
+        msg = "agent_recommender_model must name a decision model as '<provider>:<model>'."
+        raise ValueError(msg)
+    if len(candidates) < 2:
+        msg = "agent_recommender_candidates needs at least two models to choose between."
+        raise ValueError(msg)
+    if len(candidates) > MAX_AGENT_MODEL_CANDIDATES:
+        msg = f"agent_recommender_candidates may name at most {MAX_AGENT_MODEL_CANDIDATES} models."
+        raise ValueError(msg)
+    if any(not name.strip() for name in candidates):
+        msg = "agent_recommender_candidates must not have an empty model name."
+        raise ValueError(msg)
+
+
 def validate_decision_provider_entry(name: str, entry: Any) -> None:
     """Validate one ``decision_providers`` entry, raising ``ValueError`` on any problem.
 
@@ -1020,6 +1064,22 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             "openrouter, llamacpp; defaults to the key), an 'api_key' (required except for llamacpp), "
             "an 'api_base' (required for llamacpp; https whenever a key is set), and a 'timeout' "
             "in seconds. Standalone-mode only."
+        ),
+    )
+    agent_recommender_model: Annotated[str, OMITTED] = Field(
+        default="typesafe:jev-latest",
+        description=(
+            "The decision model that recommends a subagent's model through POST /api/v1/routing/recommend, "
+            "as a decision_providers selector ('<provider>:<model>'). Resolved per request, so a deployment "
+            "that never asks need not configure the provider."
+        ),
+    )
+    agent_recommender_candidates: Annotated[dict[str, str | None], OMITTED] = Field(
+        default_factory=lambda: dict(DEFAULT_AGENT_MODEL_CANDIDATES),
+        description=(
+            "The models POST /api/v1/routing/recommend may send a subagent to, as the asking harness names "
+            "them, each with what it is for (or null when the name says enough). Two to 255. Defaults to "
+            "Claude Code's haiku, sonnet and opus aliases."
         ),
     )
     search_tools: Annotated[dict[str, dict[str, Any]], OMITTED] = Field(
@@ -2310,6 +2370,7 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
         """Validate the ``decision_providers`` map at startup so misconfig fails fast."""
         for name, entry in self.decision_providers.items():
             validate_decision_provider_entry(name, entry)
+        validate_agent_recommender(self.agent_recommender_model, self.agent_recommender_candidates)
 
     @model_validator(mode="after")
     def _validate_database_timeout_ordering(self) -> "GatewayConfig":

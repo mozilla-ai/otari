@@ -18,6 +18,8 @@ _SETTING_NAMES = frozenset(
     {
         "accept_incoming_trace_context",
         "activation_guide",
+        "agent_recommender_candidates",
+        "agent_recommender_model",
         "aliases",
         "auto_migrate",
         "bootstrap",
