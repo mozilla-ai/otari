@@ -60,6 +60,16 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
         """
         await self.db.execute(select(col(Workspace.id)).where(col(Workspace.id) == workspace_id).with_for_update())
 
+    async def exists(self, workspace_id: uuid.UUID) -> bool:
+        """Report whether the workspace's row is in the database now.
+
+        Asks the database rather than the session: ``get`` answers from the
+        identity map, which still holds a workspace another transaction has
+        since deleted.
+        """
+        result = await self.db.execute(select(col(Workspace.id)).where(col(Workspace.id) == workspace_id))
+        return result.scalar_one_or_none() is not None
+
     async def get_by_ids(self, workspace_ids: Collection[uuid.UUID]) -> Sequence[Workspace]:
         """Return the workspaces named by a batch of ids (order unspecified).
 

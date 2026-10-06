@@ -43,6 +43,7 @@ from gateway.exceptions.organizations_exceptions import (
     OrganizationMemberAlreadyExistsError,
     WorkspaceAlreadyExistsError,
     WorkspaceMemberAlreadyExistsError,
+    WorkspaceNotFoundError,
 )
 from gateway.models.api_keys import APIKey
 from gateway.models.budgets import SCOPE_WORKSPACE, SCOPE_WORKSPACE_MEMBER, ScopedBudget, ScopeType
@@ -321,6 +322,43 @@ async def test_concurrent_workspace_member_adds_conflict(
     conflicts = [outcome for outcome in outcomes if isinstance(outcome, WorkspaceMemberAlreadyExistsError)]
     assert len(joined) == 1
     assert len(conflicts) == _RACERS - 1
+
+
+async def test_a_member_added_to_a_workspace_deleted_mid_join_gets_not_found(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The membership insert is refused by the workspace foreign key, which is not a duplicate."""
+    organization, owner = await _seed_owner(async_db)
+    service = WorkspaceService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    target = await service.create_workspace(user=owner, workspace_create=WorkspaceCreate(name="Target"))
+    await service.create_workspace(user=owner, workspace_create=WorkspaceCreate(name="Survivor"))
+    joiner = await create_member(async_db, organization, role="member", full_name="Joiner")
+    await async_db.commit()
+
+    async with sessions() as session:
+        actor = await UserRepository(session).get(owner.id)
+        assert actor is not None
+        adder = WorkspaceService(session, membership_listener=WorkspaceBudgetDefaultService(session))
+        take_lock = adder.workspaces.lock
+
+        # Pins the interleaving: the delete commits after the adder's pre-checks and before its insert.
+        async def delete_then_lock(workspace_id: uuid.UUID) -> None:
+            async with sessions() as other:
+                deleter = await UserRepository(other).get(owner.id)
+                assert deleter is not None
+                await WorkspaceService(
+                    other, membership_listener=WorkspaceBudgetDefaultService(other)
+                ).delete_workspace(user=deleter, workspace_id=workspace_id)
+            await take_lock(workspace_id)
+
+        monkeypatch.setattr(adder.workspaces, "lock", delete_then_lock)
+        with pytest.raises(WorkspaceNotFoundError):
+            await adder.add_member(user=actor, workspace_id=target.id, user_id=joiner.id)
+
+    joined = await async_db.execute(select(col(WorkspaceMember.id)).where(col(WorkspaceMember.user_id) == joiner.id))
+    assert joined.all() == []
 
 
 async def test_provisioning_refuses_to_shadow_an_organization_it_did_not_create(
