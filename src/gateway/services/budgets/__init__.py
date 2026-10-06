@@ -14,7 +14,6 @@ from gateway.services.budgets._reservations import (
     record_external_spend,
     refund_reservation,
     reserve_budget,
-    user_minute_limits,
 )
 from gateway.services.budgets._retiming import cadence_of, retime_ceilings_for_budget
 from gateway.services.budgets._scoped_enforcement import ApplicableBudget, BudgetScopeRequest, applicable_budgets
@@ -41,7 +40,6 @@ __all__ = [
     "record_external_spend",
     "refund_reservation",
     "reserve_budget",
-    "user_minute_limits",
     "retime_ceilings_for_budget",
     "run_reservation_sweeper",
 ]

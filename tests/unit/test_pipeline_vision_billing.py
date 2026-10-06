@@ -98,7 +98,7 @@ class _Recorder:
         monkeypatch.setattr(pipeline, "resolve_request_allowlist", fake_resolve_allowlist)
         monkeypatch.setattr(pipeline, "organization_for_workspace_id", fake_organization_for_workspace_id)
         monkeypatch.setattr(pipeline, "reserve_budget", fake_reserve)
-        monkeypatch.setattr(pipeline, "user_minute_limits", fake_minute_limits)
+        monkeypatch.setattr(pipeline, "_budget_minute_limits", fake_minute_limits)
         monkeypatch.setattr(pipeline, "increase_reservation", fake_increase)
         monkeypatch.setattr(pipeline, "log_usage", fake_log_usage)
         monkeypatch.setattr(pipeline, "reconcile_reservation", fake_reconcile)

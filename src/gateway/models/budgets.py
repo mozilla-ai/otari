@@ -31,6 +31,9 @@ from gateway.models.money import UsdCost
 # leaves the sum of three of them ~9000x inside the type.
 MAX_COUNT_LIMIT = 1_000_000_000_000_000
 
+# rpm_limit and tpm_limit are 32-bit columns, so a larger value fails on commit rather than validation.
+MAX_MINUTE_LIMIT = 2_147_483_647
+
 # An enum changes the published OpenAPI schema, so the two published vocabularies stay `Literal`.
 ResetAlignment = Literal["calendar_day", "calendar_week", "calendar_month"]
 RESET_ALIGNMENTS: tuple[ResetAlignment, ...] = get_args(ResetAlignment)

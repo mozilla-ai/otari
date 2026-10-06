@@ -3,6 +3,7 @@ import uuid
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User
+from gateway.rate_limit import BudgetMinuteLimits
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.schemas.budgets import (
     OrganizationBudgetCreate,
@@ -23,6 +24,7 @@ from gateway.services.budgets._deployment_surface import _DeploymentSurface
 from gateway.services.budgets._end_users import _EndUsers
 from gateway.services.budgets._member_policies import _MemberPolicies
 from gateway.services.budgets._organization_surface import _OrganizationSurface
+from gateway.services.budgets._reservations import _normalize_strategy
 from gateway.services.budgets._scopes import ScopeOwnership
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -43,6 +45,7 @@ class BudgetService:
         workspace_access: WorkspaceAccess,
     ) -> None:
         self._uow = uow
+        self._budgets = repositories.budgets
         self._organization = _OrganizationSurface(repositories, ScopeOwnership(organizations, api_keys), organizations)
         self._end_users = _EndUsers(repositories)
         self._deployment = _DeploymentSurface(repositories)
@@ -119,6 +122,14 @@ class BudgetService:
         """Refuse a budget a service key may not cap its end users at: an unknown one, or a tenant's."""
         async with self._uow:
             await self._end_users.require_assignable_budget(budget_id)
+
+    async def minute_limits(self, user_id: str, *, strategy: str | None) -> BudgetMinuteLimits | None:
+        """The per-minute limits of the user's own budget, or None when it sets neither or budgets are disabled."""
+        if _normalize_strategy(strategy) == "disabled":
+            return None
+        async with self._uow:
+            found = await self._budgets.minute_limits_for_user(user_id)
+        return BudgetMinuteLimits(*found) if found is not None else None
 
     async def resolve_end_user(self, *, api_key: APIKey, external_id: str) -> str:
         """Return the end user a service key named, creating it under the key's end-user budget on first use.

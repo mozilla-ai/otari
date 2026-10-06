@@ -75,7 +75,6 @@ from gateway.services.budgets import (
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
-    user_minute_limits,
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
@@ -383,7 +382,9 @@ async def _dispatch_search(
         key_id=api_key_id,
         user_id=user_id,
         estimated_tokens=0,
-        budget_limits=await user_minute_limits(db, user_id),
+        budget_limits=None
+        if budget_exempt
+        else await budget_service.minute_limits(user_id, strategy=config.budget_strategy),
     )
     if rate_limit_grant is not None:
         # A `per: model` rule names a search tool by its pricing key, <provider>:<tool>.

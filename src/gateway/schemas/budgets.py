@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from gateway.models.budgets import (
     MAX_COUNT_LIMIT,
+    MAX_MINUTE_LIMIT,
     Budget,
     BudgetResetLog,
     ResetAlignment,
@@ -52,11 +53,13 @@ class CreateBudgetRequest(BaseModel):
     rpm_limit: int | None = Field(
         default=None,
         ge=1,
+        le=MAX_MINUTE_LIMIT,
         description="Requests per minute for each user on this budget, across replicas; null is unlimited",
     )
     tpm_limit: int | None = Field(
         default=None,
         ge=1,
+        le=MAX_MINUTE_LIMIT,
         description=(
             "Tokens per minute for each user on this budget, counted on what requests used: a request is "
             "admitted while the user's minute is under the limit. Null is unlimited"
@@ -149,11 +152,13 @@ class UpdateBudgetRequest(BaseModel):
     rpm_limit: int | None = Field(
         default=None,
         ge=1,
+        le=MAX_MINUTE_LIMIT,
         description="Requests per minute for each user on this budget, across replicas; null is unlimited",
     )
     tpm_limit: int | None = Field(
         default=None,
         ge=1,
+        le=MAX_MINUTE_LIMIT,
         description=(
             "Tokens per minute for each user on this budget, counted on what requests used: a request is "
             "admitted while the user's minute is under the limit. Null is unlimited"

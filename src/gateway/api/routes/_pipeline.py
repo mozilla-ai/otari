@@ -158,7 +158,13 @@ from gateway.ports.code_execution_port import CodeExecutionPort
 from gateway.ports.mcp_server_port import McpServerPort, McpServerScope
 from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
-from gateway.rate_limit import RateLimitGrant, RateLimitInfo, admit_rate_limit_rules, check_rate_limit
+from gateway.rate_limit import (
+    BudgetMinuteLimits,
+    RateLimitGrant,
+    RateLimitInfo,
+    admit_rate_limit_rules,
+    check_rate_limit,
+)
 from gateway.services.budgets import (
     ZERO,
     BudgetScopeRequest,
@@ -170,7 +176,6 @@ from gateway.services.budgets import (
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
-    user_minute_limits,
 )
 from gateway.services.code_execution import (
     ContainerLease,
@@ -1789,6 +1794,19 @@ async def _admit_idempotent(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"User '{user_id}' is blocked")
 
 
+async def _budget_minute_limits(
+    adapter: FormatAdapter[Any, Any],
+    uow: UnitOfWork | None,
+    db: AsyncSession,
+    user_id: str,
+    strategy: str | None,
+) -> BudgetMinuteLimits | None:
+    """The per-minute limits of the user's own budget, admitted alongside ``rate_limits``."""
+    if uow is None:
+        raise adapter.error(500, DB_UNAVAILABLE_DETAIL, ErrorKind.API)
+    return await get_budget_service(uow, db).minute_limits(user_id, strategy=strategy)
+
+
 async def resolve_request_context(
     *,
     adapter: FormatAdapter[Any, Any],
@@ -2130,19 +2148,21 @@ async def resolve_request_context(
             max_output_tokens=estimate_inputs.max_output_tokens,
             default_output_tokens=estimate_inputs.default_output_tokens,
         )
+        # A key flagged exclude_from_budget logs its cost and is never reserved, reconciled into users.spend, or gated.
+        # A master-key caller has no API key and stays on the enforced path. A request to the caller's own endpoint
+        # is exempt too, its owner paying the upstream; a routing plan never resolves one, so no fallover leaves it.
+        budget_exempt = (api_key is not None and api_key.exclude_from_budget) or (
+            resolved_provider is not None and resolved_provider.owned_endpoint is not None
+        )
         # Before the reservation, so a request the rules refuse holds no budget to refund.
         rate_limit_grant = await admit_rate_limit_rules(
             raw_request,
             key_id=api_key.id if api_key is not None else None,
             user_id=user_id,
             estimated_tokens=estimated_tokens,
-            budget_limits=await user_minute_limits(db, user_id),
-        )
-        # A key flagged exclude_from_budget logs its cost and is never reserved, reconciled into users.spend, or gated.
-        # A master-key caller has no API key and stays on the enforced path. A request to the caller's own endpoint
-        # is exempt too, its owner paying the upstream; a routing plan never resolves one, so no fallover leaves it.
-        budget_exempt = (api_key is not None and api_key.exclude_from_budget) or (
-            resolved_provider is not None and resolved_provider.owned_endpoint is not None
+            budget_limits=None
+            if budget_exempt
+            else await _budget_minute_limits(adapter, uow, db, user_id, config.budget_strategy),
         )
         # Reserve first so user/blocked/budget rejections (404/403) take
         # precedence over the missing-pricing rejection (402); refund if we

@@ -9,7 +9,6 @@ from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
 from gateway.models.api_keys import APIKey
-from gateway.models.budgets import Budget
 from gateway.models.tenancy import OrganizationMember, Workspace
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
@@ -29,20 +28,6 @@ async def get_active_user(db: AsyncSession, user_id: str, *, for_update: bool = 
         stmt = stmt.with_for_update()
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
-
-
-async def budget_minute_limits(db: AsyncSession, user_id: str) -> tuple[str, int | None, int | None] | None:
-    """``(budget_id, rpm_limit, tpm_limit)`` of the user's own budget, or None when it limits neither."""
-    row = (
-        await db.execute(
-            select(Budget.budget_id, Budget.rpm_limit, Budget.tpm_limit)
-            .join(User, col(User.budget_id) == Budget.budget_id)
-            .where(User.user_id == user_id, User.deleted_at.is_(None))
-        )
-    ).first()
-    if row is None or (row.rpm_limit is None and row.tpm_limit is None):
-        return None
-    return row.budget_id, row.rpm_limit, row.tpm_limit
 
 
 async def _revive(user: User) -> User:
