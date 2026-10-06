@@ -64,6 +64,11 @@ const NO_TOOLS: PlaygroundTools = {
     enabled: false,
     reason: "No backend is configured on this deployment.",
   },
+  files: {
+    configured: false,
+    enabled: false,
+    reason: "File uploads are turned off on this deployment.",
+  },
   mcp_servers: [],
 }
 

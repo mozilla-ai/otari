@@ -6505,6 +6505,110 @@
           }
         },
         {
+          "name": "List Playground Files",
+          "request": {
+            "description": "The caller's own files in one workspace, newest first, in OpenAI's list shape.\n\nEvery file the caller owns there is listed, including one uploaded with an\nAPI key of theirs in the same workspace, because a message here can attach it.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "files"
+              ],
+              "query": [
+                {
+                  "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "after",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/files?workspace_id=&limit=&after="
+            }
+          }
+        },
+        {
+          "name": "Upload Playground File",
+          "request": {
+            "description": "Upload a file for the caller, in a workspace they belong to.\n\nThe row is owned by the same principal a Playground completion runs as, so a\n``file_id`` returned here resolves in the caller's own messages and in nobody\nelse's. ``POST /api/v1/files`` takes an API key, which a dashboard session\ndoes not hold; this is the session's way in.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "files"
+              ],
+              "query": [
+                {
+                  "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/files?workspace_id="
+            }
+          }
+        },
+        {
+          "name": "Delete Playground File",
+          "request": {
+            "description": "Delete one of the caller's files. Another identity's answers 404, as a nonexistent one does.\n\nA saved transcript that attached the file keeps its record of the\nattachment, but the file is gone, so sending that turn again does not send\nits contents.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "files",
+                ":file_id"
+              ],
+              "query": [
+                {
+                  "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/files/:file_id?workspace_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "file_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Read Playground Tools",
           "request": {
             "description": "The gateway-run tools the caller's workspace may attach to a message.\n\nOne read rather than the three the dashboard would otherwise make (the\ndeployment's tool settings, the workspace's web-search row, its\ncode-execution row), because the answer is a composition of them in a fixed\ndirection: the deployment decides whether a tool exists and the workspace may\nonly narrow that. Composing it here is what keeps the menu from offering\nsomething the request path would refuse.",

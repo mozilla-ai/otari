@@ -96,6 +96,9 @@ POST /api/v1/systemone                   # alias of /api/v1/decisions for TypeSa
 # which this one delegates to.
 POST /api/v1/playground/chat/completions                        # session-authorized, not an SDK surface
 GET /api/v1/playground/tools                                    # session-authorized, not an SDK surface
+POST /api/v1/playground/files                                   # session-authorized, not an SDK surface
+GET /api/v1/playground/files                                    # session-authorized, not an SDK surface
+DELETE /api/v1/playground/files/{file_id}                       # session-authorized, not an SDK surface
 GET /api/v1/playground/consent                                  # session-authorized, not an SDK surface
 PUT /api/v1/playground/consent                                  # session-authorized, not an SDK surface
 GET /api/v1/playground/conversations                            # session-authorized, not an SDK surface

@@ -1825,6 +1825,20 @@
         "title": "Body_files-create_file",
         "type": "object"
       },
+      "Body_playground-upload_playground_file": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_playground-upload_playground_file",
+        "type": "object"
+      },
       "BudgetResetLogResponse": {
         "description": "Response model for one budget reset event (per user).",
         "properties": {
@@ -12058,6 +12072,10 @@
           "code_execution": {
             "$ref": "#/components/schemas/PlaygroundToolStatus"
           },
+          "files": {
+            "$ref": "#/components/schemas/PlaygroundToolStatus",
+            "description": "Whether a message may attach a file uploaded here."
+          },
           "mcp_servers": {
             "items": {
               "$ref": "#/components/schemas/PlaygroundMcpServer"
@@ -12072,6 +12090,7 @@
         "required": [
           "web_search",
           "code_execution",
+          "files",
           "mcp_servers"
         ],
         "title": "PlaygroundToolsResponse",
@@ -30838,6 +30857,234 @@
           }
         ],
         "summary": "Replace Playground Favorite Models",
+        "tags": [
+          "playground"
+        ]
+      }
+    },
+    "/api/v1/playground/files": {
+      "get": {
+        "description": "The caller's own files in one workspace, newest first, in OpenAI's list shape.\n\nEvery file the caller owns there is listed, including one uploaded with an\nAPI key of theirs in the same workspace, because a message here can attach it.",
+        "operationId": "playground-list_playground_files",
+        "parameters": [
+          {
+            "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenAIFileList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Playground Files",
+        "tags": [
+          "playground"
+        ]
+      },
+      "post": {
+        "description": "Upload a file for the caller, in a workspace they belong to.\n\nThe row is owned by the same principal a Playground completion runs as, so a\n``file_id`` returned here resolves in the caller's own messages and in nobody\nelse's. ``POST /api/v1/files`` takes an API key, which a dashboard session\ndoes not hold; this is the session's way in.",
+        "operationId": "playground-upload_playground_file",
+        "parameters": [
+          {
+            "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_playground-upload_playground_file"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenAIFileObject"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Upload Playground File",
+        "tags": [
+          "playground"
+        ]
+      }
+    },
+    "/api/v1/playground/files/{file_id}": {
+      "delete": {
+        "description": "Delete one of the caller's files. Another identity's answers 404, as a nonexistent one does.\n\nA saved transcript that attached the file keeps its record of the\nattachment, but the file is gone, so sending that turn again does not send\nits contents.",
+        "operationId": "playground-delete_playground_file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenAIFileDeleted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Playground File",
         "tags": [
           "playground"
         ]

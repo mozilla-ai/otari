@@ -566,3 +566,26 @@ def test_a_real_gateway_request_still_closes_it(
     after = _activation(hosted_client, token, workspace_id)
     assert after["status"] != "waiting"
     assert after["activation_attempt"] is not None
+
+
+def test_files_are_not_offered_where_the_data_plane_could_not_read_them(
+    hosted_client: TestClient,
+    caller: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    """A file stored on the control plane is not in the data plane's store, so the upload is refused."""
+    _, workspace_id, token = caller
+    params = {"workspace_id": str(workspace_id)}
+    hosted_client.cookies.set(SESSION_COOKIE_NAME, token)
+    try:
+        tools = hosted_client.get(f"{API_ROOT}/playground/tools", params=params)
+        upload = hosted_client.post(
+            f"{API_ROOT}/playground/files",
+            params=params,
+            files={"file": ("report.txt", b"numbers", "text/plain")},
+        )
+    finally:
+        hosted_client.cookies.clear()
+
+    assert tools.status_code == status.HTTP_200_OK
+    assert tools.json()["files"]["enabled"] is False
+    assert upload.status_code == status.HTTP_404_NOT_FOUND

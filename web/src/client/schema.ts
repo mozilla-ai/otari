@@ -3384,6 +3384,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/playground/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Playground Files
+         * @description The caller's own files in one workspace, newest first, in OpenAI's list shape.
+         *
+         *     Every file the caller owns there is listed, including one uploaded with an
+         *     API key of theirs in the same workspace, because a message here can attach it.
+         */
+        get: operations["playground-list_playground_files"];
+        put?: never;
+        /**
+         * Upload Playground File
+         * @description Upload a file for the caller, in a workspace they belong to.
+         *
+         *     The row is owned by the same principal a Playground completion runs as, so a
+         *     ``file_id`` returned here resolves in the caller's own messages and in nobody
+         *     else's. ``POST /api/v1/files`` takes an API key, which a dashboard session
+         *     does not hold; this is the session's way in.
+         */
+        post: operations["playground-upload_playground_file"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playground/files/{file_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Playground File
+         * @description Delete one of the caller's files. Another identity's answers 404, as a nonexistent one does.
+         *
+         *     A saved transcript that attached the file keeps its record of the
+         *     attachment, but the file is gone, so sending that turn again does not send
+         *     its contents.
+         */
+        delete: operations["playground-delete_playground_file"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/playground/tools": {
         parameters: {
             query?: never;
@@ -6438,6 +6494,11 @@ export interface components {
             purpose: string;
             /** User */
             user?: string | null;
+        };
+        /** Body_playground-upload_playground_file */
+        "Body_playground-upload_playground_file": {
+            /** File */
+            file: string;
         };
         /**
          * BudgetResetLogResponse
@@ -11418,6 +11479,8 @@ export interface components {
          */
         PlaygroundToolsResponse: {
             code_execution: components["schemas"]["PlaygroundToolStatus"];
+            /** @description Whether a message may attach a file uploaded here. */
+            files: components["schemas"]["PlaygroundToolStatus"];
             /** Mcp Servers */
             mcp_servers: components["schemas"]["PlaygroundMcpServer"][];
             web_search: components["schemas"]["PlaygroundToolStatus"];
@@ -20133,6 +20196,110 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlaygroundFavoriteModelsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "playground-list_playground_files": {
+        parameters: {
+            query?: {
+                /** @description Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does. */
+                workspace_id?: string | null;
+                limit?: number;
+                after?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAIFileList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "playground-upload_playground_file": {
+        parameters: {
+            query?: {
+                /** @description Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_playground-upload_playground_file"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAIFileObject"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "playground-delete_playground_file": {
+        parameters: {
+            query?: {
+                /** @description Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAIFileDeleted"];
                 };
             };
             /** @description Validation Error */
