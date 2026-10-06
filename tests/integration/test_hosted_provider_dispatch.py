@@ -52,6 +52,20 @@ def _create_user(client: TestClient, headers: dict[str, str]) -> None:
     assert client.post(f"{API_ROOT}/users", json={"user_id": "u1", "alias": "u1"}, headers=headers).status_code == 200
 
 
+def _price(client: TestClient, headers: dict[str, str], model_key: str) -> None:
+    """Put a model on the deployment price list, which is what switches an offered model on.
+
+    The test deployment consults no community dataset, so a model nothing
+    prices arrives switched off, as the offer rule says it must.
+    """
+    response = client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": model_key, "input_price_per_million": 2.5, "output_price_per_million": 10},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+
+
 def _hosted_openai(client: TestClient, headers: dict[str, str]) -> None:
     response = client.post(
         f"{API_ROOT}/hosted-providers",
@@ -87,6 +101,7 @@ def test_a_hosted_provider_serves_a_candidate_nothing_else_credentials(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     _create_user(client, master_key_header)
+    _price(client, master_key_header, "openai:gpt-4o")
     _hosted_openai(client, master_key_header)
 
     captured, _ = _post_chat_capture(client, master_key_header, "openai:gpt-4o")
@@ -154,6 +169,8 @@ def test_the_catalog_lists_what_the_hosted_provider_advertises(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     """The port's other half: the roster the operator switched on reaches the Models page."""
+    _price(client, master_key_header, "openai:gpt-4o")
+    _price(client, master_key_header, "openai:gpt-4o-mini")
     _hosted_openai(client, master_key_header)
     models = client.get(f"{API_ROOT}/hosted-providers/openai/models", headers=master_key_header).json()["data"]
     [mini] = [row for row in models if row["model"] == "gpt-4o-mini"]
