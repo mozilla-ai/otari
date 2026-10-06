@@ -191,6 +191,30 @@ _FIELD_OF = {
 }
 
 
+def settle_cycle(stored: CycleSettings, submitted: CycleSettings, submitted_names: object) -> CycleSettings:
+    """The cadence an update leaves behind, given what it named and what is stored.
+
+    An omitted field contributes what is stored, *unless the cycle itself
+    changed*: then the settings of the cycle being left behind are cleared rather
+    than carried onto a cycle that does not take them. Without that rule the
+    obvious request is the one that fails, because a budget moved from monthly to
+    daily keeps a day-of-month nobody asked to keep and the write is refused for
+    a field the caller never mentioned.
+
+    Clearing rather than ignoring, because a stray setting is not harmless: it is
+    what the budget reverts to on the next switch back, silently.
+    """
+    named = set(submitted_names)  # type: ignore[call-overload]
+    changing = "reset_cycle" in named and submitted.cycle != stored.cycle
+    base = CycleSettings(submitted.cycle, None, None, None, None, None) if changing else stored
+    return CycleSettings(
+        *(
+            getattr(submitted, field) if name in named else getattr(base, field)
+            for name, field in zip(CYCLE_FIELD_ORDER, CycleSettings._fields, strict=True)
+        )
+    )
+
+
 def validate_cycle_settings(settings: CycleSettings) -> None:
     """Refuse a cadence carrying the wrong settings for its cycle.
 
@@ -290,6 +314,7 @@ __all__ = [
     "budget_window",
     "cycle_window",
     "mask_from_weekdays",
+    "settle_cycle",
     "validate_cycle_settings",
     "weekdays_from_mask",
 ]

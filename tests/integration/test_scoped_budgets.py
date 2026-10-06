@@ -432,45 +432,40 @@ async def test_a_monthly_ceiling_asleep_for_two_months_lands_in_the_current_one(
 
 
 @pytest.mark.asyncio
-async def test_an_unrecognized_alignment_leaves_the_exhausted_window_in_place(
-    async_db: AsyncSession, tenancy: Fixture
-) -> None:
-    """A value the API cannot create, so only a write that went around it. The
-    safe direction is refusing requests, not guessing a cadence and admitting
-    them, so the window stays where it is and the cap stays exhausted."""
-    now = datetime.now(UTC)
-    cap = await _scoped(
-        async_db,
-        scope_type="workspace",
-        scope_id=str(tenancy.workspace_id),
-        max_budget=10.0,
-        reset_cycle="calendar_quarter",
-        period_start=now - timedelta(days=2),
-        period_end=now - timedelta(days=1),
-    )
-    cap.current_spend = Decimal("10.0")
-    async_db.add(cap)
-    await async_db.commit()
+async def test_an_unrecognized_cycle_cannot_be_stored_at_all(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """The vocabulary is a CHECK, so there is no write that goes around it.
 
-    with pytest.raises(HTTPException) as exc_info:
-        await reserve_budget(async_db, tenancy.user_id, 1.0, scope=tenancy.scope())
-    assert exc_info.value.status_code == 403
-
-    refreshed = (await async_db.execute(select(ScopedBudget).where(ScopedBudget.id == cap.id))).scalar_one()
-    await async_db.refresh(refreshed)
-    assert refreshed.period_end == now - timedelta(days=1)
-    assert refreshed.current_spend == 10.0
+    This used to assert what the enforcement path does when it meets a cadence it
+    cannot read: leave the window where it is, because refusing requests is the
+    safe direction and guessing a cadence admits them. That guard is still there
+    and still covered (``tests/unit/test_reset_cycle_periods.py``), but it is no
+    longer reachable through the database, which is the stronger answer.
+    """
+    async_db.add(Budget(max_budget=10.0, reset_cycle="calendar_quarter"))
+    with pytest.raises(IntegrityError):
+        await async_db.commit()
+    await async_db.rollback()
 
 
 @pytest.mark.asyncio
-async def test_a_budget_cannot_carry_both_kinds_of_period(async_db: AsyncSession, tenancy: Fixture) -> None:
-    """The fourth state is not storable, so the pair never needs an "ignored
-    when" rule to be read.
+async def test_a_budget_cannot_carry_another_cycles_settings(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """A cycle holding a setting it does not take is not storable.
 
-    The constraint moved onto ``budgets`` with the cadence itself: a ceiling has
-    no period of its own to contradict any more.
+    What replaces the old exclusive pair, and the reason it is a CHECK rather
+    than a convention: a stray setting is what a budget silently reverts to on
+    the next switch back. The constraint lives on ``budgets`` with the cadence
+    itself; a ceiling has no period of its own to contradict.
     """
-    async_db.add(Budget(max_budget=10.0, reset_cycle="monthly", reset_month_day=1))
+    async_db.add(Budget(max_budget=10.0, reset_cycle="daily", reset_month_day=15))
+    with pytest.raises(IntegrityError):
+        await async_db.commit()
+    await async_db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_a_cycle_cannot_be_stored_without_its_own_settings(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """The other direction, so the CHECK cannot be satisfied by emptiness."""
+    async_db.add(Budget(max_budget=10.0, reset_cycle="weekly"))
     with pytest.raises(IntegrityError):
         await async_db.commit()
     await async_db.rollback()
@@ -743,20 +738,22 @@ def test_a_budget_can_be_relaxed_back_to_the_states_creation_allows(
     assert cleared.json()["reset_cycle"] is None
     assert cleared.json()["reset_cycle"] is None
 
-    # Naming only the alignment is refused rather than silently clearing a
-    # duration the caller did not mention.
+    # Naming a new cycle clears the old one's settings rather than carrying them
+    # onto a cycle that does not take them.
     half_switched = client.patch(
         f"{API_ROOT}/budgets/{created['budget_id']}",
         json={"reset_cycle": "every_n_hours", "reset_every_n": 1, "reset_anchor_at": "2026-01-01T00:00:00Z"},
         headers=master_key_header,
     )
     assert half_switched.status_code == 200
-    conflicting = client.patch(
+    switched = client.patch(
         f"{API_ROOT}/budgets/{created['budget_id']}",
         json={"reset_cycle": "daily"},
         headers=master_key_header,
     )
-    assert conflicting.status_code == 400, conflicting.text
+    assert switched.status_code == 200, switched.text
+    assert switched.json()["reset_every_n"] is None
+    assert switched.json()["reset_anchor_at"] is None
 
     # An omitted field is still "leave it alone", which is the half that already
     # worked and must keep working.
@@ -766,7 +763,9 @@ def test_a_budget_can_be_relaxed_back_to_the_states_creation_allows(
         headers=master_key_header,
     )
     assert renamed.status_code == 200
-    assert renamed.json()["reset_cycle"] == "every_n_hours"
+    # The switch above left it daily, and a rename names no cycle field, so the
+    # cadence is untouched.
+    assert renamed.json()["reset_cycle"] == "daily"
 
 
 def test_a_ceiling_on_a_scope_that_does_not_exist_is_refused(
@@ -828,7 +827,7 @@ def test_a_calendar_aligned_ceiling_opens_on_its_boundary(
     assert created.status_code == 200, created.text
     body = created.json()
     assert body["reset_cycle"] == "monthly"
-    assert body["reset_cycle"] is None
+    assert body["reset_month_day"] == 1
     period_start = datetime.fromisoformat(body["period_start"])
     assert period_start in {_first_of_month(before), _first_of_month(after)}
     assert datetime.fromisoformat(body["period_end"]) == _first_of_next_month(period_start)
@@ -862,8 +861,8 @@ def test_pointing_a_ceiling_at_another_budget_retimes_it(
     )
     after = datetime.now(UTC)
     assert switched.status_code == 200, switched.text
-    assert switched.json()["reset_cycle"] is None
     assert switched.json()["reset_cycle"] == "daily"
+    assert switched.json()["reset_month_day"] is None
     period_start = datetime.fromisoformat(switched.json()["period_start"])
     assert period_start in {_midnight(before), _midnight(after)}
     assert datetime.fromisoformat(switched.json()["period_end"]) == period_start + timedelta(days=1)
@@ -878,7 +877,7 @@ def test_pointing_a_ceiling_at_another_budget_retimes_it(
     assert missing.status_code == 404, missing.text
 
 
-def test_a_budget_cannot_be_created_with_both_kinds_of_period(
+def test_a_budget_cannot_be_created_with_another_cycles_settings(
     client: Any,
     master_key_header: dict[str, str],
 ) -> None:
@@ -889,12 +888,12 @@ def test_a_budget_cannot_be_created_with_both_kinds_of_period(
     """
     response = client.post(
         f"{API_ROOT}/budgets",
-        json={"max_budget": 10.0, "reset_cycle": "monthly", "reset_month_day": 1},
+        json={"max_budget": 10.0, "reset_cycle": "monthly", "reset_month_day": 1, "reset_weekdays": 1},
         headers=master_key_header,
     )
 
     assert response.status_code == 400, response.text
-    assert "not both" in response.json()["detail"]
+    assert "does not take reset_weekdays" in response.json()["detail"]
 
 
 def test_an_unknown_reset_cycle_is_refused(client: Any, master_key_header: dict[str, str]) -> None:

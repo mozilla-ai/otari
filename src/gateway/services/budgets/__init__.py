@@ -8,6 +8,7 @@ from gateway.services.budgets._periods import (
     CycleSettings,
     budget_window,
     cycle_window,
+    settle_cycle,
     validate_cycle_settings,
 )
 from gateway.services.budgets._reservations import (
@@ -46,6 +47,7 @@ __all__ = [
     "CYCLE_FIELD_ORDER",
     "CycleSettings",
     "cycle_window",
+    "settle_cycle",
     "validate_cycle_settings",
     "reconcile_reservation",
     "record_external_spend",

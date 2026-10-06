@@ -25,6 +25,7 @@ from gateway.services.budgets import (
     CycleSettings,
     cadence_of,
     retime_ceilings_for_budget,
+    settle_cycle,
     validate_cycle_settings,
 )
 
@@ -213,11 +214,10 @@ async def update_budget(
     # weekday mask it leaves behind is what `validate_cycle_settings` refuses, so
     # a caller has to clear it rather than strand it.
     if CYCLE_FIELDS & request.model_fields_set:
-        settled = CycleSettings(
-            *(
-                getattr(request, name) if name in request.model_fields_set else getattr(budget, name)
-                for name in CYCLE_FIELD_ORDER
-            )
+        settled = settle_cycle(
+            CycleSettings(*(getattr(budget, name) for name in CYCLE_FIELD_ORDER)),
+            CycleSettings(*(getattr(request, name) for name in CYCLE_FIELD_ORDER)),
+            request.model_fields_set,
         )
         _require_valid_cycle(settled)
         for name, value in zip(CYCLE_FIELD_ORDER, settled, strict=True):

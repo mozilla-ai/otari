@@ -121,7 +121,12 @@ async def test_cas_reset_user_budget_rollback_on_commit_failure(async_db: AsyncS
     now = datetime.now(UTC)
     # A past reset time makes the CAS UPDATE match the row so the code reaches commit.
     user = User(user_id="reset-fail-user", spend=50.0, next_budget_reset_at=now - timedelta(seconds=1))
-    budget = Budget(max_budget=100.0, budget_duration_sec=3600)
+    budget = Budget(
+        max_budget=100.0,
+        reset_cycle="every_n_hours",
+        reset_every_n=1,
+        reset_anchor_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
     async_db.add_all([user, budget])
     await async_db.commit()
 

@@ -79,7 +79,12 @@ def test_negative_duration_rejected(client: TestClient, master_key_header: dict[
     """Test that a negative interval is rejected."""
     response = client.post(
         f"{API_ROOT}/budgets",
-        json={"max_budget": 100.0, "budget_duration_sec": -86400},
+        json={
+            "max_budget": 100.0,
+            "reset_cycle": "every_n_days",
+            "reset_every_n": -1,
+            "reset_anchor_at": "2026-01-01T00:00:00Z",
+        },
         headers=master_key_header,
     )
     assert response.status_code == 422
@@ -157,7 +162,7 @@ def test_update_budget_negative_duration_rejected(client: TestClient, master_key
 
     response = client.patch(
         f"{API_ROOT}/budgets/{budget_id}",
-        json={"budget_duration_sec": -86400},
+        json={"reset_every_n": -1},
         headers=master_key_header,
     )
     assert response.status_code == 422

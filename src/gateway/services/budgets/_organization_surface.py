@@ -39,7 +39,13 @@ from gateway.schemas.budgets import (
     OrganizationScopedBudgetsPublic,
     OrganizationScopedBudgetUpdate,
 )
-from gateway.services.budgets._periods import CYCLE_FIELD_ORDER, CycleSettings, budget_window, validate_cycle_settings
+from gateway.services.budgets._periods import (
+    CYCLE_FIELD_ORDER,
+    CycleSettings,
+    budget_window,
+    settle_cycle,
+    validate_cycle_settings,
+)
 from gateway.services.budgets._retiming import cadence_of
 from gateway.services.budgets._scopes import ScopeOwnership, lock_workspace_for_scope
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -265,7 +271,13 @@ class _OrganizationSurface:
         # The resulting set is what the CHECK constraints refuse, and no submitted
         # field alone looks wrong: a cycle change that leaves the previous cycle's
         # settings behind is two valid-looking fields and an impossible row.
-        _require_valid_cycle(CycleSettings(*(changes.get(name, getattr(budget, name)) for name in CYCLE_FIELD_ORDER)))
+        settled = settle_cycle(
+            CycleSettings(*(getattr(budget, name) for name in CYCLE_FIELD_ORDER)),
+            CycleSettings(*(changes.get(name) for name in CYCLE_FIELD_ORDER)),
+            changes.keys() & set(CYCLE_FIELD_ORDER),
+        )
+        _require_valid_cycle(settled)
+        changes.update(dict(zip(CYCLE_FIELD_ORDER, settled, strict=True)))
         budget = await self._repositories.budgets.update(budget, changes)
         if cadence_of(budget) != cadence_before:
             period_start, period_end = _current_window(budget)
