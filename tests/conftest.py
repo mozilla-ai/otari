@@ -235,6 +235,8 @@ class TaskGroupMcpTransport:
         self.close_error: BaseException | None = None
         self.entered_in: asyncio.Task[Any] | None = None
         self.exited_in: list[asyncio.Task[Any] | None] = []
+        # What the transport's block exited with, ``None`` for a clean exit.
+        self.exited_with: list[BaseException | None] = []
 
     async def _pass(self, gate: asyncio.Event) -> None:
         while True:
@@ -250,7 +252,12 @@ class TaskGroupMcpTransport:
         await self._pass(self.may_open)
         async with anyio.create_task_group():
             self.entered_in = asyncio.current_task()
-            yield object(), object(), object()
+            try:
+                yield object(), object(), object()
+            except BaseException as exc:
+                self.exited_with.append(exc)
+                raise
+            self.exited_with.append(None)
             await self._pass(self.may_close)
             self.exited_in.append(asyncio.current_task())
         if self.close_error is not None:

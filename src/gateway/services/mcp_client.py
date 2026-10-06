@@ -32,6 +32,8 @@ from gateway.services.mcp_stateless import failure_class
 from gateway.services.tool_usage import ToolUsageTally
 
 if TYPE_CHECKING:
+    from types import TracebackType
+
     from mcp.types import CallToolResult
     from mcp.types import Tool as MCPTool
 
@@ -156,11 +158,23 @@ class MCPClientPool:
             owner.result()
         return self
 
-    async def __aexit__(self, *exc: object) -> None:
+    async def __aexit__(
+        self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: TracebackType | None
+    ) -> None:
+        """Close the sessions, abandoning their outstanding work when the request ended by raising.
+
+        A clean exit lets the transport's task group finish its child tasks. After a provider
+        error or a client that went away nothing waits on that work, so the owner task is
+        canceled instead, which exits the sessions as a failed request does. The cancellation
+        is the owner's own, so it never crosses into an anyio scope that does not hold it.
+        """
         owner = self._owner
         if owner is None:
             return
+        abandon = exc is not None
         self._release.set()
+        if abandon:
+            owner.cancel()
         try:
             in_time = await _wait_for_owner(owner)
         except asyncio.CancelledError:
@@ -171,7 +185,8 @@ class MCPClientPool:
             _retrieve_failure(owner)
             return
         if owner.cancelled():
-            logger.warning("MCP sessions were canceled before they closed")
+            if not abandon:
+                logger.warning("MCP sessions were canceled before they closed")
             return
         owner.result()
 

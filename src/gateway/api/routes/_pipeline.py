@@ -3960,8 +3960,10 @@ async def _held_tool_backend(
     entered = await backend.__aenter__()
     try:
         yield entered
-    finally:
-        await _close_tool_backend(backend.__aexit__(None, None, None), kind)
+    except BaseException as exc:
+        await _close_tool_backend(backend.__aexit__(type(exc), exc, exc.__traceback__), kind)
+        raise
+    await _close_tool_backend(backend.__aexit__(None, None, None), kind)
 
 
 async def _lazy_mcp_stream(
@@ -3986,7 +3988,9 @@ async def _eager_backend_stream(
     tool_ctx: ToolContext,
 ) -> AsyncIterator[ChunkT]:
     # ``backend.__aenter__`` already ran in ``open_stream``; this generator
-    # owns the matching ``__aexit__`` once the stream finishes or errors.
+    # owns the matching ``__aexit__`` once the stream finishes or errors, and
+    # hands it the error so a backend can abandon work nobody will read.
+    kind = _ToolBackendKind.of(tool_ctx)
     try:
         hinted = adapter.inject_hints(kwargs, backend.purpose_hints(), header=tool_ctx.tools_header)
         async for event in adapter.open_tool_loop_stream(
@@ -3998,8 +4002,10 @@ async def _eager_backend_stream(
             **(_container_loop_option(adapter, backend) if tool_ctx.use_sandbox else {}),
         ):
             yield event
-    finally:
-        await _close_tool_backend(backend.__aexit__(None, None, None), _ToolBackendKind.of(tool_ctx))
+    except BaseException as exc:
+        await _close_tool_backend(backend.__aexit__(type(exc), exc, exc.__traceback__), kind)
+        raise
+    await _close_tool_backend(backend.__aexit__(None, None, None), kind)
 
 
 async def open_stream(
@@ -4903,7 +4909,7 @@ async def run_streaming_with_fallback(
             if not isinstance(exc, asyncio.CancelledError):
                 await _flush_pending_usage_reports(config, pending_error_reports, route.request_id, session_label)
         finally:
-            await backend_stack.aclose()
+            await backend_stack.__aexit__(type(exc), exc, exc.__traceback__)
         if not isinstance(exc, Exception):
             raise
         # Only this frame knows which attempt was tried last, so the terminal
@@ -4951,8 +4957,10 @@ async def _stream_with_stack_cleanup(
     try:
         async for chunk in stream:
             yield chunk
-    finally:
-        await _close_tool_backend(backend_stack.aclose(), kind)
+    except BaseException as exc:
+        await _close_tool_backend(backend_stack.__aexit__(type(exc), exc, exc.__traceback__), kind)
+        raise
+    await _close_tool_backend(backend_stack.aclose(), kind)
 
 
 def _sandbox_error(
