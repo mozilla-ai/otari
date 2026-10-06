@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -14,7 +15,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import event
 from sqlalchemy.engine import URL, make_url
-from sqlalchemy.exc import OperationalError, SQLAlchemyError
+from sqlalchemy.exc import DisconnectionError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -156,6 +157,42 @@ def _install_timeout_translation(engine: AsyncEngine) -> None:
     how the engine is configured, so the engine is where it is normalized.
     """
     event.listen(engine.sync_engine, "handle_error", translate_timeout_error)
+
+
+# A connection checked in more recently than this is handed out without a ping.
+# What the ping catches is a socket the server or a NAT closed while it sat idle,
+# which takes minutes of idleness, while a request checks a connection out and
+# back in several times: with asyncpg each ping is BEGIN, a statement and
+# ROLLBACK, so pinging every checkout was three round trips per commit.
+PING_AFTER_IDLE_SEC = 5.0
+_CHECKED_IN_AT = "otari_checked_in_at"
+
+
+def _install_idle_ping(engine: AsyncEngine) -> None:
+    """Ping a pooled connection on checkout only when it has sat idle.
+
+    SQLAlchemy's custom pessimistic disconnect recipe: a checkout listener that
+    raises ``DisconnectionError`` has the pool discard the connection and check
+    out another, as ``pool_pre_ping`` does for a failed ping.
+    """
+    pool = engine.sync_engine.pool
+    dialect = engine.sync_engine.dialect
+
+    def _stamp(_dbapi_connection: Any, record: Any, *_: Any) -> None:
+        record.info[_CHECKED_IN_AT] = time.monotonic()
+
+    def _ping_if_idle(dbapi_connection: Any, record: Any, _proxy: Any) -> None:
+        checked_in_at = record.info.get(_CHECKED_IN_AT)
+        if checked_in_at is not None and time.monotonic() - checked_in_at < PING_AFTER_IDLE_SEC:
+            return
+        try:
+            dialect.do_ping(dbapi_connection)
+        except (dialect.loaded_dbapi.Error, OSError, TimeoutError) as exc:
+            raise DisconnectionError("pooled connection failed its ping") from exc
+
+    event.listen(pool, "connect", _stamp)
+    event.listen(pool, "checkin", _stamp)
+    event.listen(pool, "checkout", _ping_if_idle)
 
 
 async def release_session(session: AsyncSession | None) -> bool:
@@ -333,8 +370,9 @@ def engine_kwargs(
     pool; PostgreSQL only, since SQLite runs on ``NullPool``.
 
     The PostgreSQL arm adds the timeouts that otherwise do not exist anywhere on
-    the database path. ``pool_pre_ping`` is what keeps a connection the server
-    has closed from being handed to a request, but the ping is itself a
+    the database path. A ping on checkout is what keeps a connection the server
+    has closed from being handed to a request (``_install_idle_ping``, which
+    PostgreSQL uses in place of ``pool_pre_ping``), but the ping is itself a
     statement: on a socket that went away without a FIN, which managed
     PostgreSQL and the NAT in front of it do to idle connections routinely, it
     blocks on TCP retransmission rather than failing. With no ``command_timeout``
@@ -346,8 +384,9 @@ def engine_kwargs(
     # parsed URL arguments, and the first has already captured the reference by
     # the time the second is built.
     args = dict(connect_args)
-    kwargs: dict[str, Any] = {"pool_pre_ping": True, "connect_args": args}
+    kwargs: dict[str, Any] = {"connect_args": args}
     if is_sqlite:
+        kwargs["pool_pre_ping"] = True
         kwargs["poolclass"] = NullPool
         return kwargs
 
@@ -386,6 +425,8 @@ def init_db(config: GatewayConfig) -> None:
         **engine_kwargs(config, connect_args=connect_args, is_sqlite=is_sqlite),
     )
     _install_timeout_translation(_engine)
+    if not is_sqlite:
+        _install_idle_ping(_engine)
     _SessionLocal = async_sessionmaker(_engine, expire_on_commit=False)
     _pool_max_overflow[REQUEST_POOL] = config.db_max_overflow
 
@@ -419,6 +460,7 @@ def init_db(config: GatewayConfig) -> None:
             ),
         )
         _install_timeout_translation(_log_engine)
+        _install_idle_ping(_log_engine)
         _LogSessionLocal = async_sessionmaker(_log_engine, expire_on_commit=False)
         _pool_max_overflow[LOG_POOL] = 0
 

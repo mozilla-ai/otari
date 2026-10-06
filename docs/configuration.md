@@ -113,8 +113,9 @@ deployment whose dashboard and management traffic are heavy, not because
 inference is.
 
 Recycling and the two statement timeouts matter most behind a managed database
-or a NAT, which drop idle connections without closing them. The pool's pre-ping
-would catch a closed connection, but the ping is itself a statement and blocks
+or a NAT, which drop idle connections without closing them. The pool pings a
+connection that has sat idle for more than five seconds before handing it out,
+which would catch a closed one, but the ping is itself a statement and blocks
 on a socket that went away silently, so leaving these unset turns a dropped
 connection into a request that hangs for minutes.
 

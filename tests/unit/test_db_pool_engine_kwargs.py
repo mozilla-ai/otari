@@ -6,14 +6,18 @@ These pin the settings that bound it, and the second pool that keeps metering
 off the request pool's contention.
 """
 
+import sqlite3
+import time
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy.pool import NullPool
+from sqlalchemy import create_engine
+from sqlalchemy.pool import NullPool, QueuePool
 
 from gateway.core.config import GatewayConfig
-from gateway.core.database import engine_kwargs
+from gateway.core.database import PING_AFTER_IDLE_SEC, _install_idle_ping, engine_kwargs
 
 
 def _pg_kwargs(**overrides: Any) -> dict[str, Any]:
@@ -26,7 +30,8 @@ def test_postgres_pool_uses_configured_sizes() -> None:
     assert kwargs["pool_size"] == 10
     assert kwargs["max_overflow"] == 20
     assert kwargs["pool_timeout"] == 30.0
-    assert kwargs["pool_pre_ping"] is True
+    # PostgreSQL pings on checkout through ``_install_idle_ping`` instead.
+    assert "pool_pre_ping" not in kwargs
 
 
 def test_connections_are_recycled_by_default() -> None:
@@ -106,3 +111,68 @@ def test_secondary_pool_overrides_the_request_pool_sizes() -> None:
     kwargs = engine_kwargs(GatewayConfig(), connect_args={}, is_sqlite=False, pool_size=5, max_overflow=0)
     assert kwargs["pool_size"] == 5
     assert kwargs["max_overflow"] == 0
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _record(pings: list[Any], connection: Any) -> bool:
+    pings.append(connection)
+    return True
+
+
+def _pinged_engine(monkeypatch: pytest.MonkeyPatch, ping: Any) -> tuple[Any, _Clock]:
+    engine = create_engine("sqlite://", poolclass=QueuePool)
+    clock = _Clock()
+    monkeypatch.setattr(time, "monotonic", clock)
+    monkeypatch.setattr(engine.dialect, "do_ping", ping)
+    _install_idle_ping(SimpleNamespace(sync_engine=engine))  # type: ignore[arg-type]
+    return engine, clock
+
+
+def test_a_connection_used_moments_ago_is_handed_out_without_a_ping(monkeypatch: pytest.MonkeyPatch) -> None:
+    pings: list[Any] = []
+    engine, clock = _pinged_engine(monkeypatch, lambda connection: _record(pings, connection))
+
+    with engine.connect():
+        pass
+    clock.now += PING_AFTER_IDLE_SEC / 2
+    with engine.connect():
+        pass
+
+    assert pings == []
+
+
+def test_a_connection_that_sat_idle_is_pinged(monkeypatch: pytest.MonkeyPatch) -> None:
+    pings: list[Any] = []
+    engine, clock = _pinged_engine(monkeypatch, lambda connection: _record(pings, connection))
+
+    with engine.connect():
+        pass
+    clock.now += PING_AFTER_IDLE_SEC + 1
+    with engine.connect():
+        pass
+
+    assert len(pings) == 1
+
+
+def test_a_connection_that_fails_its_ping_is_replaced(monkeypatch: pytest.MonkeyPatch) -> None:
+    failures = [sqlite3.OperationalError("server closed the connection")]
+
+    def ping(_connection: Any) -> bool:
+        if failures:
+            raise failures.pop()
+        return True
+
+    engine, clock = _pinged_engine(monkeypatch, ping)
+    with engine.connect() as first:
+        stale = first.connection.dbapi_connection
+    clock.now += PING_AFTER_IDLE_SEC + 1
+
+    with engine.connect() as second:
+        assert second.connection.dbapi_connection is not stale
