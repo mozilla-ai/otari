@@ -676,7 +676,11 @@ def build_file_service(uow: UnitOfWork, backends: FileBackends, config: GatewayC
 
 
 def _file_backends(request: Request) -> FileBackends | None:
-    """The backends this build bound for files, or ``None`` in hybrid mode, which binds none."""
+    """The backends this build bound for files, or ``None`` where it has none.
+
+    Hybrid mode binds none, and a standalone deployment with files off starts
+    without a store it could not build.
+    """
     storage: FileStoragePort | None = getattr(request.app.state, "file_store", None)
     provider_files: ProviderFilePort | None = getattr(request.app.state, "provider_files", None)
     if storage is None or provider_files is None:

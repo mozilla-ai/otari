@@ -313,7 +313,10 @@ in order:
 See [config.example.yml](../config.example.yml) for the full list. Key knobs:
 
 - `files_enabled`, `files_backend`, `files_max_bytes`, `files_retention_hours`:
-upload storage (see [Storage backends](#storage-backends)).
+upload storage (see [Storage backends](#storage-backends)). With `files_enabled`
+off, a backend that cannot be built (an `s3` backend with no bucket, say) is
+logged at startup rather than stopping it, and a stored `file_id` then does not
+resolve; with it on, the same fault stops the boot.
 `files_output_max_files` and `files_output_max_bytes` each bound what one
 code-execution call may store from its sandbox and, separately, what one
 request may copy from a provider's, and `files_provider_copy_max_sec` bounds

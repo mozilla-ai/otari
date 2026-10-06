@@ -183,6 +183,27 @@ def _start_reservation_sweeper(config: GatewayConfig, _container: Container) -> 
     )
 
 
+def _resolve_file_store(config: GatewayConfig, container: Container) -> FileStoragePort | None:
+    """Build the file store, or start without one where files are off and it cannot be built.
+
+    A store that cannot be built stops the boot while files are on, because every
+    upload would fail. With files off the same fault only means a stored
+    ``file_id`` no longer resolves, so the deployment starts and says so rather
+    than locking out an operator who turned files off and removed the bucket
+    the settings still point at.
+    """
+    try:
+        return container.resolve(FileStoragePort, None)
+    except ValueError as exc:
+        if config.files_enabled:
+            raise
+        logger.warning(
+            "Files are disabled and the files backend cannot be built, so stored file references will not resolve: %s",
+            exc,
+        )
+        return None
+
+
 def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutine[Any, Any, None] | None:
     """Return the file retention sweep, or None when files or the interval disable it.
 
@@ -665,7 +686,7 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             container: Container = app.state.container
             # The retention sweep below resolves this same port, so both it and
             # the request path use whatever store this build bound.
-            app.state.file_store = container.resolve(FileStoragePort, None)
+            app.state.file_store = _resolve_file_store(config, container)
             app.state.provider_files = container.resolve(ProviderFilePort, None)
             workers = _start_lifespan_workers(config, container)
             # Workers of the enabled features. Same supervisor as the registry
