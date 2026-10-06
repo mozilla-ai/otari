@@ -30,7 +30,13 @@ if str(SRC) not in sys.path:
 if "gateway" in sys.modules:
     del sys.modules["gateway"]
 
-from gateway.api.deps import get_membership_listener, get_workspace_listener, get_workspace_search_keys, set_config
+from gateway.api.deps import (
+    build_hosted_provider_service,
+    get_membership_listener,
+    get_workspace_listener,
+    get_workspace_search_keys,
+    set_config,
+)
 from gateway.container import build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.db import get_db
@@ -351,6 +357,7 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
         membership_listener=get_membership_listener,
         workspace_listener=functools.partial(get_workspace_listener, config=config),
         search_keys=get_workspace_search_keys,
+        hosted_provider_service=functools.partial(build_hosted_provider_service, config=config),
     )
     install_rate_limits(app, config)
 

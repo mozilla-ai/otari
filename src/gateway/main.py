@@ -21,6 +21,7 @@ from typing_extensions import override
 from gateway import features
 from gateway.api.deps import (
     build_file_service,
+    build_hosted_provider_service,
     build_idempotency_service,
     get_membership_listener,
     get_workspace_listener,
@@ -301,7 +302,7 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker(
         "catalog selectors",
         lambda config, container: run_selector_index_refresher(
-            config, lambda session: container.resolve(ModelProviderPort, session)
+            config, lambda session, uow: container.resolve(ModelProviderPort, session, uow=uow)
         ),
         reset_selector_index,
     ),
@@ -1117,6 +1118,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         membership_listener=get_membership_listener,
         workspace_listener=functools.partial(get_workspace_listener, config=config),
         search_keys=get_workspace_search_keys,
+        hosted_provider_service=functools.partial(build_hosted_provider_service, config=config),
     )
     install_rate_limits(app, config)
 

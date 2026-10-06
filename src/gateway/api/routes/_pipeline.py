@@ -1391,6 +1391,11 @@ async def _serve_from_hosted_credential(
     kwargs: dict[str, Any] = {"api_key": credential.api_key}
     if credential.api_base is not None:
         kwargs["api_base"] = credential.api_base
+    if credential.client_args:
+        # The same key a ``config.yml`` instance's extras travel under
+        # (``services/provider_kwargs``), so Bedrock's region reaches the SDK
+        # client exactly as it would from the file.
+        kwargs["client_args"] = dict(credential.client_args)
     return ResolvedProvider(
         instance=credential.response_provider,
         provider=upstream,

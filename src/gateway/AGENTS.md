@@ -212,9 +212,11 @@ budgets and dials them only through the pinned, no-redirect client in
 `_owned_endpoint_network.py`. Their `api_base` is a tenant's, so it is held to
 public addresses whatever `provider_allow_private_hosts` says.
 
-Provider resolution asks `ModelProviderPort` for a deployment-owned managed
-credential only after local and tenant BYO sources fail. Managed credentials
-must never move ahead of BYO or leave their trusted gateway.
+Provider resolution asks `ModelProviderPort` for a deployment-owned credential
+only after local and tenant BYO sources fail. The core adapter answers from the
+deployment's hosted providers (`services/providers`, the `hosted_providers`
+tables, `/api/v1/hosted-providers`), built on the request's Unit of Work. A
+hosted credential must never move ahead of BYO or leave its trusted gateway.
 
 ## Mail
 

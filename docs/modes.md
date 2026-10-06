@@ -93,16 +93,26 @@ plane.
 
 ## Managed models and BYO credentials
 
-Hybrid mode can receive two kinds of provider credential:
+A request is served on the first credential the ladder finds: an organization's
+own provider key, then a provider instance stored through the Providers page,
+then one from `config.yml`, then one of the deployment's **hosted providers**. A hosted provider is a credential the
+deployment's operator configures for the deployment to serve requests on, one
+per provider, with a roster of the models offered on it and the rate each is
+charged at on the deployment price list. A standalone deployment configures them
+on the Hosted providers page; a hosted control plane holds them for its data
+plane. The deployment settles the upstream bill for a hosted model, which is why
+its rate belongs to the deployment and not to any one organization.
+
+Hybrid mode can therefore receive two kinds of provider credential:
 
 - A workspace's own provider key. The upstream provider bills that workspace.
   Any hybrid gateway can use it, including a self-hosted one.
-- A mozilla.ai-managed credential. Usage is billed through otari.ai. Only
-  otari.ai's own gateway receives it.
+- A control plane's hosted-provider credential. Usage is billed by the control
+  plane. On otari.ai, only otari.ai's own gateway receives it.
 
-Managed model identifiers use the catalog values published by otari.ai. otari.ai
-refuses a managed credential to a self-hosted gateway, so platform-owned secrets
-never leave mozilla.ai's infrastructure.
+Managed model identifiers use the catalog values the control plane publishes.
+otari.ai refuses a hosted credential to a self-hosted gateway, so platform-owned
+secrets never leave mozilla.ai's infrastructure.
 
 ## Internal protocol
 

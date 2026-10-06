@@ -6,6 +6,7 @@ end-to-end path (an overlay module rebinding a port and adding a route to a
 running app) is in ``tests/integration/test_bootstrap_overlay.py``.
 """
 
+import asyncio
 import sys
 from collections.abc import Generator
 from pathlib import Path
@@ -23,7 +24,7 @@ from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
 from gateway.adapters.mcp_server_adapter import LocalMcpServers, RemoteMcpServers
-from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
+from gateway.adapters.model_provider_adapter import HostedProviderModelProviderAdapter
 from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
 from gateway.adapters.web_search_policy_adapter import LocalWebSearchPolicy, RemoteWebSearchPolicy
@@ -114,7 +115,7 @@ def test_core_defaults_are_bound_for_every_port() -> None:
 
     assert isinstance(container.resolve(BillingPort, NO_SESSION), NullBillingAdapter)
     assert isinstance(container.resolve(EntitlementPort, NO_SESSION), BaseEntitlementAdapter)
-    assert isinstance(container.resolve(ModelProviderPort, NO_SESSION), SelfHostedModelProviderAdapter)
+    assert isinstance(container.resolve(ModelProviderPort, NO_SESSION), HostedProviderModelProviderAdapter)
     assert isinstance(container.resolve(GrowthSignalPort, NO_SESSION), NullGrowthSignalAdapter)
     assert isinstance(container.resolve(TelemetryStoragePort, NO_SESSION), DatabaseTelemetryStorageAdapter)
     assert isinstance(
@@ -157,6 +158,39 @@ def test_file_storage_refuses_a_container_built_without_config() -> None:
 
     with pytest.raises(ContainerError, match="FileStoragePort"):
         container.resolve(FileStoragePort, NO_SESSION)
+
+
+def test_the_model_provider_answers_nothing_without_a_unit_of_work() -> None:
+    """The hybrid data plane has no database, and the boot-time shape check passes none either."""
+    container = build_container(membership_listener=_no_membership_listener)
+
+    adapter = container.resolve(ModelProviderPort, NO_SESSION)
+
+    assert isinstance(adapter, HostedProviderModelProviderAdapter)
+    assert asyncio.run(adapter.get_hosted_models(organization_id=None)) == {}
+
+
+def test_the_model_provider_refuses_to_build_on_a_unit_of_work_without_a_service_builder() -> None:
+    container = build_container(membership_listener=_no_membership_listener)
+
+    with pytest.raises(ContainerError, match="hosted-provider service builder"):
+        container.resolve(ModelProviderPort, A_SESSION, uow=UnitOfWork(A_SESSION))
+
+
+def test_the_model_provider_builds_its_service_on_the_requests_unit_of_work() -> None:
+    seen: list[UnitOfWork] = []
+
+    def build(uow: UnitOfWork) -> Any:
+        seen.append(uow)
+        return object()
+
+    container = build_container(membership_listener=_no_membership_listener, hosted_provider_service=build)
+    uow = UnitOfWork(A_SESSION)
+
+    adapter = container.resolve(ModelProviderPort, A_SESSION, uow=uow)
+
+    assert isinstance(adapter, HostedProviderModelProviderAdapter)
+    assert seen == [uow]
 
 
 def test_the_identity_provider_refuses_to_build_without_a_session() -> None:

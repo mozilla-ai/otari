@@ -648,7 +648,7 @@ UNIT_OF_WORK_TYPE = "UnitOfWork"
 UNIT_OF_WORK_MODULE = "gateway.core.unit_of_work"
 UNIT_OF_WORK_FACTORY = "gateway/api/deps.py"
 UNIT_OF_WORK_FACTORY_FUNCTION = "get_unit_of_work"
-UNIT_OF_WORK_WORKER_FACTORIES = "create_unit_of_work or create_log_unit_of_work"
+UNIT_OF_WORK_WORKER_FACTORIES = "create_unit_of_work, create_log_unit_of_work or create_unit_of_work_with_session"
 
 
 def _called_name(func: ast.expr) -> str | None:
