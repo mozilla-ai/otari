@@ -4,7 +4,7 @@ Pure: no database, no provider. What is pinned is which priced keys the surface
 keeps, which it removes, and why it keeps the ones it does not offer.
 """
 
-from gateway.services.providers import (
+from gateway.services.providers._hosted_catalog import (
     KEEP_DEPLOYMENT_INSTANCE,
     KEEP_GATEWAY_TOOL,
     KEEP_SEARCH_TOOL,

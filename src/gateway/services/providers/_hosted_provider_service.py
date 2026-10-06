@@ -34,6 +34,7 @@ resolves community defaults, both of which can take the whole discovery
 timeout. Every method reads in one block, dials, then writes in another.
 """
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -202,14 +203,40 @@ def _model_public(row: HostedProviderModel, price: _Price | None) -> HostedModel
     )
 
 
-def _public(row: HostedProvider) -> HostedProviderPublic:
+def _encrypt_client_args(client_args: dict[str, Any] | None) -> str | None:
+    """Encrypt the SDK client extras for storage, as one JSON document.
+
+    Raises:
+        HostedProviderSecretStorageError: no usable ``OTARI_SECRET_KEY``.
+    """
+    if client_args is None:
+        return None
+    try:
+        return encrypt_secret(json.dumps(client_args, sort_keys=True))
+    except SecretBoxUnavailableError as exc:
+        raise HostedProviderSecretStorageError(str(exc)) from None
+
+
+def _decrypt_client_args(ciphertext: str | None) -> dict[str, Any] | None:
+    """Read the stored SDK client extras back.
+
+    Raises:
+        SecretDecryptionError, SecretBoxUnavailableError: no configured key reads them.
+    """
+    if ciphertext is None:
+        return None
+    decrypted: dict[str, Any] = json.loads(decrypt_secret(ciphertext))
+    return decrypted
+
+
+def _public(row: HostedProvider, client_args: dict[str, Any] | None) -> HostedProviderPublic:
     """Render a row for the API: no key, and ``client_args`` with credential-shaped values masked."""
     return HostedProviderPublic(
         id=row.id,
         provider=row.provider,
         api_key_last4=row.api_key_last4,
         api_base=row.api_base,
-        client_args=redact_secret_like_values(row.client_args),
+        client_args=redact_secret_like_values(client_args),
         enabled=row.enabled,
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -250,7 +277,7 @@ class HostedProviderService:
         """One page of hosted providers, enabled or not."""
         async with self.uow:
             rows, count = await self.providers.list_page(skip=skip, limit=limit)
-            return HostedProvidersPublic(data=[_public(row) for row in rows], count=count)
+            return HostedProvidersPublic(data=[self._public(row) for row in rows], count=count)
 
     async def create_provider(self, request: HostedProviderCreateRequest) -> HostedProviderPublic:
         """Configure a provider this deployment will serve hosted inference on.
@@ -272,6 +299,7 @@ class HostedProviderService:
         api_base = _normalize_api_base(request.api_base)
         await self._validate_api_base(api_base)
         encrypted = self._encrypt(request.api_key)
+        encrypted_client_args = _encrypt_client_args(request.client_args)
 
         async with self.uow:
             if await self.providers.get_by_provider(provider) is not None:
@@ -290,7 +318,7 @@ class HostedProviderService:
                     encrypted_api_key=encrypted,
                     api_key_last4=_last4(request.api_key),
                     api_base=api_base,
-                    client_args=request.client_args,
+                    encrypted_client_args=encrypted_client_args,
                     enabled=request.enabled,
                 )
             except HostedProviderConflict as conflict:
@@ -299,7 +327,7 @@ class HostedProviderService:
                 # a 500 rather than the 409 it is.
                 raise HostedProviderAlreadyExistsError(conflict.provider) from conflict
             await self._offer(provider, discovered, defaults)
-            return _public(row)
+            return _public(row, request.client_args)
 
     async def update_provider(self, provider: str, request: HostedProviderUpdateRequest) -> HostedProviderPublic:
         """Rotate the key, repoint the base, or toggle a provider.
@@ -329,11 +357,14 @@ class HostedProviderService:
                 row.encrypted_api_key = encrypted
                 row.api_key_last4 = _last4(request.api_key)
             if "client_args" in request.model_fields_set:
-                row.client_args = restore_redacted_values(request.client_args, row.client_args)
+                # The form was never shown the real values, so an entry echoed
+                # back as the mask keeps what is stored under that name.
+                stored = self._client_args(row, quiet=True)
+                row.encrypted_client_args = _encrypt_client_args(restore_redacted_values(request.client_args, stored))
             if request.enabled is not None:
                 row.enabled = request.enabled
             await self.providers.save(row)
-            return _public(row)
+            return self._public(row)
 
     async def delete_provider(self, provider: str) -> None:
         """Remove a provider and the roster offered on it. The runtime then has no hosted path for it.
@@ -853,6 +884,7 @@ class HostedProviderService:
         """
         try:
             api_key = decrypt_secret(row.encrypted_api_key)
+            client_args = _decrypt_client_args(row.encrypted_client_args)
         except (SecretDecryptionError, SecretBoxUnavailableError):
             if not quiet:
                 logger.error(
@@ -861,7 +893,26 @@ class HostedProviderService:
                     row.provider,
                 )
             return None
-        return ResolvedHostedProvider(api_key=api_key, api_base=row.api_base, client_args=row.client_args)
+        return ResolvedHostedProvider(api_key=api_key, api_base=row.api_base, client_args=client_args)
+
+    @staticmethod
+    def _client_args(row: HostedProvider, *, quiet: bool = False) -> dict[str, Any] | None:
+        """The stored SDK client extras, or None when there are none or no configured key reads them.
+
+        The listing cannot tell the two apart and does not need to: a row whose
+        extras will not decrypt has a key that will not either, and the page
+        shows that row by its tail for the operator to re-enter.
+        """
+        try:
+            return _decrypt_client_args(row.encrypted_client_args)
+        except (SecretDecryptionError, SecretBoxUnavailableError):
+            if not quiet:
+                logger.error("Hosted provider %r client arguments could not be decrypted", row.provider)
+            return None
+
+    def _public(self, row: HostedProvider) -> HostedProviderPublic:
+        """Render a stored row for the API, decrypting its extras to mask them."""
+        return _public(row, self._client_args(row, quiet=True))
 
     @staticmethod
     def _encrypt(api_key: str) -> str:
