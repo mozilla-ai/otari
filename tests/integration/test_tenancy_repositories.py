@@ -208,6 +208,39 @@ async def test_a_local_identity_can_be_created_deactivated(async_db: AsyncSessio
     assert identity.default_organization_id == organization.id
 
 
+async def test_an_identity_is_created_for_a_free_address(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+
+    identity = await UserRepository(async_db).try_create(
+        email=" Nova@Example.com ",
+        full_name="Nova",
+        active_organization_id=organization.id,
+    )
+
+    assert identity is not None
+    assert identity.email == "nova@example.com"
+    assert identity.full_name == "Nova"
+    assert identity.is_active is True
+    assert identity.default_organization_id == organization.id
+
+
+async def test_a_taken_address_creates_nothing_and_leaves_the_transaction_usable(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    holder = await _identity(async_db, organization, email="nova@example.com")
+    users = UserRepository(async_db)
+
+    created = await users.try_create(
+        email="NOVA@example.com",
+        full_name="Somebody else",
+        active_organization_id=organization.id,
+    )
+
+    assert created is None
+    found = await users.get_by_email("nova@example.com")
+    assert found is not None
+    assert found.id == holder.id
+
+
 async def test_get_by_slug(async_db: AsyncSession) -> None:
     organization = await _organization(async_db, slug="acme")
 

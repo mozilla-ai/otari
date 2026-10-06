@@ -5,10 +5,13 @@ from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import CursorResult, func, nulls_last, select, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
+from gateway.core.sql import dialect_name
 from gateway.models.tenancy import User, UserBase, UserCreate
 from gateway.repositories.base_repository import BaseRepository
 
@@ -105,6 +108,35 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         await self.db.flush()
         await self.db.refresh(user)
         return user
+
+    async def try_create(
+        self,
+        *,
+        email: str,
+        full_name: str | None,
+        active_organization_id: uuid.UUID,
+    ) -> User | None:
+        """Stage an identity for this address, or return None if an identity already holds it.
+
+        A taken address leaves the transaction usable.
+        """
+        user = User(
+            email=email.strip().lower(),
+            full_name=full_name,
+            active_organization_id=active_organization_id,
+            default_organization_id=active_organization_id,
+        )
+        dialect_insert = postgresql_insert if dialect_name(self.db) == "postgresql" else sqlite_insert
+        statement = (
+            dialect_insert(User)
+            .values(user.model_dump(exclude_none=True))
+            .on_conflict_do_nothing(index_elements=[col(User.email)])
+            .returning(col(User.id))
+        )
+        created_id = (await self.db.execute(statement)).scalar_one_or_none()
+        if created_id is None:
+            return None
+        return await self.get(created_id)
 
     async def any_active_with_password(self) -> bool:
         """Whether some active identity on this deployment could sign in with a password.
