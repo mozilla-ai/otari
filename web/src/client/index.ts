@@ -241,9 +241,7 @@ export type UpdateScopedBudgetRequest = Schemas["UpdateScopedBudgetRequest"]
 export type BudgetScopeType = CreateScopedBudgetRequest["scope_type"]
 // The cadence moved onto the budget with the limit, so it is derived from the
 // budget request now rather than from the ceiling's.
-export type BudgetResetAlignment = NonNullable<
-  CreateBudgetRequest["reset_alignment"]
->
+export type BudgetResetCycle = NonNullable<CreateBudgetRequest["reset_cycle"]>
 
 // ---------------------------------------------------------------------------
 // Models, pricing and providers

@@ -6338,8 +6338,6 @@ export interface components {
          *     lands with user management), so a fresh gateway reports zeros here.
          */
         BudgetResponse: {
-            /** Budget Duration Sec */
-            budget_duration_sec: number | null;
             /** Budget Id */
             budget_id: string;
             /** Created At */
@@ -6352,8 +6350,18 @@ export interface components {
             organization_id: string | null;
             /** Request Limit */
             request_limit: number | null;
-            /** Reset Alignment */
-            reset_alignment: string | null;
+            /** Reset Anchor At */
+            reset_anchor_at: string | null;
+            /** Reset Cycle */
+            reset_cycle: string | null;
+            /** Reset Every N */
+            reset_every_n: number | null;
+            /** Reset Month */
+            reset_month: number | null;
+            /** Reset Month Day */
+            reset_month_day: number | null;
+            /** Reset Weekdays */
+            reset_weekdays: number | null;
             /** Token Limit */
             token_limit: number | null;
             /**
@@ -7261,11 +7269,6 @@ export interface components {
          */
         CreateBudgetRequest: {
             /**
-             * Budget Duration Sec
-             * @description Budget duration in seconds (e.g., 86400 for daily, 604800 for weekly)
-             */
-            budget_duration_sec?: number | null;
-            /**
              * Max Budget
              * @description Maximum spending limit
              */
@@ -7281,10 +7284,35 @@ export interface components {
              */
             request_limit?: number | null;
             /**
-             * Reset Alignment
-             * @description Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec
+             * Reset Anchor At
+             * @description Where an interval cycle's first period opened. Later periods are counted from it, so the cadence keeps its phase rather than restarting at the next request
              */
-            reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
+            reset_anchor_at?: string | null;
+            /**
+             * Reset Cycle
+             * @description How often the budget resets, at 00:00 UTC. Null never resets. Each cycle carries its own settings and no others: every_n_hours and every_n_days take reset_every_n and reset_anchor_at, weekly takes reset_weekdays, monthly takes reset_month_day, and yearly takes reset_month and reset_month_day
+             */
+            reset_cycle?: ("every_n_hours" | "every_n_days" | "daily" | "weekly" | "monthly" | "yearly") | null;
+            /**
+             * Reset Every N
+             * @description How many hours or days between resets, in the unit reset_cycle names
+             */
+            reset_every_n?: number | null;
+            /**
+             * Reset Month
+             * @description The month a yearly cycle resets in, 1 to 12
+             */
+            reset_month?: number | null;
+            /**
+             * Reset Month Day
+             * @description The day of the month a monthly or yearly cycle resets on, 1 to 28. Capped so every month has the day
+             */
+            reset_month_day?: number | null;
+            /**
+             * Reset Weekdays
+             * @description The weekdays a weekly cycle resets on, as a bitmask with bit 0 Monday through bit 6 Sunday. Several are allowed and the limit applies to each period between them, so Monday and Friday give a four-day period and a three-day one
+             */
+            reset_weekdays?: number | null;
             /**
              * Token Limit
              * @description Maximum tokens over the period. Independent of max_budget; null is unlimited
@@ -9643,11 +9671,6 @@ export interface components {
          */
         OrganizationBudgetCreate: {
             /**
-             * Budget Duration Sec
-             * @description Seconds between resets, counted from the last one. Mutually exclusive with reset_alignment
-             */
-            budget_duration_sec?: number | null;
-            /**
              * Max Budget
              * @description Maximum spend in USD over one period; null caps nothing
              */
@@ -9663,10 +9686,35 @@ export interface components {
              */
             request_limit?: number | null;
             /**
-             * Reset Alignment
-             * @description Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec
+             * Reset Anchor At
+             * @description Where an interval cycle's first period opened. Later periods are counted from it, so the cadence keeps its phase rather than restarting at the next request
              */
-            reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
+            reset_anchor_at?: string | null;
+            /**
+             * Reset Cycle
+             * @description How often the budget resets, at 00:00 UTC. Null never resets. Each cycle carries its own settings and no others: every_n_hours and every_n_days take reset_every_n and reset_anchor_at, weekly takes reset_weekdays, monthly takes reset_month_day, and yearly takes reset_month and reset_month_day
+             */
+            reset_cycle?: ("every_n_hours" | "every_n_days" | "daily" | "weekly" | "monthly" | "yearly") | null;
+            /**
+             * Reset Every N
+             * @description How many hours or days between resets, in the unit reset_cycle names
+             */
+            reset_every_n?: number | null;
+            /**
+             * Reset Month
+             * @description The month a yearly cycle resets in, 1 to 12
+             */
+            reset_month?: number | null;
+            /**
+             * Reset Month Day
+             * @description The day of the month a monthly or yearly cycle resets on, 1 to 28. Capped so every month has the day
+             */
+            reset_month_day?: number | null;
+            /**
+             * Reset Weekdays
+             * @description The weekdays a weekly cycle resets on, as a bitmask with bit 0 Monday through bit 6 Sunday. Several are allowed and the limit applies to each period between them, so Monday and Friday give a four-day period and a three-day one
+             */
+            reset_weekdays?: number | null;
             /**
              * Token Limit
              * @description Maximum tokens over one period; null caps nothing. Independent of max_budget
@@ -9686,8 +9734,6 @@ export interface components {
          *     ceilings this budget currently holds, which is what makes a delete refuse.
          */
         OrganizationBudgetPublic: {
-            /** Budget Duration Sec */
-            budget_duration_sec: number | null;
             /** Budget Id */
             budget_id: string;
             /** Ceiling Count */
@@ -9705,8 +9751,18 @@ export interface components {
             organization_id: string;
             /** Request Limit */
             request_limit: number | null;
-            /** Reset Alignment */
-            reset_alignment: string | null;
+            /** Reset Anchor At */
+            reset_anchor_at: string | null;
+            /** Reset Cycle */
+            reset_cycle: string | null;
+            /** Reset Every N */
+            reset_every_n: number | null;
+            /** Reset Month */
+            reset_month: number | null;
+            /** Reset Month Day */
+            reset_month_day: number | null;
+            /** Reset Weekdays */
+            reset_weekdays: number | null;
             /** Token Limit */
             token_limit: number | null;
             /** Updated At */
@@ -9726,11 +9782,6 @@ export interface components {
          */
         OrganizationBudgetUpdate: {
             /**
-             * Budget Duration Sec
-             * @description Seconds between resets, counted from the last one. Mutually exclusive with reset_alignment
-             */
-            budget_duration_sec?: number | null;
-            /**
              * Max Budget
              * @description Maximum spend in USD over one period; null caps nothing
              */
@@ -9746,10 +9797,35 @@ export interface components {
              */
             request_limit?: number | null;
             /**
-             * Reset Alignment
-             * @description Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec
+             * Reset Anchor At
+             * @description Where an interval cycle's first period opened. Later periods are counted from it, so the cadence keeps its phase rather than restarting at the next request
              */
-            reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
+            reset_anchor_at?: string | null;
+            /**
+             * Reset Cycle
+             * @description How often the budget resets, at 00:00 UTC. Null never resets. Each cycle carries its own settings and no others: every_n_hours and every_n_days take reset_every_n and reset_anchor_at, weekly takes reset_weekdays, monthly takes reset_month_day, and yearly takes reset_month and reset_month_day
+             */
+            reset_cycle?: ("every_n_hours" | "every_n_days" | "daily" | "weekly" | "monthly" | "yearly") | null;
+            /**
+             * Reset Every N
+             * @description How many hours or days between resets, in the unit reset_cycle names
+             */
+            reset_every_n?: number | null;
+            /**
+             * Reset Month
+             * @description The month a yearly cycle resets in, 1 to 12
+             */
+            reset_month?: number | null;
+            /**
+             * Reset Month Day
+             * @description The day of the month a monthly or yearly cycle resets on, 1 to 28. Capped so every month has the day
+             */
+            reset_month_day?: number | null;
+            /**
+             * Reset Weekdays
+             * @description The weekdays a weekly cycle resets on, as a bitmask with bit 0 Monday through bit 6 Sunday. Several are allowed and the limit applies to each period between them, so Monday and Friday give a four-day period and a three-day one
+             */
+            reset_weekdays?: number | null;
             /**
              * Token Limit
              * @description Maximum tokens over one period; null caps nothing. Independent of max_budget
@@ -10575,8 +10651,6 @@ export interface components {
          *     shape this deliberately mirrors.
          */
         OrganizationScopedBudgetPublic: {
-            /** Budget Duration Sec */
-            budget_duration_sec: number | null;
             /** Budget Id */
             budget_id: string;
             /** Created At */
@@ -10609,8 +10683,18 @@ export interface components {
             reserved_spend: number;
             /** Reserved Tokens */
             reserved_tokens: number;
-            /** Reset Alignment */
-            reset_alignment: string | null;
+            /** Reset Anchor At */
+            reset_anchor_at: string | null;
+            /** Reset Cycle */
+            reset_cycle: string | null;
+            /** Reset Every N */
+            reset_every_n: number | null;
+            /** Reset Month */
+            reset_month: number | null;
+            /** Reset Month Day */
+            reset_month_day: number | null;
+            /** Reset Weekdays */
+            reset_weekdays: number | null;
             /** Scope Id */
             scope_id: string;
             /** Scope Type */
@@ -11850,13 +11934,11 @@ export interface components {
          *     enforced against ``current_spend + reserved_spend``, so there is no rollup
          *     over users to compute.
          *
-         *     Every limit, along with ``budget_duration_sec`` and ``reset_alignment``, is
+         *     Every limit, along with the reset cycle and its settings, is
          *     read off the budget rather than stored here, and carried on the wire so a
          *     caller can render a ceiling without fetching every budget to resolve one id.
          */
         ScopedBudgetResponse: {
-            /** Budget Duration Sec */
-            budget_duration_sec: number | null;
             /** Budget Id */
             budget_id: string;
             /** Created At */
@@ -11887,8 +11969,18 @@ export interface components {
             reserved_spend: number;
             /** Reserved Tokens */
             reserved_tokens: number;
-            /** Reset Alignment */
-            reset_alignment: string | null;
+            /** Reset Anchor At */
+            reset_anchor_at: string | null;
+            /** Reset Cycle */
+            reset_cycle: string | null;
+            /** Reset Every N */
+            reset_every_n: number | null;
+            /** Reset Month */
+            reset_month: number | null;
+            /** Reset Month Day */
+            reset_month_day: number | null;
+            /** Reset Weekdays */
+            reset_weekdays: number | null;
             /** Scope Id */
             scope_id: string;
             /** Scope Type */
@@ -12552,8 +12644,6 @@ export interface components {
          * @description Request model for updating a budget.
          */
         UpdateBudgetRequest: {
-            /** Budget Duration Sec */
-            budget_duration_sec?: number | null;
             /** Max Budget */
             max_budget?: number | null;
             /** Name */
@@ -12563,8 +12653,36 @@ export interface components {
              * @description Maximum requests over the period. Independent of max_budget; null is unlimited
              */
             request_limit?: number | null;
-            /** Reset Alignment */
-            reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
+            /**
+             * Reset Anchor At
+             * @description Where an interval cycle's first period opened. Later periods are counted from it, so the cadence keeps its phase rather than restarting at the next request
+             */
+            reset_anchor_at?: string | null;
+            /**
+             * Reset Cycle
+             * @description How often the budget resets, at 00:00 UTC. Null never resets. Each cycle carries its own settings and no others: every_n_hours and every_n_days take reset_every_n and reset_anchor_at, weekly takes reset_weekdays, monthly takes reset_month_day, and yearly takes reset_month and reset_month_day
+             */
+            reset_cycle?: ("every_n_hours" | "every_n_days" | "daily" | "weekly" | "monthly" | "yearly") | null;
+            /**
+             * Reset Every N
+             * @description How many hours or days between resets, in the unit reset_cycle names
+             */
+            reset_every_n?: number | null;
+            /**
+             * Reset Month
+             * @description The month a yearly cycle resets in, 1 to 12
+             */
+            reset_month?: number | null;
+            /**
+             * Reset Month Day
+             * @description The day of the month a monthly or yearly cycle resets on, 1 to 28. Capped so every month has the day
+             */
+            reset_month_day?: number | null;
+            /**
+             * Reset Weekdays
+             * @description The weekdays a weekly cycle resets on, as a bitmask with bit 0 Monday through bit 6 Sunday. Several are allowed and the limit applies to each period between them, so Monday and Friday give a four-day period and a three-day one
+             */
+            reset_weekdays?: number | null;
             /**
              * Token Limit
              * @description Maximum tokens over the period. Independent of max_budget; null is unlimited
@@ -13751,8 +13869,6 @@ export interface components {
          * @description One default and its template values.
          */
         WorkspaceMemberBudgetPolicyPublic: {
-            /** Budget Duration Sec */
-            budget_duration_sec: number | null;
             /** Budget Id */
             budget_id: string;
             /** Created At */
@@ -13767,8 +13883,18 @@ export interface components {
             provider_key_id: string | null;
             /** Request Limit */
             request_limit: number | null;
-            /** Reset Alignment */
-            reset_alignment: string | null;
+            /** Reset Anchor At */
+            reset_anchor_at: string | null;
+            /** Reset Cycle */
+            reset_cycle: string | null;
+            /** Reset Every N */
+            reset_every_n: number | null;
+            /** Reset Month */
+            reset_month: number | null;
+            /** Reset Month Day */
+            reset_month_day: number | null;
+            /** Reset Weekdays */
+            reset_weekdays: number | null;
             /** Token Limit */
             token_limit: number | null;
             /** Updated At */

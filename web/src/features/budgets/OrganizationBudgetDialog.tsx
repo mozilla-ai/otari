@@ -3,7 +3,6 @@ import { useState } from "react"
 import type { OrganizationBudget } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
-import { Select } from "@/design-system/forms/Select"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import {
   useCreateOrganizationBudget,
@@ -11,24 +10,23 @@ import {
 } from "@/shared/api/budgets"
 
 import { unnamedBudgetLabel } from "./budgetLabel"
+import { ResetCycleField } from "./ResetCycleField"
 import {
-  PERIOD_OPTIONS,
-  periodValue,
-  type ResetAlignment,
-} from "./organizationBudget"
+  type CycleDraft,
+  type CycleFields,
+  cycleDraftError,
+  cycleDraftFrom,
+  cycleFieldsFromDraft,
+} from "./resetCycle"
 
 // The form behind both Add and Edit for one of the organization's budgets. One
 // component rather than two: the fields are identical, and the endpoint is a
 // PATCH that leaves an omitted field alone, so an edit sends the same shape an
 // add does.
 
-export interface OrganizationBudgetDraft {
+export interface OrganizationBudgetDraft extends CycleFields {
   name: string | null
   max_budget: number | null
-  budget_duration_sec: number | null
-  // The generated union, not `string`: see `ResetAlignment` for why restating it
-  // as a string broke the build when the endpoint narrowed the field.
-  reset_alignment: ResetAlignment | null
 }
 
 /** A typed amount, or undefined when it is not a number this can send. */
@@ -83,27 +81,17 @@ export function OrganizationBudgetDialog({
   const seed = {
     name: editing?.name ?? "",
     limit: limitToInput(editing?.max_budget),
-    period: periodValue(editing),
+    cycle: cycleDraftFrom(editing),
   }
   const [name, setName] = useState(seed.name)
   const [limit, setLimit] = useState(seed.limit)
-  const [period, setPeriod] = useState(seed.period)
+  const [cycle, setCycle] = useState<CycleDraft>(seed.cycle)
 
   const amount = parseLimit(limit)
   const limitInvalid = limit.trim() !== "" && amount === undefined
   // The whole draft against what it was seeded with, so what "unsaved" means
   // cannot drift from what the form holds.
-  const { isDirty } = useDirtySnapshot({ name, limit, period })
-
-  // A duration-carrying budget (one the deployment surface created) opens on
-  // "No reset", and saving would clear the duration rather than keep it. Said
-  // out loud, because the form cannot show a period it does not offer.
-  const clearsDuration =
-    editing !== undefined &&
-    !editing.reset_alignment &&
-    editing.budget_duration_sec !== null &&
-    editing.budget_duration_sec !== undefined &&
-    period === "none"
+  const { isDirty } = useDirtySnapshot({ name, limit, cycle })
 
   // What this budget is shown as while it has no name of its own, said on the
   // field so the admin sees the label before saving rather than after. On the
@@ -111,26 +99,23 @@ export function OrganizationBudgetDialog({
   // for an example of what to type. The token and request caps come from the
   // budget being edited: this form does not offer them, and a label derived
   // without them would understate what it caps.
-  const selectedPeriod = PERIOD_OPTIONS.find(
-    (candidate) => candidate.value === period,
-  )
+  const cycleWire = cycleFieldsFromDraft(cycle)
   const unnamedLabel = unnamedBudgetLabel({
     max_budget: amount ?? null,
     token_limit: editing?.token_limit ?? null,
     request_limit: editing?.request_limit ?? null,
-    reset_alignment: selectedPeriod?.alignment ?? null,
-    budget_duration_sec: null,
+    ...cycleWire,
   })
 
   const submit = () => {
-    if (limitInvalid) return
+    if (limitInvalid || cycleDraftError(cycle) !== undefined) return
+    // The whole cycle set every time, never one field: the server refuses a
+    // budget holding a setting its cycle does not take, so a weekday mask left
+    // behind by a switch to Monthly is what makes an otherwise valid save fail.
     save({
       name: name.trim() === "" ? null : name.trim(),
       max_budget: amount ?? null,
-      // Only ever one of the two is sent with a value, because a budget resets
-      // on a duration or on a boundary and the database refuses both.
-      budget_duration_sec: null,
-      reset_alignment: selectedPeriod?.alignment ?? null,
+      ...cycleWire,
     })
   }
 
@@ -139,7 +124,7 @@ export function OrganizationBudgetDialog({
       isOpen={isOpen}
       onOpenChange={onOpenChange}
       title={editing ? "Edit budget" : "New budget"}
-      description="A budget is an amount and the period it is spent over. It caps nothing on its own: a spend ceiling is what points it at an organization, a workspace, or a key."
+      description="A budget is an amount, a reset cycle, and the entities it applies to. It caps nothing on its own: a spend ceiling is what points it at an organization, a workspace, or a key."
       submitLabel={editing ? "Save budget" : "Add budget"}
       onSubmit={submit}
       isPending={create.isPending || update.isPending}
@@ -167,28 +152,13 @@ export function OrganizationBudgetDialog({
         // behavior this field no longer decides alone.
         description="Leave blank for no dollar limit."
       />
-      <Select
-        label="Resets"
-        value={period}
-        onChange={setPeriod}
-        options={PERIOD_OPTIONS.map((option) => ({
-          value: option.value,
-          label: option.label,
-        }))}
-        shouldReserveMessage={false}
-      />
+      <ResetCycleField value={cycle} onChange={setCycle} />
       {editing && editing.ceiling_count > 0 ? (
         <p className="text-sm text-muted">
           {editing.ceiling_count === 1
             ? "1 spend ceiling is held to this budget and moves with it."
             : `${editing.ceiling_count} spend ceilings are held to this budget and move with it.`}{" "}
           Spend already recorded stays; the new figure applies from here on.
-        </p>
-      ) : null}
-      {clearsDuration ? (
-        <p className="text-sm text-warning">
-          This budget currently resets on a rolling interval, which this form
-          does not offer. Saving replaces it with the period chosen above.
         </p>
       ) : null}
     </FormDialog>

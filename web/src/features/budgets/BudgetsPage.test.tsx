@@ -44,8 +44,12 @@ function budget(overrides: Partial<Budget> = {}): Budget {
     max_budget: 100,
     token_limit: null,
     request_limit: null,
-    reset_alignment: null,
-    budget_duration_sec: 86_400,
+    reset_cycle: "every_n_days",
+    reset_every_n: 1,
+    reset_anchor_at: "2026-01-01T00:00:00+00:00",
+    reset_weekdays: null,
+    reset_month_day: null,
+    reset_month: null,
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: "2026-01-01T00:00:00+00:00",
     user_count: 0,
@@ -115,7 +119,9 @@ function mockApi(
             budget_id: "new-budget-id-0000-0000-000000000000",
             name: body.name ?? null,
             max_budget: body.max_budget ?? null,
-            budget_duration_sec: body.budget_duration_sec ?? null,
+            reset_cycle: body.reset_cycle ?? null,
+            reset_every_n: body.reset_every_n ?? null,
+            reset_anchor_at: body.reset_anchor_at ?? null,
           })
           list = [...list, row]
           return jsonResponse(row)
@@ -239,20 +245,25 @@ describe("BudgetsPage", () => {
 
   it("lists a budget with its limit and humanized reset period", async () => {
     mockApi({
-      budgets: [budget({ max_budget: 100, budget_duration_sec: 604_800 })],
+      budgets: [
+        budget({
+          max_budget: 100,
+          reset_cycle: "every_n_days",
+          reset_every_n: 7,
+          reset_anchor_at: "2026-01-01T00:00:00+00:00",
+        }),
+      ],
     })
     renderPage(<BudgetsPage />)
 
     const row = (await screen.findByText("11111111")).closest("tr")!
     expect(within(row).getByText("$100.00")).toBeInTheDocument()
-    expect(within(row).getByText("Weekly")).toBeInTheDocument()
+    expect(within(row).getByText("Every 7 days")).toBeInTheDocument()
   })
 
   it("renders an unlimited budget without a spend bar", async () => {
     mockApi({
-      budgets: [
-        budget({ max_budget: null, budget_duration_sec: null, user_count: 0 }),
-      ],
+      budgets: [budget({ max_budget: null, reset_cycle: null, user_count: 0 })],
     })
     renderPage(<BudgetsPage />)
 
@@ -260,7 +271,7 @@ describe("BudgetsPage", () => {
     // One vocabulary across both budget pages, where this table used to say
     // "Unlimited" and the organization one "No limit" for the same state.
     expect(within(row).getByText("No limit")).toBeInTheDocument()
-    expect(within(row).getByText("No reset")).toBeInTheDocument()
+    expect(within(row).getByText("Never")).toBeInTheDocument()
     expect(within(row).getByText("No users assigned")).toBeInTheDocument()
   })
 
@@ -272,7 +283,7 @@ describe("BudgetsPage", () => {
         budget({
           max_budget: null,
           token_limit: 1_000_000,
-          budget_duration_sec: null,
+          reset_cycle: null,
           user_count: 0,
         }),
       ],
@@ -340,11 +351,21 @@ describe("BudgetsPage", () => {
         String(u).includes(`${API_ROOT}/budgets`) &&
         (init?.method ?? "") === "POST",
     )
-    expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+    const posted = JSON.parse(String(post?.[1]?.body))
+    expect(posted).toMatchObject({
       name: "team-free-tier",
       max_budget: 250,
-      budget_duration_sec: 604_800,
+      // The operator form still speaks in seconds; the wire takes a cycle, and
+      // a weekly preset is seven days of it.
+      reset_cycle: "every_n_days",
+      reset_every_n: 7,
+      reset_weekdays: null,
+      reset_month_day: null,
+      reset_month: null,
     })
+    // Anchored at midnight UTC today, which is what makes the cycle keep its
+    // phase; the date itself moves with the clock, so only its shape is asserted.
+    expect(posted.reset_anchor_at).toMatch(/^\d{4}-\d{2}-\d{2}T00:00:00Z$/)
 
     // The created budget shows its name in the table.
     expect(await screen.findByText("team-free-tier")).toBeInTheDocument()
@@ -792,7 +813,15 @@ describe("BudgetsPage", () => {
     // 14 days is a custom period (not a preset), so Edit opens with the field
     // seeded to "14"; making it fractional exercises the committed-value path the
     // paste-into-empty tests miss.
-    mockApi({ budgets: [budget({ budget_duration_sec: 1_209_600 })] })
+    mockApi({
+      budgets: [
+        budget({
+          reset_cycle: "every_n_days",
+          reset_every_n: 14,
+          reset_anchor_at: "2026-01-01T00:00:00+00:00",
+        }),
+      ],
+    })
     const user = userEvent.setup()
     renderPage(<BudgetsPage />)
 
@@ -832,13 +861,25 @@ describe("BudgetsPage", () => {
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({
       name: null,
       max_budget: null,
-      budget_duration_sec: null,
+      reset_cycle: null,
+      reset_every_n: null,
+      reset_anchor_at: null,
+      reset_weekdays: null,
+      reset_month_day: null,
+      reset_month: null,
     })
   })
 
   it("opens the edit form seeded from the row's Edit action", async () => {
     mockApi({
-      budgets: [budget({ max_budget: 42, budget_duration_sec: 86_400 })],
+      budgets: [
+        budget({
+          max_budget: 42,
+          reset_cycle: "every_n_days",
+          reset_every_n: 1,
+          reset_anchor_at: "2026-01-01T00:00:00+00:00",
+        }),
+      ],
     })
     const user = userEvent.setup()
     renderPage(<BudgetsPage />)

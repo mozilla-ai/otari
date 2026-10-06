@@ -66,6 +66,12 @@ import {
 } from "./budgetLabel"
 import { OrganizationBudgetsPage } from "./OrganizationBudgetsPage"
 import { hasNoLimit, limitLabel } from "./organizationBudget"
+import {
+  type CycleFields,
+  cycleLabel,
+  EMPTY_CYCLE,
+  type ReadCycleFields,
+} from "./resetCycle"
 
 // ---------- formatting ----------
 
@@ -81,13 +87,40 @@ const PERIOD_PRESETS: { label: string; seconds: number | null }[] = [
   { label: "Monthly", seconds: 30 * DAY },
 ]
 
-function formatDuration(seconds: number | null): string {
-  if (seconds === null) return "No reset"
-  const preset = PERIOD_PRESETS.find((preset) => preset.seconds === seconds)
-  if (preset) return preset.label
-  if (seconds % DAY === 0) return `Every ${seconds / DAY} days`
-  if (seconds % HOUR === 0) return `Every ${seconds / HOUR} hours`
-  return `Every ${seconds}s`
+/** The cycle fields a duration in seconds becomes on the wire. */
+function cycleFromSeconds(seconds: number | null): CycleFields {
+  if (seconds === null || seconds <= 0) return { ...EMPTY_CYCLE }
+  const anchor = `${new Date().toISOString().slice(0, 10)}T00:00:00Z`
+  if (seconds % DAY === 0) {
+    return {
+      ...EMPTY_CYCLE,
+      reset_cycle: "every_n_days",
+      reset_every_n: seconds / DAY,
+      reset_anchor_at: anchor,
+    }
+  }
+  return {
+    ...EMPTY_CYCLE,
+    reset_cycle: "every_n_hours",
+    // Ceiling, so the period is never shorter than the one typed: a shorter
+    // period admits the limit again sooner. Matches the migration's rule.
+    reset_every_n: Math.max(1, Math.ceil(seconds / HOUR)),
+    reset_anchor_at: anchor,
+  }
+}
+
+/** The seconds a stored cycle opens this form on, where it has an equivalent. */
+function secondsFromCycle(budget: ReadCycleFields): number | null {
+  if (budget.reset_cycle === "every_n_days") {
+    return (budget.reset_every_n ?? 1) * DAY
+  }
+  if (budget.reset_cycle === "every_n_hours") {
+    return (budget.reset_every_n ?? 1) * HOUR
+  }
+  // A calendar cycle has no second count, so the form opens on "No reset"
+  // rather than proposing a conversion. `cycleLabel` on the row is what says
+  // what it actually is.
+  return null
 }
 
 // The segment that opens the custom-days field. A sentinel rather than a number,
@@ -248,7 +281,7 @@ function BudgetForm({
   initial: {
     name: string | null
     max_budget: number | null
-    budget_duration_sec: number | null
+    durationSec: number | null
   }
   // The caps this form does not edit, so the label it offers an unnamed budget
   // reads as the whole of what it caps rather than the dollar figure alone.
@@ -276,7 +309,7 @@ function BudgetForm({
     initial.max_budget === null ? "" : String(initial.max_budget),
   )
   const [durationSec, setDurationSec] = useState<number | null>(
-    initial.budget_duration_sec,
+    initial.durationSec,
   )
   const [periodInvalid, setPeriodInvalid] = useState(false)
   const [userIds, setUserIds] = useState<string[]>(assignedUserIds ?? [])
@@ -307,8 +340,7 @@ function BudgetForm({
     max_budget: parsed.isValid ? parsed.value : null,
     token_limit: uneditedLimits?.token_limit ?? null,
     request_limit: uneditedLimits?.request_limit ?? null,
-    reset_alignment: null,
-    budget_duration_sec: durationSec,
+    ...cycleFromSeconds(durationSec),
   })
 
   const submit = () => {
@@ -318,7 +350,7 @@ function BudgetForm({
       {
         name: name.trim() || null,
         max_budget: parsed.value,
-        budget_duration_sec: durationSec,
+        ...cycleFromSeconds(durationSec),
       },
       userIds,
     )
@@ -709,9 +741,7 @@ function DeploymentBudgetsPage() {
         id: "reset",
         header: "Reset",
         cell: (budget) => (
-          <span className="text-muted">
-            {formatDuration(budget.budget_duration_sec)}
-          </span>
+          <span className="text-muted">{cycleLabel(budget)}</span>
         ),
       },
       {
@@ -1093,7 +1123,7 @@ function EditBudgetDialog({
       initial={{
         name: row.name,
         max_budget: row.max_budget,
-        budget_duration_sec: row.budget_duration_sec,
+        durationSec: secondsFromCycle(row),
       }}
       uneditedLimits={row}
       error={updateBudget.error ?? assignmentError}
@@ -1204,7 +1234,7 @@ function CreateBudgetDialog({
       }}
       title="New budget"
       submitLabel={pendingAssignments ? "Retry assignments" : "Create budget"}
-      initial={{ name: null, max_budget: null, budget_duration_sec: null }}
+      initial={{ name: null, max_budget: null, durationSec: null }}
       error={createBudget.error ?? assignmentError}
       isPending={createBudget.isPending || assigningUsers}
       returnFocusRef={returnFocusRef}

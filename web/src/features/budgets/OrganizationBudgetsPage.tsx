@@ -24,7 +24,8 @@ import {
 } from "./appliedTo"
 import { budgetLabeler } from "./budgetLabel"
 import { OrganizationBudgetDialog } from "./OrganizationBudgetDialog"
-import { limitLabel, periodLabel } from "./organizationBudget"
+import { limitLabel } from "./organizationBudget"
+import { cycleLabel } from "./resetCycle"
 import { SpendCeilingsCard } from "./SpendCeilingsCard"
 
 // Budgets, for an organization owner or admin.
@@ -112,7 +113,7 @@ export function OrganizationBudgetsPage({
     {
       id: "resets",
       header: "Reset cycle",
-      cell: (row) => periodLabel(row),
+      cell: (row) => cycleLabel(row),
     },
     {
       id: "actions",

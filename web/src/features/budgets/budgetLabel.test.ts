@@ -15,8 +15,12 @@ function budget(overrides: Partial<LabelableBudget> = {}): LabelableBudget {
     max_budget: 250,
     token_limit: null,
     request_limit: null,
-    budget_duration_sec: null,
-    reset_alignment: "calendar_month",
+    reset_cycle: "monthly",
+    reset_every_n: null,
+    reset_anchor_at: null,
+    reset_weekdays: null,
+    reset_month_day: 1,
+    reset_month: null,
     ...overrides,
   }
 }
@@ -61,22 +65,24 @@ describe("budgetLabel", () => {
   it("counts a rolling period in days", () => {
     expect(
       budgetLabel(
-        budget({ reset_alignment: null, budget_duration_sec: 7 * 86_400 }),
+        budget({
+          reset_cycle: "every_n_days",
+          reset_every_n: 7,
+          reset_month_day: null,
+        }),
       ),
     ).toBe("$250.00 / 7 days")
   })
 
   it("says no period for a budget that caps nothing", () => {
     expect(
-      budgetLabel(
-        budget({ max_budget: null, reset_alignment: "calendar_day" }),
-      ),
+      budgetLabel(budget({ max_budget: null, reset_cycle: "daily" })),
     ).toBe("No limit")
   })
 
   it("drops the period from a budget that never resets", () => {
     expect(
-      budgetLabel(budget({ reset_alignment: null, budget_duration_sec: null })),
+      budgetLabel(budget({ reset_cycle: null, reset_month_day: null })),
     ).toBe("$250.00")
   })
 })
