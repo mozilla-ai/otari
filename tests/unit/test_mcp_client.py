@@ -340,6 +340,34 @@ async def test_pool_closes_from_a_task_other_than_the_one_that_opened_it(transpo
 
 
 @pytest.mark.asyncio
+async def test_a_pool_closed_cleanly_lets_its_transport_finish(transport: TaskGroupMcpTransport) -> None:
+    pool = MCPClientPool([_TASK_GROUP_CONFIG])
+    await pool.__aenter__()
+
+    await pool.__aexit__(None, None, None)
+
+    assert transport.exited_with == [None]
+    assert transport.exited_in == [transport.entered_in]
+
+
+@pytest.mark.asyncio
+async def test_a_pool_closed_by_a_failed_request_abandons_its_transport_work(
+    transport: TaskGroupMcpTransport,
+) -> None:
+    """Work nobody will read is not waited for: the transport exits canceled, in the task that opened it."""
+    pool = MCPClientPool([_TASK_GROUP_CONFIG])
+    await pool.__aenter__()
+    transport.may_close.clear()  # transport work that a clean close would wait out
+    failure = RuntimeError("the provider failed")
+
+    await asyncio.wait_for(pool.__aexit__(type(failure), failure, None), timeout=2)
+
+    assert len(transport.exited_with) == 1
+    assert isinstance(transport.exited_with[0], asyncio.CancelledError)
+    assert transport.exited_in == []
+
+
+@pytest.mark.asyncio
 async def test_pool_finishes_closing_when_the_closing_task_is_canceled(transport: TaskGroupMcpTransport) -> None:
     pool = MCPClientPool([_TASK_GROUP_CONFIG])
     await pool.__aenter__()

@@ -608,7 +608,8 @@ def _flatten_result_block(
         parts.append(f"stderr:\n{content.stderr}")
     if content.return_code not in (None, 0):
         parts.append(f"return_code: {content.return_code}")
-    listed = [ref.filename or "?" for ref in content.content]
+    # A reference with no name was never fetched, so there is nothing the model could do with it.
+    listed = [ref.filename for ref in content.content if ref.filename]
     listed += [name for name in [*produced, *file_ids] if name not in listed]
     if listed:
         names = [f"{name} (file_id: {file_ids[name]})" if name in file_ids else name for name in listed]

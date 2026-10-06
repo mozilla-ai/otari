@@ -31,6 +31,9 @@ from gateway.models.money import UsdCost
 # leaves the sum of three of them ~9000x inside the type.
 MAX_COUNT_LIMIT = 1_000_000_000_000_000
 
+# rpm_limit and tpm_limit are 32-bit columns, so a larger value fails on commit rather than validation.
+MAX_MINUTE_LIMIT = 2_147_483_647
+
 # An enum changes the published OpenAPI schema, so the two published vocabularies stay `Literal`.
 ResetAlignment = Literal["calendar_day", "calendar_week", "calendar_month"]
 RESET_ALIGNMENTS: tuple[ResetAlignment, ...] = get_args(ResetAlignment)
@@ -106,6 +109,12 @@ class Budget(Base):
     # counter, and the counters compared against these are the same width.
     token_limit: Mapped[int | None] = mapped_column(BigInteger(), default=None)
     request_limit: Mapped[int | None] = mapped_column(BigInteger(), default=None)
+    # Per-minute limits for each user on this budget, counted in rate_limit_store
+    # rather than in these rows: requests per minute, and tokens per minute
+    # counted on what each request used. Read only for a user's own budget, not
+    # for a scoped ceiling that names this budget.
+    rpm_limit: Mapped[int | None] = mapped_column(default=None)
+    tpm_limit: Mapped[int | None] = mapped_column(default=None)
     budget_duration_sec: Mapped[int | None] = mapped_column()
     # Snap the window to a UTC calendar boundary instead of counting a fixed
     # number of seconds, which is the only way to express a calendar month (2592000

@@ -32,8 +32,10 @@ from gateway.services._tool_loop import (
     MaxToolIterationsExceeded,
     StreamAction,
     ToolBackend,
+    log_tool_failure,
     run_tool_loop,
     run_tool_loop_stream,
+    tool_failure_detail,
 )
 from gateway.services.tools import MAX_USES_EXCEEDED_ERROR, ToolUseBudget, is_capped_call
 
@@ -214,8 +216,9 @@ async def _execute_mcp_calls(
         except MaxToolIterationsExceeded:
             raise
         except Exception as exc:  # noqa: BLE001 — see docstring
-            logger.warning("MCP tool %s execution failed: %s", name, exc)
-            text = f"[tool error] {exc}"
+            detail = tool_failure_detail(pool, name)
+            log_tool_failure(name, detail, exc)
+            text = f"[tool error] {detail}"
         else:
             if capped and budget is not None:
                 budget.record(text)

@@ -1418,7 +1418,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"token_limit\": 0\n}"
+              "raw": "{\n  \"budget_duration_sec\": 1,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"rpm_limit\": 1,\n  \"token_limit\": 0,\n  \"tpm_limit\": 1\n}"
             },
             "description": "Create a new budget.",
             "header": [
@@ -1478,7 +1478,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"token_limit\": 0\n}"
+              "raw": "{\n  \"budget_duration_sec\": 1,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"rpm_limit\": 1,\n  \"token_limit\": 0,\n  \"tpm_limit\": 1\n}"
             },
             "description": "Update a budget.",
             "header": [
@@ -3562,7 +3562,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"token_limit\": 0\n}"
+              "raw": "{\n  \"budget_duration_sec\": 1,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"token_limit\": 0\n}"
             },
             "description": "Define a budget owned by this organization. Owners and admins only.",
             "header": [
@@ -3597,7 +3597,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"token_limit\": 0\n}"
+              "raw": "{\n  \"budget_duration_sec\": 1,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"token_limit\": 0\n}"
             },
             "description": "Change a budget's label, figure or period.\n\nEvery ceiling naming it is held to the new figure from here on, which is the\npoint of naming a budget rather than typing an amount per place it applies.",
             "header": [
@@ -8023,7 +8023,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"expected_updated_at\": \"string\",\n  \"options\": {},\n  \"provider\": \"string\",\n  \"timeout\": 0\n}"
+              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"expected_updated_at\": \"string\",\n  \"options\": {},\n  \"provider\": \"string\",\n  \"timeout\": 1.0\n}"
             },
             "description": "Update a stored search tool. Omitted fields are left as-is; an explicit ``null`` clears them.\n\n``api_key`` follows the same rule: omit it to keep the stored key, send a new\none to rotate, or send ``null`` to clear it (a keyless SearXNG backend). The\nrow is locked ``FOR UPDATE`` so the ``expected_updated_at`` check and the\nwrite it guards are atomic. The tool as it will be after the update is\nvalidated, so a change that would leave it unusable (clearing the key of a\nprovider that needs one) is refused rather than stored.",
             "header": [
@@ -8115,7 +8115,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_estimate_default_output_tokens\": 0,\n  \"default_pricing\": false,\n  \"file_understanding_enabled\": false,\n  \"model_cache_ttl_seconds\": 0,\n  \"model_discovery\": false,\n  \"model_discovery_negative_ttl_seconds\": 0,\n  \"model_discovery_timeout_seconds\": 0,\n  \"models_dev_cache_ttl_seconds\": 0,\n  \"models_dev_metadata\": false,\n  \"pricing_refresh\": \"manual\",\n  \"public_catalog\": false,\n  \"reject_user_mismatch\": false,\n  \"require_pricing\": false,\n  \"stream_missing_usage_policy\": \"estimate\",\n  \"vision_describe_max_tokens\": 0,\n  \"vision_describe_model\": \"string\",\n  \"vision_strategy\": \"describe\"\n}"
+              "raw": "{\n  \"budget_estimate_default_output_tokens\": 0,\n  \"default_pricing\": false,\n  \"file_understanding_enabled\": false,\n  \"model_cache_ttl_seconds\": 0,\n  \"model_discovery\": false,\n  \"model_discovery_negative_ttl_seconds\": 0,\n  \"model_discovery_timeout_seconds\": 1.0,\n  \"models_dev_cache_ttl_seconds\": 0,\n  \"models_dev_metadata\": false,\n  \"pricing_refresh\": \"manual\",\n  \"public_catalog\": false,\n  \"reject_user_mismatch\": false,\n  \"require_pricing\": false,\n  \"stream_missing_usage_policy\": \"estimate\",\n  \"vision_describe_max_tokens\": 1,\n  \"vision_describe_model\": \"string\",\n  \"vision_strategy\": \"describe\"\n}"
             },
             "description": "Persist and apply runtime setting changes.\n\nEach provided field is stored as an override (winning over config/env) and\napplied to the running gateway immediately. Operator-gated: these change\nhow the gateway meters and lists models.",
             "header": [

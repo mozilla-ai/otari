@@ -37,6 +37,19 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         result = await self.db.execute(select(func.count()).select_from(User).where(User.budget_id == budget_id))
         return result.scalar_one()
 
+    async def minute_limits_for_user(self, user_id: str) -> tuple[str, int | None, int | None] | None:
+        """``(budget_id, rpm_limit, tpm_limit)`` of the user's own budget, or None when it limits neither."""
+        row = (
+            await self.db.execute(
+                select(Budget.budget_id, Budget.rpm_limit, Budget.tpm_limit)
+                .join(User, User.budget_id == Budget.budget_id)
+                .where(User.user_id == user_id, User.deleted_at.is_(None))
+            )
+        ).first()
+        if row is None or (row.rpm_limit is None and row.tpm_limit is None):
+            return None
+        return row.budget_id, row.rpm_limit, row.tpm_limit
+
     async def get_by_id_and_organization(self, budget_id: str, organization_id: uuid.UUID) -> Budget | None:
         """Return the budget with this ID when this organization owns it, otherwise None."""
         result = await self.db.execute(
