@@ -27,3 +27,58 @@ gates:
       Force-pushing rewrites shared history; use --force-with-lease if you
       must. (main is already protected server-side; this covers other
       branches.)
+
+  # NOTE: A phrase matches only a contiguous run of tokens, so each flag form is
+  # listed. The lists cover the common spellings, not every one git accepts.
+  - id: no-push-to-main
+    type: command
+    runs: [pre_tool_use.command]
+    enforcement: required
+    forbidden:
+      - git push origin main
+      - git push origin HEAD:main
+      - git push origin main:main
+      - git push origin HEAD:refs/heads/main
+      - git push -u origin main
+      - git push --set-upstream origin main
+      - git push -f origin main
+      - git push --force origin main
+      - git push --force-with-lease origin main
+      - git push origin +main
+      - git push upstream main
+    message: >-
+      Never push to main. Push a branch and open a pull request
+      (.github/skills/pr-cycle/SKILL.md).
+
+  # NOTE: A gate cannot see the current branch, so it also refuses a merge on main itself.
+  # `git merge --ff-only origin/main` and `git pull origin main` stay open to update main.
+  # `gh pr update-branch --rebase` is refused too, because a phrase cannot exclude a flag.
+  - id: no-merging-main-into-a-branch
+    type: command
+    runs: [pre_tool_use.command]
+    enforcement: required
+    forbidden:
+      - git merge main
+      - git merge origin/main
+      - git merge --no-ff main
+      - git merge --no-ff origin/main
+      - git merge --squash main
+      - git merge --squash origin/main
+      - gh pr update-branch
+    message: >-
+      Rebase instead: `git fetch origin && git rebase origin/main`, then
+      `git push --force-with-lease`. Never merge main into a branch
+      (.github/skills/pr-cycle/SKILL.md, "Branch shape"). To update main
+      itself, use `git merge --ff-only origin/main`.
+
+  # NOTE: This catches the gh subcommand only. `gh api` and `curl` against the
+  # issues endpoint get through, because a phrase cannot match a varying path.
+  # An unquoted mention of the phrase is refused too. A quoted one is a single token.
+  - id: no-agent-filed-issues
+    type: command
+    runs: [pre_tool_use.command]
+    enforcement: required
+    forbidden: ["gh issue create"]
+    message: >-
+      Do not file a GitHub issue. Show the draft title and body in the chat,
+      and let a person file it (AGENTS.md, "Repository Conventions").
