@@ -467,6 +467,20 @@ async def test_loop_mixed_tools_executes_owned_and_returns_only_foreign(monkeypa
     assert tool_use_ids == ["foreign_id"]
 
 
+_LEAKY_ERROR = "GET https://search.internal/v1?api_key=sk-live-secret failed"
+
+
+def _capture_warnings(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]]:
+    """Record each warning the tool loop logs, with the ``extra`` it carries."""
+    logged: list[tuple[Any, ...]] = []
+
+    def capture(message: str, *args: Any, extra: dict[str, Any] | None = None) -> None:
+        logged.append((message % args, extra))
+
+    monkeypatch.setattr(logger, "warning", capture)
+    return logged
+
+
 @pytest.mark.asyncio
 async def test_loop_tool_execution_failure_appears_as_tool_result_message(monkeypatch: pytest.MonkeyPatch) -> None:
     responses = iter(
@@ -482,10 +496,12 @@ async def test_loop_tool_execution_failure_appears_as_tool_result_message(monkey
         return next(responses)
 
     monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+    logged = _capture_warnings(monkeypatch)
+    raised = RuntimeError(_LEAKY_ERROR)
 
     class FailingPool(_FakePool):
         async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
-            raise RuntimeError("upstream down")
+            raise raised
 
     pool = FailingPool(tool_names=["fetch_url"])
     out = await anthropic_tool_loop(
@@ -498,8 +514,9 @@ async def test_loop_tool_execution_failure_appears_as_tool_result_message(monkey
     tool_result_msg = captured[1][-1]
     assert tool_result_msg["role"] == "user"
     assert tool_result_msg["content"][0]["type"] == "tool_result"
-    assert "tool error" in tool_result_msg["content"][0]["content"]
-    assert "upstream down" in tool_result_msg["content"][0]["content"]
+    assert tool_result_msg["content"][0]["content"] == "[tool error] Gateway tool execution failed"
+    assert logged == [("Gateway tool execution failed: fetch_url", {"error_type": type(raised).__name__})]
+    assert "sk-live-secret" not in str(captured) + str(logged)
 
 
 @pytest.mark.asyncio
@@ -991,13 +1008,8 @@ async def test_stream_mcp_exception_emits_error_without_logging_detail(
             self.calls.append((name, arguments))
             raise RuntimeError("credential-detail-do-not-log")
 
-    logged_warnings: list[tuple[Any, ...]] = []
-
-    def capture_warning(message: str, *args: Any) -> None:
-        logged_warnings.append((message, *args))
-
     monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
-    monkeypatch.setattr(logger, "warning", capture_warning)
+    logged_warnings = _capture_warnings(monkeypatch)
     pool = FailingActivityPool()
     events = [
         event
@@ -1024,7 +1036,7 @@ async def test_stream_mcp_exception_emits_error_without_logging_detail(
     model_result = provider_calls[1]["messages"][-1]["content"][0]
     assert model_result["content"] == "[tool error] MCP tool execution failed"
     assert "credential-detail-do-not-log" not in str(provider_calls[1]["messages"])
-    assert logged_warnings == [("Gateway tool %s execution failed: %s", "fetch_url", "RuntimeError")]
+    assert logged_warnings == [("MCP tool execution failed: fetch_url", {"error_type": "RuntimeError"})]
     assert "credential-detail-do-not-log" not in str(logged_warnings)
     assert "do-not-log" not in str(logged_warnings)
 

@@ -29,6 +29,7 @@ from openai.types.responses import (
 )
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
+from gateway.log_config import logger
 from gateway.services import mcp_loop_responses as responses_loop_module
 from gateway.services.mcp_loop_responses import (
     MaxToolIterationsExceeded,
@@ -458,6 +459,20 @@ async def test_loop_mixed_capped_search_hides_refusal_and_returns_foreign_call(
     assert [getattr(item, "call_id", None) for item in out.output or []] == ["foreign_id"]
 
 
+_LEAKY_ERROR = "GET https://search.internal/v1?api_key=sk-live-secret failed"
+
+
+def _capture_warnings(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]]:
+    """Record each warning the tool loop logs, with the ``extra`` it carries."""
+    logged: list[tuple[Any, ...]] = []
+
+    def capture(message: str, *args: Any, extra: dict[str, Any] | None = None) -> None:
+        logged.append((message % args, extra))
+
+    monkeypatch.setattr(logger, "warning", capture)
+    return logged
+
+
 @pytest.mark.asyncio
 async def test_loop_tool_failure_appears_as_function_call_output(monkeypatch: pytest.MonkeyPatch) -> None:
     responses = iter(
@@ -474,10 +489,12 @@ async def test_loop_tool_failure_appears_as_function_call_output(monkeypatch: py
         return next(responses)
 
     monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    logged = _capture_warnings(monkeypatch)
+    raised = RuntimeError(_LEAKY_ERROR)
 
     class FailingPool(_FakePool):
         async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
-            raise RuntimeError("upstream down")
+            raise raised
 
     pool = FailingPool(tool_names=["fetch_url"])
     await responses_tool_loop(
@@ -489,8 +506,55 @@ async def test_loop_tool_failure_appears_as_function_call_output(monkeypatch: py
     output_item = next(
         item for item in second_input if isinstance(item, dict) and item.get("type") == "function_call_output"
     )
-    assert "tool error" in output_item["output"]
-    assert "upstream down" in output_item["output"]
+    assert output_item["output"] == "[tool error] Gateway tool execution failed"
+    assert logged == [("Gateway tool execution failed: fetch_url", {"error_type": type(raised).__name__})]
+    assert "sk-live-secret" not in str(captured_inputs) + str(logged)
+
+
+@pytest.mark.asyncio
+async def test_stream_tool_failure_keeps_the_exception_out_of_the_output_and_the_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_inputs: list[Any] = []
+    iter_streams = iter(
+        [
+            _async_iter(
+                _output_item_added(0, _function_call("c", "fetch_url", "")),
+                _function_call_args_done(0, "fc_item_1", "fetch_url", "{}"),
+                _output_item_done(0, _function_call("c", "fetch_url", "{}")),
+                _response_completed(),
+            ),
+            _async_iter(_text_delta("msg_1", 0, "recovered"), _response_completed()),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        captured_inputs.append(list(kwargs["input_data"]))
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+    logged = _capture_warnings(monkeypatch)
+    raised = RuntimeError(_LEAKY_ERROR)
+
+    class FailingPool(_FakePool):
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+            raise raised
+
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, FailingPool(tool_names=["fetch_url"])),
+            max_iterations=5,
+        )
+    ]
+
+    output_item = next(
+        item for item in captured_inputs[1] if isinstance(item, dict) and item.get("type") == "function_call_output"
+    )
+    assert output_item["output"] == "[tool error] Gateway tool execution failed"
+    assert logged == [("Gateway tool execution failed: fetch_url", {"error_type": type(raised).__name__})]
+    assert "sk-live-secret" not in str(captured_inputs) + str(logged) + str(events)
 
 
 @pytest.mark.asyncio

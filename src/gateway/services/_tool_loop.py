@@ -25,6 +25,8 @@ from contextlib import AbstractAsyncContextManager, aclosing, nullcontext
 from enum import Enum, auto
 from typing import Any, Generic, Protocol, TypeVar, cast
 
+from gateway.log_config import logger
+
 ResultT = TypeVar("ResultT")
 ChunkT = TypeVar("ChunkT")
 StateT = TypeVar("StateT")
@@ -50,6 +52,24 @@ class ToolBackend(Protocol):
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str: ...
 
     def purpose_hints(self) -> list[tuple[str, str]]: ...
+
+
+def tool_failure_detail(pool: ToolBackend, name: str) -> str:
+    """What the model and the caller are told when a call to ``name`` raised.
+
+    It names the kind of tool and never the exception, whose text can carry a URL
+    with a query credential, a header value or an internal hostname. One call gets
+    the same words on every path.
+    """
+    server_name_for_tool = getattr(pool, "server_name_for_tool", None)
+    if callable(server_name_for_tool) and server_name_for_tool(name):
+        return "MCP tool execution failed"
+    return "Gateway tool execution failed"
+
+
+def log_tool_failure(name: str, detail: str, exc: BaseException) -> None:
+    """Log a call that raised, keeping the exception's text out of the line for the same reason."""
+    logger.warning("%s: %s", detail, name, extra={"error_type": type(exc).__name__})
 
 
 class MaxToolIterationsExceeded(Exception):

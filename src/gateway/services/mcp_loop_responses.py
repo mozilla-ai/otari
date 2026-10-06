@@ -33,7 +33,13 @@ from openai.types.responses.response_output_item_added_event import ResponseOutp
 from openai.types.responses.response_output_item_done_event import ResponseOutputItemDoneEvent
 
 from gateway.log_config import logger
-from gateway.services._tool_loop import StreamAction, run_tool_loop, run_tool_loop_stream
+from gateway.services._tool_loop import (
+    StreamAction,
+    log_tool_failure,
+    run_tool_loop,
+    run_tool_loop_stream,
+    tool_failure_detail,
+)
 from gateway.services.mcp_loop import (
     DEFAULT_MAX_TOOL_ITERATIONS,
     MAX_TOOL_ITERATIONS_CAP,
@@ -121,8 +127,9 @@ async def _execute_function_calls(
         except MaxToolIterationsExceeded:
             raise
         except Exception as exc:  # noqa: BLE001 — see docstring
-            logger.warning("MCP tool %s execution failed: %s", item.name, exc)
-            text = f"[tool error] {exc}"
+            detail = tool_failure_detail(pool, item.name)
+            log_tool_failure(item.name, detail, exc)
+            text = f"[tool error] {detail}"
         else:
             if capped and budget is not None:
                 budget.record(text)
@@ -272,8 +279,9 @@ async def _execute_stream_owned(
         except MaxToolIterationsExceeded:
             raise
         except Exception as exc:  # noqa: BLE001 (same tool-error-as-message idiom as the non-stream loop)
-            logger.warning("MCP tool %s execution failed: %s", call.name, exc)
-            text = f"[tool error] {exc}"
+            detail = tool_failure_detail(pool, call.name)
+            log_tool_failure(call.name, detail, exc)
+            text = f"[tool error] {detail}"
         else:
             if capped and budget is not None:
                 budget.record(text)

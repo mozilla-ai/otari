@@ -24,6 +24,7 @@ from any_llm.types.completion import (
     ChoiceDeltaToolCallFunction as DeltaFn,
 )
 
+from gateway.log_config import logger
 from gateway.services import mcp_loop as mcp_loop_module
 from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
@@ -640,6 +641,20 @@ async def test_loop_handles_duck_typed_tool_calls(monkeypatch: pytest.MonkeyPatc
     assert pool.calls == [("fetch_url", {"u": "x"})], "loop must execute duck-typed function tool_calls"
 
 
+_LEAKY_ERROR = "GET https://search.internal/v1?api_key=sk-live-secret failed"
+
+
+def _capture_warnings(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, ...]]:
+    """Record each warning the tool loop logs, with the ``extra`` it carries."""
+    logged: list[tuple[Any, ...]] = []
+
+    def capture(message: str, *args: Any, extra: dict[str, Any] | None = None) -> None:
+        logged.append((message % args, extra))
+
+    monkeypatch.setattr(logger, "warning", capture)
+    return logged
+
+
 @pytest.mark.asyncio
 async def test_loop_tool_execution_failure_appears_as_tool_message(monkeypatch: pytest.MonkeyPatch) -> None:
     responses = iter(
@@ -655,10 +670,12 @@ async def test_loop_tool_execution_failure_appears_as_tool_message(monkeypatch: 
         return next(responses)
 
     monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+    logged = _capture_warnings(monkeypatch)
+    raised = RuntimeError(_LEAKY_ERROR)
 
     class FailingPool(_FakePool):
         async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
-            raise RuntimeError("upstream down")
+            raise raised
 
     pool = FailingPool(tool_names=["fetch_url"])
     out = await mcp_tool_loop(
@@ -669,8 +686,10 @@ async def test_loop_tool_execution_failure_appears_as_tool_message(monkeypatch: 
     assert out.choices[0].message.content == "recovered"
     tool_msg = captured[1][-1]
     assert tool_msg["role"] == "tool"
-    assert "tool error" in tool_msg["content"]
-    assert "upstream down" in tool_msg["content"]
+    # The exception's text can carry a credential, so neither the model nor the log sees it.
+    assert tool_msg["content"] == "[tool error] Gateway tool execution failed"
+    assert logged == [("Gateway tool execution failed: fetch_url", {"error_type": type(raised).__name__})]
+    assert "sk-live-secret" not in str(captured) + str(logged)
 
 
 # ---------- streaming loop ----------
