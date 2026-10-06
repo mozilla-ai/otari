@@ -871,6 +871,9 @@ _DOMAINS_PAGE = """# Backend domains
 """
 
 
+_PAGE_DOMAINS = {"api_keys", "budgets"}
+
+
 def _domains_page(tmp_path: Path, text: str = _DOMAINS_PAGE) -> Path:
     return _write(tmp_path, "docs/domains.md", text)
 
@@ -921,7 +924,7 @@ def test_a_location_named_for_a_documented_domain_is_clean(
 ) -> None:
     monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
     _write(tmp_path, relative_path, "")
-    assert check.check_domain_names(tmp_path, _domains_page(tmp_path)) == []
+    assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == []
 
 
 @pytest.mark.parametrize(
@@ -938,7 +941,7 @@ def test_a_location_named_for_no_documented_domain_is_flagged(
 ) -> None:
     monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
     _write(tmp_path, relative_path, "")
-    assert check.check_domain_names(tmp_path, _domains_page(tmp_path)) == [
+    assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == [
         f"{location} names no domain in docs/domains.md; name it for a domain there, or give the new domain a section"
     ]
 
@@ -946,7 +949,7 @@ def test_a_location_named_for_no_documented_domain_is_flagged(
 def test_an_exceptions_module_without_the_suffix_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
     _write(tmp_path, "gateway/exceptions/budgets.py", "")
-    assert check.check_domain_names(tmp_path, _domains_page(tmp_path)) == [
+    assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == [
         "gateway/exceptions/budgets.py is not named <domain>_exceptions.py"
     ]
 
@@ -955,19 +958,19 @@ def test_a_shared_exceptions_module_is_clean(tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
     _write(tmp_path, "gateway/exceptions/_base.py", "")
     _write(tmp_path, "gateway/exceptions/shared_exceptions.py", "")
-    assert check.check_domain_names(tmp_path, _domains_page(tmp_path)) == []
+    assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == []
 
 
 def test_a_directory_that_is_not_a_package_is_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
     _write(tmp_path, "gateway/services/.mypy_cache/cache.json", "")
-    assert check.check_domain_names(tmp_path, _domains_page(tmp_path)) == []
+    assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == []
 
 
 def test_a_location_on_the_domain_name_baseline_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ("gateway/services/tenancy/",))
     _write(tmp_path, "gateway/services/tenancy/__init__.py", "")
-    assert check.check_domain_names(tmp_path, _domains_page(tmp_path)) == []
+    assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == []
 
 
 @pytest.mark.parametrize("package", ["tenancy", "budgets"])
@@ -977,16 +980,21 @@ def test_a_domain_name_baseline_entry_that_is_gone_or_now_a_domain_must_leave_th
     monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", (f"gateway/services/{package}/",))
     if package == "budgets":
         _write(tmp_path, "gateway/services/budgets/__init__.py", "")
-    assert check.check_domain_names(tmp_path, _domains_page(tmp_path)) == [
+    assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == [
         f"gateway/services/{package}/ is on the domain name baseline but no longer exists or now names a domain; "
         "remove it from the baseline"
     ]
 
 
 def test_a_missing_domains_page_is_flagged(tmp_path: Path) -> None:
-    assert check.check_domain_names(tmp_path, tmp_path / "docs" / "domains.md") == [
-        "docs/domains.md not found; the domain names are read from its '## The domains' section"
-    ]
+    assert check.read_domains_page(tmp_path / "docs" / "domains.md") == (
+        set(),
+        ["docs/domains.md not found; the domain names are read from its '## The domains' section"],
+    )
+
+
+def test_the_domains_page_gives_its_domains(tmp_path: Path) -> None:
+    assert check.read_domains_page(_domains_page(tmp_path)) == (_PAGE_DOMAINS, [])
 
 
 def test_main_fails_on_a_package_named_for_no_domain(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -995,4 +1003,177 @@ def test_main_fails_on_a_package_named_for_no_domain(tmp_path: Path, monkeypatch
     _point_main_at(tmp_path, monkeypatch)
     assert check.main() == 0
     _write(tmp_path, "src/gateway/services/billing/__init__.py", "")
+    assert check.main() == 1
+
+
+_DOMAINS = {"gadgets", "things", "widgets"}
+_REPOSITORY_REMEDY = (
+    "only the domain's own service and repository packages and the builders in gateway/api/deps.py import its "
+    "repositories"
+)
+
+
+def _write_domain_packages(src_root: Path, layer: str, *packages: str) -> None:
+    for package in packages:
+        _write(src_root, f"gateway/{layer}/{package}/__init__.py", "")
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "source", "module"),
+    [
+        (
+            "gateway/services/widgets/_store.py",
+            "from gateway.repositories.things import ThingRepository\n",
+            "gateway.repositories.things",
+        ),
+        (
+            "gateway/services/widgets/_store.py",
+            "from ...repositories.things.thing_repository import ThingRepository\n",
+            "gateway.repositories.things.thing_repository",
+        ),
+        (
+            "gateway/repositories/widgets/widget_repository.py",
+            "import gateway.repositories.things\n",
+            "gateway.repositories.things",
+        ),
+        ("gateway/api/routes/things.py", "from gateway.repositories import things\n", "gateway.repositories.things"),
+        (
+            "gateway/adapters/thing_adapter.py",
+            "from gateway.repositories.things import ThingRepository\n",
+            "gateway.repositories.things",
+        ),
+    ],
+)
+def test_importing_another_domains_repositories_is_flagged(
+    tmp_path: Path, relative_path: str, source: str, module: str
+) -> None:
+    _write_domain_packages(tmp_path, "repositories", "things", "widgets")
+    _write_domain_packages(tmp_path, "services", "widgets")
+    _write(tmp_path, relative_path, source)
+    assert check.check_repository_imports(tmp_path, _DOMAINS) == [
+        f"{relative_path}:1 imports {module}; {_REPOSITORY_REMEDY}"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "source"),
+    [
+        ("gateway/services/things/_service.py", "from gateway.repositories.things import ThingRepository\n"),
+        ("gateway/repositories/things/other_repository.py", "from .thing_repository import ThingRepository\n"),
+        ("gateway/api/deps.py", "from gateway.repositories.things import ThingRepository\n"),
+        ("gateway/api/routes/things.py", "from gateway.repositories.base_repository import BaseRepository\n"),
+        ("gateway/api/routes/things.py", "from gateway.repositories.legacy import LegacyRepository\n"),
+    ],
+)
+def test_importing_a_domains_own_or_a_non_domain_repository_is_clean(
+    tmp_path: Path, relative_path: str, source: str
+) -> None:
+    _write_domain_packages(tmp_path, "repositories", "things", "legacy")
+    _write_domain_packages(tmp_path, "services", "things")
+    _write(tmp_path, relative_path, source)
+    assert check.check_repository_imports(tmp_path, _DOMAINS) == []
+
+
+@pytest.mark.parametrize("relative_path", ["gateway/services/thing_service.py", "gateway/services/legacy/_store.py"])
+def test_service_code_outside_every_domain_package_is_not_checked(tmp_path: Path, relative_path: str) -> None:
+    _write_domain_packages(tmp_path, "repositories", "things")
+    _write_domain_packages(tmp_path, "services", "legacy")
+    _write(tmp_path, relative_path, "from gateway.repositories.things import ThingRepository\n")
+    assert check.check_repository_imports(tmp_path, _DOMAINS) == []
+
+
+def test_repository_import_violations_are_reported_in_line_order(tmp_path: Path) -> None:
+    _write_domain_packages(tmp_path, "repositories", "things", "widgets")
+    _write(
+        tmp_path,
+        "gateway/core/thing.py",
+        "def load():\n    from gateway.repositories.things import T\nfrom gateway.repositories.widgets import W\n",
+    )
+    assert [violation.split(" imports ")[0] for violation in check.check_repository_imports(tmp_path, _DOMAINS)] == [
+        "gateway/core/thing.py:2",
+        "gateway/core/thing.py:3",
+    ]
+
+
+def test_main_fails_on_an_import_of_another_domains_repositories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(tmp_path, "src/gateway/repositories/things/__init__.py", "")
+    _write(tmp_path, "tests/__init__.py", "")
+    _point_main_at(tmp_path, monkeypatch)
+    assert check.main() == 0
+    _write(tmp_path, "src/gateway/core/thing.py", "from gateway.repositories.things import ThingRepository\n")
+    assert check.main() == 1
+
+
+_SERVICE_PACKAGE_REMEDY = "code outside a domain imports what its service package root exports"
+
+
+def _write_things_service(src_root: Path) -> None:
+    _write(src_root, "gateway/services/things/__init__.py", "from ._store import Store\n")
+    _write(src_root, "gateway/services/things/_store.py", "")
+    _write(src_root, "gateway/services/things/store.py", "")
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "source", "module"),
+    [
+        (
+            "gateway/api/routes/things.py",
+            "from gateway.services.things._store import Store\n",
+            "gateway.services.things._store",
+        ),
+        (
+            "gateway/api/routes/things.py",
+            "from gateway.services.things import _store\n",
+            "gateway.services.things._store",
+        ),
+        ("gateway/api/deps.py", "import gateway.services.things.store\n", "gateway.services.things.store"),
+        ("gateway/services/widgets/_service.py", "from ..things.store import Store\n", "gateway.services.things.store"),
+        (
+            "gateway/services/thing_service.py",
+            "from gateway.services.things.store import Store\n",
+            "gateway.services.things.store",
+        ),
+    ],
+)
+def test_importing_below_another_domains_service_package_root_is_flagged(
+    tmp_path: Path, relative_path: str, source: str, module: str
+) -> None:
+    _write_things_service(tmp_path)
+    _write(tmp_path, relative_path, source)
+    assert check.check_service_package_imports(tmp_path, _DOMAINS) == [
+        f"{relative_path}:1 imports {module}; {_SERVICE_PACKAGE_REMEDY}"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "source"),
+    [
+        ("gateway/api/routes/things.py", "from gateway.services.things import Store\n"),
+        ("gateway/api/routes/things.py", "from gateway.services import things\n"),
+        ("gateway/services/things/_service.py", "from gateway.services.things._store import Store\n"),
+        ("gateway/services/things/_service.py", "from ._store import Store\n"),
+        ("gateway/api/routes/things.py", "from gateway.services.thing_service import ThingService\n"),
+        ("gateway/api/routes/things.py", "from gateway.services.legacy._store import Store\n"),
+    ],
+)
+def test_importing_a_service_package_root_own_modules_or_a_non_domain_package_is_clean(
+    tmp_path: Path, relative_path: str, source: str
+) -> None:
+    _write_things_service(tmp_path)
+    _write(tmp_path, "gateway/services/thing_service.py", "")
+    _write(tmp_path, "gateway/services/legacy/__init__.py", "")
+    _write(tmp_path, "gateway/services/legacy/_store.py", "")
+    _write(tmp_path, relative_path, source)
+    assert check.check_service_package_imports(tmp_path, _DOMAINS) == []
+
+
+def test_main_fails_on_an_import_below_a_service_package_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(tmp_path, "src/gateway/services/things/__init__.py", "")
+    _write(tmp_path, "src/gateway/services/things/_store.py", "")
+    _write(tmp_path, "tests/__init__.py", "")
+    _point_main_at(tmp_path, monkeypatch)
+    assert check.main() == 0
+    _write(tmp_path, "src/gateway/core/thing.py", "from gateway.services.things._store import Store\n")
     assert check.main() == 1

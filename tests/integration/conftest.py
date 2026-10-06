@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import os
 import socket
 import sys
@@ -29,7 +30,7 @@ if str(SRC) not in sys.path:
 if "gateway" in sys.modules:
     del sys.modules["gateway"]
 
-from gateway.api.deps import set_config
+from gateway.api.deps import get_membership_listener, get_workspace_listener, set_config
 from gateway.container import build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.db import get_db
@@ -344,7 +345,12 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
         else None
     )
     app.state.feedback_rate_limiter = new_feedback_rate_limiter() if config.feedback_enabled else None
-    app.state.container = build_container(config.bootstrap, config=config)
+    app.state.container = build_container(
+        config.bootstrap,
+        config=config,
+        membership_listener=get_membership_listener,
+        workspace_listener=functools.partial(get_workspace_listener, config=config),
+    )
     install_rate_limits(app, config)
 
 

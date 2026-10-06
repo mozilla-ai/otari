@@ -49,6 +49,15 @@ Enforces:
     each name is a domain that docs/domains.md gives a section. An exceptions
     module is named <domain>_exceptions.py. The names that do not match yet are
     on a baseline, and the baseline only shrinks.
+20. Repository imports: only a domain's own service package, its own
+    repository package and the builders in gateway/api/deps.py import a
+    domain's repository package, so a domain's queries stay behind its
+    service. A domain is one that docs/domains.md gives a section. Service code
+    outside every domain package is not checked, because its path does not
+    say which domain owns it.
+21. Service package imports: code outside a domain's service package
+    imports only its root, so the root's exports are the domain's whole
+    public API.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -61,7 +70,7 @@ Exit codes:
 import ast
 import re
 import sys
-from collections.abc import Iterator
+from collections.abc import Container, Iterator
 from pathlib import Path
 from typing import TypedDict
 
@@ -909,13 +918,17 @@ def _domain_named_locations(src_root: Path) -> tuple[dict[str, str], list[str]]:
     return locations, misnamed
 
 
-def check_domain_names(src_root: Path, doc_path: Path) -> list[str]:
-    """Check that each domain package and domain module names a domain the domains page gives a section."""
+def read_domains_page(doc_path: Path) -> tuple[set[str], list[str]]:
+    """Return the domains the domains page gives a section, and each problem with the page."""
     if not doc_path.is_file():
-        return [f"{DOMAINS_DOC} not found; the domain names are read from its '{DOMAINS_SECTION}' section"]
-    domains, violations = documented_domains(doc_path.read_text(encoding="utf-8"))
+        return set(), [f"{DOMAINS_DOC} not found; the domain names are read from its '{DOMAINS_SECTION}' section"]
+    return documented_domains(doc_path.read_text(encoding="utf-8"))
+
+
+def check_domain_names(src_root: Path, domains: set[str]) -> list[str]:
+    """Check that each domain package and domain module names one of the documented domains."""
     locations, misnamed = _domain_named_locations(src_root)
-    violations.extend(misnamed)
+    violations = list(misnamed)
     violations.extend(
         f"{relative_path} names no domain in {DOMAINS_DOC}; "
         "name it for a domain there, or give the new domain a section"
@@ -929,6 +942,120 @@ def check_domain_names(src_root: Path, doc_path: Path) -> list[str]:
         if not (src_root / relative_path).exists() or locations.get(relative_path) in domains
     )
     return violations
+
+
+REPOSITORY_SCOPE = "gateway/repositories"
+SERVICE_BUILDERS = "gateway/api/deps.py"
+
+
+def _domain_packages(src_root: Path, layer: str, domains: set[str]) -> set[str]:
+    """Return the name of each package in a layer that is named for a documented domain."""
+    layer_root = src_root / layer
+    if not layer_root.is_dir():
+        return set()
+    return {
+        package.name
+        for package in layer_root.iterdir()
+        if package.name in domains and (package / "__init__.py").is_file()
+    }
+
+
+def _imported_domain(module: str, layer: str, packages: Container[str]) -> str | None:
+    """Return the domain package of a layer that a module path lies in, or None if it lies in none."""
+    prefix = layer.replace("/", ".") + "."
+    if not module.startswith(prefix):
+        return None
+    package = module.removeprefix(prefix).split(".")[0]
+    return package if package in packages else None
+
+
+def _import_statements(tree: ast.Module, file_path: Path, src_root: Path) -> Iterator[tuple[int, list[str]]]:
+    """Yield the line of each import statement in a module and the absolute module paths it pulls in."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            yield node.lineno, _imported_modules(node, file_path, src_root)
+
+
+def _is_old_shape_service(relative_path: str, service_packages: set[str]) -> bool:
+    """Return whether a module is service code outside every domain service package."""
+    return relative_path.startswith(f"{SERVICE_SCOPE}/") and not any(
+        relative_path.startswith(f"{SERVICE_SCOPE}/{package}/") for package in service_packages
+    )
+
+
+def _foreign_repository_import(modules: list[str], relative_path: str, repository_packages: set[str]) -> str | None:
+    """Return the first of an import's modules that lies in another domain's repository package, or None."""
+    for module in modules:
+        domain = _imported_domain(module, REPOSITORY_SCOPE, repository_packages)
+        if domain is not None and not relative_path.startswith(
+            (f"{SERVICE_SCOPE}/{domain}/", f"{REPOSITORY_SCOPE}/{domain}/")
+        ):
+            return module
+    return None
+
+
+def check_repository_imports(src_root: Path, domains: set[str]) -> list[str]:
+    """Check that only a domain's own packages and the service builders import its repositories.
+
+    NOTE: Service code outside every domain package is skipped, because its path does not say which domain owns it.
+    """
+    repository_packages = _domain_packages(src_root, REPOSITORY_SCOPE, domains)
+    service_packages = _domain_packages(src_root, SERVICE_SCOPE, domains)
+    found: list[tuple[str, int, str]] = []
+    for relative_path, tree in _parsed_modules(src_root, "gateway", exempt=(SERVICE_BUILDERS,)):
+        if _is_old_shape_service(relative_path, service_packages):
+            continue
+        for line, modules in _import_statements(tree, src_root / relative_path, src_root):
+            module = _foreign_repository_import(modules, relative_path, repository_packages)
+            if module is not None:
+                found.append((relative_path, line, module))
+    return [
+        f"{relative_path}:{line} imports {module}; only the domain's own service and repository packages and the "
+        f"builders in {SERVICE_BUILDERS} import its repositories"
+        for relative_path, line, module in sorted(found)
+    ]
+
+
+def _package_members(package_root: Path) -> set[str]:
+    """Return the name of each module and subpackage directly inside a package, spelled as it is on disk.
+
+    NOTE: A path test on a case-insensitive file system would match a class such as Mailer to mailer.py.
+    """
+    return {
+        entry.stem if entry.is_file() else entry.name
+        for entry in package_root.iterdir()
+        if (entry.suffix == ".py" and entry.name != "__init__.py") or (entry / "__init__.py").is_file()
+    }
+
+
+def _below_root_service_import(modules: list[str], relative_path: str, members: dict[str, set[str]]) -> str | None:
+    """Return the first of an import's modules that lies below another domain's service package root, or None."""
+    for module in modules:
+        domain = _imported_domain(module, SERVICE_SCOPE, members)
+        if domain is None or relative_path.startswith(f"{SERVICE_SCOPE}/{domain}/"):
+            continue
+        package_root = f"{SERVICE_SCOPE.replace('/', '.')}.{domain}."
+        if module.removeprefix(package_root).split(".")[0] in members[domain]:
+            return module
+    return None
+
+
+def check_service_package_imports(src_root: Path, domains: set[str]) -> list[str]:
+    """Check that code outside a domain service package imports only the package root."""
+    members = {
+        package: _package_members(src_root / SERVICE_SCOPE / package)
+        for package in _domain_packages(src_root, SERVICE_SCOPE, domains)
+    }
+    found: list[tuple[str, int, str]] = []
+    for relative_path, tree in _parsed_modules(src_root, "gateway"):
+        for line, modules in _import_statements(tree, src_root / relative_path, src_root):
+            module = _below_root_service_import(modules, relative_path, members)
+            if module is not None:
+                found.append((relative_path, line, module))
+    return [
+        f"{relative_path}:{line} imports {module}; code outside a domain imports what its service package root exports"
+        for relative_path, line, module in sorted(found)
+    ]
 
 
 def main() -> int:
@@ -968,7 +1095,11 @@ def main() -> int:
     database_violations = check_database_imports(SRC_ROOT)
     transaction_violations = check_transaction_control(SRC_ROOT)
     unit_of_work_violations = check_unit_of_work_construction(SRC_ROOT)
-    domain_name_violations = check_domain_names(SRC_ROOT, REPO_ROOT / DOMAINS_DOC)
+    # NOTE: A page with no domains fails here, so a rule that reads them cannot pass by checking nothing.
+    domains, domains_page_violations = read_domains_page(REPO_ROOT / DOMAINS_DOC)
+    domain_name_violations = domains_page_violations + (check_domain_names(SRC_ROOT, domains) if domains else [])
+    repository_import_violations = check_repository_imports(SRC_ROOT, domains)
+    service_package_import_violations = check_service_package_imports(SRC_ROOT, domains)
 
     if import_violations:
         print("❌ Architecture violations found:\n")
@@ -1019,6 +1150,18 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal domain name violations: {len(domain_name_violations)}")
 
+    if repository_import_violations:
+        print("\n❌ Repository import violations:\n")
+        for violation in repository_import_violations:
+            print(f"  {violation}")
+        print(f"\nTotal repository import violations: {len(repository_import_violations)}")
+
+    if service_package_import_violations:
+        print("\n❌ Service package import violations:\n")
+        for violation in service_package_import_violations:
+            print(f"  {violation}")
+        print(f"\nTotal service package import violations: {len(service_package_import_violations)}")
+
     if (
         import_violations
         or naming_violations
@@ -1028,6 +1171,8 @@ def main() -> int:
         or unit_of_work_violations
         or flat_module_violations
         or domain_name_violations
+        or repository_import_violations
+        or service_package_import_violations
     ):
         print("\n💡 See ARCHITECTURE.md for the intended layering")
         return 1

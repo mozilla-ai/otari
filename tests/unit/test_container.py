@@ -50,6 +50,7 @@ from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
+from gateway.services.tenancy.membership_listener import MembershipListener
 
 # The core adapters ignore the session, so a placeholder stands in for one; a
 # unit test of the wiring has no database and needs none.
@@ -99,8 +100,12 @@ def _write_bootstrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str,
     _WRITTEN.add(name)
 
 
+def _no_membership_listener(uow: UnitOfWork) -> MembershipListener:
+    return cast(MembershipListener, object())
+
+
 def test_core_defaults_are_bound_for_every_port() -> None:
-    container = build_container()
+    container = build_container(membership_listener=_no_membership_listener)
 
     assert isinstance(container.resolve(BillingPort, NO_SESSION), NullBillingAdapter)
     assert isinstance(container.resolve(EntitlementPort, NO_SESSION), BaseEntitlementAdapter)
@@ -161,6 +166,28 @@ def test_the_identity_provider_refuses_to_build_without_a_unit_of_work() -> None
 
     with pytest.raises(ContainerError, match="a session and a unit of work are required"):
         container.resolve(IdentityProviderPort, A_SESSION)
+
+
+def test_the_identity_provider_refuses_to_build_without_a_membership_listener() -> None:
+    container = build_container(config=GatewayConfig())
+
+    with pytest.raises(ContainerError, match="a membership listener is required"):
+        container.resolve(IdentityProviderPort, A_SESSION, uow=UnitOfWork(A_SESSION))
+
+
+def test_the_identity_provider_builds_its_membership_listener_on_the_requests_unit_of_work() -> None:
+    built_on: list[UnitOfWork] = []
+
+    def build_listener(uow: UnitOfWork) -> MembershipListener:
+        built_on.append(uow)
+        return _no_membership_listener(uow)
+
+    container = build_container(config=GatewayConfig(), membership_listener=build_listener)
+    uow = UnitOfWork(A_SESSION)
+
+    container.resolve(IdentityProviderPort, A_SESSION, uow=uow)
+
+    assert built_on == [uow]
 
 
 def test_a_plain_bind_replaces_a_unit_of_work_binding() -> None:

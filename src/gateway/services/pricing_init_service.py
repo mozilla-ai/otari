@@ -146,8 +146,7 @@ async def warn_if_router_candidates_lack_pricing(config: GatewayConfig, db: Asyn
     gateway down over an optimization that has a safe fallback; refusing a write
     costs an operator one corrected request, with the policy in front of them.
     """
-    from gateway.services.routing.backends import backend_requires_pricing
-    from gateway.services.routing.knn import unpriced_router_candidates
+    from gateway.services.routing import backend_requires_pricing, unpriced_router_candidates
 
     for name, spec in config.routing.policies.items():
         if not backend_requires_pricing(spec.router_backend):

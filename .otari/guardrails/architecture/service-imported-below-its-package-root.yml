@@ -1,7 +1,7 @@
 schema_version: "1.0"
 policy:
   id: otari/architecture/service-imported-below-its-package-root
-  description: Code outside a domain imports only the root of that domain's service package.
+  description: Code outside a service package that is not a domain yet imports only its root.
 
 gates:
 
@@ -16,8 +16,9 @@ gates:
       - "src/gateway/services/**"
     rubric: >-
       Judge only the import lines this diff adds under src/gateway/. Fail if one of them
-      imports a module below the root of a domain service package from outside that
-      package, for example gateway.services.budgets._policies imported by a module
-      outside services/budgets/. A module whose name starts with an underscore is
-      private to its package. This is layer and import rule 5 in ARCHITECTURE.md, "The
-      modular monolith". Pass if the diff adds no such import.
+      imports a module below the root of a service package whose name is not a domain
+      docs/domains.md gives a section, from outside that package. For example,
+      gateway.services.tenancy.user_service imported by a module outside
+      services/tenancy/ fails. This is layer and import rule 5 in ARCHITECTURE.md, "The
+      modular monolith". The architecture check covers the packages named for a domain.
+      Pass if the diff adds no such import.

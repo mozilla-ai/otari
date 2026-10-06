@@ -296,9 +296,14 @@ def routing_explain(
     cross the threshold.
     """
     from gateway.models.routing import PolicySpec
-    from gateway.services.routing import BudgetState, NoEligibleCandidatesError, compile_policy
-    from gateway.services.routing.backends import backend_is_priority, backend_is_weighted
-    from gateway.services.routing.decide import explain_router_ordering
+    from gateway.services.routing import (
+        BudgetState,
+        NoEligibleCandidatesError,
+        backend_is_priority,
+        backend_is_weighted,
+        compile_policy,
+        explain_router_ordering,
+    )
 
     cfg = load_config(config)
     if not cfg.routing.policies:

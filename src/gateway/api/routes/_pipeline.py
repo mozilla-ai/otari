@@ -223,11 +223,12 @@ from gateway.services.routing import (
     BudgetState,
     CompiledPlan,
     NoEligibleCandidatesError,
+    RoutingSignal,
     compile_policy,
+    decide_ordering,
     needs_budget_state,
     selection_consults_router,
 )
-from gateway.services.routing.decide import RoutingSignal, decide_ordering
 from gateway.services.sandbox_backend import (
     CODE_EXECUTION_TOOL_NAME,
     DEFAULT_EXEC_TIMEOUT_S,
