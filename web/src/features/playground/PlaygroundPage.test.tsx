@@ -18,6 +18,7 @@ import type {
   PlaygroundConversations,
   PlaygroundFavoriteModels,
   PlaygroundFile,
+  PlaygroundFiles,
   PlaygroundMessages,
   PlaygroundTools,
 } from "@/client"
@@ -152,6 +153,8 @@ interface ApiState {
   tools?: PlaygroundTools
   /** Answers one upload; a thrown error is the gateway refusing it. */
   upload?: (file: File) => PlaygroundFile
+  /** One listing, or one per request so a test can page by `after`. */
+  files?: PlaygroundFiles | ((path: string) => PlaygroundFiles)
 }
 
 /**
@@ -184,6 +187,21 @@ function mockApi(state: ApiState = {}) {
         const form = init?.body as FormData
         const file = form.get("file") as File
         return (state.upload ?? uploaded)(file) as never
+      }
+      if (path.startsWith("/playground/files") && method === "DELETE") {
+        return undefined as never
+      }
+      if (path.startsWith("/playground/files")) {
+        if (typeof state.files === "function") {
+          return state.files(path) as never
+        }
+        return (state.files ?? {
+          object: "list",
+          data: [],
+          has_more: false,
+          first_id: null,
+          last_id: null,
+        }) as never
       }
       if (path.startsWith("/organizations/me")) {
         return (state.context ?? context()) as never
@@ -1350,5 +1368,146 @@ describe("attaching files", () => {
     expect(saved.messages[0]?.attachments).toEqual([
       { file_id: "file-report.txt", filename: "report.txt", bytes: 17 },
     ])
+  })
+})
+
+describe("the files dialog", () => {
+  const earlier: PlaygroundFile = {
+    id: "file-old",
+    object: "file",
+    bytes: 2048,
+    created_at: 1_700_000_000,
+    expires_at: null,
+    filename: "notes.pdf",
+    purpose: "user_data",
+  }
+  const listing: PlaygroundFiles = {
+    object: "list",
+    data: [earlier],
+    has_more: false,
+    first_id: earlier.id,
+    last_id: earlier.id,
+  }
+
+  it("is not offered where the deployment serves no uploads", async () => {
+    mockApi()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+    expect(
+      screen.queryByRole("button", { name: "Files" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("attaches a file uploaded earlier to the next question", async () => {
+    mockApi({ tools: FILES_ON, files: listing })
+    const stream = mockStream([delta("ok"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Files" }))
+    const dialog = await screen.findByRole("dialog", { name: "Files" })
+    expect(within(dialog).getByText("notes.pdf")).toBeInTheDocument()
+    expect(within(dialog).getByText(/^2 kB ·/)).toBeInTheDocument()
+    await user.click(
+      within(dialog).getByRole("button", { name: "Attach notes.pdf" }),
+    )
+    // Not offered twice for one question.
+    expect(
+      within(dialog).getByRole("button", { name: "Attach notes.pdf" }),
+    ).toBeDisabled()
+    await user.click(
+      within(dialog).getAllByRole("button", {
+        name: "Close",
+      })[0] as HTMLElement,
+    )
+
+    expect(
+      await screen.findByRole("button", { name: "Remove notes.pdf" }),
+    ).toBeInTheDocument()
+    await user.type(screen.getByLabelText("Message"), "Read it")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await screen.findByText("ok")
+
+    const init = stream.mock.calls[0]?.[1]
+    expect(JSON.parse(String(init?.body)).messages[0].content[1]).toEqual({
+      type: "file",
+      file: { file_id: "file-old", filename: "notes.pdf" },
+    })
+  })
+
+  it("loads later pages of uploads on request", async () => {
+    const later: PlaygroundFile = {
+      ...earlier,
+      id: "file-older",
+      filename: "archive.pdf",
+    }
+    const { fetchSpy } = mockApi({
+      tools: FILES_ON,
+      files: (path) =>
+        path.includes("after=file-old")
+          ? {
+              object: "list",
+              data: [later],
+              has_more: false,
+              first_id: later.id,
+              last_id: later.id,
+            }
+          : { ...listing, has_more: true },
+    })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Files" }))
+    const dialog = await screen.findByRole("dialog", { name: "Files" })
+    expect(within(dialog).queryByText("archive.pdf")).not.toBeInTheDocument()
+    await user.click(
+      within(dialog).getByRole("button", { name: "Load more files" }),
+    )
+
+    expect(await within(dialog).findByText("archive.pdf")).toBeInTheDocument()
+    expect(within(dialog).getByText("notes.pdf")).toBeInTheDocument()
+    expect(
+      within(dialog).queryByRole("button", { name: "Load more files" }),
+    ).not.toBeInTheDocument()
+    expect(fetchSpy).toHaveBeenCalledWith(
+      `/playground/files?workspace_id=${WORKSPACE_ID}&after=file-old`,
+    )
+  })
+
+  it("deletes a file after a confirm, and takes it off the next question", async () => {
+    const { writes } = mockApi({ tools: FILES_ON, files: listing })
+    const user = userEvent.setup()
+    renderPage()
+
+    await user.click(await screen.findByRole("button", { name: "Files" }))
+    const dialog = await screen.findByRole("dialog", { name: "Files" })
+    await user.click(
+      within(dialog).getByRole("button", { name: "Attach notes.pdf" }),
+    )
+    await user.click(
+      within(dialog).getByRole("button", { name: "Delete notes.pdf" }),
+    )
+    await user.click(
+      await screen.findByRole("button", { name: "Delete permanently" }),
+    )
+
+    await waitFor(() =>
+      expect(writes).toContainEqual({
+        url: `/playground/files/file-old?workspace_id=${WORKSPACE_ID}`,
+        method: "DELETE",
+        body: undefined,
+      }),
+    )
+    await user.click(
+      within(dialog).getAllByRole("button", {
+        name: "Close",
+      })[0] as HTMLElement,
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    )
+    expect(
+      screen.queryByRole("button", { name: "Remove notes.pdf" }),
+    ).not.toBeInTheDocument()
   })
 })

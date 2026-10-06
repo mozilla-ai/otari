@@ -7,10 +7,12 @@ import {
   fetchPlaygroundConversation,
   useDeletePlaygroundComparison,
   useDeletePlaygroundConversation,
+  useDeletePlaygroundFile,
   usePlaygroundComparisons,
   usePlaygroundConsent,
   usePlaygroundConversations,
   usePlaygroundFavoriteModels,
+  usePlaygroundFiles,
   usePlaygroundTools,
   useReplacePlaygroundFavoriteModels,
   useSavePlaygroundComparison,
@@ -97,6 +99,12 @@ export function usePlayground() {
   const toolSelection = usePlaygroundToolSelection(tools.data)
   const canAttachFiles = tools.data?.files.enabled ?? false
   const uploadFile = useUploadPlaygroundFile(workspaceId)
+  const deleteFile = useDeletePlaygroundFile(workspaceId)
+  const [isFilesOpen, setIsFilesOpen] = useState(false)
+  // Read only while the dialog is open: nothing else on the page lists them.
+  const files = usePlaygroundFiles(workspaceId, {
+    enabled: isFilesOpen && canAttachFiles,
+  })
 
   const conversations = usePlaygroundConversations(workspaceId)
   const saveConversation = useSavePlaygroundConversation(workspaceId)
@@ -328,6 +336,17 @@ export function usePlayground() {
     setUploadError(undefined)
     setAttachments((prev) =>
       prev.filter((attachment) => attachment.key !== key),
+    )
+  }
+
+  /** Delete an upload, and take it off the next question if it was on it. */
+  const removeFile = async (fileId: string) => {
+    await deleteFile.mutateAsync(fileId)
+    setAttachments((prev) =>
+      prev.filter(
+        (attachment) =>
+          attachment.status !== "ready" || attachment.fileId !== fileId,
+      ),
     )
   }
 
@@ -641,6 +660,17 @@ export function usePlayground() {
     removeAttachment,
     isUploading,
     uploadError,
+
+    // Uploaded files
+    isFilesOpen,
+    setIsFilesOpen,
+    files: files.data?.pages.flatMap((page) => page.data) ?? [],
+    isFilesLoading: files.isPending && !files.data,
+    hasMoreFiles: files.hasNextPage,
+    isLoadingMoreFiles: files.isFetchingNextPage,
+    loadMoreFiles: () => void files.fetchNextPage(),
+    filesError: files.error ?? undefined,
+    removeFile,
     submit,
     handleComposerKeyDown,
     stop,

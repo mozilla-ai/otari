@@ -14,6 +14,7 @@ import { usePlayground } from "./hooks/usePlayground"
 import { ModelSelect } from "./ModelSelect"
 import { PlaygroundComposer } from "./PlaygroundComposer"
 import { PlaygroundConversation } from "./PlaygroundConversation"
+import { PlaygroundFiles } from "./PlaygroundFiles"
 import { PlaygroundGateNotice } from "./PlaygroundGateNotice"
 import { PlaygroundHistory } from "./PlaygroundHistory"
 import { PlaygroundToolbar } from "./PlaygroundToolbar"
@@ -103,6 +104,32 @@ export function PlaygroundPage() {
               hasTranscript={hasTranscript}
               onToggleCompare={playground.toggleCompare}
               onNewChat={() => playground.setIsNewChatConfirmOpen(true)}
+              files={
+                playground.canAttachFiles ? (
+                  <PlaygroundFiles
+                    isOpen={playground.isFilesOpen}
+                    onOpenChange={playground.setIsFilesOpen}
+                    files={playground.files}
+                    isLoading={playground.isFilesLoading}
+                    hasMore={playground.hasMoreFiles}
+                    isLoadingMore={playground.isLoadingMoreFiles}
+                    onLoadMore={playground.loadMoreFiles}
+                    error={playground.filesError}
+                    attachedIds={
+                      new Set(
+                        playground.attachments.flatMap((attachment) =>
+                          attachment.status === "ready"
+                            ? [attachment.fileId]
+                            : [],
+                        ),
+                      )
+                    }
+                    canAttach={playground.canChat && !playground.isBusy}
+                    onAttach={playground.attachUploaded}
+                    onDelete={playground.removeFile}
+                  />
+                ) : undefined
+              }
               history={
                 <PlaygroundHistory
                   conversations={playground.conversations}

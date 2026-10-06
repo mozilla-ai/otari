@@ -11,7 +11,12 @@
 // `undefined` is "no workspace selected yet", which every read here declines to
 // run on rather than asking about a workspace nobody named.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import type {
   PlaygroundComparisons,
   PlaygroundConsent,
@@ -85,9 +90,8 @@ export function usePlaygroundTools(workspaceId: string | undefined) {
 // ---------------------------------------------------------------------------
 // Files a message can attach
 //
-// The caller's own uploads in one workspace. Not paged further than the first
-// page: the dialog that lists them is a picker, and the newest hundred are the
-// ones somebody is there to reuse.
+// The caller's own uploads in one workspace, newest first, a page at a time:
+// the dialog asks for the next page with the last file's id as the cursor.
 // ---------------------------------------------------------------------------
 
 // Longer than the default request deadline: an upload takes as long as its
@@ -98,10 +102,17 @@ export function usePlaygroundFiles(
   workspaceId: string | undefined,
   { enabled = true }: { enabled?: boolean } = {},
 ) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: [PLAYGROUND, workspaceId, "files"],
-    queryFn: () =>
-      apiFetch<PlaygroundFiles>(`${ROOT}/files${scope(workspaceId as string)}`),
+    queryFn: ({ pageParam }) =>
+      apiFetch<PlaygroundFiles>(
+        `${ROOT}/files${scope(workspaceId as string)}${
+          pageParam ? `&after=${encodeURIComponent(pageParam)}` : ""
+        }`,
+      ),
+    initialPageParam: "",
+    getNextPageParam: (page) =>
+      page.has_more && page.last_id ? page.last_id : undefined,
     enabled: enabled && workspaceId !== undefined,
     staleTime: 30_000,
   })
