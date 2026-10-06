@@ -32,7 +32,13 @@ Find unused code and remove it safely, before it accumulates.
    not just the package it lives in.
 3. Apply only small, behavior-preserving cleanups with any required test
    updates. Include every validated removal, not just one.
-4. Validate with the commands below, then create a PR as
+4. Split the removals into two PRs. One holds every public name removed under
+   `src/gateway/` or `cli/src/`, meaning one with no leading underscore. An
+   unused import in an `__init__.py` counts as public, because a consumer can
+   import the name from that package. The other holds the rest, such as a
+   name with a leading underscore, an unused import or an unused local. Open
+   only the PRs that have removals.
+5. Validate with the commands below, then create each PR as
    [automation-pr.prompt.md](automation-pr.prompt.md) describes.
 
 ## Guardrails
@@ -47,6 +53,11 @@ Find unused code and remove it safely, before it accumulates.
   can prove the reference is gone.
 - Do not remove a public route, schema field or CLI flag: that is an API change,
   not a cleanup.
+- A public name under `src/gateway/` or `cli/src/` can be imported by a consumer
+  outside this repository, such as the `otari-ai` overlay, so a search here
+  cannot prove it unused. Say in the description of the PR that removes one
+  that consumers outside this repository may import the removed names, and
+  that a human must review it before it merges.
 - Do not change product behavior.
 - Prefer small, reviewable removals over speculative refactors.
 
