@@ -157,10 +157,14 @@ To upgrade:
    `pg_dump` against its public URL.
 2. Read the [release notes](https://github.com/mozilla-ai/otari/releases) for
    every release between yours and the target.
-3. On the otari service, open Settings → Source and change the image tag to the
+3. Add any variable those releases newly require to the otari service. The
+   template only reaches new deploys, so an existing one never gets a variable
+   added to it later. The release notes name such variables; [`template.json`](template.json) at the target
+   release's tag shows what a new deploy would get.
+4. On the otari service, open Settings → Source and change the image tag to the
    target release (for example `0.15.0`). Railway
    redeploys, and Otari migrates the schema on startup.
-4. Check `/api/v1/health/readiness` and make one real request, as in [Verify](#verify).
+5. Check `/api/v1/health/readiness` and make one real request, as in [Verify](#verify).
 
 To take patch releases without doing this by hand, turn on Railway's
 [Image Auto Updates](https://docs.railway.com/deployments/image-auto-updates):

@@ -47,7 +47,7 @@ To keep provider keys in Railway variables instead of the dashboard, declare the
 
 ### Upgrading
 
-The image is pinned to a release, so a redeploy never migrates your schema by surprise. To upgrade, back up Postgres, read the [release notes](https://github.com/mozilla-ai/otari/releases), then change the image tag under Settings → Source. To take patch releases automatically, turn on Image Auto Updates with **Patches only**.
+The image is pinned to a release, so a redeploy never migrates your schema by surprise. To upgrade, back up Postgres, read the [release notes](https://github.com/mozilla-ai/otari/releases), add any variable they say a release now requires (an existing deploy never gets new template variables), then change the image tag under Settings → Source. To take patch releases automatically, turn on Image Auto Updates with **Patches only**.
 
 ## Common Use Cases
 
