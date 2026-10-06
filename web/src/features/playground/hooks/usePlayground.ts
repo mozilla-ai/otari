@@ -1,7 +1,7 @@
 import type { FormEvent, KeyboardEvent } from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import type { PlaygroundComparisonPreference } from "@/client"
+import type { PlaygroundComparisonPreference, PlaygroundFile } from "@/client"
 import { useCatalog } from "@/shared/api/models"
 import {
   fetchPlaygroundConversation,
@@ -16,6 +16,7 @@ import {
   useSavePlaygroundComparison,
   useSavePlaygroundConversation,
   useUpdatePlaygroundConsent,
+  useUploadPlaygroundFile,
 } from "@/shared/api/playground"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
@@ -28,9 +29,11 @@ import {
   buildConversationRequest,
   findRatedExchange,
   togglePinnedModel,
+  turnsFromSavedMessages,
 } from "../helpers/playgroundSave"
 import { turnsForRegenerate } from "../helpers/playgroundTurns"
 import {
+  type ChatAttachment,
   type ChatTurn,
   EMPTY_PANEL,
   type PanelState,
@@ -52,6 +55,16 @@ export type PendingConsent =
 
 /** How long the "recorded, thanks" line stays up after a rating. */
 const RATING_ACKNOWLEDGEMENT_MS = 3000
+
+/** The most files one question carries, which is what a saved turn may record. */
+export const MAX_ATTACHMENTS = 10
+
+/** A file on the next question: still uploading, or uploaded and named by its id. */
+export type PendingAttachment = {
+  key: string
+  filename: string
+  bytes: number
+} & ({ status: "uploading" } | { status: "ready"; fileId: string })
 
 /**
  * The Playground's controller: every piece of state the page renders from, and
@@ -82,6 +95,8 @@ export function usePlayground() {
 
   const tools = usePlaygroundTools(workspaceId)
   const toolSelection = usePlaygroundToolSelection(tools.data)
+  const canAttachFiles = tools.data?.files.enabled ?? false
+  const uploadFile = useUploadPlaygroundFile(workspaceId)
 
   const conversations = usePlaygroundConversations(workspaceId)
   const saveConversation = useSavePlaygroundConversation(workspaceId)
@@ -96,6 +111,26 @@ export function usePlayground() {
 
   const [isComparing, setIsComparing] = useState(false)
   const [draft, setDraft] = useState("")
+  const [attachments, setAttachmentsState] = useState<PendingAttachment[]>([])
+  // The list as of the last change rather than the last render, which is what
+  // the cap and the duplicate check read: two picks or drops can land before
+  // React re-renders, and each would otherwise see room the other has taken.
+  const attachmentsRef = useRef<PendingAttachment[]>([])
+  const setAttachments = useCallback(
+    (
+      next:
+        | PendingAttachment[]
+        | ((prev: PendingAttachment[]) => PendingAttachment[]),
+    ) => {
+      attachmentsRef.current =
+        typeof next === "function" ? next(attachmentsRef.current) : next
+      setAttachmentsState(attachmentsRef.current)
+    },
+    [],
+  )
+  // Reported in the composer, beside the chips, rather than with the page's
+  // other failures: it is about the next question, not about anything sent.
+  const [uploadError, setUploadError] = useState<unknown>(undefined)
   const [panelA, setPanelA] = useState<PanelState>(EMPTY_PANEL)
   const [panelB, setPanelB] = useState<PanelState>(EMPTY_PANEL)
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
@@ -178,9 +213,13 @@ export function usePlayground() {
     setPanelA(EMPTY_PANEL)
     setPanelB(EMPTY_PANEL)
     setDraft("")
+    // A file belongs to the workspace it was uploaded in, and would not resolve
+    // in a question sent to the next one.
+    setAttachments([])
+    setUploadError(undefined)
     setIsComparing(false)
     invalidateSavedState()
-  }, [workspaceId, stop, invalidateSavedState])
+  }, [workspaceId, stop, invalidateSavedState, setAttachments])
 
   // Restore A from this browser; B stays empty until explicitly chosen.
   const defaultModel = models[0]?.key ?? ""
@@ -201,6 +240,96 @@ export function usePlayground() {
   }, [panelA.model, workspaceId])
 
   const isBusy = isAnyPanelBusy(panelA, panelB)
+  const isUploading = attachments.some(
+    (attachment) => attachment.status === "uploading",
+  )
+
+  /**
+   * Upload each file and put it on the next question.
+   *
+   * Each file shows as a chip straight away and is named by its id once the
+   * upload answers. A refused upload drops its chip and reports why, and the
+   * others carry on: one oversized file is no reason to lose the rest.
+   */
+  const attachFiles = (files: File[]) => {
+    if (!canAttachFiles || files.length === 0) return
+    setUploadError(undefined)
+    const room = MAX_ATTACHMENTS - attachmentsRef.current.length
+    if (files.length > room) {
+      setUploadError(
+        new Error(`A message can carry at most ${MAX_ATTACHMENTS} files.`),
+      )
+    }
+    for (const file of files.slice(0, Math.max(room, 0))) {
+      const key = crypto.randomUUID()
+      setAttachments((prev) => [
+        ...prev,
+        { key, filename: file.name, bytes: file.size, status: "uploading" },
+      ])
+      // `mutateAsync` rather than `mutate`'s callbacks, which TanStack fires for
+      // the latest call only: every file here is a call of its own.
+      void uploadFile.mutateAsync(file).then(
+        (uploaded) => {
+          setAttachments((prev) =>
+            prev.map((attachment) =>
+              attachment.key === key
+                ? {
+                    key,
+                    filename: uploaded.filename,
+                    bytes: uploaded.bytes,
+                    status: "ready",
+                    fileId: uploaded.id,
+                  }
+                : attachment,
+            ),
+          )
+        },
+        (error: unknown) => {
+          setAttachments((prev) =>
+            prev.filter((attachment) => attachment.key !== key),
+          )
+          setUploadError(error)
+        },
+      )
+    }
+  }
+
+  /** Put a file uploaded earlier on the next question, once. */
+  const attachUploaded = (file: PlaygroundFile) => {
+    if (
+      attachmentsRef.current.some(
+        (attachment) =>
+          attachment.status === "ready" && attachment.fileId === file.id,
+      )
+    ) {
+      return
+    }
+    if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
+      setUploadError(
+        new Error(`A message can carry at most ${MAX_ATTACHMENTS} files.`),
+      )
+      return
+    }
+    setUploadError(undefined)
+    setAttachments((prev) => [
+      ...prev,
+      {
+        key: file.id,
+        filename: file.filename,
+        bytes: file.bytes,
+        status: "ready",
+        fileId: file.id,
+      },
+    ])
+  }
+
+  /** Take a file off the next question. The upload itself is kept. */
+  const removeAttachment = (key: string) => {
+    setUploadError(undefined)
+    setAttachments((prev) =>
+      prev.filter((attachment) => attachment.key !== key),
+    )
+  }
 
   const send = useCallback(
     async (question: string) => {
@@ -209,10 +338,27 @@ export function usePlayground() {
       // The send *button* becomes Stop while a reply is in flight, so the only
       // way in here is the Enter key, and a second stream into the same panel
       // interleaves two replies into one turn.
-      if (isBusy || (isComparing && !panelB.model)) return
-      const turn: ChatTurn = { role: "user", content: trimmed }
+      if (isBusy || isUploading || (isComparing && !panelB.model)) return
+      const sent: ChatAttachment[] = attachments.flatMap((attachment) =>
+        attachment.status === "ready"
+          ? [
+              {
+                fileId: attachment.fileId,
+                filename: attachment.filename,
+                bytes: attachment.bytes,
+              },
+            ]
+          : [],
+      )
+      const turn: ChatTurn = {
+        role: "user",
+        content: trimmed,
+        ...(sent.length > 0 ? { attachments: sent } : {}),
+      }
 
       setDraft("")
+      setAttachments([])
+      setUploadError(undefined)
       invalidateSavedState()
 
       // Both comparison panels receive the same question and stream independently.
@@ -229,6 +375,9 @@ export function usePlayground() {
       panelB,
       isComparing,
       isBusy,
+      isUploading,
+      attachments,
+      setAttachments,
       streamReply,
       invalidateSavedState,
     ],
@@ -392,11 +541,7 @@ export function usePlayground() {
       // outlive the model that produced it, and restoring a key the catalog no
       // longer serves leaves the picker blank while Send still dispatches it.
       model: pickInitialModel(saved.model, models),
-      turns: loaded.data.map((message) => ({
-        role: message.role === "assistant" ? "assistant" : "user",
-        content: message.content,
-        reasoning: message.reasoning ?? undefined,
-      })),
+      turns: turnsFromSavedMessages(loaded.data),
     })
     // A loaded transcript is already stored, so Save is disarmed rather than
     // offering to store a second copy of it.
@@ -489,6 +634,13 @@ export function usePlayground() {
     // Composer
     draft,
     setDraft,
+    canAttachFiles,
+    attachments,
+    attachFiles,
+    attachUploaded,
+    removeAttachment,
+    isUploading,
+    uploadError,
     submit,
     handleComposerKeyDown,
     stop,

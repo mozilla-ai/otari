@@ -1,5 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -10,6 +17,7 @@ import type {
   PlaygroundConsent,
   PlaygroundConversations,
   PlaygroundFavoriteModels,
+  PlaygroundFile,
   PlaygroundMessages,
   PlaygroundTools,
 } from "@/client"
@@ -72,6 +80,23 @@ const NO_TOOLS: PlaygroundTools = {
   mcp_servers: [],
 }
 
+const FILES_ON: PlaygroundTools = {
+  ...NO_TOOLS,
+  files: { configured: true, enabled: true, reason: null },
+}
+
+function uploaded(file: File): PlaygroundFile {
+  return {
+    id: `file-${file.name}`,
+    object: "file",
+    bytes: file.size,
+    created_at: 0,
+    expires_at: null,
+    filename: file.name,
+    purpose: "user_data",
+  }
+}
+
 function context(): OrganizationContext {
   return organizationContext({
     workspace_memberships: [
@@ -124,6 +149,9 @@ interface ApiState {
   catalog?: CatalogResponse
   messages?: PlaygroundMessages
   context?: OrganizationContext
+  tools?: PlaygroundTools
+  /** Answers one upload; a thrown error is the gateway refusing it. */
+  upload?: (file: File) => PlaygroundFile
 }
 
 /**
@@ -144,8 +172,18 @@ function mockApi(state: ApiState = {}) {
         writes.push({
           url: path,
           method,
-          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+          body:
+            init?.body instanceof FormData
+              ? init.body
+              : init?.body
+                ? JSON.parse(String(init.body))
+                : undefined,
         })
+      }
+      if (path.startsWith("/playground/files") && method === "POST") {
+        const form = init?.body as FormData
+        const file = form.get("file") as File
+        return (state.upload ?? uploaded)(file) as never
       }
       if (path.startsWith("/organizations/me")) {
         return (state.context ?? context()) as never
@@ -153,7 +191,9 @@ function mockApi(state: ApiState = {}) {
       if (path.startsWith("/catalog/models")) {
         return (state.catalog ?? CATALOG) as never
       }
-      if (path.startsWith("/playground/tools")) return NO_TOOLS as never
+      if (path.startsWith("/playground/tools")) {
+        return (state.tools ?? NO_TOOLS) as never
+      }
       if (path.startsWith("/playground/consent")) {
         return (state.consent ?? {
           store_conversations: false,
@@ -1032,7 +1072,11 @@ describe("history", () => {
           },
         ],
       },
-      messages: { data: [{ role: "user", content: "Asked a retired model", attachments: [] }] },
+      messages: {
+        data: [
+          { role: "user", content: "Asked a retired model", attachments: [] },
+        ],
+      },
     })
     const user = userEvent.setup()
     renderPage()
@@ -1064,7 +1108,11 @@ describe("history", () => {
       messages: {
         data: [
           { role: "user", content: "How does OAuth work", attachments: [] },
-          { role: "assistant", content: "It delegates authorization.", attachments: [] },
+          {
+            role: "assistant",
+            content: "It delegates authorization.",
+            attachments: [],
+          },
         ],
       },
     })
@@ -1091,5 +1139,216 @@ describe("history", () => {
       screen.queryByRole("button", { name: "Model B" }),
     ).not.toBeInTheDocument()
     expect(screen.getByRole("radio", { name: "Compare" })).toBeInTheDocument()
+  })
+})
+
+describe("attaching files", () => {
+  const report = () =>
+    new File(["quarterly numbers"], "report.txt", { type: "text/plain" })
+
+  function fileInput(): HTMLInputElement {
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
+    if (!input) throw new Error("no file input")
+    return input
+  }
+
+  function sentMessages(stream: ReturnType<typeof mockStream>, call = 0) {
+    const init = stream.mock.calls[call]?.[1]
+    return JSON.parse(String(init?.body)).messages
+  }
+
+  it("offers no attach control where the deployment serves no uploads", async () => {
+    mockApi()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+    expect(
+      screen.queryByRole("button", { name: "Attach files" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("uploads a chosen file and sends it as a file part beside the text", async () => {
+    const { writes } = mockApi({ tools: FILES_ON })
+    const stream = mockStream([delta("summary"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole("button", { name: "Attach files" })
+
+    await user.upload(fileInput(), report())
+    const chips = await screen.findByRole("list", { name: "Attached files" })
+    expect(within(chips).getByText("report.txt")).toBeInTheDocument()
+    expect(within(chips).getByText("17 B")).toBeInTheDocument()
+    expect(writes[0]?.url).toBe(
+      `/playground/files?workspace_id=${WORKSPACE_ID}`,
+    )
+
+    await user.type(screen.getByLabelText("Message"), "Summarize this")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await screen.findByText("summary")
+
+    expect(sentMessages(stream)).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Summarize this" },
+          {
+            type: "file",
+            file: { file_id: "file-report.txt", filename: "report.txt" },
+          },
+        ],
+      },
+    ])
+    // The chip moved from the composer into the sent question.
+    const question = screen.getByRole("article", { name: "Your message" })
+    expect(within(question).getByText("report.txt")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Remove report.txt" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("sends without a file whose chip was removed", async () => {
+    mockApi({ tools: FILES_ON })
+    const stream = mockStream([delta("ok"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole("button", { name: "Attach files" })
+
+    await user.upload(fileInput(), report())
+    await user.click(
+      await screen.findByRole("button", { name: "Remove report.txt" }),
+    )
+    await user.type(screen.getByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await screen.findByText("ok")
+
+    expect(sentMessages(stream)).toEqual([{ role: "user", content: "hi" }])
+  })
+
+  it("reports a refused upload in the composer and drops its chip", async () => {
+    mockApi({
+      tools: FILES_ON,
+      upload: () => {
+        throw new apiClient.ApiError(
+          413,
+          "File exceeds maximum upload size of 1 MB",
+        )
+      },
+    })
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole("button", { name: "Attach files" })
+
+    await user.upload(fileInput(), report())
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "File exceeds maximum upload size of 1 MB",
+    )
+    expect(
+      screen.queryByRole("list", { name: "Attached files" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("attaches a file dropped on the page", async () => {
+    mockApi({ tools: FILES_ON })
+    renderPage()
+    await screen.findByRole("button", { name: "Attach files" })
+
+    const dataTransfer = { types: ["Files"], files: [report()] }
+    const page = screen.getByText("Try a prompt.")
+    fireEvent.dragEnter(page, { dataTransfer })
+    expect(screen.getByText("Drop files to attach them")).toBeInTheDocument()
+    fireEvent.drop(page, { dataTransfer })
+
+    const chips = await screen.findByRole("list", { name: "Attached files" })
+    expect(within(chips).getByText("report.txt")).toBeInTheDocument()
+    expect(
+      screen.queryByText("Drop files to attach them"),
+    ).not.toBeInTheDocument()
+  })
+
+  it("holds a question to ten files when two drops land before a render", async () => {
+    mockApi({ tools: FILES_ON })
+    renderPage()
+    await screen.findByRole("button", { name: "Attach files" })
+
+    const page = screen.getByText("Try a prompt.")
+    const drop = (prefix: string) => ({
+      dataTransfer: {
+        types: ["Files"],
+        files: Array.from(
+          { length: 6 },
+          (_, index) => new File(["x"], `${prefix}-${index}.txt`),
+        ),
+      },
+    })
+    // One batch, so the second drop runs before React re-renders the first.
+    act(() => {
+      fireEvent.drop(page, drop("first"))
+      fireEvent.drop(page, drop("second"))
+    })
+
+    const chips = await screen.findByRole("list", { name: "Attached files" })
+    await waitFor(() =>
+      expect(within(chips).getAllByRole("listitem")).toHaveLength(10),
+    )
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "A message can carry at most 10 files.",
+    )
+  })
+
+  it("sends the file to both models when comparing", async () => {
+    mockApi({ tools: FILES_ON })
+    const stream = mockStream([delta("an answer"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText("Try a prompt.")
+
+    await user.click(await screen.findByRole("radio", { name: "Compare" }))
+    await user.click(screen.getByRole("button", { name: "Model B" }))
+    await user.click(await screen.findByText("claude-sonnet-4"))
+    await user.upload(fileInput(), report())
+    await screen.findByRole("button", { name: "Remove report.txt" })
+    await user.type(screen.getByLabelText("Message"), "which?")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+
+    await waitFor(() =>
+      expect(screen.getAllByText("an answer")).toHaveLength(2),
+    )
+    for (const call of [0, 1]) {
+      expect(sentMessages(stream, call)[0].content[1]).toEqual({
+        type: "file",
+        file: { file_id: "file-report.txt", filename: "report.txt" },
+      })
+    }
+  })
+
+  it("keeps the attachments with a saved turn", async () => {
+    const { writes } = mockApi({
+      tools: FILES_ON,
+      consent: { store_conversations: true, store_comparisons: false },
+    })
+    mockStream([delta("ok"), "[DONE]"])
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole("button", { name: "Attach files" })
+
+    await user.upload(fileInput(), report())
+    await screen.findByRole("button", { name: "Remove report.txt" })
+    await user.type(screen.getByLabelText("Message"), "hi")
+    await user.click(screen.getByRole("button", { name: "Send message" }))
+    await screen.findByText("ok")
+    await user.click(screen.getByRole("button", { name: "History" }))
+    await user.click(screen.getByRole("button", { name: "Save current chat" }))
+
+    await waitFor(() =>
+      expect(
+        writes.find((write) => write.url === "/playground/conversations"),
+      ).toBeDefined(),
+    )
+    const saved = writes.find(
+      (write) => write.url === "/playground/conversations",
+    )?.body as { messages: { attachments?: unknown }[] }
+    expect(saved.messages[0]?.attachments).toEqual([
+      { file_id: "file-report.txt", filename: "report.txt", bytes: 17 },
+    ])
   })
 })

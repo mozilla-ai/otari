@@ -1,10 +1,14 @@
 import type { FormEvent, KeyboardEvent, ReactNode } from "react"
-import { FiArrowUp, FiSquare } from "react-icons/fi"
+import { FileTrigger } from "react-aria-components"
+import { FiArrowUp, FiPaperclip, FiSquare } from "react-icons/fi"
 
 import type { PlaygroundTools } from "@/client"
 import { IconButton } from "@/design-system/actions/IconButton"
+import { errorMessage } from "@/design-system/feedback/errorMessage"
 
 import { ActiveToolChips } from "./ActiveToolChips"
+import { PendingAttachmentChips } from "./AttachmentChips"
+import type { PendingAttachment } from "./hooks/usePlayground"
 import { ToolsMenu } from "./ToolsMenu"
 
 export interface ComposerProps {
@@ -26,6 +30,13 @@ export interface ComposerProps {
   toggleWebSearch: (isOn: boolean) => void
   toggleCodeExecution: (isOn: boolean) => void
   toggleMcpServer: (id: string, isOn: boolean) => void
+  /** False where the deployment serves no uploads, which hides the control. */
+  canAttachFiles: boolean
+  attachments: PendingAttachment[]
+  onAttachFiles: (files: File[]) => void
+  onRemoveAttachment: (key: string) => void
+  isUploading: boolean
+  uploadError: unknown
 }
 
 /**
@@ -51,6 +62,12 @@ export function PlaygroundComposer({
   toggleWebSearch,
   toggleCodeExecution,
   toggleMcpServer,
+  canAttachFiles,
+  attachments,
+  onAttachFiles,
+  onRemoveAttachment,
+  isUploading,
+  uploadError,
 }: ComposerProps) {
   // Narrow enough to fit beside the controls from `lg` up, and under the frame
   // below it, so the two nodes say the same thing at one width each.
@@ -70,6 +87,15 @@ export function PlaygroundComposer({
           onToggleCodeExecution={toggleCodeExecution}
           onToggleMcpServer={toggleMcpServer}
         />
+        <PendingAttachmentChips
+          attachments={attachments}
+          onRemove={onRemoveAttachment}
+        />
+        {uploadError ? (
+          <p role="alert" className="px-1 text-caption text-danger">
+            {errorMessage(uploadError)}
+          </p>
+        ) : null}
         <textarea
           aria-label="Message"
           value={draft}
@@ -90,6 +116,24 @@ export function PlaygroundComposer({
           className="min-h-13 max-h-48 w-full resize-none px-1 bg-transparent text-base leading-[1.625rem] text-foreground placeholder:text-subtle focus:outline-none disabled:cursor-not-allowed [field-sizing:content]"
         />
         <div className="otari-actions flex min-h-8 items-center gap-1">
+          {canAttachFiles ? (
+            <FileTrigger
+              allowsMultiple
+              onSelect={(files) => {
+                if (files) onAttachFiles(Array.from(files))
+              }}
+            >
+              <IconButton
+                label="Attach files"
+                size="sm"
+                isIconOnly
+                className="shrink-0 md:min-h-8 md:min-w-8"
+                isDisabled={!canChat || isBusy}
+              >
+                <FiPaperclip aria-hidden className="size-4" />
+              </IconButton>
+            </FileTrigger>
+          ) : null}
           <ToolsMenu
             tools={tools}
             isWebSearchOn={isWebSearchOn}
@@ -123,7 +167,9 @@ export function PlaygroundComposer({
               size="sm"
               isIconOnly
               className="ml-auto shrink-0 lg:ml-0 md:min-h-8 md:min-w-8"
-              isDisabled={!draft.trim() || !canChat || !!missingModel}
+              isDisabled={
+                !draft.trim() || !canChat || !!missingModel || isUploading
+              }
             >
               <FiArrowUp aria-hidden className="size-4" />
             </IconButton>

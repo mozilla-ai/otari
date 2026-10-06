@@ -19,6 +19,8 @@ import type {
   PlaygroundConversation,
   PlaygroundConversations,
   PlaygroundFavoriteModels,
+  PlaygroundFile,
+  PlaygroundFiles,
   PlaygroundMessages,
   PlaygroundTools,
   SavePlaygroundComparisonRequest,
@@ -77,6 +79,70 @@ export function usePlaygroundTools(workspaceId: string | undefined) {
       apiFetch<PlaygroundTools>(`${ROOT}/tools${scope(workspaceId as string)}`),
     enabled: workspaceId !== undefined,
     staleTime: 60_000,
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Files a message can attach
+//
+// The caller's own uploads in one workspace. Not paged further than the first
+// page: the dialog that lists them is a picker, and the newest hundred are the
+// ones somebody is there to reuse.
+// ---------------------------------------------------------------------------
+
+// Longer than the default request deadline: an upload takes as long as its
+// bytes do on the caller's link, and the gateway already bounds its size.
+const UPLOAD_TIMEOUT_MS = 5 * 60_000
+
+export function usePlaygroundFiles(
+  workspaceId: string | undefined,
+  { enabled = true }: { enabled?: boolean } = {},
+) {
+  return useQuery({
+    queryKey: [PLAYGROUND, workspaceId, "files"],
+    queryFn: () =>
+      apiFetch<PlaygroundFiles>(`${ROOT}/files${scope(workspaceId as string)}`),
+    enabled: enabled && workspaceId !== undefined,
+    staleTime: 30_000,
+  })
+}
+
+export function useUploadPlaygroundFile(workspaceId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (file: File) => {
+      const body = new FormData()
+      body.append("file", file)
+      return apiFetch<PlaygroundFile>(
+        `${ROOT}/files${scope(workspaceId as string)}`,
+        {
+          method: "POST",
+          body,
+          signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+        },
+      )
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [PLAYGROUND, workspaceId, "files"],
+      })
+    },
+  })
+}
+
+export function useDeletePlaygroundFile(workspaceId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (fileId: string) =>
+      apiFetch<void>(
+        `${ROOT}/files/${encodeURIComponent(fileId)}${scope(workspaceId as string)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [PLAYGROUND, workspaceId, "files"],
+      })
+    },
   })
 }
 
@@ -301,11 +367,21 @@ interface StreamChunk {
 const WEB_SEARCH_TOOL = "otari_web_search"
 const CODE_EXECUTION_TOOL = "otari_code_execution"
 
+/** One part of a message that carries more than text, in the OpenAI format. */
+export type PlaygroundContentPart =
+  | { type: "text"; text: string }
+  | { type: "file"; file: { file_id: string; filename: string } }
+
+export interface PlaygroundWireMessage {
+  role: string
+  content: string | PlaygroundContentPart[]
+}
+
 export interface StreamChatParams {
   workspaceId: string
   /** The `instance:model` selector, as the catalog publishes it. */
   model: string
-  messages: { role: string; content: string }[]
+  messages: PlaygroundWireMessage[]
   tools: ToolSelection
   onDelta: (delta: StreamDelta) => void
   onUsage?: (usage: StreamUsage) => void
