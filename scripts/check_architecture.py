@@ -49,6 +49,7 @@ Enforces:
     each name is a domain that docs/domains.md gives a section. An exceptions
     module is named <domain>_exceptions.py. The names that do not match yet are
     on a baseline, and the baseline only shrinks.
+    A package on it holds only the modules the baseline lists, so new code goes in its domain's package.
 20. Repository imports: only a domain's own service package, its own
     repository package and the builders in gateway/api/deps.py import a
     domain's repository package, so a domain's queries stay behind its
@@ -855,16 +856,74 @@ DOMAIN_HEADING = re.compile(r"^### (.*)$", re.MULTILINE)
 DOMAIN_NAME = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 SHARED_HEADING = "Shared"
 # These names do not match a domain yet. The baseline only shrinks, so a reviewer refuses a new entry.
-DOMAIN_NAME_BASELINE = (
-    "gateway/exceptions/budget_exceptions.py",
-    "gateway/exceptions/control_plane_exceptions.py",
-    "gateway/repositories/code_execution/",
-    "gateway/repositories/tenancy/",
-    "gateway/services/code_execution/",
-    "gateway/services/control_plane/",
-    "gateway/services/mail/",
-    "gateway/services/tenancy/",
-)
+# A package's entry names every module it holds, so a new module in it is refused.
+DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
+    "gateway/exceptions/budget_exceptions.py": (),
+    "gateway/exceptions/control_plane_exceptions.py": (),
+    "gateway/repositories/code_execution/": (
+        "__init__.py",
+        "sandbox_container_repository.py",
+        "workspace_code_execution_policy_repository.py",
+    ),
+    "gateway/repositories/tenancy/": (
+        "__init__.py",
+        "invitation_repository.py",
+        "org_provider_key_repository.py",
+        "organization_domain_repository.py",
+        "organization_guardrail_definition_repository.py",
+        "organization_member_repository.py",
+        "organization_repository.py",
+        "user_repository.py",
+        "workspace_repository.py",
+    ),
+    "gateway/services/code_execution/": (
+        "__init__.py",
+        "_workspace_defaults.py",
+        "container_sweeper.py",
+        "containers.py",
+    ),
+    "gateway/services/control_plane/": (
+        "__init__.py",
+        "_resolve.py",
+        "transport.py",
+    ),
+    "gateway/services/mail/": (
+        "__init__.py",
+        "mailer.py",
+        "message.py",
+        "templates.py",
+        "transports.py",
+    ),
+    "gateway/services/tenancy/": (
+        "__init__.py",
+        "authorization.py",
+        "deployment_user_service.py",
+        "domain_verification.py",
+        "email_address.py",
+        "invitation_email.py",
+        "membership_listener.py",
+        "org_provider_key_service.py",
+        "organization_domain_service.py",
+        "organization_guardrail_definition_service.py",
+        "organization_guardrail_runner.py",
+        "organization_guardrail_service.py",
+        "organization_model_access.py",
+        "organization_service.py",
+        "password_policy.py",
+        "password_reset_email.py",
+        "provisioning_service.py",
+        "tokens.py",
+        "user_service.py",
+        "verification_email.py",
+        "webauthn_service.py",
+        "workspace_activation_service.py",
+        "workspace_code_execution_policy_service.py",
+        "workspace_listener.py",
+        "workspace_mcp_server_service.py",
+        "workspace_service.py",
+        "workspace_web_search_service.py",
+    ),
+}
 # These modules belong to no domain. The set grows when the shared set does.
 SHARED_EXCEPTION_MODULES = ("gateway/exceptions/_base.py", "gateway/exceptions/shared_exceptions.py")
 
@@ -925,8 +984,38 @@ def read_domains_page(doc_path: Path) -> tuple[set[str], list[str]]:
     return documented_domains(doc_path.read_text(encoding="utf-8"))
 
 
+def _baseline_package_modules(src_root: Path) -> list[str]:
+    """Return each module a package on the domain name baseline holds but does not list, and each it lists but lacks."""
+    violations: list[str] = []
+    for package, listed in DOMAIN_NAME_BASELINE.items():
+        package_root = src_root / package
+        if not package.endswith("/"):
+            if listed:
+                violations.append(f"{package} is a module, so its domain name baseline entry lists no modules")
+            continue
+        if not package_root.is_dir():
+            continue
+        held = {
+            module.relative_to(package_root).as_posix()
+            for module in package_root.rglob("*.py")
+            if "__pycache__" not in module.parts
+        }
+        violations.extend(
+            f"{package}{module} is a new module in a package named for no domain; put it in its domain's package"
+            for module in sorted(held - set(listed))
+        )
+        violations.extend(
+            f"{package}{module} is on the domain name baseline but no longer exists; remove it from the baseline"
+            for module in sorted(set(listed) - held)
+        )
+    return violations
+
+
 def check_domain_names(src_root: Path, domains: set[str]) -> list[str]:
-    """Check that each domain package and domain module names one of the documented domains."""
+    """Check that each domain package and domain module names one of the documented domains.
+
+    A package whose name is not a domain yet holds only the modules its baseline entry lists.
+    """
     locations, misnamed = _domain_named_locations(src_root)
     violations = list(misnamed)
     violations.extend(
@@ -941,6 +1030,7 @@ def check_domain_names(src_root: Path, domains: set[str]) -> list[str]:
         for relative_path in DOMAIN_NAME_BASELINE
         if not (src_root / relative_path).exists() or locations.get(relative_path) in domains
     )
+    violations.extend(_baseline_package_modules(src_root))
     return violations
 
 

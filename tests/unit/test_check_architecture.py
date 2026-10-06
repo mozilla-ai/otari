@@ -41,7 +41,7 @@ def _point_main_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write(tmp_path, "cli/src/otari_agent/__init__.py", "")
     _write(tmp_path, "docs/domains.md", "## The domains\n\n### things\n")
     for name in [name for name in vars(check) if name.endswith("_BASELINE")]:
-        monkeypatch.setattr(check, name, ())
+        monkeypatch.setattr(check, name, type(getattr(check, name))())
 
 
 def test_service_importing_models_is_clean(tmp_path: Path) -> None:
@@ -922,7 +922,7 @@ def test_a_lower_case_shared_heading_is_not_a_domain() -> None:
 def test_a_location_named_for_a_documented_domain_is_clean(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_path: str
 ) -> None:
-    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {})
     _write(tmp_path, relative_path, "")
     assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == []
 
@@ -939,7 +939,7 @@ def test_a_location_named_for_a_documented_domain_is_clean(
 def test_a_location_named_for_no_documented_domain_is_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_path: str, location: str
 ) -> None:
-    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {})
     _write(tmp_path, relative_path, "")
     assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == [
         f"{location} names no domain in docs/domains.md; name it for a domain there, or give the new domain a section"
@@ -947,7 +947,7 @@ def test_a_location_named_for_no_documented_domain_is_flagged(
 
 
 def test_an_exceptions_module_without_the_suffix_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {})
     _write(tmp_path, "gateway/exceptions/budgets.py", "")
     assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == [
         "gateway/exceptions/budgets.py is not named <domain>_exceptions.py"
@@ -955,29 +955,70 @@ def test_an_exceptions_module_without_the_suffix_is_flagged(tmp_path: Path, monk
 
 
 def test_a_shared_exceptions_module_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {})
     _write(tmp_path, "gateway/exceptions/_base.py", "")
     _write(tmp_path, "gateway/exceptions/shared_exceptions.py", "")
     assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == []
 
 
 def test_a_directory_that_is_not_a_package_is_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {})
     _write(tmp_path, "gateway/services/.mypy_cache/cache.json", "")
     assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == []
 
 
 def test_a_location_on_the_domain_name_baseline_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ("gateway/services/tenancy/",))
+    monkeypatch.setattr(
+        check,
+        "DOMAIN_NAME_BASELINE",
+        {"gateway/services/tenancy/": ("__init__.py", "handlers/__init__.py", "handlers/invite.py")},
+    )
     _write(tmp_path, "gateway/services/tenancy/__init__.py", "")
+    _write(tmp_path, "gateway/services/tenancy/handlers/__init__.py", "")
+    _write(tmp_path, "gateway/services/tenancy/handlers/invite.py", "")
+    _write(tmp_path, "gateway/services/tenancy/__pycache__/cached.py", "")
     assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == []
+
+
+@pytest.mark.parametrize("module", ["invite.py", "handlers/invite.py"])
+def test_a_new_module_in_a_package_on_the_domain_name_baseline_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, module: str
+) -> None:
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {"gateway/services/tenancy/": ("__init__.py",)})
+    _write(tmp_path, "gateway/services/tenancy/__init__.py", "")
+    _write(tmp_path, f"gateway/services/tenancy/{module}", "")
+    assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == [
+        f"gateway/services/tenancy/{module} is a new module in a package named for no domain; "
+        "put it in its domain's package"
+    ]
+
+
+def test_a_listed_module_that_no_longer_exists_must_leave_the_domain_name_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {"gateway/services/tenancy/": ("__init__.py", "invite.py")})
+    _write(tmp_path, "gateway/services/tenancy/__init__.py", "")
+    assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == [
+        "gateway/services/tenancy/invite.py is on the domain name baseline but no longer exists; "
+        "remove it from the baseline"
+    ]
+
+
+def test_a_module_entry_on_the_domain_name_baseline_that_lists_modules_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {"gateway/exceptions/budget_exceptions.py": ("invite.py",)})
+    _write(tmp_path, "gateway/exceptions/budget_exceptions.py", "")
+    assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == [
+        "gateway/exceptions/budget_exceptions.py is a module, so its domain name baseline entry lists no modules"
+    ]
 
 
 @pytest.mark.parametrize("package", ["tenancy", "budgets"])
 def test_a_domain_name_baseline_entry_that_is_gone_or_now_a_domain_must_leave_the_baseline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, package: str
 ) -> None:
-    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", (f"gateway/services/{package}/",))
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {f"gateway/services/{package}/": ("__init__.py",)})
     if package == "budgets":
         _write(tmp_path, "gateway/services/budgets/__init__.py", "")
     assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == [
@@ -1003,6 +1044,19 @@ def test_main_fails_on_a_package_named_for_no_domain(tmp_path: Path, monkeypatch
     _point_main_at(tmp_path, monkeypatch)
     assert check.main() == 0
     _write(tmp_path, "src/gateway/services/billing/__init__.py", "")
+    assert check.main() == 1
+
+
+def test_main_fails_on_a_new_module_in_a_package_on_the_domain_name_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(tmp_path, "src/gateway/services/__init__.py", "")
+    _write(tmp_path, "src/gateway/services/tenancy/__init__.py", "")
+    _write(tmp_path, "tests/__init__.py", "")
+    _point_main_at(tmp_path, monkeypatch)
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {"gateway/services/tenancy/": ("__init__.py",)})
+    assert check.main() == 0
+    _write(tmp_path, "src/gateway/services/tenancy/invite.py", "")
     assert check.main() == 1
 
 
