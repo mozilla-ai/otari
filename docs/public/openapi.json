@@ -11618,6 +11618,33 @@
         "title": "PendingOrganizationInvitationsPublic",
         "type": "object"
       },
+      "PlaygroundAttachment": {
+        "description": "A file one turn sent, as the page draws its chip and sends it again.\n\nA record of the attachment rather than a reference the gateway keeps alive:\nthe file can be deleted after the save, and a resumed turn that sends it\nthen does not send its contents.",
+        "properties": {
+          "bytes": {
+            "minimum": 0.0,
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "file_id": {
+            "maxLength": 64,
+            "title": "File Id",
+            "type": "string"
+          },
+          "filename": {
+            "maxLength": 255,
+            "title": "Filename",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_id",
+          "filename",
+          "bytes"
+        ],
+        "title": "PlaygroundAttachment",
+        "type": "object"
+      },
       "PlaygroundComparisonCreate": {
         "description": "One rated A/B exchange.\n\nBoth answers in full, which is the disclosure the comparison consent flag\ncovers: a preference with no answers attached is a datum nobody can later\ncheck, and the page's own history list shows the question and the two model\nids from these columns.",
         "properties": {
@@ -11954,6 +11981,14 @@
       "PlaygroundMessageCreate": {
         "description": "One turn in a transcript being saved.",
         "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/PlaygroundAttachment"
+            },
+            "maxItems": 10,
+            "title": "Attachments",
+            "type": "array"
+          },
           "content": {
             "maxLength": 200000,
             "title": "Content",
@@ -11990,6 +12025,14 @@
       "PlaygroundMessagePublic": {
         "description": "One stored turn, in the order it was saved.\n\nNo usage figures, matching what the save accepts: tokens, cost and timing\ndescribe the request that ran rather than the conversation, and a resumed\ntranscript reporting an old request's latency as this session's would be\nlying. The billing record for that request is its ``usage_logs`` row.",
         "properties": {
+          "attachments": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PlaygroundAttachment"
+            },
+            "title": "Attachments",
+            "type": "array"
+          },
           "content": {
             "title": "Content",
             "type": "string"

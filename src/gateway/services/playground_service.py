@@ -31,6 +31,7 @@ from gateway.models.playground import (
     MAX_FAVORITE_MODELS,
     MAX_SAVED_COMPARISONS,
     MAX_SAVED_CONVERSATIONS,
+    PlaygroundAttachment,
     PlaygroundComparison,
     PlaygroundComparisonCreate,
     PlaygroundComparisonSummary,
@@ -453,6 +454,7 @@ async def save_conversation(
                 role=message.role,
                 content=message.content,
                 reasoning=message.reasoning,
+                attachments=[attachment.model_dump() for attachment in message.attachments],
             )
         )
     await _prune_oldest(
@@ -503,7 +505,15 @@ async def read_conversation_messages(
         .scalars()
         .all()
     )
-    return [PlaygroundMessagePublic(role=row.role, content=row.content, reasoning=row.reasoning) for row in rows]
+    return [
+        PlaygroundMessagePublic(
+            role=row.role,
+            content=row.content,
+            reasoning=row.reasoning,
+            attachments=[PlaygroundAttachment.model_validate(attachment) for attachment in row.attachments],
+        )
+        for row in rows
+    ]
 
 
 async def delete_conversation(

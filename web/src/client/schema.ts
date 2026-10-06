@@ -11209,6 +11209,22 @@ export interface components {
             data: components["schemas"]["PendingOrganizationInvitationPublic"][];
         };
         /**
+         * PlaygroundAttachment
+         * @description A file one turn sent, as the page draws its chip and sends it again.
+         *
+         *     A record of the attachment rather than a reference the gateway keeps alive:
+         *     the file can be deleted after the save, and a resumed turn that sends it
+         *     then does not send its contents.
+         */
+        PlaygroundAttachment: {
+            /** Bytes */
+            bytes: number;
+            /** File Id */
+            file_id: string;
+            /** Filename */
+            filename: string;
+        };
+        /**
          * PlaygroundComparisonCreate
          * @description One rated A/B exchange.
          *
@@ -11413,6 +11429,8 @@ export interface components {
          * @description One turn in a transcript being saved.
          */
         PlaygroundMessageCreate: {
+            /** Attachments */
+            attachments?: components["schemas"]["PlaygroundAttachment"][];
             /** Content */
             content: string;
             /** Reasoning */
@@ -11433,6 +11451,11 @@ export interface components {
          *     lying. The billing record for that request is its ``usage_logs`` row.
          */
         PlaygroundMessagePublic: {
+            /**
+             * Attachments
+             * @default []
+             */
+            attachments: components["schemas"]["PlaygroundAttachment"][];
             /** Content */
             content: string;
             /** Reasoning */

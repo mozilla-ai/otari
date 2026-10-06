@@ -1032,7 +1032,7 @@ describe("history", () => {
           },
         ],
       },
-      messages: { data: [{ role: "user", content: "Asked a retired model" }] },
+      messages: { data: [{ role: "user", content: "Asked a retired model", attachments: [] }] },
     })
     const user = userEvent.setup()
     renderPage()
@@ -1063,8 +1063,8 @@ describe("history", () => {
       conversations: { data: [SAVED] },
       messages: {
         data: [
-          { role: "user", content: "How does OAuth work" },
-          { role: "assistant", content: "It delegates authorization." },
+          { role: "user", content: "How does OAuth work", attachments: [] },
+          { role: "assistant", content: "It delegates authorization.", attachments: [] },
         ],
       },
     })

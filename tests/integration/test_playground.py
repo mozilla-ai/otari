@@ -370,7 +370,7 @@ def test_a_saved_turn_carries_no_usage_figures(client: TestClient, world: _World
 
     code, messages = _request(client, world, "member", "GET", f"{_PREFIX}/conversations/{created['id']}/messages")
     assert code == status.HTTP_200_OK
-    assert set(messages["data"][0]) == {"role", "content", "reasoning"}
+    assert set(messages["data"][0]) == {"role", "content", "reasoning", "attachments"}
 
 
 def test_reasoning_survives_a_save(client: TestClient, world: _World) -> None:
@@ -384,6 +384,31 @@ def test_reasoning_survives_a_save(client: TestClient, world: _World) -> None:
     code, messages = _request(client, world, "member", "GET", f"{_PREFIX}/conversations/{created['id']}/messages")
     assert code == status.HTTP_200_OK
     assert messages["data"][1]["reasoning"] == "thinking"
+
+
+def test_attachments_survive_a_save(client: TestClient, world: _World) -> None:
+    """A resumed transcript keeps which files each turn sent, so it can send them again."""
+    _grant(client, world, "member", store_conversations=True)
+    body = _conversation_body(world)
+    attachment = {"file_id": "file-abc123", "filename": "report.pdf", "bytes": 84213}
+    body["messages"][0]["attachments"] = [attachment]
+    code, created = _request(client, world, "member", "POST", f"{_PREFIX}/conversations", json=body)
+    assert code == status.HTTP_201_CREATED
+
+    code, messages = _request(client, world, "member", "GET", f"{_PREFIX}/conversations/{created['id']}/messages")
+    assert code == status.HTTP_200_OK
+    assert messages["data"][0]["attachments"] == [attachment]
+    assert messages["data"][1]["attachments"] == []
+
+
+def test_too_many_attachments_on_one_turn_are_refused(client: TestClient, world: _World) -> None:
+    _grant(client, world, "member", store_conversations=True)
+    body = _conversation_body(world)
+    body["messages"][0]["attachments"] = [
+        {"file_id": f"file-{index}", "filename": "a.txt", "bytes": 1} for index in range(11)
+    ]
+    code, _ = _request(client, world, "member", "POST", f"{_PREFIX}/conversations", json=body)
+    assert code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 def test_another_identity_cannot_read_or_delete_a_transcript(client: TestClient, world: _World) -> None:
