@@ -59,11 +59,7 @@ class _EndUsers:
         """
         _check_external_id(external_id)
         requested = await self._listed_budget(api_key, requested_budget_id) if requested_budget_id else None
-        owner_user_id = str(api_key.user_id)
-        owner = await self._repositories.end_users.get(owner_user_id)
-        if owner is None or owner.blocked or owner.deleted_at is not None:
-            raise EndUserOwnerUnavailableError()
-
+        owner_user_id = await self._available_owner(api_key)
         existing = await self._repositories.end_users.find(owner_user_id, external_id)
         if existing is not None:
             if existing.deleted_at is not None:
@@ -92,7 +88,7 @@ class _EndUsers:
         _require_service_key(api_key)
         _check_external_id(external_id)
         budget = await self._listed_budget(api_key, budget_id)
-        owner_user_id = str(api_key.user_id)
+        owner_user_id = await self._available_owner(api_key)
         user = await self._repositories.end_users.find(owner_user_id, external_id)
         if user is None:
             _check_new_external_id(external_id)
@@ -117,6 +113,14 @@ class _EndUsers:
         if blocked is not None:
             user.blocked = blocked
         return EndUserPublic.from_model(user)
+
+    async def _available_owner(self, api_key: APIKey) -> str:
+        """The key's user, refused when it is blocked or deleted, since its end users bill through it."""
+        owner_user_id = str(api_key.user_id)
+        owner = await self._repositories.end_users.get(owner_user_id)
+        if owner is None or owner.blocked or owner.deleted_at is not None:
+            raise EndUserOwnerUnavailableError()
+        return owner_user_id
 
     async def _assignable_budget(self, budget_id: str) -> Budget:
         budget = await self._repositories.budgets.get(budget_id)
@@ -157,6 +161,9 @@ def _check_new_external_id(external_id: str) -> None:
     """
     if "/" in external_id:
         raise EndUserIdInvalidError("must not contain '/'")
+    # HTTP clients collapse these as dot segments, so a request for one reaches another route.
+    if external_id in (".", ".."):
+        raise EndUserIdInvalidError("must not be '.' or '..'")
 
 
 def _require_service_key(api_key: APIKey) -> None:

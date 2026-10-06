@@ -366,6 +366,20 @@ def test_a_new_end_user_id_may_not_contain_a_slash(client: TestClient, master_ke
     assert chat.status_code == 400, chat.text
     assert put.status_code == 400, put.text
     assert _end_user(client, master_key_header, key_id, "org/alice").status_code == 404
+    for dots in (".", ".."):
+        assert _chat(client, headers, dots).status_code == 400, dots
+
+
+def test_put_refuses_an_end_user_of_a_blocked_owner(client: TestClient, master_key_header: dict[str, str]) -> None:
+    key_id, _ = _mlpa(client, master_key_header)
+    assert client.patch(f"{API_ROOT}/users/mlpa", json={"blocked": True}, headers=master_key_header).status_code == 200
+
+    put = client.put(
+        f"{API_ROOT}/keys/{key_id}/end-users/early", json={"budget_id": "eu-ai"}, headers=master_key_header
+    )
+
+    assert put.status_code == 403, put.text
+    assert _end_user(client, master_key_header, key_id, "early").status_code == 404
 
 
 def test_an_end_user_created_with_a_slash_before_the_rule_still_works(

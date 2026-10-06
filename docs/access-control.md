@@ -117,8 +117,8 @@ Each distinct `user` value creates an end user, whether or not the request is
 then admitted, and nothing else caps how many a key can create. Set a rate
 limit on a deployment that issues service keys, and send a stable id per end
 user rather than a per-session or per-request value. An id is at most 256
-characters, and a new one may not contain `/`, so that it can be named in the
-path of the end user routes below.
+characters, and a new one may not contain `/` or be `.` or `..`, so that it
+can be named in the path of the end user routes below.
 
 ### Several budgets on one key
 
