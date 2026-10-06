@@ -12,7 +12,7 @@ per (workspace, name), which the composite cannot give while ``user_id`` is
 NULL.
 
 Revision ID: c2e5a8d1f4b7
-Revises: b3e8f1a6c9d2
+Revises: c9e4a7d2f8b6
 Create Date: 2026-10-06
 """
 
@@ -22,7 +22,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c2e5a8d1f4b7"
-down_revision: str | Sequence[str] | None = "b3e8f1a6c9d2"
+down_revision: str | Sequence[str] | None = "c9e4a7d2f8b6"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
