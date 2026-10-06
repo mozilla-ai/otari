@@ -1343,6 +1343,204 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/hosted-providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Hosted Providers
+         * @description List the providers this deployment serves hosted inference on.
+         */
+        get: operations["hosted-providers-list_hosted_providers"];
+        put?: never;
+        /**
+         * Create Hosted Provider
+         * @description Configure a provider with the key this deployment will serve it on.
+         *
+         *     Everything the provider lists on that key is offered at once; a provider
+         *     that will not say yields a provider with no models, not an error.
+         */
+        post: operations["hosted-providers-create_hosted_provider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Catalog
+         * @description Re-ask every enabled provider what it lists, then take the rest off the catalog.
+         *
+         *     The whole deployment rather than one provider: a stored price is what puts a
+         *     model on a tenant's Models page, and a price under a provider nothing here
+         *     serves cannot be reached by a per-provider refresh. Declared before the
+         *     ``/{provider}`` paths to read in the order the surface is used; no method
+         *     collides in any case.
+         */
+        post: operations["hosted-providers-refresh_catalog"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/refresh/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Catalog Refresh
+         * @description What a catalog sweep would remove, without removing it.
+         *
+         *     A GET, and a truthful one: it writes nothing. It does dial every enabled
+         *     provider, as ``available-models`` does, because a model the provider still
+         *     lists would survive the sweep and previewing it as doomed would be a lie.
+         */
+        get: operations["hosted-providers-preview_catalog_refresh"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Hosted Provider
+         * @description Remove a provider and its roster, leaving the runtime with no hosted path for it.
+         */
+        delete: operations["hosted-providers-delete_hosted_provider"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Hosted Provider
+         * @description Rotate the key, repoint the base, or turn a provider off.
+         */
+        patch: operations["hosted-providers-update_hosted_provider"];
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/{provider}/available-models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Available Models
+         * @description Ask the provider what it serves on the stored credential.
+         *
+         *     Dials the upstream on every call rather than caching: the caller is the
+         *     admin form's model picker, opened rarely and entitled to a current answer.
+         *     Failure comes back in the body, so the picker can fall back to a text box.
+         */
+        get: operations["hosted-providers-list_available_models"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/{provider}/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Hosted Models
+         * @description List the models offered on one provider, with the price each currently serves at.
+         */
+        get: operations["hosted-providers-list_hosted_models"];
+        put?: never;
+        /**
+         * Add Hosted Model
+         * @description Offer a model on a provider, optionally at a custom price.
+         */
+        post: operations["hosted-providers-add_hosted_model"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/{provider}/models/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Hosted Models
+         * @description Ask the provider again and offer whatever is newly listed.
+         *
+         *     Additive only: nothing already offered is removed or toggled. New models
+         *     follow the offer rule, seeded with the community default price and off
+         *     when nothing prices them. A seeded price nobody changed moves with the
+         *     default.
+         */
+        post: operations["hosted-providers-refresh_hosted_models"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hosted-providers/{provider}/models/{model_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Hosted Model
+         * @description Stop offering a model on a provider. Its pricing history stays.
+         */
+        delete: operations["hosted-providers-remove_hosted_model"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Hosted Model
+         * @description Reprice one offered model, toggle whether it is served, or both.
+         */
+        patch: operations["hosted-providers-update_hosted_model"];
+        trace?: never;
+    };
     "/api/v1/images/generations": {
         parameters: {
             query?: never;
@@ -9073,6 +9271,302 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HostedAvailableModelsPublic
+         * @description What the provider says it serves on the stored credential.
+         *
+         *     Failure is a field rather than a status: an unreachable upstream, or a
+         *     provider with no model listing, is an answer about the provider rather than
+         *     about this request, and the form still has to render a plain text box when
+         *     the list cannot be fetched.
+         */
+        HostedAvailableModelsPublic: {
+            /**
+             * Discovery Unsupported
+             * @default false
+             */
+            discovery_unsupported: boolean;
+            /** Error */
+            error?: string | null;
+            /** Models */
+            models?: string[];
+            /** Provider */
+            provider: string;
+        };
+        /**
+         * HostedCatalogKeptGroupPublic
+         * @description Priced models a sweep left in place, grouped by the reason it did.
+         */
+        HostedCatalogKeptGroupPublic: {
+            /** Count */
+            count: number;
+            /** Models */
+            models: string[];
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * HostedCatalogProviderRefreshPublic
+         * @description What one hosted provider newly lists, as a catalog sweep found it.
+         *
+         *     Per provider rather than one total, because a dial that failed is a fact
+         *     about that provider, and the operator has to be told which one went quiet
+         *     rather than read a smaller number than they expected.
+         */
+        HostedCatalogProviderRefreshPublic: {
+            /** Added */
+            added: string[];
+            /**
+             * Credential Unreadable
+             * @default false
+             */
+            credential_unreadable: boolean;
+            /**
+             * Discovery Unsupported
+             * @default false
+             */
+            discovery_unsupported: boolean;
+            /** Error */
+            error?: string | null;
+            /** Provider */
+            provider: string;
+            /** Repriced */
+            repriced?: string[];
+        };
+        /**
+         * HostedCatalogRefreshPublic
+         * @description What a catalog sweep did, or would do.
+         *
+         *     ``removed`` is a sample and ``removed_count`` the total, so a deployment
+         *     that has never been swept does not answer one button press with a few
+         *     thousand strings.
+         */
+        HostedCatalogRefreshPublic: {
+            /** Kept */
+            kept: components["schemas"]["HostedCatalogKeptGroupPublic"][];
+            /** Providers */
+            providers: components["schemas"]["HostedCatalogProviderRefreshPublic"][];
+            /** Removed */
+            removed: string[];
+            /** Removed Count */
+            removed_count: number;
+            /** Removed Override Rows */
+            removed_override_rows: number;
+            /** Removed Price Rows */
+            removed_price_rows: number;
+        };
+        /**
+         * HostedModelCreateRequest
+         * @description Offer a model on a hosted provider, optionally at a custom price.
+         *
+         *     Omitting the rates means the deployment serves the model at whatever the
+         *     price ladder already answers: a stored deployment price, else the community
+         *     default, which the offer stores as the deployment's own rate.
+         */
+        HostedModelCreateRequest: {
+            /** Cache Read Price Per Million */
+            cache_read_price_per_million?: number | null;
+            /** Cache Write 1H Price Per Million */
+            cache_write_1h_price_per_million?: number | null;
+            /** Cache Write Price Per Million */
+            cache_write_price_per_million?: number | null;
+            /** Input Price Per Million */
+            input_price_per_million?: number | null;
+            /** Model */
+            model: string;
+            /** Output Price Per Million */
+            output_price_per_million?: number | null;
+        };
+        /**
+         * HostedModelPublic
+         * @description One offered model, with the price the deployment currently serves it at.
+         *
+         *     ``price_source`` says which rung of the deployment's ladder answered:
+         *     ``deployment`` for a rate an operator set, ``defaults`` for the
+         *     community-maintained rate, whether this surface stored it or the fallback
+         *     supplies it, and None when nothing prices the model yet. ``enabled`` is the
+         *     serving switch; a model offered without a discoverable price starts off.
+         */
+        HostedModelPublic: {
+            /** Cache Read Price Per Million */
+            cache_read_price_per_million?: number | null;
+            /** Cache Write 1H Price Per Million */
+            cache_write_1h_price_per_million?: number | null;
+            /** Cache Write Price Per Million */
+            cache_write_price_per_million?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Input Price Per Million */
+            input_price_per_million?: number | null;
+            /** Model */
+            model: string;
+            /** Output Price Per Million */
+            output_price_per_million?: number | null;
+            /** Price Source */
+            price_source?: ("organization" | "deployment" | "defaults") | null;
+            /** Provider */
+            provider: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * HostedModelUpdateRequest
+         * @description Reprice an offered model, toggle whether it is served, or both.
+         *
+         *     A price is the input/output pair or nothing: sending the pair writes a new
+         *     pricing version, and the cache rates then follow ``POST /pricing``'s own
+         *     semantics (a field the caller omits inherits the most recent stored value,
+         *     an explicit null clears it). ``enabled`` travels alone freely, so a toggle
+         *     never re-sends rates it did not change.
+         */
+        HostedModelUpdateRequest: {
+            /** Cache Read Price Per Million */
+            cache_read_price_per_million?: number | null;
+            /** Cache Write 1H Price Per Million */
+            cache_write_1h_price_per_million?: number | null;
+            /** Cache Write Price Per Million */
+            cache_write_price_per_million?: number | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Input Price Per Million */
+            input_price_per_million?: number | null;
+            /** Output Price Per Million */
+            output_price_per_million?: number | null;
+        };
+        /**
+         * HostedModelsPublic
+         * @description A page of one hosted provider's offered models, and how many there are in total.
+         */
+        HostedModelsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["HostedModelPublic"][];
+        };
+        /**
+         * HostedModelsRefreshPublic
+         * @description What a refresh did: the models newly offered, the seeded rates it moved, and the list's new size.
+         *
+         *     Failure is a field rather than a status, for the reason
+         *     ``HostedAvailableModelsPublic`` gives: the list is still standing, and the
+         *     panel renders the reason beside it.
+         */
+        HostedModelsRefreshPublic: {
+            /** Added */
+            added: string[];
+            /** Count */
+            count: number;
+            /**
+             * Discovery Unsupported
+             * @default false
+             */
+            discovery_unsupported: boolean;
+            /** Error */
+            error?: string | null;
+            /** Repriced */
+            repriced: string[];
+        };
+        /**
+         * HostedProviderCreateRequest
+         * @description Configure a provider this deployment will serve hosted inference on.
+         *
+         *     ``client_args`` is whatever the provider's SDK client needs beyond the key
+         *     (Bedrock's region and IAM pair), the same shape an organization provider
+         *     key takes. Values under credential-shaped names come back masked.
+         */
+        HostedProviderCreateRequest: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Api Key */
+            api_key: string;
+            /** Client Args */
+            client_args?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Provider */
+            provider: string;
+        };
+        /**
+         * HostedProviderPublic
+         * @description One hosted provider, named by its provider and the tail of its key.
+         *
+         *     No shape in this section carries key material: a stored credential is
+         *     known by its last four characters and nothing else, and ``client_args``
+         *     goes out with credential-shaped values masked.
+         */
+        HostedProviderPublic: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Api Key Last4 */
+            api_key_last4?: string | null;
+            /** Client Args */
+            client_args?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Provider */
+            provider: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * HostedProviderUpdateRequest
+         * @description Rotate the key, repoint the base, or turn a provider off.
+         *
+         *     ``provider`` is immutable: changing it is a delete plus a create, because
+         *     the key belongs to the provider it was issued by. Omitting ``api_key``
+         *     leaves the stored credential untouched, so a toggle never re-sends a secret
+         *     the caller does not have. ``client_args`` omitted is left alone; an explicit
+         *     null clears it, and an entry echoed back as the mask keeps the stored value.
+         */
+        HostedProviderUpdateRequest: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /** Client Args */
+            client_args?: {
+                [key: string]: unknown;
+            } | null;
+            /** Enabled */
+            enabled?: boolean | null;
+        };
+        /**
+         * HostedProvidersPublic
+         * @description A page of hosted providers, and how many there are in total.
+         */
+        HostedProvidersPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["HostedProviderPublic"][];
         };
         /**
          * Icon
@@ -17311,6 +17805,376 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PolicyCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-list_hosted_providers": {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedProvidersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-create_hosted_provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedProviderCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedProviderPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-refresh_catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedCatalogRefreshPublic"];
+                };
+            };
+        };
+    };
+    "hosted-providers-preview_catalog_refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedCatalogRefreshPublic"];
+                };
+            };
+        };
+    };
+    "hosted-providers-delete_hosted_provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-update_hosted_provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedProviderUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedProviderPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-list_available_models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedAvailableModelsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-list_hosted_models": {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedModelsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-add_hosted_model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedModelCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedModelPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-refresh_hosted_models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedModelsRefreshPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-remove_hosted_model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "hosted-providers-update_hosted_model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HostedModelUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedModelPublic"];
                 };
             };
             /** @description Validation Error */
