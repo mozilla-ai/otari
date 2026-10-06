@@ -39,8 +39,10 @@ from otari_agent.domain.policy import (
 from otari_agent.domain.types import (
     CheckVerdict,
     CommandGate,
+    CommandIfChangedGate,
     EvidenceScope,
     GateResult,
+    GateSpec,
     JudgeGate,
     JudgeVerdict,
     Outcome,
@@ -1153,7 +1155,7 @@ def _hook_collect_diff(repo_root: Path, diff_range: _DiffRange = _DiffRange()) -
         diff += untracked
     if len(diff) > _HOOK_JUDGE_MAX_DIFF_CHARS:
         click.echo(
-            f"otari hook: diff is {len(diff):,} characters, over the {_HOOK_JUDGE_MAX_DIFF_CHARS:,} limit; "
+            f"otari: diff is {len(diff):,} characters, over the {_HOOK_JUDGE_MAX_DIFF_CHARS:,} limit; "
             "judge gates will see only the first that many.",
             err=True,
         )
@@ -1645,7 +1647,7 @@ def _hook_collect_judge_verdicts(
     if len(judge_gates) > _HOOK_JUDGE_MAX_GATES_PER_RUN:
         skipped = [gate.id for gate in judge_gates[_HOOK_JUDGE_MAX_GATES_PER_RUN:]]
         click.echo(
-            f"otari hook: {len(judge_gates):,} judge gates in this guardrail, over the "
+            f"otari: {len(judge_gates):,} judge gates in this guardrail, over the "
             f"{_HOOK_JUDGE_MAX_GATES_PER_RUN:,} limit; skipping the lowest priority: {', '.join(skipped)}.",
             err=True,
         )
@@ -1666,7 +1668,7 @@ def _hook_collect_judge_verdicts(
     transcript = extract_transcript(Path(change.transcript_path)) if change.transcript_path else ""
     if len(transcript) > _HOOK_JUDGE_MAX_TRANSCRIPT_CHARS:
         click.echo(
-            f"otari hook: transcript is {len(transcript):,} characters, over the "
+            f"otari: transcript is {len(transcript):,} characters, over the "
             f"{_HOOK_JUDGE_MAX_TRANSCRIPT_CHARS:,} limit; judge gates will see only the most recent that many.",
             err=True,
         )
@@ -1940,7 +1942,7 @@ def _hook_collect_check_verdicts(
     if len(check_gates) > _HOOK_CHECK_MAX_GATES_PER_RUN:
         skipped = [gate.id for gate in check_gates[_HOOK_CHECK_MAX_GATES_PER_RUN:]]
         click.echo(
-            f"otari hook: {len(check_gates):,} verifier gates in this guardrail, over the "
+            f"otari: {len(check_gates):,} verifier gates in this guardrail, over the "
             f"{_HOOK_CHECK_MAX_GATES_PER_RUN:,} limit; skipping the lowest priority: {', '.join(skipped)}.",
             err=True,
         )
@@ -3679,4 +3681,312 @@ def guardrails_validate(
         )
 
     if errors or (strict and warnings):
+        raise SystemExit(1)
+
+
+class _CheckedGateType(Enum):
+    """Each member is a gate type that `otari guardrails check` can run against a change.
+
+    Each value is the gate's own `type`.
+    """
+
+    JUDGE = "judge"
+    PATH = "path"
+    VERIFIER = "verifier"
+
+
+# The label for a gate that a change gives nothing to run against, in place of an outcome.
+_CANNOT_RUN = "cannot run"
+
+# Wide enough for every label a check prints, so every gate ID starts in the same column.
+# A check counts the gates that do not apply rather than printing them.
+_CHECK_LABEL_WIDTH = max(
+    len(_CANNOT_RUN), *(len(outcome.value) for outcome in Outcome if outcome is not Outcome.NOT_APPLICABLE)
+)
+
+# Every Git call a check makes reads local objects, so this bounds a stuck process rather than a slow one.
+_GUARDRAILS_GIT_TIMEOUT_SECONDS = 30
+
+
+def _parse_checked_types(
+    ctx: click.Context, param: click.Parameter, value: tuple[str, ...]
+) -> frozenset[_CheckedGateType]:
+    """Parse `--type`: the gate types to run, every runnable type when none is named."""
+    return frozenset(_CheckedGateType(name) for name in value) or frozenset(_CheckedGateType)
+
+
+def _parse_revision(ctx: click.Context, param: click.Parameter, value: str | None) -> str | None:
+    """Refuse a revision that Git would read as an option."""
+    if value is not None and value.startswith("-"):
+        raise click.BadParameter(f"must name a commit, not an option (got {value!r}).")
+    return value
+
+
+def _guardrails_git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run one Git command in `repo_root`, or raise a `ClickException` when Git cannot run at all.
+
+    A non-zero exit is returned rather than raised, so the caller says what it means.
+    """
+    try:
+        return subprocess.run(  # noqa: S603 - fixed program, no shell, explicit cwd
+            ["git", *args],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=_GUARDRAILS_GIT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        raise click.ClickException(f"`git {args[0]}` could not run ({exc}).") from exc
+
+
+def _guardrails_commit(repo_root: Path, revision: str, option: str) -> str:
+    """Return the full SHA of the commit `revision` names, or raise a `ClickException` naming `option`."""
+    result = _guardrails_git(repo_root, "rev-parse", "--verify", "--quiet", f"{revision}^{{commit}}")
+    if result.returncode != 0:
+        raise click.ClickException(f"{option} {revision!r} names no commit in {repo_root}.")
+    return result.stdout.strip()
+
+
+def _guardrails_check_range(repo_root: Path, base: str, head: str | None) -> _DiffRange:
+    """Return the change since `head`, or else HEAD, left `base`.
+
+    The change starts at the merge base of the two.
+    It ends at `head`, or at the working tree when `head` is None.
+    A commit that reached `base` after the branch left it is not part of the change.
+    """
+    head_commit = None if head is None else _guardrails_commit(repo_root, head, "--head")
+    base_commit = _guardrails_commit(repo_root, base, "--base")
+    result = _guardrails_git(repo_root, "merge-base", base_commit, head_commit or "HEAD")
+    if result.returncode != 0:
+        raise click.ClickException(
+            f"--base {base!r} shares no history with {head or 'HEAD'} in this clone. "
+            "Fetch the history both share, which a CI checkout needs in full."
+        )
+    return _DiffRange(result.stdout.strip(), head_commit)
+
+
+def _guardrails_changed_paths(repo_root: Path, diff_range: _DiffRange) -> list[str]:
+    """Return every path the change touches, deleted and untracked ones included.
+
+    A rename counts as both of its paths, so a gate over either one sees it.
+    """
+    result = _guardrails_git(repo_root, "diff", "--name-only", "--no-renames", "-z", *diff_range.git_diff_args())
+    if result.returncode != 0:
+        raise click.ClickException(f"Could not list the changed paths: {result.stderr.strip()[:500]}")
+    paths = [path for path in result.stdout.split("\0") if path]
+    if diff_range.head is None:
+        untracked = _hook_untracked_paths(repo_root)
+        if untracked is None:
+            raise click.ClickException(f"Could not list the untracked files in {repo_root}.")
+        paths.extend(untracked)
+    return list(dict.fromkeys(paths))
+
+
+def _echo_check_result(gate: GateSpec, result: GateResult, unable_reason: str | None = None) -> None:
+    """Print one gate's outcome, or why it cannot run, then why it did not pass and the detail behind it."""
+    label = _CANNOT_RUN if unable_reason is not None else result.outcome.value
+    color = None
+    if unable_reason is not None:
+        color = "yellow"
+    elif result.outcome is not Outcome.PASS:
+        color = "red" if gate.enforcement == "required" else "yellow"
+    click.secho(
+        f"  {label:<{_CHECK_LABEL_WIDTH}}  {gate.id} ({gate.type}, {gate.enforcement}){_declared_in(result)}",
+        fg=color,
+    )
+    indent = " " * (_CHECK_LABEL_WIDTH + 4)
+    if unable_reason is not None:
+        click.echo(f"{indent}{unable_reason}")
+    elif result.outcome is not Outcome.PASS:
+        click.echo(f"{indent}{result.message}")
+        for line in (result.detail or "").splitlines():
+            click.echo(f"{indent}  {line}")
+
+
+def _echo_check_report(
+    spec: PolicySpec, results: tuple[GateResult, ...], gate_types: frozenset[_CheckedGateType], head: str | None
+) -> bool:
+    """Print each selected gate's result and a summary, and return whether a required gate did not pass.
+
+    A gate that cannot run against this change is reported as such, and never counts as a failure.
+    The command gates are listed only when `gate_types` does not narrow the run.
+    """
+    selected = {gate_type.value for gate_type in gate_types}
+    lists_command_gates = gate_types == frozenset(_CheckedGateType)
+    results_by_id = {result.gate_id: result for result in results}
+    failed_required: list[str] = []
+    failed_advisory: list[str] = []
+    not_applicable = 0
+    unable: list[str] = []
+    for gate in spec.gates:
+        if isinstance(gate, CommandGate | CommandIfChangedGate):
+            if lists_command_gates:
+                unable.append(gate.id)
+            continue
+        if gate.type not in selected:
+            continue
+        result = results_by_id[gate.id]
+        if isinstance(gate, VerifierGate) and head is not None:
+            _echo_check_result(gate, result, "A verifier inspects the working tree, and --head names a commit.")
+            continue
+        if result.outcome is Outcome.NOT_APPLICABLE:
+            not_applicable += 1
+            continue
+        _echo_check_result(gate, result)
+        if result.outcome.is_blocking:
+            (failed_required if gate.enforcement == "required" else failed_advisory).append(gate.id)
+
+    if not_applicable:
+        click.echo(f"  {not_applicable} gate(s) do not apply to this change.")
+    if unable:
+        click.echo(
+            f"  {len(unable)} command or command_if_changed gate(s) cannot run against a change, "
+            f"which carries no commands: {', '.join(unable)}."
+        )
+    click.echo()
+    click.echo(
+        f"{len(failed_required)} required gate(s) did not pass, {len(failed_advisory)} advisory gate(s) did not pass."
+    )
+    return bool(failed_required)
+
+
+@guardrails.command(name="check")
+@click.option(
+    "--base",
+    default="HEAD",
+    show_default=True,
+    callback=_parse_revision,
+    help="Check the change since this commit, measured from where the checked commit left it.",
+)
+@click.option(
+    "--head",
+    default=None,
+    callback=_parse_revision,
+    help=(
+        "Check the change up to this commit, read from Git alone, instead of up to the working tree. "
+        "Verifier gates inspect the working tree, so they cannot run with it."
+    ),
+)
+@click.option(
+    "--type",
+    "gate_types",
+    type=click.Choice([gate_type.value for gate_type in _CheckedGateType]),
+    multiple=True,
+    callback=_parse_checked_types,
+    help=(
+        "Run only gates of this type. Repeatable. Defaults to every type a change can run, "
+        "and then also lists the command gates that cannot run."
+    ),
+)
+@click.option(
+    "--guardrails-from",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "Read the guardrail files and verifier scripts from this checkout instead of the one being checked, "
+        "so a change cannot alter the gates that check it."
+    ),
+)
+@click.option(
+    "--judge-model",
+    envvar="OTARI_HOOK_JUDGE_MODEL",
+    default=None,
+    help=(
+        f"Model a judge gate's call uses. Defaults to {_HOOK_JUDGE_DEFAULT_MODEL!r} for claude, "
+        "and to the account's own default for codex."
+    ),
+)
+@click.option(
+    "--judge-cli",
+    envvar="OTARI_HOOK_JUDGE_CLI",
+    default=None,
+    callback=_parse_judge_cli,
+    help=(
+        "Comma-separated, ordered judge CLI backends to try (claude, codex). "
+        "A gate's own judge_cli overrides this. Defaults to claude."
+    ),
+)
+def guardrails_check(
+    base: str,
+    head: str | None,
+    gate_types: frozenset[_CheckedGateType],
+    guardrails_from: Path | None,
+    judge_model: str | None,
+    judge_cli: tuple[str, ...] | None,
+) -> None:
+    """Run this repo's gates against a change, the way a CI job checks a pull request.
+
+    The change runs from where the checked commit left `--base` to `--head`.
+    Without `--head` it runs to the working tree.
+    Every gate sees the paths it touches as `stop.working_tree` evidence.
+
+    `path` and `verifier` gates run, and a `required` one that does not pass exits 1.
+    A verifier runs with the checked repo as its working directory, so it inspects the change.
+    `judge` gates run where a judge CLI is installed and signed in.
+    They are advisory, so a finding never changes the exit status.
+    `command` and `command_if_changed` gates read the commands a session ran.
+    A change carries no commands, so they are reported as unable to run.
+
+    It reads the repo's own guardrail only.
+    The files in `~/.otari/` belong to one person, and a check reads the same on every machine.
+
+    See docs/agent-guardrails.md.
+    """
+    root = _hook_find_repo_root(Path.cwd())
+    if root is None:
+        raise click.ClickException("Not inside a Git repository.")
+    narrowed = gate_types != frozenset(_CheckedGateType)
+    if head is not None and narrowed and _CheckedGateType.VERIFIER in gate_types:
+        raise click.UsageError("--type verifier cannot run with --head, because a verifier inspects the working tree.")
+
+    guardrail_root = guardrails_from.resolve() if guardrails_from is not None else root
+    files = [GuardrailFile(path, GuardrailOrigin.REPO) for path in _hook_discover_guardrail_files(guardrail_root)]
+    if not files:
+        raise click.ClickException(
+            _guardrail_moved_notice(guardrail_root)
+            or f"No guardrail in {guardrail_root}: no {GUARDRAIL_FILE}, nothing under {GUARDRAIL_DIR}/."
+        )
+    try:
+        guardrail = _hook_load_guardrail(files, guardrail_root)
+    except (GuardrailReadError, PolicyError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    spec = guardrail.spec
+
+    diff_range = _guardrails_check_range(root, base, head)
+    paths = _guardrails_changed_paths(root, diff_range)
+    judge_results = None
+    if _CheckedGateType.JUDGE in gate_types:
+        judge_results = _hook_collect_judge_verdicts(
+            spec,
+            _JudgedChange(repo_root=root, changed_paths=paths, diff_range=diff_range),
+            _JudgeSettings(model=judge_model, cli_override=judge_cli),
+        )
+    check_results = None
+    if _CheckedGateType.VERIFIER in gate_types and head is None:
+        check_results = _hook_collect_check_verdicts(
+            spec, root, paths, _verifier_scopes(guardrail.origins, guardrail_root)
+        )
+    try:
+        check = check_policy(
+            spec,
+            paths=paths,
+            commands=[],
+            path_source="stop.working_tree",
+            judge_results=judge_results,
+            check_results=check_results,
+        )
+    except PolicyCheckError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    source = "" if guardrails_from is None else f" from {guardrails_from}"
+    click.echo(f"{guardrail.name}{source}: {len(spec.gates)} gate(s), schema {spec.schema_version}.")
+    click.echo(
+        f"{len(paths)} changed path(s) since {base} (merge base {diff_range.base[:12]}), "
+        f"up to {head or 'the working tree'}."
+    )
+    click.echo()
+    if _echo_check_report(spec, check.results, gate_types, head):
         raise SystemExit(1)
