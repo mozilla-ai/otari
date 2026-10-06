@@ -61,9 +61,8 @@ from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
-from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import UserRepository
-from gateway.services.budgets import BudgetMembershipListener
+from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
 
 T = TypeVar("T")
@@ -86,6 +85,7 @@ PortFactory = Callable[[AsyncSession | None], T]
 # of Work, because the membership listener writes through its open block and only
 # ``get_unit_of_work`` may construct one.
 UnitOfWorkPortFactory = Callable[[AsyncSession | None, UnitOfWork | None], T]
+MembershipListenerBuilder = Callable[[UnitOfWork], MembershipListener]
 Register = Callable[["Container"], None]
 
 
@@ -253,7 +253,9 @@ def _growth_signal_adapter(session: AsyncSession | None) -> GrowthSignalPort:
     return NullGrowthSignalAdapter(session)
 
 
-def _identity_provider_adapter_factory(config: GatewayConfig | None) -> UnitOfWorkPortFactory[IdentityProviderPort]:
+def _identity_provider_adapter_factory(
+    config: GatewayConfig | None, membership_listener: MembershipListenerBuilder | None
+) -> UnitOfWorkPortFactory[IdentityProviderPort]:
     """Build the core ``IdentityProviderPort`` factory, bound to this app's ``open_signup`` setting.
 
     An open signup creates a workspace membership, so the adapter needs the request's Unit of Work too.
@@ -263,11 +265,12 @@ def _identity_provider_adapter_factory(config: GatewayConfig | None) -> UnitOfWo
         if session is None or uow is None:
             msg = f"a session and a unit of work are required to build {_port_name(IdentityProviderPort)}"
             raise ContainerError(msg)
+        if membership_listener is None:
+            msg = f"a membership listener is required to build {_port_name(IdentityProviderPort)}"
+            raise ContainerError(msg)
         return DeploymentIdentityProviderAdapter(
             UserRepository(session),
-            OrganizationService(
-                session, membership_listener=BudgetMembershipListener(BudgetRepositories.on(uow)), uow=uow
-            ),
+            OrganizationService(session, membership_listener=membership_listener(uow), uow=uow),
             open_signup=bool(config and config.open_signup),
         )
 
@@ -450,12 +453,21 @@ def _bind_workspace_ports(container: Container, config: GatewayConfig | None) ->
         container.bind(WebSearchPolicyPort, _shared(RemoteWebSearchPolicy(config)))
 
 
-def build_container(bootstrap_selector: str | None = None, config: GatewayConfig | None = None) -> Container:
+def build_container(
+    bootstrap_selector: str | None = None,
+    config: GatewayConfig | None = None,
+    *,
+    membership_listener: MembershipListenerBuilder | None = None,
+) -> Container:
     """Build the composition-root container for this deployment.
 
     Binds the core adapters, then, if a selector is given, lets the bootstrap it
     names rebind ports and contribute routers. With no selector the core
     defaults stand and Otari boots standalone.
+
+    ``membership_listener`` builds the listener the OAuth sign-in adapter's
+    organization service notifies. It is a parameter because its builder lives
+    in the API layer, which this module cannot import.
 
     Raises:
         BootstrapError: If the selector is present but blank, or names a
@@ -484,7 +496,9 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
     # overlay binds a scale-out store behind the same port.
     container.bind(TelemetryStoragePort, _telemetry_storage_adapter)
     # OAuth sign-in: the base applies this deployment's `open_signup` setting.
-    container.bind_with_unit_of_work(IdentityProviderPort, _identity_provider_adapter_factory(config))
+    container.bind_with_unit_of_work(
+        IdentityProviderPort, _identity_provider_adapter_factory(config, membership_listener)
+    )
     # API key format: the base mints the open-source shape and checks every
     # presented key against its own rows. A hosted overlay binds a format that
     # carries a region and a checksum, and routes a key minted elsewhere away.

@@ -18,7 +18,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from typing_extensions import override
 
 from gateway import features
-from gateway.api.deps import build_file_service, build_idempotency_service, set_config
+from gateway.api.deps import build_file_service, build_idempotency_service, get_membership_listener, set_config
 from gateway.api.main import register_routers
 from gateway.container import Container, build_container
 from gateway.context_propagation import TraceContextPropagationMiddleware
@@ -1088,7 +1088,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # reason config is: two apps in one process must not share one. A bootstrap
     # that cannot be loaded raises here, so a deployment that named one and got
     # it wrong fails to start instead of quietly running the plain build.
-    app.state.container = build_container(config.bootstrap, config=config)
+    app.state.container = build_container(config.bootstrap, config=config, membership_listener=get_membership_listener)
     install_rate_limits(app, config)
 
     register_routers(app, config)
