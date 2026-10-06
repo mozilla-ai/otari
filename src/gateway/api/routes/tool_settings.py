@@ -128,6 +128,13 @@ class ToolSettingsResponse(BaseModel):
     """The effective value of every editable tool/guardrail field."""
 
     fields: list[ToolSettingField]
+    sandbox_provider: Literal["protocol", "e2b"] | None = Field(
+        default=None,
+        description=(
+            "What runs generated code: 'protocol' (a sandbox at sandbox_url) or 'e2b'. Set at startup, "
+            "not editable here. Null for a reader who does not operate the deployment."
+        ),
+    )
 
 
 class UpdateToolSettingsRequest(BaseModel):
@@ -192,7 +199,8 @@ def _current_fields(config: GatewayConfig, *, include_urls: bool = True) -> Tool
         )
         for key in keys
     ]
-    return ToolSettingsResponse(fields=fields)
+    provider = cast('Literal["protocol", "e2b"]', config.effective_sandbox_provider()) if include_urls else None
+    return ToolSettingsResponse(fields=fields, sandbox_provider=provider)
 
 
 @reader_router.get("")

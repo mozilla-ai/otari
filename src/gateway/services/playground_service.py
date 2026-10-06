@@ -212,6 +212,7 @@ class PlaygroundToolAvailability:
 
 
 _WORKSPACE_DISABLED = "Turned off for this workspace."
+_WORKSPACE_NOT_ENABLED = "Not turned on for this workspace."
 _NOT_CONFIGURED = "No backend is configured on this deployment."
 
 
@@ -262,7 +263,11 @@ async def resolve_tool_availability(
 
     return PlaygroundToolAvailability(
         web_search=_tool_availability(web_search_configured, web_search_row),
-        code_execution=_tool_availability(sandbox_configured, code_execution_row),
+        code_execution=(
+            _hosted_code_execution(code_execution_row)
+            if config.is_hosted_mode
+            else _tool_availability(sandbox_configured, code_execution_row)
+        ),
         mcp_servers=[
             McpServerAvailability(
                 id=server.id,
@@ -273,6 +278,20 @@ async def resolve_tool_availability(
             for server in servers
         ],
     )
+
+
+def _hosted_code_execution(workspace_enabled: bool | None) -> ToolAvailability:
+    """Code execution on a hosted control plane, read the way the platform reads it.
+
+    The control plane runs no code: the platform's sandbox behind the data plane
+    does, so this process's own sandbox config says nothing. And there a workspace
+    turns code execution on, so no row means off rather than "no narrowing".
+    """
+    if workspace_enabled is None:
+        return ToolAvailability(configured=True, enabled=False, reason=_WORKSPACE_NOT_ENABLED)
+    if workspace_enabled is False:
+        return ToolAvailability(configured=True, enabled=False, reason=_WORKSPACE_DISABLED)
+    return ToolAvailability(configured=True, enabled=True)
 
 
 def _tool_availability(configured: bool, workspace_enabled: bool | None) -> ToolAvailability:

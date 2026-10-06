@@ -13087,6 +13087,11 @@ export interface components {
         ToolSettingsResponse: {
             /** Fields */
             fields: components["schemas"]["ToolSettingField"][];
+            /**
+             * Sandbox Provider
+             * @description What runs generated code: 'protocol' (a sandbox at sandbox_url) or 'e2b'. Set at startup, not editable here. Null for a reader who does not operate the deployment.
+             */
+            sandbox_provider?: ("protocol" | "e2b") | null;
         };
         /**
          * ToolsResponse

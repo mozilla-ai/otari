@@ -2181,6 +2181,10 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
         configured = (self.code_execution_executor or "").strip() or otari_env("CODE_EXECUTION_EXECUTOR")
         return CodeExecutor.parse(configured) or CodeExecutor.AUTO
 
+    def effective_sandbox_provider(self) -> str:
+        """The deployment's ``sandbox_provider``, normalized: ``protocol`` when unset."""
+        return (self.sandbox_provider or "").strip().lower() or "protocol"
+
     def sandbox_configured(self) -> bool:
         """Whether this deployment can run ``otari_code_execution`` at all.
 
@@ -2189,7 +2193,7 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
 
         Gotcha: a cleared dashboard override leaves ``sandbox_url`` as ``None``, so the environment value still counts.
         """
-        if (self.sandbox_provider or "").strip().lower() not in ("", "protocol"):
+        if self.effective_sandbox_provider() != "protocol":
             return True
         return bool(self.sandbox_url or otari_env("SANDBOX_URL"))
 

@@ -8,15 +8,8 @@ import {
 import { WorkspaceCodeExecutionPolicyCard } from "./WorkspaceCodeExecutionPolicyCard"
 
 /**
- * A workspace's stance on code execution, plus the ceilings it may narrow.
- *
- * The three-position stance is the interesting part: a workspace can be
- * unconfigured (inherit), explicitly on, or explicitly off, and "unconfigured" is
- * not the same as "off", clearing a policy hands the decision back to the
- * deployment default, which is why there is a clear mutation as well as a set one.
- *
- * `MAX_ITERATIONS` (25) and `MAX_EXEC_TIMEOUT_S` (60) are ceilings, not defaults:
- * a workspace may narrow them, never widen them.
+ * Whether a workspace may run code: one switch over three stored states. No
+ * policy reads as allowed, because it behaves exactly like one.
  *
  * This card reads the *selected* workspace from context rather than a prop, so
  * these stories mock /api/v1/organizations/me, that is what
@@ -48,12 +41,6 @@ function api(policy: ReturnType<typeof workspaceCodeExecutionPolicy>) {
 const meta = {
   title: "Dashboard/Tools/WorkspaceCodeExecutionPolicyCard",
   component: WorkspaceCodeExecutionPolicyCard,
-  // `docsHref` is the caller's, the way the page passes it: the card renders the
-  // link and does not know how a docs URL is built. The page uses
-  // `toolsDocs("per-workspace-code-policy")`.
-  args: {
-    docsHref: "https://example.com/docs/tools#per-workspace-code-policy",
-  },
   parameters: {
     api: api(workspaceCodeExecutionPolicy({ workspace_id: WORKSPACE_ID })),
     layout: "padded",
@@ -64,10 +51,7 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/**
- * Unconfigured, which is what a workspace has until somebody sets a policy. The
- * deployment default decides, and this card says so rather than implying "off".
- */
+/** No policy, which is what a workspace has until somebody sets one: it reads as allowed. */
 export const Unconfigured: Story = {
   render: (args) => (
     <div className="w-[44rem]">
@@ -76,17 +60,15 @@ export const Unconfigured: Story = {
   ),
 }
 
-/** Explicitly enabled, with both ceilings narrowed below the maximum. */
-export const EnabledWithCeilings: Story = {
+/** A policy naming a tool the sandbox no longer serves, so it offers a reset. */
+export const StalePolicy: Story = {
   parameters: {
     api: api(
       workspaceCodeExecutionPolicy({
         workspace_id: WORKSPACE_ID,
         configured: true,
         enabled: true,
-        max_iterations: 8,
-        exec_timeout_s: 20,
-        default_purpose_hint: "Data analysis over uploaded CSVs.",
+        tools: ["bash_code_execution"],
         created_at: "2026-06-01T00:00:00+00:00",
         updated_at: "2026-08-01T00:00:00+00:00",
       }),

@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router"
-import { Fragment } from "react"
+import { Fragment, type ReactNode, useState } from "react"
 import type {
   ToolServiceName,
   ToolSettingField,
@@ -8,12 +8,16 @@ import type {
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Skeleton } from "@/design-system/feedback/Skeleton"
 import { PageIntro } from "@/design-system/layout/PageIntro"
-import { CONTROL_LANE } from "@/design-system/layout/SettingRow"
+import { CONTROL_LANE, SettingRow } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
+import { DisclosureRow } from "@/design-system/navigation/DisclosureRow"
 import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
 import type { FieldCopy } from "@/features/tools/ToolSettingRows"
 import { ToolPriceRow, ToolSettingRow } from "@/features/tools/ToolSettingRows"
-import { ToolStatusGroup } from "@/features/tools/ToolStatusGroup"
+import {
+  ToolStatusGroup,
+  ToolStatusRow,
+} from "@/features/tools/ToolStatusGroup"
 import { WorkspaceCodeExecutionPolicyCard } from "@/features/tools/WorkspaceCodeExecutionPolicyCard"
 import { WorkspaceMcpServersCard } from "@/features/tools/WorkspaceMcpServersCard"
 import { WorkspaceWebSearchCard } from "@/features/tools/WorkspaceWebSearchCard"
@@ -25,7 +29,7 @@ import {
   useUpdateToolSettings,
 } from "@/shared/api/tools"
 import { docsSourceHref } from "@/shared/helpers/docs"
-import { useSurfaces } from "@/shared/hooks/useDeployment"
+import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
 
 // One settable field maps onto one key of the update request; cast at this one
 // boundary (the keys come from the backend's field list).
@@ -79,44 +83,21 @@ const FIELD_COPY: Record<string, FieldCopy & { defaultLabel?: string }> = {
     help: "Sent to the backend when a tool entry has none of its own.",
     placeholder: "Answer from official docs",
   },
-  sandbox_provider: {
-    label: "Provider",
-    help: "What runs the code: protocol talks to the backend URL below, e2b runs it on E2B from this process and needs no backend URL.",
-    placeholder: "protocol",
-    isMachineReadable: true,
-  },
-  sandbox_container_idle_ttl_sec: {
-    label: "Hold a sandbox for (seconds)",
-    help: "How long a sandbox stays resumable after a request that asked to hold one. Requests that do not ask are never held. 0 holds nothing at all.",
-    placeholder: "600",
-    isMachineReadable: true,
-  },
-  sandbox_container_max_lifetime_sec: {
-    label: "Longest sandbox life (seconds)",
-    help: "The most a resumed sandbox may live from its first lease, whatever the idle clock says.",
-    placeholder: "3600",
-    isMachineReadable: true,
-  },
   sandbox_url: {
-    label: "Backend URL",
-    help: "Where the protocol provider runs code. While unset, otari_code_execution requests are rejected with 400 unless sandbox_provider names a hosted one.",
+    label: "Sandbox URL",
+    help: "A sandbox you run that speaks the code-execution protocol. While unset, otari_code_execution requests are rejected with 400.",
     placeholder: "http://sandbox:8080",
     isMachineReadable: true,
   },
   sandbox_session_image: {
     label: "Session image",
-    help: "The image a leased session runs, for the protocol provider. Blank lets the backend choose.",
+    help: "The image a sandbox session runs. Blank lets the sandbox choose.",
     placeholder: "mzdotai/otari-sandbox-container:latest",
     isMachineReadable: true,
   },
-  sandbox_purpose_hint: {
-    label: "Purpose hint",
-    help: "Sent to the backend when a tool entry has none of its own.",
-    placeholder: "Run untrusted analysis code",
-  },
   code_execution_executor: {
     label: "Who runs provider code tools",
-    help: "For a request that declares a provider's own code tool (Anthropic code_execution, OpenAI code_interpreter). Auto keeps it with a provider that runs it natively and brings it here otherwise.",
+    help: "For requests that declare a provider's own code tool (Anthropic code_execution, OpenAI code_interpreter).",
     placeholder: "",
     defaultLabel: "Default (auto)",
     optionLabels: {
@@ -133,8 +114,13 @@ const FIELD_COPY: Record<string, FieldCopy & { defaultLabel?: string }> = {
   },
 }
 
-const EXECUTOR_NEEDS_BACKEND =
-  "Takes effect once a Backend URL is set above. Until then provider code tools are always forwarded."
+const TENANT_UNAVAILABLE = "Not available on this deployment."
+
+const EXECUTOR_NEEDS_SANDBOX =
+  "Takes effect once a sandbox is configured. Until then provider code tools are always forwarded."
+
+// Fields only the `protocol` provider reads; E2B ignores both.
+const PROTOCOL_ONLY_KEYS = new Set(["sandbox_url", "sandbox_session_image"])
 
 function copyFor(field: ToolSettingField): FieldCopy & {
   defaultLabel?: string
@@ -163,6 +149,8 @@ interface ManagedToolSpec {
   unavailableHelp?: string
   /** A heading in `docs/tools.md`, when the service's own is not the tool's. */
   docsAnchor?: string
+  /** A line for people, in place of the description the model is given. */
+  help?: string
 }
 
 interface GroupSpec {
@@ -175,6 +163,10 @@ interface GroupSpec {
   isPriced?: boolean
   /** Where a key the backend added but this page has not been told about goes. */
   catchAll?: boolean
+  /** Keys collapsed under an Advanced row at the end of the group. */
+  advanced?: string[]
+  /** Hidden from a reader who does not operate the deployment. */
+  isOperatorOnly?: boolean
 }
 
 interface ServiceSpec {
@@ -185,6 +177,8 @@ interface ServiceSpec {
   /** Gateway-run tools whose status and per-call prices belong to this service. */
   managedTools?: ManagedToolSpec[]
   groups: GroupSpec[]
+  /** Keys the backend reports that this page deliberately leaves to the API. */
+  omit?: string[]
 }
 
 const SERVICES: ServiceSpec[] = [
@@ -244,33 +238,32 @@ const SERVICES: ServiceSpec[] = [
     key: "sandbox",
     label: "Code execution",
     intro:
-      "Give models a sandbox to run generated code in, and decide which workspaces may use it. Changes apply immediately.",
+      "A sandbox where models write and run Python while working on a request.",
     docsAnchor: "code-execution",
     managedTools: [
       {
         toolId: "otari_code_execution",
         pricingKey: "otari:code_execution",
         urlBacked: true,
+        unavailableSummary: "Unavailable · no sandbox",
+        unavailableHelp:
+          "No sandbox is configured, so every call is rejected with 400.",
+        help: "Lets the model run Python to do math, analyze data, and make charts or files.",
       },
     ],
     groups: [
       {
-        title: "Backend",
-        blurb:
-          "The sandbox that runs generated code. Uploaded files a request references are seeded into it, and files the code writes come back through the files API.",
+        title: "Sandbox",
+        blurb: "Where generated code runs, for every workspace.",
         docsAnchor: "code-execution",
-        keys: ["sandbox_url", "sandbox_session_image"],
+        keys: ["sandbox_url"],
+        advanced: ["sandbox_session_image", "code_execution_executor"],
         isPriced: true,
-      },
-      {
-        title: "Behavior",
-        blurb:
-          "Who runs a provider's own code tool, and what the gateway sends the sandbox when a request does not.",
-        docsAnchor: "code-execution-executor",
-        keys: ["code_execution_executor", "sandbox_purpose_hint"],
         catchAll: true,
+        isOperatorOnly: true,
       },
     ],
+    omit: ["sandbox_purpose_hint"],
   },
   {
     key: "guardrails",
@@ -292,6 +285,42 @@ const SERVICES: ServiceSpec[] = [
 ]
 
 const toolsDocs = (anchor?: string) => docsSourceHref("tools.md", anchor)
+
+/** Rows most operators never touch, folded under one row at the end of a group. */
+function AdvancedRows({ children }: { children: ReactNode }) {
+  const [isOpen, setIsOpen] = useState(false)
+  return (
+    <DisclosureRow
+      label="Advanced"
+      isOpen={isOpen}
+      onToggle={() => setIsOpen((open) => !open)}
+    >
+      <div className="flex flex-col divide-y divide-border-subtle">
+        {children}
+      </div>
+    </DisclosureRow>
+  )
+}
+
+/** Which sandbox runs the code. Chosen at startup, so it is stated, not edited. */
+function SandboxProviderRow({ provider }: { provider: "protocol" | "e2b" }) {
+  return (
+    <SettingRow
+      label="Provider"
+      configKey="sandbox_provider"
+      help={
+        provider === "e2b"
+          ? "E2B runs the code. Set with sandbox_provider and E2B_API_KEY at startup."
+          : "A sandbox you run. To use E2B instead, set sandbox_provider: e2b and E2B_API_KEY, then restart."
+      }
+      control={
+        <span className="text-caption text-foreground">
+          {provider === "e2b" ? "E2B" : "Self-hosted"}
+        </span>
+      }
+    />
+  )
+}
 
 /** The frames, at the real row height, so settings arriving does not move the page. */
 function LoadingGroups() {
@@ -332,18 +361,20 @@ function LoadingGroups() {
  */
 export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
   // The Tools group is member-visible for the workspace and organization cards
-  // below. Of the deployment-wide reads above them, only the tool settings now
-  // answer a tenant, without the service endpoints in them (otari-ai#1969), so
-  // that one is asked unconditionally and rendered read-only. The pricing rows
+  // below. Of the deployment-wide reads above them, the tool settings answer a
+  // tenant without the service endpoints in them (otari-ai#1969), and the tool
+  // list is a catalog read any session may make, so both are asked
+  // unconditionally. The pricing rows
   // and the /api/v1/search tools stay operator-only on the server, so they are
   // still gated on the same answer the sidebar uses rather than fired into a 403.
   const { isOperator } = useDeploymentOperator()
   const query = useToolSettings()
-  const tools = useTools(isOperator)
+  const tools = useTools()
   const pricing = usePricing(isOperator)
   const setPricing = useSetPricing()
   const update = useUpdateToolSettings()
   const serves = useSurfaces()
+  const isHosted = useDeployment().deployment_type === "hosted"
 
   // Latest rate per key. /api/v1/pricing is history-shaped (one row per
   // effective_at), and the newest row is the one in force.
@@ -357,7 +388,15 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
 
   const data = query.data
   const disabled = !data
-  const byKey = new Map((data?.fields ?? []).map((field) => [field.key, field]))
+  const sandboxProvider = data?.sandbox_provider ?? undefined
+  const byKey = new Map(
+    (data?.fields ?? [])
+      .filter(
+        (field) =>
+          sandboxProvider !== "e2b" || !PROTOCOL_ONLY_KEYS.has(field.key),
+      )
+      .map((field) => [field.key, field]),
+  )
   const shown = SERVICES.filter((service) => !only || service.key === only)
   const narrowed = only ? shown[0] : undefined
 
@@ -369,11 +408,14 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
       >
         {/* Two readings: an operator configures the service endpoints, and a
             caller who does not is told what the deployment's tools do to their
-            requests instead of how to configure a backend they cannot reach. */}
-        {isOperator
-          ? (narrowed?.intro ??
-            "Configure the built-in tool and guardrail service endpoints without a restart. Changes apply immediately and persist.")
-          : "How this deployment's built-in tools behave on your requests, what your workspace may use of them, and what your organization mandates."}
+            requests instead of how to configure a backend they cannot reach.
+            Code execution's intro says only what the tool does, so it reads
+            the same to both. */}
+        {narrowed && (isOperator || narrowed.key === "sandbox")
+          ? narrowed.intro
+          : isOperator
+            ? "Configure the built-in tool and guardrail service endpoints without a restart. Changes apply immediately and persist."
+            : "How this deployment's built-in tools behave on your requests, what your workspace may use of them, and what your organization mandates."}
       </PageIntro>
 
       <ErrorBanner error={query.error} />
@@ -392,42 +434,125 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
         const urlField = (data?.fields ?? []).find(
           (field) => field.service === service.key && field.type === "url",
         )
-        const known = new Set(service.groups.flatMap((group) => group.keys))
+        const known = new Set([
+          ...service.groups.flatMap((group) => [
+            ...group.keys,
+            ...(group.advanced ?? []),
+          ]),
+          ...(service.omit ?? []),
+        ])
         // A key the backend reports for this service that no group lists still
         // renders, so a backend addition is visible without a frontend change.
-        const unlisted = (data?.fields ?? []).filter(
+        const unlisted = [...byKey.values()].filter(
           (field) => field.service === service.key && !known.has(field.key),
         )
+        const fieldsFor = (keys: string[]) =>
+          keys
+            .map((key) => byKey.get(key))
+            .filter((field): field is ToolSettingField => Boolean(field))
+        const renderField = (field: ToolSettingField) => {
+          const copy = copyFor(field)
+          return (
+            <ToolSettingRow
+              key={field.key}
+              field={field}
+              copy={copy}
+              defaultLabel={copy.defaultLabel}
+              commit={(key, value) => update.mutateAsync(oneField(key, value))}
+              disabled={disabled}
+              readOnly={!isOperator}
+              // The executor only decides anything once there is a sandbox to
+              // bring code to; without one every provider declaration is
+              // forwarded whatever this says.
+              note={
+                field.key === "code_execution_executor" &&
+                sandboxProvider !== "e2b" &&
+                !urlField?.value
+                  ? EXECUTOR_NEEDS_SANDBOX
+                  : undefined
+              }
+            />
+          )
+        }
+
+        const statusRow = ({
+          spec,
+          tool,
+          asRow = false,
+        }: (typeof managed)[number] & { asRow?: boolean }) => {
+          const Status = asRow ? ToolStatusRow : ToolStatusGroup
+          return (
+            <Status
+              key={tool.id}
+              tool={tool}
+              // A hosted control plane never runs a tool itself, so its own
+              // config says nothing about whether the data plane can.
+              showsAvailability={!isHosted}
+              docsHref={toolsDocs(spec.docsAnchor ?? service.docsAnchor)}
+              help={spec.help}
+              urlFieldKey={
+                spec.urlBacked && isOperator ? urlField?.key : undefined
+              }
+              // A tenant cannot set up a backend, so they are told the tool
+              // is off here rather than how to turn it on.
+              unavailableSummary={
+                isOperator ? spec.unavailableSummary : "Unavailable"
+              }
+              unavailableHelp={
+                isOperator ? spec.unavailableHelp : TENANT_UNAVAILABLE
+              }
+            />
+          )
+        }
 
         return (
           <Fragment key={service.key}>
             {/* The question an operator arrives with, above the settings that
                 answer it: can this deployment run the tool at all. */}
-            {managed.map(({ spec, tool }) => (
-              <ToolStatusGroup
-                key={tool.id}
-                tool={tool}
-                docsHref={toolsDocs(spec.docsAnchor ?? service.docsAnchor)}
-                urlFieldKey={spec.urlBacked ? urlField?.key : undefined}
-                unavailableSummary={spec.unavailableSummary}
-                unavailableHelp={spec.unavailableHelp}
+            {service.key === "sandbox" ? null : managed.map(statusRow)}
+
+            {/* The tool and the switch most readers came for, as one card
+                above the one-time setup. */}
+            {service.key === "sandbox" ? (
+              <WorkspaceCodeExecutionPolicyCard
+                isHosted={isHosted}
+                leading={
+                  managed.length > 0
+                    ? managed.map((entry) =>
+                        statusRow({ ...entry, asRow: true }),
+                      )
+                    : undefined
+                }
               />
-            ))}
+            ) : null}
 
             {service.groups.map((group) => {
+              if (group.isOperatorOnly && !isOperator) return null
+              // A hosted control plane serves no inference, so its own sandbox
+              // settings run nothing: the platform's sandbox does.
+              if (service.key === "sandbox" && isHosted) return null
               const fields = [
-                ...group.keys
-                  .map((key) => byKey.get(key))
-                  .filter((field): field is ToolSettingField => Boolean(field)),
+                ...fieldsFor(group.keys),
                 ...(group.catchAll ? unlisted : []),
               ]
+              const advanced = fieldsFor(group.advanced ?? [])
               // Operator-only inside a group a member also sees: the rate
               // comes from /api/v1/pricing, whose read is still operator-gated, so
               // a member would get an editable "unpriced" row that can only
               // fail on save.
               const pricedTools =
                 group.isPriced && isOperator ? (service.managedTools ?? []) : []
-              if (fields.length === 0 && pricedTools.length === 0) return null
+              const providerRow =
+                service.key === "sandbox" && sandboxProvider ? (
+                  <SandboxProviderRow provider={sandboxProvider} />
+                ) : null
+              if (
+                fields.length === 0 &&
+                advanced.length === 0 &&
+                pricedTools.length === 0 &&
+                !providerRow
+              )
+                return null
               return (
                 <SettingsGroup
                   isBounded
@@ -441,31 +566,8 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                   description={group.blurb}
                   docsHref={toolsDocs(group.docsAnchor)}
                 >
-                  {fields.map((field) => {
-                    const copy = copyFor(field)
-                    return (
-                      <ToolSettingRow
-                        key={field.key}
-                        field={field}
-                        copy={copy}
-                        defaultLabel={copy.defaultLabel}
-                        commit={(key, value) =>
-                          update.mutateAsync(oneField(key, value))
-                        }
-                        disabled={disabled}
-                        readOnly={!isOperator}
-                        // The executor only decides anything once there is a
-                        // sandbox to bring code to; without one every provider
-                        // declaration is forwarded whatever this says.
-                        note={
-                          field.key === "code_execution_executor" &&
-                          !urlField?.value
-                            ? EXECUTOR_NEEDS_BACKEND
-                            : undefined
-                        }
-                      />
-                    )
-                  })}
+                  {providerRow}
+                  {fields.map(renderField)}
                   {pricedTools.map(({ pricingKey }) => (
                     <ToolPriceRow
                       key={pricingKey}
@@ -492,6 +594,9 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                       }
                     />
                   ))}
+                  {advanced.length > 0 ? (
+                    <AdvancedRows>{advanced.map(renderField)}</AdvancedRows>
+                  ) : null}
                 </SettingsGroup>
               )
             })}
@@ -511,11 +616,6 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                   docsHref={toolsDocs("per-workspace-search-policy")}
                 />
               </>
-            ) : null}
-            {service.key === "sandbox" ? (
-              <WorkspaceCodeExecutionPolicyCard
-                docsHref={toolsDocs("per-workspace-code-policy")}
-              />
             ) : null}
             {service.key === "guardrails" &&
             serves("organization_guardrails") ? (
