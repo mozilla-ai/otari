@@ -16,7 +16,7 @@ before touching a row, and every route stays thin. Workspace resolution and
 the workspace-management check both go through `services.tenancy.authorization`
 directly (`resolve_visible_workspace`, `require_workspace_management_access`)
 rather than through `WorkspaceService`, the same shared entry point
-`WorkspaceBudgetDefaultService` uses and `WorkspaceService` itself delegates
+`WorkspaceAccess` wraps and `WorkspaceService` itself delegates
 to internally. Reading is open to any active member; every mutation on the
 organization surface needs an organization owner/admin, and every mutation on
 a workspace's override or model restrictions needs an organization

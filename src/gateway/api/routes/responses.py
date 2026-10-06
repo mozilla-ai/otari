@@ -39,6 +39,7 @@ from gateway.api.routes._pipeline import (
     prepare_gateway_tools,
     provider_error_headers,
     raise_all_streaming_attempts_failed,
+    refusal_code,
     release_reservation,
     resolve_dispatch_provider,
     resolve_request_context,
@@ -61,14 +62,21 @@ from gateway.services.files import StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_responses import (
-    CODE_INTERPRETER_CALL_ID_PREFIX,
     MAX_TOOL_ITERATIONS_CAP,
     responses_tool_loop,
     responses_tool_loop_stream,
 )
+from gateway.services.provider_kwargs import apply_endpoint_defaults
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
-from gateway.services.tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, Dialect, ToolUseBudget
-from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat
+from gateway.services.tools import (
+    CODE_EXECUTION_HEADER,
+    CODE_INTERPRETER_CALL_ID_PREFIX,
+    WEB_SEARCH_CALL_ID_PREFIX,
+    WEB_SEARCH_HEADER,
+    Dialect,
+    ToolUseBudget,
+)
+from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
 
@@ -186,26 +194,18 @@ def _split_codex_input_metadata(value: Any) -> tuple[Any, bool]:
     return value, False
 
 
-# Output item types the gateway mints itself to describe work it did server-side.
-# They are stripped back off an inbound ``input`` before the provider sees it: the
+# Output items the gateway mints itself to describe work it did server-side are
+# stripped back off an inbound ``input`` before the provider sees it: the
 # documented way to continue a Responses conversation is to append the previous
 # ``response.output`` to the next ``input``, and the gateway has no
 # ``previous_response_id`` support to do that server-side, so an echoed turn would
 # otherwise ship a ``web_search_call`` to a provider that never declared a
-# web-search tool. A ``code_interpreter_call`` is recognized only when its id
-# carries the gateway's own prefix, because OpenAI's own items are legitimately
-# echoed to OpenAI and must survive.
-_GATEWAY_MINTED_ITEM_TYPES = frozenset({"web_search_call"})
-
-
-def _is_gateway_minted_item(item: Any) -> bool:
-    return isinstance(item, dict) and item.get("type") in _GATEWAY_MINTED_ITEM_TYPES
-
-
-def _is_gateway_minted_code_interpreter_call(item: Any) -> bool:
-    if not isinstance(item, dict) or item.get("type") != "code_interpreter_call":
+# web-search tool. Each is recognized only by its id's gateway prefix, because
+# OpenAI's own items are legitimately echoed to OpenAI and must survive.
+def _is_gateway_minted(item: Any, item_type: str, id_prefix: str) -> bool:
+    if not isinstance(item, dict) or item.get("type") != item_type:
         return False
-    return str(item.get("id") or "").startswith(CODE_INTERPRETER_CALL_ID_PREFIX)
+    return str(item.get("id") or "").startswith(id_prefix)
 
 
 def _code_interpreter_call_as_message(item: dict[str, Any]) -> dict[str, Any]:
@@ -231,15 +231,10 @@ def _code_interpreter_call_as_message(item: dict[str, Any]) -> dict[str, Any]:
 def _strip_gateway_minted_items(input_data: Any) -> Any:
     """Take gateway-minted server-tool items back off an inbound ``input``.
 
-    Only touches a list input, and only the items the gateway itself emits. A
-    ``web_search_call`` is dropped: a caller who genuinely used a provider-native
-    web search still had that run upstream, so its items arrive on a response the
-    gateway passed through untouched; those are indistinguishable here and are
-    dropped too. That is the conservative direction: dropping a descriptive item
-    loses nothing the model needs (the search results themselves are in the
-    transcript), while forwarding one risks a 400 from the provider. A gateway-run
-    interpreter call is told apart by its id prefix, so a provider's own survives,
-    and is folded into a message rather than dropped
+    Only touches a list input, and only the items the gateway itself emits, told
+    apart by their id prefix so a provider's own survives. A gateway-run search is
+    dropped, which loses nothing the model needs because its results are already in
+    the transcript. A gateway-run interpreter call is folded into a message instead
     (:func:`_code_interpreter_call_as_message`).
     """
     if not isinstance(input_data, list):
@@ -247,10 +242,10 @@ def _strip_gateway_minted_items(input_data: Any) -> Any:
     kept: list[Any] = []
     touched = 0
     for item in input_data:
-        if _is_gateway_minted_code_interpreter_call(item):
+        if _is_gateway_minted(item, "code_interpreter_call", CODE_INTERPRETER_CALL_ID_PREFIX):
             kept.append(_code_interpreter_call_as_message(item))
             touched += 1
-        elif _is_gateway_minted_item(item):
+        elif _is_gateway_minted(item, "web_search_call", WEB_SEARCH_CALL_ID_PREFIX):
             touched += 1
         else:
             kept.append(item)
@@ -342,7 +337,7 @@ class _ResponsesAdapter:
         )
 
     def stream_error_payload(self, exc: BaseException) -> str:
-        return self.stream_format.error_payload
+        return openai_error_event(self.stream_format, refusal_code(exc))
 
     def format_chunk(self, chunk: ResponseStreamEvent) -> str:
         return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True)}\n\n"
@@ -749,7 +744,9 @@ async def create_response(
                 raise_all_streaming_attempts_failed(_ADAPTER, exc, route)
 
         # Standalone: single attempt streaming.
-        call_kwargs = {**provider_kwargs, **_with_codex_extra_body(base_request_fields, provider), "model": model}
+        call_kwargs = apply_endpoint_defaults(
+            {**provider_kwargs, **_with_codex_extra_body(base_request_fields, provider), "model": model}, resolved
+        )
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
             ctx=ctx,
@@ -782,7 +779,9 @@ async def create_response(
         return result.model_dump(exclude_none=True)
 
     # Standalone non-stream path
-    call_kwargs = {**provider_kwargs, **_with_codex_extra_body(base_request_fields, provider), "model": model}
+    call_kwargs = apply_endpoint_defaults(
+        {**provider_kwargs, **_with_codex_extra_body(base_request_fields, provider), "model": model}, resolved
+    )
     result = await run_standalone_non_stream(
         adapter=_ADAPTER,
         ctx=ctx,

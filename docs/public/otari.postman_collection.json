@@ -6505,6 +6505,110 @@
           }
         },
         {
+          "name": "List Playground Files",
+          "request": {
+            "description": "The caller's own files in one workspace, newest first, in OpenAI's list shape.\n\nEvery file the caller owns there is listed, including one uploaded with an\nAPI key of theirs in the same workspace, because a message here can attach it.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "files"
+              ],
+              "query": [
+                {
+                  "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "after",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/files?workspace_id=&limit=&after="
+            }
+          }
+        },
+        {
+          "name": "Upload Playground File",
+          "request": {
+            "description": "Upload a file for the caller, in a workspace they belong to.\n\nThe row is owned by the same principal a Playground completion runs as, so a\n``file_id`` returned here resolves in the caller's own messages and in nobody\nelse's. ``POST /api/v1/files`` takes an API key, which a dashboard session\ndoes not hold; this is the session's way in.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "files"
+              ],
+              "query": [
+                {
+                  "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/files?workspace_id="
+            }
+          }
+        },
+        {
+          "name": "Delete Playground File",
+          "request": {
+            "description": "Delete one of the caller's files. Another identity's answers 404, as a nonexistent one does.\n\nA saved transcript that attached the file keeps its record of the\nattachment, but the file is gone, so sending that turn again does not send\nits contents.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "files",
+                ":file_id"
+              ],
+              "query": [
+                {
+                  "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/files/:file_id?workspace_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "file_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Read Playground Tools",
           "request": {
             "description": "The gateway-run tools the caller's workspace may attach to a message.\n\nOne read rather than the three the dashboard would otherwise make (the\ndeployment's tool settings, the workspace's web-search row, its\ncode-execution row), because the answer is a composition of them in a fixed\ndirection: the deployment decides whether a tool exists and the workspace may\nonly narrow that. Composing it here is what keeps the menu from offering\nsomething the request path would refuse.",
@@ -7182,6 +7286,184 @@
     {
       "item": [
         {
+          "name": "List Provider Endpoints",
+          "request": {
+            "description": "List owned provider endpoints, narrowed by owner when given. Keys are never returned.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "provider-endpoints"
+              ],
+              "query": [
+                {
+                  "description": "Only endpoints this workspace owns.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "Only endpoints this user owns.",
+                  "disabled": true,
+                  "key": "user_id",
+                  "value": ""
+                },
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/provider-endpoints?workspace_id=&user_id=&skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Create Provider Endpoint",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"name\": \"string\",\n  \"provider\": \"string\",\n  \"api_base\": \"string\"\n}"
+            },
+            "description": "Register an endpoint for a workspace, or for one user in it.\n\nIt is reachable as ``<name>:<model>`` by its owner as soon as this returns on\nthis worker, and on the others within 30 seconds.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "provider-endpoints"
+              ],
+              "raw": "{{baseUrl}}/api/v1/provider-endpoints"
+            }
+          }
+        },
+        {
+          "name": "Get Provider Endpoint",
+          "request": {
+            "description": "Read one endpoint. The key is never returned, only its last four characters.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "provider-endpoints",
+                ":endpoint_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/provider-endpoints/:endpoint_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "endpoint_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Provider Endpoint",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"default_params\": {},\n  \"name\": \"string\",\n  \"provider\": \"string\"\n}"
+            },
+            "description": "Change an endpoint's name, provider, base URL, key or default fields. The owner cannot change.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "provider-endpoints",
+                ":endpoint_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/provider-endpoints/:endpoint_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "endpoint_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Provider Endpoint",
+          "request": {
+            "description": "Delete an endpoint. Its name stops resolving at once on this worker, within 30 seconds elsewhere.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "provider-endpoints",
+                ":endpoint_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/provider-endpoints/:endpoint_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "endpoint_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "provider-endpoints"
+    },
+    {
+      "item": [
+        {
           "name": "List Rate Limit Rules",
           "request": {
             "description": "List every rule in effect: the config.yml rules, then the ones stored here.",
@@ -7572,7 +7854,7 @@
               },
               "raw": "{\n  \"max_results\": 5,\n  \"query\": \"otari llm gateway\"\n}"
             },
-            "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
+            "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use with the key's end-user budget, and is billed and\n  rate limited as that end user, as on chat completions.",
             "header": [
               {
                 "key": "Content-Type",
@@ -7605,7 +7887,7 @@
               },
               "raw": "{\n  \"max_results\": 5,\n  \"query\": \"otari llm gateway\"\n}"
             },
-            "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /api/v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
+            "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /api/v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use with the key's end-user budget, and is billed and\n  rate limited as that end user, as on chat completions.",
             "header": [
               {
                 "key": "Content-Type",
@@ -8794,7 +9076,7 @@
         {
           "name": "List Users",
           "request": {
-            "description": "List the users the caller's organization can name, with pagination.\n\n``users`` is deployment-global and has no organization column, so which of\nthem this organization can name is derived: a key, usage, or a roster row\nputs one in reach, and one reached from nowhere at all (the shared\n``default`` owner, or a user just created) is shared rather than hidden.\nSee ``repositories.users_repository.in_organization``.",
+            "description": "List the users the caller's organization can name, with pagination.\n\n``users`` is deployment-global and has no organization column, so which of\nthem this organization can name is derived: a key, usage, or a roster row\nputs one in reach, and one reached from nowhere at all (the shared\n``default`` owner, or a user just created) is shared rather than hidden.\nSee ``repositories.users_repository.in_organization``.\n\n``parent_user_id`` with ``external_id`` finds the end user a service key\ncreated for a ``user`` value, which is how a caller maps its own ids to\nOtari's. ``include_total`` adds an ``Otari-Total-Count`` header counting\nevery match, so ``limit=1`` with it counts a service key's end users.",
             "header": [],
             "method": "GET",
             "url": {
@@ -8818,9 +9100,33 @@
                   "disabled": true,
                   "key": "limit",
                   "value": ""
+                },
+                {
+                  "description": "Only the end users of this owner: the user a service key belongs to.",
+                  "disabled": true,
+                  "key": "parent_user_id",
+                  "value": ""
+                },
+                {
+                  "description": "Only the end user a service key names with this `user` value.",
+                  "disabled": true,
+                  "key": "external_id",
+                  "value": ""
+                },
+                {
+                  "description": "Only blocked users (true) or only unblocked ones (false).",
+                  "disabled": true,
+                  "key": "blocked",
+                  "value": ""
+                },
+                {
+                  "description": "Also count every matching user, in the Otari-Total-Count response header.",
+                  "disabled": true,
+                  "key": "include_total",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/users?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/users?skip=&limit=&parent_user_id=&external_id=&blocked=&include_total="
             }
           }
         },

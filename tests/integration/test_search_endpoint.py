@@ -6,6 +6,7 @@ row that makes a search visible in the Activity and Usage views.
 """
 
 import logging
+from collections.abc import Generator
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -13,11 +14,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.api.deps import reset_config
-from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig, RateLimitRule
 from gateway.core.database import reset_db
 from gateway.inflight import InFlightRegistry
 from gateway.main import create_app
 from gateway.services.search_backend import SearchHit, SearchOutcome, SearchProviderError
+
+from .conftest import build_test_client
 
 SEARCH_USAGE_LABEL = "/v1/search"
 
@@ -510,3 +513,93 @@ def test_search_is_tracked_while_its_provider_call_runs(client: TestClient, api_
     assert entry.policy_name is None
     # And it is gone afterwards, so the panel cannot accumulate a ghost.
     assert len(registry) == 0
+
+
+def test_a_service_key_bills_search_to_the_end_user_it_names(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """``user`` on a service key's search names an end user, created with the key's end-user budget."""
+    budget = client.post(
+        f"{API_ROOT}/budgets", json={"request_limit": 1, "budget_duration_sec": 86400}, headers=master_key_header
+    ).json()
+    key = client.post(
+        f"{API_ROOT}/keys",
+        json={
+            "key_name": "mlpa-search",
+            "user_id": "mlpa-search",
+            "is_service_key": True,
+            "end_user_budget_id": budget["budget_id"],
+        },
+        headers=master_key_header,
+    ).json()
+    headers = {API_KEY_HEADER: f"Bearer {key['key']}"}
+    body = {**SEARCH_PAYLOAD, "user": "fxa-123:search"}
+
+    with _mock_search():
+        first = client.post(f"{API_ROOT}/search/exa-search", json=body, headers=headers)
+        second = client.post(f"{API_ROOT}/search/exa-search", json=body, headers=headers)
+        other = client.post(
+            f"{API_ROOT}/search/exa-search", json={**SEARCH_PAYLOAD, "user": "fxa-456:search"}, headers=headers
+        )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 403, second.text
+    assert other.status_code == 200, other.text
+    users = client.get(f"{API_ROOT}/users", params={"parent_user_id": "mlpa-search"}, headers=master_key_header).json()
+    end_user = next(user for user in users if user["external_id"] == "fxa-123:search")
+    assert end_user["budget_id"] == budget["budget_id"]
+    assert len(_search_rows(client, master_key_header, end_user["user_id"])) >= 1
+
+
+def _rules_client(test_config: GatewayConfig, rules: list[dict[str, Any]]) -> Generator[TestClient]:
+    config = test_config.model_copy(update={"rate_limits": [RateLimitRule(**rule) for rule in rules]})
+    yield from build_test_client(config)
+
+
+def _keyed(client: TestClient, master_key_header: dict[str, str], user_id: str) -> dict[str, str]:
+    assert client.post(f"{API_ROOT}/users", json={"user_id": user_id}, headers=master_key_header).status_code == 200
+    key = client.post(f"{API_ROOT}/keys", json={"key_name": user_id, "user_id": user_id}, headers=master_key_header)
+    assert key.status_code == 200, key.text
+    return {API_KEY_HEADER: f"Bearer {key.json()['key']}"}
+
+
+@pytest.fixture
+def per_key_client(test_config: GatewayConfig) -> Generator[TestClient]:
+    yield from _rules_client(test_config, [{"name": "keys", "per": "key", "rpm": 1}])
+
+
+@pytest.fixture
+def per_tool_client(test_config: GatewayConfig) -> Generator[TestClient]:
+    yield from _rules_client(test_config, [{"name": "exa-cap", "per": "model", "models": ["exa:exa-search"], "rpm": 1}])
+
+
+def test_a_search_refused_before_the_reservation_uses_no_rate_limit_slot(
+    per_key_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    headers = _keyed(per_key_client, master_key_header, "rules-search")
+
+    with _mock_search():
+        unknown = per_key_client.post(f"{API_ROOT}/search/no-such-tool", json=SEARCH_PAYLOAD, headers=headers)
+        first = per_key_client.post(f"{API_ROOT}/search/exa-search", json=SEARCH_PAYLOAD, headers=headers)
+        second = per_key_client.post(f"{API_ROOT}/search/exa-search", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert unknown.status_code == 400, unknown.text
+    assert first.status_code == 200, first.text
+    assert second.status_code == 429, second.text
+
+
+def test_a_per_model_rule_limits_the_search_tool_it_names(
+    per_tool_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    headers = _keyed(per_tool_client, master_key_header, "rules-tool")
+
+    with _mock_search():
+        first = per_tool_client.post(f"{API_ROOT}/search/exa-search", json=SEARCH_PAYLOAD, headers=headers)
+        second = per_tool_client.post(f"{API_ROOT}/search/exa-search", json=SEARCH_PAYLOAD, headers=headers)
+        other = per_tool_client.post(f"{API_ROOT}/search/exa-fast", json=SEARCH_PAYLOAD, headers=headers)
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 429, second.text
+    assert "exa-cap" in second.json()["detail"]
+    assert other.status_code == 200, other.text

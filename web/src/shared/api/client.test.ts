@@ -69,6 +69,21 @@ describe("the request policy", () => {
 })
 
 describe("apiFetch", () => {
+  it("leaves a form body's content type to the browser", async () => {
+    // The browser writes the multipart boundary into the header itself, so a
+    // JSON content type set here would make the upload unreadable.
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ ok: true }))
+    const body = new FormData()
+    body.append("file", new Blob(["x"]), "a.txt")
+
+    await apiFetch("/playground/files", { method: "POST", body })
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit
+    expect(new Headers(init.headers).has("Content-Type")).toBe(false)
+  })
+
   it("bounds a request that never settles", async () => {
     // A hung request holds one of the browser's ~6 sockets per origin. Enough of
     // them and everything an operator clicks afterwards queues behind them, which

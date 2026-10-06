@@ -9,9 +9,8 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
+from gateway.api.deps import BudgetServiceDep, CurrentIdentity, verify_master_key
 from gateway.api.routes.organizations import Message
 from gateway.schemas.budgets import (
     WorkspaceMemberBudgetPoliciesPublic,
@@ -19,7 +18,6 @@ from gateway.schemas.budgets import (
     WorkspaceMemberBudgetPolicyPublic,
     WorkspaceMemberBudgetPolicyUpdate,
 )
-from gateway.services.budgets import WorkspaceBudgetDefaultService
 
 # Auth is declared on the router, matching `routes/workspaces.py`: every
 # handler here needs the master key, and a future one that forgot the
@@ -31,31 +29,21 @@ router = APIRouter(
 )
 
 
-def get_workspace_budget_default_service(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceBudgetDefaultService:
-    """Build the service on the request's session."""
-    return WorkspaceBudgetDefaultService(db)
-
-
-WorkspaceBudgetDefaultServiceDep = Annotated[
-    WorkspaceBudgetDefaultService, Depends(get_workspace_budget_default_service)
-]
-
-
 @router.get("")
 async def list_workspace_budget_defaults(
-    service: WorkspaceBudgetDefaultServiceDep,
+    service: BudgetServiceDep,
     current_identity: CurrentIdentity,
     workspace_id: uuid.UUID,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
 ) -> WorkspaceMemberBudgetPoliciesPublic:
     """List the budget defaults attached to a workspace. Any member may read it."""
-    return await service.list_defaults(user=current_identity, workspace_id=workspace_id, skip=skip, limit=limit)
+    return await service.list_member_policies(user=current_identity, workspace_id=workspace_id, skip=skip, limit=limit)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_workspace_budget_default(
-    service: WorkspaceBudgetDefaultServiceDep,
+    service: BudgetServiceDep,
     current_identity: CurrentIdentity,
     workspace_id: uuid.UUID,
     body: WorkspaceMemberBudgetPolicyCreate,
@@ -66,12 +54,12 @@ async def create_workspace_budget_default(
     existing active member of the workspace; a member who joins afterwards is
     materialized when they join.
     """
-    return await service.create_default(user=current_identity, workspace_id=workspace_id, request=body)
+    return await service.create_member_policy(user=current_identity, workspace_id=workspace_id, request=body)
 
 
 @router.patch("/{default_id}")
 async def update_workspace_budget_default(
-    service: WorkspaceBudgetDefaultServiceDep,
+    service: BudgetServiceDep,
     current_identity: CurrentIdentity,
     workspace_id: uuid.UUID,
     default_id: str,
@@ -83,17 +71,17 @@ async def update_workspace_budget_default(
     their existing ceiling; only a member materialized afterwards sees the
     new one.
     """
-    return await service.update_default(
+    return await service.update_member_policy(
         user=current_identity,
         workspace_id=workspace_id,
-        default_id=default_id,
+        policy_id=default_id,
         request=body,
     )
 
 
 @router.delete("/{default_id}")
 async def delete_workspace_budget_default(
-    service: WorkspaceBudgetDefaultServiceDep,
+    service: BudgetServiceDep,
     current_identity: CurrentIdentity,
     workspace_id: uuid.UUID,
     default_id: str,
@@ -103,5 +91,5 @@ async def delete_workspace_budget_default(
     The per-member ``scoped_budgets`` rows it already materialized are kept;
     a member joining afterwards no longer gets one from it.
     """
-    await service.delete_default(user=current_identity, workspace_id=workspace_id, default_id=default_id)
+    await service.delete_member_policy(user=current_identity, workspace_id=workspace_id, policy_id=default_id)
     return Message(message="Workspace budget default deleted")

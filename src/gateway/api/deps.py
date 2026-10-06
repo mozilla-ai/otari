@@ -38,11 +38,16 @@ from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.files import FileRepositories
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
-from gateway.repositories.providers import OrgProviderKeyModelRepository
+from gateway.repositories.providers import OrgProviderKeyModelRepository, ProviderEndpointRepository
 from gateway.repositories.rate_limits import RateLimitRuleRepository
-from gateway.repositories.tenancy import OrganizationGuardrailDefinitionRepository, OrgProviderKeyRepository
+from gateway.repositories.tenancy import (
+    OrganizationGuardrailDefinitionRepository,
+    OrgProviderKeyRepository,
+    WorkspaceRepository,
+)
+from gateway.repositories.users_repository import get_active_user
 from gateway.services.api_keys import ApiKeyService
-from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultService
+from gateway.services.budgets import BudgetMembershipListener, BudgetService
 from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
@@ -52,11 +57,13 @@ from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.organization_pricing_service import OrganizationPricingService
 from gateway.services.overview.overview_service import OverviewService
-from gateway.services.providers import OrgProviderModelService
+from gateway.services.providers import OrgProviderModelService, ProviderEndpointService, refresh_provider_endpoint_cache
 from gateway.services.rate_limits import RateLimitService
 from gateway.services.routing import clear_router_backend_cache
 from gateway.services.tenancy import OrganizationService, organization_guardrail_runner
+from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
+from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, refresh_org_provider_cache
 from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
@@ -783,10 +790,26 @@ def get_unit_of_work_if_needed(
     return None if db is None else get_unit_of_work(db)
 
 
+UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
+
+
+def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
+    """Return the listener that keeps members' budget ceilings in step with their memberships.
+
+    It writes through the request's Unit of Work, so a service that changes membership must be built on the same one.
+    """
+    return BudgetMembershipListener(BudgetRepositories.on(uow))
+
+
+MembershipListenerDep = Annotated[MembershipListener, Depends(get_membership_listener)]
+
+
 async def get_current_identity(
     db: Annotated[AsyncSession, Depends(get_db)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
     _master_key: Annotated[str | None, Depends(verify_master_key)],
+    uow: UnitOfWorkDep,
+    membership_listener: MembershipListenerDep,
 ) -> TenancyUser:
     """Resolve the tenancy identity acting on this request.
 
@@ -809,7 +832,7 @@ async def get_current_identity(
     """
     if session_identity is not None:
         return session_identity
-    return await ensure_bootstrap_identity(db, membership_listener=WorkspaceBudgetDefaultService(db))
+    return await ensure_bootstrap_identity(db, uow=uow, membership_listener=membership_listener)
 
 
 CurrentIdentity = Annotated[TenancyUser, Depends(get_current_identity)]
@@ -913,10 +936,11 @@ def get_growth_signal_port(
 # nobody does.
 def get_identity_provider_port(
     db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
     container: ContainerDep,
 ) -> IdentityProviderPort:
-    """Resolve the identity adapter this build bound at startup."""
-    return container.resolve(IdentityProviderPort, db)
+    """Resolve the identity adapter this build bound at startup, on the request's session and Unit of Work."""
+    return container.resolve(IdentityProviderPort, db, uow=uow)
 
 
 def get_mcp_server_port(db: PortSessionDep, container: ContainerDep) -> McpServerPort:
@@ -957,7 +981,11 @@ def get_web_search_policy_port(db: PortSessionDep, container: ContainerDep) -> W
     return container.resolve(WebSearchPolicyPort, db)
 
 
-def get_overview_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OverviewService:
+def get_overview_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
+    membership_listener: MembershipListenerDep,
+) -> OverviewService:
     """Build the dashboard overview's summary service on the request's session.
 
     Assembled here rather than in the route, because a route does not name a
@@ -969,7 +997,7 @@ def get_overview_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Overvi
         DeploymentUserService(db),
         # The listener is for writes; this service only reads, and the same
         # pairing is what `routes/workspaces.py` builds.
-        WorkspaceService(db, membership_listener=WorkspaceBudgetDefaultService(db)),
+        WorkspaceService(db, uow=uow, membership_listener=membership_listener),
     )
 
 
@@ -992,11 +1020,13 @@ def get_budget_service(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> BudgetService:
     """Build the request's budget service on the request's Unit of Work."""
+    organizations = OrganizationService(db, membership_listener=None)
     return BudgetService(
         uow,
         BudgetRepositories.on(uow),
-        OrganizationService(db, membership_listener=None),
+        organizations,
         ApiKeyService(ApiKeyRepository(uow)),
+        WorkspaceAccess(db, organizations),
     )
 
 
@@ -1073,6 +1103,34 @@ def get_org_provider_model_service(
 
 
 OrgProviderModelServiceDep = Annotated[OrgProviderModelService, Depends(get_org_provider_model_service)]
+
+
+def get_provider_endpoint_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> ProviderEndpointService:
+    """Build the owned provider endpoint service on the request's session and unit of work."""
+
+    async def resolve_workspace(workspace_id: uuid.UUID | None) -> uuid.UUID | None:
+        if workspace_id is None:
+            return await default_workspace_id(db)
+        return workspace_id if await WorkspaceRepository(db).get(workspace_id) is not None else None
+
+    async def user_is_active(user_id: str) -> bool:
+        return await get_active_user(db, user_id) is not None
+
+    return ProviderEndpointService(
+        uow,
+        config=config,
+        endpoints=ProviderEndpointRepository(uow),
+        resolve_workspace=resolve_workspace,
+        user_is_active=user_is_active,
+        refresh_cache=lambda: refresh_provider_endpoint_cache(uow),
+    )
+
+
+ProviderEndpointServiceDep = Annotated[ProviderEndpointService, Depends(get_provider_endpoint_service)]
 
 
 def get_rate_limit_service(

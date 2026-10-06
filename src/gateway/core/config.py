@@ -379,8 +379,18 @@ class RateLimitRule(BaseModel):
         default=None,
         ge=1,
         description=(
-            "Tokens per minute. A request is admitted on its estimate (prompt plus max output, or "
-            "budget_estimate_default_output_tokens) and charged what it used once it completes."
+            "Tokens per minute, counted on what each request used; see tpm_admission for how a request is admitted."
+        ),
+    )
+    tpm_admission: Literal["used", "estimate"] = Field(
+        default="used",
+        description=(
+            "How a tpm limit admits a request. 'used' (the default) admits a request while the "
+            "minute's tokens are under the limit and counts what it used once it completes, as "
+            "LiteLLM does. 'estimate' holds the request's estimate (prompt plus max output, or "
+            "budget_estimate_default_output_tokens) while it runs and refuses it when that does not "
+            "fit, which is how providers count their own quotas: use it for a limit meant to stay "
+            "under one."
         ),
     )
     max_concurrent: int | None = Field(default=None, ge=1, description="Requests in flight at once.")
@@ -883,13 +893,14 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
     open_signup: Annotated[bool, OMITTED] = Field(
         default=False,
         description=(
-            "Whether POST /api/v1/auth/signup may create an identity from nothing, each with an "
-            "organization and workspace of its own. False (the default) keeps signup to claiming "
-            "an address an admin already put on the roster, which is what a single-tenant "
-            "deployment wants: anyone who could reach the dashboard could otherwise register on "
-            "it. True is the multi-tenant posture a control plane runs, and it needs mail "
-            "configured, since a self-serve account is unusable until its address is verified. "
-            "Turning it on puts tenant creation on an unauthenticated route: the per-IP throttle "
+            "Whether an unknown address may create an account with its own organization and "
+            "workspace. It applies to POST /api/v1/auth/signup and to a first OAuth sign-in. "
+            "False (the default) limits both to addresses an admin already added. A single-tenant "
+            "deployment needs this, because otherwise anyone who can reach the dashboard can "
+            "register. True suits a control plane that serves many tenants. The signup form also "
+            "requires mail, because a new account cannot sign in until its address is verified. "
+            "An OAuth sign-in does not require mail, because the provider has already verified "
+            "the address. Enabling it puts tenant creation on an unauthenticated route: the per-IP throttle "
             "that guards the public auth routes is the only bound on it, and nothing yet expires "
             "the organization an unverified signup leaves behind, so run it behind whatever edge "
             "controls the deployment has."
@@ -1522,6 +1533,15 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             f"{API_ROOT}/provider-credentials/{{instance}}) refuse an internal api_base. "
             "Chat dispatch (which dials the endpoint on every request) is not gated, so this is not a "
             "general egress control. Also settable via OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS."
+        ),
+    )
+    provider_endpoints_enabled: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
+        default=False,
+        description=(
+            "Serve provider endpoints owned by a workspace or a user, reached as '<name>:<model>' and "
+            f"managed through {API_ROOT}/provider-endpoints. Off by default. Their api_base is always "
+            "refused when it resolves to a private, loopback, link-local or reserved address, whatever "
+            "provider_allow_private_hosts says. Also settable via OTARI_PROVIDER_ENDPOINTS_ENABLED."
         ),
     )
     platform: Annotated[dict[str, Any], OMITTED] = Field(

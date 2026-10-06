@@ -102,6 +102,17 @@ Both take `limit` (default 100, at most 1000).
 
 Unlike Anthropic, Otari leaves an expired file out of a listing.
 
+### From the Playground
+
+The dashboard's Playground uploads through `/api/v1/playground/files`, which
+takes the dashboard session rather than an API key. A file uploaded there
+belongs to the signed-in person in the workspace the switcher has selected, the
+same owner a Playground completion runs as, so its `file_id` resolves in their
+messages and in nobody else's. The same person's files uploaded with one of
+their keys in that workspace are listed there too. A hosted control plane does
+not serve these routes, because the data plane that runs its completions could
+not read a file stored on the control plane.
+
 ## Files and code execution
 
 When a request's code runs on Otari's sandbox, because it declared the

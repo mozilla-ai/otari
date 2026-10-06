@@ -20,6 +20,8 @@ from gateway.services.tools._declarations import Tool, extract_first_matching_to
 from gateway.services.tools._native import Dialect
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from gateway.core.config import GatewayConfig
 
 # Per-request choice of who runs a provider-native code-execution declaration.
@@ -92,7 +94,7 @@ def first_provider_code_execution_tool(tools: list[dict[str, Any]] | None) -> di
     return None
 
 
-def native_code_execution_dialect(tool_entry: dict[str, Any] | None) -> Dialect | None:
+def native_code_execution_dialect(tool_entry: Mapping[str, Any] | None) -> Dialect | None:
     """The wire format whose native result blocks the caller expects, or ``None``.
 
     ``"messages"`` for Anthropic's dated keyword, which is what the Anthropic SDK

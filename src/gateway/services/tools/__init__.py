@@ -28,6 +28,7 @@ from gateway.services.tools._code_execution_declarations import (
     provider_runs_code_natively,
     resolve_code_executor_preference,
 )
+from gateway.services.tools._code_execution_responses import CODE_INTERPRETER_CALL_ID_PREFIX
 from gateway.services.tools._declarations import Tool, extract_first_matching_tool
 from gateway.services.tools._mcp_admission import admit_mcp_servers
 from gateway.services.tools._native import (
@@ -52,14 +53,17 @@ from gateway.services.tools._web_declarations import (
     web_search_declaration_forms,
     web_search_intercept_enabled,
 )
+from gateway.services.tools._web_search_responses import WEB_SEARCH_CALL_ID_PREFIX
 from gateway.services.tools._web_search_results import web_search_max_results_baseline
 
 __all__ = [
     "BUILTIN_TOOLS",
     "CODE_EXECUTION_HEADER",
+    "CODE_INTERPRETER_CALL_ID_PREFIX",
     "CONTAINER_GONE_DETAIL_TEMPLATE",
     "MAX_USES_EXCEEDED_ERROR",
     "SERVER_TOOL_USE_ID_PREFIX",
+    "WEB_SEARCH_CALL_ID_PREFIX",
     "WEB_SEARCH_HEADER",
     "AdmittedCodeExecution",
     "BuiltinTool",

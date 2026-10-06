@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, Request, status
 
+from gateway.core.error_codes import RATE_LIMITED, error_headers
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.ports.rate_limit_store_port import RateLimitStorePort, RateLimitWindow
@@ -115,7 +116,7 @@ def _info_or_raise(window: RateLimitWindow, limit: int) -> RateLimitInfo:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Rate limit exceeded",
-            headers={"Retry-After": str(math.ceil(window.reset_after))},
+            headers={"Retry-After": str(math.ceil(window.reset_after)), **error_headers(RATE_LIMITED)},
         )
     # Wall-clock time for the externally facing reset header.
     return RateLimitInfo(limit=limit, remaining=limit - window.count, reset=time.time() + window.reset_after)
@@ -293,14 +294,13 @@ def _count(n: int, noun: str) -> str:
     return f"{n:,} {noun}" if n == 1 else f"{n:,} {noun}s"
 
 
-def _refused(detail: str, retry_after: float | None) -> HTTPException:
+def _refused(detail: str, retry_after: float | None, rule: str) -> HTTPException:
     """A 429 with ``detail``, without ``Retry-After`` when no wait would let the request in."""
     RATE_LIMIT_HITS.inc()
-    return HTTPException(
-        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-        detail=detail,
-        headers={"Retry-After": str(max(math.ceil(retry_after), 1))} if retry_after is not None else None,
-    )
+    headers = error_headers(RATE_LIMITED, rule=rule)
+    if retry_after is not None:
+        headers["Retry-After"] = str(max(math.ceil(retry_after), 1))
+    return HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=detail, headers=headers)
 
 
 async def _count_rule(
@@ -327,22 +327,24 @@ async def _count_rule(
             raise _refused(
                 f"Rate limit '{rule.name}'{label} exceeded: {_count(rule.rpm, 'request')} per minute",
                 window.reset_after,
+                rule.name,
             )
         hold.entries.append((f"{base}:rpm", window.handle))
     if rule.tpm is not None:
         # At least one token, so a request estimating none is still refused by a full window.
-        cost = max(estimated_tokens, 1)
+        cost = 1 if rule.tpm_admission == "used" else max(estimated_tokens, 1)
         if cost > rule.tpm:
             msg = (
                 f"Request needs an estimated {_count(cost, 'token')}; "
                 f"rate limit '{rule.name}'{label} allows {rule.tpm:,} per minute"
             )
-            raise _refused(msg, None)
+            raise _refused(msg, None, rule.name)
         window = await store.hit(f"{base}:tpm", rule.tpm, _RULE_WINDOW_SEC, cost=cost)
         if window.handle is None:
             raise _refused(
                 f"Rate limit '{rule.name}'{label} exceeded: {_count(rule.tpm, 'token')} per minute",
                 window.reset_after,
+                rule.name,
             )
         hold.entries.append((f"{base}:tpm", window.handle))
         hold.estimates.append((f"{base}:tpm", window.handle))
@@ -352,6 +354,7 @@ async def _count_rule(
             raise _refused(
                 f"Rate limit '{rule.name}'{label} exceeded: {_count(rule.max_concurrent, 'request')} in flight",
                 _CONCURRENCY_RETRY_AFTER_SEC,
+                rule.name,
             )
         hold.leases.append((f"{base}:concurrent", lease))
 

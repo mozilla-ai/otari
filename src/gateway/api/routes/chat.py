@@ -41,6 +41,7 @@ from gateway.api.routes._pipeline import (
     provider_error_headers,
     raise_all_streaming_attempts_failed,
     rate_limit_headers,
+    refusal_code,
     resolve_dispatch_provider,
     resolve_request_context,
     run_platform_non_stream,
@@ -60,6 +61,7 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.provider_fields import surface_provider_fields
 from gateway.services.files import FileService, StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import (
@@ -69,8 +71,9 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop,
     mcp_tool_loop_stream,
 )
+from gateway.services.provider_kwargs import apply_endpoint_defaults
 from gateway.services.tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, Dialect, ToolUseBudget
-from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
+from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
 from gateway.types.session_principal import SessionPrincipal
@@ -208,10 +211,10 @@ class _ChatAdapter:
         )
 
     def stream_error_payload(self, exc: BaseException) -> str:
-        return self.stream_format.error_payload
+        return openai_error_event(self.stream_format, refusal_code(exc))
 
     def format_chunk(self, chunk: ChatCompletionChunk) -> str:
-        return f"data: {chunk.model_dump_json()}\n\n"
+        return f"data: {surface_provider_fields(chunk).model_dump_json()}\n\n"
 
     def extract_stream_usage(self, chunk: ChatCompletionChunk) -> CompletionUsage | None:
         if not chunk.usage:
@@ -626,7 +629,9 @@ async def run_chat_completion(
         resolved = await resolve_dispatch_provider(
             ctx, config, request.model, adapter=adapter, model_provider=model_provider
         )
-        call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
+        call_kwargs = apply_endpoint_defaults(
+            {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
+        )
         return await run_single_attempt_stream(
             adapter=adapter,
             ctx=ctx,
@@ -651,7 +656,7 @@ async def run_chat_completion(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Internal error: missing route context",
             )
-        return await run_platform_non_stream(
+        platform_result = await run_platform_non_stream(
             adapter=adapter,
             route=route,
             base_request_fields=request_fields,
@@ -662,11 +667,14 @@ async def run_chat_completion(
             rate_limit_info=ctx.rate_limit_info,
             session_label=request.session_label,
         )
+        return surface_provider_fields(platform_result)
 
     resolved = await resolve_dispatch_provider(
         ctx, config, request.model, adapter=adapter, model_provider=model_provider
     )
-    call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
+    call_kwargs = apply_endpoint_defaults(
+        {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
+    )
     result = await run_standalone_non_stream(
         adapter=adapter,
         ctx=ctx,
@@ -678,6 +686,7 @@ async def run_chat_completion(
         display_model=resolved.alias,
         base_request_fields=request_fields,
     )
+    surface_provider_fields(result)
     if idempotency is not None:
         await idempotency.complete(result, response)
     return result

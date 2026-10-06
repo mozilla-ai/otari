@@ -3384,6 +3384,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/playground/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Playground Files
+         * @description The caller's own files in one workspace, newest first, in OpenAI's list shape.
+         *
+         *     Every file the caller owns there is listed, including one uploaded with an
+         *     API key of theirs in the same workspace, because a message here can attach it.
+         */
+        get: operations["playground-list_playground_files"];
+        put?: never;
+        /**
+         * Upload Playground File
+         * @description Upload a file for the caller, in a workspace they belong to.
+         *
+         *     The row is owned by the same principal a Playground completion runs as, so a
+         *     ``file_id`` returned here resolves in the caller's own messages and in nobody
+         *     else's. ``POST /api/v1/files`` takes an API key, which a dashboard session
+         *     does not hold; this is the session's way in.
+         */
+        post: operations["playground-upload_playground_file"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/playground/files/{file_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Playground File
+         * @description Delete one of the caller's files. Another identity's answers 404, as a nonexistent one does.
+         *
+         *     A saved transcript that attached the file keeps its record of the
+         *     attachment, but the file is gone, so sending that turn again does not send
+         *     its contents.
+         */
+        delete: operations["playground-delete_playground_file"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/playground/tools": {
         parameters: {
             query?: never;
@@ -3760,6 +3816,61 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/provider-endpoints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Provider Endpoints
+         * @description List owned provider endpoints, narrowed by owner when given. Keys are never returned.
+         */
+        get: operations["provider-endpoints-list_provider_endpoints"];
+        put?: never;
+        /**
+         * Create Provider Endpoint
+         * @description Register an endpoint for a workspace, or for one user in it.
+         *
+         *     It is reachable as ``<name>:<model>`` by its owner as soon as this returns on
+         *     this worker, and on the others within 30 seconds.
+         */
+        post: operations["provider-endpoints-create_provider_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/provider-endpoints/{endpoint_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Provider Endpoint
+         * @description Read one endpoint. The key is never returned, only its last four characters.
+         */
+        get: operations["provider-endpoints-get_provider_endpoint"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Provider Endpoint
+         * @description Delete an endpoint. Its name stops resolving at once on this worker, within 30 seconds elsewhere.
+         */
+        delete: operations["provider-endpoints-delete_provider_endpoint"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Provider Endpoint
+         * @description Change an endpoint's name, provider, base URL, key or default fields. The owner cannot change.
+         */
+        patch: operations["provider-endpoints-update_provider_endpoint"];
         trace?: never;
     };
     "/api/v1/providers": {
@@ -4194,11 +4305,14 @@ export interface paths {
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and may name any existing user.
-         *     - API key: usage and spend always bind to the key's own user. A ``user``
-         *       field naming a different user is rejected with 403 (or ignored, when the
-         *       key's own ``reject_user_mismatch`` is false, or the deployment-wide
-         *       setting is disabled and the key does not override it); it is never billed
-         *       to that user.
+         *     - API key: usage and spend bind to the key's own user. A ``user`` field
+         *       naming a different user is rejected with 403 (or ignored, when the key's
+         *       own ``reject_user_mismatch`` is false, or the deployment-wide setting is
+         *       disabled and the key does not override it); it is never billed to that
+         *       user.
+         *     - Service key: a ``user`` field names one of the key owner's end users,
+         *       created on first use with the key's end-user budget, and is billed and
+         *       rate limited as that end user, as on chat completions.
          */
         post: operations["search-create_search"];
         delete?: never;
@@ -4334,11 +4448,14 @@ export interface paths {
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and may name any existing user.
-         *     - API key: usage and spend always bind to the key's own user. A ``user``
-         *       field naming a different user is rejected with 403 (or ignored, when the
-         *       key's own ``reject_user_mismatch`` is false, or the deployment-wide
-         *       setting is disabled and the key does not override it); it is never billed
-         *       to that user.
+         *     - API key: usage and spend bind to the key's own user. A ``user`` field
+         *       naming a different user is rejected with 403 (or ignored, when the key's
+         *       own ``reject_user_mismatch`` is false, or the deployment-wide setting is
+         *       disabled and the key does not override it); it is never billed to that
+         *       user.
+         *     - Service key: a ``user`` field names one of the key owner's end users,
+         *       created on first use with the key's end-user budget, and is billed and
+         *       rate limited as that end user, as on chat completions.
          */
         post: operations["search-create_search_for_tool"];
         delete?: never;
@@ -4947,6 +5064,11 @@ export interface paths {
          *     puts one in reach, and one reached from nowhere at all (the shared
          *     ``default`` owner, or a user just created) is shared rather than hidden.
          *     See ``repositories.users_repository.in_organization``.
+         *
+         *     ``parent_user_id`` with ``external_id`` finds the end user a service key
+         *     created for a ``user`` value, which is how a caller maps its own ids to
+         *     Otari's. ``include_total`` adds an ``Otari-Total-Count`` header counting
+         *     every match, so ``limit=1`` with it counts a service key's end users.
          */
         get: operations["users-list_users"];
         put?: never;
@@ -6438,6 +6560,11 @@ export interface components {
             purpose: string;
             /** User */
             user?: string | null;
+        };
+        /** Body_playground-upload_playground_file */
+        "Body_playground-upload_playground_file": {
+            /** File */
+            file: string;
         };
         /**
          * BudgetResetLogResponse
@@ -11148,6 +11275,22 @@ export interface components {
             data: components["schemas"]["PendingOrganizationInvitationPublic"][];
         };
         /**
+         * PlaygroundAttachment
+         * @description A file one turn sent, as the page draws its chip and sends it again.
+         *
+         *     A record of the attachment rather than a reference the gateway keeps alive:
+         *     the file can be deleted after the save, and a resumed turn that sends it
+         *     then does not send its contents.
+         */
+        PlaygroundAttachment: {
+            /** Bytes */
+            bytes: number;
+            /** File Id */
+            file_id: string;
+            /** Filename */
+            filename: string;
+        };
+        /**
          * PlaygroundComparisonCreate
          * @description One rated A/B exchange.
          *
@@ -11352,6 +11495,8 @@ export interface components {
          * @description One turn in a transcript being saved.
          */
         PlaygroundMessageCreate: {
+            /** Attachments */
+            attachments?: components["schemas"]["PlaygroundAttachment"][];
             /** Content */
             content: string;
             /** Reasoning */
@@ -11372,6 +11517,11 @@ export interface components {
          *     lying. The billing record for that request is its ``usage_logs`` row.
          */
         PlaygroundMessagePublic: {
+            /**
+             * Attachments
+             * @default []
+             */
+            attachments: components["schemas"]["PlaygroundAttachment"][];
             /** Content */
             content: string;
             /** Reasoning */
@@ -11418,6 +11568,8 @@ export interface components {
          */
         PlaygroundToolsResponse: {
             code_execution: components["schemas"]["PlaygroundToolStatus"];
+            /** @description Whether a message may attach a file uploaded here. */
+            files: components["schemas"]["PlaygroundToolStatus"];
             /** Mcp Servers */
             mcp_servers: components["schemas"]["PlaygroundMcpServer"][];
             web_search: components["schemas"]["PlaygroundToolStatus"];
@@ -11709,6 +11861,123 @@ export interface components {
             vision: boolean;
         };
         /**
+         * ProviderEndpointCreateRequest
+         * @description What a caller sends to create an owned endpoint. The key is stored encrypted.
+         */
+        ProviderEndpointCreateRequest: {
+            /**
+             * Api Base
+             * @description Base URL of the endpoint. Refused when it resolves to a private, loopback, link-local or reserved address.
+             */
+            api_base: string;
+            /**
+             * Api Key
+             * @description Sent to the endpoint. Never returned, only its last four.
+             */
+            api_key?: string | null;
+            /**
+             * Default Params
+             * @description Fields added to every request body sent to this endpoint, beneath the caller's own: a field the caller sets wins. For fields the gateway does not model, such as vLLM's 'chat_template_kwargs'. Credential and transport fields are refused.
+             */
+            default_params?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Name
+             * @description What callers put before the colon to reach this endpoint, as '<name>:<model>'. Letters, digits, '.', '_' and '-', starting with a letter or digit. It may not be a provider's name or a configured instance's.
+             */
+            name: string;
+            /**
+             * Provider
+             * @description The implementation that speaks to the endpoint: 'openai' for an OpenAI-compatible server, 'anthropic' for an Anthropic-compatible one. Whichever it is, callers may use any of the chat, responses and messages routes.
+             */
+            provider: string;
+            /**
+             * User Id
+             * @description User that owns the endpoint. Omit for one every caller in the workspace reaches. A user's endpoint shadows a workspace-wide one of the same name for that user alone.
+             */
+            user_id?: string | null;
+            /**
+             * Workspace Id
+             * @description Workspace that owns the endpoint. Omit for the deployment's default workspace.
+             */
+            workspace_id?: string | null;
+        };
+        /**
+         * ProviderEndpointPublic
+         * @description The API-facing shape. Never carries the key, only whether one is set.
+         */
+        ProviderEndpointPublic: {
+            /** Api Base */
+            api_base: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Default Params */
+            default_params?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Last4 */
+            last4?: string | null;
+            /** Name */
+            name: string;
+            /** Provider */
+            provider: string;
+            /** Updated At */
+            updated_at?: string | null;
+            /** User Id */
+            user_id?: string | null;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
+         * ProviderEndpointUpdateRequest
+         * @description A partial update. Only what is set is applied; an explicit null ``api_key`` clears it.
+         */
+        ProviderEndpointUpdateRequest: {
+            /**
+             * Api Base
+             * @description Base URL of the endpoint. Refused when it resolves to a private, loopback, link-local or reserved address.
+             */
+            api_base?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /**
+             * Default Params
+             * @description Fields added to every request body sent to this endpoint, beneath the caller's own: a field the caller sets wins. For fields the gateway does not model, such as vLLM's 'chat_template_kwargs'. Credential and transport fields are refused.
+             */
+            default_params?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Name
+             * @description What callers put before the colon to reach this endpoint, as '<name>:<model>'. Letters, digits, '.', '_' and '-', starting with a letter or digit. It may not be a provider's name or a configured instance's.
+             */
+            name?: string | null;
+            /**
+             * Provider
+             * @description The implementation that speaks to the endpoint: 'openai' for an OpenAI-compatible server, 'anthropic' for an Anthropic-compatible one. Whichever it is, callers may use any of the chat, responses and messages routes.
+             */
+            provider?: string | null;
+        };
+        /** ProviderEndpointsPublic */
+        ProviderEndpointsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["ProviderEndpointPublic"][];
+        };
+        /**
          * ProviderHealthResponse
          * @description Provider connectivity across the whole gateway, for the health monitor.
          *
@@ -11896,9 +12165,16 @@ export interface components {
             rpm?: number | null;
             /**
              * Tpm
-             * @description Tokens per minute. A request is admitted on its estimate (prompt plus max output, or budget_estimate_default_output_tokens) and charged what it used once it completes.
+             * @description Tokens per minute, counted on what each request used; see tpm_admission for how a request is admitted.
              */
             tpm?: number | null;
+            /**
+             * Tpm Admission
+             * @description How a tpm limit admits a request. 'used' (the default) admits a request while the minute's tokens are under the limit and counts what it used once it completes, as LiteLLM does. 'estimate' holds the request's estimate (prompt plus max output, or budget_estimate_default_output_tokens) while it runs and refuses it when that does not fit, which is how providers count their own quotas: use it for a limit meant to stay under one.
+             * @default used
+             * @enum {string}
+             */
+            tpm_admission: "used" | "estimate";
         };
         /**
          * RateLimitRulePublic
@@ -11945,9 +12221,16 @@ export interface components {
             source: "config" | "dashboard";
             /**
              * Tpm
-             * @description Tokens per minute. A request is admitted on its estimate (prompt plus max output, or budget_estimate_default_output_tokens) and charged what it used once it completes.
+             * @description Tokens per minute, counted on what each request used; see tpm_admission for how a request is admitted.
              */
             tpm?: number | null;
+            /**
+             * Tpm Admission
+             * @description How a tpm limit admits a request. 'used' (the default) admits a request while the minute's tokens are under the limit and counts what it used once it completes, as LiteLLM does. 'estimate' holds the request's estimate (prompt plus max output, or budget_estimate_default_output_tokens) while it runs and refuses it when that does not fit, which is how providers count their own quotas: use it for a limit meant to stay under one.
+             * @default used
+             * @enum {string}
+             */
+            tpm_admission: "used" | "estimate";
             /**
              * Updated At
              * @description When a stored rule last changed.
@@ -11994,6 +12277,11 @@ export interface components {
              * @description Tokens per minute.
              */
             tpm?: number | null;
+            /**
+             * Tpm Admission
+             * @description 'used' counts only what a request used; 'estimate' holds its estimate.
+             */
+            tpm_admission?: ("used" | "estimate") | null;
         };
         /**
          * RateLimitRulesPublic
@@ -20151,6 +20439,110 @@ export interface operations {
             };
         };
     };
+    "playground-list_playground_files": {
+        parameters: {
+            query?: {
+                /** @description Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does. */
+                workspace_id?: string | null;
+                limit?: number;
+                after?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAIFileList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "playground-upload_playground_file": {
+        parameters: {
+            query?: {
+                /** @description Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_playground-upload_playground_file"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAIFileObject"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "playground-delete_playground_file": {
+        parameters: {
+            query?: {
+                /** @description Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path: {
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAIFileDeleted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "playground-read_playground_tools": {
         parameters: {
             query?: {
@@ -20705,6 +21097,172 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TestProviderResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-endpoints-list_provider_endpoints": {
+        parameters: {
+            query?: {
+                /** @description Only endpoints this workspace owns. */
+                workspace_id?: string | null;
+                /** @description Only endpoints this user owns. */
+                user_id?: string | null;
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderEndpointsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-endpoints-create_provider_endpoint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderEndpointCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderEndpointPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-endpoints-get_provider_endpoint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                endpoint_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderEndpointPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-endpoints-delete_provider_endpoint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                endpoint_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "provider-endpoints-update_provider_endpoint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                endpoint_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderEndpointUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderEndpointPublic"];
                 };
             };
             /** @description Validation Error */
@@ -22362,6 +22920,14 @@ export interface operations {
             query?: {
                 skip?: number;
                 limit?: number;
+                /** @description Only the end users of this owner: the user a service key belongs to. */
+                parent_user_id?: string | null;
+                /** @description Only the end user a service key names with this `user` value. */
+                external_id?: string | null;
+                /** @description Only blocked users (true) or only unblocked ones (false). */
+                blocked?: boolean | null;
+                /** @description Also count every matching user, in the Otari-Total-Count response header. */
+                include_total?: boolean;
             };
             header?: never;
             path?: never;

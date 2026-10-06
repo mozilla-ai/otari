@@ -47,6 +47,7 @@ from gateway.api.routes import (
     overview,
     playground,
     pricing,
+    provider_endpoints,
     providers,
     rate_limits,
     rerank,
@@ -222,6 +223,7 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(scoped_budgets.router, Plane.CONTROL),
     RouterMount(overview.router, Plane.CONTROL),
     RouterMount(aliases.router, Plane.CONTROL),
+    RouterMount(provider_endpoints.router, Plane.CONTROL),
     RouterMount(routing.router, Plane.CONTROL),
     RouterMount(routing_memory.router, Plane.CONTROL),
     # Both prefixed /pricing, split by who may call them; operator first, so

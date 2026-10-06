@@ -1,10 +1,10 @@
-"""ORM tables for providers: provider instances configured at runtime, and model aliases."""
+"""ORM tables for providers: provider instances configured at runtime, owned endpoints, and model aliases."""
 
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, UniqueConstraint, Uuid, text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base
@@ -125,3 +125,60 @@ class ProviderCredential(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class ProviderEndpoint(Base):
+    """A provider endpoint a workspace or one of its users brings, addressed by name.
+
+    An app built on otari lets its users bring their own model server: a base
+    URL, an API key, and sometimes fields the server wants in every request. A
+    caller reaches one as ``<name>:<model>``, which resolves only for its owner,
+    ahead of the deployment's own instances (``services/provider_kwargs``).
+
+    Disjoint from ``org_provider_keys`` by construction: those resolve by
+    provider for every workspace in an organization, these resolve by name for
+    one workspace or one user in it, so no query over one table can pick up a
+    row of the other.
+
+    Owned the way ``ModelAlias`` is: ``workspace_id`` always, ``user_id`` (the
+    billing identity) when the endpoint belongs to one user, who then shadows a
+    workspace-wide endpoint of the same name. The same pair of constraints keeps
+    one row per scope, for the reason given there.
+
+    The owner pays the upstream, so requests to one never count toward a budget.
+    """
+
+    __tablename__ = "provider_endpoints"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name", "user_id", name="uq_provider_endpoints_workspace_name_user"),
+        Index(
+            "uq_provider_endpoints_workspace_shared_name",
+            "workspace_id",
+            "name",
+            unique=True,
+            sqlite_where=text("user_id IS NULL"),
+            postgresql_where=text("user_id IS NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    # No index of its own: both constraints above lead with it. CASCADE, as on
+    # ``org_provider_keys``: a credential means nothing once its owner is gone.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(64))
+    # The any-llm implementation, which picks the wire; not a routing key.
+    provider: Mapped[str] = mapped_column(String(64))
+    api_base: Mapped[str] = mapped_column(String(1024))
+    encrypted_api_key: Mapped[str | None] = mapped_column()
+    last4: Mapped[str | None] = mapped_column(String(8))
+    # Fields sent in every request body beneath the caller's own.
+    default_params: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )

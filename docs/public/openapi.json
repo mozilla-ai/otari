@@ -1825,6 +1825,20 @@
         "title": "Body_files-create_file",
         "type": "object"
       },
+      "Body_playground-upload_playground_file": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_playground-upload_playground_file",
+        "type": "object"
+      },
       "BudgetResetLogResponse": {
         "description": "Response model for one budget reset event (per user).",
         "properties": {
@@ -11604,6 +11618,33 @@
         "title": "PendingOrganizationInvitationsPublic",
         "type": "object"
       },
+      "PlaygroundAttachment": {
+        "description": "A file one turn sent, as the page draws its chip and sends it again.\n\nA record of the attachment rather than a reference the gateway keeps alive:\nthe file can be deleted after the save, and a resumed turn that sends it\nthen does not send its contents.",
+        "properties": {
+          "bytes": {
+            "minimum": 0.0,
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "file_id": {
+            "maxLength": 64,
+            "title": "File Id",
+            "type": "string"
+          },
+          "filename": {
+            "maxLength": 255,
+            "title": "Filename",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_id",
+          "filename",
+          "bytes"
+        ],
+        "title": "PlaygroundAttachment",
+        "type": "object"
+      },
       "PlaygroundComparisonCreate": {
         "description": "One rated A/B exchange.\n\nBoth answers in full, which is the disclosure the comparison consent flag\ncovers: a preference with no answers attached is a datum nobody can later\ncheck, and the page's own history list shows the question and the two model\nids from these columns.",
         "properties": {
@@ -11940,6 +11981,14 @@
       "PlaygroundMessageCreate": {
         "description": "One turn in a transcript being saved.",
         "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/PlaygroundAttachment"
+            },
+            "maxItems": 10,
+            "title": "Attachments",
+            "type": "array"
+          },
           "content": {
             "maxLength": 200000,
             "title": "Content",
@@ -11976,6 +12025,14 @@
       "PlaygroundMessagePublic": {
         "description": "One stored turn, in the order it was saved.\n\nNo usage figures, matching what the save accepts: tokens, cost and timing\ndescribe the request that ran rather than the conversation, and a resumed\ntranscript reporting an old request's latency as this session's would be\nlying. The billing record for that request is its ``usage_logs`` row.",
         "properties": {
+          "attachments": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PlaygroundAttachment"
+            },
+            "title": "Attachments",
+            "type": "array"
+          },
           "content": {
             "title": "Content",
             "type": "string"
@@ -12058,6 +12115,10 @@
           "code_execution": {
             "$ref": "#/components/schemas/PlaygroundToolStatus"
           },
+          "files": {
+            "$ref": "#/components/schemas/PlaygroundToolStatus",
+            "description": "Whether a message may attach a file uploaded here."
+          },
           "mcp_servers": {
             "items": {
               "$ref": "#/components/schemas/PlaygroundMcpServer"
@@ -12072,6 +12133,7 @@
         "required": [
           "web_search",
           "code_execution",
+          "files",
           "mcp_servers"
         ],
         "title": "PlaygroundToolsResponse",
@@ -12805,6 +12867,265 @@
         "title": "ProviderCapabilitiesSchema",
         "type": "object"
       },
+      "ProviderEndpointCreateRequest": {
+        "description": "What a caller sends to create an owned endpoint. The key is stored encrypted.",
+        "properties": {
+          "api_base": {
+            "description": "Base URL of the endpoint. Refused when it resolves to a private, loopback, link-local or reserved address.",
+            "maxLength": 1024,
+            "title": "Api Base",
+            "type": "string"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sent to the endpoint. Never returned, only its last four.",
+            "title": "Api Key"
+          },
+          "default_params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields added to every request body sent to this endpoint, beneath the caller's own: a field the caller sets wins. For fields the gateway does not model, such as vLLM's 'chat_template_kwargs'. Credential and transport fields are refused.",
+            "title": "Default Params"
+          },
+          "name": {
+            "description": "What callers put before the colon to reach this endpoint, as '<name>:<model>'. Letters, digits, '.', '_' and '-', starting with a letter or digit. It may not be a provider's name or a configured instance's.",
+            "maxLength": 64,
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "description": "The implementation that speaks to the endpoint: 'openai' for an OpenAI-compatible server, 'anthropic' for an Anthropic-compatible one. Whichever it is, callers may use any of the chat, responses and messages routes.",
+            "maxLength": 64,
+            "title": "Provider",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "User that owns the endpoint. Omit for one every caller in the workspace reaches. A user's endpoint shadows a workspace-wide one of the same name for that user alone.",
+            "title": "User Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Workspace that owns the endpoint. Omit for the deployment's default workspace.",
+            "title": "Workspace Id"
+          }
+        },
+        "required": [
+          "name",
+          "provider",
+          "api_base"
+        ],
+        "title": "ProviderEndpointCreateRequest",
+        "type": "object"
+      },
+      "ProviderEndpointPublic": {
+        "description": "The API-facing shape. Never carries the key, only whether one is set.",
+        "properties": {
+          "api_base": {
+            "title": "Api Base",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "default_params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Params"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace_id",
+          "name",
+          "provider",
+          "api_base",
+          "created_at"
+        ],
+        "title": "ProviderEndpointPublic",
+        "type": "object"
+      },
+      "ProviderEndpointUpdateRequest": {
+        "description": "A partial update. Only what is set is applied; an explicit null ``api_key`` clears it.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Base URL of the endpoint. Refused when it resolves to a private, loopback, link-local or reserved address.",
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "default_params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fields added to every request body sent to this endpoint, beneath the caller's own: a field the caller sets wins. For fields the gateway does not model, such as vLLM's 'chat_template_kwargs'. Credential and transport fields are refused.",
+            "title": "Default Params"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What callers put before the colon to reach this endpoint, as '<name>:<model>'. Letters, digits, '.', '_' and '-', starting with a letter or digit. It may not be a provider's name or a configured instance's.",
+            "title": "Name"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The implementation that speaks to the endpoint: 'openai' for an OpenAI-compatible server, 'anthropic' for an Anthropic-compatible one. Whichever it is, callers may use any of the chat, responses and messages routes.",
+            "title": "Provider"
+          }
+        },
+        "title": "ProviderEndpointUpdateRequest",
+        "type": "object"
+      },
+      "ProviderEndpointsPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderEndpointPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ProviderEndpointsPublic",
+        "type": "object"
+      },
       "ProviderHealthResponse": {
         "description": "Provider connectivity across the whole gateway, for the health monitor.\n\nCarries per-provider results plus the ``healthy`` / ``total`` counts and the\nmost recent ``checked_at`` so the overview page can render a summary tile\nwithout re-deriving them.",
         "properties": {
@@ -13147,8 +13468,18 @@
                 "type": "null"
               }
             ],
-            "description": "Tokens per minute. A request is admitted on its estimate (prompt plus max output, or budget_estimate_default_output_tokens) and charged what it used once it completes.",
+            "description": "Tokens per minute, counted on what each request used; see tpm_admission for how a request is admitted.",
             "title": "Tpm"
+          },
+          "tpm_admission": {
+            "default": "used",
+            "description": "How a tpm limit admits a request. 'used' (the default) admits a request while the minute's tokens are under the limit and counts what it used once it completes, as LiteLLM does. 'estimate' holds the request's estimate (prompt plus max output, or budget_estimate_default_output_tokens) while it runs and refuses it when that does not fit, which is how providers count their own quotas: use it for a limit meant to stay under one.",
+            "enum": [
+              "used",
+              "estimate"
+            ],
+            "title": "Tpm Admission",
+            "type": "string"
           }
         },
         "required": [
@@ -13246,8 +13577,18 @@
                 "type": "null"
               }
             ],
-            "description": "Tokens per minute. A request is admitted on its estimate (prompt plus max output, or budget_estimate_default_output_tokens) and charged what it used once it completes.",
+            "description": "Tokens per minute, counted on what each request used; see tpm_admission for how a request is admitted.",
             "title": "Tpm"
+          },
+          "tpm_admission": {
+            "default": "used",
+            "description": "How a tpm limit admits a request. 'used' (the default) admits a request while the minute's tokens are under the limit and counts what it used once it completes, as LiteLLM does. 'estimate' holds the request's estimate (prompt plus max output, or budget_estimate_default_output_tokens) while it runs and refuses it when that does not fit, which is how providers count their own quotas: use it for a limit meant to stay under one.",
+            "enum": [
+              "used",
+              "estimate"
+            ],
+            "title": "Tpm Admission",
+            "type": "string"
           },
           "updated_at": {
             "anyOf": [
@@ -13362,6 +13703,22 @@
             ],
             "description": "Tokens per minute.",
             "title": "Tpm"
+          },
+          "tpm_admission": {
+            "anyOf": [
+              {
+                "enum": [
+                  "used",
+                  "estimate"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "'used' counts only what a request used; 'estimate' holds its estimate.",
+            "title": "Tpm Admission"
           }
         },
         "title": "RateLimitRuleUpdate",
@@ -30859,6 +31216,234 @@
         ]
       }
     },
+    "/api/v1/playground/files": {
+      "get": {
+        "description": "The caller's own files in one workspace, newest first, in OpenAI's list shape.\n\nEvery file the caller owns there is listed, including one uploaded with an\nAPI key of theirs in the same workspace, because a message here can attach it.",
+        "operationId": "playground-list_playground_files",
+        "parameters": [
+          {
+            "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenAIFileList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Playground Files",
+        "tags": [
+          "playground"
+        ]
+      },
+      "post": {
+        "description": "Upload a file for the caller, in a workspace they belong to.\n\nThe row is owned by the same principal a Playground completion runs as, so a\n``file_id`` returned here resolves in the caller's own messages and in nobody\nelse's. ``POST /api/v1/files`` takes an API key, which a dashboard session\ndoes not hold; this is the session's way in.",
+        "operationId": "playground-upload_playground_file",
+        "parameters": [
+          {
+            "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_playground-upload_playground_file"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenAIFileObject"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Upload Playground File",
+        "tags": [
+          "playground"
+        ]
+      }
+    },
+    "/api/v1/playground/files/{file_id}": {
+      "delete": {
+        "description": "Delete one of the caller's files. Another identity's answers 404, as a nonexistent one does.\n\nA saved transcript that attached the file keeps its record of the\nattachment, but the file is gone, so sending that turn again does not send\nits contents.",
+        "operationId": "playground-delete_playground_file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenAIFileDeleted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Playground File",
+        "tags": [
+          "playground"
+        ]
+      }
+    },
     "/api/v1/playground/tools": {
       "get": {
         "description": "The gateway-run tools the caller's workspace may attach to a message.\n\nOne read rather than the three the dashboard would otherwise make (the\ndeployment's tool settings, the workspace's web-search row, its\ncode-execution row), because the answer is a composition of them in a fixed\ndirection: the deployment decides whether a tool exists and the workspace may\nonly narrow that. Composing it here is what keeps the menu from offering\nsomething the request path would refuse.",
@@ -31830,6 +32415,315 @@
         "summary": "Test Stored Provider",
         "tags": [
           "providers"
+        ]
+      }
+    },
+    "/api/v1/provider-endpoints": {
+      "get": {
+        "description": "List owned provider endpoints, narrowed by owner when given. Keys are never returned.",
+        "operationId": "provider-endpoints-list_provider_endpoints",
+        "parameters": [
+          {
+            "description": "Only endpoints this workspace owns.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only endpoints this workspace owns.",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "description": "Only endpoints this user owns.",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only endpoints this user owns.",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderEndpointsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Provider Endpoints",
+        "tags": [
+          "provider-endpoints"
+        ]
+      },
+      "post": {
+        "description": "Register an endpoint for a workspace, or for one user in it.\n\nIt is reachable as ``<name>:<model>`` by its owner as soon as this returns on\nthis worker, and on the others within 30 seconds.",
+        "operationId": "provider-endpoints-create_provider_endpoint",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderEndpointCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderEndpointPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Provider Endpoint",
+        "tags": [
+          "provider-endpoints"
+        ]
+      }
+    },
+    "/api/v1/provider-endpoints/{endpoint_id}": {
+      "delete": {
+        "description": "Delete an endpoint. Its name stops resolving at once on this worker, within 30 seconds elsewhere.",
+        "operationId": "provider-endpoints-delete_provider_endpoint",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "endpoint_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Endpoint Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Provider Endpoint",
+        "tags": [
+          "provider-endpoints"
+        ]
+      },
+      "get": {
+        "description": "Read one endpoint. The key is never returned, only its last four characters.",
+        "operationId": "provider-endpoints-get_provider_endpoint",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "endpoint_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Endpoint Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderEndpointPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Provider Endpoint",
+        "tags": [
+          "provider-endpoints"
+        ]
+      },
+      "patch": {
+        "description": "Change an endpoint's name, provider, base URL, key or default fields. The owner cannot change.",
+        "operationId": "provider-endpoints-update_provider_endpoint",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "endpoint_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Endpoint Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderEndpointUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderEndpointPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Provider Endpoint",
+        "tags": [
+          "provider-endpoints"
         ]
       }
     },
@@ -32974,7 +33868,7 @@
     },
     "/api/v1/search": {
       "post": {
-        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
+        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use with the key's end-user budget, and is billed and\n  rate limited as that end user, as on chat completions.",
         "operationId": "search-create_search",
         "requestBody": {
           "content": {
@@ -33269,7 +34163,7 @@
     },
     "/api/v1/search/{search_tool_name}": {
       "post": {
-        "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /api/v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
+        "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /api/v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use with the key's end-user budget, and is billed and\n  rate limited as that end user, as on chat completions.",
         "operationId": "search-create_search_for_tool",
         "parameters": [
           {
@@ -35592,7 +36486,7 @@
     },
     "/api/v1/users": {
       "get": {
-        "description": "List the users the caller's organization can name, with pagination.\n\n``users`` is deployment-global and has no organization column, so which of\nthem this organization can name is derived: a key, usage, or a roster row\nputs one in reach, and one reached from nowhere at all (the shared\n``default`` owner, or a user just created) is shared rather than hidden.\nSee ``repositories.users_repository.in_organization``.",
+        "description": "List the users the caller's organization can name, with pagination.\n\n``users`` is deployment-global and has no organization column, so which of\nthem this organization can name is derived: a key, usage, or a roster row\nputs one in reach, and one reached from nowhere at all (the shared\n``default`` owner, or a user just created) is shared rather than hidden.\nSee ``repositories.users_repository.in_organization``.\n\n``parent_user_id`` with ``external_id`` finds the end user a service key\ncreated for a ``user`` value, which is how a caller maps its own ids to\nOtari's. ``include_total`` adds an ``Otari-Total-Count`` header counting\nevery match, so ``limit=1`` with it counts a service key's end users.",
         "operationId": "users-list_users",
         "parameters": [
           {
@@ -35616,6 +36510,72 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Only the end users of this owner: the user a service key belongs to.",
+            "in": "query",
+            "name": "parent_user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the end users of this owner: the user a service key belongs to.",
+              "title": "Parent User Id"
+            }
+          },
+          {
+            "description": "Only the end user a service key names with this `user` value.",
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the end user a service key names with this `user` value.",
+              "title": "External Id"
+            }
+          },
+          {
+            "description": "Only blocked users (true) or only unblocked ones (false).",
+            "in": "query",
+            "name": "blocked",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only blocked users (true) or only unblocked ones (false).",
+              "title": "Blocked"
+            }
+          },
+          {
+            "description": "Also count every matching user, in the Otari-Total-Count response header.",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Also count every matching user, in the Otari-Total-Count response header.",
+              "title": "Include Total",
+              "type": "boolean"
             }
           }
         ],

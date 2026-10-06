@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
@@ -24,7 +24,7 @@ from gateway.models.budgets import Budget
 from gateway.models.money import as_float
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
-from gateway.repositories.users_repository import in_organization
+from gateway.repositories.users_repository import UserFilter, count_users, in_organization, page_users
 from gateway.services.budgets import budget_window
 from gateway.services.model_access import validate_allowed_models
 
@@ -268,12 +268,24 @@ async def create_user(
     return UserResponse.from_model(user)
 
 
+_PARENT_DESC = "Only the end users of this owner: the user a service key belongs to."
+_EXTERNAL_DESC = "Only the end user a service key names with this `user` value."
+_BLOCKED_DESC = "Only blocked users (true) or only unblocked ones (false)."
+_TOTAL_DESC = "Also count every matching user, in the Otari-Total-Count response header."
+TOTAL_COUNT_HEADER = "Otari-Total-Count"
+
+
 @router.get("")
 async def list_users(
+    response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     organization_id: CallerOrganization,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    parent_user_id: Annotated[str | None, Query(description=_PARENT_DESC)] = None,
+    external_id: Annotated[str | None, Query(description=_EXTERNAL_DESC)] = None,
+    blocked: Annotated[bool | None, Query(description=_BLOCKED_DESC)] = None,
+    include_total: Annotated[bool, Query(description=_TOTAL_DESC)] = False,
 ) -> list[UserResponse]:
     """List the users the caller's organization can name, with pagination.
 
@@ -282,12 +294,16 @@ async def list_users(
     puts one in reach, and one reached from nowhere at all (the shared
     ``default`` owner, or a user just created) is shared rather than hidden.
     See ``repositories.users_repository.in_organization``.
-    """
-    result = await db.execute(
-        select(User).where(User.deleted_at.is_(None), in_organization(organization_id)).offset(skip).limit(limit)
-    )
-    users = result.scalars().all()
 
+    ``parent_user_id`` with ``external_id`` finds the end user a service key
+    created for a ``user`` value, which is how a caller maps its own ids to
+    Otari's. ``include_total`` adds an ``Otari-Total-Count`` header counting
+    every match, so ``limit=1`` with it counts a service key's end users.
+    """
+    filters = UserFilter(parent_user_id=parent_user_id, external_id=external_id, blocked=blocked)
+    if include_total:
+        response.headers[TOTAL_COUNT_HEADER] = str(await count_users(db, organization_id, filters))
+    users = await page_users(db, organization_id, filters, skip=skip, limit=limit)
     return [UserResponse.from_model(user) for user in users]
 
 

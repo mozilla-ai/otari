@@ -14,9 +14,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.core.config import parse_bool_env
 from gateway.core.env import otari_env
+from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.tools import web_search_max_results_baseline
 from gateway.services.web_retrieval_backend import (
@@ -65,7 +65,7 @@ def _strip_gateway_fields(
 
     Sensitive provider-call fields (credentials, ``provider`` selection, ...) are
     also stripped: the request schemas never derive them (see
-    ``_schema_derive.SENSITIVE_PARAM_FIELDS``), but the Responses request allows
+    ``provider_params.SENSITIVE_PARAM_FIELDS``), but the Responses request allows
     extra fields, so a client could still smuggle one in. The gateway resolves
     these itself, and the provider-call merge spreads request fields last, so a
     client value would otherwise override the operator-controlled one.

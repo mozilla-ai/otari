@@ -12,6 +12,7 @@ function tools(overrides: Partial<PlaygroundTools> = {}): PlaygroundTools {
   return {
     web_search: { configured: true, enabled: true, reason: null },
     code_execution: { configured: true, enabled: true, reason: null },
+    files: { configured: true, enabled: true, reason: null },
     mcp_servers: [
       { id: "srv-1", name: "Docs", purpose_hint: null, enabled: true },
       { id: "srv-2", name: "Tickets", purpose_hint: null, enabled: true },

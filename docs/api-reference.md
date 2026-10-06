@@ -83,6 +83,13 @@ rate that priced the model: `organization` (an organization's override),
 genai-prices dataset). Hybrid mode attaches the platform's settlement instead;
 see [Hybrid mode protocol](hybrid-mode-protocol.md#inline-response-fields).
 
+### Provider-specific fields
+
+A field a provider adds to a chat completion's message beyond the OpenAI schema
+(Exa's `citations`, for instance) is kept where the provider put it and copied
+under `message.provider_specific_fields` (`delta.provider_specific_fields` on a
+stream), where clients written against LiteLLM look for it.
+
 ### Cost of a failed or interrupted request
 
 A stream that fails mid-response ends in an error event, and one the client
@@ -188,6 +195,10 @@ search tool directly. This is separate from `otari_web_search`, which lets a
 model request searches during a completion. Both are described in
 [Built-in tools](tools.md).
 
+A service key's `user` field names one of its end users here as it does on chat
+completions: the search is billed to that end user, under the key's end-user
+budget, and counted by `rate_limits`.
+
 Search-tool management lives under `/api/v1/search-tools`. The generated OpenAPI
 document describes the supported providers, filters, and management schemas.
 
@@ -248,6 +259,30 @@ removed.
 Gateway-side failures use fixed public messages. Diagnose them with protected
 logs and safe metadata such as request ID, provider, model, and status. Do not
 log provider keys, prompts, responses, or raw upstream bodies.
+
+## Error codes
+
+A refusal a caller is expected to act on carries a stable code, both as an
+`Otari-Error-Code` header and as `code` in the body beside the human-readable
+`detail`: `{"detail": "...", "code": "budget_exceeded"}`. Map refusals by the
+code: it keeps its meaning across releases, while the `detail` text may be
+reworded.
+
+| `Otari-Error-Code` | Status | Meaning | Also sent |
+|---|---|---|---|
+| `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token` |
+| `user_blocked` | 403 | The billed user is blocked | |
+| `user_not_found` | 404 | The billed user does not exist | |
+| `rate_limited` | 429 | A gateway rate limit is full | `Otari-Rate-Limit-Rule` for a `rate_limits` rule; `Retry-After` when waiting helps |
+| `upstream_rate_limited` | 429 | The provider rate limited the gateway | `Retry-After` when the provider sent one |
+| `invalid_model` | 400 | The model selector names no configured provider | |
+| `model_not_allowed` | 403 | The key may not use the model | |
+| `context_length_exceeded` | 400 | The prompt is too long for the model | |
+| `pricing_required` | 402 | `require_pricing` is on and the model has no price | |
+
+A failure after a stream has started arrives as an error event, which carries
+the code as `error.code` on Chat Completions and Responses:
+`{"error": {"message": "...", "type": "server_error", "code": "upstream_rate_limited"}}`.
 
 ## Caller-orchestrated MCP
 

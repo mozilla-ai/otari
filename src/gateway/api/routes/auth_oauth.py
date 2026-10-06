@@ -31,10 +31,8 @@ history both record; the cookie is the half of the flow that neither does. See
 ``gateway.services.oauth_service``.
 
 **What this route decides, and what it does not.** It proves the person holds
-the provider account. Who that makes them *here* is behind
-``IdentityProviderPort``: this build resolves the identity against its roster
-and refuses one it does not recognize, and an overlay binds a different policy
-without editing this file.
+the provider account. ``IdentityProviderPort`` decides which account that person
+signs in as here, so an overlay can change that policy without editing this file.
 """
 
 import uuid

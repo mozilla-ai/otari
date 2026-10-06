@@ -155,6 +155,17 @@ run through the same path as any other completion, so routing policies,
 guardrails, budgets and the tool loop all apply, and every request appears in
 Activity and Usage.
 
+A question can carry files. Attach them with the paperclip in the composer or
+drop them anywhere on the page; each uploads at once and shows as a chip with
+its name and size until the question is sent. The model reads them the way an
+API request's [uploaded files](files.md) are read, so a text-only local model is
+given their extracted text. When comparing, both models get the same files. A
+saved conversation remembers which files each question carried. Removing a
+chip takes the file off that question and keeps the upload: the Files dialog
+lists everything you uploaded in the workspace, to attach again or to delete.
+These controls appear only where the deployment stores files: not when file
+uploads are off, and not on a hosted control plane.
+
 Two things are worth knowing about how it is billed and what it stores.
 
 A Playground request carries no API key. It is authorized by the dashboard
@@ -198,13 +209,7 @@ workspace roles. Deployment-wide operations require an operator. See
 
 ## Authentication options
 
-Password sign-in is tied to an existing identity, unless the deployment sets
-`open_signup: true`, which lets an unknown address register itself with an
-organization of its own. Optional passkeys, Google OAuth, and GitHub OAuth add
-ways for an existing identity to sign in; they do not make an unknown account a
-member. OAuth requires `public_base_url` plus the
-provider's client ID and secret. Passkeys can instead use `public_base_url`, or
-an explicit `webauthn_rp_id` and `webauthn_allowed_origins` pair.
+Password sign-in works for an existing account. Optional passkeys, Google OAuth and GitHub OAuth add more ways to sign in. When the deployment sets `open_signup: true`, a new address can also create an account with its own organization, through the signup form or a Google or GitHub sign-in. A passkey never creates an account. OAuth requires `public_base_url` plus the provider's client ID and secret. Passkeys can instead use `public_base_url`, or an explicit `webauthn_rp_id` and `webauthn_allowed_origins` pair.
 
 Signing in *can* add a membership in one case. If an organization has claimed and
 proven the email domain that the identity's verified address belongs to, the

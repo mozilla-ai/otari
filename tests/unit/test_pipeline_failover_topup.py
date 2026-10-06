@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import gateway.api.routes._pipeline as pipeline
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import BUDGET_EXCEEDED, error_headers
 from gateway.services.budgets import ReservationHandle
 from gateway.types.attempt import Attempt
 
@@ -155,6 +156,25 @@ async def test_a_refused_top_up_stops_the_chain_with_the_failover_detail(
     assert exc_info.value.status_code == 402
     assert exc_info.value.detail == pipeline.budget_exhausted_mid_failover_detail()
     assert "failing over" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_a_refused_top_up_keeps_the_budget_code(
+    monkeypatch: pytest.MonkeyPatch, increases: list[Decimal]
+) -> None:
+    """The detail is replaced, but the code and scope a client maps the refusal by are not."""
+    refusal_headers = error_headers(BUDGET_EXCEEDED, budget_scope="user")
+
+    async def refuse(*_args: Any, **_kwargs: Any) -> None:
+        raise HTTPException(status_code=403, detail="budget exceeded", headers=refusal_headers)
+
+    monkeypatch.setattr(pipeline, "increase_reservation", refuse)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await pipeline.top_up_reservation_for_attempt(_ctx(estimate=Decimal(5)), _attempt(2, "anthropic", "pricey"))
+
+    assert exc_info.value.detail == pipeline.budget_exhausted_mid_failover_detail()
+    assert exc_info.value.headers == refusal_headers
 
 
 @pytest.mark.asyncio

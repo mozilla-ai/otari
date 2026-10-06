@@ -23,28 +23,25 @@ execution path and the gateway has nothing to dispatch against.
 from __future__ import annotations
 
 import json
-import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from any_llm import aresponses
-from openai.types.responses import ResponseCodeInterpreterToolCall
-from openai.types.responses.response_code_interpreter_tool_call import OutputImage, OutputLogs
 from openai.types.responses.response_output_item_added_event import ResponseOutputItemAddedEvent
 from openai.types.responses.response_output_item_done_event import ResponseOutputItemDoneEvent
 
 from gateway.log_config import logger
 from gateway.services._tool_loop import StreamAction, run_tool_loop, run_tool_loop_stream
-from gateway.services.files import guess_mime_type
 from gateway.services.mcp_loop import (
     DEFAULT_MAX_TOOL_ITERATIONS,
     MAX_TOOL_ITERATIONS_CAP,
     MaxToolIterationsExceeded,
     ToolBackend,
 )
-from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, CodeExecution
 from gateway.services.tool_format import openai_to_responses_tools
+from gateway.services.tool_usage import is_tool_error
 from gateway.services.tools import (
     MAX_USES_EXCEEDED_ERROR,
     Dialect,
@@ -95,24 +92,28 @@ async def _execute_function_calls(
     items: list[Any],
     *,
     budget: ToolUseBudget | None = None,
-    refused_call_ids: set[str] | None = None,
+    native_items: list[Any] | None = None,
+    tools: frozenset[str] = frozenset(),
 ) -> list[dict[str, Any]]:
     """Run each owned function_call and return the Responses function_call_output items.
 
     Tool failures convert to a ``[tool error] ...`` string in the output so the
     model can recover. Only cancellation-class exceptions escape; same idiom
     as :func:`gateway.services.mcp_loop._execute_mcp_calls`. A call past ``budget``
-    is refused as one of those errors. When supplied, ``refused_call_ids`` records
-    that decision at its source, so a tool announces a refused call the way its own
-    rendering says to rather than as one that ran.
+    is refused as one of those errors.
+
+    When ``native_items`` is given, each call appends the native items announcing it
+    right after it ran, so they keep the order the calls ran in and a rendering that
+    reads a backend's buffer reads only that call's entries.
     """
     out: list[dict[str, Any]] = []
     for item in items:
         args = _parsed_arguments(item.arguments)
+        call = NativeCall(str(item.name or ""), str(item.call_id or ""), args)
         capped = is_capped_call(budget, pool, item.name)
         if capped and budget is not None and budget.exhausted():
-            if refused_call_ids is not None:
-                refused_call_ids.add(str(item.call_id))
+            if native_items is not None:
+                native_items.extend(_native_items(call, pool, tools, refused=True))
             out.append({"type": "function_call_output", "call_id": item.call_id, "output": MAX_USES_EXCEEDED_ERROR})
             continue
         try:
@@ -125,6 +126,8 @@ async def _execute_function_calls(
         else:
             if capped and budget is not None:
                 budget.record(text)
+        if native_items is not None:
+            native_items.extend(_native_items(replace(call, failed=is_tool_error(text)), pool, tools, refused=False))
         out.append({"type": "function_call_output", "call_id": item.call_id, "output": text})
     return out
 
@@ -202,58 +205,6 @@ def _reoutput_indexed(event: Any, visible_index: int) -> Any:
     return event.model_copy(update={"output_index": visible_index})
 
 
-# The gateway's own ``code_interpreter_call`` item ids. OpenAI issues ``ci_``
-# ids, so a reserved prefix is what lets an echoed item be told apart from one
-# describing a run OpenAI's own interpreter did (see ``routes/responses.py``).
-CODE_INTERPRETER_CALL_ID_PREFIX = "otari_ci_"
-
-
-def _produced_image_outputs(execution: CodeExecution, files_base_url: str | None) -> list[OutputImage]:
-    """``image`` outputs for the images a run produced, in the caller's vocabulary.
-
-    OpenAI's only shape for a produced file here is a URL, so an image is
-    announced as the address Otari serves it from and anything else is left to
-    the files API, where every produced file is listed and downloadable by id.
-    """
-    if not files_base_url:
-        return []
-    return [
-        OutputImage(type="image", url=f"{files_base_url}/{file_id}/content")
-        for filename, file_id in execution.file_ids.items()
-        if guess_mime_type(filename).startswith("image/")
-    ]
-
-
-def _code_interpreter_call_item(
-    execution: CodeExecution, container_id: str, files_base_url: str | None = None
-) -> ResponseCodeInterpreterToolCall:
-    """The Responses API's native "the server ran code" output item, for one gateway execution.
-
-    Emitted for a caller that declared ``code_interpreter`` and whose request the
-    gateway's sandbox ran instead. ``outputs`` carries the run's logs, which is
-    what OpenAI's interpreter reports too, and an ``image`` entry per produced
-    image (see :func:`_produced_image_outputs`).
-    """
-    outputs: list[OutputLogs | OutputImage] | None = None
-    status: str = "failed"
-    if execution.result is not None:
-        result = execution.result.content
-        logs = "".join(part for part in (result.stdout, result.stderr) if part)
-        outputs = [OutputLogs(type="logs", logs=logs)] if logs else None
-        images = _produced_image_outputs(execution, files_base_url)
-        if images:
-            outputs = [*(outputs or []), *images]
-        status = "completed" if result.return_code in (None, 0) else "failed"
-    return ResponseCodeInterpreterToolCall(
-        id=f"{CODE_INTERPRETER_CALL_ID_PREFIX}{uuid.uuid4().hex}",
-        code=execution.code,
-        container_id=container_id,
-        outputs=outputs,
-        status=status,  # type: ignore[arg-type]
-        type="code_interpreter_call",
-    )
-
-
 def _parsed_arguments(raw: Any) -> dict[str, Any]:
     """The call's arguments, empty where the model sent something unusable."""
     try:
@@ -276,40 +227,6 @@ def _native_items(call: NativeCall, pool: ToolBackend, tools: frozenset[str], *,
     if rendering is None:
         return []
     return rendering.refused(call) if refused else rendering.ran(call, pool)
-
-
-def _native_items_for(
-    owned: list[Any],
-    pool: ToolBackend,
-    refused_call_ids: set[str] | None = None,
-    *,
-    tools: frozenset[str] = frozenset(),
-) -> list[Any]:
-    """Native items for the gateway-run calls among ``owned`` whose tool ``tools`` names.
-
-    ``code_execution`` maps to a ``code_interpreter_call``, read off the executions the
-    sandbox backend kept for the calls just awaited rather than off the calls themselves.
-    """
-    items: list[Any] = []
-    for item in owned:
-        call = NativeCall(
-            str(getattr(item, "name", "") or ""),
-            str(getattr(item, "call_id", "") or ""),
-            _parsed_arguments(getattr(item, "arguments", "")),
-        )
-        items.extend(_native_items(call, pool, tools, refused=bool(refused_call_ids and call.id in refused_call_ids)))
-    items.extend(_code_interpreter_items(pool, emit=CODE_EXECUTION_TOOL_NAME in tools))
-    return items
-
-
-def _code_interpreter_items(pool: ToolBackend, *, emit: bool) -> list[ResponseCodeInterpreterToolCall]:
-    """``code_interpreter_call`` items for the executions the backend kept, when asked."""
-    take_executions = getattr(pool, "take_executions", None)
-    if not emit or take_executions is None:
-        return []
-    container_id = str(getattr(pool, "container_id", "") or "")
-    files_base_url = getattr(pool, "files_base_url", None)
-    return [_code_interpreter_call_item(execution, container_id, files_base_url) for execution in take_executions()]
 
 
 def _compaction_items(output: list[Any]) -> list[Any]:
@@ -360,9 +277,8 @@ async def _execute_stream_owned(
         else:
             if capped and budget is not None:
                 budget.record(text)
-        state.native_items.extend(_native_items(call, pool, tools, refused=False))
+        state.native_items.extend(_native_items(replace(call, failed=is_tool_error(text)), pool, tools, refused=False))
         results.append({"type": "function_call_output", "call_id": call.id, "output": text})
-    state.code_interpreter_items.extend(_code_interpreter_items(pool, emit=CODE_EXECUTION_TOOL_NAME in tools))
     return results
 
 
@@ -422,7 +338,6 @@ class _ResponsesStreamState:
         # Native items for this iteration's gateway-run calls, minted right after
         # each call ran and drained by ``synthetic_events``.
         self.native_items: list[Any] = []
-        self.code_interpreter_items: list[ResponseCodeInterpreterToolCall] = []
         # Output items the gateway runs itself. Their events are swallowed: the
         # client can never be sent a ``function_call_output`` for a call the
         # gateway consumed, so showing it the call is a dead end.
@@ -502,11 +417,13 @@ class _ResponsesToolLoopStrategy:
         # Mixed-batch exit: the owned subset runs for its side effects. Collect
         # its native items too, since ``fold_usage`` runs on that path and
         # prepends them, so the caller still sees the search or run it paid for.
-        refused_call_ids: set[str] = set()
-        outputs = await _execute_function_calls(pool, owned, budget=self._budget, refused_call_ids=refused_call_ids)
-        if acc is not None:
-            acc["native_items"].extend(_native_items_for(owned, pool, refused_call_ids, tools=self._native_tools))
-        return outputs
+        return await _execute_function_calls(
+            pool,
+            owned,
+            budget=self._budget,
+            native_items=acc["native_items"] if acc is not None else None,
+            tools=self._native_tools,
+        )
 
     def filter_owned(self, result: Response, owned: list[Any], pool: ToolBackend) -> None:
         # Mixed batch: the owned subset was executed for its side effects;
@@ -542,17 +459,16 @@ class _ResponsesToolLoopStrategy:
         # compaction item on every continuation.
         output = list(result.output or [])
         transcript.extend(_items_to_dicts(_replay_items(output, owned)))
-        refused_call_ids: set[str] = set()
         outputs = await _execute_function_calls(
             pool,
             owned,
             budget=self._budget,
-            refused_call_ids=refused_call_ids,
+            native_items=acc["native_items"] if acc is not None else None,
+            tools=self._native_tools,
         )
         transcript.extend(outputs)
         if acc is not None:
             acc["compactions"].extend(_compaction_items(output))
-            acc["native_items"].extend(_native_items_for(owned, pool, refused_call_ids, tools=self._native_tools))
 
     # ---- streaming hooks ----
 
@@ -747,9 +663,8 @@ class _ResponsesToolLoopStrategy:
         minted where the calls ran, since this hook holds no backend to read them from.
         """
         events: list[ResponseStreamEvent] = []
-        items = [*state.native_items, *state.code_interpreter_items]
+        items = state.native_items
         state.native_items = []
-        state.code_interpreter_items = []
         acc.setdefault("native_items", []).extend(items)
         for item in items:
             output_index = acc["next_output_index"]

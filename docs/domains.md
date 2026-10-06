@@ -85,7 +85,9 @@ Organizations, workspaces, members, invitations, email-domain claims, first-boot
 provisioning, the setup guide, and the gateway's billing users.
 
 It defines `MembershipListener`, the interface budgets implements to react to a
-membership change without organizations importing budgets. It also owns
+membership change without organizations importing budgets. The listener writes
+through the caller's Unit of Work, so a service that changes membership is built
+with one and makes the change inside its block. It also owns
 `models/users.py`, `repositories/users_repository.py` and
 `services/workspace_scope.py`.
 
@@ -113,7 +115,8 @@ It also owns `models/pricing_schemas.py`.
 ### providers
 
 Provider credentials: instances configured at runtime, organization-scoped
-provider keys, their health, and what a dispatch needs to reach a provider.
+provider keys, endpoints a workspace or a user owns, their health, and what a
+dispatch needs to reach a provider.
 
 `tenancy/org_provider_key_service.py` has three divider sections (organization
 keys, workspace overrides, model restrictions) and splits along them.

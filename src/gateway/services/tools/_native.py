@@ -37,9 +37,9 @@ class NativeCall:
     """One gateway-run tool call, as a rendering needs to describe it.
 
     ``id`` is the ID the caller's own transcript gave the call. A rendering that needs an
-    ID of its own mints one carrying the gateway's prefix instead. ``failed`` is set only
-    by a dialect whose renderings read it, so a rendering must not take ``False`` as proof
-    that a call succeeded.
+    ID of its own mints one carrying the gateway's prefix instead. ``failed`` is whether the
+    call ran and answered with a tool error. Chat Completions has no renderings and never
+    sets it, so a rendering must not take ``False`` there as proof that a call succeeded.
     """
 
     name: str

@@ -11,6 +11,7 @@ import { IconButton } from "@/design-system/actions/IconButton"
 import { CodeBlock } from "@/design-system/content/CodeBlock"
 import { Markdown } from "@/design-system/content/Markdown"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { SentAttachmentList } from "./AttachmentChips"
 import { parseThinkTags } from "./helpers/parseThinkTags"
 import { splitModelKey } from "./helpers/playgroundModels"
 import type { ChatTurn } from "./helpers/playgroundTypes"
@@ -78,7 +79,13 @@ export function MessageBubble({
 }) {
   if (turn.role === "user") {
     return (
-      <article aria-label="Your message" className="flex justify-end">
+      <article
+        aria-label="Your message"
+        className="flex flex-col items-end gap-2"
+      >
+        {turn.attachments?.length ? (
+          <SentAttachmentList attachments={turn.attachments} />
+        ) : null}
         <p className="max-w-[35rem] whitespace-pre-wrap break-words bg-surface-alt px-4 py-3 text-base leading-[1.625rem]">
           {turn.content}
         </p>

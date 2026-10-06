@@ -6,10 +6,11 @@ name: Otari SDK Codegen
 # typed error mapping, ergonomic methods); that shell is not regenerated here
 # (see scripts/sdk_codegen/README.md).
 #
-# Requires a repository secret SDK_CODEGEN_TOKEN: a fine-grained PAT or GitHub App
-# installation token with Contents:write and Pull-requests:write on
-# mozilla-ai/otari-sdk-{python,ts,go,rust}. The default GITHUB_TOKEN cannot push
-# to other repositories.
+# Pushes and opens PRs with an installation token of the codegen GitHub App.
+# The app is installed on mozilla-ai/otari-sdk-{python,ts,go,rust} with
+# Contents:write and Pull-requests:write. The repository secrets CODEGEN_APP_ID
+# (the app Client ID) and CODEGEN_APP_KEY (the app private key) mint the token.
+# The default GITHUB_TOKEN cannot push to other repositories.
 
 on:
   release:
@@ -98,11 +99,22 @@ jobs:
           fi
           uv run python scripts/sdk_codegen/generate.py "${args[@]}"
 
+      - name: Generate App token for ${{ matrix.sdk_repo }}
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.CODEGEN_APP_ID }}
+          private-key: ${{ secrets.CODEGEN_APP_KEY }}
+          owner: mozilla-ai
+          repositories: ${{ matrix.sdk_repo }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Checkout ${{ matrix.sdk_repo }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ matrix.sdk_repo }}
-          token: ${{ secrets.SDK_CODEGEN_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           path: sdk-repo
 
       - name: Sync generated client into the SDK repo
@@ -124,7 +136,7 @@ jobs:
         id: regen_pr
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
-          token: ${{ secrets.SDK_CODEGEN_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           path: sdk-repo
           branch: sdk-codegen/client-core
           delete-branch: true
@@ -162,7 +174,7 @@ jobs:
         # not fail the regeneration itself, so the error is downgraded to a warning.
         if: steps.regen_pr.outputs.pull-request-number
         env:
-          GH_TOKEN: ${{ secrets.SDK_CODEGEN_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           SDK_REPO: ${{ matrix.sdk_repo }}
           PR_NUMBER: ${{ steps.regen_pr.outputs.pull-request-number }}
         run: |

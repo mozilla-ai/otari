@@ -171,13 +171,20 @@ rate_limits:
 ```
 
 - `rpm`: requests per minute.
-- `tpm`: tokens per minute. A request is admitted on an estimate (its prompt
-  plus `max_tokens`, or `budget_estimate_default_output_tokens` when it sets
-  none) and charged what it used once it completes. A request that fails is
-  charged the tokens its provider reported before failing, usually none, and a
-  request refused after admission (by its budget, say) is charged nothing. A
-  request whose estimate alone exceeds the limit is always refused, with no
-  `Retry-After`, since waiting would not let it in.
+- `tpm`: tokens per minute, counted on what each request used. A request is
+  admitted while the minute's tokens are under the limit and charged what it
+  used once it completes, as LiteLLM does, so the last request admitted in a
+  minute can take the count past the limit. A request that fails is charged the
+  tokens its provider reported before failing, usually none, and a request
+  refused after admission (by its budget, say) is charged nothing.
+  `tpm_admission: estimate` counts the way providers count their own quotas
+  instead: a request holds an estimate (its prompt plus `max_tokens`, or
+  `budget_estimate_default_output_tokens` when it sets none) while it runs, and
+  is refused when that does not fit. Use it for a limit meant to stay under a
+  provider's quota, such as a `per: model` rule that should move traffic to the
+  next model before the provider refuses it. Under it, a request whose estimate
+  alone exceeds the limit is always refused, with no `Retry-After`, since
+  waiting would not let it in.
 - `max_concurrent`: requests in flight at once. A slot is given back when the
   response ends, streamed or not. `lease_sec` (15 minutes by default) bounds how
   long a slot outlives a process that dies holding it.
@@ -186,7 +193,7 @@ rate_limits:
 a dashboard session), and `per: user` does not limit one billed to no user. A request has to fit every rule that applies to it; one
 that does not is refused with a 429 naming the rule and the limit it hit, counted by none of them,
 and holds no budget. Rules count in `rate_limit_store`, so with Redis they hold
-across replicas. They apply to chat completions, messages and responses, after
+across replicas. They apply to chat completions, messages, responses and search, after
 `rate_limit_rpm`. A hybrid gateway does not enforce them yet, so it refuses to
 start with `rate_limits` set.
 
@@ -200,6 +207,8 @@ skips a full model and tries its next candidate, and a request is refused with a
 429 only when no candidate has room. A direct call to a full model is refused.
 A candidate that fails before responding gives back its tokens and its slot but
 keeps its request counted, since the provider was sent it.
+A search tool is limited the same way, named as `provider:tool` (`exa:exa-search`),
+the name its pricing uses.
 
 Rules can also be added, changed and removed from the dashboard (Settings, Rate
 limit rules) or through `/api/v1/rate-limits`. A change applies at once on the
@@ -482,17 +491,13 @@ where logs are shared. Test delivery from Settings or
 
 ## Signup
 
-Signup is closed by default: only an address an owner or admin already added or
-invited can set a password. Open it where the deployment serves many tenants and
-each new address should arrive with an organization of its own:
+Signup is closed by default: only an address an owner or admin already added or invited can get an account, by setting a password or by signing in with Google or GitHub. Open it where the deployment serves many tenants and each new address should arrive with an organization of its own:
 
 ```yaml
 open_signup: true
 ```
 
-Mail has to be configured for either posture, since signup sends a verification
-link. See [Access control](access-control.md) for what each posture does with an
-address nobody has added.
+The signup form needs mail configured in either case, because it sends a verification link. A Google or GitHub sign-in needs no mail, because the provider has already verified the address. See [Access control](access-control.md) for what each value does with an address nobody has added.
 
 ## Built-in tools and guardrails variables
 
@@ -509,6 +514,7 @@ and guardrail configuration. Common startup settings are:
 - `mcp_allow_loopback` and `mcp_allow_private_hosts`
 - `web_search_allow_private_hosts`
 - `provider_allow_private_hosts`
+- `provider_endpoints_enabled` (see [Provider endpoints](provider-endpoints.md))
 
 See [Built-in tools](tools.md), [MCP](mcp.md), and
 [Guardrails](guardrails.md) for behavior and security boundaries.

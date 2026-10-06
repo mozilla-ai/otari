@@ -49,7 +49,7 @@ from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Proto
 from urllib.parse import ParseResult, urlparse
 
 from any_llm import LLMProvider
-from any_llm.exceptions import AnyLLMError, InvalidRequestError, UnsupportedParameterError
+from any_llm.exceptions import AnyLLMError, ContextLengthExceededError, InvalidRequestError, UnsupportedParameterError
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -98,12 +98,21 @@ from gateway.api.routes._platform import (
 from gateway.api.routes._platform import (
     default_attempt_kwargs as default_attempt_kwargs,  # explicit re-export for the route modules
 )
-from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.api.routes._tools import _build_web_retrieval_backend, _resolve_sandbox_purpose_hint
 from gateway.core.config import ATTEMPT_ID_HEADER, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, release_session
 from gateway.core.env import otari_env
+from gateway.core.error_codes import (
+    CONTEXT_LENGTH_EXCEEDED,
+    INVALID_MODEL,
+    MODEL_NOT_ALLOWED,
+    PRICING_REQUIRED,
+    UPSTREAM_RATE_LIMITED,
+    error_code_of,
+    error_headers,
+)
 from gateway.core.metered_pricing import calculate_metered_cost, quantize_cost
+from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import (
     cache_read_tokens_of,
@@ -203,6 +212,7 @@ from gateway.services.provider_kwargs import (
     provider_key,
     resolve_provider_selector,
 )
+from gateway.services.providers import owned_endpoint_http_client
 from gateway.services.routing import (
     BudgetState,
     CompiledPlan,
@@ -249,7 +259,6 @@ from gateway.services.tools import (
     claim_web_declarations,
     declares_code_execution,
     extract_web_tools,
-    native_code_execution_dialect,
     native_rendering,
     read_web_search_max_uses,
     web_search_intercept_enabled,
@@ -637,20 +646,41 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
 def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, str] | None:
     """Response headers for a classified provider failure, or ``None``.
 
-    Forwards the upstream ``Retry-After`` on a 429, which is the one header a
-    rate-limited caller can act on and the one piece of a provider's rate-limit
-    response that its message body cannot always carry. Restricted to the 429:
-    on the statuses that surface as a fixed-detail 502 the header would describe
-    the gateway's own upstream account, which is not the caller's to read.
-
-    Returns ``None`` rather than an empty dict when there is nothing to send, so
-    ``HTTPException(headers=...)`` stays unset instead of being handed a dict
-    that adds nothing.
+    On a 429, ``Otari-Error-Code: upstream_rate_limited`` (so a caller can tell
+    the provider's limit from the gateway's own) and the upstream ``Retry-After``,
+    the one piece of a provider's rate-limit response that its message body cannot
+    always carry. Restricted to the 429: on the statuses that surface as a
+    fixed-detail 502 the header would describe the gateway's own upstream
+    account, which is not the caller's to read.
     """
+    if status_code == status.HTTP_400_BAD_REQUEST and _is_context_length_error(exc):
+        return error_headers(CONTEXT_LENGTH_EXCEEDED)
     if status_code != status.HTTP_429_TOO_MANY_REQUESTS:
         return None
+    headers = error_headers(UPSTREAM_RATE_LIMITED)
     retry_after = upstream_retry_after(exc)
-    return {"Retry-After": retry_after} if retry_after is not None else None
+    if retry_after is not None:
+        headers["Retry-After"] = retry_after
+    return headers
+
+
+def _is_context_length_error(exc: BaseException) -> bool:
+    """Whether any-llm classified the failure as a prompt too long for the model."""
+    return any(isinstance(current, ContextLengthExceededError) for current in upstream_exception_chain(exc))
+
+
+def refusal_code(exc: BaseException) -> str | None:
+    """The ``Otari-Error-Code`` an exception ending a request stands for, or None.
+
+    Read by the stream error events, which go out after the headers that would
+    otherwise carry it.
+    """
+    if isinstance(exc, HTTPException):
+        return error_code_of(exc.headers)
+    mapping = classify_provider_error(exc)
+    if mapping is None:
+        return None
+    return error_code_of(provider_error_headers(exc, mapping.status_code))
 
 
 def failure_status_code(exc: BaseException) -> int:
@@ -1042,6 +1072,7 @@ def _raise_for_unresolvable_model(model_selector: str, exc: Exception) -> NoRetu
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=unresolvable_model_detail(model_selector),
+        headers=error_headers(INVALID_MODEL),
     ) from exc
 
 
@@ -1067,12 +1098,16 @@ async def resolve_dispatch_provider(
     Whichever of the two produced it, the result then passes through
     :func:`_serve_from_hosted_credential`, which is where ``model_provider`` is
     asked to serve a candidate no stored credential could. That is the last rung
-    and never displaces an earlier one; see that function.
+    and never displaces an earlier one; see that function. The caller's own
+    endpoint skips it, holding its credential already, and is given the one HTTP
+    client allowed to dial it.
     """
     if ctx.resolved_provider is not None:
-        return await _serve_from_hosted_credential(ctx, ctx.resolved_provider, adapter=adapter, port=model_provider)
+        return await _prepare_for_dispatch(ctx, ctx.resolved_provider, adapter=adapter, port=model_provider)
     try:
-        resolved = resolve_provider_selector(config, model_selector, ctx.user_id, workspace_id=ctx.workspace_id)
+        resolved = resolve_provider_selector(
+            config, model_selector, ctx.user_id, workspace_id=ctx.workspace_id, owned_endpoints=True
+        )
     except (ValueError, AnyLLMError) as exc:
         # A reservation is already held for this selector, so it is released before the rejection is recorded.
         await release_reservation(ctx)
@@ -1090,7 +1125,22 @@ async def resolve_dispatch_provider(
             request_id=ctx.request_id,
         )
         _raise_for_unresolvable_model(model_selector, exc)
-    return await _serve_from_hosted_credential(ctx, resolved, adapter=adapter, port=model_provider)
+    return await _prepare_for_dispatch(ctx, resolved, adapter=adapter, port=model_provider)
+
+
+async def _prepare_for_dispatch(
+    ctx: RequestContext,
+    resolved: ResolvedProvider,
+    *,
+    adapter: FormatAdapter[Any, Any],
+    port: ModelProviderPort,
+) -> ResolvedProvider:
+    if resolved.owned_endpoint is not None:
+        # The client re-checks and pins the endpoint's address on every request
+        # and follows no redirect; see ``services/providers``.
+        client_args = {"http_client": owned_endpoint_http_client()}
+        return replace(resolved, kwargs={**resolved.kwargs, "client_args": client_args})
+    return await _serve_from_hosted_credential(ctx, resolved, adapter=adapter, port=port)
 
 
 async def _warn_if_hosted_upstream_is_unpriced(
@@ -1482,6 +1532,7 @@ async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) 
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail=no_pricing_error_detail(f"{attempt.instance}:{attempt.model}"),
+            headers=error_headers(PRICING_REQUIRED),
         )
     repriced = estimate_cost(
         pricing,
@@ -1507,7 +1558,9 @@ async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) 
             attempt.instance,
             attempt.model,
         )
-        raise HTTPException(status_code=exc.status_code, detail=budget_exhausted_mid_failover_detail()) from exc
+        raise HTTPException(
+            status_code=exc.status_code, detail=budget_exhausted_mid_failover_detail(), headers=exc.headers
+        ) from exc
 
 
 def budget_exhausted_mid_failover_detail() -> str:
@@ -1949,7 +2002,9 @@ async def resolve_request_context(
             )
         else:
             try:
-                resolved = resolve_provider_selector(config, model, user_id, workspace_id=workspace_id)
+                resolved = resolve_provider_selector(
+                    config, model, user_id, workspace_id=workspace_id, owned_endpoints=True
+                )
                 gate_instance, gate_impl, gate_model = resolved.instance, resolved.provider, resolved.model
                 # Reused by the route handler for dispatch (see `RequestContext.resolved_provider`)
                 # instead of calling `resolve_provider_selector` a second time.
@@ -1983,7 +2038,7 @@ async def resolve_request_context(
                 started_at=started_at,
                 request_id=request_id,
             )
-            raise adapter.error(403, not_allowed_detail, ErrorKind.PERMISSION)
+            raise adapter.error(403, not_allowed_detail, ErrorKind.PERMISSION, headers=error_headers(MODEL_NOT_ALLOWED))
 
         # Organization-scoped model restriction (otari#643): the org key
         # resolved for this workspace+provider may narrow which models it
@@ -1997,6 +2052,7 @@ async def resolve_request_context(
             and gate_instance is not None
             and gate_impl is not None
             and gate_instance not in config.providers
+            and (resolved_provider is None or resolved_provider.owned_endpoint is None)
         ):
             org_allowlist = cached_org_model_restriction(workspace_id, gate_impl.value)
             if org_allowlist is not None and gate_model not in org_allowlist:
@@ -2014,7 +2070,9 @@ async def resolve_request_context(
                     started_at=started_at,
                     request_id=request_id,
                 )
-                raise adapter.error(403, not_allowed_detail, ErrorKind.PERMISSION)
+                raise adapter.error(
+                    403, not_allowed_detail, ErrorKind.PERMISSION, headers=error_headers(MODEL_NOT_ALLOWED)
+                )
 
         if idempotency is not None and session_principal is None:
             try:
@@ -2079,8 +2137,11 @@ async def resolve_request_context(
             estimated_tokens=estimated_tokens,
         )
         # A key flagged exclude_from_budget logs its cost and is never reserved, reconciled into users.spend, or gated.
-        # A master-key caller has no API key and stays on the enforced path.
-        budget_exempt = api_key is not None and api_key.exclude_from_budget
+        # A master-key caller has no API key and stays on the enforced path. A request to the caller's own endpoint
+        # is exempt too, its owner paying the upstream; a routing plan never resolves one, so no fallover leaves it.
+        budget_exempt = (api_key is not None and api_key.exclude_from_budget) or (
+            resolved_provider is not None and resolved_provider.owned_endpoint is not None
+        )
         # Reserve first so user/blocked/budget rejections (404/403) take
         # precedence over the missing-pricing rejection (402); refund if we
         # then reject for missing pricing.
@@ -2156,6 +2217,7 @@ async def resolve_request_context(
                 402,
                 no_pricing_detail,
                 ErrorKind.INVALID_REQUEST,
+                headers=error_headers(PRICING_REQUIRED),
             )
 
         # Resolve uploaded attachments only once the request is authorized
@@ -2471,30 +2533,13 @@ class ToolContext:
 
         A caller who declared a tool in a provider's words is owed that provider's
         items back, and each tool's registry entry decides whether its declaration
-        asks for them. Code execution answers from :attr:`native_code_execution_dialect`
-        instead, because the dialect loops still build its blocks themselves.
+        asks for them.
         """
-        names = {
+        return frozenset(
             name
             for name, entry in self.declared_gateway_tools.items()
             if (rendering := native_rendering(name, dialect)) is not None and rendering.declared(entry)
-        }
-        if self.use_sandbox and self.native_code_execution_dialect == dialect:
-            names.add(CODE_EXECUTION_TOOL_NAME)
-        return frozenset(names)
-
-    @property
-    def native_code_execution_dialect(self) -> Dialect | None:
-        """The wire format whose native code-execution blocks this request expects.
-
-        Set only when the gateway runs a declaration made in a provider's own
-        vocabulary: the caller asked in Anthropic's or OpenAI's words and its SDK
-        will look for that provider's result shape, so the loop answers in it.
-        ``None`` for ``otari_code_execution``, whose callers get the plain result.
-        """
-        if not self.use_sandbox:
-            return None
-        return native_code_execution_dialect(self.sandbox_tool_entry)
+        )
 
     @property
     def max_web_search_uses(self) -> int | None:

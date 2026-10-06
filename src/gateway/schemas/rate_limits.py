@@ -33,6 +33,9 @@ class RateLimitRuleUpdate(BaseModel):
     )
     rpm: int | None = Field(default=None, ge=1, description="Requests per minute.")
     tpm: int | None = Field(default=None, ge=1, description="Tokens per minute.")
+    tpm_admission: Literal["used", "estimate"] | None = Field(
+        default=None, description="'used' counts only what a request used; 'estimate' holds its estimate."
+    )
     max_concurrent: int | None = Field(default=None, ge=1, description="Requests in flight at once.")
     lease_sec: float | None = Field(default=None, gt=0, description="How long a max_concurrent slot is held at most.")
 

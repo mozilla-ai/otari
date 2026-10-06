@@ -2,7 +2,8 @@
 
 The wire shapes for a deployment's organization-scoped provider credentials:
 the keys themselves, a workspace's departure from its organization's default,
-and the models a key offers with the rate each is charged at.
+and the models a key offers with the rate each is charged at. Also the
+endpoints a workspace or one of its users owns.
 
 They are SQLModel rather than plain Pydantic because they are read straight off
 the rows in ``models/provider_keys.py``, whose tables are SQLModel too.
@@ -18,6 +19,7 @@ from sqlmodel import Field, SQLModel
 
 from gateway.models.pricing import PriceSource
 from gateway.models.provider_keys import OrgProviderKey
+from gateway.models.providers import ProviderEndpoint
 from gateway.models.secret_fields import redact_secret_like_values
 
 
@@ -238,6 +240,90 @@ class OrgProviderAvailableModelsPublic(SQLModel):
     discovery_unsupported: bool = False
 
 
+_ENDPOINT_NAME_DESC = (
+    "What callers put before the colon to reach this endpoint, as '<name>:<model>'. Letters, digits, '.', '_' "
+    "and '-', starting with a letter or digit. It may not be a provider's name or a configured instance's."
+)
+_ENDPOINT_PROVIDER_DESC = (
+    "The implementation that speaks to the endpoint: 'openai' for an OpenAI-compatible server, 'anthropic' for an "
+    "Anthropic-compatible one. Whichever it is, callers may use any of the chat, responses and messages routes."
+)
+_ENDPOINT_API_BASE_DESC = (
+    "Base URL of the endpoint. Refused when it resolves to a private, loopback, link-local or reserved address."
+)
+_ENDPOINT_DEFAULT_PARAMS_DESC = (
+    "Fields added to every request body sent to this endpoint, beneath the caller's own: a field the caller sets "
+    "wins. For fields the gateway does not model, such as vLLM's 'chat_template_kwargs'. Credential and "
+    "transport fields are refused."
+)
+
+
+class ProviderEndpointCreateRequest(SQLModel):
+    """What a caller sends to create an owned endpoint. The key is stored encrypted."""
+
+    name: str = Field(max_length=64, description=_ENDPOINT_NAME_DESC)
+    provider: str = Field(max_length=64, description=_ENDPOINT_PROVIDER_DESC)
+    api_base: str = Field(max_length=1024, description=_ENDPOINT_API_BASE_DESC)
+    api_key: str | None = Field(default=None, description="Sent to the endpoint. Never returned, only its last four.")
+    default_params: dict[str, Any] | None = Field(default=None, description=_ENDPOINT_DEFAULT_PARAMS_DESC)
+    workspace_id: uuid.UUID | None = Field(
+        default=None, description="Workspace that owns the endpoint. Omit for the deployment's default workspace."
+    )
+    user_id: str | None = Field(
+        default=None,
+        description=(
+            "User that owns the endpoint. Omit for one every caller in the workspace reaches. A user's endpoint "
+            "shadows a workspace-wide one of the same name for that user alone."
+        ),
+    )
+
+
+class ProviderEndpointUpdateRequest(SQLModel):
+    """A partial update. Only what is set is applied; an explicit null ``api_key`` clears it."""
+
+    name: str | None = Field(default=None, max_length=64, description=_ENDPOINT_NAME_DESC)
+    provider: str | None = Field(default=None, max_length=64, description=_ENDPOINT_PROVIDER_DESC)
+    api_base: str | None = Field(default=None, max_length=1024, description=_ENDPOINT_API_BASE_DESC)
+    api_key: str | None = None
+    default_params: dict[str, Any] | None = Field(default=None, description=_ENDPOINT_DEFAULT_PARAMS_DESC)
+
+
+class ProviderEndpointPublic(SQLModel):
+    """The API-facing shape. Never carries the key, only whether one is set."""
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    user_id: str | None = None
+    name: str
+    provider: str
+    api_base: str
+    last4: str | None = None
+    default_params: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime | None = None
+
+    @classmethod
+    def from_row(cls, row: ProviderEndpoint) -> ProviderEndpointPublic:
+        """Read one row for the API, masking credential-shaped ``default_params`` entries."""
+        return cls(
+            id=row.id,
+            workspace_id=row.workspace_id,
+            user_id=row.user_id,
+            name=row.name,
+            provider=row.provider,
+            api_base=row.api_base,
+            last4=row.last4,
+            default_params=redact_secret_like_values(row.default_params),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+
+class ProviderEndpointsPublic(SQLModel):
+    data: list[ProviderEndpointPublic]
+    count: int
+
+
 __all__ = [
     "OrgProviderAvailableModelsPublic",
     "OrgProviderKeyCreateRequest",
@@ -249,6 +335,10 @@ __all__ = [
     "OrgProviderKeyUpdateRequest",
     "OrgProviderKeysPublic",
     "OrgProviderModelsRefreshPublic",
+    "ProviderEndpointCreateRequest",
+    "ProviderEndpointPublic",
+    "ProviderEndpointUpdateRequest",
+    "ProviderEndpointsPublic",
     "WorkspaceProviderKeyOverridePublic",
     "WorkspaceProviderKeyOverrideRequest",
     "WorkspaceProviderKeyOverridesPublic",

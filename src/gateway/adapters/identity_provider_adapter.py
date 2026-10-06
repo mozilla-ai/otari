@@ -1,22 +1,6 @@
-"""Identity adapter enforcing the base build's roster policy on an OAuth sign-in.
-
-Satisfies :class:`gateway.ports.identity_provider_port.IdentityProviderPort` with
-the policy Otari's base build already applies to every other way in: an account
-exists here because an operator put it here. A social identity signs in as an
-account already on the roster and never creates one, so enabling Google or GitHub
-sign-in widens *how* a member authenticates, never *who* may.
-
-This is a real implementation and not a Null Object, per ``ARCHITECTURE.md``'s
-cardinal property. There is a live decision behind the port (link, refuse, and
-whether the provider's assertion is enough to lift the local verification gate),
-and it is the decision an overlay is most likely to want to replace: a hosted
-edition provisions on first sight, and an enterprise edition maps a directory
-connection onto an organization. Both bind here without editing this tree.
-"""
+"""Core adapter for ``IdentityProviderPort``."""
 
 from datetime import UTC, datetime
-
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.exceptions.identity_exceptions import (
     InvalidEmailError,
@@ -27,17 +11,20 @@ from gateway.models.tenancy import User
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.tenancy.email_address import validated_email
+from gateway.services.tenancy.organization_service import OrganizationService
 
 
-class RosterIdentityProviderAdapter(IdentityProviderPort):
-    """Resolves an OAuth identity onto an account an operator already added.
+class DeploymentIdentityProviderAdapter(IdentityProviderPort):
+    """Applies this deployment's ``open_signup`` setting to an OAuth sign-in.
 
-    The adapter stages its writes on the request's session and does not commit them.
-    The session is ``None`` where the deployment has no database, and ``resolve`` needs one.
+    The adapter leaves its changes for the caller to commit, except a new account's tenancy,
+    which ``OrganizationService.provision_signup_tenancy`` commits in its own Unit of Work block.
     """
 
-    def __init__(self, session: AsyncSession | None) -> None:
-        self._session = session
+    def __init__(self, users: UserRepository, organizations: OrganizationService, *, open_signup: bool) -> None:
+        self._users = users
+        self._organizations = organizations
+        self._open_signup = open_signup
 
     async def resolve(
         self,
@@ -47,30 +34,34 @@ class RosterIdentityProviderAdapter(IdentityProviderPort):
         full_name: str | None,
         email_verified: bool,
     ) -> User:
-        """Return the roster identity this OAuth identity signs in as.
+        """Return the account for this OAuth sign-in.
 
-        The address must be one the provider verified.
-        An unverified or missing address is refused whether or not it is on the roster.
+        The provider must have verified the email address.
+        If the provider sent no address, or did not verify it, the sign-in is refused and no account is created.
 
-        A successful call stages these changes on the identity and commits none of them:
+        If ``open_signup`` is enabled and there is no existing account for the address, a new account is created
+        and committed. The new account has its own organization and workspace.
+        No verification email is sent, because the provider has already verified the address.
 
-        - It records ``provider`` if the identity names none.
-          An identity that already names a provider keeps it.
+        A successful call then stages these changes on the account and commits none of them:
+
+        - It records ``provider`` if the account names none.
+          An account that already names a provider keeps it.
         - It marks an unverified address verified, which lets a deployment with no mail admit a member.
           Verifying the address also removes its password and its pending email verification token.
           The provider confirms who owns the address, not who set a password on it while it was unverified.
           A password on an address that is already verified is kept.
-        - It sets ``full_name`` if the identity has none.
+        - It sets ``full_name`` if the account has none.
 
-        NOTE: Concurrent sign-ins on one identity are serialized on PostgreSQL only.
+        NOTE: Concurrent sign-ins on one account are serialized on PostgreSQL only.
         On SQLite, the later of two concurrent sign-ins can overwrite the provider that the first recorded.
 
         Raises:
             OAuthEmailNotVerifiedError: If the provider returned no address, or one it did not verify.
-            OAuthIdentityUnknownError: If no active identity here holds that address.
+            OAuthIdentityUnknownError: If no active account holds the address,
+                and ``open_signup`` does not register a new one.
 
         """
-        assert self._session is not None, "resolving an identity needs a database session"
         if not email_verified or not email:
             raise OAuthEmailNotVerifiedError(provider)
         # An address this gateway would never store names no account, so it is refused as unknown.
@@ -79,15 +70,22 @@ class RosterIdentityProviderAdapter(IdentityProviderPort):
         except InvalidEmailError as error:
             raise OAuthIdentityUnknownError(provider) from error
 
-        users = UserRepository(self._session)
-        identity = await users.get_by_email(address)
-        # A deactivated identity is refused as unknown, so the answer does not confirm that the account exists.
-        if identity is None or not identity.is_active:
+        identity = await self._users.get_by_email(address)
+        if identity is None and self._open_signup:
+            registration = await self._organizations.provision_signup_tenancy(email=address, full_name=full_name)
+            identity = registration.identity
+        if identity is None:
             raise OAuthIdentityUnknownError(provider)
 
-        # The row is locked and re-read because a concurrent sign-in may have changed it since the first read.
-        await users.lock(identity.id)
-        await self._session.refresh(identity)
+        # The account is read again under a lock, so a change since the first read is seen before anything is written.
+        identity = await self._users.get_locked(identity.id)
+        # A deactivated account is refused as unknown, so the response does not confirm that the account exists.
+        if identity is None or not identity.is_active:
+            raise OAuthIdentityUnknownError(provider)
+        # The address is looked up again rather than compared here, so both lookups treat letter case alike.
+        holder = await self._users.get_by_email(address)
+        if holder is None or holder.id != identity.id:
+            raise OAuthIdentityUnknownError(provider)
 
         if identity.oauth_provider is None:
             identity.oauth_provider = provider
@@ -99,8 +97,8 @@ class RosterIdentityProviderAdapter(IdentityProviderPort):
             identity.email_verification_token_expires_at = None
         if not identity.full_name and full_name:
             identity.full_name = full_name
-        self._session.add(identity)
+        self._users.stage(identity)
         return identity
 
 
-__all__ = ["RosterIdentityProviderAdapter"]
+__all__ = ["DeploymentIdentityProviderAdapter"]

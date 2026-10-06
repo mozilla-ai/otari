@@ -1,7 +1,7 @@
 """The budgets domain caps spend with ceilings, reservations, reset periods and per-member policies."""
 
 from gateway.services.budgets._ledger import run_reservation_sweeper
-from gateway.services.budgets._member_policies import WorkspaceBudgetDefaultService
+from gateway.services.budgets._member_policies import BudgetMembershipListener
 from gateway.services.budgets._periods import budget_window, period_window
 from gateway.services.budgets._reservations import (
     ZERO,
@@ -23,10 +23,10 @@ from gateway.services.budgets._service import BudgetService
 __all__ = [
     "ZERO",
     "ApplicableBudget",
+    "BudgetMembershipListener",
     "BudgetScopeRequest",
     "BudgetService",
     "ReservationHandle",
-    "WorkspaceBudgetDefaultService",
     "applicable_budgets",
     "budget_window",
     "cadence_of",

@@ -288,6 +288,13 @@ class WorkspaceAlreadyActivatedError(TenancyConflictError):
         super().__init__("This workspace has already served a successful request")
 
 
+class SignupRegistrationUnresolvedError(TenancyError):
+    """The identity that took an address during a registration cannot be found."""
+
+    def __init__(self) -> None:
+        super().__init__("A signup address was released while it was being registered")
+
+
 __all__ = [
     "ForeignTenancyError",
     "InvalidRoleError",
@@ -310,6 +317,7 @@ __all__ = [
     "OrganizationNotFoundError",
     "OrganizationSlugUnavailableError",
     "PublicEmailDomainError",
+    "SignupRegistrationUnresolvedError",
     "TooManyOrganizationDomainsError",
     "UnregistrableDomainError",
     "WorkspaceActivationUnavailableError",
