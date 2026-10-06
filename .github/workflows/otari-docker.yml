@@ -125,6 +125,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-push-image
     if: github.ref == 'refs/heads/main'
+    # The dispatch authenticates with its own App token, not GITHUB_TOKEN.
+    permissions: {}
     steps:
       - name: Generate App token
         id: app-token

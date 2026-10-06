@@ -53,6 +53,9 @@ concurrency:
   group: otari-tests-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+
 jobs:
   test-unit:
     name: test-unit (${{ matrix.shard }})

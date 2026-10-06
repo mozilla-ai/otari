@@ -25,6 +25,9 @@ on:
       - '.github/workflows/otari-typecheck.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   typecheck:
     runs-on: ubuntu-latest
