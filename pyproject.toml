@@ -120,7 +120,7 @@ s3 = [
 # on that implementation detail. The protocol's own package (gcsfs, adlfs, s3fs,
 # paramiko, ...) is the operator's to install.
 fsspec = [
-    "fsspec>=2024.6.0",
+    "fsspec>=2026.6.0",
 ]
 # Hosted sandboxes through E2B, for a deployment that cannot run the reference
 # code-execution container with the isolation untrusted code needs. Selected
