@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from typing import Protocol
 
-from gateway.core.database import DATABASE_ERRORS, create_log_session
+from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS, create_log_session
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter, Gauge, Histogram
 from gateway.models.usage import UsageLog
@@ -70,36 +71,80 @@ class SingleLogWriter:
 
 
 class BatchLogWriter:
-    """Queue usage logs and flush in batches."""
+    """Queue usage logs and flush them in batches, one insert per batch.
 
-    def __init__(self, max_batch: int = 100, flush_interval: float = 1.0) -> None:
-        self._queue: asyncio.Queue[UsageLog] = asyncio.Queue()
+    A failed flush is retried with backoff. When the database refused a row for
+    its contents, the batch is then written row by row, so that row does not
+    take the rest with it; when the database is unreachable, the batch is
+    dropped, as a longer wait would only back the queue up. The queue is bounded
+    and a full one drops the row rather than blocking the request writing it,
+    which still has its reservation to settle.
+    """
+
+    def __init__(
+        self,
+        max_batch: int = 100,
+        flush_interval: float = 1.0,
+        max_queue: int = 10_000,
+        retries: int = 3,
+        retry_backoff: float = 0.5,
+        stop_timeout: float = 30.0,
+    ) -> None:
+        self._queue: asyncio.Queue[UsageLog] = asyncio.Queue(maxsize=max_queue)
         self._max_batch = max_batch
         self._flush_interval = flush_interval
+        self._retries = retries
+        self._retry_backoff = retry_backoff
+        self._stop_timeout = stop_timeout
+        self._stopping = asyncio.Event()
+        self._flushing = False
         self._task: asyncio.Task[None] | None = None
 
     async def put(self, log: UsageLog) -> None:
-        await self._queue.put(log)
+        try:
+            self._queue.put_nowait(log)
+        except asyncio.QueueFull:
+            logger.error("BatchLogWriter queue is full; dropping a usage row")
+            ROWS.labels(writer="batch", result="dropped").inc()
         QUEUE_DEPTH.set(self._queue.qsize())
 
     async def start(self) -> None:
+        self._stopping.clear()
         self._task = asyncio.create_task(self._run())
 
     async def stop(self) -> None:
+        """Write everything queued, then stop, giving up on what is left after ``stop_timeout``."""
+        self._stopping.set()
+        try:
+            await asyncio.wait_for(self._drain(), timeout=self._stop_timeout)
+        except TimeoutError:
+            logger.error(
+                "BatchLogWriter did not drain within %ss; dropping %d rows", self._stop_timeout, self._queue.qsize()
+            )
+            ROWS.labels(writer="batch", result="dropped").inc(self._queue.qsize())
+
+    async def _drain(self) -> None:
+        """Finish a flush in progress, then write what is still queued."""
         if self._task:
-            self._task.cancel()
-            try:
+            # Idle, the loop is waiting on the queue and holds no rows, so it is
+            # cancelled rather than waited out; mid-flush, it is let finish.
+            if not self._flushing:
+                self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
+            self._task = None
         await self._flush_all()
 
     async def _run(self) -> None:
-        while True:
+        while not self._stopping.is_set():
             try:
                 batch = await self._collect_batch()
                 if batch:
-                    await self._flush(batch)
+                    self._flushing = True
+                    try:
+                        await self._flush(batch)
+                    finally:
+                        self._flushing = False
             except asyncio.CancelledError:  # pragma: no cover - cooperative cancel
                 break
             except Exception as e:  # pragma: no cover - defensive logging
@@ -111,7 +156,7 @@ class BatchLogWriter:
             item = await asyncio.wait_for(self._queue.get(), timeout=self._flush_interval)
             batch.append(item)
             self._queue.task_done()
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return batch
 
         while len(batch) < self._max_batch:
@@ -121,24 +166,49 @@ class BatchLogWriter:
                 self._queue.task_done()
             except asyncio.QueueEmpty:
                 break
+        QUEUE_DEPTH.set(self._queue.qsize())
         return batch
+
+    async def _write(self, rows: list[UsageLog]) -> None:
+        async with create_log_session() as db:
+            # Spend is reconciled inline via the budget reservation path, not
+            # here — see SingleLogWriter.put. The writer only persists rows.
+            db.add_all(rows)
+            await db.commit()
 
     async def _flush(self, batch: list[UsageLog]) -> None:
         start = time.monotonic()
         BATCH_SIZE.labels(writer="batch").observe(len(batch))
-        try:
-            async with create_log_session() as db:
-                # Spend is reconciled inline via the budget reservation path, not
-                # here — see SingleLogWriter.put. The writer only persists rows.
-                for log in batch:
-                    db.add(log)
-                await db.commit()
-                ROWS.labels(writer="batch", result="written").inc(len(batch))
+        for attempt in range(self._retries + 1):
+            try:
+                await self._write(batch)
+            except DATA_ERRORS as e:
+                logger.error("BatchLogWriter flush of %d rows refused; writing them one at a time: %s", len(batch), e)
+                FLUSH_DURATION.labels(writer="batch", result="error").observe(time.monotonic() - start)
+                await self._salvage(batch)
+                return
+            except DATABASE_ERRORS as e:
+                if attempt < self._retries:
+                    logger.warning("BatchLogWriter flush of %d rows failed, retrying: %s", len(batch), e)
+                    await asyncio.sleep(self._retry_backoff * 2**attempt)
+                    continue
+                logger.error("BatchLogWriter flush failed, dropping %d rows: %s", len(batch), e)
+                ROWS.labels(writer="batch", result="dropped").inc(len(batch))
+                FLUSH_DURATION.labels(writer="batch", result="error").observe(time.monotonic() - start)
+                return
+            ROWS.labels(writer="batch", result="written").inc(len(batch))
             FLUSH_DURATION.labels(writer="batch", result="ok").observe(time.monotonic() - start)
-        except DATABASE_ERRORS as e:  # pragma: no cover - defensive logging
-            logger.error("BatchLogWriter flush failed, dropping %d rows: %s", len(batch), e)
-            ROWS.labels(writer="batch", result="dropped").inc(len(batch))
-            FLUSH_DURATION.labels(writer="batch", result="error").observe(time.monotonic() - start)
+            return
+
+    async def _salvage(self, batch: list[UsageLog]) -> None:
+        """Write a batch that failed as a whole one row at a time, dropping only the rows that fail."""
+        for log in batch:
+            try:
+                await self._write([log])
+                ROWS.labels(writer="batch", result="written").inc()
+            except DATABASE_ERRORS as e:
+                logger.error("BatchLogWriter dropped a usage row: %s", e)
+                ROWS.labels(writer="batch", result="dropped").inc()
 
     async def _flush_all(self) -> None:
         batch: list[UsageLog] = []
@@ -148,8 +218,8 @@ class BatchLogWriter:
                 self._queue.task_done()
             except asyncio.QueueEmpty:
                 break
-        if batch:
-            await self._flush(batch)
+        for offset in range(0, len(batch), self._max_batch):
+            await self._flush(batch[offset : offset + self._max_batch])
 
 
 def create_log_writer(strategy: str) -> LogWriter:

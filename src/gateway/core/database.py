@@ -15,7 +15,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import event
 from sqlalchemy.engine import URL, make_url
-from sqlalchemy.exc import DisconnectionError, OperationalError, SQLAlchemyError
+from sqlalchemy.exc import DataError, DisconnectionError, IntegrityError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -134,6 +134,10 @@ def _configure_sqlite_pragmas(engine: AsyncEngine) -> None:
 # connection, so a ``db_connect_timeout`` still surfaces as a plain
 # ``TimeoutError``. Handlers on the request path therefore catch both.
 DATABASE_ERRORS: tuple[type[BaseException], ...] = (SQLAlchemyError, TimeoutError)
+
+# The database refusing a row for what it holds, as opposed to being unreachable:
+# trying again changes nothing, and the other rows written with it may be fine.
+DATA_ERRORS: tuple[type[BaseException], ...] = (IntegrityError, DataError)
 
 
 def translate_timeout_error(context: Any) -> None:

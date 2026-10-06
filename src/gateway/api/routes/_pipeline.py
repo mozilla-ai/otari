@@ -4750,11 +4750,13 @@ async def run_single_attempt_stream(
                     await top_up_reservation_for_attempt(ctx, attempt)
                 return await open_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=attempt_kwargs)
 
+            absorbed_rows: list[asyncio.Task[None]] = []
+
             async def _absorbed(attempt: Attempt, exc: BaseException, _total: int) -> None:
-                await log_absorbed_attempt(ctx, adapter, attempt, exc)
+                await _write_absorbed_row(ctx, absorbed_rows, log_absorbed_attempt(ctx, adapter, attempt, exc))
 
             async def _skipped(attempt: Attempt, refusal: HTTPException) -> None:
-                await log_skipped_attempt(ctx, adapter, attempt, refusal)
+                await _write_absorbed_row(ctx, absorbed_rows, log_skipped_attempt(ctx, adapter, attempt, refusal))
 
             # The walk reports which candidate it stopped on, so the failure row
             # names the provider that actually failed rather than the end of the plan.
@@ -4779,6 +4781,8 @@ async def run_single_attempt_stream(
                     ctx, adapter, exhausted, stopped_on[0] if stopped_on else None, tool_tally=tool_ctx.tally
                 )
                 raise
+            finally:
+                await _absorbed_rows_written(absorbed_rows)
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
             stream_attribution = _attribution_for(ctx, chosen)
         else:
@@ -5403,6 +5407,37 @@ async def log_skipped_attempt(
     await _log_absorbed_row(ctx, adapter, attempt, f"{SKIPPED_ATTEMPT_PREFIX}{refusal.detail}", refusal.status_code)
 
 
+# Absorbed rows being written, held so a request that ends first (its client gone)
+# cannot leave its write to be garbage collected half done.
+_ABSORBED_ROW_WRITES: set[asyncio.Task[None]] = set()
+
+
+async def _absorbed_rows_written(pending: list[asyncio.Task[None]]) -> None:
+    """Wait for a walk's absorbed rows; ``asyncio.wait`` leaves them running if this wait is cancelled."""
+    if pending:
+        await asyncio.wait(pending)
+
+
+async def _write_absorbed_row(
+    ctx: RequestContext, pending: list[asyncio.Task[None]], write: Coroutine[Any, Any, None]
+) -> None:
+    """Write an absorbed row beside the next attempt rather than before it.
+
+    The row's write needs the request's session only to look up a workspace the
+    request did not resolve, so with the workspace known it runs on its own, and
+    the walk awaits it before the request answers: the row is there when the
+    response is. Without one it is written inline, so the session is never used
+    by two tasks at once.
+    """
+    if ctx.workspace_id is None:
+        await write
+        return
+    task = asyncio.create_task(write)
+    _ABSORBED_ROW_WRITES.add(task)
+    task.add_done_callback(_ABSORBED_ROW_WRITES.discard)
+    pending.append(task)
+
+
 async def _log_absorbed_row(
     ctx: RequestContext, adapter: FormatAdapter[Any, Any], attempt: Attempt, error: str, status_code: int
 ) -> None:
@@ -5486,11 +5521,13 @@ async def run_standalone_non_stream(
                     on_first_response=mark_locked_in,
                 )
 
+            absorbed_rows: list[asyncio.Task[None]] = []
+
             async def _absorbed(attempt: Attempt, exc: BaseException, _total: int) -> None:
-                await log_absorbed_attempt(ctx, adapter, attempt, exc)
+                await _write_absorbed_row(ctx, absorbed_rows, log_absorbed_attempt(ctx, adapter, attempt, exc))
 
             async def _skipped(attempt: Attempt, refusal: HTTPException) -> None:
-                await log_skipped_attempt(ctx, adapter, attempt, refusal)
+                await _write_absorbed_row(ctx, absorbed_rows, log_skipped_attempt(ctx, adapter, attempt, refusal))
 
             # The walk reports which candidate it stopped on, so the failure row
             # names the provider that actually failed rather than the end of the plan.
@@ -5515,6 +5552,8 @@ async def run_standalone_non_stream(
                     ctx, adapter, exhausted, stopped_on[0] if stopped_on else None, tool_tally=tool_ctx.tally
                 )
                 raise
+            finally:
+                await _absorbed_rows_written(absorbed_rows)
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
             attribution = _attribution_for(ctx, chosen)
         else:
