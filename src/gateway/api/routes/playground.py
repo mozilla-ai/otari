@@ -51,11 +51,23 @@ not for hybrid.
 """
 
 import uuid
+from collections.abc import AsyncIterator
 from typing import Annotated
 
 import httpx
 from any_llm.types.completion import ChatCompletion
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,6 +89,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import release_session
 from gateway.core.surface import Surface
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.files_exceptions import FilesDisabledError
 from gateway.log_config import logger
 from gateway.models.playground import (
     PlaygroundComparisonCreate,
@@ -92,7 +105,9 @@ from gateway.models.playground import (
     PlaygroundMessagesPublic,
 )
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
+from gateway.schemas.files import OpenAIFileDeleted, OpenAIFileList, OpenAIFileObject
 from gateway.services import playground_dispatch, playground_service
+from gateway.services.files import DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, FileDialect, FileListing, FileScope, NewFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.secret_box import SecretBoxUnavailableError
 from gateway.types.session_principal import SessionPrincipal
@@ -116,6 +131,8 @@ router = APIRouter(
 SURFACE = Surface("playground")
 
 _CONVERSATION_NOT_FOUND = "Conversation not found"
+_FILE_PURPOSE = "user_data"
+_READ_CHUNK_BYTES = 1024 * 1024
 _COMPARISON_NOT_FOUND = "Comparison not found"
 
 # A workspace parameter is optional everywhere it appears: the page sends the
@@ -166,6 +183,7 @@ class PlaygroundToolsResponse(BaseModel):
 
     web_search: PlaygroundToolStatus
     code_execution: PlaygroundToolStatus
+    files: PlaygroundToolStatus = Field(description="Whether a message may attach a file uploaded here.")
     mcp_servers: list[PlaygroundMcpServer]
 
 
@@ -328,6 +346,7 @@ async def read_playground_tools(
     return PlaygroundToolsResponse(
         web_search=_tool_status(availability.web_search),
         code_execution=_tool_status(availability.code_execution),
+        files=_tool_status(availability.files),
         mcp_servers=[
             PlaygroundMcpServer(
                 id=server.id,
@@ -338,6 +357,107 @@ async def read_playground_tools(
             for server in availability.mcp_servers
         ],
     )
+
+
+# ==============================================================================
+# Files a message can attach
+# ==============================================================================
+
+
+async def _require_playground_files(config: Annotated[GatewayConfig, Depends(get_config)]) -> None:
+    """Answer as the unmounted ``/files`` routes do wherever the composer offers no attachments."""
+    if not playground_service.file_availability(config).enabled:
+        raise FilesDisabledError
+
+
+_PLAYGROUND_FILES = [Depends(_require_playground_files)]
+
+
+async def _upload_chunks(file: UploadFile) -> AsyncIterator[bytes]:
+    while chunk := await file.read(_READ_CHUNK_BYTES):
+        yield chunk
+
+
+@router.post("/files", dependencies=_PLAYGROUND_FILES)
+async def upload_playground_file(
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    files: FileServiceDep,
+    file: Annotated[UploadFile, File()],
+    workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
+) -> OpenAIFileObject:
+    """Upload a file for the caller, in a workspace they belong to.
+
+    The row is owned by the same principal a Playground completion runs as, so a
+    ``file_id`` returned here resolves in the caller's own messages and in nobody
+    else's. ``POST /api/v1/files`` takes an API key, which a dashboard session
+    does not hold; this is the session's way in.
+    """
+    principal = await playground_service.resolve_playground_principal(db, identity=identity, workspace_id=workspace_id)
+    # Commits the spend row the principal may have staged, which the file row's
+    # foreign key needs, and frees the connection while the bytes stream in.
+    await release_session(db)
+    record = await files.store(
+        NewFile(
+            user_id=principal.user_id,
+            workspace_id=principal.workspace_id,
+            filename=file.filename,
+            content_type=file.content_type,
+            purpose=_FILE_PURPOSE,
+            chunks=_upload_chunks(file),
+        )
+    )
+    return OpenAIFileObject.of(record)
+
+
+@router.get("/files", dependencies=_PLAYGROUND_FILES)
+async def list_playground_files(
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    files: FileServiceDep,
+    workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_LIST_LIMIT)] = DEFAULT_LIST_LIMIT,
+    after: str | None = None,
+) -> OpenAIFileList:
+    """The caller's own files in one workspace, newest first, in OpenAI's list shape.
+
+    Every file the caller owns there is listed, including one uploaded with an
+    API key of theirs in the same workspace, because a message here can attach it.
+    """
+    resolved = await playground_service.resolve_playground_workspace(db, identity=identity, workspace_id=workspace_id)
+    result = await files.page(
+        FileListing(
+            scope=FileScope(user_id=str(identity.id), workspace_id=resolved),
+            dialect=FileDialect.OPENAI,
+            limit=limit,
+            cursor=after,
+        )
+    )
+    return OpenAIFileList(
+        data=[OpenAIFileObject.of(record) for record in result.files],
+        has_more=result.next_cursor is not None,
+        first_id=result.files[0].id if result.files else None,
+        last_id=result.files[-1].id if result.files else None,
+    )
+
+
+@router.delete("/files/{file_id}", dependencies=_PLAYGROUND_FILES)
+async def delete_playground_file(
+    file_id: str,
+    identity: CurrentIdentity,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    files: FileServiceDep,
+    workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
+) -> OpenAIFileDeleted:
+    """Delete one of the caller's files. Another identity's answers 404, as a nonexistent one does.
+
+    A saved transcript that attached the file keeps its record of the
+    attachment, but the file is gone, so sending that turn again does not send
+    its contents.
+    """
+    resolved = await playground_service.resolve_playground_workspace(db, identity=identity, workspace_id=workspace_id)
+    await files.discard(file_id, FileScope(user_id=str(identity.id), workspace_id=resolved))
+    return OpenAIFileDeleted(id=file_id)
 
 
 # ==============================================================================

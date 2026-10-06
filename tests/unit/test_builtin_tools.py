@@ -104,6 +104,28 @@ def test_a_listed_tool_is_reachable_by_name_in_every_dialect_it_renders(tool: Bu
             assert native_rendering(tool.name, dialect) is None
 
 
+@pytest.mark.parametrize(
+    ("declared_type", "expected"),
+    [
+        ("code_execution_20250825", {Dialect.MESSAGES}),
+        ("code_interpreter", {Dialect.RESPONSES}),
+        ("code_execution", set()),
+        ("otari_code_execution", set()),
+    ],
+)
+def test_code_execution_is_rendered_only_in_the_dialect_whose_keyword_declared_it(
+    declared_type: str, expected: set[Dialect]
+) -> None:
+    """A provider's keyword asks for that provider's blocks back; the gateway's own words ask for none."""
+    rendered = {
+        dialect
+        for dialect in Dialect
+        if (rendering := native_rendering(CODE_EXECUTION_TOOL_NAME, dialect)) is not None
+        and rendering.declared({"type": declared_type})
+    }
+    assert rendered == expected
+
+
 def test_a_name_the_registry_does_not_list_has_no_rendering() -> None:
     """An MCP server may expose a tool of its own; nothing announces it natively."""
     assert native_rendering("a_tool_an_mcp_server_supplied", Dialect.MESSAGES) is None

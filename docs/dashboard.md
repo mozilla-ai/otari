@@ -155,6 +155,17 @@ run through the same path as any other completion, so routing policies,
 guardrails, budgets and the tool loop all apply, and every request appears in
 Activity and Usage.
 
+A question can carry files. Attach them with the paperclip in the composer or
+drop them anywhere on the page; each uploads at once and shows as a chip with
+its name and size until the question is sent. The model reads them the way an
+API request's [uploaded files](files.md) are read, so a text-only local model is
+given their extracted text. When comparing, both models get the same files. A
+saved conversation remembers which files each question carried. Removing a
+chip takes the file off that question and keeps the upload: the Files dialog
+lists everything you uploaded in the workspace, to attach again or to delete.
+These controls appear only where the deployment stores files: not when file
+uploads are off, and not on a hosted control plane.
+
 Two things are worth knowing about how it is billed and what it stores.
 
 A Playground request carries no API key. It is authorized by the dashboard

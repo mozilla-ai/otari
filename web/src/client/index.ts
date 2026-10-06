@@ -701,6 +701,12 @@ export type SavePlaygroundConversationRequest =
   Schemas["PlaygroundConversationCreate"]
 export type PlaygroundMessage = Schemas["PlaygroundMessagePublic"]
 export type PlaygroundMessages = Schemas["PlaygroundMessagesPublic"]
+export type PlaygroundAttachment = Schemas["PlaygroundAttachment"]
+
+// A file the caller uploaded, in OpenAI's file object shape, which is what the
+// Playground's own upload and listing answer in.
+export type PlaygroundFile = Schemas["OpenAIFileObject"]
+export type PlaygroundFiles = Schemas["OpenAIFileList"]
 
 // A rated A/B exchange. The summary deliberately carries no answer bodies;
 // there is no endpoint that reads one back, because a comparison is a recorded

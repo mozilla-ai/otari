@@ -501,7 +501,13 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const headers = new Headers(init.headers)
   headers.set("Accept", "application/json")
-  if (init.body != null && !headers.has("Content-Type")) {
+  // A form body's content type carries the multipart boundary, which only the
+  // browser knows, so it is left for the browser to write.
+  if (
+    init.body != null &&
+    !(init.body instanceof FormData) &&
+    !headers.has("Content-Type")
+  ) {
     headers.set("Content-Type", "application/json")
   }
   const signal = init.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS)

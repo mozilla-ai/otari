@@ -62,13 +62,18 @@ from gateway.services.files import StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_responses import (
-    CODE_INTERPRETER_CALL_ID_PREFIX,
     MAX_TOOL_ITERATIONS_CAP,
     responses_tool_loop,
     responses_tool_loop_stream,
 )
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
-from gateway.services.tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, Dialect, ToolUseBudget
+from gateway.services.tools import (
+    CODE_EXECUTION_HEADER,
+    CODE_INTERPRETER_CALL_ID_PREFIX,
+    WEB_SEARCH_HEADER,
+    Dialect,
+    ToolUseBudget,
+)
 from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
