@@ -14,9 +14,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import URL, MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from typing_extensions import override
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from gateway import features
 from gateway.api.deps import (
@@ -378,39 +378,56 @@ _CACHEABLE_PREFIXES = ("/assets/",)
 _SHORT_CACHE_PREFIXES = ("/pwa/", "/fonts/")
 
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+class SecurityHeadersMiddleware:
     """Add security headers to all responses.
 
     Sets standard security headers on every response, plus cache-control
     headers on non-health endpoints to prevent CDN/proxy caches from
     storing authenticated responses.
+
+    Pure ASGI rather than ``BaseHTTPMiddleware``, which relays every chunk of a
+    response, a streamed completion's included, through a stream of its own: the
+    headers are all this sets, and they live on the response start message.
     """
 
-    @override
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        response = await call_next(request)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        path = request.url.path
-        if _under(path, _PUBLIC_PREFIXES):
-            return response
-        # A cacheable path's policy describes its content, so it applies only to a
-        # response that carries any: an error under it is a fact about right now.
-        # A hybrid gateway serves no /pwa/, and a day-long 404 there would outlive
-        # a switch to standalone, keeping the install prompt away from a
-        # deployment that had since started offering it.
-        serves_content = response.status_code < 400
-        if serves_content and path.startswith(_CACHEABLE_PREFIXES):
-            response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
-        elif serves_content and (path in _CACHEABLE_PATHS or path.startswith(_SHORT_CACHE_PREFIXES)):
-            response.headers.setdefault("Cache-Control", "public, max-age=86400")
-        else:
-            response.headers["Cache-Control"] = "private, no-store, no-cache"
-            vary_values = {part.strip() for part in response.headers.get("Vary", "").split(",") if part.strip()}
-            vary_values.add("Authorization")
-            response.headers["Vary"] = ", ".join(sorted(vary_values))
-        return response
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = URL(scope=scope).path
+
+        async def send_with_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                _add_security_headers(MutableHeaders(scope=message), path, message["status"])
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
+def _add_security_headers(headers: MutableHeaders, path: str, status_code: int) -> None:
+    headers["X-Content-Type-Options"] = "nosniff"
+    headers["X-Frame-Options"] = "DENY"
+    headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if _under(path, _PUBLIC_PREFIXES):
+        return
+    # A cacheable path's policy describes its content, so it applies only to a
+    # response that carries any: an error under it is a fact about right now.
+    # A hybrid gateway serves no /pwa/, and a day-long 404 there would outlive
+    # a switch to standalone, keeping the install prompt away from a
+    # deployment that had since started offering it.
+    serves_content = status_code < 400
+    if serves_content and path.startswith(_CACHEABLE_PREFIXES):
+        headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+    elif serves_content and (path in _CACHEABLE_PATHS or path.startswith(_SHORT_CACHE_PREFIXES)):
+        headers.setdefault("Cache-Control", "public, max-age=86400")
+    else:
+        headers["Cache-Control"] = "private, no-store, no-cache"
+        vary_values = {part.strip() for part in headers.get("Vary", "").split(",") if part.strip()}
+        vary_values.add("Authorization")
+        headers["Vary"] = ", ".join(sorted(vary_values))
 
 
 def _validate_metrics_support(config: GatewayConfig) -> None:
