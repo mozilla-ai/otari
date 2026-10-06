@@ -132,6 +132,18 @@ def test_a_second_key_of_the_same_provider_and_name_is_refused(
     assert response.status_code == 409
 
 
+def test_renaming_a_key_onto_another_keys_name_is_refused(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    _add_key(client, master_key_header, name="first", api_key="tvly-1")
+    second = _add_key(client, master_key_header, name="second", api_key="tvly-2")
+
+    response = client.patch(f"{_KEYS}/{second['id']}", json={"name": "first"}, headers=master_key_header)
+
+    assert response.status_code == 409
+    assert "first" in response.json()["detail"]
+
+
 def test_one_default_per_provider_and_a_live_key_cannot_be_deleted(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:

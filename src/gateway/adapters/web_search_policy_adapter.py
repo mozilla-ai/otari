@@ -7,7 +7,6 @@ Either answer carries the workspace's own search key, where its organization has
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
@@ -20,14 +19,14 @@ from gateway.log_config import logger
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential, WebTool
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.repositories.tenancy import WorkspaceRepository
-from gateway.repositories.tools import WorkspaceWebSearchKeyOverrideRepository, resolve_web_search_key
+from gateway.repositories.tools import WorkspaceWebSearchKeyOverrideRepository
 from gateway.services.control_plane import ResolveEndpoint, resolve
 from gateway.services.tenancy.workspace_web_search_service import (
     InvalidStoredWebSearchDomainError,
     read_web_search_policy,
     resolve_workspace_web_search_config,
 )
-from gateway.services.tools import search_key_credential
+from gateway.services.tools import workspace_search_credential
 
 # The policy of a workspace that holds no row, carrying only its search key.
 _NO_NARROWING = ResolvedWebSearchConfig(
@@ -59,22 +58,14 @@ class LocalWebSearchPolicy(WebSearchPolicyPort):
             raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.STORED_POLICY_INVALID) from None
         if WebTool.SEARCH not in requested_tools:
             return policy
-        credential = await self._workspace_credential(scope.workspace_id)
+        credential = await workspace_search_credential(
+            WorkspaceRepository(self._session),
+            WorkspaceWebSearchKeyOverrideRepository(self._session),
+            scope.workspace_id,
+        )
         if credential is None:
             return policy
         return replace(policy or _NO_NARROWING, credential=credential)
-
-    async def _workspace_credential(self, workspace_id: uuid.UUID) -> WebSearchCredential | None:
-        """The key the workspace searches with, or ``None`` where it uses the deployment's search."""
-        workspace = await WorkspaceRepository(self._session).get(workspace_id)
-        if workspace is None:
-            return None
-        candidates = await WorkspaceWebSearchKeyOverrideRepository(self._session).candidates(
-            organization_id=workspace.organization_id, workspace_id=workspace.id
-        )
-        credentials = {key.id: search_key_credential(key) for key, _ in candidates}
-        chosen = resolve_web_search_key(candidates, lambda key: credentials[key.id] is not None)
-        return credentials[chosen.id] if chosen is not None else None
 
 
 class RemoteWebSearchPolicy(WebSearchPolicyPort):

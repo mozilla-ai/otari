@@ -29,6 +29,7 @@ from gateway.exceptions.tools_exceptions import (
 from gateway.log_config import logger
 from gateway.models.tenancy import User
 from gateway.models.tools import OrgWebSearchKey, WebSearchCredential
+from gateway.repositories.tenancy import WorkspaceRepository
 from gateway.repositories.tools import (
     OrgWebSearchKeyRepository,
     WebSearchKeyConflict,
@@ -68,6 +69,29 @@ def search_key_credential(key: OrgWebSearchKey) -> WebSearchCredential | None:
 
 def search_key_is_usable(key: OrgWebSearchKey) -> bool:
     return search_key_credential(key) is not None
+
+
+async def workspace_search_credential(
+    workspaces: WorkspaceRepository, overrides: WorkspaceWebSearchKeyOverrideRepository, workspace_id: uuid.UUID
+) -> WebSearchCredential | None:
+    """The key a workspace searches with, or ``None`` where it uses the deployment's search.
+
+    Read by every search a workspace makes: the in-loop tool and direct search alike.
+    Only the keys the choice reaches are decrypted.
+    """
+    workspace = await workspaces.get(workspace_id)
+    if workspace is None:
+        return None
+    candidates = await overrides.candidates(organization_id=workspace.organization_id, workspace_id=workspace.id)
+    credentials: dict[uuid.UUID, WebSearchCredential | None] = {}
+
+    def credential(key: OrgWebSearchKey) -> WebSearchCredential | None:
+        if key.id not in credentials:
+            credentials[key.id] = search_key_credential(key)
+        return credentials[key.id]
+
+    chosen = resolve_web_search_key(candidates, lambda key: credential(key) is not None)
+    return credential(chosen) if chosen is not None else None
 
 
 class WebSearchKeyService:
@@ -134,13 +158,22 @@ class WebSearchKeyService:
             values["name"] = _validated_name(request.name)
         if request.api_key is not None:
             values["encrypted_api_key"], values["last4"] = _encrypted(request.api_key)
-        async with self.uow:
-            key = await self._live_key(key_id, organization_id)
+        provider = ""
         try:
             async with self.uow:
+                key = await self._live_key(key_id, organization_id)
+                provider = key.provider
+                name = values.get("name")
+                if (
+                    name is not None
+                    and name != key.name
+                    and await self.keys.get_by_name(organization_id=organization_id, provider=provider, name=str(name))
+                ):
+                    raise WebSearchKeyAlreadyExistsError(provider, str(name))
                 row = await self.keys.update_key(key, values) if values else key
         except WebSearchKeyConflict:
-            raise WebSearchKeyAlreadyExistsError(key.provider, str(values["name"])) from None
+            # A rollback expires the loaded row, so the error is built from what was read before it.
+            raise WebSearchKeyAlreadyExistsError(provider, str(values["name"])) from None
         return _public(row)
 
     async def archive_key(self, *, user: User, key_id: uuid.UUID) -> OrgWebSearchKeyPublic:
@@ -171,13 +204,14 @@ class WebSearchKeyService:
     async def set_default(self, *, user: User, key_id: uuid.UUID) -> OrgWebSearchKeyPublic:
         """Make a key its provider's organization default."""
         organization_id = await self._managed_organization(user)
-        async with self.uow:
-            key = await self._live_key(key_id, organization_id)
+        provider = ""
         try:
             async with self.uow:
+                key = await self._live_key(key_id, organization_id)
+                provider = key.provider
                 key = await self.keys.set_org_default(key)
         except WebSearchKeyConflict:
-            raise WebSearchKeyDefaultConflictError(key.provider) from None
+            raise WebSearchKeyDefaultConflictError(provider) from None
         return _public(key)
 
     # ------------------------------------------------------------------
@@ -191,7 +225,8 @@ class WebSearchKeyService:
             candidates = await self.overrides.candidates(
                 organization_id=workspace.organization_id, workspace_id=workspace.id
             )
-        effective = resolve_web_search_key(candidates, search_key_is_usable)
+        usable = {key.id: search_key_is_usable(key) for key, _ in candidates}
+        effective = resolve_web_search_key(candidates, lambda key: usable[key.id])
         return WorkspaceWebSearchKeysPublic(
             data=[
                 WorkspaceWebSearchKeyPublic(
@@ -203,7 +238,7 @@ class WebSearchKeyService:
                     is_default=override.is_default if override else False,
                     disabled=override.disabled if override else False,
                     is_effective=effective is not None and key.id == effective.id,
-                    usable=search_key_is_usable(key),
+                    usable=usable[key.id],
                 )
                 for key, override in candidates
             ]

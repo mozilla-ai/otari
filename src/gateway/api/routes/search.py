@@ -69,6 +69,8 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.usage import UsageLog
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit
+from gateway.repositories.tenancy import WorkspaceRepository
+from gateway.repositories.tools import WorkspaceWebSearchKeyOverrideRepository
 from gateway.services.budgets import (
     BudgetScopeRequest,
     BudgetService,
@@ -86,12 +88,14 @@ from gateway.services.search_backend import (
     SearchTool,
     SearchToolError,
     resolve_search_tool,
+    run_keyed_search,
     run_search,
 )
 from gateway.services.tenancy.workspace_web_search_service import (
     InvalidStoredWebSearchDomainError,
     resolve_workspace_web_search_config,
 )
+from gateway.services.tools import workspace_search_credential
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 
 router = APIRouter(tags=["search"])
@@ -358,6 +362,13 @@ async def _dispatch_search(
         )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=refusal.message)
 
+    # A workspace whose organization brought its own search key searches with it, so
+    # its own account pays. The named tool must still be configured, and is still what
+    # the request is allowlisted, rate-limited and priced as, as the in-loop tool is.
+    search_credential = await workspace_search_credential(
+        WorkspaceRepository(db), WorkspaceWebSearchKeyOverrideRepository(db), usage_workspace_id
+    )
+
     pricing_key = f"{tool.provider}:{tool.name}"
 
     # Model access control (per-key), keyed on the same <provider>:<tool> string
@@ -453,7 +464,11 @@ async def _dispatch_search(
     )
 
     try:
-        outcome = await run_search(tool, _search_query(request))
+        query = _search_query(request)
+        if search_credential is not None:
+            outcome = await run_keyed_search(search_credential, query)
+        else:
+            outcome = await run_search(tool, query)
         # The provider's own charge is the true cost; the configured flat rate is
         # the fallback for a provider that reports none.
         # Rounded once, here, so the row and the reconciled spend agree.

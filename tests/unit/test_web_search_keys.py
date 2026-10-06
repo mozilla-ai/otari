@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
@@ -17,7 +18,10 @@ from gateway.models.tools import (
     WorkspaceWebSearchKeyOverride,
 )
 from gateway.repositories.tools import resolve_web_search_key
+from gateway.services import search_backend
+from gateway.services.search_backend import SearchQuery
 from gateway.services.tools import apply_web_access_policy
+from gateway.services.web_search_providers import WebSearchProviderError
 
 _START = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -146,3 +150,57 @@ def test_admission_carries_the_key_only_for_a_declared_search(
     )
 
     assert grant.search_credential is (credential if carried else None)
+
+
+def test_the_choice_decrypts_only_until_a_usable_key() -> None:
+    pinned, default, oldest = _key("pinned", age=2), _key("default", default=True, age=1), _key("oldest")
+    asked: list[str] = []
+
+    def usable(key: OrgWebSearchKey) -> bool:
+        asked.append(key.name)
+        return key.name != "pinned"
+
+    chosen = resolve_web_search_key([(oldest, None), (default, None), (pinned, _override(pinned, pinned=True))], usable)
+
+    assert chosen is default
+    assert asked == ["pinned", "default"]
+
+
+@pytest.mark.asyncio
+async def test_direct_search_on_a_workspace_key_reads_the_providers_hits(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+
+    async def fake_provider_search(**kwargs: Any) -> list[dict[str, Any]]:
+        seen.update(kwargs)
+        return [
+            {"url": "https://kept.example/a", "title": "A", "content": "first"},
+            {"url": "https://dropped.example/b", "title": "B", "content": "second"},
+            {"url": "https://kept.example/c", "title": "C", "content": "third"},
+        ]
+
+    monkeypatch.setattr(search_backend, "provider_search", fake_provider_search)
+    credential = WebSearchCredential(provider="tavily", api_key="workspace-key")
+
+    outcome = await search_backend.run_keyed_search(
+        credential, SearchQuery(query="q", max_results=2, domain_filter=("-dropped.example",))
+    )
+
+    assert (seen["provider"], seen["api_key"], seen["query"]) == ("tavily", "workspace-key", "q")
+    assert seen["options"] == {"max_results": 2}
+    assert [hit.url for hit in outcome.results] == ["https://kept.example/a", "https://kept.example/c"]
+    assert outcome.cost_usd is None
+
+
+@pytest.mark.asyncio
+async def test_direct_search_on_a_workspace_key_reports_a_provider_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def failing_provider_search(**_kwargs: Any) -> list[dict[str, Any]]:
+        raise WebSearchProviderError("tavily search returned HTTP 401")
+
+    monkeypatch.setattr(search_backend, "provider_search", failing_provider_search)
+
+    with pytest.raises(search_backend.SearchProviderError) as raised:
+        await search_backend.run_keyed_search(
+            WebSearchCredential(provider="tavily", api_key="workspace-key"), SearchQuery(query="q")
+        )
+
+    assert "workspace-key" not in str(raised.value)

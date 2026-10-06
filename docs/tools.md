@@ -510,7 +510,8 @@ and admins manage the keys under `/api/v1/organizations/me/web-search-keys`: add
 rename or replace a key, archive it, and make one key per provider the
 organization's default. Only the last four characters of a key are ever shown.
 
-A search request names no provider, so each workspace searches with one key:
+Each workspace searches with one key, for model-initiated and
+[direct search](#direct-search) alike:
 
 1. the key the workspace pinned as its own, if any;
 2. otherwise an organization default, Tavily before Brave;
@@ -537,3 +538,8 @@ through [`search_tools`](configuration.md#search-tools) or the Search tools API.
 A SearXNG search tool can reuse `web_search_url`, so model-initiated and direct
 search can share one backend. They remain distinct surfaces with separate
 pricing keys.
+
+A workspace with a usable [organization search key](#organization-search-keys)
+runs its direct searches on that key rather than on the named tool's backend.
+The named tool must still be configured, and the request is still allowlisted,
+rate-limited and priced as that tool.

@@ -19,6 +19,7 @@ from gateway.core.database import reset_db
 from gateway.inflight import InFlightRegistry
 from gateway.main import create_app
 from gateway.services.search_backend import SearchHit, SearchOutcome, SearchProviderError
+from gateway.services.secret_box import generate_secret_key
 
 from .conftest import build_test_client
 
@@ -640,3 +641,66 @@ def test_a_service_key_starts_a_search_end_user_on_the_budget_it_names(
     assert refused.status_code == 403
     assert refused.json()["code"] == "end_user_budget_not_allowed"
     assert refused.headers["Otari-Error-Code"] == "end_user_budget_not_allowed"
+
+
+def _add_org_search_key(client: TestClient, headers: dict[str, str], api_key: str) -> str:
+    created = client.post(
+        f"{API_ROOT}/organizations/me/web-search-keys",
+        json={"provider": "tavily", "name": "ours", "api_key": api_key},
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    key_id: str = created.json()["id"]
+    return key_id
+
+
+@pytest.fixture
+def _secret_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+
+
+@pytest.mark.usefixtures("_secret_key")
+def test_search_uses_the_workspaces_own_key(
+    client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str]
+) -> None:
+    """A workspace whose organization brought a search key searches with it, as the named tool."""
+    _add_org_search_key(client, master_key_header, "tvly-org-secret")
+    keyed = AsyncMock(return_value=SearchOutcome(results=_HITS))
+    deployment = AsyncMock(return_value=SearchOutcome(results=_HITS))
+    with (
+        patch("gateway.api.routes.search.run_keyed_search", keyed),
+        patch("gateway.api.routes.search.run_search", deployment),
+    ):
+        resp = client.post(f"{API_ROOT}/search/exa-search", json=SEARCH_PAYLOAD, headers=api_key_header)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["search_tool"] == "exa-search"
+    deployment.assert_not_called()
+    credential = keyed.call_args.args[0]
+    assert (credential.provider, credential.api_key) == ("tavily", "tvly-org-secret")
+
+
+@pytest.mark.usefixtures("_secret_key")
+def test_search_without_a_usable_key_uses_the_named_tool(
+    client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str]
+) -> None:
+    """A key the workspace turned off leaves its searches on the deployment's tool."""
+    key_id = _add_org_search_key(client, master_key_header, "tvly-org-secret")
+    workspace_id = client.get(f"{API_ROOT}/workspaces", headers=master_key_header).json()["data"][0]["id"]
+    turned_off = client.patch(
+        f"{API_ROOT}/workspaces/{workspace_id}/web-search-keys/{key_id}",
+        json={"disabled": True},
+        headers=master_key_header,
+    )
+    assert turned_off.status_code == 200, turned_off.text
+    keyed = AsyncMock(return_value=SearchOutcome(results=_HITS))
+    deployment = AsyncMock(return_value=SearchOutcome(results=_HITS))
+    with (
+        patch("gateway.api.routes.search.run_keyed_search", keyed),
+        patch("gateway.api.routes.search.run_search", deployment),
+    ):
+        resp = client.post(f"{API_ROOT}/search/exa-search", json=SEARCH_PAYLOAD, headers=api_key_header)
+
+    assert resp.status_code == 200, resp.text
+    keyed.assert_not_called()
+    assert deployment.call_args.args[0].name == "exa-search"

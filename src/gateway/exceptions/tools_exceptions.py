@@ -285,28 +285,6 @@ class McpSessionsInterruptedError(Exception):
         super().__init__("MCP sessions were canceled before they opened")
 
 
-__all__ = [
-    "CodeExecutionPolicyResolutionFailedError",
-    "CodeExecutionPolicyResolutionFailure",
-    "McpResolutionFailure",
-    "McpServerResolutionFailedError",
-    "McpSessionsInterruptedError",
-    "SandboxImageNotAllowedError",
-    "SandboxToolsUnrunnableError",
-    "WebAccessNotEnabledError",
-    "WebAccessRefusedError",
-    "WebAccessToolNotAuthorizedError",
-    "WebSearchNotEnabledError",
-    "WebSearchPolicyResolutionFailedError",
-    "WebSearchPolicyResolutionFailure",
-    "WorkspaceMcpServerAlreadyExistsError",
-    "WorkspaceMcpServerLimitReachedError",
-    "WorkspaceMcpServerNotFoundError",
-    "WorkspaceMcpServerUnsafeUrlError",
-    "WorkspaceWebSearchDomainsExcludedError",
-]
-
-
 class WebSearchKeyNotFoundError(TenancyNotFoundError):
     """No web search key with this id in the caller's organization."""
 
@@ -355,3 +333,25 @@ class WebSearchKeyDefaultConflictError(TenancyConflictError):
 class WorkspaceWebSearchKeyOverrideConflictError(TenancyValidationError):
     def __init__(self) -> None:
         super().__init__("A web search key cannot be both pinned and turned off for a workspace")
+
+
+__all__ = [
+    "CodeExecutionPolicyResolutionFailedError",
+    "CodeExecutionPolicyResolutionFailure",
+    "McpResolutionFailure",
+    "McpServerResolutionFailedError",
+    "McpSessionsInterruptedError",
+    "SandboxImageNotAllowedError",
+    "SandboxToolsUnrunnableError",
+    "WebAccessNotEnabledError",
+    "WebAccessRefusedError",
+    "WebAccessToolNotAuthorizedError",
+    "WebSearchNotEnabledError",
+    "WebSearchPolicyResolutionFailedError",
+    "WebSearchPolicyResolutionFailure",
+    "WorkspaceMcpServerAlreadyExistsError",
+    "WorkspaceMcpServerLimitReachedError",
+    "WorkspaceMcpServerNotFoundError",
+    "WorkspaceMcpServerUnsafeUrlError",
+    "WorkspaceWebSearchDomainsExcludedError",
+]

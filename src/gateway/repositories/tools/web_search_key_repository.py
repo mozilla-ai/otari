@@ -41,19 +41,14 @@ def resolve_web_search_key(
     3. Otherwise the organization's oldest key.
 
     A key the workspace turned off, or one this deployment cannot decrypt, is passed over.
+    ``usable`` is asked of keys in that order and only until one passes.
     ``candidates`` must be oldest-first, which is the order the repository returns.
     """
-    eligible = [
-        (key, override) for key, override in candidates if (override is None or not override.disabled) and usable(key)
-    ]
-    for key, override in eligible:
-        if override is not None and override.is_default:
-            return key
-    defaults = [key for key, _ in eligible if key.is_org_default]
-    if defaults:
-        rank = {provider: index for index, provider in enumerate(WEB_SEARCH_PROVIDERS)}
-        return min(defaults, key=lambda key: rank.get(key.provider, len(rank)))
-    return eligible[0][0] if eligible else None
+    live = [(key, override) for key, override in candidates if override is None or not override.disabled]
+    rank = {provider: index for index, provider in enumerate(WEB_SEARCH_PROVIDERS)}
+    pinned = [key for key, override in live if override is not None and override.is_default]
+    defaults = sorted((key for key, _ in live if key.is_org_default), key=lambda key: rank.get(key.provider, len(rank)))
+    return next((key for key in (*pinned, *defaults, *(key for key, _ in live)) if usable(key)), None)
 
 
 class OrgWebSearchKeyRepository(
