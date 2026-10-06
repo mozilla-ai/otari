@@ -1,5 +1,6 @@
 """The ``rate_limits`` rules: their config, admission, settlement, and the middleware that gives slots back."""
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,7 +13,13 @@ from starlette.types import Message, Receive, Scope, Send
 from gateway.adapters.rate_limit_store_adapter import InMemoryRateLimitStore
 from gateway.core.config import GatewayConfig, RateLimitRule
 from gateway.main import _validate_rate_limit_store
-from gateway.rate_limit import BudgetMinuteLimits, RateLimitGrantMiddleware, RateLimitRules, admit_rate_limit_rules
+from gateway.rate_limit import (
+    RATE_LIMIT_HITS,
+    BudgetMinuteLimits,
+    RateLimitGrantMiddleware,
+    RateLimitRules,
+    admit_rate_limit_rules,
+)
 
 
 def _request() -> Request:
@@ -106,6 +113,79 @@ async def test_a_refused_request_is_counted_by_no_rule() -> None:
         await _admit(rules)
 
     assert (await store.hit("rule:wide:all:rpm", 5, 60)).count == 2
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_by_several_rules_names_the_first_in_order() -> None:
+    store = InMemoryRateLimitStore()
+    rules = _rules(store, {"name": "first", "per": "user", "rpm": 1}, {"name": "second", "per": "key", "rpm": 1})
+
+    await _admit(rules)
+    before = RATE_LIMIT_HITS._value.get()  # type: ignore[attr-defined]
+    with pytest.raises(HTTPException, match="'first'"):
+        await _admit(rules)
+
+    # One refused request, counted once however many rules it did not fit.
+    assert RATE_LIMIT_HITS._value.get() - before == 1  # type: ignore[attr-defined]
+
+
+class _CountingStore(InMemoryRateLimitStore):
+    """Records how many store calls were in flight at once."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.in_flight = 0
+        self.most_in_flight = 0
+
+    async def hit(self, key: str, limit: int, window_sec: float, cost: int = 1) -> Any:
+        self.in_flight += 1
+        self.most_in_flight = max(self.most_in_flight, self.in_flight)
+        await asyncio.sleep(0)
+        try:
+            return await super().hit(key, limit, window_sec, cost)
+        finally:
+            self.in_flight -= 1
+
+
+@pytest.mark.asyncio
+async def test_a_callers_own_rules_are_counted_at_once() -> None:
+    store = _CountingStore()
+    rules = _rules(
+        store,
+        {"name": "everyone", "per": "deployment", "rpm": 10},
+        {"name": "keys", "per": "key", "rpm": 10},
+        {"name": "users", "per": "user", "rpm": 10},
+    )
+
+    await _admit(rules)
+
+    # The key's and user's rules together, then the deployment's once they admit.
+    assert store.most_in_flight == 2
+
+
+@pytest.mark.asyncio
+async def test_a_request_over_its_own_limit_takes_no_deployment_slot() -> None:
+    """One tenant's refused burst must not crowd the others out of a shared limit, even briefly."""
+    acquired: list[str] = []
+
+    class _Store(InMemoryRateLimitStore):
+        async def acquire(self, key: str, limit: int, lease_sec: float) -> str | None:
+            acquired.append(key)
+            return await super().acquire(key, limit, lease_sec)
+
+    rules = _rules(
+        _Store(),
+        {"name": "everyone", "per": "deployment", "max_concurrent": 1},
+        {"name": "keys", "per": "key", "rpm": 1},
+    )
+    grant = await _admit(rules, key_id="k1")
+    await grant.release()
+    acquired.clear()
+
+    with pytest.raises(HTTPException, match="'keys'"):
+        await _admit(rules, key_id="k1")
+
+    assert acquired == []
 
 
 @pytest.mark.asyncio
