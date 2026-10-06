@@ -166,15 +166,16 @@ def test_half_a_price_is_a_422(client: TestClient, master_key_header: dict[str, 
     assert response.status_code == 422
 
 
-def test_without_a_secret_key_a_create_is_a_400_naming_the_variable(
+def test_without_a_secret_key_a_create_is_a_500_that_names_no_library(
     client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A missing secret key is a deployment gap the caller cannot fix, so it is not blamed on the request."""
     monkeypatch.delenv("OTARI_SECRET_KEY")
 
     response = client.post(PATH, json={"provider": "openai", "api_key": KEY}, headers=master_key_header)
 
-    assert response.status_code == 400
-    assert "OTARI_SECRET_KEY" in response.json()["detail"]
+    assert response.status_code == 500
+    assert "Fernet" not in response.text
     assert client.get(PATH, headers=master_key_header).json()["count"] == 0
 
 
