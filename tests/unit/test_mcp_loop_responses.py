@@ -22,6 +22,8 @@ from openai.types.responses import (
     ResponseFunctionToolCall,
     ResponseOutputItemAddedEvent,
     ResponseOutputItemDoneEvent,
+    ResponseOutputMessage,
+    ResponseOutputText,
     ResponseTextDeltaEvent,
     ResponseUsage,
 )
@@ -683,6 +685,71 @@ def _response_completed(seq: int = 0, output: list[Any] | None = None) -> Respon
     )
 
 
+def _message(item_id: str, text: str) -> ResponseOutputMessage:
+    return ResponseOutputMessage(
+        id=item_id,
+        type="message",
+        role="assistant",
+        status="completed",
+        content=[ResponseOutputText(type="output_text", text=text, annotations=[])],
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_terminal_response_lists_items_where_the_stream_showed_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A client accumulating item events and one reading ``get_final_response()`` see one order.
+
+    The first round forwards a message and asks for a gateway search, whose native item
+    is announced after it. The second round forwards the answer. The terminal response
+    lists all three at the indices the stream showed them under.
+    """
+    before = _message("msg_before", "let me look that up")
+    search = _function_call("call_1", "web_search", '{"query": "otari gateway"}')
+    answer = _message("msg_answer", "here you go")
+    iter_streams = iter(
+        [
+            _async_iter(
+                _output_item_added(0, before),
+                _output_item_done(0, before),
+                _output_item_added(1, _function_call("call_1", "web_search", "")),
+                _function_call_args_done(1, "fc_item_1", "web_search", '{"query": "otari gateway"}'),
+                _output_item_done(1, search),
+                _response_completed(output=[before, search]),
+            ),
+            _async_iter(
+                _output_item_added(0, answer),
+                _output_item_done(0, answer),
+                _response_completed(output=[answer]),
+            ),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, _FakePool(tool_names=["web_search"], results={"web_search": "results"})),
+            max_iterations=5,
+            native_tools=_SEARCH,
+        )
+    ]
+
+    shown = {event.output_index: cast(Any, event).item for event in events if event.type == "response.output_item.done"}
+    completed = next(event for event in events if event.type == "response.completed")
+    final = cast(Any, completed).response.output
+    assert [item.type for item in final] == ["message", "web_search_call", "message"]
+    assert sorted(shown) == list(range(len(final)))
+    for index, item in shown.items():
+        assert (final[index].type, final[index].id) == (item.type, item.id)
+
+
 @pytest.mark.asyncio
 async def test_stream_passes_text_events_through_and_terminates(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
@@ -1309,12 +1376,14 @@ async def test_a_streamed_mixed_batch_announces_the_execution_and_the_terminal_l
     announced = [e for e in events if getattr(getattr(e, "item", None), "type", None) == "code_interpreter_call"]
     assert len(announced) == 2  # added and done, before the terminal event
     completed = next(e for e in events if e.type == "response.completed")
-    # ``get_final_response()`` agrees with the stream: the run it announced is
-    # in the terminal output, the gateway's consumed call is not.
+    # ``get_final_response()`` agrees with the stream: the run it announced is in the
+    # terminal output at the index it was announced under, the gateway's consumed call is not.
     assert [getattr(item, "type", None) for item in completed.response.output] == [
-        "code_interpreter_call",
         "function_call",
+        "code_interpreter_call",
     ]
+    last = cast(Any, announced[-1])
+    assert completed.response.output.index(last.item) == last.output_index
     assert events.index(announced[-1]) < events.index(completed)
 
 

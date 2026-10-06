@@ -291,38 +291,35 @@ def _hidden_call_ids(state: "_ResponsesStreamState") -> set[str]:
     }
 
 
-def _without_output_items(event: Any, call_ids: set[str]) -> Any:
-    """Return a ``response.completed`` event with the named function calls removed."""
-    response_obj = getattr(event, "response", None)
-    output = getattr(response_obj, "output", None)
-    if response_obj is None or not output:
-        return event
-    kept = [
-        item
-        for item in output
-        if not (getattr(item, "type", None) == "function_call" and getattr(item, "call_id", None) in call_ids)
-    ]
-    if len(kept) == len(output):
-        return event
-    try:
-        return event.model_copy(update={"response": response_obj.model_copy(update={"output": kept})})
-    except (AttributeError, TypeError):
-        logger.warning("Could not filter gateway function_call items from response.completed")
-        return event
+def _with_output_as_shown(event: Any, state: "_ResponsesStreamState", shown: dict[int, Any]) -> Any:
+    """Return a terminal response whose ``output`` is what the stream showed, in ``output_index`` order.
 
-
-def _prepend_output_items(event: Any, items: list[Any]) -> Any:
-    """Prepend hidden-iteration output items to a terminal response."""
-    if not items:
-        return event
+    The final round's items keep the upstream response's own objects, placed at the
+    index each was shown under: an item's ``output_index`` is its position in that
+    response's ``output``. The gateway's own calls stay out, and an item the stream
+    never showed goes after the rest.
+    """
     response_obj = getattr(event, "response", None)
     if response_obj is None:
         return event
+    hidden_call_ids = _hidden_call_ids(state)
+    placed = dict(shown)
+    unshown: list[Any] = []
+    for raw_index, item in enumerate(getattr(response_obj, "output", None) or []):
+        if raw_index in state.hidden_output_indices or (
+            getattr(item, "type", None) == "function_call" and getattr(item, "call_id", None) in hidden_call_ids
+        ):
+            continue
+        visible_index = state.visible_output_index.get(raw_index)
+        if visible_index is None:
+            unshown.append(item)
+        else:
+            placed[visible_index] = item
+    output = [item for _, item in sorted(placed.items())] + unshown
     try:
-        output = list(items) + list(getattr(response_obj, "output", None) or [])
         return event.model_copy(update={"response": response_obj.model_copy(update={"output": output})})
     except (AttributeError, TypeError):
-        logger.warning("Could not add hidden Responses output items to response.completed")
+        logger.warning("Could not set the shown Responses output items on response.completed")
         return event
 
 
@@ -498,10 +495,12 @@ class _ResponsesToolLoopStrategy:
             "started": 0,
             "next_sequence": 0,
             "next_output_index": 0,
-            "compactions": [],
-            # The native items announced mid-stream, kept so the terminal
-            # ``response.completed`` lists what the client already saw.
-            "native_items": [],
+            # Every item the client was shown, by the output index it was shown at,
+            # and whether the loop changed the stream at all. The terminal
+            # ``response.completed`` lists the shown items in that order, so it agrees
+            # with the item events the client already accumulated.
+            "shown_items": {},
+            "rewritten": False,
         }
 
     def observe(
@@ -573,7 +572,12 @@ class _ResponsesToolLoopStrategy:
             return StreamAction.DEFER, event
         visible = event
         if isinstance(raw_index, int):
-            visible = _reoutput_indexed(event, self._visible_output_for(state, acc, raw_index))
+            visible_index = self._visible_output_for(state, acc, raw_index)
+            visible = _reoutput_indexed(event, visible_index)
+            shown = getattr(event, "item", None)
+            if shown is not None and etype in {"response.output_item.added", "response.output_item.done"}:
+                # The done event's item replaces the added snapshot.
+                acc["shown_items"][visible_index] = shown
         return StreamAction.FORWARD, self._resequenced(visible, acc)
 
     @staticmethod
@@ -637,9 +641,12 @@ class _ResponsesToolLoopStrategy:
         # the gateway's own function_call items even though their item events were
         # hidden. Left in, ``get_final_response()`` would contradict the stream the
         # client just accumulated, and hand it a call it cannot dispatch.
-        hidden = _hidden_call_ids(state)
-        folded = _without_output_items(state.deferred_completed, hidden) if hidden else state.deferred_completed
-        folded = _prepend_output_items(folded, [*acc["compactions"], *acc.get("native_items", [])])
+        if acc["rewritten"] or state.hidden_output_indices:
+            # Earlier rounds' items and the native items were shown at the indices the
+            # client holds them under, which the final upstream response knows nothing of.
+            folded = _with_output_as_shown(state.deferred_completed, state, acc["shown_items"])
+        else:
+            folded = state.deferred_completed
         folded = _maybe_fold_response_completed_usage(folded, acc["output_tokens"])
         # The terminal event is the last thing the client sees, so it continues the
         # same sequence as the events forwarded before it.
@@ -648,12 +655,12 @@ class _ResponsesToolLoopStrategy:
     def accumulate_stream_usage(self, acc: dict[str, Any], state: _ResponsesStreamState) -> None:
         # All-owned continuation: fold this iteration's output_tokens from the
         # dropped ``response.completed`` event into the running total.
+        acc["rewritten"] = True
         if state.deferred_completed is not None:
             iter_response = getattr(state.deferred_completed, "response", None)
             iter_usage = getattr(iter_response, "usage", None) if iter_response is not None else None
             if iter_usage is not None:
                 acc["output_tokens"] += getattr(iter_usage, "output_tokens", 0) or 0
-        acc["compactions"].extend(state.compaction_items[index] for index in sorted(state.compaction_items))
 
     def synthetic_events(self, state: _ResponsesStreamState, acc: dict[str, Any]) -> list[ResponseStreamEvent]:
         """Announce this iteration's gateway-run calls in the Responses API's own vocabulary.
@@ -665,10 +672,11 @@ class _ResponsesToolLoopStrategy:
         events: list[ResponseStreamEvent] = []
         items = state.native_items
         state.native_items = []
-        acc.setdefault("native_items", []).extend(items)
         for item in items:
             output_index = acc["next_output_index"]
             acc["next_output_index"] += 1
+            acc["shown_items"][output_index] = item
+            acc["rewritten"] = True
             for event_cls, event_type in (
                 (ResponseOutputItemAddedEvent, "response.output_item.added"),
                 (ResponseOutputItemDoneEvent, "response.output_item.done"),
