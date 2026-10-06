@@ -3,7 +3,8 @@
 The wire shapes for a deployment's organization-scoped provider credentials:
 the keys themselves, a workspace's departure from its organization's default,
 and the models a key offers with the rate each is charged at. Also the
-endpoints a workspace or one of its users owns.
+endpoints a workspace or one of its users owns, and the hosted providers the
+deployment serves on its own credentials.
 
 They are SQLModel rather than plain Pydantic because they are read straight off
 the rows in ``models/provider_keys.py``, whose tables are SQLModel too.
@@ -13,8 +14,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Self
 
+from pydantic import model_validator
 from sqlmodel import Field, SQLModel
 
 from gateway.models.pricing import PriceSource
@@ -324,7 +326,251 @@ class ProviderEndpointsPublic(SQLModel):
     count: int
 
 
+# ==============================================================================
+# Hosted providers
+# ==============================================================================
+
+
+class HostedProviderCreateRequest(SQLModel):
+    """Configure a provider this deployment will serve hosted inference on.
+
+    ``client_args`` is whatever the provider's SDK client needs beyond the key
+    (Bedrock's region and IAM pair), the same shape an organization provider
+    key takes. Values under credential-shaped names come back masked.
+    """
+
+    provider: str = Field(min_length=1, max_length=64)
+    api_key: str = Field(min_length=1, max_length=1024)
+    api_base: str | None = Field(default=None, max_length=1024)
+    client_args: dict[str, Any] | None = None
+    enabled: bool = True
+
+
+class HostedProviderUpdateRequest(SQLModel):
+    """Rotate the key, repoint the base, or turn a provider off.
+
+    ``provider`` is immutable: changing it is a delete plus a create, because
+    the key belongs to the provider it was issued by. Omitting ``api_key``
+    leaves the stored credential untouched, so a toggle never re-sends a secret
+    the caller does not have. ``client_args`` omitted is left alone; an explicit
+    null clears it, and an entry echoed back as the mask keeps the stored value.
+    """
+
+    api_key: str | None = Field(default=None, min_length=1, max_length=1024)
+    api_base: str | None = Field(default=None, max_length=1024)
+    client_args: dict[str, Any] | None = None
+    enabled: bool | None = None
+
+
+class HostedProviderPublic(SQLModel):
+    """One hosted provider, named by its provider and the tail of its key.
+
+    No shape in this section carries key material: a stored credential is
+    known by its last four characters and nothing else, and ``client_args``
+    goes out with credential-shaped values masked.
+    """
+
+    id: uuid.UUID
+    provider: str
+    api_key_last4: str | None = None
+    api_base: str | None = None
+    client_args: dict[str, Any] | None = None
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+class HostedProvidersPublic(SQLModel):
+    """A page of hosted providers, and how many there are in total."""
+
+    data: list[HostedProviderPublic]
+    count: int
+
+
+def _rates_come_as_a_pair(request: HostedModelCreateRequest | HostedModelUpdateRequest) -> None:
+    """Refuse half a price.
+
+    ``model_pricing`` stores input and output in one row, so a single rate has
+    no shape to land in. The cache rates are that row's optional half: each may
+    come alone, but only beside the pair that gives the row its base rates.
+    """
+    if (request.input_price_per_million is None) != (request.output_price_per_million is None):
+        msg = "input_price_per_million and output_price_per_million must be set together"
+        raise ValueError(msg)
+    cache_fields = {
+        "cache_read_price_per_million",
+        "cache_write_price_per_million",
+        "cache_write_1h_price_per_million",
+    }
+    if request.input_price_per_million is None and cache_fields & request.model_fields_set:
+        msg = "cache rates need input_price_per_million and output_price_per_million beside them"
+        raise ValueError(msg)
+
+
+class HostedModelCreateRequest(SQLModel):
+    """Offer a model on a hosted provider, optionally at a custom price.
+
+    Omitting the rates means the deployment serves the model at whatever the
+    price ladder already answers: a stored deployment price, else the community
+    default, which the offer stores as the deployment's own rate.
+    """
+
+    model: str = Field(min_length=1, max_length=255)
+    input_price_per_million: float | None = Field(default=None, ge=0)
+    output_price_per_million: float | None = Field(default=None, ge=0)
+    cache_read_price_per_million: float | None = Field(default=None, ge=0)
+    cache_write_price_per_million: float | None = Field(default=None, ge=0)
+    cache_write_1h_price_per_million: float | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _prices_come_as_a_pair(self) -> Self:
+        _rates_come_as_a_pair(self)
+        return self
+
+
+class HostedModelUpdateRequest(SQLModel):
+    """Reprice an offered model, toggle whether it is served, or both.
+
+    A price is the input/output pair or nothing: sending the pair writes a new
+    pricing version, and the cache rates then follow ``POST /pricing``'s own
+    semantics (a field the caller omits inherits the most recent stored value,
+    an explicit null clears it). ``enabled`` travels alone freely, so a toggle
+    never re-sends rates it did not change.
+    """
+
+    input_price_per_million: float | None = Field(default=None, ge=0)
+    output_price_per_million: float | None = Field(default=None, ge=0)
+    cache_read_price_per_million: float | None = Field(default=None, ge=0)
+    cache_write_price_per_million: float | None = Field(default=None, ge=0)
+    cache_write_1h_price_per_million: float | None = Field(default=None, ge=0)
+    enabled: bool | None = None
+
+    @model_validator(mode="after")
+    def _a_price_is_a_pair(self) -> Self:
+        _rates_come_as_a_pair(self)
+        return self
+
+
+class HostedModelPublic(SQLModel):
+    """One offered model, with the price the deployment currently serves it at.
+
+    ``price_source`` says which rung of the deployment's ladder answered:
+    ``deployment`` for a rate an operator set, ``defaults`` for the
+    community-maintained rate, whether this surface stored it or the fallback
+    supplies it, and None when nothing prices the model yet. ``enabled`` is the
+    serving switch; a model offered without a discoverable price starts off.
+    """
+
+    id: uuid.UUID
+    provider: str
+    model: str
+    input_price_per_million: float | None = None
+    output_price_per_million: float | None = None
+    cache_read_price_per_million: float | None = None
+    cache_write_price_per_million: float | None = None
+    cache_write_1h_price_per_million: float | None = None
+    price_source: PriceSource | None = None
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+class HostedModelsPublic(SQLModel):
+    """A page of one hosted provider's offered models, and how many there are in total."""
+
+    data: list[HostedModelPublic]
+    count: int
+
+
+class HostedModelsRefreshPublic(SQLModel):
+    """What a refresh did: the models newly offered, the seeded rates it moved, and the list's new size.
+
+    Failure is a field rather than a status, for the reason
+    ``HostedAvailableModelsPublic`` gives: the list is still standing, and the
+    panel renders the reason beside it.
+    """
+
+    added: list[str]
+    repriced: list[str]
+    count: int
+    error: str | None = None
+    discovery_unsupported: bool = False
+
+
+class HostedCatalogProviderRefreshPublic(SQLModel):
+    """What one hosted provider newly lists, as a catalog sweep found it.
+
+    Per provider rather than one total, because a dial that failed is a fact
+    about that provider, and the operator has to be told which one went quiet
+    rather than read a smaller number than they expected.
+    """
+
+    provider: str
+    added: list[str]
+    # Empty in a preview: moving a seeded price is a write.
+    repriced: list[str] = Field(default_factory=list)
+    error: str | None = None
+    discovery_unsupported: bool = False
+    # The stored key would not decrypt here, as against being refused upstream,
+    # so the page does not offer to remove a provider whose credential merely
+    # needs re-entering.
+    credential_unreadable: bool = False
+
+
+class HostedCatalogKeptGroupPublic(SQLModel):
+    """Priced models a sweep left in place, grouped by the reason it did."""
+
+    reason: str
+    count: int
+    # A sample; ``count`` is the whole group.
+    models: list[str]
+
+
+class HostedCatalogRefreshPublic(SQLModel):
+    """What a catalog sweep did, or would do.
+
+    ``removed`` is a sample and ``removed_count`` the total, so a deployment
+    that has never been swept does not answer one button press with a few
+    thousand strings.
+    """
+
+    providers: list[HostedCatalogProviderRefreshPublic]
+    removed: list[str]
+    removed_count: int
+    removed_price_rows: int
+    removed_override_rows: int
+    kept: list[HostedCatalogKeptGroupPublic]
+
+
+class HostedAvailableModelsPublic(SQLModel):
+    """What the provider says it serves on the stored credential.
+
+    Failure is a field rather than a status: an unreachable upstream, or a
+    provider with no model listing, is an answer about the provider rather than
+    about this request, and the form still has to render a plain text box when
+    the list cannot be fetched.
+    """
+
+    provider: str
+    models: list[str] = Field(default_factory=list)
+    error: str | None = None
+    discovery_unsupported: bool = False
+
+
 __all__ = [
+    "HostedAvailableModelsPublic",
+    "HostedCatalogKeptGroupPublic",
+    "HostedCatalogProviderRefreshPublic",
+    "HostedCatalogRefreshPublic",
+    "HostedModelCreateRequest",
+    "HostedModelPublic",
+    "HostedModelUpdateRequest",
+    "HostedModelsPublic",
+    "HostedModelsRefreshPublic",
+    "HostedProviderCreateRequest",
+    "HostedProviderPublic",
+    "HostedProviderUpdateRequest",
+    "HostedProvidersPublic",
     "OrgProviderAvailableModelsPublic",
     "OrgProviderKeyCreateRequest",
     "OrgProviderKeyModelCreateRequest",

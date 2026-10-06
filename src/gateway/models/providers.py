@@ -1,13 +1,14 @@
-"""ORM tables for providers: provider instances configured at runtime, owned endpoints, and model aliases."""
+"""ORM tables for providers: runtime instances, owned endpoints, hosted providers, and model aliases."""
 
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, text
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, text, true
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlmodel import Field, SQLModel
 
-from gateway.models.base import Base
+from gateway.models.base import Base, CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, _timestamp_field
 from gateway.models.secret_fields import redact_secret_like_values
 
 
@@ -182,3 +183,84 @@ class ProviderEndpoint(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+# ==============================================================================
+# Hosted providers
+# ==============================================================================
+
+
+class HostedProvider(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+    """A provider this deployment serves hosted inference on, and the key it serves it with.
+
+    The deployment's own upstream credential, one row per any-llm
+    implementation: what serves a request that brings no BYO key and names no
+    configured instance. It is the last rung of the credential ladder
+    (``api/routes/_pipeline.resolve_dispatch_provider``), asked only after an
+    organization's key and a ``config.yml`` instance have both missed, so a row
+    here never displaces a credential the caller supplied.
+
+    Keyed on the implementation rather than an instance name because the
+    runtime echoes ``provider`` back as the upstream usage is keyed on, which is
+    what keeps a hosted request's pricing key stable. Named instances of one
+    implementation stay a ``config.yml`` concern.
+
+    The key is stored encrypted (``services/secret_box``) and is read back in
+    one place, the ``ModelProviderPort`` adapter, which hands it to the upstream
+    SDK in this process and never over the wire. ``api_key_last4`` is a separate
+    plaintext column so the admin list can tell rows apart without decrypting
+    every stored credential to draw a table.
+
+    SQLModel rather than the declarative ``Base`` style of the tables above,
+    because its ``Public`` schema is an endpoint contract the dashboard client
+    is generated from (``src/gateway/AGENTS.md``, "Data and migrations").
+    """
+
+    __tablename__ = "hosted_providers"
+    __table_args__ = (UniqueConstraint("provider", name="uq_hosted_providers_provider"),)
+
+    provider: str = Field(max_length=64)
+    encrypted_api_key: str
+    api_key_last4: str | None = Field(default=None, max_length=4)
+    api_base: str | None = Field(default=None, max_length=1024)
+    # What the provider's SDK client needs beyond a key (Bedrock's region and
+    # IAM pair). Stored unencrypted like ``OrgProviderKey.client_args``, with
+    # the same trade: credential-shaped values are masked on the way out
+    # (``redact_secret_like_values``) and are not encrypted at rest.
+    client_args: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
+    enabled: bool = Field(default=True, nullable=False, sa_column_kwargs={"server_default": true()})
+
+
+class HostedProviderModel(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+    """One model the deployment offers on a hosted provider.
+
+    Membership and a serving switch. The rate lives in ``model_pricing`` keyed
+    ``provider:model``, the deployment price list billing already reads, so
+    this table cannot drift from what a request settles at.
+
+    Keyed on the provider's *name* rather than a foreign key to
+    ``hosted_providers``, because a hosted provider need not be a row: a
+    deployment may declare one in ``config.yml`` or the environment, and its
+    roster, toggles and prices still live here. The service removes a
+    provider's model rows when the provider leaves, which the database cannot
+    do for it without the foreign key.
+
+    The serving switch is one-sided at dispatch: a row that is switched off
+    refuses, and a model with no row is served but not advertised. The offered
+    list is discovery's best effort, and a model the provider grew between
+    refreshes must not turn the whole provider off.
+    """
+
+    __tablename__ = "hosted_provider_models"
+    __table_args__ = (UniqueConstraint("provider", "model", name="uq_hosted_provider_models_provider_model"),)
+
+    provider: str = Field(max_length=64, index=True)
+    model: str = Field(max_length=255)
+    # A model nothing prices is offered but not served, so a model the pricing
+    # data has not caught up with cannot be billed at nothing.
+    enabled: bool = Field(default=True, nullable=False, sa_column_kwargs={"server_default": true()})
+    # Equal to ``effective_at`` of the model's latest ``model_pricing`` version
+    # only while that version is the community default this surface stored. Any
+    # later version, from this surface or ``POST /pricing``, is an operator's
+    # rate, and a refresh then leaves it alone.
+    seeded_price_at: datetime | None = _timestamp_field(default=None, column_kwargs={})

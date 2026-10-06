@@ -1,4 +1,4 @@
-"""Errors the provider-key surfaces raise, and the HTTP status each carries."""
+"""Errors the provider-key and hosted-provider surfaces raise, and the HTTP status each carries."""
 
 from gateway.exceptions import (
     TenancyConflictError,
@@ -203,7 +203,97 @@ class ProviderEndpointInvalidError(TenancyValidationError):
     """A name, provider, base URL or default field the endpoint cannot be saved with."""
 
 
+class HostedProviderNotFoundError(TenancyNotFoundError):
+    def __init__(self, provider: str) -> None:
+        super().__init__(f"Hosted provider '{provider}' not found")
+
+
+class HostedProviderAlreadyExistsError(TenancyConflictError):
+    def __init__(self, provider: str) -> None:
+        super().__init__(f"A hosted provider for '{provider}' is already configured")
+
+
+class HostedProviderUnknownProviderError(TenancyValidationError):
+    """A ``provider`` that is blank, or names no any-llm implementation this build can dispatch to.
+
+    Refused on the way in rather than discovered at dispatch: the runtime turns
+    an unknown ``response_provider`` into a 502 for the caller whose request
+    hit it (``_pipeline.py``), which is a bad way for an operator to learn they
+    made a typo in an admin form. The same guard, including
+    ``PROVIDER_TYPE_ALIASES``, that ``OrgProviderKeyUnknownProviderError`` is.
+    """
+
+    def __init__(self, provider: str) -> None:
+        if not provider:
+            super().__init__("A provider is required")
+        else:
+            super().__init__(f"'{provider}' is not a known provider implementation")
+
+
+class HostedProviderUnsafeApiBaseError(TenancyValidationError):
+    """An ``api_base`` the SSRF gate refused; the message is that gate's own."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class HostedProviderSecretStorageError(TenancyValidationError):
+    """``OTARI_SECRET_KEY`` is unset or unusable, so no credential can be stored.
+
+    The message names the variable and never the key, and neither does the
+    ``SecretBoxUnavailableError`` it wraps.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class HostedModelNotFoundError(TenancyNotFoundError):
+    def __init__(self, model_id: object) -> None:
+        super().__init__(f"Hosted model {model_id} not found")
+
+
+class HostedModelNameRequiredError(TenancyValidationError):
+    """A model name that is blank once trimmed: half of a pricing key nothing could ever price."""
+
+    def __init__(self) -> None:
+        super().__init__("A model name is required")
+
+
+class HostedModelAlreadyOfferedError(TenancyConflictError):
+    """The unique index is the arbiter; this is what a racing insert's conflict is mapped to."""
+
+    def __init__(self, provider: str, model: str) -> None:
+        super().__init__(f"'{model}' is already offered on the '{provider}' hosted provider")
+
+
+class HostedCatalogEmptyError(TenancyConflictError):
+    """A catalog sweep was asked for while no hosted provider offers a model.
+
+    Refused rather than run. The sweep keeps the models this surface offers and
+    removes the rest, so with nothing offered there is no roster to reconcile
+    against and the whole deployment price list would read as serving nothing.
+    A deployment in that state has not been configured yet, which is a
+    different thing from one whose catalog has drifted.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "No hosted provider offers a model yet, so there is nothing to reconcile the catalog against. "
+            "Configure a provider and its models first."
+        )
+
+
 __all__ = [
+    "HostedCatalogEmptyError",
+    "HostedModelAlreadyOfferedError",
+    "HostedModelNameRequiredError",
+    "HostedModelNotFoundError",
+    "HostedProviderAlreadyExistsError",
+    "HostedProviderNotFoundError",
+    "HostedProviderSecretStorageError",
+    "HostedProviderUnknownProviderError",
+    "HostedProviderUnsafeApiBaseError",
     "OrgDefaultProviderKeyConflictError",
     "OrgProviderKeyAlreadyExistsError",
     "OrgProviderKeyArchivedError",
