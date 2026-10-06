@@ -57,8 +57,8 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
 
         Raises:
             OAuthEmailNotVerifiedError: If the provider returned no address, or one it did not verify.
-            OAuthIdentityUnknownError: If the account for the address is deactivated or deleted,
-                or if no account exists and ``open_signup`` is disabled.
+            OAuthIdentityUnknownError: If no active account holds the address,
+                and ``open_signup`` does not register a new one.
 
         """
         if not email_verified or not email:
@@ -80,6 +80,10 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         identity = await self._users.get_locked(identity.id)
         # A deactivated account is refused as unknown, so the response does not confirm that the account exists.
         if identity is None or not identity.is_active:
+            raise OAuthIdentityUnknownError(provider)
+        # The address is looked up again rather than compared here, so both lookups treat letter case alike.
+        holder = await self._users.get_by_email(address)
+        if holder is None or holder.id != identity.id:
             raise OAuthIdentityUnknownError(provider)
 
         if identity.oauth_provider is None:

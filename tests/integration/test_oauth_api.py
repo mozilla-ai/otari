@@ -512,6 +512,37 @@ def test_an_account_deactivated_during_its_sign_in_is_refused(
     assert refused.email_verified_at is None
 
 
+def test_an_account_that_moves_to_another_address_during_its_sign_in_is_refused(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    """An account whose address changes while its sign-in is in progress is refused."""
+    add_member(client, master_key_header, email="ada@example.com")
+    stub_exchange(monkeypatch)
+    original = UserRepository.get_locked
+
+    async def _move_first(self: UserRepository, user_id: uuid.UUID) -> User | None:
+        identity = _identity(db_session, "ada@example.com")
+        identity.email = "grace@example.com"
+        db_session.add(identity)
+        db_session.commit()
+        return await original(self, user_id)
+
+    monkeypatch.setattr(UserRepository, "get_locked", _move_first)
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+
+    assert response.status_code == 401
+    assert SESSION_COOKIE_NAME not in response.cookies
+    db_session.expire_all()
+    moved = _identity(db_session, "grace@example.com")
+    assert moved.oauth_provider is None
+    assert moved.email_verified_at is None
+
+
 def test_a_lost_registration_race_signs_in_to_the_winner_rather_than_failing(
     client: TestClient,
     oauth_configured: None,
