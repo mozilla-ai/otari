@@ -2283,6 +2283,52 @@ async def test_stream_announces_the_execution_as_native_blocks(monkeypatch: pyte
     assert [event.index for event in events if event.type == "content_block_start"] == [0, 1, 2]
 
 
+class _FakeSearchAndSandboxPool(_FakeSandboxPool):
+    """A pool that owns both ``web_search`` and ``code_execution``, buffering each like the real backends."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._tool_names = {"web_search", "code_execution"}
+        self._results["web_search"] = "[1] Result\nhttps://a"
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        if name == "code_execution":
+            return await super().call_tool(name, arguments)
+        self.calls.append((name, arguments))
+        return self._results[name]
+
+    def take_last_results(self) -> list[dict[str, Any]]:
+        return [{"url": "https://a", "title": "A"}]
+
+
+@pytest.mark.asyncio
+async def test_native_blocks_keep_the_order_their_calls_ran_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each code execution's pair sits where its call ran, which holds only while the buffer is read per call."""
+    responses = [
+        _message_response(
+            stop_reason="tool_use",
+            content=[
+                _search_use("tu_1", "first"),
+                _code_use("tu_2", "print(1)"),
+                _search_use("tu_3", "second"),
+                _code_use("tu_4", "print(2)"),
+            ],
+        ),
+        _message_response(stop_reason="end_turn", content=[_text_block("done")]),
+    ]
+    monkeypatch.setattr(messages_loop_module, "amessages", _fake_amessages_for(responses))
+
+    result = await anthropic_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
+        pool=cast(Any, _FakeSearchAndSandboxPool()),
+        max_iterations=5,
+        native_tools=frozenset({WEB_SEARCH_TOOL_NAME, CODE_EXECUTION_TOOL_NAME}),
+    )
+
+    uses = [cast(Any, block).input for block in result.content if block.type == "server_tool_use"]
+    assert uses == [{"query": "first"}, {"code": "print(1)"}, {"query": "second"}, {"code": "print(2)"}]
+
+
 @pytest.mark.asyncio
 async def test_native_result_announces_a_stored_file_the_block_did_not_name(monkeypatch: pytest.MonkeyPatch) -> None:
     """The ``code_execution_output`` entries come from what was stored, not from the block's own list."""

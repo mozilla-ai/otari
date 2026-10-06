@@ -76,7 +76,7 @@ class ResponsesCodeExecutionRendering:
 
     def declared(self, tool_entry: Mapping[str, Any] | None) -> bool:
         """Whether the caller declared OpenAI's ``code_interpreter``, which is what asks for the item."""
-        return native_code_execution_dialect(dict(tool_entry or {})) is Dialect.RESPONSES
+        return native_code_execution_dialect(tool_entry) is Dialect.RESPONSES
 
     def ran(self, call: NativeCall, pool: ToolBackend) -> list[Any]:
         """An item for each execution the backend kept since the last call.

@@ -517,9 +517,9 @@ class SandboxBackend:
     def take_executions(self) -> list[CodeExecution]:
         """The calls executed since the last take, in order, clearing them.
 
-        Consumed by a loop building native result blocks right after the calls it
-        awaited. Clearing means a later loop round cannot attribute an earlier
-        round's executions to its own calls.
+        Consumed by a loop building native result blocks right after each call it
+        awaited, before it runs the next: a code-execution rendering reads the whole
+        buffer as that one call's, so calls run concurrently would swap results.
         """
         executions, self._executions = self._executions, []
         return executions
