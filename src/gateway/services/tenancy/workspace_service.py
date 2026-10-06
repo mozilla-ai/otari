@@ -45,6 +45,7 @@ from gateway.models.tenancy import (
     WorkspacesPublic,
     WorkspaceUpdate,
 )
+from gateway.repositories.code_execution import WorkspaceCodeExecutionPolicyRepository
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.membership_listener import MembershipListener
@@ -67,9 +68,8 @@ class WorkspaceService:
         self._uow = uow
         self.workspaces = WorkspaceRepository(db)
         self.members = WorkspaceMemberRepository(db)
-        self.organizations = OrganizationService(
-            db, membership_listener=None, code_execution_on_by_default=code_execution_on_by_default
-        )
+        self.organizations = OrganizationService(db, membership_listener=None)
+        self._code_execution_on_by_default = code_execution_on_by_default
         self._membership_listener = membership_listener
 
     # ------------------------------------------------------------------
@@ -184,7 +184,8 @@ class WorkspaceService:
                     organization_id=organization.id,
                     created_by_user_id=user.id,
                 )
-                self.organizations.stage_new_workspace_defaults(workspace.id)
+                if self._code_execution_on_by_default:
+                    await WorkspaceCodeExecutionPolicyRepository(self.db).create_enabled(workspace.id)
                 member = await self.members.create(workspace_id=workspace.id, user_id=user.id, role="owner")
                 # No-op today: a workspace this fresh has no defaults of its own yet.
                 # Called anyway so every WorkspaceMember-creating path materializes

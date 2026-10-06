@@ -10,13 +10,17 @@ from collections.abc import Callable
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.core.config import API_ROOT, GatewayConfig
-from gateway.models.tenancy import Workspace
+from gateway.models.tenancy import Workspace, WorkspaceMember
 from gateway.models.tools import WorkspaceCodeExecutionPolicy
+from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
+
+from .tenancy_helpers import membership_writes
 
 
 def _policies(db_session_factory: Callable[[], Session]) -> dict[uuid.UUID, bool]:
@@ -109,3 +113,31 @@ def test_standalone_stages_no_policy_for_a_new_workspace(
     workspace_id = _create_workspace(client, master_key_header)
 
     assert workspace_id not in _policies(db_session_factory)
+
+
+@pytest.mark.asyncio
+async def test_first_sign_in_provisioning_starts_its_workspace_with_code_execution_on(async_db: AsyncSession) -> None:
+    # A migration seeds the default workspace, so provisioning creates one only
+    # where it is gone; take it away so this is the path under test.
+    await async_db.execute(delete(Workspace).where(col(Workspace.name) == "Default workspace"))
+    await async_db.commit()
+
+    operator = await ensure_bootstrap_identity(
+        async_db, **membership_writes(async_db), code_execution_on_by_default=True
+    )
+
+    workspace_ids = (
+        (
+            await async_db.execute(
+                select(col(WorkspaceMember.workspace_id)).where(col(WorkspaceMember.user_id) == operator.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    policies = {
+        row.workspace_id: row.enabled
+        for row in (await async_db.execute(select(WorkspaceCodeExecutionPolicy))).scalars().all()
+    }
+    assert workspace_ids
+    assert all(policies.get(workspace_id) is True for workspace_id in workspace_ids)

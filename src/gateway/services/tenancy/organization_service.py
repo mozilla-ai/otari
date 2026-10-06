@@ -76,7 +76,7 @@ from gateway.models.tenancy import (
     WorkspaceMember,
     WorkspaceMemberUpdate,
 )
-from gateway.models.tools import WorkspaceCodeExecutionPolicy
+from gateway.repositories.code_execution import WorkspaceCodeExecutionPolicyRepository
 from gateway.repositories.tenancy import (
     InvitationRepository,
     OrganizationMemberRepository,
@@ -254,10 +254,10 @@ class OrganizationService:
         self.workspace_rows = WorkspaceRepository(db)
         self.invitations = InvitationRepository(db)
 
-    def stage_new_workspace_defaults(self, workspace_id: uuid.UUID) -> None:
-        """Stage what a workspace this service just created starts with, inside the caller's transaction."""
+    async def _start_new_workspace(self, workspace_id: uuid.UUID) -> None:
+        """Stage what a workspace this service just created starts with, inside the open transaction."""
         if self._code_execution_on_by_default:
-            self.db.add(WorkspaceCodeExecutionPolicy(workspace_id=workspace_id, enabled=True))
+            await WorkspaceCodeExecutionPolicyRepository(self.db).create_enabled(workspace_id)
 
     # ------------------------------------------------------------------
     # Context resolution and authorization
@@ -514,7 +514,7 @@ class OrganizationService:
                     organization_id=organization.id,
                     created_by_user_id=user.id,
                 )
-                self.stage_new_workspace_defaults(workspace.id)
+                await self._start_new_workspace(workspace.id)
                 # Through the assignment path rather than a bare
                 # ``WorkspaceMemberRepository.create``, so this is the same
                 # create-member-then-materialize-defaults step every other
@@ -578,7 +578,7 @@ class OrganizationService:
                 organization_id=organization.id,
                 created_by_user_id=identity.id,
             )
-            self.stage_new_workspace_defaults(workspace.id)
+            await self._start_new_workspace(workspace.id)
             await self._apply_workspace_assignments(
                 user_id=identity.id,
                 assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="owner")],

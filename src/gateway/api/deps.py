@@ -810,6 +810,7 @@ async def get_current_identity(
     _master_key: Annotated[str | None, Depends(verify_master_key)],
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> TenancyUser:
     """Resolve the tenancy identity acting on this request.
 
@@ -832,7 +833,12 @@ async def get_current_identity(
     """
     if session_identity is not None:
         return session_identity
-    return await ensure_bootstrap_identity(db, uow=uow, membership_listener=membership_listener)
+    return await ensure_bootstrap_identity(
+        db,
+        uow=uow,
+        membership_listener=membership_listener,
+        code_execution_on_by_default=config.is_hosted_mode,
+    )
 
 
 CurrentIdentity = Annotated[TenancyUser, Depends(get_current_identity)]

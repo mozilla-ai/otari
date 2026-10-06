@@ -240,7 +240,12 @@ async def _sign_in_with_master_key(
     # Provisions the tenancy root on a first-ever sign-in, and resolves the same
     # operator every time after that. It commits its own work, which is why it
     # runs before the session row is staged rather than beside it.
-    return await ensure_bootstrap_identity(db, uow=uow, membership_listener=membership_listener)
+    return await ensure_bootstrap_identity(
+        db,
+        uow=uow,
+        membership_listener=membership_listener,
+        code_execution_on_by_default=config.is_hosted_mode,
+    )
 
 
 async def _sign_in_with_password(email: str, password: str, request: Request, db: AsyncSession) -> TenancyUser:
