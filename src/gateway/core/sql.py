@@ -54,6 +54,19 @@ def utc_bound(value: datetime | None) -> datetime | None:
     return value.replace(tzinfo=UTC)
 
 
+def utc_iso(value: datetime) -> str:
+    """Serialize a stored timestamp as unambiguous UTC ISO-8601.
+
+    SQLite does not persist a timezone-aware column's offset and hands it back
+    naive, and a browser reads an offset-less timestamp in its own local zone, so a
+    recent UTC event can land in the future. Treat a naive value as the UTC it was
+    stored as; an aware one (PostgreSQL) passes through unchanged.
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.isoformat()
+
+
 # Time-series granularity. Declared here rather than beside one of its readers
 # because the read endpoints, the telemetry storage port, and its adapters all
 # have to agree on the grid; a chart built from two of them lines up only if

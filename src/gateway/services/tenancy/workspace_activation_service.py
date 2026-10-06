@@ -48,6 +48,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
+from gateway.core.sql import utc_iso
 from gateway.exceptions.organizations_exceptions import (
     WorkspaceActivationUnavailableError,
     WorkspaceAlreadyActivatedError,
@@ -126,20 +127,6 @@ def activation_error_category(status_code: int | None) -> ActivationErrorCategor
     if 400 <= status_code < 500:
         return "invalid_request"
     return "internal"
-
-
-def _utc_iso(value: datetime) -> str:
-    """Serialize a stored timestamp as unambiguous UTC ISO-8601.
-
-    ``usage_logs.timestamp`` is timezone-aware, but SQLite does not persist the
-    offset and hands it back naive, and a browser reads an offset-less timestamp
-    as local time. The same four lines as ``api/routes/usage.py``'s ``_utc_iso``,
-    duplicated rather than imported because a service may not import the API
-    layer (`scripts/check_architecture.py`).
-    """
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.isoformat()
 
 
 def _integration_traffic(endpoint: Any, api_key_id: Any) -> ColumnElement[bool]:
@@ -540,7 +527,7 @@ def _attempt_public(row: UsageLog) -> ActivationAttemptPublic:
     """Render one usage row as the attempt the guide reports."""
     succeeded = row.status == "success"
     return ActivationAttemptPublic(
-        occurred_at=_utc_iso(row.timestamp),
+        occurred_at=utc_iso(row.timestamp),
         request_id=row.id,
         status="success" if succeeded else "failed",
         provider=row.provider,

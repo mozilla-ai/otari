@@ -27,6 +27,7 @@ from gateway.core.sql import (
     dialect_name,
     match_any,
     utc_bound,
+    utc_iso,
 )
 from gateway.core.surface import Surface
 from gateway.inflight import get_registry
@@ -173,19 +174,6 @@ _TOOL_DIMENSION = "tool"
 _ALL_SUMMARY_DIMENSIONS: set[str] = set(_SUMMARY_DIMENSIONS) | {_ERROR_TAXONOMY_DIMENSION, _TOOL_DIMENSION}
 
 
-def _utc_iso(value: datetime) -> str:
-    """Serialize a stored timestamp as unambiguous UTC ISO-8601.
-
-    ``usage_logs.timestamp`` is timezone-aware, but SQLite returns it naive (it does
-    not persist the offset). A naive ``isoformat()`` has no ``+00:00``, so a browser
-    reads it in its own local zone and a recent UTC event can land in the future,
-    showing as "0s ago". Treat a naive value as the UTC it was stored as.
-    """
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.isoformat()
-
-
 class UsageEntry(BaseModel):
     """A single usage log entry."""
 
@@ -255,7 +243,7 @@ class UsageEntry(BaseModel):
             user_alias=user_alias,
             api_key_id=log.api_key_id,
             api_key_name=api_key_name,
-            timestamp=_utc_iso(log.timestamp),
+            timestamp=utc_iso(log.timestamp),
             model=log.model,
             provider=log.provider,
             endpoint=log.endpoint,
