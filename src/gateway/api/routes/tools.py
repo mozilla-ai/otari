@@ -14,7 +14,7 @@ distinction).
 
 Standalone-only, like every other non-completion router. Hybrid mode could not
 answer this honestly: there the platform owns the per-workspace tool policy
-(``_resolve_platform_web_search``), so a tool this gateway has configured may
+(``WebSearchPolicyPort``), so a tool this gateway has configured may
 still be refused with a 403 for the caller asking. Reporting ``available: true``
 from local config alone would be worse than not answering.
 """
@@ -25,10 +25,10 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from gateway.api.deps import get_config, verify_catalog_reader
-from gateway.api.routes._tools import Tool, code_execution_declaration_forms, web_search_declaration_forms
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.services.sandbox_backend import code_execution_tool_definition
+from gateway.services.tools import Tool, code_execution_declaration_forms, web_search_declaration_forms
 from gateway.services.web_retrieval_backend import web_fetch_tool_definition, web_search_tool_definition
 
 router = APIRouter(

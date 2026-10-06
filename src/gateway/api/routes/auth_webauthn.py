@@ -44,6 +44,8 @@ from gateway.api.routes._public_auth import throttle_public_auth
 # differently would tell a person the two doors closed for different reasons.
 from gateway.api.routes.auth_session import MAINTENANCE_MODE_REFUSAL
 from gateway.core.config import GatewayConfig
+from gateway.exceptions import TenancyError
+from gateway.exceptions.identity_exceptions import PasskeysNotConfiguredError
 from gateway.log_config import logger
 from gateway.models.tenancy import (
     MAX_WEBAUTHN_CREDENTIAL_NAME,
@@ -58,7 +60,6 @@ from gateway.services.dashboard_session_service import (
 )
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.tenancy import webauthn_service
-from gateway.services.tenancy.errors import PasskeysNotConfiguredError, TenancyError
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 
 router = APIRouter(prefix="/auth/webauthn", tags=["auth"])
@@ -187,9 +188,7 @@ async def register_passkey(
     return webauthn_service.to_public(credential, relying_party_id=credential.rp_id)
 
 
-@router.post(
-    "/authenticate/options", response_model=CeremonyOptions, dependencies=[Depends(require_passkey_support)]
-)
+@router.post("/authenticate/options", response_model=CeremonyOptions, dependencies=[Depends(require_passkey_support)])
 async def authentication_options(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -206,9 +205,7 @@ async def authentication_options(
     return options
 
 
-@router.post(
-    "/authenticate", response_model=PasskeySessionResponse, dependencies=[Depends(require_passkey_support)]
-)
+@router.post("/authenticate", response_model=PasskeySessionResponse, dependencies=[Depends(require_passkey_support)])
 async def authenticate_passkey(
     body: AuthenticatePasskeyRequest,
     request: Request,

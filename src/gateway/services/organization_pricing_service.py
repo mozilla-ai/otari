@@ -46,6 +46,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions import TenancyValidationError
+from gateway.exceptions.pricing_exceptions import (
+    OrganizationPricingManagedModelError,
+    OrganizationPricingNotFoundError,
+    OrganizationPricingOverlapError,
+)
 from gateway.models.money import to_usd, to_usd_or_none
 from gateway.models.pricing import API_ORIGIN, ModelPricing, OrganizationModelPricing, PriceSource
 from gateway.models.tenancy import User as TenancyUser
@@ -58,12 +64,6 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.provider_kwargs import is_deployment_instance_key, split_selector
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
-from gateway.services.tenancy.errors import (
-    OrganizationPricingManagedModelError,
-    OrganizationPricingNotFoundError,
-    OrganizationPricingOverlapError,
-    TenancyValidationError,
-)
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
 
@@ -98,7 +98,6 @@ def _describe_period(effective_from: datetime, effective_to: datetime | None) ->
     if effective_to is None:
         return f"from {start} onwards"
     return f"{start} to {effective_to.isoformat()}"
-
 
 
 @dataclass(frozen=True)
@@ -210,7 +209,6 @@ class OrganizationPricingService:
         self.rows.add_all(list(rows))
         await self.rows.flush()
 
-
     async def _writable_organization_id(self, user: TenancyUser) -> uuid.UUID:
         """The caller's organization, having checked they may change its rates."""
         organization = await self.organizations.get_active_organization_for_user(user)
@@ -258,9 +256,7 @@ class OrganizationPricingService:
         if model_key in await self.deployment_supplied_keys(organization_id, [model_key]):
             raise OrganizationPricingManagedModelError(model_key)
 
-    async def deployment_supplied_keys(
-        self, organization_id: uuid.UUID, model_keys: Collection[str]
-    ) -> set[str]:
+    async def deployment_supplied_keys(self, organization_id: uuid.UUID, model_keys: Collection[str]) -> set[str]:
         """Which of ``model_keys`` the deployment pays the upstream bill for.
 
         A ``config.providers`` instance always does. A bare key does when a
@@ -283,9 +279,7 @@ class OrganizationPricingService:
             return set()
         byo = await self.provider_keys.get_byo_providers(organization_id=organization_id)
         return {
-            model_key
-            for model_key in model_keys
-            if await self._is_deployment_supplied(organization_id, model_key, byo)
+            model_key for model_key in model_keys if await self._is_deployment_supplied(organization_id, model_key, byo)
         }
 
     async def _is_deployment_supplied(
@@ -387,9 +381,7 @@ class OrganizationPricingService:
         that is what tells a client whether to ask for another one.
         """
         organization_id = await self._readable_organization_id(user)
-        return await self.rows.page_for_organization(
-            organization_id, model_key=model_key, skip=skip, limit=limit
-        )
+        return await self.rows.page_for_organization(organization_id, model_key=model_key, skip=skip, limit=limit)
 
     async def create_for_caller(
         self,

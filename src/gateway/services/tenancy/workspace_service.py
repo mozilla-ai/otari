@@ -20,6 +20,17 @@ import uuid
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.organizations_exceptions import (
+    InvalidRoleError,
+    LastWorkspaceError,
+    NotAnOrganizationMemberError,
+    WorkspaceAlreadyExistsError,
+    WorkspaceInUseError,
+    WorkspaceMemberAlreadyExistsError,
+    WorkspaceMemberNotFoundError,
+    WorkspaceNameRequiredError,
+)
 from gateway.models.tenancy import (
     MANAGEMENT_ROLES,
     WORKSPACE_MEMBER_ROLES,
@@ -36,16 +47,6 @@ from gateway.models.tenancy import (
 )
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
 from gateway.services.tenancy import authorization
-from gateway.services.tenancy.errors import (
-    InvalidRoleError,
-    LastWorkspaceError,
-    NotAnOrganizationMemberError,
-    WorkspaceAlreadyExistsError,
-    WorkspaceInUseError,
-    WorkspaceMemberAlreadyExistsError,
-    WorkspaceMemberNotFoundError,
-    WorkspaceNameRequiredError,
-)
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
 
@@ -53,8 +54,10 @@ from gateway.services.tenancy.organization_service import OrganizationService
 class WorkspaceService:
     """Business logic for the workspace surface."""
 
-    def __init__(self, db: AsyncSession, *, membership_listener: MembershipListener):
+    def __init__(self, db: AsyncSession, *, uow: UnitOfWork, membership_listener: MembershipListener):
+        """Build the service on a session and a Unit of Work over it, which the listener writes through."""
         self.db = db
+        self._uow = uow
         self.workspaces = WorkspaceRepository(db)
         self.members = WorkspaceMemberRepository(db)
         self.organizations = OrganizationService(db, membership_listener=None)
@@ -71,7 +74,7 @@ class WorkspaceService:
         """Resolve a workspace the caller may see, or raise not-found.
 
         Delegates to ``services.tenancy.authorization``, shared with
-        ``WorkspaceBudgetDefaultService`` so the visibility rule is defined
+        the budgets domain (``WorkspaceAccess``) so the visibility rule is defined
         once.
         """
         return await authorization.resolve_visible_workspace(
@@ -131,7 +134,7 @@ class WorkspaceService:
         """Allow an organization owner/admin, or an owner/admin of this workspace.
 
         Delegates to ``services.tenancy.authorization``, shared with
-        ``WorkspaceBudgetDefaultService`` so the management rule is defined
+        the budgets domain (``WorkspaceAccess``) so the management rule is defined
         once. Private: `services.tenancy.org_provider_key_service` needs the
         same rule for workspace-scoped provider-key overrides and model
         restrictions, and calls ``authorization.require_workspace_management_access``
@@ -165,21 +168,20 @@ class WorkspaceService:
         # actually decides. Without this the loser of that race answers 500
         # instead of the 409 the pre-check would have given it.
         try:
-            workspace = await self.workspaces.create_workspace(
-                name=name,
-                description=workspace_create.description,
-                organization_id=organization.id,
-                created_by_user_id=user.id,
-            )
-            member = await self.members.create(workspace_id=workspace.id, user_id=user.id, role="owner")
-            # No-op today: a workspace this fresh has no defaults of its own yet.
-            # Called anyway so every WorkspaceMember-creating path materializes
-            # the same way, rather than three of four doing it and this one
-            # relying on being first.
-            await self._membership_listener.member_joined(member)
-            await self.db.commit()
+            async with self._uow:
+                workspace = await self.workspaces.create_workspace(
+                    name=name,
+                    description=workspace_create.description,
+                    organization_id=organization.id,
+                    created_by_user_id=user.id,
+                )
+                member = await self.members.create(workspace_id=workspace.id, user_id=user.id, role="owner")
+                # No-op today: a workspace this fresh has no defaults of its own yet.
+                # Called anyway so every WorkspaceMember-creating path materializes
+                # the same way, rather than three of four doing it and this one
+                # relying on being first.
+                await self._membership_listener.member_joined(member)
         except IntegrityError:
-            await self.db.rollback()
             raise WorkspaceAlreadyExistsError(name) from None
 
         return WorkspacePublic.model_validate(workspace)
@@ -296,16 +298,15 @@ class WorkspaceService:
         await self.workspaces.lock(workspace_id)
 
         try:
-            member_ids = await self.members.ids_for_workspace(workspace_id)
-            await self._membership_listener.workspace_deleted(workspace_id, member_ids)
-            await self.workspaces.delete_workspace(workspace)
-            await self.db.commit()
+            async with self._uow:
+                member_ids = await self.members.ids_for_workspace(workspace_id)
+                await self._membership_listener.workspace_deleted(workspace_id, member_ids)
+                await self.workspaces.delete_workspace(workspace)
         except IntegrityError:
             # Checking first would be a race and four more queries; the database
             # already knows, so let it answer and translate what it says. The
             # rollback takes the ceiling deletes back with it, so a refused
             # delete leaves the workspace exactly as it was.
-            await self.db.rollback()
             raise WorkspaceInUseError from None
 
     # ------------------------------------------------------------------
@@ -354,7 +355,7 @@ class WorkspaceService:
         if await self.members.get_by_workspace_and_user(workspace.id, user_id) is not None:
             raise WorkspaceMemberAlreadyExistsError(user_id)
 
-        # Serialized against a concurrent `WorkspaceBudgetDefaultService.create_default`
+        # Serialized against a concurrent `BudgetService.create_member_policy`
         # on this workspace, via the same row lock it takes: without it, this
         # read of the current defaults and that one's read of the current
         # members can each run before the other's write commits, and the new
@@ -364,11 +365,10 @@ class WorkspaceService:
         # As in create_workspace: the pre-check races the insert, and the unique
         # constraint is what actually decides.
         try:
-            member = await self.members.create(workspace_id=workspace.id, user_id=user_id, role=role)
-            await self._membership_listener.member_joined(member)
-            await self.db.commit()
+            async with self._uow:
+                member = await self.members.create(workspace_id=workspace.id, user_id=user_id, role=role)
+                await self._membership_listener.member_joined(member)
         except IntegrityError:
-            await self.db.rollback()
             raise WorkspaceMemberAlreadyExistsError(user_id) from None
         return WorkspaceMemberPublic.model_validate(member)
 
@@ -402,9 +402,9 @@ class WorkspaceService:
         if member is None:
             return
 
-        await self._membership_listener.member_removed(member)
-        await self.members.delete(member)
-        await self.db.commit()
+        async with self._uow:
+            await self._membership_listener.member_removed(member)
+            await self.members.delete(member)
 
 
 __all__ = ["WorkspaceService"]

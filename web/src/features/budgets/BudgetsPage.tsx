@@ -36,7 +36,6 @@ import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { SpendMeter, spendState } from "@/design-system/metrics/SpendMeter"
 import { Segmented } from "@/design-system/navigation/Segmented"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
-import { isDeploymentOperator } from "@/features/organization/roles"
 import { UserMultiSelect } from "@/features/users/UserMultiSelect"
 import { aliasesByUserId, userDisplay } from "@/features/users/userDisplay"
 import {
@@ -46,7 +45,10 @@ import {
   useDeleteBudget,
   useUpdateBudget,
 } from "@/shared/api/budgets"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import {
+  useDeploymentOperator,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
 import { useUpdateUser, useUsers } from "@/shared/api/users"
 import {
   useAllWorkspaceBudgetDefaults,
@@ -536,8 +538,9 @@ const getBudgetRowKey = (budget: Budget): string => budget.budget_id
 
 // Whose budget a row is: a tenant's carries an organization, the deployment's own
 // carries none. `/users` refuses to cap a gateway user at a tenant's
-// (otari#881), so the page marks the row and withholds the assignment control
-// rather than offering a save the API answers 404.
+// (otari#881) and `/budgets` refuses to delete one (otari#902), so the page
+// marks the row and withholds both controls rather than offering an action the
+// API refuses.
 function isOrganizationOwned(budget: Budget): boolean {
   return budget.organization_id !== null
 }
@@ -643,7 +646,14 @@ function DeploymentBudgetsPage() {
   // open leaves it nothing to return to, so focus lands on body and Tab
   // restarts at the top of the document.
   const showOnboarding = !loading && rows.length === 0
-  const selectableKeys = rows.map((budget) => budget.budget_id)
+  // A tenant's row stays out of the selection: the only bulk action is Delete,
+  // and one refusal would stop the loop with the rest of the batch undeleted.
+  const ownedKeys = rows
+    .filter(isOrganizationOwned)
+    .map((budget) => budget.budget_id)
+  const selectableKeys = rows
+    .filter((budget) => !isOrganizationOwned(budget))
+    .map((budget) => budget.budget_id)
   const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys)
 
   const onBulkDelete = async () => {
@@ -777,11 +787,13 @@ function DeploymentBudgetsPage() {
                 setEditing(budget.budget_id)
               }}
             />
-            <RowAction
-              icon={FiTrash2}
-              label="Delete"
-              onPress={() => setPendingDelete(budget)}
-            />
+            {isOrganizationOwned(budget) ? null : (
+              <RowAction
+                icon={FiTrash2}
+                label="Delete"
+                onPress={() => setPendingDelete(budget)}
+              />
+            )}
           </RowActionRow>
         ),
       },
@@ -978,6 +990,7 @@ function DeploymentBudgetsPage() {
             selectionMode="multiple"
             selectedKeys={selection.selectedKeys}
             onSelectionChange={selection.onSelectionChange}
+            disabledKeys={ownedKeys}
           />
         </TableScrollFrame>
       )}
@@ -1232,16 +1245,16 @@ function CreateBudgetDialog({
  */
 export function BudgetsPage() {
   const organization = useOrganizationContext()
+  const { answer, isSettled } = useDeploymentOperator()
 
-  if (organization.isPending && !organization.data) {
+  if (!isSettled) {
     return <PageLoading label="Loading spend and budgets…" />
   }
-  // Fails towards the operator page on an errored context, matching what the
-  // rail does with this row: it is the page that was here before, its reads say
-  // in their own words when they are refused, and an admin seeing that is a
-  // worse-looking version of a page they can still reach, where the reverse
-  // would hide the deployment's budgets from the one caller who owns them.
-  if (organization.data && !isDeploymentOperator(organization.data)) {
+  // An errored context lands on the operator page, as every operator gate does
+  // (`useDeploymentOperator`): its reads say in their own words when they are
+  // refused, where the reverse would hide the deployment's budgets from the one
+  // caller who owns them.
+  if (answer === "not-operator" && organization.data) {
     return <OrganizationBudgetsPage organization={organization.data} />
   }
   return <DeploymentBudgetsPage />

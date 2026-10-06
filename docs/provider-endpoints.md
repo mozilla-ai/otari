@@ -26,8 +26,8 @@ An endpoint belongs to a workspace, and optionally to one user in it:
   endpoint of the same name for them.
 
 Callers reach an endpoint as `<name>:<model>`, for example `my-vllm:qwen3`, on
-`/v1/chat/completions`, `/v1/responses` and `/v1/messages`. The API key decides
-the workspace and the user, so no request field can reach somebody else's
+`/api/v1/chat/completions`, `/api/v1/responses` and `/api/v1/messages`. The API
+key decides the workspace and the user, so no request field can reach somebody else's
 endpoint. A name is letters, digits, `.`, `_` and `-`, and it may not be a
 provider's name or a configured instance's, because that selector already means
 something. An instance added later with an endpoint's name takes the selector

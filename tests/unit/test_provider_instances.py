@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import uuid
+from collections.abc import Iterator
 
 import pytest
 import yaml
@@ -10,13 +12,18 @@ from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
 
 from gateway.api.routes.pricing import _candidate_model_keys
-from gateway.core.config import GatewayConfig, ModelCapabilityConfig, provider_credential_env_names
+from gateway.core.config import (
+    KEYLESS_SELF_HOSTED_PROVIDERS,
+    GatewayConfig,
+    ModelCapabilityConfig,
+    provider_credential_env_names,
+)
 from gateway.log_config import logger as gateway_logger
+from gateway.services import provider_kwargs
 from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.provider_kwargs import (
     _AMBIENT_CREDENTIAL_PROVIDERS,
     _KEYLESS_PLACEHOLDER_API_KEY,
-    _KEYLESS_SELF_HOSTED_PROVIDERS,
     get_provider_kwargs,
     keyless_placeholder_api_key,
     normalize_pricing_key,
@@ -221,7 +228,7 @@ def test_credential_env_names_splits_alternatives() -> None:
 
 def test_credential_env_names_empty_for_keyless_backends() -> None:
     # any-llm spells "no credential" as the literal string "None".
-    for keyless in ("ollama", "llamacpp", "llamafile"):
+    for keyless in ("ollama", "llamafile"):
         assert provider_credential_env_names(keyless) == ()
 
 
@@ -248,7 +255,7 @@ def test_the_uncredentialed_provider_roster_has_not_drifted() -> None:
     routes a working self-hosted or IAM-authenticated request to somebody else's
     fleet. `provider_credential_env_names` cannot answer it, because it sees the
     *declaration* and these providers declare a variable they do not insist on,
-    so the two sets are written out by hand in `provider_kwargs.py`.
+    so the two sets are written out by hand in `config.py` and `provider_kwargs.py`.
 
     This is the drift guard for both directions, which is why it asserts on the
     whole roster rather than only on the names already listed. A provider that
@@ -270,17 +277,17 @@ def test_the_uncredentialed_provider_roster_has_not_drifted() -> None:
     # itself and need no hand-written entry, so they are expected here but not in
     # either set.
     declares_nothing = {name for name in overriding if provider_credential_env_names(name) == ()}
-    classified = _KEYLESS_SELF_HOSTED_PROVIDERS | _AMBIENT_CREDENTIAL_PROVIDERS | _KEYED_DESPITE_OVERRIDING
+    classified = KEYLESS_SELF_HOSTED_PROVIDERS | _AMBIENT_CREDENTIAL_PROVIDERS | _KEYED_DESPITE_OVERRIDING
 
     assert overriding - declares_nothing == classified, (
         "any-llm's uncredentialed-provider roster changed. Every provider overriding "
-        "_verify_and_set_api_key must be classified in provider_kwargs.py "
-        "(_KEYLESS_SELF_HOSTED_PROVIDERS / _AMBIENT_CREDENTIAL_PROVIDERS) or here "
+        "_verify_and_set_api_key must be classified in config.py "
+        "(KEYLESS_SELF_HOSTED_PROVIDERS), provider_kwargs.py (_AMBIENT_CREDENTIAL_PROVIDERS) or here "
         "(_KEYED_DESPITE_OVERRIDING). Unclassified names are treated as keyed, which is "
         "the direction that hands a working request to a hosted fleet."
     )
     # And nothing in either set has quietly started demanding a key.
-    for name in _KEYLESS_SELF_HOSTED_PROVIDERS | _AMBIENT_CREDENTIAL_PROVIDERS:
+    for name in KEYLESS_SELF_HOSTED_PROVIDERS | _AMBIENT_CREDENTIAL_PROVIDERS:
         assert provider_credential_env_names(name), f"{name} no longer declares a credential variable"
         assert name in overriding, f"any-llm now unconditionally requires a credential for {name}"
 
@@ -403,6 +410,52 @@ def test_get_provider_kwargs_strips_provider_type_and_models() -> None:
     assert "provider_type" not in kwargs
     assert "models" not in kwargs
     assert kwargs == {"api_base": "http://x/v1", "api_key": "k"}
+
+
+def test_bedrock_uses_aws_region_when_default_region_is_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+
+    kwargs = get_provider_kwargs(GatewayConfig(), LLMProvider.BEDROCK)
+
+    assert kwargs["client_args"] == {"region_name": "us-east-1"}
+
+
+def test_bedrock_region_fallback_preserves_other_client_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    config = GatewayConfig(providers={"bedrock": {"client_args": {"retries": {"max_attempts": 2}}}})
+
+    kwargs = get_provider_kwargs(config, LLMProvider.BEDROCK)
+
+    assert kwargs["client_args"] == {
+        "retries": {"max_attempts": 2},
+        "region_name": "us-east-1",
+    }
+
+
+def test_bedrock_preserves_explicit_region_and_aws_default_region(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    explicit_config = GatewayConfig(providers={"bedrock": {"client_args": {"region_name": "ap-southeast-2"}}})
+
+    explicit_kwargs = get_provider_kwargs(explicit_config, LLMProvider.BEDROCK)
+
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-1")
+    default_config = GatewayConfig(providers={"bedrock": {"client_args": {"retries": {"max_attempts": 2}}}})
+    default_kwargs = get_provider_kwargs(default_config, LLMProvider.BEDROCK)
+
+    assert explicit_kwargs["client_args"] == {"region_name": "ap-southeast-2"}
+    assert default_kwargs["client_args"] == {"retries": {"max_attempts": 2}}
+
+
+def test_aws_region_fallback_is_limited_to_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+
+    kwargs = get_provider_kwargs(GatewayConfig(), LLMProvider.OPENAI)
+
+    assert "client_args" not in kwargs
 
 
 # ---------------------------------------------------------------------------
@@ -554,3 +607,84 @@ def test_candidate_model_keys_accepts_string_provider_from_any_llm(monkeypatch: 
     monkeypatch.setattr(AnyLLM, "split_model_provider", lambda _selector: ("registry-only", "model"))
 
     assert _candidate_model_keys("registry-only:model") == ["registry-only:model", "registry-only/model"]
+
+
+# ---------------------------------------------------------------------------
+# Deprecated env-var fallback for an undeclared provider (#1626)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def undeclared_env_warnings(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> Iterator[pytest.LogCaptureFixture]:
+    """Capture gateway warnings with the once-per-provider memory cleared."""
+    monkeypatch.setattr(provider_kwargs, "_undeclared_env_warned", set())
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _capture_gateway_logs(caplog)
+    try:
+        yield caplog
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+
+def test_undeclared_provider_on_env_var_warns_once(
+    monkeypatch: pytest.MonkeyPatch, undeclared_env_warnings: pytest.LogCaptureFixture
+) -> None:
+    """The warning names the provider and its variable, never the value, and is not repeated per request."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
+    config = GatewayConfig(providers={})
+
+    get_provider_kwargs(config, LLMProvider.ANTHROPIC)
+    get_provider_kwargs(config, LLMProvider.ANTHROPIC)
+
+    records = [r for r in undeclared_env_warnings.records if "not declared under providers:" in r.getMessage()]
+    assert len(records) == 1
+    message = records[0].getMessage()
+    assert "'anthropic'" in message and "ANTHROPIC_API_KEY" in message
+    assert "sk-ant-secret-value" not in message
+
+
+def test_declared_provider_on_env_var_warns_nothing(
+    monkeypatch: pytest.MonkeyPatch, undeclared_env_warnings: pytest.LogCaptureFixture
+) -> None:
+    """A declared entry reading its key from the env var is the supported shape."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    config = GatewayConfig(providers={"anthropic": {"api_key": "sk-ant-test"}})
+
+    get_provider_kwargs(config, LLMProvider.ANTHROPIC)
+
+    assert "not declared" not in undeclared_env_warnings.text
+
+
+def test_undeclared_provider_without_env_var_warns_nothing(
+    undeclared_env_warnings: pytest.LogCaptureFixture,
+) -> None:
+    """No env var means no fallback in use; the request fails on its own terms."""
+    get_provider_kwargs(GatewayConfig(providers={}), LLMProvider.ANTHROPIC)
+
+    assert "not declared" not in undeclared_env_warnings.text
+
+
+def test_organization_key_counts_as_declared(
+    monkeypatch: pytest.MonkeyPatch, undeclared_env_warnings: pytest.LogCaptureFixture
+) -> None:
+    """An organization-scoped provider key is a declaration too, even with the env var also set."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setattr(provider_kwargs, "cached_org_provider_kwargs", lambda _ws, _p: {"api_key": "sk-org"})
+
+    get_provider_kwargs(GatewayConfig(providers={}), LLMProvider.ANTHROPIC, workspace_id=uuid.uuid4())
+
+    assert "not declared" not in undeclared_env_warnings.text
+
+
+@pytest.mark.parametrize("mode", ["hybrid", "hosted"])
+def test_undeclared_env_provider_warns_nothing_outside_standalone(
+    mode: str, monkeypatch: pytest.MonkeyPatch, undeclared_env_warnings: pytest.LogCaptureFixture
+) -> None:
+    """Hybrid resolves credentials from the platform and hosted serves no inference."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+    get_provider_kwargs(GatewayConfig(mode=mode, providers={}), LLMProvider.ANTHROPIC)
+
+    assert "not declared" not in undeclared_env_warnings.text

@@ -176,4 +176,23 @@ describe("wireMessages", () => {
       { role: "assistant", content: "hello" },
     ])
   })
+
+  it("sends a question's attachments as file parts after its text", () => {
+    const turns: ChatTurn[] = [
+      {
+        role: "user",
+        content: "Summarize this",
+        attachments: [{ fileId: "file-1", filename: "report.pdf", bytes: 10 }],
+      },
+    ]
+    expect(wireMessages(turns)).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Summarize this" },
+          { type: "file", file: { file_id: "file-1", filename: "report.pdf" } },
+        ],
+      },
+    ])
+  })
 })

@@ -39,27 +39,27 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, and_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
-from gateway.core.usage_source import integration_traffic, served_here
-from gateway.models.api_keys import APIKey
-from gateway.models.money import as_float
-from gateway.models.tenancy import User, Workspace, WorkspaceActivationState
-from gateway.models.usage import UsageLog
-from gateway.ports.api_key_format_port import ApiKeyFormatPort
-from gateway.repositories.users_repository import get_or_create_attribution_user
-from gateway.services.tenancy import authorization
-from gateway.services.tenancy.errors import (
+from gateway.core.sql import utc_iso
+from gateway.exceptions.organizations_exceptions import (
     WorkspaceActivationUnavailableError,
     WorkspaceAlreadyActivatedError,
 )
+from gateway.models.api_keys import APIKey
+from gateway.models.money import as_float
+from gateway.models.tenancy import User, Workspace, WorkspaceActivationState
+from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, UsageLog
+from gateway.ports.api_key_format_port import ApiKeyFormatPort
+from gateway.repositories.users_repository import get_or_create_attribution_user
+from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 
 # What the guide calls the key it mints, as the Keys page shows it. One name for
@@ -129,18 +129,30 @@ def activation_error_category(status_code: int | None) -> ActivationErrorCategor
     return "internal"
 
 
-def _utc_iso(value: datetime) -> str:
-    """Serialize a stored timestamp as unambiguous UTC ISO-8601.
+def _integration_traffic(endpoint: Any, api_key_id: Any) -> ColumnElement[bool]:
+    """Match usage rows made from outside the product.
 
-    ``usage_logs.timestamp`` is timezone-aware, but SQLite does not persist the
-    offset and hands it back naive, and a browser reads an offset-less timestamp
-    as local time. The same four lines as ``api/routes/usage.py``'s ``_utc_iso``,
-    duplicated rather than imported because a service may not import the API
-    layer (`scripts/check_architecture.py`).
+    The guide closes when a workspace first calls this gateway *from somebody's own
+    code*; a message typed into our own Playground is the product being
+    demonstrated, not integrated, so closing on one would congratulate somebody for
+    something they have not done yet and then never offer the guide again.
+
+    Two columns, because the Playground answers to two shapes. Where this
+    deployment runs the completion itself, the row carries
+    ``PLAYGROUND_USAGE_ENDPOINT``. Where a hosted control plane forwards to its
+    data-plane gateway (``services/playground_dispatch``), the row is written from
+    the gateway's usage report and labeled like every other report, so the label
+    cannot carry the surface; the credential does, because the one the control
+    plane forwards under is minted by this deployment for exactly this purpose and
+    is marked as such.
     """
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.isoformat()
+    return and_(
+        endpoint != PLAYGROUND_USAGE_ENDPOINT,
+        # A row with no key at all (the standalone Playground writes one, and so
+        # does any session-authorized request) matches nothing here and is left to
+        # the endpoint half above, which is the half that knows about it.
+        ~select(APIKey.id).where(APIKey.id == api_key_id, APIKey.internal_secret.is_not(None)).exists(),
+    )
 
 
 class ActivationAttemptPublic(BaseModel):
@@ -471,14 +483,14 @@ class WorkspaceActivationService:
         moment somebody's own code first reached this gateway, so a message typed
         into the product is the demo rather than the integration, and closing on
         one would retire the guide for a workspace that has not integrated
-        anything. See :func:`~gateway.core.usage_source.integration_traffic`.
+        anything. See :func:`_integration_traffic`.
         """
         statement = (
             select(UsageLog)
             .where(
                 UsageLog.workspace_id == workspace_id,
-                served_here(UsageLog.source),
-                integration_traffic(UsageLog.endpoint, UsageLog.api_key_id),
+                UsageLog.source == SERVED_HERE_SLUG,
+                _integration_traffic(UsageLog.endpoint, UsageLog.api_key_id),
                 UsageLog.status == "success",
             )
             # Tie-broken on the id so two rows sharing a timestamp still name one
@@ -501,8 +513,8 @@ class WorkspaceActivationService:
             select(UsageLog)
             .where(
                 UsageLog.workspace_id == workspace_id,
-                served_here(UsageLog.source),
-                integration_traffic(UsageLog.endpoint, UsageLog.api_key_id),
+                UsageLog.source == SERVED_HERE_SLUG,
+                _integration_traffic(UsageLog.endpoint, UsageLog.api_key_id),
                 UsageLog.status.in_(_ATTEMPT_STATUSES),
             )
             .order_by(UsageLog.timestamp.desc(), UsageLog.id.desc())
@@ -515,7 +527,7 @@ def _attempt_public(row: UsageLog) -> ActivationAttemptPublic:
     """Render one usage row as the attempt the guide reports."""
     succeeded = row.status == "success"
     return ActivationAttemptPublic(
-        occurred_at=_utc_iso(row.timestamp),
+        occurred_at=utc_iso(row.timestamp),
         request_id=row.id,
         status="success" if succeeded else "failed",
         provider=row.provider,

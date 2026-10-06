@@ -91,6 +91,7 @@ class InvitationRepository(BaseRepository[Invitation, InvitationCreate, Invitati
             col(Invitation.status) == "pending",
             col(Invitation.expires_at) >= now,
         ]
+
         # One join set, applied to both statements. Counting over a narrower
         # one lets a row be counted and not returned, which would end
         # ``fetchAllPaged``'s walk early on a page it read as short; today
@@ -103,9 +104,7 @@ class InvitationRepository(BaseRepository[Invitation, InvitationCreate, Invitati
                 col(Invitation.organization_member_id) == col(OrganizationMember.id),
             ).join(Organization, col(Invitation.organization_id) == col(Organization.id))
 
-        count_result = await self.db.execute(
-            joined(select(func.count()).select_from(Invitation)).where(*conditions)
-        )
+        count_result = await self.db.execute(joined(select(func.count()).select_from(Invitation)).where(*conditions))
         count = count_result.scalar_one()
 
         result = await self.db.execute(

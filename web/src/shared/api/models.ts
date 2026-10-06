@@ -1,6 +1,7 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import type {
   CatalogModelDetail,
+  CatalogQueryParams,
   CatalogResponse,
   DiscoverableModelsResponse,
   ModelListResponse,
@@ -15,33 +16,29 @@ import {
   NO_RETRY,
 } from "@/shared/api/queryKeys"
 
-/**
- * The window `useCatalog` asks for: the endpoint's maximum, not its default 100.
- *
- * The catalog list filters, sorts, counts providers and builds its filter rail
- * from what one request returns, so a window makes every one of those describe
- * the window rather than the catalog. One BYO provider key can offer over a
- * hundred models by itself, which is what put real deployments past the default.
- *
- * Still a window. `count` is the number of matches before it, and the page says
- * so when the two differ. otari#1465 tracks moving the filtering to the server,
- * which is the answer a bigger number is not.
- */
-export const CATALOG_LIST_LIMIT = 1000
-
 // The catalog folded by model, priced for the caller. Any session may read it,
 // like `/v1/models`; the detail is keyed under the list so a pricing write that
 // invalidates CATALOG takes every open detail with it.
 // Keyed beside the model id so a detail read and a list read never share a
 // cache entry (a model whose id is `list` included), while both still fall
 // under the CATALOG prefix invalidations use.
-export function useCatalog() {
+// Existing consumers such as the Playground keep their original bounded read.
+// The Models page supplies its filters, skip, and limit explicitly.
+export function useCatalog(params: CatalogQueryParams = { limit: 1000 }) {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value == null) continue
+    for (const entry of Array.isArray(value) ? value : [value]) {
+      search.append(key, String(entry))
+    }
+  }
   return useQuery({
     ...NO_RETRY,
-    queryKey: [CATALOG, "list"],
-    queryFn: () =>
-      apiFetch<CatalogResponse>(`/catalog/models?limit=${CATALOG_LIST_LIMIT}`),
+    queryKey: [CATALOG, "list", params],
+    queryFn: ({ signal }) =>
+      apiFetch<CatalogResponse>(`/catalog/models?${search}`, { signal }),
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
   })
 }
 

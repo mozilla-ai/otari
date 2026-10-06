@@ -1,0 +1,27 @@
+schema_version: "1.0"
+policy:
+  id: otari/tests
+  description: Code whose tests have to have run in the same session.
+
+gates:
+
+  - id: cli-changed-needs-tests
+    type: command_if_changed
+    runs: [stop.session]
+    enforcement: required
+    when_changed: ["src/gateway/cli.py"]
+    require: ["tests/unit/test_gateway_cli.py"]
+    message: >-
+      You touched the CLI; run tests/unit/test_gateway_cli.py before
+      finishing (see AGENTS.md, "Change Validation Checklist").
+
+  - id: agent-cli-changed-needs-tests
+    type: command_if_changed
+    runs: [stop.session]
+    enforcement: required
+    when_changed: ["cli/src/otari_agent/**"]
+    require: ["tests/unit/test_otari_agent_cli.py"]
+    message: >-
+      You touched the otari-agent CLI; run tests/unit/test_otari_agent_cli.py
+      and the hook tests before finishing (see AGENTS.md, "Change Validation
+      Checklist").

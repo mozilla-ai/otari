@@ -37,6 +37,7 @@ from gateway.exceptions.providers_exceptions import (
     ProviderEndpointOwnerNotFoundError,
     ProviderEndpointsDisabledError,
 )
+from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.log_config import logger
 from gateway.models.secret_fields import restore_redacted_values
 from gateway.repositories.providers import EndpointNameConflict, ProviderEndpointRepository
@@ -51,7 +52,6 @@ from gateway.services.providers._owned_endpoint_network import (
     check_owned_endpoint_api_base,
 )
 from gateway.services.secret_box import SecretBoxUnavailableError, encrypt_secret
-from gateway.services.tenancy.errors import SecretBoxUnavailableTenancyError
 
 # Implementations that take nothing but a base URL and a key. A provider that
 # can authenticate from the deployment's own environment (Bedrock's instance

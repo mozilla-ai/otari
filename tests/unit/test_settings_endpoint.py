@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy.exc import OperationalError
 
 from gateway.api.routes import settings as settings_route
@@ -337,6 +338,16 @@ def test_the_viewer_shows_the_ui_base_url_actually_in_use() -> None:
 
     assert shown["ui_base_url"] == "https://otari.example.com"
     assert GatewayConfig(ui_base_url="https://app.example.com").ui_base_url == "https://app.example.com"
+
+
+def test_the_ui_base_url_keeps_a_query_and_refuses_a_fragment() -> None:
+    # A query is how an edge serving one interface for several deployments
+    # tells each link apart; a fragment would collide with the hash route.
+    assert GatewayConfig(ui_base_url="https://app.example.com/ui/?edge=eu").ui_base_url == (
+        "https://app.example.com/ui?edge=eu"
+    )
+    with pytest.raises(ValidationError, match="no fragment"):
+        GatewayConfig(ui_base_url="https://app.example.com/ui#/login")
 
 
 def test_every_config_field_is_shown_or_deliberately_omitted() -> None:

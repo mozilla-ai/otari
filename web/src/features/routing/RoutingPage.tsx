@@ -12,9 +12,12 @@ import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Dot } from "@/design-system/indicators/Dot"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
-import { canManage, isDeploymentOperator } from "@/features/organization/roles"
+import { canManage } from "@/features/organization/roles"
 import { RouterReadiness } from "@/features/routing/RouterReadiness"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import {
+  useDeploymentOperator,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
 import {
   useAliases,
   useDeleteAlias,
@@ -35,6 +38,7 @@ import {
   findWeights,
   KNN_BACKEND,
   normalizeBackend,
+  PRIORITY_BACKEND,
   type RoutingRow,
   WEIGHTED_BACKEND,
 } from "./policyModel"
@@ -100,7 +104,7 @@ function isEditableInForm(spec: PolicySpec): boolean {
     if (entry.router !== undefined) {
       if ((entry.candidates?.length ?? 0) === 0) return false
       const backend = normalizeBackend(entry.router)
-      if (backend === KNN_BACKEND) return true
+      if (backend === KNN_BACKEND || backend === PRIORITY_BACKEND) return true
       // A weighted entry without weights cannot be saved back (the API refuses it),
       // so the form would have to invent a split. Read-only says so instead.
       return (
@@ -130,6 +134,7 @@ function routerLabelOf(spec: PolicySpec): string {
   const backend = findRouterBackend(spec)
   if (backend === WEIGHTED_BACKEND) return "Weighted"
   if (backend === KNN_BACKEND) return "Learned"
+  if (backend === PRIORITY_BACKEND) return "Priority"
   return "Routed"
 }
 
@@ -193,9 +198,7 @@ export function RoutingPage() {
   // tenant-scoped `/organizations/me/*` one. Both wait for the context to settle
   // rather than taking "not yet an operator" as "member".
   const organization = useOrganizationContext()
-  const isOperator = isDeploymentOperator(organization.data)
-  const isContextSettled =
-    organization.data !== undefined || organization.isError
+  const { isOperator, isSettled: isContextSettled } = useDeploymentOperator()
   // The switcher is seeded from the caller's own memberships, not the
   // organization's whole list (otari-ai#1969), so this is null only for somebody
   // who belongs to no workspace: they have nothing of their own to see and

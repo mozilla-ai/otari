@@ -15,6 +15,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.models.tenancy import Organization, User, Workspace
 from gateway.models.tools import WorkspaceWebSearchConfig
 from gateway.repositories.tenancy import (
@@ -24,7 +25,6 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.services.tenancy.errors import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.services.tenancy.workspace_web_search_service import (
     WorkspaceWebSearchConfigUpdate,
     WorkspaceWebSearchService,

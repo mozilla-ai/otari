@@ -11,7 +11,12 @@
 // `undefined` is "no workspace selected yet", which every read here declines to
 // run on rather than asking about a workspace nobody named.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import type {
   PlaygroundComparisons,
   PlaygroundConsent,
@@ -19,6 +24,8 @@ import type {
   PlaygroundConversation,
   PlaygroundConversations,
   PlaygroundFavoriteModels,
+  PlaygroundFile,
+  PlaygroundFiles,
   PlaygroundMessages,
   PlaygroundTools,
   SavePlaygroundComparisonRequest,
@@ -77,6 +84,76 @@ export function usePlaygroundTools(workspaceId: string | undefined) {
       apiFetch<PlaygroundTools>(`${ROOT}/tools${scope(workspaceId as string)}`),
     enabled: workspaceId !== undefined,
     staleTime: 60_000,
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Files a message can attach
+//
+// The caller's own uploads in one workspace, newest first, a page at a time:
+// the dialog asks for the next page with the last file's id as the cursor.
+// ---------------------------------------------------------------------------
+
+// Longer than the default request deadline: an upload takes as long as its
+// bytes do on the caller's link, and the gateway already bounds its size.
+const UPLOAD_TIMEOUT_MS = 5 * 60_000
+
+export function usePlaygroundFiles(
+  workspaceId: string | undefined,
+  { enabled = true }: { enabled?: boolean } = {},
+) {
+  return useInfiniteQuery({
+    queryKey: [PLAYGROUND, workspaceId, "files"],
+    queryFn: ({ pageParam }) =>
+      apiFetch<PlaygroundFiles>(
+        `${ROOT}/files${scope(workspaceId as string)}${
+          pageParam ? `&after=${encodeURIComponent(pageParam)}` : ""
+        }`,
+      ),
+    initialPageParam: "",
+    getNextPageParam: (page) =>
+      page.has_more && page.last_id ? page.last_id : undefined,
+    enabled: enabled && workspaceId !== undefined,
+    staleTime: 30_000,
+  })
+}
+
+export function useUploadPlaygroundFile(workspaceId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (file: File) => {
+      const body = new FormData()
+      body.append("file", file)
+      return apiFetch<PlaygroundFile>(
+        `${ROOT}/files${scope(workspaceId as string)}`,
+        {
+          method: "POST",
+          body,
+          signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+        },
+      )
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [PLAYGROUND, workspaceId, "files"],
+      })
+    },
+  })
+}
+
+export function useDeletePlaygroundFile(workspaceId: string | undefined) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (fileId: string) =>
+      apiFetch<void>(
+        `${ROOT}/files/${encodeURIComponent(fileId)}${scope(workspaceId as string)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [PLAYGROUND, workspaceId, "files"],
+      })
+    },
   })
 }
 
@@ -301,11 +378,21 @@ interface StreamChunk {
 const WEB_SEARCH_TOOL = "otari_web_search"
 const CODE_EXECUTION_TOOL = "otari_code_execution"
 
+/** One part of a message that carries more than text, in the OpenAI format. */
+export type PlaygroundContentPart =
+  | { type: "text"; text: string }
+  | { type: "file"; file: { file_id: string; filename: string } }
+
+export interface PlaygroundWireMessage {
+  role: string
+  content: string | PlaygroundContentPart[]
+}
+
 export interface StreamChatParams {
   workspaceId: string
   /** The `instance:model` selector, as the catalog publishes it. */
   model: string
-  messages: { role: string; content: string }[]
+  messages: PlaygroundWireMessage[]
   tools: ToolSelection
   onDelta: (delta: StreamDelta) => void
   onUsage?: (usage: StreamUsage) => void

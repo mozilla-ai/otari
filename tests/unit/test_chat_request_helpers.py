@@ -1,4 +1,4 @@
-"""Unit tests for the tool-extraction helpers in `gateway.api.routes._tools`.
+"""Unit tests for the tool-extraction helpers in `gateway.services.tools`.
 
 By default only the explicit gateway-managed types (`otari_code_execution` /
 `otari_web_search`) are extracted and run by the gateway. Provider-named
@@ -20,52 +20,54 @@ from typing import Any
 
 import pytest
 
-from gateway.api.routes._pipeline import ToolContext, _read_web_search_max_uses
+from gateway.api.routes._pipeline import ToolContext
 from gateway.api.routes._tools import (
-    _extract_code_execution_tool,
-    _extract_web_fetch_tool,
-    _extract_web_search_tool,
     _retargeted_tool_choice,
     _strip_gateway_fields,
-    _web_search_intercept_enabled,
-    declares_native_web_search,
 )
 from gateway.core.config import GatewayConfig
+from gateway.services.tools import (
+    Dialect,
+    extract_code_execution_tool,
+    read_web_search_max_uses,
+    web_search_intercept_enabled,
+)
+from gateway.services.tools._web_declarations import extract_web_fetch_tool, extract_web_search_tool
 
 
 def test_extracts_otari_code_execution() -> None:
-    entry, remaining = _extract_code_execution_tool([{"type": "otari_code_execution"}])
+    entry, remaining = extract_code_execution_tool([{"type": "otari_code_execution"}])
     assert entry == {"type": "otari_code_execution"}
     assert remaining is None
 
 
 def test_passes_through_gateway_native_short_form() -> None:
-    entry, remaining = _extract_code_execution_tool([{"type": "code_execution"}])
+    entry, remaining = extract_code_execution_tool([{"type": "code_execution"}])
     assert entry is None
     assert remaining == [{"type": "code_execution"}]
 
 
 def test_passes_through_openai_code_interpreter() -> None:
-    entry, remaining = _extract_code_execution_tool([{"type": "code_interpreter"}])
+    entry, remaining = extract_code_execution_tool([{"type": "code_interpreter"}])
     assert entry is None
     assert remaining == [{"type": "code_interpreter"}]
 
 
 def test_passes_through_anthropic_versioned_type() -> None:
-    entry, remaining = _extract_code_execution_tool([{"type": "code_execution_20250825"}])
+    entry, remaining = extract_code_execution_tool([{"type": "code_execution_20250825"}])
     assert entry is None
     assert remaining == [{"type": "code_execution_20250825"}]
 
 
 def test_passes_through_future_anthropic_version() -> None:
-    entry, remaining = _extract_code_execution_tool([{"type": "code_execution_20991231"}])
+    entry, remaining = extract_code_execution_tool([{"type": "code_execution_20991231"}])
     assert entry is None
     assert remaining == [{"type": "code_execution_20991231"}]
 
 
 def test_passes_through_unrelated_tools_alongside_otari() -> None:
     user_tool = {"type": "function", "function": {"name": "get_weather"}}
-    entry, remaining = _extract_code_execution_tool([user_tool, {"type": "otari_code_execution"}])
+    entry, remaining = extract_code_execution_tool([user_tool, {"type": "otari_code_execution"}])
     assert entry == {"type": "otari_code_execution"}
     assert remaining == [user_tool]
 
@@ -74,7 +76,7 @@ def test_provider_keywords_stay_in_remaining_for_passthrough() -> None:
     # A request mixing the gateway-managed type with a provider-named one:
     # the gateway runs the otari_* entry, the provider-named entry passes
     # through untouched.
-    entry, remaining = _extract_code_execution_tool(
+    entry, remaining = extract_code_execution_tool(
         [
             {"type": "otari_code_execution", "purpose_hint": "first"},
             {"type": "code_interpreter"},
@@ -85,7 +87,7 @@ def test_provider_keywords_stay_in_remaining_for_passthrough() -> None:
 
 
 def test_takes_only_the_first_otari_entry() -> None:
-    entry, remaining = _extract_code_execution_tool(
+    entry, remaining = extract_code_execution_tool(
         [
             {"type": "otari_code_execution", "purpose_hint": "first"},
             {"type": "otari_code_execution", "purpose_hint": "second"},
@@ -96,25 +98,25 @@ def test_takes_only_the_first_otari_entry() -> None:
 
 
 def test_returns_no_entry_when_absent() -> None:
-    entry, remaining = _extract_code_execution_tool([{"type": "function", "function": {"name": "f"}}])
+    entry, remaining = extract_code_execution_tool([{"type": "function", "function": {"name": "f"}}])
     assert entry is None
     assert remaining == [{"type": "function", "function": {"name": "f"}}]
 
 
 def test_empty_tools_returns_no_entry() -> None:
-    entry, remaining = _extract_code_execution_tool(None)
+    entry, remaining = extract_code_execution_tool(None)
     assert entry is None
     assert remaining is None
 
 
 def test_does_not_match_unrelated_types_starting_with_otari() -> None:
-    entry, remaining = _extract_code_execution_tool([{"type": "otari_code_review"}])
+    entry, remaining = extract_code_execution_tool([{"type": "otari_code_review"}])
     assert entry is None
     assert remaining == [{"type": "otari_code_review"}]
 
 
 def test_non_string_type_does_not_match() -> None:
-    entry, _ = _extract_code_execution_tool([{"type": None}, {"type": 42}])
+    entry, _ = extract_code_execution_tool([{"type": None}, {"type": 42}])
     assert entry is None
 
 
@@ -122,49 +124,49 @@ def test_non_string_type_does_not_match() -> None:
 
 
 def test_web_search_extracts_otari_web_search() -> None:
-    entry, remaining = _extract_web_search_tool([{"type": "otari_web_search"}])
+    entry, remaining = extract_web_search_tool([{"type": "otari_web_search"}])
     assert entry == {"type": "otari_web_search"}
     assert remaining is None
 
 
 def test_web_fetch_extracts_only_the_canonical_type() -> None:
-    entry, remaining = _extract_web_fetch_tool([{"type": "otari_web_fetch"}, {"type": "web_fetch_20250910"}])
+    entry, remaining = extract_web_fetch_tool([{"type": "otari_web_fetch"}, {"type": "web_fetch_20250910"}])
     assert entry == {"type": "otari_web_fetch"}
     assert remaining == [{"type": "web_fetch_20250910"}]
 
 
 def test_web_search_passes_through_gateway_native_short_form() -> None:
-    entry, remaining = _extract_web_search_tool([{"type": "web_search"}])
+    entry, remaining = extract_web_search_tool([{"type": "web_search"}])
     assert entry is None
     assert remaining == [{"type": "web_search"}]
 
 
 def test_web_search_passes_through_anthropic_versioned_type() -> None:
-    entry, remaining = _extract_web_search_tool([{"type": "web_search_20250305"}])
+    entry, remaining = extract_web_search_tool([{"type": "web_search_20250305"}])
     assert entry is None
     assert remaining == [{"type": "web_search_20250305"}]
 
 
 def test_web_search_passes_through_future_anthropic_version() -> None:
-    entry, remaining = _extract_web_search_tool([{"type": "web_search_20991231"}])
+    entry, remaining = extract_web_search_tool([{"type": "web_search_20991231"}])
     assert entry is None
     assert remaining == [{"type": "web_search_20991231"}]
 
 
 def test_web_search_passes_through_unrelated_tools_alongside_otari() -> None:
     user_tool = {"type": "function", "function": {"name": "get_weather"}}
-    entry, remaining = _extract_web_search_tool([user_tool, {"type": "otari_web_search"}])
+    entry, remaining = extract_web_search_tool([user_tool, {"type": "otari_web_search"}])
     assert entry == {"type": "otari_web_search"}
     assert remaining == [user_tool]
 
 
 def test_web_search_does_not_match_code_execution() -> None:
-    entry, _ = _extract_web_search_tool([{"type": "otari_code_execution"}])
+    entry, _ = extract_web_search_tool([{"type": "otari_code_execution"}])
     assert entry is None
 
 
 def test_web_search_carries_per_tool_config_through() -> None:
-    entry, _ = _extract_web_search_tool(
+    entry, _ = extract_web_search_tool(
         [{"type": "otari_web_search", "max_results": 3, "allowed_domains": ["docs.python.org"]}]
     )
     assert entry is not None
@@ -176,36 +178,36 @@ def test_web_search_carries_per_tool_config_through() -> None:
 
 
 def test_intercept_claims_bare_web_search() -> None:
-    entry, remaining = _extract_web_search_tool([{"type": "web_search"}], intercept=True)
+    entry, remaining = extract_web_search_tool([{"type": "web_search"}], intercept=True)
     assert entry == {"type": "web_search"}
     assert remaining is None
 
 
 def test_intercept_claims_anthropic_versioned_type() -> None:
-    entry, remaining = _extract_web_search_tool([{"type": "web_search_20250305"}], intercept=True)
+    entry, remaining = extract_web_search_tool([{"type": "web_search_20250305"}], intercept=True)
     assert entry == {"type": "web_search_20250305"}
     assert remaining is None
 
 
 def test_intercept_claims_future_anthropic_version() -> None:
-    entry, _ = _extract_web_search_tool([{"type": "web_search_20991231"}], intercept=True)
+    entry, _ = extract_web_search_tool([{"type": "web_search_20991231"}], intercept=True)
     assert entry is not None
 
 
 def test_intercept_claims_openai_responses_preview_type() -> None:
-    entry, _ = _extract_web_search_tool([{"type": "web_search_preview"}], intercept=True)
+    entry, _ = extract_web_search_tool([{"type": "web_search_preview"}], intercept=True)
     assert entry is not None
 
 
 def test_intercept_claims_claude_code_shape_with_name_and_max_uses() -> None:
     claude_code = {"type": "web_search_20250305", "name": "web_search", "max_uses": 8}
-    entry, remaining = _extract_web_search_tool([claude_code], intercept=True)
+    entry, remaining = extract_web_search_tool([claude_code], intercept=True)
     assert entry == claude_code
     assert remaining is None
 
 
 def test_intercept_still_claims_the_canonical_otari_type() -> None:
-    entry, _ = _extract_web_search_tool([{"type": "otari_web_search"}], intercept=True)
+    entry, _ = extract_web_search_tool([{"type": "otari_web_search"}], intercept=True)
     assert entry == {"type": "otari_web_search"}
 
 
@@ -216,7 +218,7 @@ def test_intercept_never_claims_a_function_named_web_search() -> None:
     tool_call they can execute. LiteLLM excludes this case for the same reason.
     """
     own_tool = {"type": "function", "function": {"name": "web_search", "parameters": {}}}
-    entry, remaining = _extract_web_search_tool([own_tool], intercept=True)
+    entry, remaining = extract_web_search_tool([own_tool], intercept=True)
     assert entry is None
     assert remaining == [own_tool]
 
@@ -227,33 +229,15 @@ def test_intercept_does_not_claim_code_execution_or_unrelated_tools() -> None:
         {"type": "web_fetch_20250910"},
         {"type": "function", "function": {"name": "get_weather"}},
     ]
-    entry, remaining = _extract_web_search_tool(tools, intercept=True)
+    entry, remaining = extract_web_search_tool(tools, intercept=True)
     assert entry is None
     assert remaining == tools
 
 
 def test_intercept_off_is_the_default_and_passes_provider_keywords_through() -> None:
-    entry, remaining = _extract_web_search_tool([{"type": "web_search_20250305"}])
+    entry, remaining = extract_web_search_tool([{"type": "web_search_20250305"}])
     assert entry is None
     assert remaining == [{"type": "web_search_20250305"}]
-
-
-# --- native-declaration discrimination ---------------------------------------
-
-
-def test_versioned_declaration_is_native() -> None:
-    assert declares_native_web_search({"type": "web_search_20250305"}) is True
-
-
-def test_bare_and_canonical_declarations_are_not_native() -> None:
-    """Neither shape implies the caller expects native server-tool blocks back."""
-    assert declares_native_web_search({"type": "web_search"}) is False
-    assert declares_native_web_search({"type": "otari_web_search"}) is False
-
-
-def test_missing_declaration_is_not_native() -> None:
-    assert declares_native_web_search(None) is False
-    assert declares_native_web_search({}) is False
 
 
 # --- intercept toggle resolution ---------------------------------------------
@@ -261,29 +245,29 @@ def test_missing_declaration_is_not_native() -> None:
 
 def test_intercept_defaults_off(monkeypatch: Any) -> None:
     monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
-    assert _web_search_intercept_enabled(GatewayConfig()) is False
+    assert web_search_intercept_enabled(GatewayConfig()) is False
 
 
 def test_intercept_reads_the_config_field(monkeypatch: Any) -> None:
     monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
-    assert _web_search_intercept_enabled(GatewayConfig(web_search_intercept=True)) is True
+    assert web_search_intercept_enabled(GatewayConfig(web_search_intercept=True)) is True
 
 
 def test_intercept_falls_back_to_env(monkeypatch: Any) -> None:
     monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
-    assert _web_search_intercept_enabled(GatewayConfig()) is True
+    assert web_search_intercept_enabled(GatewayConfig()) is True
 
 
 def test_intercept_env_falsey_values_stay_off(monkeypatch: Any) -> None:
     for raw in ("0", "false", "no", "off", ""):
         monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", raw)
-        assert _web_search_intercept_enabled(GatewayConfig()) is False
+        assert web_search_intercept_enabled(GatewayConfig()) is False
 
 
 def test_config_false_wins_over_a_truthy_env(monkeypatch: Any) -> None:
     """An explicit off (dashboard override / YAML) is not overridden by the env."""
     monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
-    assert _web_search_intercept_enabled(GatewayConfig(web_search_intercept=False)) is False
+    assert web_search_intercept_enabled(GatewayConfig(web_search_intercept=False)) is False
 
 
 # --- tool_choice retargeting -------------------------------------------------
@@ -367,7 +351,6 @@ def _capped_context(entry: dict[str, Any] | None) -> ToolContext:
         use_sandbox=False,
         sandbox_tool_entry=None,
         code_execution_port=None,
-        sandbox_auth_token=None,
         use_web_search=True,
         web_search_tool_entry=entry,
         web_search_url="http://search.invalid",
@@ -392,7 +375,7 @@ def test_max_uses_is_honored_on_a_declaration_with_no_native_response_shape() ->
     for type_value in ("otari_web_search", "web_search"):
         entry = {"type": type_value, "max_uses": 2}
         ctx = _capped_context(entry)
-        assert ctx.emit_native_web_search is False
+        assert ctx.native_tools(Dialect.MESSAGES) == frozenset()
         assert ctx.max_web_search_uses == 2, type_value
 
 
@@ -407,8 +390,8 @@ def test_a_zero_max_uses_caps_the_searches_at_none_rather_than_at_no_limit() -> 
     entry = {"type": "web_search_20250305", "max_uses": 0}
     ctx = _capped_context(entry)
     assert ctx.max_web_search_uses == 0
-    assert ctx.web_search_budget is not None
-    assert ctx.web_search_budget.exhausted(), "the first search must already be over the cap"
+    assert ctx.use_budget is not None
+    assert ctx.use_budget.exhausted(), "the first search must already be over the cap"
 
 
 def test_a_nonsensical_max_uses_is_refused_by_the_reader() -> None:
@@ -426,34 +409,7 @@ def test_a_nonsensical_max_uses_is_refused_by_the_reader() -> None:
     for value in (-1, True, False, "2", 1.5, 5.0):
         entry = {"type": "web_search_20250305", "max_uses": value}
         with pytest.raises(ValueError, match="non-negative integer"):
-            _read_web_search_max_uses(entry)
-
-
-def test_what_a_container_field_asks_for_is_read_in_both_vocabularies() -> None:
-    """An id resumes one, ``auto`` asks for one, and nothing asks for nothing.
-
-    OpenAI spells the ask as the object ``{"type": "auto"}`` on a
-    ``code_interpreter`` entry, which is why the string spelling is not the only
-    one: the dialects with no object form (Anthropic's top-level field, the
-    gateway's own entry) use ``"auto"``.
-    """
-    from gateway.api.routes._pipeline import CONTAINER_AUTO, _requested_container
-
-    assert _requested_container("otari_cntr_1") == "otari_cntr_1"
-    assert _requested_container({"id": "otari_cntr_2"}) == "otari_cntr_2"
-    assert _requested_container("auto") == CONTAINER_AUTO
-    assert _requested_container(" AUTO ") == CONTAINER_AUTO, "case and padding are the client's, not the meaning"
-    assert _requested_container({"type": "auto"}) == CONTAINER_AUTO
-    # An object naming an id means that id, whatever its type says.
-    assert _requested_container({"type": "auto", "id": "otari_cntr_4"}) == "otari_cntr_4"
-
-    # Nothing asked for: the request holds no sandbox past itself.
-    assert _requested_container(None) is None
-    assert _requested_container("") is None
-    assert _requested_container("   ") is None
-    assert _requested_container({}) is None
-    assert _requested_container({"type": "something_else"}) is None
-    assert _requested_container(7) is None
+            read_web_search_max_uses(entry)
 
 
 def test_only_the_gateways_own_container_words_are_refused_when_the_provider_runs_the_code() -> None:
@@ -463,15 +419,15 @@ def test_only_the_gateways_own_container_words_are_refused_when_the_provider_run
     provider's own spelling on its own tool entry, so it has to reach them
     untouched even though it normalizes to the same ask here.
     """
-    from gateway.api.routes._pipeline import _gateway_container_value
+    from gateway.services.code_execution import gateway_container_value
 
-    assert _gateway_container_value("auto") == "auto"
-    assert _gateway_container_value(" AUTO ") == "AUTO"
-    assert _gateway_container_value("otari_cntr_abc") == "otari_cntr_abc"
+    assert gateway_container_value("auto") == "auto"
+    assert gateway_container_value(" AUTO ") == "AUTO"
+    assert gateway_container_value("otari_cntr_abc") == "otari_cntr_abc"
 
     # The provider's, so it is forwarded rather than refused.
-    assert _gateway_container_value("container_01ABC") is None
-    assert _gateway_container_value({"type": "auto"}) is None
-    assert _gateway_container_value({"id": "container_01ABC"}) is None
-    assert _gateway_container_value(None) is None
-    assert _gateway_container_value("") is None
+    assert gateway_container_value("container_01ABC") is None
+    assert gateway_container_value({"type": "auto"}) is None
+    assert gateway_container_value({"id": "container_01ABC"}) is None
+    assert gateway_container_value(None) is None
+    assert gateway_container_value("") is None

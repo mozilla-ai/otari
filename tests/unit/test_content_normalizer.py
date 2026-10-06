@@ -1,7 +1,8 @@
 """Unit tests for the content normalizer.
 
-The heavy extraction/vision boundaries (markitdown, vision side-call, file
-store) are monkeypatched so these tests run with no optional deps and no DB.
+The heavy extraction and vision boundaries (markitdown, the vision side-call)
+are monkeypatched and the files service is a stand-in, so these tests run with
+no optional deps and no database.
 """
 
 from __future__ import annotations
@@ -13,10 +14,11 @@ import pytest
 from any_llm.types.completion import CompletionUsage
 
 from gateway.core.config import GatewayConfig
-from gateway.models.tools import FileObject
+from gateway.exceptions.files_exceptions import AttachedFileUnavailableError, ProviderUploadFailedError
 from gateway.services import content_normalizer as cn
-from gateway.services.content_normalizer import normalize_messages
+from gateway.services.content_normalizer import name_container_copies, normalize_messages
 from gateway.services.file_extractors import ExtractionResult
+from gateway.services.files import FileScope, StagedFile
 from gateway.services.model_capabilities import Capabilities
 
 _NATIVE = Capabilities(image=True, pdf=True, source="test")
@@ -35,9 +37,7 @@ def _image_msg(url: str = _PNG_DATA_URL) -> list[dict[str, Any]]:
 async def test_string_content_untouched() -> None:
     cfg = GatewayConfig()
     msgs = [{"role": "user", "content": "plain text"}]
-    out, stats = await normalize_messages(
-        msgs, config=cfg, caps=_TEXT_ONLY, fmt="openai", db=None, file_store=None, user_id="u"
-    )
+    out, stats = await normalize_messages(msgs, config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u")
     assert out == msgs
     assert not stats.touched
 
@@ -53,8 +53,7 @@ async def test_bare_string_messages_untouched() -> None:
         config=cfg,
         caps=_TEXT_ONLY,
         fmt="responses",
-        db=None,
-        file_store=None,
+        files=None,
         user_id="u",
     )
     assert cast("Any", out) == text
@@ -65,9 +64,7 @@ async def test_bare_string_messages_untouched() -> None:
 async def test_native_image_passthrough() -> None:
     cfg = GatewayConfig()
     msg = _image_msg()
-    out, stats = await normalize_messages(
-        msg, config=cfg, caps=_NATIVE, fmt="openai", db=None, file_store=None, user_id="u"
-    )
+    out, stats = await normalize_messages(msg, config=cfg, caps=_NATIVE, fmt="openai", files=None, user_id="u")
     block = out[0]["content"][1]
     assert block["type"] == "image_url"
     # An already-inline block must pass through byte-identical — no decode/
@@ -84,7 +81,7 @@ async def test_text_only_image_described(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(cn, "describe_image", fake_describe)
     cfg = GatewayConfig(vision_strategy="describe")
     out, stats = await normalize_messages(
-        _image_msg(), config=cfg, caps=_TEXT_ONLY, fmt="openai", db=None, file_store=None, user_id="u"
+        _image_msg(), config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u"
     )
     block = out[0]["content"][1]
     assert block["type"] == "text"
@@ -101,7 +98,7 @@ async def test_text_only_image_described(monkeypatch: pytest.MonkeyPatch) -> Non
 async def test_text_only_image_dropped_when_off() -> None:
     cfg = GatewayConfig(vision_strategy="off")
     out, stats = await normalize_messages(
-        _image_msg(), config=cfg, caps=_TEXT_ONLY, fmt="openai", db=None, file_store=None, user_id="u"
+        _image_msg(), config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u"
     )
     block = out[0]["content"][1]
     assert block["type"] == "text"
@@ -117,8 +114,7 @@ async def test_remote_image_url_not_fetched_and_passed_through() -> None:
         config=cfg,
         caps=_TEXT_ONLY,
         fmt="openai",
-        db=None,
-        file_store=None,
+        files=None,
         user_id="u",
     )
     # Remote URLs are never fetched (SSRF-safe); the block is left for the model
@@ -140,9 +136,7 @@ async def test_document_extracted_to_text(monkeypatch: pytest.MonkeyPatch) -> No
             "content": [{"type": "file", "file": {"file_data": pdf_data_url, "filename": "q3.pdf"}}],
         }
     ]
-    out, stats = await normalize_messages(
-        msgs, config=cfg, caps=_TEXT_ONLY, fmt="openai", db=None, file_store=None, user_id="u"
-    )
+    out, stats = await normalize_messages(msgs, config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u")
     block = out[0]["content"][0]
     assert block["type"] == "text"
     assert "q3.pdf" in block["text"]
@@ -159,9 +153,7 @@ async def test_anthropic_image_passthrough_native() -> None:
             "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": _PNG_B64}}],
         }
     ]
-    out, stats = await normalize_messages(
-        msgs, config=cfg, caps=_NATIVE, fmt="anthropic", db=None, file_store=None, user_id="u"
-    )
+    out, stats = await normalize_messages(msgs, config=cfg, caps=_NATIVE, fmt="anthropic", files=None, user_id="u")
     assert out[0]["content"][0]["type"] == "image"
     assert out[0]["content"][0]["source"]["type"] == "base64"
     assert not stats.touched
@@ -171,33 +163,13 @@ async def test_anthropic_image_passthrough_native() -> None:
 async def test_responses_uses_input_text_block() -> None:
     cfg = GatewayConfig(vision_strategy="off")
     msgs = [{"role": "user", "content": [{"type": "input_image", "image_url": _PNG_DATA_URL}]}]
-    out, _ = await normalize_messages(
-        msgs, config=cfg, caps=_TEXT_ONLY, fmt="responses", db=None, file_store=None, user_id="u"
-    )
+    out, _ = await normalize_messages(msgs, config=cfg, caps=_TEXT_ONLY, fmt="responses", files=None, user_id="u")
     assert out[0]["content"][0]["type"] == "input_text"
 
 
 @pytest.mark.asyncio
-async def test_file_id_resolved_and_inlined_for_native(monkeypatch: pytest.MonkeyPatch) -> None:
-    record = FileObject(
-        id="file-x",
-        user_id="u",
-        filename="pic.png",
-        mime_type="image/png",
-        bytes=8,
-        purpose="user_data",
-        storage_ref="x/file-x",
-    )
-
-    async def fake_fetch(db, file_id, user_id, *, workspace_id=None):  # type: ignore[no-untyped-def]
-        assert file_id == "file-x"
-        return record
-
-    async def fake_read(file_store, rec):  # type: ignore[no-untyped-def]
-        return b"\x89PNG\r\n\x1a\n"
-
-    monkeypatch.setattr(cn, "fetch_file", fake_fetch)
-    monkeypatch.setattr(cn, "read_file_bytes", fake_read)
+async def test_file_id_resolved_and_inlined_for_native() -> None:
+    files = _files(_stored("file-x", "pic.png", "image/png"), data=b"\x89PNG\r\n\x1a\n")
 
     cfg = GatewayConfig()
     msgs = [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "x"}, "file_id": "file-x"}]}]
@@ -206,8 +178,7 @@ async def test_file_id_resolved_and_inlined_for_native(monkeypatch: pytest.Monke
         config=cfg,
         caps=_NATIVE,
         fmt="openai",
-        db=cast(Any, object()),
-        file_store=cast(Any, object()),
+        files=files,
         user_id="u",
     )
     block = out[0]["content"][0]
@@ -220,40 +191,40 @@ async def test_file_id_resolved_and_inlined_for_native(monkeypatch: pytest.Monke
 async def test_disabled_is_noop() -> None:
     cfg = GatewayConfig(file_understanding_enabled=False, vision_strategy="off")
     out, stats = await normalize_messages(
-        _image_msg(), config=cfg, caps=_TEXT_ONLY, fmt="openai", db=None, file_store=None, user_id="u"
+        _image_msg(), config=cfg, caps=_TEXT_ONLY, fmt="openai", files=None, user_id="u"
     )
     assert out == _image_msg()
     assert not stats.touched
 
 
-def _stored(file_id: str = "file-csv", filename: str = "data.csv", mime: str = "text/csv") -> FileObject:
-    return FileObject(
-        id=file_id,
-        user_id="u",
-        filename=filename,
-        mime_type=mime,
-        bytes=9,
-        purpose="user_data",
-        storage_ref=f"x/{file_id}",
-    )
+def _stored(file_id: str = "file-csv", filename: str = "data.csv", mime: str = "text/csv") -> StagedFile:
+    return StagedFile(file_id=file_id, filename=filename, mime_type=mime, storage_ref=f"x/{file_id}")
 
 
-def _patch_store(monkeypatch: pytest.MonkeyPatch, record: FileObject, data: bytes, reads: list[str]) -> None:
-    async def fake_fetch(db, file_id, user_id, *, workspace_id=None):  # type: ignore[no-untyped-def]
-        return record if file_id == record.id else None
+class _FakeFiles:
+    """The files service as the normalizer uses it, serving the uploads it was given."""
 
-    async def fake_read(file_store, rec):  # type: ignore[no-untyped-def]
-        reads.append(rec.id)
-        return data
+    def __init__(self, *staged: StagedFile, data: bytes = b"") -> None:
+        self._staged = {upload.file_id: upload for upload in staged}
+        self._data = data
+        self.reads: list[str] = []
 
-    monkeypatch.setattr(cn, "fetch_file", fake_fetch)
-    monkeypatch.setattr(cn, "read_file_bytes", fake_read)
+    async def staged_upload(self, file_id: str, scope: FileScope) -> StagedFile | None:
+        return self._staged.get(file_id)
+
+    async def read_bytes(self, staged: StagedFile) -> bytes:
+        self.reads.append(staged.file_id)
+        return self._data
+
+
+def _files(*staged: StagedFile, data: bytes = b"") -> Any:
+    """A stand-in files service holding ``staged``, for the normalizer's parameter."""
+    return _FakeFiles(*staged, data=data)
 
 
 @pytest.mark.asyncio
-async def test_container_upload_staged_for_sandbox_without_reading_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
-    reads: list[str] = []
-    _patch_store(monkeypatch, _stored(), b"a,b\n1,2\n", reads)
+async def test_container_upload_staged_for_sandbox_without_reading_bytes() -> None:
+    files = _files(_stored(), data=b"a,b\n1,2\n")
     msgs = [
         {
             "role": "user",
@@ -268,8 +239,7 @@ async def test_container_upload_staged_for_sandbox_without_reading_bytes(monkeyp
         config=GatewayConfig(),
         caps=_TEXT_ONLY,
         fmt="anthropic",
-        db=cast(Any, object()),
-        file_store=cast(Any, object()),
+        files=files,
         user_id="u",
         sandbox_requested=True,
     )
@@ -279,13 +249,12 @@ async def test_container_upload_staged_for_sandbox_without_reading_bytes(monkeyp
     marker = out[0]["content"][1]
     assert marker["type"] == "text"
     assert "data.csv" in marker["text"]
-    assert reads == []
+    assert files.reads == []
 
 
 @pytest.mark.asyncio
 async def test_container_upload_without_sandbox_is_read_as_document(monkeypatch: pytest.MonkeyPatch) -> None:
-    reads: list[str] = []
-    _patch_store(monkeypatch, _stored(), b"a,b\n1,2\n", reads)
+    files = _files(_stored(), data=b"a,b\n1,2\n")
 
     async def fake_extract(data: bytes, mime: str, filename: str | None) -> ExtractionResult:
         return ExtractionResult("| a | b |", True, "ok")
@@ -297,8 +266,7 @@ async def test_container_upload_without_sandbox_is_read_as_document(monkeypatch:
         config=GatewayConfig(),
         caps=_TEXT_ONLY,
         fmt="anthropic",
-        db=cast(Any, object()),
-        file_store=cast(Any, object()),
+        files=files,
         user_id="u",
     )
     assert stats.sandbox_inputs == []
@@ -307,9 +275,8 @@ async def test_container_upload_without_sandbox_is_read_as_document(monkeypatch:
 
 
 @pytest.mark.asyncio
-async def test_document_file_id_is_also_staged_when_sandbox_runs(monkeypatch: pytest.MonkeyPatch) -> None:
-    reads: list[str] = []
-    _patch_store(monkeypatch, _stored("file-pdf", "report.pdf", "application/pdf"), b"%PDF", reads)
+async def test_document_file_id_is_also_staged_when_sandbox_runs() -> None:
+    files = _files(_stored("file-pdf", "report.pdf", "application/pdf"), data=b"%PDF")
     msgs = [
         {"role": "user", "content": [{"type": "document", "source": {"type": "file", "file_id": "file-pdf"}}]},
         {"role": "user", "content": [{"type": "document", "source": {"type": "file", "file_id": "file-pdf"}}]},
@@ -319,8 +286,7 @@ async def test_document_file_id_is_also_staged_when_sandbox_runs(monkeypatch: py
         config=GatewayConfig(),
         caps=_NATIVE,
         fmt="anthropic",
-        db=cast(Any, object()),
-        file_store=cast(Any, object()),
+        files=files,
         user_id="u",
         sandbox_requested=True,
     )
@@ -332,8 +298,7 @@ async def test_document_file_id_is_also_staged_when_sandbox_runs(monkeypatch: py
 
 @pytest.mark.asyncio
 async def test_bare_responses_input_file_item_is_normalized(monkeypatch: pytest.MonkeyPatch) -> None:
-    reads: list[str] = []
-    _patch_store(monkeypatch, _stored("file-txt", "notes.txt", "text/plain"), b"hello", reads)
+    files = _files(_stored("file-txt", "notes.txt", "text/plain"), data=b"hello")
 
     async def fake_extract(data: bytes, mime: str, filename: str | None) -> ExtractionResult:
         return ExtractionResult(data.decode(), True, "ok")
@@ -348,8 +313,7 @@ async def test_bare_responses_input_file_item_is_normalized(monkeypatch: pytest.
         config=GatewayConfig(),
         caps=_TEXT_ONLY,
         fmt="responses",
-        db=cast(Any, object()),
-        file_store=cast(Any, object()),
+        files=files,
         user_id="u",
     )
     assert stats.files_extracted == 1
@@ -360,22 +324,47 @@ async def test_bare_responses_input_file_item_is_normalized(monkeypatch: pytest.
 
 
 @pytest.mark.asyncio
-async def test_bare_responses_input_file_item_inlined_for_native(monkeypatch: pytest.MonkeyPatch) -> None:
-    reads: list[str] = []
-    _patch_store(monkeypatch, _stored("file-pdf", "r.pdf", "application/pdf"), b"%PDF", reads)
+async def test_bare_responses_input_file_item_inlined_for_native() -> None:
+    files = _files(_stored("file-pdf", "r.pdf", "application/pdf"), data=b"%PDF")
     items = [{"type": "input_file", "file_id": "file-pdf"}]
     out, _ = await normalize_messages(
         items,
         config=GatewayConfig(),
         caps=_NATIVE,
         fmt="responses",
-        db=cast(Any, object()),
-        file_store=cast(Any, object()),
+        files=files,
         user_id="u",
     )
     # Stays a bare item, now carrying inline data the provider can read.
     assert out[0]["type"] == "input_file"
     assert out[0]["file_data"].startswith("data:application/pdf;base64,")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fmt", "block"),
+    [
+        ("openai", {"type": "file", "file": {"file_id": "file-md"}}),
+        ("responses", {"type": "input_file", "file_id": "file-md"}),
+        ("anthropic", {"type": "document", "source": {"type": "file", "file_id": "file-md"}}),
+    ],
+)
+async def test_text_document_is_extracted_for_a_pdf_capable_model(
+    monkeypatch: pytest.MonkeyPatch, fmt: cn.WireFormat, block: dict[str, Any]
+) -> None:
+    # A model that reads PDFs natively is not one that reads Markdown natively:
+    # the provider's document part refuses that MIME type.
+    async def fake_extract(data: bytes, mime: str, filename: str | None) -> ExtractionResult:
+        return ExtractionResult(data.decode("utf-8"), True, "ok")
+
+    monkeypatch.setattr(cn, "extract_text_from_file", fake_extract)
+    files = _files(_stored("file-md", "README.md", "text/markdown"), data=b"# Otari")
+    msgs = [{"role": "user", "content": [block]}]
+    out, stats = await normalize_messages(msgs, config=GatewayConfig(), caps=_NATIVE, fmt=fmt, files=files, user_id="u")
+    text_type = "input_text" if fmt == "responses" else "text"
+    assert out[0]["content"][0]["type"] == text_type
+    assert "# Otari" in out[0]["content"][0]["text"]
+    assert stats.files_extracted == 1
 
 
 @pytest.mark.parametrize(
@@ -392,22 +381,14 @@ async def test_bare_responses_input_file_item_inlined_for_native(monkeypatch: py
     ],
 )
 def test_sandbox_path_for(filename: str, taken: set[str], expected: str) -> None:
-    from gateway.services.file_service import sandbox_path_for
+    from gateway.services.files import sandbox_path_for
 
     assert sandbox_path_for(filename, taken) == expected
 
 
 @pytest.mark.asyncio
-async def test_two_uploads_named_alike_are_both_staged_and_the_model_learns_both_names(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    first = _stored("file-a", "data.csv")
-    second = _stored("file-b", "data.csv")
-
-    async def fake_fetch(db, file_id, user_id, *, workspace_id=None):  # type: ignore[no-untyped-def]
-        return {"file-a": first, "file-b": second}.get(file_id)
-
-    monkeypatch.setattr(cn, "fetch_file", fake_fetch)
+async def test_two_uploads_named_alike_are_both_staged_and_the_model_learns_both_names() -> None:
+    files = _files(_stored("file-a", "data.csv"), _stored("file-b", "data.csv"))
     msgs = [
         {
             "role": "user",
@@ -424,8 +405,7 @@ async def test_two_uploads_named_alike_are_both_staged_and_the_model_learns_both
         config=GatewayConfig(),
         caps=_TEXT_ONLY,
         fmt="anthropic",
-        db=cast(Any, object()),
-        file_store=cast(Any, object()),
+        files=files,
         user_id="u",
         sandbox_requested=True,
     )
@@ -434,3 +414,87 @@ async def test_two_uploads_named_alike_are_both_staged_and_the_model_learns_both
     assert "data.csv" in markers[0]
     assert "data-2.csv" in markers[1]
     assert "data.csv" in markers[2] and "data-2" not in markers[2]
+
+
+@pytest.mark.asyncio
+async def test_container_upload_is_held_for_the_providers_container() -> None:
+    files = _files(_stored(), data=b"a,b\n1,2\n")
+    block = {"type": "container_upload", "file_id": "file-csv"}
+    msgs = [{"role": "user", "content": [block, dict(block)]}]
+
+    out, stats = await normalize_messages(
+        msgs,
+        config=GatewayConfig(),
+        caps=_TEXT_ONLY,
+        fmt="anthropic",
+        files=files,
+        user_id="u",
+        provider_container=True,
+    )
+
+    # The block keeps naming the upload, which each candidate is sent a copy of
+    # in its own account. The model is shown nothing, and the blob is not read.
+    assert out[0]["content"] == [block, block]
+    assert [staged.file_id for staged in stats.container_inputs] == ["file-csv"]
+    assert stats.files_extracted == 0
+    assert files.reads == []
+
+
+def test_container_copies_are_named_without_changing_the_request() -> None:
+    msgs: list[dict[str, Any]] = [
+        {
+            "role": "user",
+            "content": [{"type": "container_upload", "file_id": "file-csv"}, {"type": "text", "text": "x"}],
+        },
+        {"role": "assistant", "content": "plain"},
+    ]
+
+    named = name_container_copies(msgs, {"file-csv": "file_011Cq"})
+
+    assert named[0]["content"][0] == {"type": "container_upload", "file_id": "file_011Cq"}
+    assert named[0]["content"][1] == {"type": "text", "text": "x"}
+    assert named[1] == {"role": "assistant", "content": "plain"}
+    assert msgs[0]["content"][0]["file_id"] == "file-csv"
+
+
+@pytest.mark.asyncio
+async def test_container_upload_naming_an_unknown_file_refuses() -> None:
+    """A provider file ID of the caller's choosing must never reach the provider."""
+    msgs = [{"role": "user", "content": [{"type": "container_upload", "file_id": "file_someone_elses"}]}]
+
+    with pytest.raises(AttachedFileUnavailableError):
+        await normalize_messages(
+            msgs,
+            config=GatewayConfig(),
+            caps=_TEXT_ONLY,
+            fmt="anthropic",
+            files=_files(_stored()),
+            user_id="u",
+            provider_container=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_container_upload_whose_lookup_fails_refuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A lookup that errors must not forward the caller's own file id to the provider.
+
+    It refuses as an upstream fault rather than a missing file, because the file
+    may well exist and the caller has nothing to correct.
+    """
+
+    class _Broken:
+        async def staged_upload(self, file_id: str, scope: Any) -> None:
+            raise RuntimeError("database unavailable")
+
+    msgs = [{"role": "user", "content": [{"type": "container_upload", "file_id": "file-csv"}]}]
+
+    with pytest.raises(ProviderUploadFailedError):
+        await normalize_messages(
+            msgs,
+            config=GatewayConfig(),
+            caps=_TEXT_ONLY,
+            fmt="anthropic",
+            files=cast(Any, _Broken()),
+            user_id="u",
+            provider_container=True,
+        )

@@ -1,0 +1,18 @@
+schema_version: "1.0"
+policy:
+  id: otari/architecture/port-named-for-an-implementation
+  description: A port is named for a domain capability, never for an implementation.
+
+gates:
+
+  - id: port-named-for-an-implementation
+    type: judge
+    runs: [stop.session]
+    enforcement: advisory
+    when_changed:
+      - "src/gateway/ports/**"
+    rubric: >-
+      Judge only ports this diff adds or renames under src/gateway/ports/. Fail if a
+      port's name names an implementation or a vendor rather than a domain capability,
+      for example E2BPort rather than CodeExecutionPort. This is cardinal rule 4 in
+      ARCHITECTURE.md. Pass if the diff adds or renames no port.

@@ -156,3 +156,30 @@ async def test_an_organization_lists_every_workspace_membership_whatever_its_sta
         globex.workspace_member.id
     ]
     assert await service.get_workspace_member_ids_in_organization(uuid.uuid4()) == []
+
+
+async def test_a_workspace_pages_only_its_active_memberships(async_db: AsyncSession) -> None:
+    acme = await _tenant(async_db, "acme")
+    globex = await _tenant(async_db, "globex")
+    members = WorkspaceMemberRepository(async_db)
+    joined = [
+        await members.create(workspace_id=acme.workspace.id, user_id=(await _identity(async_db, acme.organization)).id)
+        for _ in range(2)
+    ]
+    await members.create(
+        workspace_id=acme.workspace.id,
+        user_id=(await _identity(async_db, acme.organization)).id,
+        status="suspended",
+    )
+    service = _service(async_db)
+    active = sorted([acme.workspace_member.id, *(member.id for member in joined)])
+
+    page, count = await service.page_active_workspace_member_ids(acme.workspace.id, skip=0, limit=2)
+    assert count == 3
+    rest, _ = await service.page_active_workspace_member_ids(acme.workspace.id, skip=2, limit=2)
+    assert [*page, *rest] == active
+    assert await service.page_active_workspace_member_ids(globex.workspace.id, skip=0, limit=10) == (
+        [globex.workspace_member.id],
+        1,
+    )
+    assert await service.page_active_workspace_member_ids(uuid.uuid4(), skip=0, limit=10) == ([], 0)

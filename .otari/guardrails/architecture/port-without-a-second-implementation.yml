@@ -1,0 +1,20 @@
+schema_version: "1.0"
+policy:
+  id: otari/architecture/port-without-a-second-implementation
+  description: A capability earns a port only with a second implementation or a hard boundary.
+
+gates:
+
+  - id: port-without-a-second-implementation
+    type: judge
+    runs: [stop.session]
+    enforcement: advisory
+    when_changed:
+      - "src/gateway/ports/**"
+    rubric: >-
+      Judge only ports this diff adds under src/gateway/ports/. Fail if a new port
+      covers plain management CRUD, or covers a capability that has one implementation
+      and no hard boundary, such as intellectual property or a hosted service. This is
+      cardinal rule 7 in ARCHITECTURE.md. Fail only when neither the diff nor the
+      session shows a second implementation or a hard boundary. Pass if the diff adds no
+      port.

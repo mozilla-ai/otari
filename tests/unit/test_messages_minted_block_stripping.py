@@ -15,11 +15,8 @@ import pytest
 from gateway.api.routes._pipeline import ToolContext
 from gateway.api.routes.messages import _strip_gateway_minted_blocks
 from gateway.core.config import GatewayConfig
-from gateway.services.mcp_loop_messages import (
-    MCP_ACTIVITY_ID_PREFIX,
-    SERVER_TOOL_USE_ID_PREFIX,
-    WEB_SEARCH_TOOL_USE_ID_PREFIX,
-)
+from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX
+from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX
 
 
 def test_strips_the_minted_pair_but_keeps_the_text() -> None:
@@ -102,7 +99,6 @@ def _tool_ctx(config: GatewayConfig) -> ToolContext:
         use_sandbox=False,
         sandbox_tool_entry=None,
         code_execution_port=None,
-        sandbox_auth_token=None,
         use_web_search=False,
         web_search_tool_entry=None,
         web_search_url=config.web_search_url,
@@ -155,7 +151,7 @@ def _provider_pair() -> list[dict[str, Any]]:
     ]
 
 
-def _gateway_pair(tool_use_id: str = f"{WEB_SEARCH_TOOL_USE_ID_PREFIX}gw") -> list[dict[str, Any]]:
+def _gateway_pair(tool_use_id: str = f"{SERVER_TOOL_USE_ID_PREFIX}gw") -> list[dict[str, Any]]:
     """What the gateway mints: the reserved id prefix, encrypted_content empty."""
     return [
         {"type": "server_tool_use", "id": tool_use_id, "name": "web_search", "input": {"query": "y"}},
@@ -325,7 +321,7 @@ def test_a_provider_error_result_is_kept() -> None:
 
 def test_a_max_uses_error_result_and_its_call_are_stripped() -> None:
     """A capped gateway search must not be echoed back to the provider."""
-    gw = f"{WEB_SEARCH_TOOL_USE_ID_PREFIX}gw"
+    gw = f"{SERVER_TOOL_USE_ID_PREFIX}gw"
     messages: list[dict[str, Any]] = [
         {
             "role": "assistant",
@@ -452,7 +448,7 @@ def test_anthropics_own_code_execution_pair_survives() -> None:
 
 def test_a_gateway_interpreter_call_becomes_a_message_the_model_can_still_read() -> None:
     from gateway.api.routes.responses import _strip_gateway_minted_items
-    from gateway.services.mcp_loop_responses import CODE_INTERPRETER_CALL_ID_PREFIX
+    from gateway.services.tools import CODE_INTERPRETER_CALL_ID_PREFIX
 
     items: list[dict[str, Any]] = [
         {"role": "user", "content": "compute"},
@@ -480,7 +476,7 @@ def test_a_gateway_interpreter_call_becomes_a_message_the_model_can_still_read()
 
 def test_a_failed_gateway_interpreter_call_folds_its_status() -> None:
     from gateway.api.routes.responses import _strip_gateway_minted_items
-    from gateway.services.mcp_loop_responses import CODE_INTERPRETER_CALL_ID_PREFIX
+    from gateway.services.tools import CODE_INTERPRETER_CALL_ID_PREFIX
 
     item = {
         "type": "code_interpreter_call",
@@ -496,4 +492,26 @@ def test_openais_own_interpreter_call_survives_untouched() -> None:
     from gateway.api.routes.responses import _strip_gateway_minted_items
 
     item = {"type": "code_interpreter_call", "id": "ci_123", "code": "x", "status": "completed"}
-    assert _strip_gateway_minted_items([item, {"type": "web_search_call", "id": "ws_1"}]) == [item]
+    assert _strip_gateway_minted_items([item]) == [item]
+
+
+def test_a_gateway_search_is_dropped_and_a_providers_own_survives() -> None:
+    """Only the item the gateway minted is its to take back; OpenAI's own search is echoed to OpenAI."""
+    from gateway.api.routes.responses import _strip_gateway_minted_items
+    from gateway.services.tools import WEB_SEARCH_CALL_ID_PREFIX
+
+    providers: dict[str, Any] = {
+        "type": "web_search_call",
+        "id": "ws_123",
+        "action": {"type": "search", "query": "theirs"},
+        "status": "completed",
+    }
+    gateways: dict[str, Any] = {
+        "type": "web_search_call",
+        "id": f"{WEB_SEARCH_CALL_ID_PREFIX}abc",
+        "action": {"type": "search", "query": "ours"},
+        "status": "completed",
+    }
+    message = {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "done"}]}
+
+    assert _strip_gateway_minted_items([providers, gateways, message]) == [providers, message]

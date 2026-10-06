@@ -1,0 +1,48 @@
+schema_version: "1.0"
+policy:
+  id: otari/repo-conventions
+  description: Rules this repo's own AGENTS.md states, where a check can hold them.
+
+gates:
+
+  # Both spellings are needed: the matcher requires `**` to consume at least
+  # one path segment, so `**/CLAUDE.md` alone catches web/ and src/gateway/
+  # but never the root file.
+  - id: no-hand-edited-claude-md
+    type: path
+    runs: [pre_tool_use.edit_target, stop.working_tree]
+    enforcement: required
+    forbidden: ["CLAUDE.md", "**/CLAUDE.md"]
+    message: >-
+      CLAUDE.md is a one-line `@AGENTS.md` import, kept as a file rather than
+      a symlink so Windows clones survive. Edit the AGENTS.md beside it
+      instead (see AGENTS.md, top).
+
+  - id: frontend-standards-changed-needs-coverage
+    type: command_if_changed
+    runs: [stop.session]
+    enforcement: required
+    when_changed:
+      [
+        ".github/skills/frontend-standards/**",
+        ".github/instructions/frontend-standards.instructions.md",
+        "scripts/rule_coverage/frontend-standards.txt",
+      ]
+    require: ["tests/unit/test_frontend_rule_coverage.py", "make test-unit"]
+    message: >-
+      A heading added to the frontend-standards skill or its instructions
+      counterpart owes a manifest line in scripts/rule_coverage/frontend-standards.txt;
+      run tests/unit/test_frontend_rule_coverage.py (see AGENTS.md, "Skills &
+      Scoped Instructions").
+
+  - id: code-execution-spec-changed-needs-contract-check
+    type: command_if_changed
+    runs: [stop.session]
+    enforcement: required
+    when_changed: ["docs/public/code-execution-openapi.yaml", "docs/code-execution-protocol.md"]
+    require: ["tests/unit/test_code_execution_contract.py", "make test-unit"]
+    message: >-
+      docs/public/code-execution-openapi.yaml (hand-maintained) and
+      docs/code-execution-protocol.md must stay in sync; run
+      tests/unit/test_code_execution_contract.py (see AGENTS.md, "Generated
+      Artifacts").

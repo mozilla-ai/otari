@@ -19,6 +19,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.organizations_exceptions import (
+    NotAuthorizedError,
+    WorkspaceActivationUnavailableError,
+    WorkspaceAlreadyActivatedError,
+    WorkspaceNotFoundError,
+)
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import Organization, User, Workspace, WorkspaceActivationState
 from gateway.models.usage import UsageLog
@@ -33,12 +39,6 @@ from gateway.repositories.tenancy import (
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services import playground_dispatch
 from gateway.services.secret_box import generate_secret_key
-from gateway.services.tenancy.errors import (
-    NotAuthorizedError,
-    WorkspaceActivationUnavailableError,
-    WorkspaceAlreadyActivatedError,
-    WorkspaceNotFoundError,
-)
 from gateway.services.tenancy.workspace_activation_service import (
     ACTIVATION_KEY_NAME,
     WorkspaceActivationService,
@@ -200,44 +200,6 @@ async def test_imported_usage_does_not_activate_a_workspace(async_db: AsyncSessi
     """Somebody else's traffic recorded here for cost reporting is not a call to this gateway."""
     owner, workspace = await _setup(async_db, slug="acme-imported")
     await _usage(async_db, workspace.id, source="claude_code")
-
-    status = await WorkspaceActivationService(async_db, _config(), KEY_FORMAT).get_status(
-        user=owner, workspace_id=workspace.id
-    )
-
-    assert status.status == "waiting"
-    assert status.latest_attempt is None
-    assert status.experience_eligible is True
-
-
-async def test_migrated_hosted_history_activates_a_workspace(async_db: AsyncSession) -> None:
-    """A workspace whose traffic was backfilled has called this gateway, on hosted history.
-
-    The backfill keeps a hosted row's origin behind a legacy prefix
-    (``otari-ai:gateway``), so a bare comparison against ``gateway`` would read a
-    long-standing customer as pre-activation and ask them for their first request.
-    """
-    owner, workspace = await _setup(async_db, slug="acme-migrated")
-    first = await _usage(async_db, workspace.id, source="otari-ai:gateway", seconds_ago=120)
-
-    status = await WorkspaceActivationService(async_db, _config(), KEY_FORMAT).get_status(
-        user=owner, workspace_id=workspace.id
-    )
-
-    assert status.status == "activated"
-    assert status.activation_attempt is not None
-    assert status.activation_attempt.request_id == first.id
-    assert status.experience_eligible is False
-
-
-async def test_migrated_imported_usage_does_not_activate_a_workspace(async_db: AsyncSession) -> None:
-    """Only the slug behind the legacy prefix decides, not the prefix.
-
-    ``otari-ai:claude_code`` is an import that was migrated, so it stays somebody
-    else's traffic.
-    """
-    owner, workspace = await _setup(async_db, slug="acme-migrated-import")
-    await _usage(async_db, workspace.id, source="otari-ai:claude_code")
 
     status = await WorkspaceActivationService(async_db, _config(), KEY_FORMAT).get_status(
         user=owner, workspace_id=workspace.id

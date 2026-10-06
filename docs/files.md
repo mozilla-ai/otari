@@ -102,6 +102,17 @@ Both take `limit` (default 100, at most 1000).
 
 Unlike Anthropic, Otari leaves an expired file out of a listing.
 
+### From the Playground
+
+The dashboard's Playground uploads through `/api/v1/playground/files`, which
+takes the dashboard session rather than an API key. A file uploaded there
+belongs to the signed-in person in the workspace the switcher has selected, the
+same owner a Playground completion runs as, so its `file_id` resolves in their
+messages and in nobody else's. The same person's files uploaded with one of
+their keys in that workspace are listed there too. A hosted control plane does
+not serve these routes, because the data plane that runs its completions could
+not read a file stored on the control plane.
+
 ## Files and code execution
 
 When a request's code runs on Otari's sandbox, because it declared the
@@ -115,11 +126,88 @@ marker the model is given carries the name the file actually has. An Anthropic
 `container_upload` block (`{"type": "container_upload", "file_id": "..."}`) is
 for the sandbox only: the model is told the file is there and never sees its
 contents. A `document`, `file`, or `input_file` block with a `file_id` is both
-shown to the model (extracted or passed through as usual) and seeded. Without a
-sandbox in the request, a `container_upload` block is read as a document. That
-is also what happens when the executor leaves a provider's declaration with the
-provider: whether a file is staged follows who runs the code, decided once from
-the workspace pin, the header and the deployment default.
+shown to the model (extracted or passed through as usual) and seeded. A request
+that runs no code execution at all reads a `container_upload` block as a
+document. Where a file goes follows who runs the code, decided once from the
+workspace pin, the header and the deployment default.
+
+### A file the provider's own code execution reads
+
+A declaration the [executor](tools.md#code-execution-executor) leaves with the
+provider runs in the provider's container, which reads only files that provider
+holds. So Otari uploads a copy of the attached file to the provider, and the
+`container_upload` block carries the provider's ID for that copy rather than
+Otari's. The model still never sees the contents.
+
+Otari's store stays the source of truth and the copy is a cache. The copy
+carries an expiry, `files_provider_upload_ttl_hours` (1 hour by default, up to
+the 90 days Anthropic accepts), and the provider deletes it when that passes. A
+copy with time left is reused, so attaching the same file on every turn of a
+conversation uploads it once. Otari asks the provider whether it still holds a
+recorded copy before using it, and makes one fresh copy where the provider has
+dropped it early. A lookup that fails for another reason keeps the copy in use.
+
+A provider file ID exists only inside the account of the credential that
+uploaded it, so a copy is recorded against the account it is in. Otari names the
+account by a digest of the credential the request is dispatched with, never by
+the credential itself. A request whose credential changed, because a key was
+rotated or an organization added its own, therefore makes a fresh copy rather
+than naming one its account does not hold.
+
+The copy is made for each candidate as it is dispatched. A routing policy that
+falls over to a model on another key sends that model a copy in its own account.
+A candidate whose provider cannot hold a copy is passed over, in the policy's
+order, and the request is refused when no candidate can.
+
+Each copy is recorded before it is uploaded and confirmed once the provider
+holds it. Two requests copying one file at the same moment each make and record
+a copy. A copy whose upload or confirmation was cut off is left unnamed for the
+provider to expire, and the file sweep removes its unconfirmed row.
+
+**A copy never outlives the file's expiry.** Where `files_retention_hours` is
+set, the copy's expiry is cut back to whatever the file itself has left, less a
+minute for the provider to accept the upload, so the provider never holds a file
+past the point Otari would have stopped serving it.
+A provider that reports a longer expiry than that has the copy deleted again and
+the request refused, because the promise is about the copy that exists rather
+than the one Otari asked for.
+Anthropic will not hold a file for less than an hour, so a file with less than an
+hour and a minute left cannot have a copy at all, and such a request is refused. That makes
+`files_retention_hours` and the provider's floor interact: set retention to an
+hour against Anthropic and no file is ever copyable, because a file is under an
+hour from its expiry almost at once. Leave retention comfortably above the floor
+where provider-side code execution is wanted. Deleting a
+file early is the one case this does not cover: see the note at the end of this
+section.
+
+These refuse the request rather than answering without the file, because the
+request asked for code over that file:
+
+- 400: a `file_id` this deployment does not hold, which also keeps a provider
+  file ID of the caller's choosing from reaching the provider, whose files are
+  scoped to the account rather than to the caller;
+- 400: a file with too little left for a copy to expire no later than it does;
+- 400: `files_provider_upload_enabled` set to `false`;
+- 400: `file_understanding_enabled` set to `false`, because nothing then reads
+  the block;
+- 400: a routing policy with no candidate whose provider can hold a copy;
+- 502: a provider that would not take the copy. A routing policy tries its next
+  candidate first.
+
+`files_provider_upload_enabled` does not decide whether a file's contents reach
+the provider, which they do either way, inline in the request. It decides
+whether a copy is stored in the provider's account until it expires.
+
+Today this applies to Anthropic's code execution, whose `container_upload` block
+is the only provider-native block that names a file. Anthropic's Files API is
+generally available on the Claude API and is not available on Amazon Bedrock or
+Google Cloud, so a deployment reaching Anthropic through one of those refuses
+rather than copying.
+
+One limit is worth knowing. Deleting the Otari file before its expiry does not
+yet reach the copy, so the copy stands at the provider until its own expiry
+passes, which is never later than the file's would have been. Keep
+`files_provider_upload_ttl_hours` short where that matters.
 
 A file the code writes into the working directory comes back as a new stored
 file owned by the same user and workspace, with purpose `code_execution_output`.
@@ -156,19 +244,27 @@ a later request can name it in a `file_id` block.
 
 Otari copies a file before the caller sees its ID: before the reply returns,
 or, on a stream, before the event that names the file is sent. The cost is
-time: the reply, or the stream, waits for the download, for at most 60 seconds
-in all. One reply copies at most `files_output_max_files` files and
-`files_output_max_bytes` in total, the caps in the next paragraph.
+time. The reply, or the stream, waits for the download, for at most
+`files_provider_copy_max_sec` (60 seconds by default) across the whole request.
+A stream keeps emitting its usual keepalive while it waits
+(`streaming_keepalive_interval_ms`), so an intermediary with a read timeout
+does not sever the connection during a copy.
 
-Some files are not copied: one past a cap or past the time limit, one the
-provider will not serve, and any file from a provider other than Anthropic or
-OpenAI. Such a file's ID still appears in the reply, and Otari answers 404 for
-it.
+Some files are not copied: one past an allowance below or past the time limit,
+one the provider will not serve, and any file from a provider other than
+Anthropic or OpenAI. Such a file's ID still appears in the reply, and Otari
+answers 404 for it. A provider that merely refused is retried on a later event
+naming the same file, where the response offers one; an allowance it ran past
+is not, because the allowance only shrinks.
 
-One call may store at most `files_output_max_files` files and
-`files_output_max_bytes` in total (20 files and 64 MB by default, the latter also
-bounded by `files_max_bytes`). What a run writes is untrusted, so a file past
-either cap is named in the tool result without an id rather than stored. A
+`files_output_max_files` and `files_output_max_bytes` (20 files and 64 MB by
+default, the latter also bounded by `files_max_bytes`) are each spent twice
+over, once per source: one call may store that many files from Otari's own
+sandbox, and one request may copy that many from a provider's. A request that
+uses both has an allowance of each rather than one between them. What a run
+writes is untrusted, so a file past either is named without an id rather than
+stored. Only a file that actually lands spends from an allowance, so a provider
+having a bad minute does not cost the files named after it their place. A
 produced file is streamed from the sandbox into the store and never held whole.
 
 > The reference `otari-sandbox-container` leaves the result block's
@@ -203,6 +299,11 @@ For each file/image block it resolves the **target model's** capabilities, then:
 | **Text-only** (most local models)                     | extracted to text (markitdown) and inlined | captioned by a vision model / OCR, or dropped with a log line |
 
 
+A natively capable model is sent an uploaded document only when it is a PDF,
+because the providers' document parts take PDFs. Any other upload (Markdown,
+CSV, plain text, an office document) is extracted to text for every model. A
+document block the caller wrote inline is forwarded as written.
+
 Scanned/image-only PDFs (no extractable text) are rasterized page-by-page and
 sent through the image path.
 
@@ -228,12 +329,24 @@ in order:
 See [config.example.yml](../config.example.yml) for the full list. Key knobs:
 
 - `files_enabled`, `files_backend`, `files_max_bytes`, `files_retention_hours`:
-upload storage (see [Storage backends](#storage-backends)).
-`files_output_max_files` and `files_output_max_bytes` bound what one
-code-execution call may store from its sandbox, and what one reply may copy
-from a provider's (see above). An expired file answers 404 at once, and the
+upload storage (see [Storage backends](#storage-backends)). With `files_enabled`
+off, a backend that cannot be built (an `s3` backend with no bucket, say) is
+logged at startup rather than stopping it, and a stored `file_id` then does not
+resolve; with it on, the same fault stops the boot.
+`files_output_max_files` and `files_output_max_bytes` each bound what one
+code-execution call may store from its sandbox and, separately, what one
+request may copy from a provider's, and `files_provider_copy_max_sec` bounds
+how long that copying may take (see above). An expired file answers 404 at once, and the
 background sweep (`files_sweep_interval_sec`, hourly by default, `0` to
-disable) then reclaims its bytes and row along with those of deleted files.
+disable) then reclaims its bytes and row along with those of deleted files and
+of uploads that never completed.
+- `files_provider_upload_enabled` and `files_provider_upload_ttl_hours`: whether
+a copy of an attached file may be stored at the provider that runs a request's
+code, and how long that copy lives (see
+[A file the provider's own code execution reads](#a-file-the-providers-own-code-execution-reads)).
+- `OTARI_PROVIDER_ACCOUNT_PEPPER`: the key for the digest that names the provider
+account a copy is in. Required while `files_provider_upload_enabled` is on (see
+[Provider copies](configuration.md#provider-copies)).
 - `file_understanding_enabled`: master switch for content normalization.
 - `vision_strategy` (`describe` | `ocr` | `off`) and `vision_describe_model`:
 how images are handled for text-only models. The describe model may be a local
@@ -246,6 +359,15 @@ vision model (e.g. `ollama:qwen2-vl`) to keep captioning free.
 deleted file, or one past `files_retention_hours`, loses its row and bytes
 within an hour where cleanup was the operator's task. Set
 `files_sweep_interval_sec: 0` to keep it that way.
+
+A file's row is written before its bytes, so an upload that is refused, loses
+its connection or stops partway leaves a row naming its blob rather than a blob
+nothing names. A refused upload gives both back at once. Where that cleanup
+cannot finish, because the store will not drop the bytes or the database will
+not take the change, the row remains and the sweep reclaims it once it is more
+than an hour old, which is how long an upload has to arrive. Files produced by
+a sandbox or copied from a provider are recorded the same way, so nothing needs
+manual reconciliation.
 
 ### Storage backends
 

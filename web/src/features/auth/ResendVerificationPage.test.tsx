@@ -5,8 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ResendVerificationPage } from "@/features/auth/ResendVerificationPage"
 import { apiFetch } from "@/shared/api/client"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { bootstrap } from "@/tests/fixtures"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
 
 // The network boundary, not the hooks: the real hooks, their query keys, and
@@ -30,9 +32,11 @@ function renderPage() {
   })
   return render(
     <QueryClientProvider client={client}>
-      <ThemeProvider>
-        <ResendVerificationPage />
-      </ThemeProvider>
+      <DeploymentProvider value={bootstrap()}>
+        <ThemeProvider>
+          <ResendVerificationPage />
+        </ThemeProvider>
+      </DeploymentProvider>
     </QueryClientProvider>,
   )
 }
@@ -48,7 +52,21 @@ afterEach(() => {
   window.location.hash = ""
 })
 
+vi.mock("@/features/auth/overlayPublicAuthFields", () => ({
+  PublicAuthFields: ({ page, isBusy }: { page: string; isBusy: boolean }) => (
+    <p>{`fields for ${page}, ${isBusy ? "busy" : "idle"}`}</p>
+  ),
+}))
+
 describe("ResendVerificationPage", () => {
+  it("renders the edition's own fields ahead of the address", () => {
+    renderPage()
+
+    expect(
+      screen.getByText("fields for resend-verification, idle"),
+    ).toBeInTheDocument()
+  })
+
   it("sends a fresh link and lands on the check-email page", async () => {
     vi.mocked(apiFetch).mockResolvedValue({ message: "…" } as never)
     const user = userEvent.setup()

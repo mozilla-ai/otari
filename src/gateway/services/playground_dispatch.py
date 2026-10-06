@@ -131,17 +131,21 @@ async def resolve_dispatch_key(db: AsyncSession, *, principal: SessionPrincipal,
     # a 500 on every later request. Whichever row wins is a complete credential,
     # so the loser is simply never read.
     row = (
-        await db.execute(
-            select(APIKey)
-            .where(
-                col(APIKey.user_id) == principal.user_id,
-                col(APIKey.workspace_id) == principal.workspace_id,
-                col(APIKey.internal_secret).is_not(None),
+        (
+            await db.execute(
+                select(APIKey)
+                .where(
+                    col(APIKey.user_id) == principal.user_id,
+                    col(APIKey.workspace_id) == principal.workspace_id,
+                    col(APIKey.internal_secret).is_not(None),
+                )
+                .order_by(col(APIKey.created_at), col(APIKey.id))
+                .limit(1)
             )
-            .order_by(col(APIKey.created_at), col(APIKey.id))
-            .limit(1)
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
 
     # Read once: the answer decides both whether to mint and whether the existing
     # row needs rewriting, and decrypting twice would log the failure twice.

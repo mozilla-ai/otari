@@ -6,7 +6,8 @@ applyTo: "src/gateway/**/*.py"
 
 The backend is a modular monolith. The layers are the top-level folders under
 `src/gateway/`, and each layer holds one package or module per domain.
-`docs/domains.md` assigns every module to its domain.
+A module in its domain's target location belongs to that domain by its path,
+and `docs/domains.md` says what each domain owns.
 
 ## Old shape and new shape
 
@@ -96,6 +97,10 @@ error module subclasses those bases.
 
 - Flag a route that catches a tenancy error to turn it into an
   `HTTPException`.
+- The completion pipeline is the one exception. Each completion dialect answers
+  in its own error envelope, which the handler cannot know, so the pipeline
+  renders the family through `domain_error` in `api/routes/_pipeline.py`. Flag a
+  completion route that renders a tenancy error any other way.
 
 ## Module size
 

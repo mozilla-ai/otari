@@ -8,15 +8,15 @@ from any_llm.types.responses import Response as ResponsesResponse
 from any_llm.types.responses import ResponsesParams, ResponseStreamEvent
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi import Response as FastAPIResponse
-from fastapi.responses import StreamingResponse
 from openai.types.responses import ResponseUsage
 from openresponses_types.types import Usage as OpenResponsesUsage
 from pydantic import ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
-    CodeExecutionPortDep,
     ModelProviderPortDep,
+    OptionalFileServiceDep,
+    ToolPortsDep,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     get_config,
@@ -25,17 +25,21 @@ from gateway.api.deps import (
     get_unit_of_work_if_needed,
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_text, text_from_content
+from gateway.api.routes._idempotency import IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     NO_RESOLVABLE_PROVIDER_DETAIL,
     PROVIDER_ERROR_DETAIL,
+    DeclaredTools,
     ErrorKind,
+    ToolBackends,
     _flush_pending_usage_reports,
     _PendingUsageReport,
     classify_provider_error,
     prepare_gateway_tools,
     provider_error_headers,
     raise_all_streaming_attempts_failed,
+    refusal_code,
     release_reservation,
     resolve_dispatch_provider,
     resolve_request_context,
@@ -47,28 +51,34 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost, build_attempt_client_args
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
-from gateway.api.routes._tools import CODE_EXECUTION_HEADER, _strip_gateway_fields
+from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
-from gateway.models.tools import CodeExecutor
-from gateway.services.file_service import StagedFile
+from gateway.services.files import StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_responses import (
-    CODE_INTERPRETER_CALL_ID_PREFIX,
     MAX_TOOL_ITERATIONS_CAP,
     responses_tool_loop,
     responses_tool_loop_stream,
 )
 from gateway.services.provider_kwargs import apply_endpoint_defaults
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
-from gateway.services.web_search_budget import WebSearchBudget
-from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat
+from gateway.services.tools import (
+    CODE_EXECUTION_HEADER,
+    CODE_INTERPRETER_CALL_ID_PREFIX,
+    WEB_SEARCH_CALL_ID_PREFIX,
+    WEB_SEARCH_HEADER,
+    Dialect,
+    ToolUseBudget,
+)
+from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
+from gateway.types.normalization_target import NormalizationTarget
 
 router = APIRouter(tags=["responses"])
 
@@ -184,26 +194,18 @@ def _split_codex_input_metadata(value: Any) -> tuple[Any, bool]:
     return value, False
 
 
-# Output item types the gateway mints itself to describe work it did server-side.
-# They are stripped back off an inbound ``input`` before the provider sees it: the
+# Output items the gateway mints itself to describe work it did server-side are
+# stripped back off an inbound ``input`` before the provider sees it: the
 # documented way to continue a Responses conversation is to append the previous
 # ``response.output`` to the next ``input``, and the gateway has no
 # ``previous_response_id`` support to do that server-side, so an echoed turn would
 # otherwise ship a ``web_search_call`` to a provider that never declared a
-# web-search tool. A ``code_interpreter_call`` is recognized only when its id
-# carries the gateway's own prefix, because OpenAI's own items are legitimately
-# echoed to OpenAI and must survive.
-_GATEWAY_MINTED_ITEM_TYPES = frozenset({"web_search_call"})
-
-
-def _is_gateway_minted_item(item: Any) -> bool:
-    return isinstance(item, dict) and item.get("type") in _GATEWAY_MINTED_ITEM_TYPES
-
-
-def _is_gateway_minted_code_interpreter_call(item: Any) -> bool:
-    if not isinstance(item, dict) or item.get("type") != "code_interpreter_call":
+# web-search tool. Each is recognized only by its id's gateway prefix, because
+# OpenAI's own items are legitimately echoed to OpenAI and must survive.
+def _is_gateway_minted(item: Any, item_type: str, id_prefix: str) -> bool:
+    if not isinstance(item, dict) or item.get("type") != item_type:
         return False
-    return str(item.get("id") or "").startswith(CODE_INTERPRETER_CALL_ID_PREFIX)
+    return str(item.get("id") or "").startswith(id_prefix)
 
 
 def _code_interpreter_call_as_message(item: dict[str, Any]) -> dict[str, Any]:
@@ -229,15 +231,10 @@ def _code_interpreter_call_as_message(item: dict[str, Any]) -> dict[str, Any]:
 def _strip_gateway_minted_items(input_data: Any) -> Any:
     """Take gateway-minted server-tool items back off an inbound ``input``.
 
-    Only touches a list input, and only the items the gateway itself emits. A
-    ``web_search_call`` is dropped: a caller who genuinely used a provider-native
-    web search still had that run upstream, so its items arrive on a response the
-    gateway passed through untouched; those are indistinguishable here and are
-    dropped too. That is the conservative direction: dropping a descriptive item
-    loses nothing the model needs (the search results themselves are in the
-    transcript), while forwarding one risks a 400 from the provider. A gateway-run
-    interpreter call is told apart by its id prefix, so a provider's own survives,
-    and is folded into a message rather than dropped
+    Only touches a list input, and only the items the gateway itself emits, told
+    apart by their id prefix so a provider's own survives. A gateway-run search is
+    dropped, which loses nothing the model needs because its results are already in
+    the transcript. A gateway-run interpreter call is folded into a message instead
     (:func:`_code_interpreter_call_as_message`).
     """
     if not isinstance(input_data, list):
@@ -245,10 +242,10 @@ def _strip_gateway_minted_items(input_data: Any) -> Any:
     kept: list[Any] = []
     touched = 0
     for item in input_data:
-        if _is_gateway_minted_code_interpreter_call(item):
+        if _is_gateway_minted(item, "code_interpreter_call", CODE_INTERPRETER_CALL_ID_PREFIX):
             kept.append(_code_interpreter_call_as_message(item))
             touched += 1
-        elif _is_gateway_minted_item(item):
+        elif _is_gateway_minted(item, "web_search_call", WEB_SEARCH_CALL_ID_PREFIX):
             touched += 1
         else:
             kept.append(item)
@@ -285,11 +282,13 @@ def _usage_to_completion_usage(
         return None
     details = getattr(usage, "input_tokens_details", None)
     cache_read_tokens = (getattr(details, "cached_tokens", 0) or 0) if details is not None else 0
+    output_details = getattr(usage, "output_tokens_details", None)
     return GatewayUsage(
         prompt_tokens=getattr(usage, "input_tokens", 0) or 0,
         completion_tokens=getattr(usage, "output_tokens", 0) or 0,
         total_tokens=getattr(usage, "total_tokens", 0) or 0,
         cache_read_tokens=cache_read_tokens,
+        reasoning_tokens=getattr(output_details, "reasoning_tokens", 0) or 0,
     )
 
 
@@ -310,7 +309,7 @@ class _ResponsesAdapter:
     and friends.
     """
 
-    name = "responses"
+    name = Dialect.RESPONSES
     endpoint = USAGE_ENDPOINT
     stream_format: StreamFormat = RESPONSES_STREAM_FORMAT
     log_success_without_usage = True
@@ -336,6 +335,9 @@ class _ResponsesAdapter:
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=PROVIDER_ERROR_DETAIL,
         )
+
+    def stream_error_payload(self, exc: BaseException) -> str:
+        return openai_error_event(self.stream_format, refusal_code(exc))
 
     def format_chunk(self, chunk: ResponseStreamEvent) -> str:
         return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True)}\n\n"
@@ -398,24 +400,18 @@ class _ResponsesAdapter:
         max_iterations: int,
         on_first_response: Callable[[], None] | None = None,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
-        web_search_budget: WebSearchBudget | None = None,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: ToolUseBudget | None = None,
     ) -> ResponsesResponse:
-        # ``emit_native_web_search`` is accepted for interface parity and ignored:
-        # this format announces a gateway-run search natively on every request
-        # (see docs/tools.md), so the Anthropic-shaped opt-in has nothing to add.
-        # ``web_search_budget`` is not: the cap bounds what the caller is billed
-        # for, which every format owes whether or not it can describe the search.
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
         # the platform-attempt path so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
         if on_first_response is not None:
             extra["on_first_response"] = on_first_response
-        if web_search_budget is not None:
-            extra["web_search_budget"] = web_search_budget
-        if emit_native_code_execution:
-            extra["emit_native_code_execution"] = True
+        if use_budget is not None:
+            extra["use_budget"] = use_budget
+        if native_tools:
+            extra["native_tools"] = native_tools
         return await responses_tool_loop(
             completion_kwargs=kwargs,
             pool=pool,
@@ -429,15 +425,14 @@ class _ResponsesAdapter:
         pool: ToolBackend,
         max_iterations: int,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
-        web_search_budget: WebSearchBudget | None = None,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: ToolUseBudget | None = None,
     ) -> AsyncIterator[ResponseStreamEvent]:
         extra: dict[str, Any] = {}
-        if web_search_budget is not None:
-            extra["web_search_budget"] = web_search_budget
-        if emit_native_code_execution:
-            extra["emit_native_code_execution"] = True
+        if use_budget is not None:
+            extra["use_budget"] = use_budget
+        if native_tools:
+            extra["native_tools"] = native_tools
         return responses_tool_loop_stream(
             completion_kwargs=kwargs,
             pool=pool,
@@ -521,11 +516,13 @@ async def create_response(
     request_body: ResponsesRequest,
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    files: OptionalFileServiceDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
-    code_execution_port: CodeExecutionPortDep,
-) -> dict[str, Any] | StreamingResponse:
+    tool_ports: ToolPortsDep,
+    idempotency: IdempotencyGuardDep,
+) -> dict[str, Any] | FastAPIResponse:
     """OpenAI-compatible Responses endpoint.
 
     Supports MCP tool-use loops, sandboxed code execution, and SearXNG
@@ -543,14 +540,7 @@ async def create_response(
     # sandbox session once the billed user and workspace are resolved.
     sandbox_inputs: list[StagedFile] = []
 
-    async def _normalize(
-        user_id: str,
-        provider: LLMProvider | None,
-        model: str,
-        instance: str | None,
-        workspace_id: uuid.UUID | None,
-        workspace_executor: CodeExecutor | None,
-    ) -> tuple[int, CompletionUsage | None]:
+    async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Responses input payload
         # before the cost estimate. Standalone only; no-op when the files
         # feature is off or the request has no attachments.
@@ -558,46 +548,50 @@ async def create_response(
             request_body.input,
             fmt="responses",
             config=config,
-            provider=provider,
-            model=model,
-            db=db,
-            raw_request=raw_request,
-            user_id=user_id,
-            instance=instance,
-            workspace_id=workspace_id,
+            provider=target.provider,
+            model=target.model,
+            files=files,
+            user_id=target.user_id,
+            instance=target.instance,
+            workspace_id=target.file_workspace_id,
             sandbox_requested=sandbox_requested(
                 request_body.tools,
                 config=config,
-                provider=provider,
+                provider=target.provider,
                 dialect=_ADAPTER.name,
                 code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-                workspace_executor=workspace_executor,
+                workspace_executor=target.workspace_executor,
             ),
         )
         sandbox_inputs.extend(stats.sandbox_inputs)
         chars = len(str(request_body.input)) + len(str(getattr(request_body, "instructions", "") or ""))
         return chars, stats.vision_usage()
 
-    ctx = await resolve_request_context(
-        adapter=_ADAPTER,
-        raw_request=raw_request,
-        response=response,
-        db=db,
-        uow=uow,
-        config=config,
-        log_writer=log_writer,
-        model=request_body.model,
-        user_id_from_request=request_body.user,
-        estimate_prompt_chars=len(str(request_body.input)) + len(str(getattr(request_body, "instructions", "") or "")),
-        estimate_max_output_tokens=max_output_tokens,
-        master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
-        user_forbidden_detail=_USER_FORBIDDEN,
-        routing_signal=lambda: routing_signal_from_text(
-            _routing_text(request_body), raw_request, has_tools=bool(request_body.tools)
-        ),
-        normalize_messages=_normalize,
-        tools=request_body.tools,
-    )
+    try:
+        ctx = await resolve_request_context(
+            adapter=_ADAPTER,
+            raw_request=raw_request,
+            response=response,
+            db=db,
+            uow=uow,
+            config=config,
+            log_writer=log_writer,
+            model=request_body.model,
+            user_id_from_request=request_body.user,
+            estimate_prompt_chars=len(str(request_body.input))
+            + len(str(getattr(request_body, "instructions", "") or "")),
+            estimate_max_output_tokens=max_output_tokens,
+            master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
+            user_forbidden_detail=_USER_FORBIDDEN,
+            routing_signal=lambda: routing_signal_from_text(
+                _routing_text(request_body), raw_request, has_tools=bool(request_body.tools)
+            ),
+            normalize_messages=_normalize,
+            tools=request_body.tools,
+            idempotency=None if bool(request_body.stream) else idempotency,
+        )
+    except IdempotentReplay as replay:
+        return replay.response()
 
     # Provider-support guard: an unsupported provider would just fail
     # downstream, so surface a clearer 400 upfront. In hybrid mode validate
@@ -652,29 +646,34 @@ async def create_response(
         adapter=_ADAPTER,
         ctx=ctx,
         response=response,
-        guardrails=request_body.guardrails,
-        guardrail_text=_responses_input_text(request_body.input),
-        tools=request_body.tools,
-        mcp_servers=request_body.mcp_servers,
-        mcp_server_ids=request_body.mcp_server_ids,
-        max_tool_iterations=request_body.max_tool_iterations,
-        tools_header=request_body.tools_header,
-        code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-        code_execution_port=code_execution_port,
-        sandbox_containers=build_sandbox_container_registry(
-            config=config,
-            uow=ctx.uow,
-            user_id=ctx.user_id,
-            workspace_id=ctx.workspace_id,
-            port=code_execution_port,
+        declared=DeclaredTools(
+            guardrails=request_body.guardrails,
+            guardrail_text=_responses_input_text(request_body.input),
+            tools=request_body.tools,
+            mcp_servers=request_body.mcp_servers,
+            mcp_server_ids=request_body.mcp_server_ids,
+            max_tool_iterations=request_body.max_tool_iterations,
+            tools_header=request_body.tools_header,
+            code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+            web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
         ),
-        sandbox_files=build_sandbox_file_bridge(
-            raw_request=raw_request,
-            config=config,
-            uow=ctx.uow,
-            user_id=ctx.user_id,
-            workspace_id=ctx.workspace_id,
-            inputs=sandbox_inputs,
+        backends=ToolBackends(
+            ports=tool_ports,
+            sandbox_containers=build_sandbox_container_registry(
+                config=config,
+                uow=ctx.uow,
+                user_id=ctx.user_id,
+                workspace_id=ctx.workspace_id,
+                port=tool_ports.code_execution,
+            ),
+            sandbox_files=build_sandbox_file_bridge(
+                raw_request=raw_request,
+                config=config,
+                uow=ctx.uow,
+                user_id=ctx.user_id,
+                workspace_id=ctx.workspace_id,
+                inputs=sandbox_inputs,
+            ),
         ),
     )
 
@@ -795,4 +794,6 @@ async def create_response(
         base_request_fields=base_request_fields,
     )
 
-    return result.model_dump(exclude_none=True)
+    body = result.model_dump(exclude_none=True)
+    await idempotency.complete(body, response)
+    return body

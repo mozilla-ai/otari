@@ -25,10 +25,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions import TenancyConflictError, TenancyForbiddenError
+from gateway.exceptions.organizations_exceptions import WorkspaceNotFoundError
 from gateway.models.playground import (
     MAX_FAVORITE_MODELS,
     MAX_SAVED_COMPARISONS,
     MAX_SAVED_CONVERSATIONS,
+    PlaygroundAttachment,
     PlaygroundComparison,
     PlaygroundComparisonCreate,
     PlaygroundComparisonSummary,
@@ -48,11 +51,6 @@ from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
-from gateway.services.tenancy.errors import (
-    TenancyConflictError,
-    TenancyForbiddenError,
-    WorkspaceNotFoundError,
-)
 from gateway.services.workspace_scope import organization_default_workspace_id
 from gateway.types.session_principal import SessionPrincipal
 
@@ -62,7 +60,7 @@ RetainedContent = Literal["conversations", "comparisons"]
 # ``HTTPException``, because this slice authorizes through ``services/tenancy/``
 # and that family is what the handler registered in ``gateway.main`` renders.
 # The status belongs to the condition rather than to the endpoint, which is the
-# rule ``services/tenancy/errors.py`` states.
+# rule ``gateway.exceptions`` states.
 _SPEND_IDENTITY_REVOKED = "Your spend identity has been deactivated on this deployment; ask an operator to restore it."
 _NO_WORKSPACE = "You are not a member of a workspace on this deployment; ask an operator to add you to one."
 
@@ -211,11 +209,14 @@ class PlaygroundToolAvailability:
 
     web_search: ToolAvailability
     code_execution: ToolAvailability
+    files: ToolAvailability
     mcp_servers: list[McpServerAvailability]
 
 
 _WORKSPACE_DISABLED = "Turned off for this workspace."
 _NOT_CONFIGURED = "No backend is configured on this deployment."
+_FILES_OFF = "File uploads are turned off on this deployment."
+_FILES_NOT_FORWARDED = "This deployment's models run on another gateway, which cannot read files stored here."
 
 
 async def resolve_tool_availability(
@@ -266,6 +267,7 @@ async def resolve_tool_availability(
     return PlaygroundToolAvailability(
         web_search=_tool_availability(web_search_configured, web_search_row),
         code_execution=_tool_availability(sandbox_configured, code_execution_row),
+        files=file_availability(config),
         mcp_servers=[
             McpServerAvailability(
                 id=server.id,
@@ -289,6 +291,20 @@ def _tool_availability(configured: bool, workspace_enabled: bool | None) -> Tool
         return ToolAvailability(configured=False, enabled=False, reason=_NOT_CONFIGURED)
     if workspace_enabled is False:
         return ToolAvailability(configured=True, enabled=False, reason=_WORKSPACE_DISABLED)
+    return ToolAvailability(configured=True, enabled=True)
+
+
+def file_availability(config: GatewayConfig) -> ToolAvailability:
+    """Whether a Playground message may attach an uploaded file on this deployment.
+
+    A hosted control plane forwards each completion to its data plane, which
+    resolves a ``file_id`` against its own store and would not find one uploaded
+    here, so the uploads are refused rather than accepted and then lost.
+    """
+    if not config.files_enabled:
+        return ToolAvailability(configured=False, enabled=False, reason=_FILES_OFF)
+    if config.is_hosted_mode:
+        return ToolAvailability(configured=False, enabled=False, reason=_FILES_NOT_FORWARDED)
     return ToolAvailability(configured=True, enabled=True)
 
 
@@ -438,6 +454,7 @@ async def save_conversation(
                 role=message.role,
                 content=message.content,
                 reasoning=message.reasoning,
+                attachments=[attachment.model_dump() for attachment in message.attachments],
             )
         )
     await _prune_oldest(
@@ -489,7 +506,12 @@ async def read_conversation_messages(
         .all()
     )
     return [
-        PlaygroundMessagePublic(role=row.role, content=row.content, reasoning=row.reasoning)
+        PlaygroundMessagePublic(
+            role=row.role,
+            content=row.content,
+            reasoning=row.reasoning,
+            attachments=[PlaygroundAttachment.model_validate(attachment) for attachment in row.attachments],
+        )
         for row in rows
     ]
 

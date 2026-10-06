@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from gateway.db import APIKey
 
 
-GUARDRAILS_RESULT_HEADER = "X-Otari-Guardrails"
+GUARDRAILS_RESULT_HEADER = "Otari-Guardrails"
 """Response header carrying a compact JSON summary of guardrail verdicts when a
 ``monitor``-mode (or otherwise non-blocking) check ran."""
 
@@ -365,10 +365,7 @@ async def apply_input_guardrails(
         # Non-blocking: surface the verdict for observability (monitor mode, or
         # a passing block-mode check). Header value is kept compact and free of
         # the freeform `explanation` to avoid oversized / non-ASCII headers.
-        summary = [
-            {"profile": r.profile, "mode": r.mode, "valid": r.valid, "score": r.score}
-            for r in verdict.results
-        ]
+        summary = [{"profile": r.profile, "mode": r.mode, "valid": r.valid, "score": r.score} for r in verdict.results]
         response.headers[GUARDRAILS_RESULT_HEADER] = json.dumps(summary, separators=(",", ":"))
 
 
@@ -386,9 +383,7 @@ async def resolve_managed_workspace_id(db: AsyncSession, workspace_id: uuid.UUID
     """
     if workspace_id is None:
         return await default_workspace_id(db)
-    named = (
-        await db.execute(select(col(Workspace.id)).where(col(Workspace.id) == workspace_id))
-    ).scalar_one_or_none()
+    named = (await db.execute(select(col(Workspace.id)).where(col(Workspace.id) == workspace_id))).scalar_one_or_none()
     if named is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

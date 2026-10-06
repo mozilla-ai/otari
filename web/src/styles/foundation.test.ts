@@ -1772,6 +1772,8 @@ describe("the catalog shows every prop", () => {
       "the fallback for a refused clipboard write, which a story cannot provoke without breaking the clipboard",
     "feedback/FormDialog.returnFocusRef":
       "where focus lands after the frame is gone, which needs the trigger to unmount with it: a story could pass the prop and would demonstrate nothing",
+    "feedback/FormDialog.target":
+      "`RestoreFocus`'s, the helper behind `returnFocusRef`, exported for the feedback dialog; the same reason applies",
   }
 
   // Not props: the first two are every component's, and a leading underscore is

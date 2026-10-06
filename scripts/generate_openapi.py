@@ -45,6 +45,8 @@ def generate_openapi_spec() -> dict[str, object]:
             web_search_provider="tavily",
             web_search_provider_api_key="openapi-generation-placeholder",
             web_search_backend_token="openapi-generation-placeholder",
+            # Off by default and mounted only when on, so it is set for the same reason.
+            feedback_enabled=True,
         )
         app = create_app(config)
         return cast(dict[str, object], app.openapi())
@@ -104,6 +106,7 @@ def check_spec(spec: dict[str, object], existing_path: Path) -> bool:
     if generated_json != existing_json:
         print("Generated spec does not match existing spec", file=sys.stderr)
         print("Generated spec:")
+        # codeql[py/clear-text-logging-sensitive-data]
         print(generated_json)
         print("Existing spec:")
         print(existing_json)

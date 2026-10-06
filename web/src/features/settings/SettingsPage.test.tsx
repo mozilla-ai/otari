@@ -6,14 +6,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type {
   ConfigField,
+  DeploymentBootstrap,
   GatewaySettings,
   MailSettings,
   ReencryptProviderCredentialsResult,
   StoredProvider,
 } from "@/client"
 import { AuthProvider } from "@/features/auth/AuthContext"
-import { fieldMatches, SettingsPage } from "@/features/settings/SettingsPage"
+import {
+  fieldMatches,
+  rateLimitRulesMatch,
+  rulesCardAfter,
+  SettingsPage,
+} from "@/features/settings/SettingsPage"
 import { API_ROOT } from "@/shared/api/client"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { bootstrap } from "@/tests/fixtures"
 import { pickOption } from "@/tests/select"
 
 describe("fieldMatches", () => {
@@ -42,6 +50,39 @@ describe("fieldMatches", () => {
 
   it("does not match unrelated text", () => {
     expect(fieldMatches(field, "database")).toBe(false)
+  })
+})
+
+describe("rulesCardAfter", () => {
+  const all = [
+    { name: "Server & database" },
+    { name: "Rate limiting & CORS" },
+    { name: "Observability" },
+  ]
+
+  it("follows the rate limiting group", () => {
+    expect(rulesCardAfter(all, all)).toBe(1)
+  })
+
+  it("keeps its place when a filter hides that group", () => {
+    const shown = [{ name: "Server & database" }, { name: "Observability" }]
+    expect(rulesCardAfter(shown, all)).toBe(0)
+    expect(rulesCardAfter([{ name: "Observability" }], all)).toBe(-1)
+  })
+
+  it("goes last when the settings name no rate limiting group", () => {
+    const other = [{ name: "Server & database" }, { name: "Observability" }]
+    expect(rulesCardAfter(other, other)).toBe(1)
+  })
+})
+
+describe("rateLimitRulesMatch", () => {
+  it("is found by what it limits and by its name", () => {
+    expect(rateLimitRulesMatch("")).toBe(true)
+    expect(rateLimitRulesMatch("rate")).toBe(true)
+    expect(rateLimitRulesMatch("tokens per minute")).toBe(true)
+    expect(rateLimitRulesMatch("rate_limits")).toBe(true)
+    expect(rateLimitRulesMatch("database")).toBe(false)
   })
 })
 
@@ -177,13 +218,18 @@ function storedProvider(
   }
 }
 
-function renderWithClient(ui: ReactElement) {
+function renderWithClient(
+  ui: ReactElement,
+  deployment: Partial<DeploymentBootstrap> = {},
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
-      <AuthProvider>{ui}</AuthProvider>
+      <DeploymentProvider value={bootstrap(deployment)}>
+        <AuthProvider>{ui}</AuthProvider>
+      </DeploymentProvider>
     </QueryClientProvider>,
   )
 }
@@ -203,6 +249,7 @@ function mockApi(
   stored: StoredProvider[] = [],
   reencryptResult: ReencryptProviderCredentialsResult = {
     reencrypted: 1,
+    skipped: 0,
     unreadable: 0,
   },
 ) {
@@ -295,6 +342,24 @@ describe("SettingsPage", () => {
   afterEach(() => {
     vi.restoreAllMocks()
     window.localStorage.clear()
+  })
+
+  it("offers the rate limit rules on a standalone gateway", async () => {
+    mockApi()
+
+    renderWithClient(<SettingsPage />)
+
+    await screen.findByText(/Version 1.2.3/)
+    expect(screen.getByText("Rate limit rules")).toBeInTheDocument()
+  })
+
+  it("does not offer the rate limit rules on a hosted control plane", async () => {
+    mockApi()
+
+    renderWithClient(<SettingsPage />, { deployment_type: "hosted" })
+
+    await screen.findByText(/Version 1.2.3/)
+    expect(screen.queryByText("Rate limit rules")).not.toBeInTheDocument()
   })
 
   it("reflects the current settings on its switches", async () => {

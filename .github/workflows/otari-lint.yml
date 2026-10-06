@@ -5,10 +5,12 @@ on:
     branches: [ main, develop ]
     paths:
       - 'src/gateway/**'
+      - 'cli/**'
       - 'alembic/**'
       - 'tests/**'
       - 'scripts/**'
       - 'Makefile'
+      - '.pre-commit-config.yaml'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-lint.yml'
@@ -16,14 +18,19 @@ on:
     branches: [ main ]
     paths:
       - 'src/gateway/**'
+      - 'cli/**'
       - 'alembic/**'
       - 'tests/**'
       - 'scripts/**'
       - 'Makefile'
+      - '.pre-commit-config.yaml'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-lint.yml'
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   lint:
@@ -32,7 +39,7 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       with:
         python-version: 3.14
         activate-environment: true
@@ -41,4 +48,4 @@ jobs:
       run: uv sync --dev --frozen
 
     - name: Run lint checks
-      run: make lint
+      run: make lint-python

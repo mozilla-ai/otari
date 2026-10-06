@@ -178,7 +178,11 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
         model_key = normalize_pricing_key(config, raw_model_key)
         instance = model_key.split(":", 1)[0] if ":" in model_key else model_key
 
-        if instance not in config.providers and instance != GATEWAY_TOOL_PRICING_PROVIDER:
+        if (
+            instance not in config.providers
+            and instance not in config.decision_providers
+            and instance != GATEWAY_TOOL_PRICING_PROVIDER
+        ):
             logger.warning(
                 "Skipping pricing for '%s': provider '%s' is not listed in the providers section. "
                 "The provider may still work if its credentials come from the environment, but its "

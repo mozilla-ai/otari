@@ -102,9 +102,7 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
 
     async def get_organization_id(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
         """Return the ID of the organization that owns a workspace, or None."""
-        result = await self.db.execute(
-            select(col(Workspace.organization_id)).where(col(Workspace.id) == workspace_id)
-        )
+        result = await self.db.execute(select(col(Workspace.organization_id)).where(col(Workspace.id) == workspace_id))
         return result.scalar_one_or_none()
 
     async def get_by_organization_and_name(self, organization_id: uuid.UUID, name: str) -> Workspace | None:
@@ -308,6 +306,20 @@ class WorkspaceMemberRepository:
             select(col(WorkspaceMember.id)).where(col(WorkspaceMember.workspace_id) == workspace_id)
         )
         return list(result.scalars().all())
+
+    async def page_active_ids_for_workspace(
+        self, workspace_id: uuid.UUID, *, skip: int, limit: int
+    ) -> tuple[list[uuid.UUID], int]:
+        """Return a page of the IDs of a workspace's active memberships, plus how many there are.
+
+        Ordered by ID, so two pages of an unchanged set neither repeat nor omit a row.
+        """
+        active = (col(WorkspaceMember.workspace_id) == workspace_id, col(WorkspaceMember.status) == "active")
+        count_result = await self.db.execute(select(func.count()).select_from(WorkspaceMember).where(*active))
+        result = await self.db.execute(
+            select(col(WorkspaceMember.id)).where(*active).order_by(col(WorkspaceMember.id)).offset(skip).limit(limit)
+        )
+        return list(result.scalars().all()), count_result.scalar_one()
 
     async def get_workspace_id(self, workspace_member_id: uuid.UUID) -> uuid.UUID | None:
         """Return the ID of the workspace a membership belongs to, or None."""

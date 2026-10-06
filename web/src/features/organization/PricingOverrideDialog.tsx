@@ -5,8 +5,9 @@ import type { OrganizationPricingOverride } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
+import { isValidModelKey } from "@/features/models/modelKey"
 import { useModels } from "@/shared/api/models"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import { useDeploymentOperator } from "@/shared/api/organizations"
 import {
   useCreateOrganizationPricing,
   useReplaceOrganizationPricing,
@@ -15,12 +16,10 @@ import {
 import {
   deploymentManagedPrefixes,
   findOverlapping,
-  isValidModelKey,
   managedModelReason,
   parseRate,
   periodBlockedReason,
 } from "./pricingOverride"
-import { isDeploymentOperator } from "./roles"
 
 // The form behind both Add and Edit. One component rather than two, because the
 // only difference is whether the model key is editable: the endpoint replaces a
@@ -126,8 +125,7 @@ export function PricingOverrideDialog({
   // the card's own gate. The query key is shared, so an opener who may edit
   // finds it already warm from the card.
   const catalog = useModels(isOpen)
-  const organization = useOrganizationContext()
-  const isOperator = isDeploymentOperator(organization.data)
+  const { isOperator } = useDeploymentOperator()
   const managedPrefixes = deploymentManagedPrefixes(catalog.data?.data)
   const save = (draft: PricingOverrideDraft) => {
     const onDone = { onSuccess: onSaved }

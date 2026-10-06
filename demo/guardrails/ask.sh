@@ -10,7 +10,7 @@
 #   * mode=block   → if the input is flagged, the gateway returns 403 and never
 #                    calls the provider.
 #   * mode=monitor → the request is forwarded anyway; the verdict is surfaced on
-#                    the X-Otari-Guardrails response header.
+#                    the Otari-Guardrails response header.
 #
 # Env vars:
 #   OTARI_URL  — default http://localhost:${OTARI_PORT:-8000}
@@ -90,7 +90,7 @@ _gw_before=$(docker logs $OTARI_CONTAINER 2>&1 | wc -l | tr -d ' ' || echo 0)
 _gr_before=$(docker logs $GUARDRAILS_CONTAINER 2>&1 | wc -l | tr -d ' ' || echo 0)
 
 # Non-streaming: the interesting signal is the status code (403 vs 200), the
-# X-Otari-Guardrails header (monitor mode), and the body.
+# Otari-Guardrails header (monitor mode), and the body.
 status=$(curl -sS -o /tmp/.guardrails-body -D /tmp/.guardrails-headers -w '%{http_code}' \
   -X POST "$OTARI_URL/v1/chat/completions" \
   -H "Authorization: Bearer $OTARI_KEY" \
@@ -108,7 +108,7 @@ verdict_header = None
 try:
     with open("/tmp/.guardrails-headers") as f:
         for line in f:
-            if line.lower().startswith("x-otari-guardrails:"):
+            if line.lower().startswith("otari-guardrails:"):
                 verdict_header = line.split(":", 1)[1].strip()
 except FileNotFoundError:
     pass
@@ -130,7 +130,7 @@ if status == "403":
 elif status == "200":
     print(f"{GRN}{BOLD}✓ allowed (HTTP 200){RST}")
     if verdict_header:
-        print(f"  {CYN}X-Otari-Guardrails:{RST} {verdict_header}")
+        print(f"  {CYN}Otari-Guardrails:{RST} {verdict_header}")
     if payload and payload.get("choices"):
         print()
         print(payload["choices"][0]["message"].get("content") or "(no content)")

@@ -72,8 +72,8 @@ def test_without_a_container_nothing_is_added_and_the_shared_strategy_is_reused(
     result = _message()
     _MESSAGES_STRATEGY.fold_usage(result, _MESSAGES_STRATEGY.new_usage_accumulator())
     assert result.container is None
-    assert _strategy_for(False, None) is _MESSAGES_STRATEGY
-    assert _strategy_for(False, None, container=_lease()) is not _MESSAGES_STRATEGY
+    assert _strategy_for(frozenset(), None) is _MESSAGES_STRATEGY
+    assert _strategy_for(frozenset(), None, container=_lease()) is not _MESSAGES_STRATEGY
 
 
 class _NoTools:

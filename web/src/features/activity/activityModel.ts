@@ -179,7 +179,47 @@ export function resolveExtentWindow(
 const STATUS_LABELS: Record<string, string> = {
   error: "Error",
   absorbed: "Absorbed",
+  skipped: "Skipped",
   success: "Success",
+}
+
+// How the gateway marks an absorbed row whose candidate was skipped rather than
+// called (`SKIPPED_ATTEMPT_PREFIX` in `api/routes/_pipeline.py`): a model a
+// per-model rate limit had no room on, so the request moved to the next one.
+const SKIPPED_ATTEMPT_PREFIX = "Skipped: "
+
+/** Whether this row is a candidate the routing walk skipped without calling it. */
+export function isSkippedAttempt(entry: UsageEntry): boolean {
+  return (
+    entry.status === "absorbed" &&
+    (entry.error_message ?? "").startsWith(SKIPPED_ATTEMPT_PREFIX)
+  )
+}
+
+/** Why a skipped candidate was skipped, as the gateway worded it. */
+export function describeSkip(entry: UsageEntry): string {
+  return (entry.error_message ?? "").slice(SKIPPED_ATTEMPT_PREFIX.length)
+}
+
+/** The status word a row shows: a skip is not a failure, so it does not say "Absorbed". */
+export function displayStatus(entry: UsageEntry): string {
+  return isSkippedAttempt(entry) ? "skipped" : entry.status
+}
+
+// Why a candidate was skipped, short enough for a row: "rate limit 'x' full" when
+// a per-model limit had no room, "too large for rate limit 'x'" when the request's
+// token estimate alone is over it (`_count_rule` in `rate_limit.py`).
+function skipCause(entry: UsageEntry): string {
+  const reason = describeSkip(entry)
+  const rule = /rate limit '([^']+)'/i.exec(reason)?.[1]
+  if (!rule) return "could not serve"
+  return reason.startsWith("Request needs")
+    ? `too large for rate limit '${rule}'`
+    : `rate limit '${rule}' full`
+}
+
+function skipReason(entry: UsageEntry): string {
+  return `skipped, ${skipCause(entry)}`
 }
 
 export function describeStatus(status: string): string {
@@ -383,6 +423,8 @@ export interface GroupOutcome {
   /** Qualified target of the attempt that served, or null when none did. */
   servedBy: string | null
   servedPosition: number | null
+  /** The candidates skipped before it, each as "target (why)", when the page holds their rows. */
+  spilledFrom: string[]
 }
 
 // Index the outcome of every group represented in `rows`. Built from rows the page
@@ -391,6 +433,14 @@ export interface GroupOutcome {
 export function indexGroupOutcomes(
   rows: readonly UsageEntry[],
 ): Map<string, GroupOutcome> {
+  const skipped = new Map<string, string[]>()
+  for (const row of sortPlanRows(rows)) {
+    if (!row.request_group_id || !isSkippedAttempt(row)) continue
+    skipped.set(row.request_group_id, [
+      ...(skipped.get(row.request_group_id) ?? []),
+      `${findPricingSelector(row)} (${skipCause(row)})`,
+    ])
+  }
   return new Map(
     rows.flatMap((row): [string, GroupOutcome][] =>
       row.request_group_id && row.status !== "absorbed"
@@ -404,12 +454,38 @@ export function indexGroupOutcomes(
                   row.status === "success"
                     ? (row.attempt_position ?? null)
                     : null,
+                spilledFrom: skipped.get(row.request_group_id) ?? [],
               },
             ],
           ]
         : [],
     ),
   )
+}
+
+// Groups whose served row is on this page while an earlier attempt's row is not,
+// which a page boundary does. Their outcome is known but incomplete: without the
+// earlier rows, the served row cannot say what it spilled over from.
+export function findGroupsMissingEarlierAttempts(
+  rows: readonly UsageEntry[],
+): string[] {
+  const positions = new Map<string, Set<number>>()
+  for (const row of rows) {
+    if (!row.request_group_id || row.attempt_position == null) continue
+    const seen = positions.get(row.request_group_id) ?? new Set<number>()
+    seen.add(row.attempt_position)
+    positions.set(row.request_group_id, seen)
+  }
+  return rows.flatMap((row) => {
+    const position = row.attempt_position ?? 1
+    if (row.status !== "success" || !row.request_group_id || position <= 1)
+      return []
+    const seen = positions.get(row.request_group_id) ?? new Set<number>()
+    for (let earlier = 1; earlier < position; earlier += 1) {
+      if (!seen.has(earlier)) return [row.request_group_id]
+    }
+    return []
+  })
 }
 
 // One line of prose for a row's place in its plan, replacing the "attempt 1/2 ·
@@ -428,6 +504,11 @@ export function describeAttempt(
   // worth saying is why that candidate was picked.
   if (position == null || total == null || total <= 1) return reason
   const attempt = `attempt ${position} of ${total}`
+  if (isSkippedAttempt(entry)) {
+    return outcome?.servedBy
+      ? `${attempt} ${skipReason(entry)}, served by ${outcome.servedBy}`
+      : `${attempt} ${skipReason(entry)}`
+  }
   if (entry.status === "absorbed") {
     if (outcome?.servedBy)
       return `${attempt} failed, served by ${outcome.servedBy}`
@@ -444,12 +525,19 @@ export function describeAttempt(
       ? `${attempt} failed, no further candidate tried`
       : `${attempt} failed, plan exhausted`
   }
-  return reason ? `served on ${attempt} (${reason})` : `served on ${attempt}`
+  const served = reason
+    ? `served on ${attempt} (${reason})`
+    : `served on ${attempt}`
+  const spilledFrom = outcome?.spilledFrom ?? []
+  return spilledFrom.length > 0
+    ? `${served}, spilled over from ${spilledFrom.join(", ")}`
+    : served
 }
 
 // Per-attempt outcome for the plan table. Terser than the row sentence, which has
 // to stand alone; here the table's shape already says which attempt this is.
 export function describeAttemptOutcome(entry: UsageEntry): string {
+  if (isSkippedAttempt(entry)) return `skipped: ${describeSkip(entry)}`
   if (entry.status === "absorbed")
     return entry.status_code === null
       ? "failed, fell back"

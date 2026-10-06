@@ -13,7 +13,12 @@ name: Otari Docker Build
 # sources, and dependency resolution. src/gateway/** is left out on purpose. A
 # Python source change cannot fail the build (nothing compiles it) and
 # otari-tests.yml already covers it, so including it would add a multi-minute
-# image build to nearly every PR for no signal.
+# image build to nearly every PR for no signal. That stays true now the container
+# also serves a request below: what the hybrid smoke adds here is whether the
+# *image* can serve one (its layout, entrypoint and baked environment), and the
+# same walk against the source checkout runs per PR in otari-oss-edition.yml.
+# cli/src/** is the one Python source that is listed: the liveness check asserts
+# what `otari --version` reports inside the image.
 #
 # Single-platform on purpose too: this proves the recipe works and the container
 # boots. The publish workflow still builds linux/arm64 under QEMU, which is
@@ -28,8 +33,11 @@ on:
       - 'web/**'
       - 'docs/dashboard.md'
       - 'pyproject.toml'
+      - 'cli/pyproject.toml'
+      - 'cli/src/**'
       - 'uv.lock'
       - 'scripts/docker_liveness_check.sh'
+      - 'scripts/hybrid_edition_smoke.py'
       - '.github/workflows/otari-docker-build.yml'
   workflow_dispatch:
 
@@ -46,13 +54,13 @@ jobs:
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # Reads the cache the publish workflow's test build writes on main, and
       # deliberately does not write one back: a fork PR has no write access to
       # the cache backend, and a read-only miss is just a slower build.
       - name: Build image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: Dockerfile
@@ -67,3 +75,20 @@ jobs:
       # fallback, which is what a bundle that never reached the image looks like.
       - name: Run container liveness check
         run: ./scripts/docker_liveness_check.sh otari-pr:${{ github.sha }}
+
+      # Liveness proves the container answers its health probes. This proves it
+      # can serve a request: the same hybrid walk as otari-oss-edition.yml, run
+      # against the image a deployment actually pulls rather than a source
+      # checkout. The image pins OTARI_HOST/OTARI_PORT as environment variables,
+      # which beat a mounted config file, so an image that boots but cannot
+      # serve is a break only this step sees.
+      - name: Install the smoke's environment
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: "3.14"
+
+      - name: Smoke the container in hybrid mode
+        run: |
+          uv sync --frozen --no-dev
+          uv run --frozen --no-dev python scripts/hybrid_edition_smoke.py \
+            --image otari-pr:${{ github.sha }}

@@ -56,7 +56,8 @@ def store(s3_options: dict[str, Any]) -> FsspecFileStore:
 
 @pytest.mark.asyncio
 async def test_put_writes_the_object_under_the_root(store: FsspecFileStore, s3_options: dict[str, Any]) -> None:
-    ref = await store.put("file-abcdef0123", b"hello bytes")
+    ref = await store.allocate("file-abcdef0123")
+    await store.put(ref, b"hello bytes")
 
     assert ref == "ab/file-abcdef0123"
     assert await store.get(ref) == b"hello bytes"
@@ -68,7 +69,8 @@ async def test_put_stream_and_get_stream_roundtrip_across_parts(store: FsspecFil
     payload = bytes(range(256)) * (2 * _BLOCK_SIZE // 256) + b"tail"
     chunks = [payload[i : i + 1024 * 1024] for i in range(0, len(payload), 1024 * 1024)]
 
-    ref, size = await store.put_stream("file-streamtest01", _iter(chunks))
+    ref = await store.allocate("file-streamtest01")
+    size = await store.put_stream(ref, _iter(chunks))
 
     assert size == len(payload)
     collected = bytearray()
@@ -79,7 +81,8 @@ async def test_put_stream_and_get_stream_roundtrip_across_parts(store: FsspecFil
 
 @pytest.mark.asyncio
 async def test_delete_removes_the_object_and_is_idempotent(store: FsspecFileStore) -> None:
-    ref = await store.put("file-deleteme0001", b"x")
+    ref = await store.allocate("file-deleteme0001")
+    await store.put(ref, b"x")
 
     await store.delete(ref)
     await store.delete(ref)
@@ -103,8 +106,9 @@ async def test_failed_put_stream_leaves_no_object(store: FsspecFileStore) -> Non
         yield b"x" * _BLOCK_SIZE
         raise RuntimeError("client went away")
 
+    ref = await store.allocate("file-partial00001")
     with pytest.raises(RuntimeError, match="client went away"):
-        await store.put_stream("file-partial00001", _failing())
+        await store.put_stream(ref, _failing())
 
     with pytest.raises(FileNotFoundError):
         await store.get("pa/file-partial00001")

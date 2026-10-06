@@ -281,6 +281,7 @@ def _resolve_genai_price_uncached(
             # must degrade to "unpriced"/"unknown" rather than turn into a request
             # error for that model. Signal a transient failure so the caller does
             # not memoize it (the next request retries).
+            # codeql[py/clear-text-logging-sensitive-data]
             logger.warning("genai-prices lookup failed for model_ref=%r provider_id=%r", model_ref, provider_id)
             return _TRANSIENT_FAILURE
 
@@ -350,6 +351,7 @@ def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> 
     model_key = f"{provider}:{model}" if provider else model
     logger.debug(
         "Using genai-prices default pricing for '%s' (matched %s/%s)",
+        # codeql[py/clear-text-logging-sensitive-data]
         model_key,
         getattr(calc.provider, "id", None),
         getattr(calc.model, "id", None),
@@ -401,8 +403,8 @@ async def _find_organization_override(
     organization_id: uuid.UUID,
     model_keys: list[str],
     as_of: datetime,
-) -> ModelPricing | None:
-    """An organization's rate for the first of ``model_keys`` that has one.
+) -> OrganizationModelPricing | None:
+    """An organization's override for the first of ``model_keys`` that has one.
 
     One statement over every candidate key, not one per key. This runs on the
     request path ahead of the deployment lookup, so an organization with no
@@ -444,8 +446,7 @@ async def _find_organization_override(
         .order_by(key_preference, OrganizationModelPricing.effective_from.desc())
         .limit(1)
     )
-    override = (await db.execute(stmt)).scalar_one_or_none()
-    return override_as_model_pricing(override) if override is not None else None
+    return (await db.execute(stmt)).scalar_one_or_none()
 
 
 class OverridePeriod(NamedTuple):
@@ -492,9 +493,7 @@ async def load_organization_override_index(
             # end", where ``normalize_effective_at`` would read it as "ends now".
             effective_to = normalize_effective_at(row.effective_to) if row.effective_to is not None else None
             index.setdefault(row.model_key, []).append(
-                OverridePeriod(
-                    normalize_effective_at(row.effective_from), effective_to, override_as_model_pricing(row)
-                )
+                OverridePeriod(normalize_effective_at(row.effective_from), effective_to, override_as_model_pricing(row))
             )
     for periods in index.values():
         periods.sort(key=lambda period: period.effective_from)
@@ -747,10 +746,19 @@ async def find_model_pricing(
 
 
 class ResolvedPricing(NamedTuple):
-    """A resolved rate and which step of the lookup order supplied it."""
+    """A resolved rate, which step of the lookup order supplied it, and which entry.
+
+    ``reference`` names the entry within that source: an override's row id, the
+    stored ``model_key`` a deployment rate matched on (which may be the legacy
+    spelling), or the genai-prices ``provider_id:model_id`` that answered.
+    ``effective_at`` is when that entry took effect, and is ``None`` for a
+    default, whose dataset carries no such date for the rate.
+    """
 
     pricing: ModelPricing
     source: PriceSource
+    reference: str | None = None
+    effective_at: datetime | None = None
 
 
 async def resolve_model_pricing(
@@ -771,21 +779,23 @@ async def resolve_model_pricing(
     if organization_id is not None:
         override = await _find_organization_override(db, organization_id, key_forms, lookup_time)
         if override is not None:
-            return ResolvedPricing(override, "organization")
+            pricing = override_as_model_pricing(override)
+            return ResolvedPricing(pricing, "organization", str(override.id), pricing.effective_at)
 
-    pricing = await _find_by_model_key(db, model_key, lookup_time)
+    stored = await _find_by_model_key(db, model_key, lookup_time)
 
     for legacy_key in legacy_keys:
-        if pricing is not None:
+        if stored is not None:
             break
-        pricing = await _find_by_model_key(db, legacy_key, lookup_time)
-    if pricing is not None:
-        return ResolvedPricing(pricing, "deployment")
+        stored = await _find_by_model_key(db, legacy_key, lookup_time)
+    if stored is not None:
+        return ResolvedPricing(stored, "deployment", stored.model_key, normalize_effective_at(stored.effective_at))
 
     if use_defaults and default_pricing_enabled():
         default = default_model_pricing(provider, model, lookup_time)
         if default is not None:
-            return ResolvedPricing(default, "defaults")
+            # A dictionary read: the lookup above memoized the resolution.
+            return ResolvedPricing(default, "defaults", default_pricing_reference(provider, model, lookup_time))
 
     return None
 

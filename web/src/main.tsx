@@ -2,8 +2,10 @@ import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 
 import App from "@/app/App"
+import { loadDeployment } from "@/app/boot"
 import { Provider } from "@/app/provider"
 import { apiFetch } from "@/shared/api/client"
+import { prepareRequests } from "@/shared/api/overlayRequestPolicy"
 import type { WireBootstrap } from "@/shared/helpers/bootstrap"
 import "@/styles/globals.css"
 
@@ -36,7 +38,10 @@ function loadBootstrap(): Promise<WireBootstrap | null> {
   }).catch(() => null)
 }
 
-void loadBootstrap().then((bootstrap) => {
+// Settled before the bootstrap is asked for, because the answer can change
+// where that request goes; a preparation that fails lands on the same screen
+// as a bootstrap that never arrived (see `app/boot.ts`).
+void loadDeployment(prepareRequests, loadBootstrap).then((bootstrap) => {
   createRoot(container).render(
     <StrictMode>
       <Provider>

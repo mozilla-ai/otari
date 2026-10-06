@@ -269,6 +269,11 @@ export type PricingTier = Schemas["PricingTier"]
 // The catalog folded by model (`/v1/catalog`): one summary per model in the
 // list, and one detail carrying every offering of it the caller may use.
 export type CatalogResponse = Schemas["CatalogResponse"]
+export type CatalogFacets = Schemas["CatalogFacets"]
+export type CatalogVendorFacet = Schemas["CatalogVendorFacet"]
+export type CatalogQueryParams = NonNullable<
+  operations["catalog-list_catalog"]["parameters"]["query"]
+>
 export type CatalogModelSummary = Schemas["CatalogModelSummary"]
 export type CatalogModelDetail = Schemas["CatalogModelDetail"]
 export type CatalogOffering = Schemas["CatalogOffering"]
@@ -438,6 +443,14 @@ export type GuardrailCategory = Schemas["GuardrailCategory"]
 export type RequirementGroup = Schemas["RequirementGroup"]
 
 // ---------------------------------------------------------------------------
+// Rate limit rules
+// ---------------------------------------------------------------------------
+export type RateLimitRule = Schemas["RateLimitRulePublic"]
+export type RateLimitRules = Schemas["RateLimitRulesPublic"]
+export type CreateRateLimitRuleRequest = Schemas["RateLimitRuleCreate"]
+export type UpdateRateLimitRuleRequest = Schemas["RateLimitRuleUpdate"]
+
+// ---------------------------------------------------------------------------
 // Search tools
 // ---------------------------------------------------------------------------
 export type SearchProviderInfo = Schemas["SearchProviderSchema"]
@@ -546,6 +559,12 @@ export type InviteOrganizationMemberRequest = Defaulted<
 >
 export type InviteOrganizationMemberResult =
   Schemas["InviteOrganizationMemberResultPublic"]
+export type BulkInviteOrganizationMembersRequest = Defaulted<
+  Schemas["BulkInviteOrganizationMembersRequest"],
+  "role"
+>
+export type BulkInviteOrganizationMembersResult =
+  Schemas["BulkInviteOrganizationMembersResultPublic"]
 export type InvitationPreview = Schemas["InvitationPreviewPublic"]
 export type AcceptInvitationRequest = Defaulted<
   Schemas["AcceptInvitationRequest"],
@@ -618,6 +637,13 @@ export type CreateOrganizationGuardrailRequest = Defaulted<
 >
 export type UpdateOrganizationGuardrailRequest =
   Schemas["OrganizationGuardrailUpdate"]
+// Posting some text to the service a mandate names, which stores nothing.
+export type TestOrganizationGuardrailRequest = Defaulted<
+  Schemas["OrganizationGuardrailTest"],
+  "validate_kwargs"
+>
+export type OrganizationGuardrailTestResult =
+  Schemas["OrganizationGuardrailTestResult"]
 // A guardrail the organization defined for Otari to build and run itself. A
 // mandate points at one through `definition_id`; see
 // `src/gateway/services/tenancy/organization_guardrail_definition_service.py`.
@@ -675,6 +701,12 @@ export type SavePlaygroundConversationRequest =
   Schemas["PlaygroundConversationCreate"]
 export type PlaygroundMessage = Schemas["PlaygroundMessagePublic"]
 export type PlaygroundMessages = Schemas["PlaygroundMessagesPublic"]
+export type PlaygroundAttachment = Schemas["PlaygroundAttachment"]
+
+// A file the caller uploaded, in OpenAI's file object shape, which is what the
+// Playground's own upload and listing answer in.
+export type PlaygroundFile = Schemas["OpenAIFileObject"]
+export type PlaygroundFiles = Schemas["OpenAIFileList"]
 
 // A rated A/B exchange. The summary deliberately carries no answer bodies;
 // there is no endpoint that reads one back, because a comparison is a recorded
@@ -697,3 +729,6 @@ export type OAuthAuthorizeResponse = Schemas["AuthorizeResponse"]
 export type OAuthCallbackRequest = Schemas["OAuthCallbackRequest"]
 
 export type * from "./local"
+
+export type FeedbackSubmission =
+  operations["feedback-submit_feedback"]["requestBody"]["content"]["application/json"]

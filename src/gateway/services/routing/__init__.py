@@ -9,8 +9,8 @@ marks the routing capability line provisional, and whether that port should exis
 at all is an open maintainer decision, so this does not presume one.
 
 A policy's ``select`` may hand the ordering to a *router backend*
-(``backends.py``), which is where the learned kNN router (``knn.py``) and the
-weighted load balancer (``weighted.py``) plug in. The split is deliberate: the
+(``backends.py``), which is where the learned kNN router (``knn.py``), the
+weighted load balancer (``weighted.py``) and the priority order plug in. The split is deliberate: the
 compiler stays pure and synchronous, and a backend's asynchronous work
 (embedding, reading stored examples) happens in the request pipeline, which
 passes the resulting order in as a value.
@@ -19,6 +19,7 @@ passes the resulting order in as a value.
 from gateway.services.routing.backends import (
     KNN_BACKEND,
     NOOP_BACKEND,
+    PRIORITY_BACKEND,
     WEIGHTED_BACKEND,
     RouterBackend,
     RoutingContext,
@@ -43,6 +44,7 @@ from gateway.types.budget_state import BudgetState
 __all__ = [
     "KNN_BACKEND",
     "NOOP_BACKEND",
+    "PRIORITY_BACKEND",
     "WEIGHTED_BACKEND",
     "BudgetState",
     "CompiledPlan",

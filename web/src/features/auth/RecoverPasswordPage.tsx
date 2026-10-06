@@ -1,6 +1,7 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { PublicAuthFields } from "@/features/auth/overlayPublicAuthFields"
 import { useRequestPasswordReset } from "@/shared/api/auth"
 
 import { AuthEmailField } from "./AuthFields"
@@ -68,6 +69,7 @@ export function RecoverPasswordPage() {
           submit()
         }}
       >
+        <PublicAuthFields page="recover-password" isBusy={request.isPending} />
         <AuthEmailField
           value={email}
           onChange={(next) => {

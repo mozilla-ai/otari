@@ -91,7 +91,7 @@ def _post_with_search_patched(
     seen = _Dispatch()
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> MessageResponse:
         seen.ran = True
         return _text_response("via-search-loop")
@@ -195,6 +195,24 @@ def test_invalid_request_domain_rules_are_rejected_for_other_completion_shapes(
     assert response.json()["detail"] == (
         "Web search allowed_domains and blocked_domains must each contain at most 100 bare valid hostnames"
     )
+
+
+def test_a_request_domain_in_cookie_syntax_is_served_as_the_bare_host(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A request reads ``.example.com`` as a workspace's policy does, not as a 400."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", _SEARCH_URL)
+
+    response, seen = _post_with_search_patched(
+        client,
+        api_key_header,
+        {**_REQUEST, "tools": [{"type": "otari_web_search", "allowed_domains": [".example.com"]}]},
+    )
+
+    assert response.status_code == 200, response.text
+    assert list(seen.backend_kwargs["allowed_domains"]) == ["example.com"]
 
 
 def test_invalid_legacy_domain_rule_fails_closed_but_remains_visible_for_repair(
@@ -498,7 +516,7 @@ def test_a_streaming_request_gets_the_same_narrowing(
     seen = _Dispatch()
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> AsyncIterator[MessageStreamEvent]:
         seen.ran = True
         yield MessageStopEvent(type="message_stop")
@@ -636,7 +654,7 @@ def test_a_config_read_that_fails_releases_the_budget_reservation(
         raise SQLAlchemyError("connection lost mid-admission")
 
     monkeypatch.setattr(
-        "gateway.api.routes._pipeline.resolve_workspace_web_search_config",
+        "gateway.adapters.web_search_policy_adapter.resolve_workspace_web_search_config",
         failing_resolve,
     )
     # TestClient re-raises a server exception rather than rendering a 500, so the

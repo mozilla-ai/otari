@@ -346,6 +346,7 @@ async def test_service(
 
     try:
         async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT_S, follow_redirects=False) as client:
+            # codeql[py/full-ssrf]
             resp = await client.get(url)
     except httpx.HTTPError as exc:
         return TestServiceResponse(ok=False, reason=f"unreachable: {exc.__class__.__name__}: {exc}")

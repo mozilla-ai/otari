@@ -9,7 +9,10 @@ host: "0.0.0.0"
 port: 8000
 
 # Deployment-wide management credential. Applications should use API keys.
-master_key: YOUR_MASTER_KEY_HERE
+# Set it as OTARI_MASTER_KEY (in .env with Docker Compose) rather than here, so
+# it stays out of a file you may want to commit. Left unset, Otari generates one
+# on first boot and prints it once.
+# master_key: choose-a-strong-management-key
 
 # Common models use the bundled genai-prices snapshot when no stored price
 # exists. Explicit database pricing always wins.
@@ -56,11 +59,17 @@ providers:
 # Optional server controls.
 # rate_limit_rpm: 60
 # enable_metrics: true
+# Honor incoming OpenTelemetry trace context (traceparent/tracestate by
+# default). Off by default: the headers are unauthenticated, so enable it only
+# for trusted service callers.
+# accept_incoming_trace_context: true
 # cors_allow_origins:
 #   - "https://app.example.com"
 
 # Provider and search credentials stored through the dashboard require
 # OTARI_SECRET_KEY in the process environment.
+# Provider copies of attached files, on by default, require
+# OTARI_PROVIDER_ACCOUNT_PEPPER: its own random value of at least 32 characters.
 
 # Optional email delivery. public_base_url is also used by passkeys and OAuth.
 # public_base_url: "https://otari.example.com"
@@ -93,8 +102,12 @@ providers:
 # files_max_bytes: 536870912
 # files_output_max_files: 20
 # files_output_max_bytes: 67108864
+# files_provider_copy_max_sec: 60
 # files_retention_hours: 168
 # files_sweep_interval_sec: 3600
+# A copy at the provider that runs a request's code, and how long it lives there:
+# files_provider_upload_enabled: true
+# files_provider_upload_ttl_hours: 1
 # vision_strategy: describe
 # vision_describe_model: "ollama:qwen2-vl"
 # model_capabilities:

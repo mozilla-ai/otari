@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Liveness check for the gateway Docker image.
-# Starts PostgreSQL, runs the gateway container, and validates health endpoints.
+# Checks `otari --version`, starts PostgreSQL, runs the gateway container, and
+# validates health endpoints.
 #
 # Usage: ./scripts/docker_liveness_check.sh <image_tag>
 # Example: ./scripts/docker_liveness_check.sh otari-test:abc123
@@ -27,6 +28,22 @@ cleanup() {
 }
 
 trap cleanup EXIT
+
+# The build context excludes .git (.dockerignore), so setuptools-scm has no tag
+# to read and otari_agent.__version__ is its 0.0.0 fallback; `otari --version`
+# reports OTARI_VERSION instead, the image's own ENV and the value the gateway
+# reports. Compared inside the container, so the script needs no copy of the
+# build argument.
+echo "Testing otari --version reports the image version..."
+docker run --rm "$IMAGE_TAG" sh -c '
+    expected="otari, version $OTARI_VERSION"
+    actual="$(otari --version)"
+    echo "$actual"
+    if [ "$actual" != "$expected" ]; then
+        echo "Expected \"$expected\": the CLI did not pick up OTARI_VERSION"
+        exit 1
+    fi
+'
 
 echo "Starting PostgreSQL container..."
 docker run -d --name "$POSTGRES_CONTAINER" \
@@ -59,8 +76,11 @@ master_key: "test-master-key"
 EOF
 
 echo "Starting gateway container with image: $IMAGE_TAG"
+# Provider copies are on by default, and the gateway refuses to serve without a
+# pepper of its own. Generated per run, as a deployment would set one.
 docker run -d --name "$OTARI_CONTAINER" \
     --add-host=host.docker.internal:host-gateway \
+    -e OTARI_PROVIDER_ACCOUNT_PEPPER="$(openssl rand -base64 32)" \
     -p 8000:8000 \
     -v "$CONFIG_FILE":/app/config.yml \
     "$IMAGE_TAG" \

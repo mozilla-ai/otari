@@ -10,9 +10,9 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.models.tenancy import MANAGEMENT_ROLES, Organization, User, Workspace
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
-from gateway.services.tenancy.errors import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.services.tenancy.organization_service import OrganizationService
 
 
@@ -110,6 +110,26 @@ async def require_workspace_management_access(
         raise NotAuthorizedError
 
 
+class WorkspaceAccess:
+    """The workspace visibility and management checks, for a domain whose services do not hold the session."""
+
+    def __init__(self, db: AsyncSession, organizations: OrganizationService) -> None:
+        self._db = db
+        self._organizations = organizations
+
+    async def resolve_visible_workspace(self, *, user: User, workspace_id: uuid.UUID) -> Workspace:
+        """See :func:`resolve_visible_workspace`."""
+        return await resolve_visible_workspace(
+            self._db, user=user, workspace_id=workspace_id, organizations=self._organizations
+        )
+
+    async def require_workspace_management_access(self, *, user: User, workspace: Workspace) -> None:
+        """See :func:`require_workspace_management_access`."""
+        await require_workspace_management_access(
+            self._db, user=user, workspace=workspace, organizations=self._organizations
+        )
+
+
 @dataclass(frozen=True)
 class VisibleWorkspaceScope:
     """How much of one organization the caller may be shown.
@@ -173,6 +193,7 @@ async def resolve_visible_workspace_scope(
 
 __all__ = [
     "VisibleWorkspaceScope",
+    "WorkspaceAccess",
     "has_workspace_management_access",
     "require_workspace_management_access",
     "resolve_visible_workspace",

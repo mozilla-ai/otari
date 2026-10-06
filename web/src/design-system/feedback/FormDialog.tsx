@@ -11,6 +11,7 @@ import { FiX } from "react-icons/fi"
 
 import { Button } from "../actions/Button"
 import { ErrorBanner } from "./ErrorBanner"
+import { useDirtyGuard } from "./useDirtyGuard"
 
 /**
  * Moves focus to `target` when it unmounts, if nothing else took it.
@@ -20,7 +21,11 @@ import { ErrorBanner } from "./ErrorBanner"
  * subtree mounted through the exit animation, and the dialog holds focus for
  * every one of those ~100ms.
  */
-function RestoreFocus({ target }: { target: RefObject<HTMLElement | null> }) {
+export function RestoreFocus({
+  target,
+}: {
+  target: RefObject<HTMLElement | null>
+}) {
   useEffect(
     () => () => {
       // A frame, because the overlay's own `FocusScope` restores on its way out
@@ -132,20 +137,21 @@ export function FormDialog({
   tabs,
   children,
 }: FormDialogProps) {
-  // The dirty guard lives in the footer rather than in a second dialog, because
-  // a dialog never opens a dialog.
   const descriptionId = useId()
-  const [isGuarding, setIsGuarding] = useState(false)
+  const { isGuarding, requestClose, keepEditing, discard } = useDirtyGuard({
+    isOpen,
+    onOpenChange,
+    isDirty,
+    isPending,
+    isDismissable,
+  })
   // Whether the body has been scrolled away from its top, which is what puts a
   // rule between the pinned header and the content passing under it. The footer
   // keeps its rule in every state, so only this end of the body is conditional.
   const [isScrolled, setIsScrolled] = useState(false)
   const bodyRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (!isOpen) {
-      setIsGuarding(false)
-      setIsScrolled(false)
-    }
+    if (!isOpen) setIsScrolled(false)
   }, [isOpen])
   // A failed submit mounts `ErrorBanner` at the top of the body, which in a
   // scrolled `lg` body is above the fold: `role="alert"` reaches a screen
@@ -156,15 +162,6 @@ export function FormDialog({
     if (bodyRef.current) bodyRef.current.scrollTop = 0
     setIsScrolled(false)
   }, [error])
-
-  const requestClose = () => {
-    if (isPending || !isDismissable) return
-    if (isDirty) {
-      setIsGuarding(true)
-      return
-    }
-    onOpenChange(false)
-  }
 
   return (
     <Modal
@@ -311,18 +308,8 @@ export function FormDialog({
                   <>
                     <p className="text-caption">Unsaved changes</p>
                     <div className="otari-form-dialog__actions flex items-center gap-2">
-                      <Button onPress={() => setIsGuarding(false)}>
-                        Keep editing
-                      </Button>
-                      <Button
-                        variant="danger"
-                        // The guard stays up until the dialog has closed (the
-                        // effect above clears it). Cleared here, the footer
-                        // swaps back mid-press and React reuses this button as
-                        // the submit, so the click that ends the press saves
-                        // the form being discarded.
-                        onPress={() => onOpenChange(false)}
-                      >
+                      <Button onPress={keepEditing}>Keep editing</Button>
+                      <Button variant="danger" onPress={discard}>
                         Discard
                       </Button>
                     </div>

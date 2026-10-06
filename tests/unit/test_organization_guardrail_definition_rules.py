@@ -18,6 +18,12 @@ from typing import Any
 import pytest
 from any_guardrail.parameters import RequirementGroup
 
+from gateway.exceptions.guardrails_exceptions import (
+    OrganizationGuardrailDefinitionArgumentsError,
+    OrganizationGuardrailDefinitionUnsafeUrlError,
+    OrganizationGuardrailNotBuildableError,
+    OrganizationGuardrailNotDefinableError,
+)
 from gateway.models.guardrails import OrganizationGuardrailDefinition
 from gateway.services.guardrail_catalog import (
     BuiltInGuardrailSpec,
@@ -26,12 +32,6 @@ from gateway.services.guardrail_catalog import (
     builtin_guardrail_spec,
 )
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
-from gateway.services.tenancy.errors import (
-    OrganizationGuardrailDefinitionArgumentsError,
-    OrganizationGuardrailDefinitionUnsafeUrlError,
-    OrganizationGuardrailNotBuildableError,
-    OrganizationGuardrailNotDefinableError,
-)
 from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionUpdate,
     _arguments_after,

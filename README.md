@@ -22,7 +22,7 @@ track usage.
 </div>
 
 <p align="center">
-  <img src="assets/otari-demo.gif" width="720" alt="Otari dashboard showing usage, providers, models, users, budgets, and API keys"/>
+  <img src="assets/otari-demo.gif" width="720" alt="Otari dashboard tour: spend overview, usage by model, a request rescued by a routing fallback, two models compared in the Playground, the model catalog, routing policies, API keys, members, budgets, and providers"/>
 </p>
 
 Otari sits between your applications and model providers. It authenticates
@@ -40,7 +40,7 @@ plane to [otari.ai](https://otari.ai).
 - Revocable API keys with user, workspace, and model scope
 - Budget checks before spend and usage records after settlement
 - Local routing policies for failover, weighting, and learned selection
-- Optional code execution, web search, MCP, guardrails, and file understanding
+- Optional code execution, web search, MCP, inference guardrails, and file understanding
 
 ## Quickstart
 
@@ -50,7 +50,12 @@ Run an ephemeral standalone gateway with Docker:
 docker run --rm -p 8000:8000 \
   -e OTARI_MASTER_KEY=SET_A_MASTER_KEY \
   -e OPENAI_API_KEY=YOUR_OPENAI_KEY \
-  -e OTARI_CONFIG_YAML='default_pricing: true' \
+  -e OTARI_CONFIG_YAML='
+default_pricing: true
+providers:
+  openai:
+    api_key: ${OPENAI_API_KEY}
+' \
   mzdotai/otari:latest \
   otari serve
 ```
@@ -80,6 +85,16 @@ OpenAI clients work by setting `base_url` to
 This container uses SQLite inside the container and is deleted when it stops.
 Use the Compose setup below for persistent data.
 
+The command a developer runs next to a coding agent (`otari hook`,
+`otari import claude-code`) installs on its own, without the server:
+
+```bash
+brew install mozilla-ai/tap/otari
+```
+
+See [Agent Guardrails](docs/agent-guardrails.md) and
+[Use with Claude Code](docs/use-with-claude-code.md).
+
 ## Run the full stack
 
 ```bash
@@ -87,6 +102,8 @@ git clone https://github.com/mozilla-ai/otari
 cd otari
 cp config.example.yml config.yml
 # Set a master key, provider credentials, and pricing in config.yml.
+# Provider copies of attached files need a pepper of their own. Compose reads .env.
+grep -qs OTARI_PROVIDER_ACCOUNT_PEPPER .env || echo "OTARI_PROVIDER_ACCOUNT_PEPPER=$(openssl rand -base64 32)" >> .env
 docker compose pull
 docker compose up -d
 ```
@@ -153,7 +170,6 @@ Common checks:
 make test
 make lint
 make typecheck
-pnpm --dir web run lint
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
@@ -167,7 +183,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 - [Routing](docs/routing.md)
 - [Access control](docs/access-control.md)
 - [Built-in tools](docs/tools.md)
-- [Agent Gates](docs/agent-gates.md)
+- [Agent Guardrails](docs/agent-guardrails.md)
 - [SDK and agent integrations](docs/index.md#for-integrators)
 - [Architecture](ARCHITECTURE.md)
 

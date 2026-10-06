@@ -11,8 +11,10 @@ import uuid
 from datetime import datetime
 
 import pytest
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.models.tenancy import (
     Organization,
@@ -206,6 +208,74 @@ async def test_a_local_identity_can_be_created_deactivated(async_db: AsyncSessio
     # Still a full member of the graph, which is the point of deactivating
     # rather than deleting.
     assert identity.default_organization_id == organization.id
+
+
+async def test_an_identity_is_created_for_a_free_address(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+
+    identity = await UserRepository(async_db).try_create(
+        email=" Nova@Example.com ",
+        full_name="Nova",
+        active_organization_id=organization.id,
+    )
+
+    assert identity is not None
+    assert identity.email == "nova@example.com"
+    assert identity.full_name == "Nova"
+    assert identity.is_active is True
+    assert identity.default_organization_id == organization.id
+
+
+async def test_a_taken_address_creates_nothing_and_leaves_the_transaction_usable(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    holder = await _identity(async_db, organization, email="nova@example.com")
+    users = UserRepository(async_db)
+
+    created = await users.try_create(
+        email="NOVA@example.com",
+        full_name="Somebody else",
+        active_organization_id=organization.id,
+    )
+
+    assert created is None
+    found = await users.get_by_email("nova@example.com")
+    assert found is not None
+    assert found.id == holder.id
+
+
+async def test_a_locked_identity_is_read_fresh(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    identity = await _identity(async_db, organization, full_name="Before", email="nova@example.com")
+    await async_db.execute(
+        update(User)
+        .where(col(User.id) == identity.id)
+        .values(full_name="After")
+        .execution_options(synchronize_session=False)
+    )
+    assert identity.full_name == "Before"
+
+    locked = await UserRepository(async_db).get_locked(identity.id)
+
+    assert locked is not None
+    assert locked.full_name == "After"
+
+
+async def test_staged_changes_are_written_with_the_transaction(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    identity = await _identity(async_db, organization, email="nova@example.com")
+    users = UserRepository(async_db)
+
+    identity_id = identity.id
+
+    identity.full_name = "Nova"
+    identity.oauth_provider = "google"
+    users.stage(identity)
+    await async_db.commit()
+
+    written = await users.get_locked(identity_id)
+    assert written is not None
+    assert written.full_name == "Nova"
+    assert written.oauth_provider == "google"
 
 
 async def test_get_by_slug(async_db: AsyncSession) -> None:

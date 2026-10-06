@@ -46,6 +46,7 @@ from gateway.core.database import DATABASE_ERRORS
 from gateway.core.metered_pricing import quantize_rate
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.providers_exceptions import (
+    OrgProviderKeyNotFoundError,
     OrgProviderLastModelError,
     OrgProviderModelAlreadyOfferedError,
     OrgProviderModelNameRequiredError,
@@ -74,14 +75,12 @@ from gateway.services.model_discovery_service import ProviderDiscovery, test_pro
 from gateway.services.organization_pricing_service import EffectiveRate, OrganizationPricingService
 from gateway.services.pricing_service import default_model_pricing, normalize_effective_at
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError, decrypt_secret
-from gateway.services.tenancy.errors import OrgProviderKeyNotFoundError
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
 
 # What a client is told about where a rate came from. The spellings are
 # ``models.pricing.PriceSource``, so the models panel and the Models page name
 # the same rungs to the same reader.
-PRICE_SOURCE_ORGANIZATION: PriceSource = "organization"
 PRICE_SOURCE_DEFAULT: PriceSource = "defaults"
 PRICE_SOURCE_DEPLOYMENT: PriceSource = "deployment"
 
@@ -131,10 +130,9 @@ def _same_rates(stored: OrganizationModelPricing, default: ModelPricing) -> bool
     return list(stored.pricing_tiers or []) == list(default.pricing_tiers or [])
 
 
-
 def _priced_by_deployment(rate: EffectiveRate | None) -> bool:
     """Whether the deployment's own price list answers, which nothing here may reprice."""
-    return rate is not None and rate.source == "deployment"
+    return rate is not None and rate.source == PRICE_SOURCE_DEPLOYMENT
 
 
 def _repriceable(rate: EffectiveRate | None) -> bool:
@@ -288,9 +286,7 @@ class OrgProviderModelService:
             OrgProviderKeyNotFoundError: no such key in the caller's organization.
         """
         organization = await self.organizations.get_active_organization_for_user(user)
-        await self.organizations.require_active_organization_management_access(
-            user=user, organization=organization
-        )
+        await self.organizations.require_active_organization_management_access(user=user, organization=organization)
         key = await self.keys.get_in_organization(key_id, organization.id)
         if key is None:
             # Scoped rather than checked afterward, so another organization's id
@@ -310,13 +306,9 @@ class OrgProviderModelService:
             key = await self._key_for_user(user, key_id)
             rows, count = await self.models.list_for_key(key_id, skip=skip, limit=limit)
             prices = await self._current_prices(key, rows)
-        return OrgProviderKeyModelsPublic(
-            data=[_model_public(row, prices.get(row.model)) for row in rows], count=count
-        )
+        return OrgProviderKeyModelsPublic(data=[_model_public(row, prices.get(row.model)) for row in rows], count=count)
 
-    async def available_models(
-        self, *, user: User, key_id: uuid.UUID
-    ) -> OrgProviderAvailableModelsPublic:
+    async def available_models(self, *, user: User, key_id: uuid.UUID) -> OrgProviderAvailableModelsPublic:
         """What the provider says it serves on this key's stored credential.
 
         The credential never leaves the process: it goes into an any-llm client
@@ -481,9 +473,7 @@ class OrgProviderModelService:
             logger.exception("Offering the discovered models failed for new provider key %s", key.id)
         return key
 
-    async def refresh_models(
-        self, *, user: User, key_id: uuid.UUID
-    ) -> OrgProviderModelsRefreshPublic:
+    async def refresh_models(self, *, user: User, key_id: uuid.UUID) -> OrgProviderModelsRefreshPublic:
         """Ask the provider again, offer whatever is newly listed, and move seeded rates.
 
         Additive only: a model the provider no longer lists stays offered,
@@ -514,9 +504,7 @@ class OrgProviderModelService:
 
         added = sorted({model.id for model in discovery.models} - offered)
         repriced = await self._reprice(user=user, key_id=key_id, added=added)
-        return OrgProviderModelsRefreshPublic(
-            added=added, repriced=repriced, count=len(offered) + len(added)
-        )
+        return OrgProviderModelsRefreshPublic(added=added, repriced=repriced, count=len(offered) + len(added))
 
     async def refresh_pricing(self, *, user: User, key_id: uuid.UUID) -> OrgProviderModelsRefreshPublic:
         """Move every seeded rate onto today's community default, with no dial.
@@ -559,11 +547,7 @@ class OrgProviderModelService:
         # because the dataset had not caught up and is what this pass is for. The
         # two it may not touch are the deployment's own list and a rate an admin
         # chose.
-        candidates = [
-            row.model
-            for row in offered_rows
-            if _repriceable(priced.get(keys_by_model[row.model]))
-        ]
+        candidates = [row.model for row in offered_rows if _repriceable(priced.get(keys_by_model[row.model]))]
         defaults = await self._defaults_for(provider, [*candidates, *added])
 
         async with self.uow:
@@ -685,9 +669,7 @@ class OrgProviderModelService:
     # Pricing and dialing
     # ------------------------------------------------------------------
 
-    async def _current_prices(
-        self, key: OrgProviderKey, rows: Sequence[OrgProviderKeyModel]
-    ) -> dict[str, _Price]:
+    async def _current_prices(self, key: OrgProviderKey, rows: Sequence[OrgProviderKeyModel]) -> dict[str, _Price]:
         """What each offered model currently costs this organization, keyed by model.
 
         The ladder's order belongs to `OrganizationPricingService.rates_in_effect`,
@@ -732,9 +714,7 @@ class OrgProviderModelService:
             return None
 
     @staticmethod
-    async def _dial(
-        key: OrgProviderKey, credential: dict[str, object], *, timeout: float
-    ) -> ProviderDiscovery:
+    async def _dial(key: OrgProviderKey, credential: dict[str, object], *, timeout: float) -> ProviderDiscovery:
         """Ask the provider what it serves on this key. Never raises, never echoes the key."""
         api_key = credential.get("api_key")
         return await test_provider_credentials(

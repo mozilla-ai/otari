@@ -1,0 +1,25 @@
+schema_version: "1.0"
+policy:
+  id: otari/architecture/core-feature-wired-outside-the-registry
+  description: A core feature is switched at startup through the feature registry only.
+
+gates:
+
+  - id: core-feature-wired-outside-the-registry
+    type: judge
+    runs: [stop.session]
+    enforcement: advisory
+    when_changed:
+      - "src/gateway/api/main.py"
+      - "src/gateway/core/feature.py"
+      - "src/gateway/features.py"
+      - "src/gateway/main.py"
+      - "src/gateway/services/runtime_settings_service.py"
+    rubric: >-
+      Judge only code this diff adds. Fail if it makes a core feature depend on
+      OTARI_BOOTSTRAP, register itself when its module is imported, or take its on or
+      off switch from a runtime setting the dashboard can change. Also fail if it mounts
+      a router or starts a worker behind a setting of its own, outside CORE_FEATURES in
+      src/gateway/features.py. A check on the deployment mode (standalone, hosted or
+      hybrid) is not a feature switch. This is "The feature registry" in
+      ARCHITECTURE.md. Pass if the diff wires no core feature.

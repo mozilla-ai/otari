@@ -20,7 +20,7 @@ import type {
   UsageSummary,
 } from "@/client"
 import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import { useDeploymentOperator } from "@/shared/api/organizations"
 import { USAGE } from "@/shared/api/queryKeys"
 import { isoAgo } from "@/shared/helpers/timeRange"
 
@@ -81,17 +81,12 @@ function usageParams(filters: UsageFilters): URLSearchParams {
 // the scoped route would read their own organization's subset and quietly
 // understate every total on screen, so the hooks wait rather than guess.
 //
-// **An errored context is ready, not still waiting.** It is the same question
-// either way ("has the answer stopped being unknown"), and treating a failure as
+// **An errored context is ready, not still waiting.** Treating a failure as
 // perpetual loading disables every usage hook for the session: the pages then
-// issue no request at all and state that a gateway serving traffic has none,
-// with nothing to report because nothing was asked. A suspended membership
-// reaches this, since `_resolve_active_organization` 404s with no live
-// membership to fall back to. So a failure falls through to the *narrower*
-// surface, which is the safe direction (understating beats a cross-tenant read),
-// and its own refusal is what the page reports. `AppShell` resolves the same
-// error the same way, failing open rather than stranding the destinations behind
-// it.
+// issue no request at all and state that a gateway serving traffic has none.
+// A failure takes the deployment-wide surface, as every operator gate does
+// (`useDeploymentOperator`): the server refuses `/usage` to a non-operator, so
+// the cost is a refusal the page reports, never a cross-tenant read.
 //
 // The base is part of every query key it feeds, so two callers on one browser
 // can never read each other's cached rows.
@@ -109,12 +104,11 @@ export function useUsageScope(scope: UsageScope = "caller"): {
   isReady: boolean
   isDeploymentWide: boolean
 } {
-  const context = useOrganizationContext()
-  const isDeploymentWide =
-    scope === "caller" && context.data?.deployment_operator === true
+  const operator = useDeploymentOperator()
+  const isDeploymentWide = scope === "caller" && operator.isOperator
   return {
     base: isDeploymentWide ? "/usage" : "/organizations/me/usage",
-    isReady: scope === "organization" || context.isSuccess || context.isError,
+    isReady: scope === "organization" || operator.isSettled,
     isDeploymentWide,
   }
 }
@@ -267,6 +261,52 @@ export function useFailureCount(windowSeconds: number, enabled = true) {
     staleTime: 0,
     // A failed count is not worth surfacing: it sits beside its own alarm, and
     // the next poll retries anyway.
+    retry: false,
+  })
+}
+
+// Unpriced usage moves at the pace of traffic to a model nobody priced, so a slow
+// poll is enough for a banner that reports it.
+const UNPRICED_USAGE_POLL_MS = 5 * 60_000
+
+// Successful gateway requests within the last `windowSeconds` whose model usage
+// had no price (the Activity page's "Unpriced" filter), with the models that
+// served them. One bounded summary read: the totals, and the `model` breakdown
+// only. `workspaceId` narrows it the way Activity narrows to the shell's
+// selected workspace, so a count and the Activity rows it links to agree; ""
+// is no workspace, which Activity reads as deployment-wide too. The window is
+// resolved in the query function for the reasons `useFailureCount` gives.
+export function useUnpricedUsage(
+  windowSeconds: number,
+  workspaceId: string,
+  enabled = true,
+) {
+  const scope = useUsageScope()
+  return useQuery({
+    queryKey: [
+      USAGE,
+      "summary",
+      "unpriced",
+      scope.base,
+      workspaceId,
+      windowSeconds,
+    ],
+    queryFn: () => {
+      const params = usageParams({
+        workspace_id: workspaceId || undefined,
+        status: "success",
+        source: "gateway",
+        priced: false,
+        start_date: isoAgo(windowSeconds),
+      })
+      params.set("bucket", "hour")
+      params.append("dimensions", "model")
+      return apiFetch<UsageSummary>(
+        `${scope.base}/summary?${params.toString()}`,
+      )
+    },
+    enabled: enabled && scope.isReady,
+    refetchInterval: UNPRICED_USAGE_POLL_MS,
     retry: false,
   })
 }

@@ -65,6 +65,8 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { ActivityTimeline } from "./ActivityTimeline"
 import {
   describeSource,
+  displayStatus,
+  findGroupsMissingEarlierAttempts,
   formatLatencyCell,
   formatToolUsage,
   formatUSD,
@@ -516,17 +518,21 @@ export function ActivityPage() {
   // outcome row is missing: a page boundary splits a group, and filtering to the
   // `absorbed` status (the way an operator investigates fallovers) hides every
   // outcome row by construction, which is precisely when the answer is wanted.
+  // A served row is looked up as well when its earlier attempts are off the page,
+  // so it can still say what it spilled over from.
   const { pageOutcomes, unresolvedGroupIds } = useMemo(() => {
     const known = indexGroupOutcomes(rows)
-    const missing = new Set(
-      rows.flatMap((row) =>
+    const missing = new Set([
+      ...rows.flatMap((row) =>
         row.status === "absorbed" &&
         row.request_group_id &&
         !known.has(row.request_group_id)
           ? [row.request_group_id]
           : [],
       ),
-    )
+      // A served row whose skipped or failed attempts fell on the next page.
+      ...findGroupsMissingEarlierAttempts(rows),
+    ])
     return { pageOutcomes: known, unresolvedGroupIds: [...missing] }
   }, [rows])
   const unresolvedGroups = useRequestGroups(unresolvedGroupIds)
@@ -1050,7 +1056,7 @@ export function ActivityPage() {
       {
         id: "status",
         header: "Status",
-        cell: (entry) => <StatusMark status={entry.status} />,
+        cell: (entry) => <StatusMark status={displayStatus(entry)} />,
       },
     ]
   }, [groupOutcomes, memberLabels])

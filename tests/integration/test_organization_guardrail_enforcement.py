@@ -325,7 +325,7 @@ def test_a_monitor_entry_annotates_the_response_and_serves_it(
     response = _post(client, api_key_header, _REQUEST, guardrails, monkeypatch)
 
     assert response.status_code == 200
-    summary = json.loads(response.headers["X-Otari-Guardrails"])
+    summary = json.loads(response.headers["Otari-Guardrails"])
     assert summary == [{"profile": "prompt-injection", "mode": "monitor", "valid": False, "score": None}]
 
 
@@ -644,7 +644,7 @@ def test_a_monitor_mandate_on_a_definition_annotates_the_response(
     response = _post(client, api_key_header, _REQUEST, guardrails, monkeypatch)
 
     assert response.status_code == 200
-    summary = json.loads(response.headers["X-Otari-Guardrails"])
+    summary = json.loads(response.headers["Otari-Guardrails"])
     assert summary == [{"profile": "prompt-injection", "mode": "monitor", "valid": False, "score": None}]
 
 

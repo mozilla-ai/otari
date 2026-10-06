@@ -11,6 +11,7 @@ A durable standalone deployment should:
 - use PostgreSQL and back it up
 - set a strong master key in a secret store
 - set and back up `OTARI_SECRET_KEY` when storing provider credentials
+- set `OTARI_PROVIDER_ACCOUNT_PEPPER` to its own random value while provider copies are on
 - configure explicit pricing or deliberately enable default pricing
 - terminate TLS in front of the gateway
 - restrict database and management access
@@ -18,6 +19,25 @@ A durable standalone deployment should:
 - pin an image version and test migrations before upgrading
 
 The default SQLite database is intended for evaluation and single-node local use.
+
+A `/metrics` scrape needs the `metrics` extra (`pip install gateway[metrics]`),
+which the Docker image installs. A source install that sets `enable_metrics`
+without it refuses to start rather than serving an empty scrape.
+
+### Behind a reverse proxy
+
+When TLS ends at a proxy or a platform ingress, each request reaches Otari from
+the proxy's address. The dashboard sign-in limit and the public-catalog limit
+count failures per client address, so all visitors then share one budget. Ten
+wrong passwords from one visitor lock everyone out of the dashboard for a
+minute.
+
+Set `forwarded_allow_ips` (`OTARI_FORWARDED_ALLOW_IPS`) to the proxy's
+addresses or networks, comma-separated, so Otari reads the client address from
+`X-Forwarded-For`. Use `*` only where the proxy is the sole path to the
+container, as on Railway: any peer in the list can set its own client address.
+When it is unset, uvicorn's `FORWARDED_ALLOW_IPS` applies, and without that
+only `127.0.0.1` is trusted.
 
 ### Watch the connection pool
 

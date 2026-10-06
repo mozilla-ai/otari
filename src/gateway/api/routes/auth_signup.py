@@ -22,11 +22,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import GrowthSignalPortDep, get_config, get_db
+from gateway.api.deps import GrowthSignalPortDep, MembershipListenerDep, UnitOfWorkDep, get_config, get_db
 from gateway.api.routes._public_auth import mail_unavailable, throttle_public_auth
 from gateway.core.config import GatewayConfig
 from gateway.models.tenancy import MAX_FULL_NAME_LENGTH
-from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.user_service import (
@@ -107,6 +106,8 @@ async def signup(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     growth: GrowthSignalPortDep,
+    uow: UnitOfWorkDep,
+    membership_listener: MembershipListenerDep,
 ) -> SignupResponse:
     """Claim a roster identity, register a new one, or do nothing: the response never says which.
 
@@ -121,9 +122,11 @@ async def signup(
         claimed = await create_user_for_signup(
             db,
             config,
+            background_tasks=background_tasks,
             email=body.email,
             password=body.password,
-            membership_listener=WorkspaceBudgetDefaultService(db),
+            uow=uow,
+            membership_listener=membership_listener,
             full_name=body.full_name,
             terms_accepted=body.terms_accepted,
         )
@@ -162,13 +165,14 @@ async def verify_email_route(
 async def resend_verification(
     body: ResendVerificationRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> ResendVerificationResponse:
     """Mail a fresh verification link, or do nothing: the response never says which."""
     throttle_public_auth(request)
     try:
-        await resend_verification_email(db, config, email=body.email)
+        await resend_verification_email(db, config, background_tasks=background_tasks, email=body.email)
     except MailNotConfiguredError as exc:
         raise mail_unavailable(exc) from None
     return ResendVerificationResponse(message=_RESEND_MESSAGE)

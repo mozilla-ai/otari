@@ -239,6 +239,21 @@ def test_a_user_reachable_from_nowhere_is_shared_rather_than_hidden(client: Test
     assert UNATTACHED in _listed(client, world, "beta_operator")
 
 
+def test_an_end_user_belongs_to_its_owners_organization_before_it_spends(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """An end user with no usage yet has no join of its own, and is still not shared."""
+    session = db_session_factory()
+    try:
+        session.add(User(user_id="eu_alpha_customer", parent_user_id=ALPHA_KEYED, external_id="customer"))
+        session.commit()
+    finally:
+        session.close()
+
+    assert "eu_alpha_customer" in _listed(client, world, "alpha_operator")
+    assert "eu_alpha_customer" not in _listed(client, world, "beta_operator")
+
+
 def test_one_identity_is_listed_in_every_organization_it_belongs_to(client: TestClient, world: _World) -> None:
     """The case a single ``users.organization_id`` column could not have held.
 

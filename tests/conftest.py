@@ -1,13 +1,18 @@
 import argparse
+import asyncio
+import contextlib
+import os
 import re
 import shutil
 import sys
 import zlib
-from collections.abc import Generator
+from collections.abc import AsyncIterator, Callable, Generator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
+import anyio
+import httpx
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -16,6 +21,17 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 if "gateway" in sys.modules:
     del sys.modules["gateway"]
+
+
+class ControlPlaneHandler(Protocol):
+    """One call to a control plane, as a test answers it."""
+
+    async def __call__(
+        self, *, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response: ...
+
+
+InstallControlPlane = Callable[[ControlPlaneHandler], None]
 
 
 @dataclass(frozen=True)
@@ -39,6 +55,11 @@ def parse_shard(value: str) -> Shard:
     if match is None or not 1 <= int(match[1]) <= int(match[2]):
         raise argparse.ArgumentTypeError(f"expected INDEX/COUNT with 1 <= INDEX <= COUNT, got {value!r}")
     return Shard(index=int(match[1]), count=int(match[2]))
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    # Apps start with provider copies on, which refuses to boot without a pepper of its own.
+    os.environ["OTARI_PROVIDER_ACCOUNT_PEPPER"] = "test-provider-account-pepper-0000"
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -160,6 +181,88 @@ def _start_new_sqlite_databases_migrated(monkeypatch: pytest.MonkeyPatch, _migra
         run_migrations(database_url)
 
     monkeypatch.setattr(database, "_run_migrations", run_migrations_from_template)
+
+
+@pytest.fixture
+def isolated_home(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """An empty home directory, so neither a test nor a subprocess it runs reads the developer's own files."""
+    home = tmp_path_factory.mktemp("home")
+    # Windows reads USERPROFILE, not HOME.
+    for name in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(name, str(home))
+    return home
+
+
+@pytest.fixture
+def no_otari_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unset every ``OTARI_*`` variable, so the developer's shell cannot switch a mode or put a key in test output."""
+    for name in [name for name in os.environ if name.startswith("OTARI_")]:
+        monkeypatch.delenv(name)
+
+
+@pytest.fixture
+def control_plane_transport(monkeypatch: pytest.MonkeyPatch) -> InstallControlPlane:
+    """Answer a hybrid gateway's control plane calls with ``handler``.
+
+    ``handler`` receives the request the gateway would have sent and returns the
+    response it should read back, so a test states the answers it wants rather
+    than where the call is made.
+
+    NOTE: this is the only place the suite names the transport. A test that
+    reaches for it directly pins the call to wherever it lives today, and a
+    later move leaves that test passing while intercepting nothing.
+    """
+
+    def install(handler: ControlPlaneHandler) -> None:
+        monkeypatch.setattr("gateway.services.control_plane.transport.post", handler)
+
+    return install
+
+
+class TaskGroupMcpTransport:
+    """A fake MCP transport that holds an anyio task group open, as the streamable HTTP client does.
+
+    ``may_open`` and ``may_close`` gate opening and closing.
+    ``ignore_cancel`` makes both gates outlast a cancellation.
+    """
+
+    def __init__(self) -> None:
+        self.may_open = asyncio.Event()
+        self.may_open.set()
+        self.may_close = asyncio.Event()
+        self.may_close.set()
+        self.ignore_cancel = False
+        self.close_error: BaseException | None = None
+        self.entered_in: asyncio.Task[Any] | None = None
+        self.exited_in: list[asyncio.Task[Any] | None] = []
+
+    async def _pass(self, gate: asyncio.Event) -> None:
+        while True:
+            try:
+                await gate.wait()
+                return
+            except asyncio.CancelledError:
+                if not self.ignore_cancel:
+                    raise
+
+    @contextlib.asynccontextmanager
+    async def __call__(self, *args: Any, **kwargs: Any) -> AsyncIterator[tuple[object, object, object]]:
+        await self._pass(self.may_open)
+        async with anyio.create_task_group():
+            self.entered_in = asyncio.current_task()
+            yield object(), object(), object()
+            await self._pass(self.may_close)
+            self.exited_in.append(asyncio.current_task())
+        if self.close_error is not None:
+            raise self.close_error
+
+
+@pytest.fixture
+def mcp_task_group_transport(monkeypatch: pytest.MonkeyPatch) -> TaskGroupMcpTransport:
+    """Serve every MCP connection through one :class:`TaskGroupMcpTransport`."""
+    transport = TaskGroupMcpTransport()
+    monkeypatch.setattr("gateway.services.mcp_client.streamablehttp_client", transport)
+    return transport
 
 
 def _new_sqlite_file(database_url: str) -> Path | None:

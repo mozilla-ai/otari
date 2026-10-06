@@ -57,6 +57,8 @@ test.describe("hybrid deployment", () => {
       // Deployment-wide like docs_url, and unset here too.
       terms_url: null,
       privacy_url: null,
+      // Deployment-wide like docs_url, and unset here too.
+      site_url: null,
       // Never frozen, because the freeze is on a sign-in this deployment does
       // not serve: a hybrid gateway mints no session for maintenance mode to
       // refuse. Its control plane owns that, as it owns the sign-in itself.
@@ -64,6 +66,8 @@ test.describe("hybrid deployment", () => {
       // No session of its own to protect, so no ceremony to run either.
       passkeys_ready: false,
       oauth_providers: [],
+      // Never offered here: feedback is a standalone gateway's route.
+      feedback_enabled: false,
       // Its control plane sends the mail that carries links back to it.
       mail_ready: false,
       // Never open here: the catalog is the control plane's to show, and a

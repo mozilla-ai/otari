@@ -31,10 +31,8 @@ history both record; the cookie is the half of the flow that neither does. See
 ``gateway.services.oauth_service``.
 
 **What this route decides, and what it does not.** It proves the person holds
-the provider account. Who that makes them *here* is behind
-``IdentityProviderPort``: this build resolves the identity against its roster
-and refuses one it does not recognize, and an overlay binds a different policy
-without editing this file.
+the provider account. ``IdentityProviderPort`` decides which account that person
+signs in as here, so an overlay can change that policy without editing this file.
 """
 
 import uuid
@@ -54,6 +52,8 @@ from gateway.api.routes._public_auth import throttle_public_auth
 # wording it differently would tell a person the doors closed for three reasons.
 from gateway.api.routes.auth_session import MAINTENANCE_MODE_REFUSAL
 from gateway.core.config import OAUTH_PROVIDERS, GatewayConfig
+from gateway.exceptions import TenancyError
+from gateway.exceptions.identity_exceptions import OAuthNotConfiguredError
 from gateway.log_config import logger
 from gateway.services.dashboard_session_service import (
     apply_session_cookie,
@@ -71,7 +71,6 @@ from gateway.services.oauth_service import (
     provider_label,
     require_configured,
 )
-from gateway.services.tenancy.errors import OAuthNotConfiguredError, TenancyError
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 
 router = APIRouter(prefix=OAUTH_ROUTE_PREFIX, tags=["auth"])

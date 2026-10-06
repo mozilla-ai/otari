@@ -38,6 +38,11 @@ from fastapi.testclient import TestClient
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX, MCP_CLIENT_BETA
+from gateway.services.tools import WEB_SEARCH_HEADER
+from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
+from gateway.types.normalization_target import NormalizationTarget
+
+from .conftest import MODEL_NAME
 
 _CONTEXT_MANAGEMENT = {"edits": [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}]}
 _BETAS = ["compact-2026-01-12"]
@@ -534,7 +539,7 @@ def test_mcp_servers_dispatches_through_anthropic_tool_loop(
     seen: dict[str, Any] = {}
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> MessageResponse:
         seen["completion_kwargs"] = completion_kwargs
         seen["pool"] = pool
@@ -602,7 +607,7 @@ def test_web_search_replay_is_stripped_when_interception_is_off(
     captured: dict[str, Any] = {}
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> MessageResponse:
         captured.update(completion_kwargs)
         return _text_response("ok")
@@ -645,7 +650,7 @@ def test_code_execution_dispatches_through_sandbox_backend(
     pool_seen: list[Any] = []
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> MessageResponse:
         pool_seen.append(pool)
         return _text_response("via-sandbox-loop")
@@ -694,7 +699,7 @@ def test_managed_web_tool_dispatches_through_web_retrieval_backend(
     pool_seen: list[Any] = []
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> MessageResponse:
         pool_seen.append(pool)
         return _text_response("via-web-search-loop")
@@ -858,6 +863,34 @@ def test_code_execution_combined_with_mcp_servers_returns_400(
     )
 
 
+def test_web_search_combined_with_mcp_servers_returns_400(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The use cap reads ownership off the pool, which only tells a gateway call from an
+    MCP server's own because the two never share a request.
+    """
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    resp = client.post(
+        f"{API_ROOT}/messages",
+        json={
+            "model": "anthropic:claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 100,
+            "tools": [{"type": "otari_web_search", "max_uses": 1}],
+            "mcp_servers": [{"name": "x", "url": "http://127.0.0.1:9999/mcp"}],
+        },
+        headers=api_key_header,
+    )
+    assert resp.status_code == 400
+    _assert_anthropic_error(
+        resp.json(),
+        error_type="invalid_request_error",
+        message_substr="cannot be combined with otari_code_execution",
+    )
+
+
 def test_code_execution_combined_with_a_provider_native_tool_returns_400(
     client: TestClient,
     api_key_header: dict[str, str],
@@ -899,7 +932,7 @@ def test_code_execution_allows_an_unrelated_caller_function(
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> MessageResponse:
         return _text_response()
 
@@ -977,7 +1010,7 @@ def test_max_tool_iterations_exceeded_returns_422_anthropic_body(
     from gateway.services.mcp_loop_messages import MaxToolIterationsExceeded
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> MessageResponse:
         raise MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
 
@@ -1169,11 +1202,21 @@ def test_echoed_gateway_activity_is_removed_before_prompt_estimation(
 
     async def fake_normalize_messages(input_messages: Any, **kwargs: Any) -> Any:
         captured["normalized_messages"] = input_messages
-        return input_messages, SimpleNamespace(vision_usage=lambda: None, sandbox_inputs=[])
+        return input_messages, SimpleNamespace(vision_usage=lambda: None, sandbox_inputs=[], container_inputs=[])
 
     async def fake_resolve_request_context(**kwargs: Any) -> Any:
         captured.update(kwargs)
-        await kwargs["normalize_messages"]("user", None, "model", None, None, None)
+        await kwargs["normalize_messages"](
+            NormalizationTarget(
+                user_id="user",
+                provider=None,
+                model="model",
+                instance=None,
+                file_workspace_id=None,
+                credential_workspace_id=None,
+                workspace_executor=None,
+            )
+        )
         raise HTTPException(status_code=418, detail="stop after admission inputs")
 
     with (
@@ -1391,7 +1434,7 @@ def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
     seen: dict[str, Any] = {}
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> AsyncIterator[MessageStreamEvent]:
         seen["pool"] = pool
         seen["max_iterations"] = max_iterations
@@ -1589,7 +1632,7 @@ def test_stream_code_execution_dispatches_through_sandbox(
     pool_seen: list[Any] = []
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> AsyncIterator[MessageStreamEvent]:
         pool_seen.append(pool)
         yield _stream_message_stop()
@@ -1698,11 +1741,11 @@ def test_intercept_routes_provider_keywords_to_the_gateway_backend(
         completion_kwargs: Any,
         pool: Any,
         max_iterations: int,
-        emit_native_web_search: bool = False,
-        web_search_budget: Any = None,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
     ) -> MessageResponse:
         pool_seen.append(pool)
-        budgets_seen.append(web_search_budget)
+        budgets_seen.append(use_budget)
         return _text_response("via-web-search-loop")
 
     fake_backend = AsyncMock()
@@ -1752,12 +1795,12 @@ def test_intercept_emits_native_blocks_only_for_a_native_declaration(
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
     monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
 
-    seen: list[bool] = []
+    seen: list[frozenset[str]] = []
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> MessageResponse:
-        seen.append(emit_native_web_search)
+        seen.append(native_tools)
         return _text_response("ok")
 
     fake_backend = AsyncMock()
@@ -1788,7 +1831,7 @@ def test_intercept_emits_native_blocks_only_for_a_native_declaration(
     post({"type": "web_search"})
     post({"type": "otari_web_search"})
 
-    assert seen == [True, False, False]
+    assert seen == [frozenset({WEB_SEARCH_TOOL_NAME}), frozenset(), frozenset()]
 
 
 def test_intercept_off_still_forwards_provider_keywords(
@@ -1819,6 +1862,141 @@ def test_intercept_off_still_forwards_provider_keywords(
 
     assert resp.status_code == 200, resp.text
     assert [tool["type"] for tool in captured.get("tools") or []] == ["web_search_20250305"]
+
+
+def test_auto_claims_a_search_keyword_the_provider_cannot_run_with_native_blocks(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With `Otari-Web-Search: auto`, a dated keyword sent for a model whose provider
+    has no search runs on the gateway backend and still answers in Anthropic's blocks."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
+    seen: list[tuple[Any, frozenset[str]]] = []
+
+    async def fake_loop(
+        *,
+        completion_kwargs: Any,
+        pool: Any,
+        max_iterations: int,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: Any = None,
+    ) -> MessageResponse:
+        seen.append((pool, native_tools))
+        return _text_response("ok")
+
+    fake_backend = AsyncMock()
+    fake_backend.purpose_hints = lambda: []
+    fake_builder_result = AsyncMock(
+        __aenter__=AsyncMock(return_value=fake_backend),
+        __aexit__=AsyncMock(return_value=None),
+    )
+    with (
+        patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
+        patch("gateway.api.routes._pipeline._build_web_retrieval_backend", return_value=fake_builder_result),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/messages",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "search"}],
+                "max_tokens": 100,
+                "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 2}],
+            },
+            headers={**api_key_header, WEB_SEARCH_HEADER: "auto"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert seen == [(fake_backend, frozenset({WEB_SEARCH_TOOL_NAME}))]
+
+
+@pytest.mark.parametrize(
+    ("backend_url", "header"),
+    [(None, "auto"), ("http://127.0.0.1:9999/search", None)],
+    ids=["auto-without-a-backend", "backend-without-the-header"],
+)
+def test_a_search_keyword_the_provider_cannot_run_is_forwarded(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    backend_url: str | None,
+    header: str | None,
+) -> None:
+    """With nothing to run it on, or no header asking for `auto`, the keyword passes
+    through as it always has."""
+    if backend_url is None:
+        monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    else:
+        monkeypatch.setenv("OTARI_WEB_SEARCH_URL", backend_url)
+    monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
+    captured: dict[str, Any] = {}
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        captured.update(kwargs)
+        return _text_response("ok")
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = client.post(
+            f"{API_ROOT}/messages",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "search"}],
+                "max_tokens": 100,
+                "tools": [{"type": "web_search_20250305"}],
+            },
+            headers={**api_key_header, **({WEB_SEARCH_HEADER: header} if header else {})},
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert [tool["type"] for tool in captured.get("tools") or []] == ["web_search_20250305"]
+
+
+def test_an_unknown_web_search_header_value_is_rejected(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    resp = client.post(
+        f"{API_ROOT}/messages",
+        json={
+            "model": MODEL_NAME,
+            "messages": [{"role": "user", "content": "search"}],
+            "max_tokens": 100,
+            "tools": [{"type": "web_search_20250305"}],
+        },
+        headers={**api_key_header, WEB_SEARCH_HEADER: "gateway"},
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert "Otari-Web-Search must be one of auto, otari, provider" in resp.text
+
+
+def test_the_header_cannot_hand_an_intercepted_search_to_the_provider(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Interception puts every search under the workspace policy and tool pricing,
+    so `Otari-Web-Search: provider` is refused rather than letting a caller opt out."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
+    forwarded = AsyncMock()
+
+    with patch("gateway.api.routes.messages.amessages", new=forwarded):
+        resp = client.post(
+            f"{API_ROOT}/messages",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "search"}],
+                "max_tokens": 100,
+                "tools": [{"type": "web_search_20250305"}],
+            },
+            headers={**api_key_header, WEB_SEARCH_HEADER: "provider"},
+        )
+
+    assert resp.status_code == 403, resp.text
+    assert "cannot hand it to the provider" in resp.text
+    forwarded.assert_not_awaited()
 
 
 def test_intercept_without_a_backend_forwards_rather_than_400s(
@@ -1895,7 +2073,7 @@ def test_intercept_retargets_a_forced_tool_choice(
     seen: list[Any] = []
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> MessageResponse:
         seen.append(completion_kwargs.get("tool_choice"))
         return _text_response("ok")

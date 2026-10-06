@@ -32,26 +32,30 @@ def s3_store() -> Generator[S3FileStore, None, None]:
 
 @pytest.mark.asyncio
 async def test_put_get_roundtrip(s3_store: S3FileStore) -> None:
-    ref = await s3_store.put("file-abcdef0123", b"hello bytes")
+    ref = await s3_store.allocate("file-abcdef0123")
+    await s3_store.put(ref, b"hello bytes")
     assert await s3_store.get(ref) == b"hello bytes"
 
 
 @pytest.mark.asyncio
 async def test_put_shards_by_prefix(s3_store: S3FileStore) -> None:
-    ref = await s3_store.put("file-ab12cd34", b"x")
+    ref = await s3_store.allocate("file-ab12cd34")
+    await s3_store.put(ref, b"x")
     assert ref == "ab/file-ab12cd34"
 
 
 @pytest.mark.asyncio
 async def test_put_stream_get_roundtrip(s3_store: S3FileStore) -> None:
-    ref, size = await s3_store.put_stream("file-streamtest01", _iter([b"hello ", b"stream", b"ed bytes"]))
+    ref = await s3_store.allocate("file-streamtest01")
+    size = await s3_store.put_stream(ref, _iter([b"hello ", b"stream", b"ed bytes"]))
     assert size == len(b"hello streamed bytes")
     assert await s3_store.get(ref) == b"hello streamed bytes"
 
 
 @pytest.mark.asyncio
 async def test_put_stream_handles_empty_chunks(s3_store: S3FileStore) -> None:
-    ref, size = await s3_store.put_stream("file-emptystream1", _iter([]))
+    ref = await s3_store.allocate("file-emptystream1")
+    size = await s3_store.put_stream(ref, _iter([]))
     assert size == 0
     assert await s3_store.get(ref) == b""
 
@@ -59,7 +63,8 @@ async def test_put_stream_handles_empty_chunks(s3_store: S3FileStore) -> None:
 @pytest.mark.asyncio
 async def test_get_stream_yields_all_bytes(s3_store: S3FileStore) -> None:
     payload = b"x" * (3 * 1024 * 1024 + 17)  # spans multiple 1 MiB read chunks
-    ref = await s3_store.put("file-bigstream0001", payload)
+    ref = await s3_store.allocate("file-bigstream0001")
+    await s3_store.put(ref, payload)
 
     collected = bytearray()
     async for chunk in s3_store.get_stream(ref):
@@ -69,7 +74,8 @@ async def test_get_stream_yields_all_bytes(s3_store: S3FileStore) -> None:
 
 @pytest.mark.asyncio
 async def test_delete_removes_object(s3_store: S3FileStore) -> None:
-    ref = await s3_store.put("file-deadbeef", b"data")
+    ref = await s3_store.allocate("file-deadbeef")
+    await s3_store.put(ref, b"data")
     await s3_store.delete(ref)
     # S3FileStore translates a missing object into FileNotFoundError, mirroring
     # the local backend so route callers can keep catching OSError.
@@ -104,7 +110,8 @@ async def test_delete_failure_raises_oserror(s3_store: S3FileStore, monkeypatch:
 
 @pytest.mark.asyncio
 async def test_delete_is_idempotent(s3_store: S3FileStore) -> None:
-    ref = await s3_store.put("file-deadbeef", b"data")
+    ref = await s3_store.allocate("file-deadbeef")
+    await s3_store.put(ref, b"data")
     await s3_store.delete(ref)
     # S3 DeleteObject is idempotent by design: deleting an absent key is not an error.
     await s3_store.delete(ref)
@@ -122,8 +129,9 @@ async def test_put_stream_does_not_upload_on_failure_before_upload_starts(s3_sto
         msg = "simulated upstream failure mid-stream"
         raise RuntimeError(msg)
 
+    ref = await s3_store.allocate("file-failmidstream")
     with pytest.raises(RuntimeError, match="simulated upstream failure"):
-        await s3_store.put_stream("file-failmidstream", _failing_chunks())
+        await s3_store.put_stream(ref, _failing_chunks())
 
     client = s3_store._client  # noqa: SLF001 - inspecting internal state to assert nothing was uploaded
     listing = await asyncio.to_thread(client.list_objects_v2, Bucket=_BUCKET, Prefix="fa/")
@@ -156,8 +164,9 @@ async def test_put_stream_aborts_multipart_upload_on_mid_upload_failure(
     monkeypatch.setattr(client, "upload_part", _flaky_upload_part)
 
     payload = b"y" * (9 * 1024 * 1024)  # > 8 MiB default multipart_threshold
+    ref = await s3_store.allocate("file-multipartfail1")
     with pytest.raises(RuntimeError, match="simulated network failure"):
-        await s3_store.put_stream("file-multipartfail1", _iter([payload]))
+        await s3_store.put_stream(ref, _iter([payload]))
 
     assert call_count["value"] >= 2  # confirms multipart (and our failure point) actually engaged
 
@@ -192,7 +201,8 @@ async def test_put_stream_removes_orphaned_upload_when_cancelled_after_success(
 
     monkeypatch.setattr(client, "upload_fileobj", _gated_upload_fileobj)
 
-    task = asyncio.ensure_future(s3_store.put_stream("file-orphancheck01", _iter([b"data"])))
+    ref = await s3_store.allocate("file-orphancheck01")
+    task = asyncio.ensure_future(s3_store.put_stream(ref, _iter([b"data"])))
     # Don't cancel until the upload thread is truly running: an ignored
     # timeout here would let the test proceed anyway, cancelling before the
     # race it's meant to reproduce even started, silently.

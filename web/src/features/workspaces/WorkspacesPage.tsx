@@ -18,12 +18,15 @@ import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { budgetLabeler, shortBudgetId } from "@/features/budgets/budgetLabel"
-import { canManage, isDeploymentOperator } from "@/features/organization/roles"
+import { canManage } from "@/features/organization/roles"
 import { departureSummary } from "@/features/workspaces/providerKeyDepartures"
 import { WorkspaceProviderKeys } from "@/features/workspaces/WorkspaceProviderKeys"
 import { useBudgets } from "@/shared/api/budgets"
 import { ApiError } from "@/shared/api/client"
-import { useOrganizationContext } from "@/shared/api/organizations"
+import {
+  useDeploymentOperator,
+  useOrganizationContext,
+} from "@/shared/api/organizations"
 import { useProviders } from "@/shared/api/providers"
 import {
   useAllWorkspaceBudgetDefaults,
@@ -331,8 +334,7 @@ export function CreateWorkspaceForm({
   // offered anyway, the picker could only say "No default", which misreads as
   // the deployment having no budgets. Resolved here rather than passed in
   // because the workspace switcher offers this same form.
-  const context = useOrganizationContext()
-  const isOperator = isDeploymentOperator(context.data)
+  const { isOperator } = useDeploymentOperator()
   const budgets = useBudgets(isOperator)
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
@@ -523,8 +525,7 @@ function EditWorkspaceForm({
   // UUID and the per-provider section had no provider to offer. The defaults
   // read itself is workspace-scoped and would answer, but this form only reads
   // it into those controls, so it is declined together with them.
-  const context = useOrganizationContext()
-  const isOperator = isDeploymentOperator(context.data)
+  const { isOperator } = useDeploymentOperator()
   const budgets = useBudgets(isOperator)
   const defaults = useWorkspaceBudgetDefaults(isOperator ? workspace.id : null)
   const createDefault = useCreateWorkspaceBudgetDefault()
@@ -690,7 +691,7 @@ export function WorkspacesPage() {
   // unless the caller may read it, and the column it names is withheld with it
   // (the OrganizationMembersPage pattern, otari#838): without the names, every
   // cell could only echo a UUID fragment of the default's id.
-  const isOperator = isDeploymentOperator(context.data)
+  const { isOperator } = useDeploymentOperator()
   const budgets = useBudgets(isOperator)
   const remove = useDeleteWorkspace()
 

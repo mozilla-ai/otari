@@ -1,12 +1,13 @@
 import uuid
+from collections.abc import Sequence
 from typing import Never
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.budget_exceptions import BudgetStillReferencedError
-from gateway.models.budgets import Budget, WorkspaceBudgetDefault
+from gateway.models.budgets import Budget, BudgetResetLog
 from gateway.models.users import User
 from gateway.repositories.base_repository import BaseRepository
 
@@ -31,15 +32,6 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         )
         return result.scalar_one()
 
-    async def count_member_policies_for_budget(self, budget_id: str) -> int:
-        """Count the workspace member budget policies that name this budget."""
-        result = await self.db.execute(
-            select(func.count())
-            .select_from(WorkspaceBudgetDefault)
-            .where(WorkspaceBudgetDefault.budget_id == budget_id)
-        )
-        return result.scalar_one()
-
     async def count_users_for_budget(self, budget_id: str) -> int:
         """Count the gateway users assigned this budget."""
         result = await self.db.execute(select(func.count()).select_from(User).where(User.budget_id == budget_id))
@@ -52,6 +44,11 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         )
         return result.scalar_one_or_none()
 
+    async def get_many(self, budget_ids: Sequence[str]) -> dict[str, Budget]:
+        """Return the budgets with these IDs, keyed on ID, omitting an ID that names none."""
+        result = await self.db.execute(select(Budget).where(Budget.budget_id.in_(budget_ids)))
+        return {budget.budget_id: budget for budget in result.scalars().all()}
+
     async def list_by_organization(self, organization_id: uuid.UUID, *, skip: int, limit: int) -> list[Budget]:
         """Return a page of the organization's budgets, oldest first."""
         result = await self.db.execute(
@@ -62,6 +59,14 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    async def remove_reset_logs(self, budget_id: str) -> None:
+        """Stage the deletion of the budget's reset history.
+
+        ``budget_reset_logs.budget_id`` is NOT NULL with no ``ondelete``, so a budget that has ever reset
+        cannot be removed until its history is.
+        """
+        await self.db.execute(delete(BudgetResetLog).where(BudgetResetLog.budget_id == budget_id))
 
     async def remove(self, budget: Budget) -> None:
         """Stage the deletion of a budget.

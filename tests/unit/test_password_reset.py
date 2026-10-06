@@ -294,6 +294,40 @@ def test_request_reset_for_a_deactivated_identity_sends_nothing(
         assert "mail:console" not in log_text
 
 
+def test_request_reset_for_a_verified_identity_with_no_password_sends_nothing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with _client(tmp_path) as client:
+        assert (
+            client.post(
+                f"{API_ROOT}/organizations/me/members",
+                json={"email": "ada@example.com", "role": "member"},
+                headers={"Otari-Key": MASTER_KEY},
+            ).status_code
+            == 201
+        )
+        engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
+        with engine.begin() as connection:
+            connection.execute(
+                text('UPDATE "user" SET email_verified_at = CURRENT_TIMESTAMP WHERE email = :email'),
+                {"email": "ada@example.com"},
+            )
+        engine.dispose()
+
+        status_code, log_text = _request_reset(client, caplog, email="ada@example.com")
+
+        assert status_code == 200
+        assert "mail:console" not in log_text
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
+    with engine.begin() as connection:
+        token_hash = connection.execute(
+            text('SELECT password_reset_token_hash FROM "user" WHERE email = :email'), {"email": "ada@example.com"}
+        ).scalar_one()
+    engine.dispose()
+    assert token_hash is None
+
+
 def test_request_reset_without_mail_configured_is_refused(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     with _client(tmp_path) as client:
         _claimed_and_verified(client, caplog, email="ada@example.com")

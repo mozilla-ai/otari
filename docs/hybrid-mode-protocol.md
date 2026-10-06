@@ -18,6 +18,7 @@ Otari calls these endpoints, all rooted at the configured platform base URL:
 | `POST {base}/gateway/usage`                 | Report the outcome of an attempt back to the platform |
 | `POST {base}/gateway/mcp-servers/resolve`   | Authorize MCP access and swap workspace-scoped MCP server ids for inline server configs |
 | `POST {base}/gateway/web-search/resolve`    | Resolve the workspace's Web Access policy when a request uses `otari_web_search` or `otari_web_fetch` |
+| `POST {base}/gateway/code-execution/resolve` | Resolve the workspace's code-execution policy when a request declares `otari_code_execution` |
 
 `{base}` means Otari platform `base_url` setting. Otari concatenates literally. The peer service is responsible for including any API-version prefix it exposes its own routes under. For the reference otari deployment that prefix is `/api/v1`, so the base URL is `http://backend:8000/api/v1` and Otari ends up POSTing to `http://backend:8000/api/v1/gateway/provider-keys/resolve`.
 
@@ -116,7 +117,7 @@ Content-Type: application/json
 Otari iterates `attempts` in order. On a provider failure before a response is
 committed, it moves to the next entry; on success it stops. The `attempt_id` of
 the entry that ultimately succeeded (or the last one tried, on total failure) is what Otari echoes
-back via `X-Correlation-ID` and reports through `/gateway/usage`.
+back via `Otari-Attempt-ID` and reports through `/gateway/usage`.
 
 `extra_params` (optional, omitted for most providers) carries provider-specific
 credential/client fields beyond `api_key`/`api_base`: for example AWS
@@ -157,7 +158,7 @@ boto3 client and AWS has two distinct credential shapes:
 
 `request_id` groups every `attempt_id` from the same resolve call so the
 platform can attribute spend, render trace timelines, and emit fallback events.
-Otari also surfaces it as the `X-Otari-Request-ID` response header.
+Otari also surfaces it as the `Otari-Request-ID` response header.
 
 `fallback_enabled` is informational, set by the platform when its routing
 policy actually allows fallback (i.e. the policy has multiple enabled entries
@@ -213,9 +214,9 @@ its own tenant.
 
 | Status | Behavior |
 |---|---|
-| `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Authorization request rejected"`. |
+| `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` is relayed as whole seconds, rounded up and capped at one day. A value that is not a non-negative number of seconds, such as an HTTP date, is dropped. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Authorization request rejected"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
-| Network/timeout                    | Mapped to `502 Bad Gateway`. |
+| Network, timeout, protocol or proxy failure, or an undecodable body | Mapped to `502 Bad Gateway`. |
 
 A `421 Misdirected Request` only ever refers to `X-User-Token`: the user token belongs to another regional deployment, and the `detail` names the host that serves it. Otari forwards both the status and the detail unchanged so the end user can send the request there. A gateway token from the wrong region is not a `421`: that is the operator's configuration, which the end user cannot act on, so the platform answers it the way it answers any other bad gateway token. The region a token carries is a routing hint only: the platform still hashes the whole token and looks it up, and a token with a bad checksum, an unknown region, or the wrong kind for its header gets a `401` with no lookup (otari-ai#1665). The Web Access resolve below shares this ladder and forwards a `421` the same way. The MCP endpoints publish their own error contract and do not forward the detail: a `421` there becomes `misdirected_request` with the fixed safe message and no host (see below).
 
@@ -265,10 +266,11 @@ The caller-orchestrated endpoints send exactly one id:
 ```
 
 Otari reads `name`, `url`, `authorization_token`, `purpose_hint`, and
-`allowed_tools` off each entry in `servers`; for the tool loop, a missing
-`servers` key is treated as an empty list. The same URL-safety rules as inline
-MCP configs apply once the configs are resolved (SSRF guard, no bearer token
-over cleartext `http://`).
+`allowed_tools` off each entry in `servers`. Every answer must carry the
+`servers` key. An empty list says the peer resolved none. An answer omitting the
+key is one Otari cannot read. The same URL-safety rules as inline MCP configs
+apply once the configs are resolved (SSRF guard, no bearer token over cleartext
+`http://`).
 
 For a caller-orchestrated request, exactly one returned entry is bound to the
 one id Otari requested. A legacy entry may omit `id` and `enabled`; Otari uses
@@ -278,6 +280,11 @@ list is the legacy representation of a disabled server and becomes
 A missing or malformed `servers` list, multiple entries, malformed recognized
 fields, or an explicit id that does not match remain
 `502 mcp_resolution_failed`.
+
+For a tool-loop request, a missing or malformed `servers` list is also
+`502 mcp_resolution_failed`. A request naming stored servers is refused rather
+than dispatched without them. A caller cannot tell an emptied tool list from a
+model that chose not to call one, and the attempt is billed either way.
 
 New peers should return `id` and `enabled`. When present, `id` must match the
 request and `enabled` must be a JSON boolean; `enabled: false` becomes the same
@@ -294,9 +301,9 @@ Nothing platform-side stores or returns a revision.
 
 | Status | Behavior |
 |---|---|
-| `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"MCP server resolution failed"`. |
+| `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` is relayed as whole seconds, rounded up and capped at one day. A value that is not a non-negative number of seconds, such as an HTTP date, is dropped. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"MCP server resolution failed"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
-| Network/timeout                    | Mapped to `502 Bad Gateway`. |
+| Network, timeout, protocol or proxy failure, or an undecodable body | Mapped to `502 Bad Gateway`. |
 
 The caller-orchestrated endpoints publish their own error contract instead of
 forwarding any detail, because a platform `detail` may name a workspace, a plan,
@@ -356,30 +363,105 @@ no tools. Every requested tool must be in the effective authorization list or
 the request fails with `403`. Fetch always requires an explicit `"web_fetch"`
 entry, so a legacy response denies Fetch-only and combined Search/Fetch requests.
 
-Recognized domain-list fields must be lists of valid strings. A malformed
-recognized field fails closed with `502` instead of being coerced.
+Every recognized field must have its documented type and stay within the limits a stored workspace policy has: `max_results` an integer from 1 to 20, `purpose_hint` a string of at most 2,048 characters, `provider_options` an object with at most 30 keys that serializes to at most 4,096 bytes of JSON, and each domain list at most 100 valid hostnames of at most 253 characters each. A malformed recognized field fails closed with `502` instead of being coerced. A whitespace-only `purpose_hint` reads as absent.
 
-For Search, `max_results`, `allowed_domains`, `blocked_domains`, and
-`purpose_hint` remain workspace defaults where the request supplies no value;
-`provider_options` is shallow-merged with request keys winning. For Fetch,
-allowed and blocked domains form a mandatory policy that request-supplied Search
-filters may only narrow when both tools are declared. Fetch authorization does
-not depend on a Search provider, credential, or backend URL. `provider` is
-informational: the active Search backend is configured on the gateway itself.
+A workspace's `max_results`, `allowed_domains` and `blocked_domains` are a ceiling that a request may narrow and may not widen. The data plane applies the lower of the workspace's `max_results` and the request's own, or the deployment's default where the request names none. It applies the union of the two block-lists. Each allow-list entry is a domain suffix that also covers its subdomains, so the two allow-lists intersect by keeping the narrower entry of each overlapping pair: a request naming `docs.example.com` under a workspace allowing `example.com` keeps `docs.example.com`. A request whose allow-list overlaps the workspace's nowhere is refused with `403`. `purpose_hint` fills the request's hint only where it has none, and `provider_options` is shallow-merged with request keys winning.
+
+For Fetch, allowed and blocked domains form a mandatory policy that request-supplied Search filters may only narrow when both tools are declared. Fetch authorization does not depend on a Search provider, credential, or backend URL. `provider` is informational: the active Search backend is configured on the data plane itself.
 
 ### Failure
 
 | Status | Behavior |
 |---|---|
-| `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Web search resolution failed"`. |
+| `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` is relayed as whole seconds, rounded up and capped at one day. A value that is not a non-negative number of seconds, such as an HTTP date, is dropped. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Web search resolution failed"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
-| Network/timeout                    | Mapped to `502 Bad Gateway`. |
+| Network, timeout, protocol or proxy failure, or an undecodable body | Mapped to `502 Bad Gateway`. |
 
 > The resolve endpoints share the timeout (`PLATFORM_RESOLVE_TIMEOUT_MS`) and
 > token headers with `provider-keys/resolve`. Their exact response shapes will
 > become the contract of record once the consumer-side fixtures land
 > ([#146](https://github.com/mozilla-ai/otari/issues/146)); until then this
 > document is authoritative.
+
+## Code execution resolution
+
+Called when the deployment has a sandbox and a request declares code
+execution: `otari_code_execution`, or a provider's own code-execution tool. It
+is asked before Otari decides who runs a provider's tool, because the answer's
+`executor` can decide that. It is asked at the same point in every request,
+whether the data plane holds the policy or its control plane does.
+
+### Request
+
+```
+POST /gateway/code-execution/resolve
+X-Gateway-Token: gw_...
+X-User-Token: tk_...
+Content-Type: application/json
+
+{}
+```
+
+The workspace is identified by `X-User-Token`. The body carries nothing: the
+question is what this workspace may do, not what this request asked for.
+
+### Response
+
+```json
+{
+  "enabled": true,
+  "default_purpose_hint": "Data analysis",
+  "max_iterations": 4,
+  "executor": "otari",
+  "tools": ["code_execution"],
+  "exec_timeout_s": 30
+}
+```
+
+`enabled` is the platform's veto and must be a JSON boolean. A workspace that
+may not run code is answered with `200` and `"enabled": false`, not refused, so
+a request whose code would not run here is unaffected by it. A `403` is only for
+a caller the platform does not accept, as on `provider-keys/resolve`.
+
+Every other field is optional, and `null` means the same as absent:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `default_purpose_hint` | string | The hint used when a request gives none. An empty string means none. |
+| `max_iterations` | positive integer | A ceiling on the tool loop's iterations. |
+| `exec_timeout_s` | positive integer | A ceiling on one execution's runtime, in seconds. |
+| `tools` | list of strings | The code-execution tool kinds the workspace may use: `code_execution`, `bash_code_execution`, `text_editor_code_execution`. |
+| `executor` | `auto`, `otari` or `provider` | Who runs a provider's code-execution tool for this workspace. |
+
+Otari applies every field, as it does a policy it holds itself. The two
+ceilings only lower the deployment's own limits, so a larger value changes
+nothing. `tools` intersects the tool kinds the sandbox serves, and a list that
+leaves none is refused with `403`. A field of the wrong type, or an `executor`
+Otari does not know, is a contract break: it fails closed with `502` and no code
+runs.
+
+A policy narrows what the deployment already allows and never widens it. A
+response that resolves to nothing leaves the deployment's own settings in force.
+
+### Failure
+
+| Status | Behavior |
+|---|---|
+| `400`, `401`, `402`, `403`, `404`, `421`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` is relayed as whole seconds, rounded up and capped at one day. A value that is not a non-negative number of seconds, such as an HTTP date, is dropped. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Code execution resolution failed"`. |
+| `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
+| Network, timeout, protocol or proxy failure, or an undecodable body | Mapped to `502 Bad Gateway`. |
+
+### Where the code runs
+
+This endpoint answers policy only. It returns no sandbox address and no
+credential, because the sandbox is deployment-wide configuration
+(`OTARI_SANDBOX_URL`) rather than a per-workspace fact.
+
+Otari sends the sandbox no caller credential, whatever that setting names. A
+control plane that serves the sandbox itself therefore cannot tell which
+workspace a call is for.
+
+[#1603](https://github.com/mozilla-ai/otari/issues/1603) decided how a data plane will reach the sandbox: with a scoped grant, presented to a front door in front of the backend. This endpoint will then also return the front door's address and a grant, as fields an older data plane ignores. [#1688](https://github.com/mozilla-ai/otari/issues/1688) holds the grant's design, and this section specifies the new fields when they ship.
 
 ## Usage report
 

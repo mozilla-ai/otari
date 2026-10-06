@@ -51,6 +51,15 @@ from gateway.core.email_domains import (
     is_registrable_domain,
     normalized_domain,
 )
+from gateway.exceptions.organizations_exceptions import (
+    OrganizationDomainAlreadyClaimedError,
+    OrganizationDomainClaimedHereError,
+    OrganizationDomainNotFoundError,
+    OrganizationDomainNotVerifiedError,
+    PublicEmailDomainError,
+    TooManyOrganizationDomainsError,
+    UnregistrableDomainError,
+)
 from gateway.log_config import logger
 from gateway.models.tenancy import (
     DOMAIN_PROOF_TTL,
@@ -67,15 +76,6 @@ from gateway.models.tenancy import (
 from gateway.repositories.tenancy.organization_domain_repository import OrganizationDomainRepository
 from gateway.repositories.tenancy.organization_member_repository import OrganizationMemberRepository
 from gateway.services.tenancy.domain_verification import resolve_txt_records
-from gateway.services.tenancy.errors import (
-    OrganizationDomainAlreadyClaimedError,
-    OrganizationDomainClaimedHereError,
-    OrganizationDomainNotFoundError,
-    OrganizationDomainNotVerifiedError,
-    PublicEmailDomainError,
-    TooManyOrganizationDomainsError,
-    UnregistrableDomainError,
-)
 from gateway.services.tenancy.organization_service import OrganizationService
 
 # How long a verification token is, in bytes of entropy before hex encoding.
@@ -184,9 +184,7 @@ class OrganizationDomainService:
         # and the null is then dropped as well: both columns are NOT NULL, so a
         # PATCH naming one explicitly as null would otherwise fail on the
         # constraint rather than being the no-op the caller meant.
-        update_data = {
-            key: value for key, value in request.model_dump(exclude_unset=True).items() if value is not None
-        }
+        update_data = {key: value for key, value in request.model_dump(exclude_unset=True).items() if value is not None}
         updated = await self.domains.update_domain(row, update_data)
         await self.db.commit()
         await self.db.refresh(updated)

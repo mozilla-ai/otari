@@ -7,6 +7,8 @@
 // because it yanks the view down on every token. Both are unit-testable here
 // and neither is testable through a render.
 
+import type { PlaygroundWireMessage } from "@/shared/api/playground"
+
 import type { ChatTurn } from "./playgroundTypes"
 
 /**
@@ -112,9 +114,26 @@ export function shouldFollowToBottom(params: {
   return justAsked || params.isPinnedToBottom
 }
 
-/** The wire form of a panel's turns: what the model is sent, and nothing else. */
-export function wireMessages(
-  turns: ChatTurn[],
-): { role: string; content: string }[] {
-  return turns.map((turn) => ({ role: turn.role, content: turn.content }))
+/**
+ * The wire form of a panel's turns: what the model is sent, and nothing else.
+ *
+ * A question with attachments becomes content parts, its text first and then
+ * one file part per attachment, which the gateway resolves by `file_id`.
+ */
+export function wireMessages(turns: ChatTurn[]): PlaygroundWireMessage[] {
+  return turns.map((turn) => {
+    if (!turn.attachments?.length) {
+      return { role: turn.role, content: turn.content }
+    }
+    return {
+      role: turn.role,
+      content: [
+        { type: "text", text: turn.content },
+        ...turn.attachments.map((attachment) => ({
+          type: "file" as const,
+          file: { file_id: attachment.fileId, filename: attachment.filename },
+        })),
+      ],
+    }
+  })
 }

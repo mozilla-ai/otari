@@ -1512,7 +1512,7 @@
         {
           "name": "Delete Budget",
           "request": {
-            "description": "Delete a budget.\n\nRefused with 409 while anything still names this budget: a workspace handing\nit to its members, or a scoped ceiling enforcing it. Both foreign keys are\n``RESTRICT``, so the database would refuse either anyway, but as an\n``IntegrityError`` reported as \"Database error\" with nothing naming what to\ngo and change. Checked here so the refusal can say which, and where.",
+            "description": "Delete a budget the deployment owns.\n\nRefused with 409 for an organization's budget: the operator may edit one\n(``PATCH`` retimes its ceilings) but deleting it would take a budget the\ntenant defined out from under them.\n\nRefused with 409, too, while anything still names this budget: a workspace\nhanding it to its members, or a scoped ceiling enforcing it. The refusal says\nwhich, and where.\n\nGateway users assigned to the budget are left uncapped, as the dashboard's\nconfirmation says, and its reset history is deleted with it.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -1586,7 +1586,7 @@
         {
           "name": "List Catalog",
           "request": {
-            "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the genai-prices default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances at the deployment's\nrates and nothing that belongs to a tenant.",
+            "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the genai-prices default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances and the hosted\nmodels at the deployment's rates, and nothing that belongs to a tenant.",
             "header": [],
             "method": "GET",
             "url": {
@@ -1607,25 +1607,103 @@
                   "value": ""
                 },
                 {
-                  "description": "Narrow to models whose name, catalog id or any selector contains this text, case-insensitively.",
+                  "description": "Case-insensitive text in a model's name, vendor, id, selectors, or provider instances.",
                   "disabled": true,
                   "key": "search",
                   "value": ""
                 },
                 {
-                  "description": "Number of models to skip",
+                  "description": "Number of matching models to skip.",
                   "disabled": true,
                   "key": "skip",
                   "value": ""
                 },
                 {
-                  "description": "Maximum number of models to return",
+                  "description": "Maximum number of models to return.",
                   "disabled": true,
                   "key": "limit",
                   "value": ""
+                },
+                {
+                  "description": "Match any named provider instance.",
+                  "disabled": true,
+                  "key": "provider",
+                  "value": ""
+                },
+                {
+                  "description": "Match any vendor; an empty value names unknown vendors.",
+                  "disabled": true,
+                  "key": "vendor",
+                  "value": ""
+                },
+                {
+                  "description": "Require every input modality.",
+                  "disabled": true,
+                  "key": "input_modality",
+                  "value": ""
+                },
+                {
+                  "description": "Require every output modality.",
+                  "disabled": true,
+                  "key": "output_modality",
+                  "value": ""
+                },
+                {
+                  "description": "Require every capability.",
+                  "disabled": true,
+                  "key": "capability",
+                  "value": ""
+                },
+                {
+                  "description": "Minimum context window; unknown windows do not match.",
+                  "disabled": true,
+                  "key": "min_context",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum cheapest input price per million tokens; unpriced models do not match.",
+                  "disabled": true,
+                  "key": "max_input",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "pricing",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "source",
+                  "value": ""
+                },
+                {
+                  "description": "Release window ending today (UTC); zero disables it. Unknown and future releases do not match.",
+                  "disabled": true,
+                  "key": "released_within_days",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "sort",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "direction",
+                  "value": ""
+                },
+                {
+                  "description": "Include the filter choices drawn from the whole authorized catalog.",
+                  "disabled": true,
+                  "key": "include_facets",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context=&search=&skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/catalog/models?at_context=&search=&skip=&limit=&provider=&vendor=&input_modality=&output_modality=&capability=&min_context=&max_input=&pricing=&source=&released_within_days=&sort=&direction=&include_facets="
             }
           }
         },
@@ -1723,6 +1801,77 @@
     {
       "item": [
         {
+          "name": "Create Decision",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"typesafe:jev-latest\",\n  \"questions\": {\n    \"urgency\": {\n      \"instructions\": \"Does this message express urgency?\",\n      \"type\": \"noul\"\n    }\n  },\n  \"state\": \"The Stripe integration has failed for 3 days and I'm losing sales.\"\n}"
+            },
+            "description": "Answer typed questions (noul, choice, score) about a state.\n\n``model`` is ``<provider>:<model>``, where the provider is a ``decision_providers``\nentry, for example ``typesafe:jev-latest`` or ``openrouter:typesafe/jev-1.13``.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user; a ``user`` naming a\n  different user is rejected with 403 unless mismatch rejection is off.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "decisions"
+              ],
+              "raw": "{{baseUrl}}/api/v1/decisions"
+            }
+          }
+        },
+        {
+          "name": "Create Systemone Decision",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"typesafe:jev-latest\",\n  \"questions\": {\n    \"urgency\": {\n      \"instructions\": \"Does this message express urgency?\",\n      \"type\": \"noul\"\n    }\n  },\n  \"state\": \"The Stripe integration has failed for 3 days and I'm losing sales.\"\n}"
+            },
+            "description": "Answer typed questions at the path TypeSafe's SDK and llama-server use.\n\nIdentical to ``POST /api/v1/decisions``; point the client's base URL at the gateway's ``/api``.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "systemone"
+              ],
+              "raw": "{{baseUrl}}/api/v1/systemone"
+            }
+          }
+        }
+      ],
+      "name": "decisions"
+    },
+    {
+      "item": [
+        {
           "name": "Create Embedding",
           "request": {
             "body": {
@@ -1757,6 +1906,44 @@
         }
       ],
       "name": "embeddings"
+    },
+    {
+      "item": [
+        {
+          "name": "Submit Feedback",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"message\": \"string\"\n}"
+            },
+            "description": "Send feedback privately to the Otari team.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "feedback"
+              ],
+              "raw": "{{baseUrl}}/api/v1/feedback"
+            }
+          }
+        }
+      ],
+      "name": "feedback"
     },
     {
       "item": [
@@ -2035,7 +2222,7 @@
               },
               "raw": "{\n  \"policy_yaml\": \"string\"\n}"
             },
-            "description": "Evaluate a submitted policy against submitted evidence.\n\nAuthenticated with either an API key or the master key (the router-level\ngate), like ``POST /api/v1/usage/external-events``: this identifies who\nsent the request, not whether its evidence is true. `blocked` is set when\na required gate's outcome is not `pass`/`not_applicable` (an unresolved\ngate never counts as a pass).\n\nThe actual parse-and-evaluate work is\n``agent_runtime.domain.check.run_policy_check``, shared with ``otari\nhook``'s own local evaluation: this route's own job is authentication,\ntranslating that function's tri-state request fields into its own typed\nones, and turning ``PolicyCheckError`` into a 422.",
+            "description": "Evaluate a submitted policy against submitted evidence.\n\nAuthenticated with either an API key or the master key (the router-level\ngate), like ``POST /api/v1/usage/external-events``: this identifies who\nsent the request, not whether its evidence is true. `blocked` is set when\na required gate's outcome is not `pass`/`not_applicable` (an unresolved\ngate never counts as a pass).\n\nThe actual parse-and-evaluate work is\n``otari_agent.domain.check.run_policy_check``, shared with ``otari\nhook``'s own local evaluation: this route's own job is authentication,\ntranslating that function's tri-state request fields into its own typed\nones, and turning ``PolicyCheckError`` into a 422.",
             "header": [
               {
                 "key": "Content-Type",
@@ -2223,7 +2410,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"user_id\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"end_user_budget_id\": \"string\",\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_service_key\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"user_id\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
             },
             "description": "Create a new API key in the caller's organization.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, the key is associated with the shared \"default\" user, which is created\non first use. Keys without an explicit owner therefore share one identity, and so share budget,\nusage, and files.\n\n``workspace_id`` names a workspace in the caller's organization, and omitting\nit mints into that organization's default workspace. A key resolves that\norganization's provider credentials and bills there, so minting into another\norganization's workspace would spend its budget on its credentials.",
             "header": [
@@ -2283,7 +2470,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"end_user_budget_id\": \"string\",\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"is_service_key\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
             },
             "description": "Update an API key in the caller's organization.\n\nRequires master key authentication.",
             "header": [
@@ -2944,6 +3131,42 @@
                 "member-invitations"
               ],
               "raw": "{{baseUrl}}/api/v1/organizations/me/member-invitations"
+            }
+          }
+        },
+        {
+          "name": "Bulk Invite Active Organization Members",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"emails\": [\n    \"string\"\n  ]\n}"
+            },
+            "description": "Invite several addresses to the caller's active organization at once.\n\nOrganization owners and admins only. Every address gets the same role and\nworkspace assignments. Each one is checked as ``POST /me/member-invitations``\nwould check it, and an address that is refused lands in ``failed`` with the\nreason rather than failing the request, so the answer is 200 even when some\nor all were refused. Each invited entry carries its own ``mail_sent`` and\naccept link.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "member-invitations",
+                "bulk"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/member-invitations/bulk"
             }
           }
         },
@@ -3906,6 +4129,50 @@
                 ":guardrail_id"
               ],
               "raw": "{{baseUrl}}/api/v1/organizations/me/guardrails/:guardrail_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "guardrail_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Test Organization Guardrail",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"text\": \"string\"\n}"
+            },
+            "description": "Post some text to the guardrails service a mandate names and return its verdict.\n\nOrganization owners and admins only. Uses the mandate's own endpoint and\ncredential, or the deployment's guardrails URL when it names none, and\nfaces the same safety check a request does. Nothing is stored.\n``validate_kwargs`` replaces the stored arguments for this call, a\n``***`` in it keeps the value stored under that name, and omitting it\nsends the stored arguments.\n\nA mandate that runs a configured guardrail answers 409: test that\nguardrail through ``/api/v1/organizations/me/guardrail-definitions``. So\ndoes one with nowhere to send the check. A service that cannot be reached,\nor answers something malformed, answers 502, and the reason is in the\ngateway's log only.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "guardrails",
+                ":guardrail_id",
+                "test"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/guardrails/:guardrail_id/test",
               "variable": [
                 {
                   "description": "path parameter",
@@ -6238,6 +6505,110 @@
           }
         },
         {
+          "name": "List Playground Files",
+          "request": {
+            "description": "The caller's own files in one workspace, newest first, in OpenAI's list shape.\n\nEvery file the caller owns there is listed, including one uploaded with an\nAPI key of theirs in the same workspace, because a message here can attach it.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "files"
+              ],
+              "query": [
+                {
+                  "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "after",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/files?workspace_id=&limit=&after="
+            }
+          }
+        },
+        {
+          "name": "Upload Playground File",
+          "request": {
+            "description": "Upload a file for the caller, in a workspace they belong to.\n\nThe row is owned by the same principal a Playground completion runs as, so a\n``file_id`` returned here resolves in the caller's own messages and in nobody\nelse's. ``POST /api/v1/files`` takes an API key, which a dashboard session\ndoes not hold; this is the session's way in.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "files"
+              ],
+              "query": [
+                {
+                  "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/files?workspace_id="
+            }
+          }
+        },
+        {
+          "name": "Delete Playground File",
+          "request": {
+            "description": "Delete one of the caller's files. Another identity's answers 404, as a nonexistent one does.\n\nA saved transcript that attached the file keeps its record of the\nattachment, but the file is gone, so sending that turn again does not send\nits contents.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "playground",
+                "files",
+                ":file_id"
+              ],
+              "query": [
+                {
+                  "description": "Workspace to act in. Defaults to the caller's organization's default workspace. A workspace the caller is not a member of answers 404, as a nonexistent one does.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/playground/files/:file_id?workspace_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "file_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Read Playground Tools",
           "request": {
             "description": "The gateway-run tools the caller's workspace may attach to a message.\n\nOne read rather than the three the dashboard would otherwise make (the\ndeployment's tool settings, the workspace's web-search row, its\ncode-execution row), because the answer is a composition of them in a fixed\ndirection: the deployment decides whether a tool exists and the workspace may\nonly narrow that. Composing it here is what keeps the menu from offering\nsomething the request path would refuse.",
@@ -7093,6 +7464,131 @@
     {
       "item": [
         {
+          "name": "List Rate Limit Rules",
+          "request": {
+            "description": "List every rule in effect: the config.yml rules, then the ones stored here.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rate-limits"
+              ],
+              "raw": "{{baseUrl}}/api/v1/rate-limits"
+            }
+          }
+        },
+        {
+          "name": "Create Rate Limit Rule",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"name\": \"keys\",\n  \"per\": \"key\",\n  \"rpm\": 600,\n  \"tpm\": 200000\n}"
+            },
+            "description": "Add a rule. It applies from the next request on this replica, and on every replica within 30 seconds.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rate-limits"
+              ],
+              "raw": "{{baseUrl}}/api/v1/rate-limits"
+            }
+          }
+        },
+        {
+          "name": "Update Rate Limit Rule",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"rpm\": 1200\n}"
+            },
+            "description": "Change a stored rule. Requests it already counted stay counted. A config.yml rule answers 409.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rate-limits",
+                ":name"
+              ],
+              "raw": "{{baseUrl}}/api/v1/rate-limits/:name",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "name",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Rate Limit Rule",
+          "request": {
+            "description": "Remove a stored rule. A config.yml rule answers 409.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "rate-limits",
+                ":name"
+              ],
+              "raw": "{{baseUrl}}/api/v1/rate-limits/:name",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "name",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "rate-limits"
+    },
+    {
+      "item": [
+        {
           "name": "Create Rerank",
           "request": {
             "body": {
@@ -7358,7 +7854,7 @@
               },
               "raw": "{\n  \"max_results\": 5,\n  \"query\": \"otari llm gateway\"\n}"
             },
-            "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
+            "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use with the key's end-user budget, and is billed and\n  rate limited as that end user, as on chat completions.",
             "header": [
               {
                 "key": "Content-Type",
@@ -7391,7 +7887,7 @@
               },
               "raw": "{\n  \"max_results\": 5,\n  \"query\": \"otari llm gateway\"\n}"
             },
-            "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /api/v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
+            "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /api/v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use with the key's end-user budget, and is billed and\n  rate limited as that end user, as on chat completions.",
             "header": [
               {
                 "key": "Content-Type",
@@ -8263,6 +8759,34 @@
           }
         },
         {
+          "name": "Get Request Settlement",
+          "request": {
+            "description": "Look up a request's settled cost by the ``Otari-Request-ID`` it was sent (standalone).\n\nThis is how a caller recovers the cost of a request whose response never\ncarried one: a stream that failed or was disconnected mid-response, or a\nrequest that errored. An API key sees only the requests it made; the master\nkey sees any. Returns 404 until the request has settled (its rows are written\nby a background writer, so a lookup made the instant a stream closes can\nprecede them), and for an id that is unknown or belongs to another key, with\nno way to tell those apart. A stream that ended before the provider reported\nusage, and ran no gateway tools, writes no row, so its id stays 404.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usage",
+                "requests",
+                ":request_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/usage/requests/:request_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "request_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Usage Series",
           "request": {
             "description": "Time series split by one dimension, for the dashboard's stacked charts.\n\nSame filters and window bounds as ``/summary`` (kept in lockstep: the\ndashboard serializes one filter object for both, and a filter this endpoint\nsilently ignored would make the stacked chart disagree with the tiles beside\nit). The window's top groups by spend are returned as their own series;\neverything past the top eight folds into a single ``other`` series per\nbucket, so the stack always reconciles with the summary totals. Points are\nsparse (populated cells only); the bucket grid is bounded like ``/summary``'s\nseries, so an hourly bucket over a too-wide window is rejected rather than\nballooning the payload.",
@@ -8552,7 +9076,7 @@
         {
           "name": "List Users",
           "request": {
-            "description": "List the users the caller's organization can name, with pagination.\n\n``users`` is deployment-global and has no organization column, so which of\nthem this organization can name is derived: a key, usage, or a roster row\nputs one in reach, and one reached from nowhere at all (the shared\n``default`` owner, or a user just created) is shared rather than hidden.\nSee ``repositories.users_repository.in_organization``.",
+            "description": "List the users the caller's organization can name, with pagination.\n\n``users`` is deployment-global and has no organization column, so which of\nthem this organization can name is derived: a key, usage, or a roster row\nputs one in reach, and one reached from nowhere at all (the shared\n``default`` owner, or a user just created) is shared rather than hidden.\nSee ``repositories.users_repository.in_organization``.\n\n``parent_user_id`` with ``external_id`` finds the end user a service key\ncreated for a ``user`` value, which is how a caller maps its own ids to\nOtari's. ``include_total`` adds an ``Otari-Total-Count`` header counting\nevery match, so ``limit=1`` with it counts a service key's end users.",
             "header": [],
             "method": "GET",
             "url": {
@@ -8576,9 +9100,33 @@
                   "disabled": true,
                   "key": "limit",
                   "value": ""
+                },
+                {
+                  "description": "Only the end users of this owner: the user a service key belongs to.",
+                  "disabled": true,
+                  "key": "parent_user_id",
+                  "value": ""
+                },
+                {
+                  "description": "Only the end user a service key names with this `user` value.",
+                  "disabled": true,
+                  "key": "external_id",
+                  "value": ""
+                },
+                {
+                  "description": "Only blocked users (true) or only unblocked ones (false).",
+                  "disabled": true,
+                  "key": "blocked",
+                  "value": ""
+                },
+                {
+                  "description": "Also count every matching user, in the Otari-Total-Count response header.",
+                  "disabled": true,
+                  "key": "include_total",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/users?skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/users?skip=&limit=&parent_user_id=&external_id=&blocked=&include_total="
             }
           }
         },

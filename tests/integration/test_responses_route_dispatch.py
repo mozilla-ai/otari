@@ -326,7 +326,9 @@ def test_mcp_servers_dispatches_through_responses_tool_loop(
 ) -> None:
     seen: dict[str, Any] = {}
 
-    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int) -> Response:
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+    ) -> Response:
         seen["completion_kwargs"] = completion_kwargs
         seen["pool"] = pool
         seen["max_iterations"] = max_iterations
@@ -372,7 +374,9 @@ def test_code_execution_dispatches_through_sandbox_backend(
 
     pool_seen: list[Any] = []
 
-    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int) -> Response:
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+    ) -> Response:
         pool_seen.append(pool)
         return _response()
 
@@ -416,7 +420,9 @@ def test_managed_web_tool_dispatches_through_web_retrieval_backend(
 
     pool_seen: list[Any] = []
 
-    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int) -> Response:
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+    ) -> Response:
         pool_seen.append(pool)
         return _response()
 
@@ -455,7 +461,7 @@ def test_web_search_max_uses_reaches_the_responses_tool_loop(
 
     Counterpart to
     ``test_messages_route_dispatch.test_intercept_routes_provider_keywords_to_the_gateway_backend``:
-    the adapter's ``web_search_budget`` plumbing is only reachable through the route,
+    the adapter's ``use_budget`` plumbing is only reachable through the route,
     so the unit tests that call the loop functions directly cannot cover it.
     """
     monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
@@ -467,9 +473,10 @@ def test_web_search_max_uses_reaches_the_responses_tool_loop(
         completion_kwargs: Any,
         pool: Any,
         max_iterations: int,
-        web_search_budget: Any = None,
+        use_budget: Any = None,
+        native_tools: frozenset[str] = frozenset(),
     ) -> Response:
-        budgets_seen.append(web_search_budget)
+        budgets_seen.append(use_budget)
         return _response()
 
     fake_backend = AsyncMock()
@@ -668,7 +675,9 @@ def test_max_tool_iterations_exceeded_returns_422(
 
     from gateway.services.mcp_loop_responses import MaxToolIterationsExceeded
 
-    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int) -> Response:
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+    ) -> Response:
         raise MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
 
     fake_backend = AsyncMock()
@@ -874,7 +883,7 @@ def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
     seen: dict[str, Any] = {}
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> AsyncIterator[ResponseStreamEvent]:
         seen["pool"] = pool
         seen["max_iterations"] = max_iterations
@@ -913,6 +922,78 @@ def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
     assert plain_aresponses_called is False
 
 
+def _assert_stream_ended_cleanly(resp: Any) -> None:
+    assert resp.status_code == 200, resp.text
+    lines = [line for line in resp.text.splitlines() if line]
+    assert "event: error" not in lines, resp.text
+    assert lines[-1] == "data: [DONE]", resp.text
+    assert any('"response.completed"' in line for line in lines), resp.text
+
+
+def test_stream_mcp_pool_close_failure_does_not_cut_off_the_stream(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    async def fake_loop_stream(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+    ) -> AsyncIterator[ResponseStreamEvent]:
+        yield _stream_completed_event()
+
+    with (
+        patch("gateway.api.routes.responses.responses_tool_loop_stream", new=fake_loop_stream),
+        patch(
+            "gateway.services.mcp_client.MCPClientPool.__aenter__",
+            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [])),
+        ),
+        patch(
+            "gateway.services.mcp_client.MCPClientPool.__aexit__",
+            new=AsyncMock(side_effect=RuntimeError("the MCP server hung up")),
+        ),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/responses",
+            json={
+                "model": _MODEL,
+                "input": "hi",
+                "stream": True,
+                "mcp_servers": [{"name": "test", "url": "http://127.0.0.1:9999/mcp"}],
+            },
+            headers=api_key_header,
+        )
+
+    _assert_stream_ended_cleanly(resp)
+
+
+def test_stream_sandbox_close_failure_does_not_cut_off_the_stream(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+
+    async def fake_loop_stream(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
+    ) -> AsyncIterator[ResponseStreamEvent]:
+        yield _stream_completed_event()
+
+    fake_backend = AsyncMock()
+    fake_backend.purpose_hints = lambda: []
+    fake_backend.__aenter__ = AsyncMock(return_value=fake_backend)
+    fake_backend.__aexit__ = AsyncMock(side_effect=RuntimeError("the sandbox hung up"))
+
+    with (
+        patch("gateway.api.routes.responses.responses_tool_loop_stream", new=fake_loop_stream),
+        patch("gateway.api.routes._pipeline.SandboxBackend", return_value=fake_backend),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/responses",
+            json={"model": _MODEL, "input": "compute", "stream": True, "tools": [{"type": "otari_code_execution"}]},
+            headers=api_key_header,
+        )
+
+    _assert_stream_ended_cleanly(resp)
+
+
 def test_stream_code_execution_dispatches_through_sandbox(
     client: TestClient,
     api_key_header: dict[str, str],
@@ -932,7 +1013,7 @@ def test_stream_code_execution_dispatches_through_sandbox(
     pool_seen: list[Any] = []
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> AsyncIterator[ResponseStreamEvent]:
         pool_seen.append(pool)
         yield _stream_completed_event()

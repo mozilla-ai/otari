@@ -210,7 +210,7 @@ def test_the_database_session_is_released_before_the_mcp_session_opens(
     session: _FakeSession,
     _events: list[str],
 ) -> None:
-    """Execution step 5: a pooled connection must not be pinned across a remote call."""
+    """A pooled connection must not be pinned across a remote call."""
     row = _store_server(test_db, _workspace_id(test_db, api_key_obj["id"]))
 
     response = client.post(f"{API_ROOT}/mcp/execute", headers=api_key_header, json=_execute_body(row))
@@ -242,7 +242,7 @@ def test_the_call_appears_in_the_in_flight_registry_while_it_runs(
     api_key_header: dict[str, str],
     session: _FakeSession,
 ) -> None:
-    """Execution step 7, through the standard middleware lifecycle."""
+    """The call is registered as in flight through the standard middleware lifecycle."""
     registry: InFlightRegistry = client.app.state.inflight  # type: ignore[attr-defined]
     seen: list[list[str]] = []
     session.on_call = lambda: seen.append([entry.endpoint for entry in registry.snapshot()])
@@ -288,7 +288,7 @@ def test_the_authenticated_principal_is_rate_limited_before_any_outbound_access(
     clean_database: None,
     session: _FakeSession,
 ) -> None:
-    """R-ADM-2: the limit is charged to the key's own subject, before the MCP call."""
+    """The limit is charged to the key's own subject, before the MCP call."""
     config = test_config.model_copy(update={"rate_limit_rpm": 1})
     for rate_limited_client in build_test_client(config):
         master = {"Otari-Key": f"Bearer {config.master_key}"}

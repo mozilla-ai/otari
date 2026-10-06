@@ -34,13 +34,10 @@ export function UseModelDrawer({
   model,
   isOpen,
   onOpenChange,
-  publicView,
 }: {
   model: CatalogModelDetail
   isOpen: boolean
   onOpenChange: (open: boolean) => void
-  /** Ahead of a session: a visitor is told to sign in for a key rather than linked to the page. */
-  publicView: boolean
 }) {
   const deployment = useDeployment()
   const baseUrl = resolveSnippetBaseUrl(deployment)
@@ -155,26 +152,11 @@ export function UseModelDrawer({
               <section className="flex flex-col gap-2">
                 <h3 className="text-title">2. Get an API key</h3>
                 <p className="text-sm text-muted">
-                  {publicView ? (
-                    <>
-                      <a href="#/" className="text-link hover:text-link-hover">
-                        Sign in
-                      </a>{" "}
-                      and create a key on API keys, then set it as an
-                      environment variable.
-                    </>
-                  ) : (
-                    <>
-                      Create a key on{" "}
-                      <Link
-                        to="/keys"
-                        className="text-link hover:text-link-hover"
-                      >
-                        API keys
-                      </Link>{" "}
-                      and set it as an environment variable.
-                    </>
-                  )}
+                  Create a key on{" "}
+                  <Link to="/keys" className="text-link hover:text-link-hover">
+                    API keys
+                  </Link>{" "}
+                  and set it as an environment variable.
                 </p>
                 <CopyField
                   label="Environment"

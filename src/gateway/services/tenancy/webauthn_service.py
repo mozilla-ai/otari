@@ -70,15 +70,7 @@ from webauthn.helpers.structs import (
 )
 
 from gateway.core.config import GatewayConfig, RelyingParty
-from gateway.log_config import logger
-from gateway.models.tenancy import (
-    WEBAUTHN_CHALLENGE_TTL_SECONDS,
-    User,
-    WebAuthnChallenge,
-    WebAuthnCredential,
-    WebAuthnCredentialPublic,
-)
-from gateway.services.tenancy.errors import (
+from gateway.exceptions.identity_exceptions import (
     PasskeyAlreadyRegisteredError,
     PasskeyCeremonyError,
     PasskeyLimitReachedError,
@@ -86,6 +78,14 @@ from gateway.services.tenancy.errors import (
     PasskeyNotFoundError,
     PasskeySignInFailedError,
     PasskeysNotConfiguredError,
+)
+from gateway.log_config import logger
+from gateway.models.tenancy import (
+    WEBAUTHN_CHALLENGE_TTL_SECONDS,
+    User,
+    WebAuthnChallenge,
+    WebAuthnCredential,
+    WebAuthnCredentialPublic,
 )
 
 # How many passkeys one identity may hold. Generous rather than tight: the
@@ -121,9 +121,7 @@ def require_relying_party(config: GatewayConfig) -> RelyingParty:
     return relying_party
 
 
-async def _issue_challenge(
-    db: AsyncSession, challenge: bytes, *, ceremony: str, user_id: uuid.UUID | None
-) -> None:
+async def _issue_challenge(db: AsyncSession, challenge: bytes, *, ceremony: str, user_id: uuid.UUID | None) -> None:
     """Record a challenge so the matching verify call can spend it.
 
     Expired rows are swept here rather than by a background task, exactly as
@@ -321,8 +319,7 @@ async def begin_registration(db: AsyncSession, config: GatewayConfig, identity: 
         user_name=identity.email or "operator",
         user_display_name=identity.full_name or identity.email or "otari operator",
         exclude_credentials=[
-            PublicKeyCredentialDescriptor(id=base64url_to_bytes(credential.credential_id))
-            for credential in existing
+            PublicKeyCredentialDescriptor(id=base64url_to_bytes(credential.credential_id)) for credential in existing
         ],
         authenticator_selection=AuthenticatorSelectionCriteria(
             resident_key=ResidentKeyRequirement.REQUIRED,
@@ -625,9 +622,7 @@ async def delete_credential(db: AsyncSession, user_id: uuid.UUID, credential_id:
     await db.delete(credential)
 
 
-async def _owned_credential(
-    db: AsyncSession, user_id: uuid.UUID, credential_id: uuid.UUID
-) -> WebAuthnCredential:
+async def _owned_credential(db: AsyncSession, user_id: uuid.UUID, credential_id: uuid.UUID) -> WebAuthnCredential:
     """One passkey, if it is this identity's; a 404 either way if it is not."""
     credential = (
         await db.execute(

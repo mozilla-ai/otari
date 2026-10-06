@@ -129,9 +129,7 @@ class OrgProviderKeyModelRepository(
         )
         return set(result.scalars().all())
 
-    async def enabled_models_for_keys(
-        self, org_provider_key_ids: Collection[uuid.UUID]
-    ) -> dict[uuid.UUID, list[str]]:
+    async def enabled_models_for_keys(self, org_provider_key_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, list[str]]:
         """The served models of each key that offers any, keyed by key id.
 
         **A key absent from the result offers nothing and is therefore

@@ -150,17 +150,21 @@ class OrganizationModelPricingRepository(BaseRepository[OrganizationModelPricing
             await self.db.execute(select(func.count()).select_from(OrganizationModelPricing).where(*where))
         ).scalar_one()
         rows = (
-            await self.db.execute(
-                select(OrganizationModelPricing)
-                .where(*where)
-                .order_by(
-                    col(OrganizationModelPricing.model_key),
-                    col(OrganizationModelPricing.effective_from).desc(),
+            (
+                await self.db.execute(
+                    select(OrganizationModelPricing)
+                    .where(*where)
+                    .order_by(
+                        col(OrganizationModelPricing.model_key),
+                        col(OrganizationModelPricing.effective_from).desc(),
+                    )
+                    .offset(skip)
+                    .limit(limit)
                 )
-                .offset(skip)
-                .limit(limit)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return list(rows), int(total)
 
     async def flush(self) -> None:

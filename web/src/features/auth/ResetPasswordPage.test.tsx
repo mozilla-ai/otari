@@ -4,7 +4,9 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ResetPasswordPage } from "@/features/auth/ResetPasswordPage"
 import { ApiError, apiFetch } from "@/shared/api/client"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
+import { bootstrap } from "@/tests/fixtures"
 
 vi.mock("@/shared/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/shared/api/client")>()
@@ -16,11 +18,13 @@ function renderPage(hash: string) {
     defaultOptions: { mutations: { retry: false } },
   })
   return render(
-    <ThemeProvider>
-      <QueryClientProvider client={client}>
-        <ResetPasswordPage hash={hash} />
-      </QueryClientProvider>
-    </ThemeProvider>,
+    <DeploymentProvider value={bootstrap()}>
+      <ThemeProvider>
+        <QueryClientProvider client={client}>
+          <ResetPasswordPage hash={hash} />
+        </QueryClientProvider>
+      </ThemeProvider>
+    </DeploymentProvider>,
   )
 }
 

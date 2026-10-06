@@ -24,11 +24,13 @@ single-tenant fixture makes "the caller's workspace" and "the default workspace"
 the same row, which is exactly the conflation both bugs were.
 """
 
+import json
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -37,15 +39,16 @@ from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT
-from gateway.core.usage_source import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG
+from gateway.adapters.file_storage_adapter import LocalDirFileStore
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.tools import WorkspaceWebSearchConfig
-from gateway.models.usage import UsageLog
+from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, UsageLog
 from gateway.models.users import User as BillingUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
+from gateway.services.file_extractors import ExtractionResult
 
-from .conftest import MODEL_NAME
+from .conftest import MODEL_NAME, build_test_client
 
 _PREFIX = f"{API_ROOT}/playground"
 
@@ -99,6 +102,14 @@ def world(
     db_session_factory: Callable[[], Session],
 ) -> _World:
     """Two tenants and the identities that act in them."""
+    return _build_world(client, master_key_header, db_session_factory)
+
+
+def _build_world(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> _World:
     # One master-key call provisions the tenancy root, so the organizations built
     # below sit beside a real default rather than replacing it.
     assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == status.HTTP_200_OK
@@ -359,7 +370,7 @@ def test_a_saved_turn_carries_no_usage_figures(client: TestClient, world: _World
 
     code, messages = _request(client, world, "member", "GET", f"{_PREFIX}/conversations/{created['id']}/messages")
     assert code == status.HTTP_200_OK
-    assert set(messages["data"][0]) == {"role", "content", "reasoning"}
+    assert set(messages["data"][0]) == {"role", "content", "reasoning", "attachments"}
 
 
 def test_reasoning_survives_a_save(client: TestClient, world: _World) -> None:
@@ -373,6 +384,31 @@ def test_reasoning_survives_a_save(client: TestClient, world: _World) -> None:
     code, messages = _request(client, world, "member", "GET", f"{_PREFIX}/conversations/{created['id']}/messages")
     assert code == status.HTTP_200_OK
     assert messages["data"][1]["reasoning"] == "thinking"
+
+
+def test_attachments_survive_a_save(client: TestClient, world: _World) -> None:
+    """A resumed transcript keeps which files each turn sent, so it can send them again."""
+    _grant(client, world, "member", store_conversations=True)
+    body = _conversation_body(world)
+    attachment = {"file_id": "file-abc123", "filename": "report.pdf", "bytes": 84213}
+    body["messages"][0]["attachments"] = [attachment]
+    code, created = _request(client, world, "member", "POST", f"{_PREFIX}/conversations", json=body)
+    assert code == status.HTTP_201_CREATED
+
+    code, messages = _request(client, world, "member", "GET", f"{_PREFIX}/conversations/{created['id']}/messages")
+    assert code == status.HTTP_200_OK
+    assert messages["data"][0]["attachments"] == [attachment]
+    assert messages["data"][1]["attachments"] == []
+
+
+def test_too_many_attachments_on_one_turn_are_refused(client: TestClient, world: _World) -> None:
+    _grant(client, world, "member", store_conversations=True)
+    body = _conversation_body(world)
+    body["messages"][0]["attachments"] = [
+        {"file_id": f"file-{index}", "filename": "a.txt", "bytes": 1} for index in range(11)
+    ]
+    code, _ = _request(client, world, "member", "POST", f"{_PREFIX}/conversations", json=body)
+    assert code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 def test_another_identity_cannot_read_or_delete_a_transcript(client: TestClient, world: _World) -> None:
@@ -751,7 +787,7 @@ def test_a_completion_is_billed_to_the_caller_with_no_api_key(
     assert row.workspace_id == world.workspaces["alpha_one"]
     # Still served-here traffic, so the operator's imported-usage mutations
     # cannot touch it: the surface it came from is a different question from
-    # who served it (``core/usage_source``).
+    # who served it.
     assert row.source == SERVED_HERE_SLUG
 
 
@@ -926,3 +962,165 @@ def test_a_completion_honors_the_caller_s_own_model_allow_list(
 
     assert code == status.HTTP_403_FORBIDDEN
     assert MODEL_NAME in body["detail"]
+
+
+# =============================================================================
+# Files: uploaded from a session, owned by the caller, in one workspace
+# =============================================================================
+
+
+@pytest.fixture
+def _file_store(client: TestClient, tmp_path: Path) -> None:
+    """Point the app's blob store at a temp dir (the default writes to the cwd)."""
+    cast(Any, client.app).state.file_store = LocalDirFileStore(str(tmp_path))
+
+
+def _upload(
+    client: TestClient,
+    world: _World,
+    who: str,
+    *,
+    workspace: str = "alpha_one",
+    name: str = "report.txt",
+    data: bytes = b"quarterly numbers",
+) -> tuple[int, Any]:
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions[who])
+    try:
+        response = client.post(
+            f"{_PREFIX}/files",
+            params=_ws(world, workspace),
+            files={"file": (name, data, "text/plain")},
+        )
+        return response.status_code, response.json()
+    finally:
+        client.cookies.clear()
+
+
+def test_the_tools_read_reports_that_files_can_be_attached(client: TestClient, world: _World) -> None:
+    code, body = _request(client, world, "member", "GET", f"{_PREFIX}/tools", params=_ws(world))
+
+    assert code == status.HTTP_200_OK
+    assert body["files"] == {"configured": True, "enabled": True, "reason": None}
+
+
+def test_an_upload_lists_for_its_owner_in_its_workspace_only(
+    client: TestClient, world: _World, _file_store: None
+) -> None:
+    """The owner predicate and the workspace predicate both bind, as on every other Playground row."""
+    code, uploaded = _upload(client, world, "member")
+    assert code == status.HTTP_200_OK
+    assert uploaded["filename"] == "report.txt"
+    assert uploaded["bytes"] == len(b"quarterly numbers")
+
+    code, listed = _request(client, world, "member", "GET", f"{_PREFIX}/files", params=_ws(world))
+    assert code == status.HTTP_200_OK
+    assert [item["id"] for item in listed["data"]] == [uploaded["id"]]
+
+    # A colleague in the same workspace sees none of it.
+    code, theirs = _request(client, world, "colleague", "GET", f"{_PREFIX}/files", params=_ws(world))
+    assert code == status.HTTP_200_OK
+    assert theirs["data"] == []
+
+
+def test_an_upload_into_a_workspace_that_is_not_the_caller_s_answers_404(
+    client: TestClient, world: _World, _file_store: None
+) -> None:
+    code, _ = _upload(client, world, "member", workspace="beta_one")
+    assert code == status.HTTP_404_NOT_FOUND
+
+
+def test_another_identity_cannot_delete_an_upload(client: TestClient, world: _World, _file_store: None) -> None:
+    _, uploaded = _upload(client, world, "member")
+    path = f"{_PREFIX}/files/{uploaded['id']}"
+
+    code, _ = _request(client, world, "colleague", "DELETE", path, params=_ws(world))
+    assert code == status.HTTP_404_NOT_FOUND
+
+    code, deleted = _request(client, world, "member", "DELETE", path, params=_ws(world))
+    assert code == status.HTTP_200_OK
+    assert deleted == {"id": uploaded["id"], "object": "file", "deleted": True}
+
+    code, listed = _request(client, world, "member", "GET", f"{_PREFIX}/files", params=_ws(world))
+    assert listed["data"] == []
+
+
+def test_an_oversized_upload_answers_413(
+    client: TestClient,
+    world: _World,
+    _file_store: None,
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(test_config, "files_max_bytes", 4)
+    code, body = _upload(client, world, "member")
+    assert code == status.HTTP_413_CONTENT_TOO_LARGE
+    assert "maximum upload size" in body["detail"]
+
+
+def test_an_upload_resolves_in_the_caller_s_own_completion(
+    client: TestClient,
+    world: _World,
+    _file_store: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Uploaded from the session, the file is the session principal's, so the pipeline finds it."""
+
+    async def fake_extract(data: bytes, mime: str, filename: str | None) -> ExtractionResult:
+        return ExtractionResult(f"EXTRACTED::{data.decode()}", True, "ok")
+
+    monkeypatch.setattr("gateway.services.content_normalizer.extract_text_from_file", fake_extract)
+    _, uploaded = _upload(client, world, "member")
+
+    captured: dict[str, Any] = {}
+
+    async def capture(**kwargs: Any) -> ChatCompletion:
+        captured.update(kwargs)
+        return _mock_completion()
+
+    with patch("gateway.api.routes.chat.acompletion", new=capture):
+        code, _ = _request(
+            client,
+            world,
+            "member",
+            "POST",
+            f"{_PREFIX}/chat/completions",
+            json={
+                "model": "ollama:llama3",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Summarize the attached file."},
+                            {"type": "file", "file": {"file_id": uploaded["id"]}},
+                        ],
+                    }
+                ],
+            },
+            params=_ws(world),
+        )
+
+    assert code == status.HTTP_200_OK
+    assert "EXTRACTED::quarterly numbers" in json.dumps(captured["messages"])
+
+
+@pytest.fixture
+def files_off_client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
+    yield from build_test_client(test_config.model_copy(update={"files_enabled": False}))
+
+
+def test_files_switched_off_answer_404_and_report_why(
+    files_off_client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    built = _build_world(files_off_client, master_key_header, db_session_factory)
+
+    code, body = _request(files_off_client, built, "member", "GET", f"{_PREFIX}/tools", params=_ws(built))
+    assert code == status.HTTP_200_OK
+    assert body["files"]["configured"] is False
+    assert body["files"]["reason"] is not None
+
+    code, _ = _upload(files_off_client, built, "member")
+    assert code == status.HTTP_404_NOT_FOUND
+    code, _ = _request(files_off_client, built, "member", "GET", f"{_PREFIX}/files", params=_ws(built))
+    assert code == status.HTTP_404_NOT_FOUND

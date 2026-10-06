@@ -33,8 +33,9 @@ standalone configuration, pricing, aliases, and routing policies.
 
 ## Configuring a provider
 
-A provider can come from `config.yml`, its native credential environment
-variable, or the standalone Providers page:
+Declare a provider under `providers` in `config.yml`, or add it on the
+standalone Providers page. Either way it serves requests and its models are
+discovered. Supply the key from the environment with a `${VAR}` reference:
 
 ```yaml
 providers:
@@ -42,9 +43,10 @@ providers:
     api_key: ${OPENAI_API_KEY}
 ```
 
-A native variable such as `OPENAI_API_KEY` can be enough to dispatch a direct
-request. Add the provider to `providers` when you also want model discovery or
-explicit client settings.
+A provider that is not declared is still called when its native variable (such
+as `OPENAI_API_KEY`) is set, but its models are not listed. That fallback is
+deprecated: the gateway logs a warning naming the provider, and a future
+release will refuse the request.
 
 Provider support is endpoint-specific. A provider that supports chat may not
 support Responses, images, audio, rerank, or batches. Unsupported combinations
@@ -213,8 +215,12 @@ the genai-prices default. Both routes accept the same credentials as
 
 Grouping keys on the models.dev display name where the dataset knows the
 model, and on the provider's id with its path prefixes, org segment and version
-pins removed where it does not. A model's id is its vendor and its name,
-`z-ai/glm-5.3`, or the bare name where nobody could say the vendor. A dated build, a size or tier, and a mode a
+pins removed where it does not; a vendor's name written in front of its own
+model (`NVIDIA Nemotron 3 Ultra`, `openai-gpt-oss-120b`) is dropped from both. A
+model's id is its vendor and its name, `z-ai/glm-5.3`, or the bare name where
+nobody could say the vendor. The vendor is the org of models.dev's
+`canonical_model_id` where the dataset has one, else the org segment of the
+provider's id, else the model family (`claude`, `nemotron`). A dated build, a size or tier, and a mode a
 reseller exposes as its own id stay separate models. models.dev's description,
 capabilities and modalities are served to every catalog reader here, where
 `GET /api/v1/models/metadata` stays operator-only.
@@ -223,6 +229,30 @@ Each offering also carries the provider's own list price from models.dev,
 where it has one, and for a signed-in caller the organization's last thirty
 days on that offering: requests, cache hit rate, and the effective price per
 million tokens after cache reads and tiers.
+
+### Browsing the grouped catalog
+
+The Models page requests one page at a time from `GET /api/v1/catalog/models`.
+Filters and sorting apply to the caller's full authorized catalog before `skip`
+and `limit` select a page. `count` is the number of matching models before paging;
+`limit` defaults to 100 and is capped at 1,000.
+
+Repeat `provider` or `vendor` to match any selected value. An empty `vendor`
+selects models whose vendor is unknown. Repeat `input_modality`,
+`output_modality`, or `capability` to require every selected value. The endpoint
+also accepts `search`, `min_context`, `max_input`, `pricing`, `source`, and
+`released_within_days`. Release windows end today in UTC and exclude unknown
+and future dates. A price ceiling excludes models with no known input rate.
+
+`sort` accepts `name`, `released`, `input`, `output`, `context`, or `providers`,
+with `direction=asc` or `desc`. Unknown values sort last in either direction;
+names and catalog ids break ties so pages have a stable order.
+
+Request `include_facets=true` to receive the provider and vendor choices from
+the complete authorized catalog, whatever the filters match, so a filter that
+matches nothing can still be undone. `facets.total_count` counts authorized
+models before filtering. `facets` is null unless requested, and never names a
+model or provider the caller cannot access.
 
 ### Catalog spellings
 
@@ -268,7 +298,10 @@ list price is marked with the list price.
 
 With `public_catalog: true` (see [Configuration](configuration.md)), the same
 two routes and the same page are served to a visitor with no session, at the
-deployment's rates and for the configured providers only.
+deployment's rates and for the models the deployment itself serves: the
+configured providers, and on a managed platform its hosted models. A visitor's
+"Use this model" opens account creation instead of the drawer (sign-in where
+signup is closed), and the dashboard reopens that model on their first sign-in.
 
 ## Listing available models
 

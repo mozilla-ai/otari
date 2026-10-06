@@ -51,21 +51,13 @@ below is what gives it a way to sign in.
 
 from datetime import UTC, datetime, timedelta
 
+from fastapi import BackgroundTasks
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
-from gateway.models.tenancy import User
-from gateway.repositories.tenancy import UserRepository
-from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
-from gateway.services.mail import Mailer
-from gateway.services.password_service import (
-    hash_password_async,
-    verify_absent_password_async,
-    verify_password_async,
-)
-from gateway.services.tenancy.email_address import validated_email
-from gateway.services.tenancy.errors import (
+from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.identity_exceptions import (
     CurrentPasswordIncorrectError,
     EmailAlreadyInUseError,
     EmailNotVerifiedError,
@@ -76,6 +68,16 @@ from gateway.services.tenancy.errors import (
     UnmodifiedPasswordError,
     VerificationTokenInvalidError,
 )
+from gateway.models.tenancy import User
+from gateway.repositories.tenancy import UserRepository
+from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
+from gateway.services.mail import Mailer
+from gateway.services.password_service import (
+    hash_password_async,
+    verify_absent_password_async,
+    verify_password_async,
+)
+from gateway.services.tenancy.email_address import validated_email
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.password_policy import validate_new_password
@@ -253,12 +255,18 @@ async def update_full_name(db: AsyncSession, identity: User, *, full_name: str |
     return identity
 
 
+class _SignupRaceLostError(Exception):
+    """Another write claimed this address first, so the signup's block rolls back and answers as a no-op."""
+
+
 async def create_user_for_signup(
     db: AsyncSession,
     config: GatewayConfig,
     *,
+    background_tasks: BackgroundTasks,
     email: str,
     password: str,
+    uow: UnitOfWork,
     membership_listener: MembershipListener,
     full_name: str | None = None,
     terms_accepted: bool = False,
@@ -276,25 +284,12 @@ async def create_user_for_signup(
     (``OrganizationService.provision_signup_tenancy``), which is how a control
     plane serving many tenants takes its first member of each.
 
-    Enumeration-safe the same way ``resend_verification_email`` and
-    ``request_password_reset`` are, and the setting does not change that: an
-    address that already has a password and one whose identity has been
-    deactivated return with nothing written and nothing mailed, whichever way it
-    is set, and an unknown address is either registered or ignored in silence.
-    The response never distinguishes them. Deactivation is
-    checked here for the reason ``verify_email`` and ``reset_password`` already
-    check it: it has to close every road in, and without this an identity
-    deactivated before it ever signed up could still have a password set and a
-    live verification token minted on it, waiting to become usable the moment
-    an operator reactivated it. An earlier version of this call answered the
-    three cases with distinguishable 404/409/200 statuses, which let an
-    unauthenticated caller enumerate an organization's roster and signup
-    progress, exactly what the sibling functions were already written to
-    avoid; this closes that gap. ``password`` is still validated and reported
-    on its own shape (too short, too long) before the lookup, since a policy
-    violation says nothing about whether the address exists and checking it
-    first means a bad password answers the same way whether or not the
-    address is real.
+    A refusal writes nothing and mails nothing, so it does not reveal which addresses hold an account.
+    An address that has a password, an address that is already verified, and a deactivated identity are refused.
+    An unknown address is registered where ``open_signup`` is on, and refused otherwise.
+    A verified address is refused because a password set on it would sign in with no proof of the mailbox.
+    A deactivated identity is refused so that no password or verification token waits on it for a reactivation.
+    ``password`` is validated before the lookup, so a policy violation answers the same for every address.
 
     Returns the identity that was claimed or registered, or ``None`` on every
     enumeration-safe path, so a caller can tell the two apart without the
@@ -304,10 +299,10 @@ async def create_user_for_signup(
     Refuses before writing anything if this deployment cannot mail the
     verification link: a signup that could never be verified would strand the
     caller in the unverified, hard-blocked state #650's sign-in gate enforces.
-    The mail send after commit is not guarded by a ``try`` on purpose, the same
-    reason ``organization_service.invite_active_organization_member_for_user``
-    does not guard its own: ``Mailer.send`` never raises, so the account this
-    call creates is durable whether or not the message actually goes out.
+    The mail send is scheduled on ``background_tasks`` after the commit rather
+    than awaited: an SMTP round trip on the claim branch alone would let a
+    caller tell it from the early return by response time. The account is
+    durable whether or not the message goes out.
     """
     mailer = Mailer(config)
     mailer.require_ready()
@@ -315,7 +310,9 @@ async def create_user_for_signup(
 
     address = validated_email(email)
     identity = await UserRepository(db).get_by_email(address)
-    if identity is not None and (identity.hashed_password is not None or not identity.is_active):
+    if identity is not None and (
+        identity.hashed_password is not None or identity.email_verified_at is not None or not identity.is_active
+    ):
         # Pays the same bcrypt cost the claim path pays hashing a fresh
         # password, so the two cases are closer in wall-clock time than a bare
         # early return would be. Not a full equalization (the claim path also
@@ -324,65 +321,51 @@ async def create_user_for_signup(
         # address with no stored hash.
         await verify_absent_password_async(password)
         return None
-    if identity is None:
-        if not config.open_signup:
-            # The same bcrypt cost as the branch above, for the same reason: an
-            # address this deployment will not register has to answer in about
-            # the time one it would register takes.
-            await verify_absent_password_async(password)
-            return None
-        # Staged into this call's transaction rather than committed on its own,
-        # so the password and verification token below land with it: an account
-        # committed here and nowhere else would be live, password-less and
-        # unverifiable.
-        try:
-            identity = await OrganizationService(db, membership_listener=membership_listener).provision_signup_tenancy(
-                email=address,
-                full_name=full_name,
-            )
-        except IntegrityError as exc:
-            # Two registrations of the same address at once. The unique index on
-            # email decides, and the loser answers like every other
-            # enumeration-safe path rather than reporting a 500 or admitting
-            # that the address is now taken.
-            #
-            # Matched on that index rather than on "an IntegrityError happened",
-            # the same discrimination ``update_password`` already makes with
-            # this helper: the other constraints this unit of work can violate
-            # (the organization slug, a membership) are not a taken address, and
-            # swallowing one as though it were would answer a failed
-            # registration with the sentence that says it succeeded.
-            await db.rollback()
-            if not _is_email_conflict(exc):
-                raise
-            return None
 
-    token = generate_token()
-    values: dict[str, str | datetime | None] = {
-        "full_name": identity.full_name or full_name,
-        "email_verification_token_hash": hash_token(token),
-        "email_verification_token_expires_at": datetime.now(UTC)
-        + timedelta(hours=config.email_verification_expiry_hours),
-    }
-    if terms_accepted:
-        values["terms_accepted_at"] = datetime.now(UTC)
-    # Conditional rather than a plain write: the check above raced any other
-    # first-credential write on this address (another signup, an invitation
-    # accepted with a password), and this is what decides between them. The
-    # loser answers like every other enumeration-safe path.
-    claimed = await UserRepository(db).claim_first_password(
-        identity.id,
-        hashed_password=await hash_password_async(password),
-        require_unverified=False,
-        values=values,
-    )
-    if not claimed:
-        await db.rollback()
+    try:
+        async with uow:
+            if identity is None:
+                if not config.open_signup:
+                    # The same bcrypt cost as the branch above, for the same reason: an
+                    # address this deployment will not register has to answer in about
+                    # the time one it would register takes.
+                    await verify_absent_password_async(password)
+                    return None
+                # The registration, the password and the verification token below are committed together.
+                registration = await OrganizationService(
+                    db, membership_listener=membership_listener, uow=uow
+                ).provision_signup_tenancy(email=address, full_name=full_name)
+                if not registration.created:
+                    # This answers like every other enumeration-safe refusal.
+                    await verify_absent_password_async(password)
+                    raise _SignupRaceLostError
+                identity = registration.identity
+
+            token = generate_token()
+            values: dict[str, str | datetime | None] = {
+                "full_name": identity.full_name or full_name,
+                "email_verification_token_hash": hash_token(token),
+                "email_verification_token_expires_at": datetime.now(UTC)
+                + timedelta(hours=config.email_verification_expiry_hours),
+            }
+            if terms_accepted:
+                values["terms_accepted_at"] = datetime.now(UTC)
+            # NOTE: A provider sign-in or another first password can commit after the check above.
+            # The condition in this write decides.
+            claimed = await UserRepository(db).claim_first_password(
+                identity.id,
+                hashed_password=await hash_password_async(password),
+                require_unverified=True,
+                values=values,
+            )
+            if not claimed:
+                raise _SignupRaceLostError
+    except _SignupRaceLostError:
         return None
-    await db.commit()
     await db.refresh(identity)
 
-    await mailer.send(
+    background_tasks.add_task(
+        mailer.send,
         to=address,
         message=render_verification_email(
             verify_link=mailer.link(f"/#/verify-email?token={token}"),
@@ -432,7 +415,9 @@ async def verify_email(db: AsyncSession, *, token: str) -> User:
     return identity
 
 
-async def resend_verification_email(db: AsyncSession, config: GatewayConfig, *, email: str) -> None:
+async def resend_verification_email(
+    db: AsyncSession, config: GatewayConfig, *, background_tasks: BackgroundTasks, email: str
+) -> None:
     """Mail a fresh verification link, or do nothing: the caller cannot tell which.
 
     Enumeration-safe by construction rather than by a caller-side generic
@@ -445,9 +430,10 @@ async def resend_verification_email(db: AsyncSession, config: GatewayConfig, *, 
     The early return still pays a bcrypt-equivalent cost first
     (``verify_absent_password_async``), the same reason ``authenticate`` pays
     one for an address with no stored hash: without it, the ineligible path
-    returns after one SELECT while the eligible one goes on to a commit and an
-    awaited mail send, and that gap is measurable enough to narrow down which
-    case a given address fell into.
+    returns after one SELECT while the eligible one goes on to a commit, and
+    that gap is measurable enough to narrow down which case a given address
+    fell into. The mail send is scheduled on ``background_tasks`` for the same
+    reason: awaiting it would reopen that gap.
     """
     mailer = Mailer(config)
     mailer.require_ready()
@@ -471,7 +457,8 @@ async def resend_verification_email(db: AsyncSession, config: GatewayConfig, *, 
     db.add(identity)
     await db.commit()
 
-    await mailer.send(
+    background_tasks.add_task(
+        mailer.send,
         to=address,
         message=render_verification_email(
             verify_link=mailer.link(f"/#/verify-email?token={token}"),
@@ -480,15 +467,17 @@ async def resend_verification_email(db: AsyncSession, config: GatewayConfig, *, 
     )
 
 
-async def request_password_reset(db: AsyncSession, config: GatewayConfig, *, email: str) -> None:
+async def request_password_reset(
+    db: AsyncSession, config: GatewayConfig, *, background_tasks: BackgroundTasks, email: str
+) -> None:
     """Mail a password-reset link, or do nothing: the caller cannot tell which.
 
     Enumeration-safe the same way ``resend_verification_email`` is, including
-    paying the same timing-equalizing cost on the early return, and refusing a
-    deactivated identity for the same reason. Works on an unverified identity
-    too, deliberately: forgetting a password predates ever verifying it, so
-    gating this on ``email_verified_at`` would strand exactly the caller it
-    exists to help.
+    paying the same timing-equalizing cost on the early return, backgrounding
+    the mail send the same way, and refusing a deactivated identity for the
+    same reason. Works on an unverified identity too, deliberately: forgetting
+    a password predates ever verifying it, so gating this on
+    ``email_verified_at`` would strand exactly the caller it exists to help.
     """
     mailer = Mailer(config)
     mailer.require_ready()
@@ -505,7 +494,8 @@ async def request_password_reset(db: AsyncSession, config: GatewayConfig, *, ema
     db.add(identity)
     await db.commit()
 
-    await mailer.send(
+    background_tasks.add_task(
+        mailer.send,
         to=address,
         message=render_password_reset_email(
             reset_link=mailer.link(f"/#/reset-password?token={token}"),

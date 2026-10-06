@@ -1,0 +1,28 @@
+schema_version: "1.0"
+policy:
+  id: otari/shell-safety
+  description: Commands refused before they run.
+
+gates:
+
+  - id: use-pnpm-not-npm
+    type: command
+    runs: [pre_tool_use.command]
+    enforcement: required
+    # Narrowed to real invocations rather than the bare tool name: a phrase
+    # matches a token in any position, so "npm" alone also refused ordinary
+    # commands that merely mention it, `grep -rn npm web/` among them.
+    forbidden: ["npm install", "npm ci", "npm run", "npm i", "npm exec"]
+    message: >-
+      web/ is pnpm, not npm (see web/AGENTS.md, "Use pnpm as pinned in
+      package.json"). Use pnpm --dir web ... instead.
+
+  - id: no-force-push
+    type: command
+    runs: [pre_tool_use.command]
+    enforcement: advisory
+    forbidden: ["git push --force", "git push -f"]
+    message: >-
+      Force-pushing rewrites shared history; use --force-with-lease if you
+      must. (main is already protected server-side; this covers other
+      branches.)

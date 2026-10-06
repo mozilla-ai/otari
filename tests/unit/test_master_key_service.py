@@ -139,6 +139,16 @@ async def test_is_valid_master_key_accepts_hash_and_plaintext() -> None:
     assert await deps.is_valid_master_key("nope", plain, session) is False
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blank", ["", "   "])
+async def test_blank_master_key_is_unset_and_accepts_no_empty_token(blank: str) -> None:
+    config = GatewayConfig(master_key=blank)
+    assert config.master_key is None
+    session = AsyncMock()
+    session.get.return_value = None
+    assert await deps.is_valid_master_key("", config, session) is False
+
+
 def test_402_message_states_cause_and_both_fixes() -> None:
     msg = no_pricing_error_detail("openai:gpt-5")
     assert "openai:gpt-5" in msg

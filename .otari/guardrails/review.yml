@@ -1,0 +1,71 @@
+schema_version: "1.0"
+policy:
+  id: otari/review
+  description: A model judges each rubric, so every gate here is advisory.
+
+gates:
+
+  - id: no-narrative-comments
+    type: judge
+    runs: [stop.session]
+    enforcement: advisory
+    # Each judge gate costs a model call, so this one runs only when source changes.
+    when_changed: ["src/gateway/**", "cli/src/otari_agent/**", "web/src/**"]
+    rubric: >-
+      Check whether this diff adds or rewrites a comment or docstring that
+      restates what the code already says, narrates the change being made
+      (e.g. "added X", "now does Y", "changed from Z"), or records what the
+      code used to do or why it differs from a prior version. The rule
+      (AGENTS.md, "Repository Conventions"): add a comment only where the
+      logic is not obvious; keep a docstring concise and meaningful;
+      narration, repeated rationale, and implementation history belong in
+      the commit message, not left in the code. Fail only on a comment or
+      docstring this diff adds or rewrites that violates this. Do not fail
+      on a comment that explains a genuinely non-obvious invariant,
+      constraint, or workaround (exactly what this rule still wants kept),
+      and do not fail when this diff adds or changes no comments at all.
+    message: >-
+      This diff may add a comment that restates the code, narrates the
+      change, or records prior behavior instead of explaining a non-obvious
+      WHY (see AGENTS.md, "Repository Conventions"): that belongs in the
+      commit message, not left in the code.
+
+  # One rubric covers both writing rules, so a turn pays for one model call.
+  - id: writing-style-violations
+    type: judge
+    runs: [stop.session]
+    enforcement: advisory
+    # `**/*.md` does not match a file at the repo root, so `*.md` is listed too.
+    when_changed: ["*.md", "**/*.md", "src/gateway/**", "cli/src/otari_agent/**", "web/src/**"]
+    rubric: >-
+      Flag two things in prose (README, docs, doc comments, docstrings,
+      commit messages, PR descriptions, user-visible UI copy), per AGENTS.md
+      "Writing style": (1) an em dash (—) or a double hyphen (--) used as a
+      sentence separator, where a comma, semicolon, colon, parenthesis,
+      period, or rephrasing should be used instead; do not flag code, a CLI
+      flag like --all, or an en-dash numeric range like 3–4. (2) A
+      British/non-US spelling (e.g. 'behaviour', 'recognise', 'serialise',
+      'catalogue', 'labelled', 'licence', 'colour'); do not flag an
+      identifier/attribute borrowed from an external API (e.g.
+      aria-labelledby, asyncio.CancelledError, GitHub's 'cancelled' job
+      conclusion), a value that travels on the wire or into a database, or a
+      third-party product's own name.
+    message: 'AGENTS.md Writing style: avoid em dashes/double hyphens as prose separators,
+      and spell prose in US English (identifiers, wire values, and third-party names
+      borrowed from elsewhere keep their original spelling).'
+
+  - id: no-leaked-secrets-in-logs-or-errors
+    type: judge
+    runs: [stop.session]
+    enforcement: advisory
+    # A security finding outranks every style and architecture finding when a turn caps its judge gates.
+    priority: 10
+    when_changed: ["src/gateway/**", "cli/src/otari_agent/**"]
+    rubric: Flag any log statement, error message, or public-facing error response that
+      includes a secret, token, or raw API key, or that otherwise leaks internal details
+      (stack traces, internal file paths, header contents) to a client. The one-time bootstrap
+      key print is a deliberate, allowed exception; nothing else should log or return
+      a raw credential.
+    message: 'Possible secret/token/API-key leak in logs or an internal detail exposed
+      in a public error response (AGENTS.md § Repository Conventions: ''Preserve security-relevant
+      behavior ... never log secrets, tokens, or raw API keys'').'

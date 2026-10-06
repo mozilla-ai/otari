@@ -19,9 +19,18 @@ export interface TurnUsage {
   tokensPerSecond: number | undefined
 }
 
+/** A file a question sends, uploaded before the question was. */
+export interface ChatAttachment {
+  fileId: string
+  filename: string
+  bytes: number
+}
+
 export interface ChatTurn {
   role: "user" | "assistant"
   content: string
+  /** The files a question sends with its text. */
+  attachments?: ChatAttachment[]
   /** Chain-of-thought, from a model that streams it in a field of its own. */
   reasoning?: string
   /** Present once an assistant turn has finished and reported its usage. */

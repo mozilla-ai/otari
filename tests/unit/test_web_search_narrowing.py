@@ -1,10 +1,8 @@
-"""How a workspace's web-search row composes with the request's own tool entry.
+"""How a workspace's web search limits compose with the request's own tool entry.
 
-The composition rule is the whole of #656's answer to #655, and it differs from
-the hybrid path's on purpose: there the platform's policy supplies *defaults* a
-request overrides, here the workspace's row *narrows* what the request asked
-for. Everything a request could shed under default-only precedence is pinned
-here, because shedding it is how a guardrail fails open.
+The limits are a ceiling on every plane: a request may narrow them and may not widen them.
+Everything a request could shed if they were only defaults is pinned here,
+because shedding it is how a guardrail fails open.
 
 The two ceilings the dashboard card repeats as literals are pinned at the
 bottom, the same drift `test_code_execution_policy_limits.py` catches next door.
@@ -18,17 +16,18 @@ from typing import Any
 
 import pytest
 
-from gateway.services.tenancy.errors import WorkspaceWebSearchDomainsExcludedError
+from gateway.exceptions.tools_exceptions import WorkspaceWebSearchDomainsExcludedError
+from gateway.models.tools import ResolvedWebSearchConfig
 from gateway.services.tenancy.workspace_web_search_service import (
-    _MAX_DOMAINS,
     _MAX_RESULTS,
     InvalidStoredWebSearchDomainError,
-    ResolvedWebSearchConfig,
-    _as_tuple,
     _normalize_domains,
-    narrow_web_search_tool_entry,
+    _stored_domains,
+    read_web_search_policy,
 )
-from gateway.services.web_retrieval_policy import canonicalize_domain_rule
+from gateway.services.tools._web_access import narrow_web_search_tool_entry
+from gateway.services.tools._web_admission import _canonicalize_web_search_request_domains
+from gateway.services.web_retrieval_policy import MAX_WEB_SEARCH_DOMAINS, canonicalize_domain_rule
 
 
 def _config(**overrides: object) -> ResolvedWebSearchConfig:
@@ -39,13 +38,14 @@ def _config(**overrides: object) -> ResolvedWebSearchConfig:
         "allowed_domains": None,
         "blocked_domains": None,
         "provider_options": None,
+        "authorized_tools": None,
     }
     values.update(overrides)
     return ResolvedWebSearchConfig(**values)  # type: ignore[arg-type]
 
 
 # What a request would get with no workspace row: the deployment's own setting,
-# or the backend's built-in. `routes/_tools.web_search_max_results_baseline`
+# or the backend's built-in. `web_search_max_results_baseline`
 # answers it for real; the cases below vary it to say which one is in play.
 _BASELINE = 5
 
@@ -69,7 +69,7 @@ def test_new_domain_rules_are_stored_in_canonical_form() -> None:
 
 
 def test_valid_legacy_domain_rules_are_canonicalized_in_memory() -> None:
-    assert _as_tuple(["EXAMPLE.com.", "bücher.example"], stored=True) == (
+    assert _stored_domains(["EXAMPLE.com.", "bücher.example"]) == (
         "example.com",
         "xn--bcher-kva.example",
     )
@@ -77,18 +77,70 @@ def test_valid_legacy_domain_rules_are_canonicalized_in_memory() -> None:
 
 def test_invalid_legacy_domain_rule_fails_closed() -> None:
     with pytest.raises(InvalidStoredWebSearchDomainError):
-        _as_tuple(["https://example.com/path"], stored=True)
+        _stored_domains(["https://example.com/path"])
 
 
 @pytest.mark.parametrize("value", [{}, False, 0, "", "example.com", {"example.com": True}])
 def test_invalid_stored_domain_container_fails_closed(value: Any) -> None:
     with pytest.raises(InvalidStoredWebSearchDomainError):
-        _as_tuple(value, stored=True)
+        _stored_domains(value)
 
 
 @pytest.mark.parametrize("value", [None, []])
 def test_empty_stored_domain_list_remains_unconfigured(value: list[str] | None) -> None:
-    assert _as_tuple(value, stored=True) is None
+    assert _stored_domains(value) is None
+
+
+_TOO_MANY = [f"d{i}.example" for i in range(MAX_WEB_SEARCH_DOMAINS + 1)]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(["example.com", 1], id="entry-not-string"),
+        pytest.param(["https://example.com/path"], id="entry-not-host"),
+        pytest.param([".".join(["a" * 60] * 5)], id="entry-too-long"),
+        pytest.param(_TOO_MANY, id="too-many-entries"),
+    ],
+)
+def test_every_source_refuses_the_same_domain_list(value: list[Any]) -> None:
+    with pytest.raises(ValueError):
+        _normalize_domains(value)
+    with pytest.raises(InvalidStoredWebSearchDomainError):
+        _stored_domains(value)
+    with pytest.raises(ValueError):
+        read_web_search_policy({"enabled": True, "allowed_domains": value})
+    with pytest.raises(ValueError):
+        _canonicalize_web_search_request_domains({"allowed_domains": value})
+
+
+def test_every_source_reads_the_same_domain_list() -> None:
+    value = [".Docs.Python.org", " docs.python.org ", "bücher.example"]
+    expected = ("docs.python.org", "xn--bcher-kva.example")
+    request_entry: dict[str, Any] = {"allowed_domains": value, "blocked_domains": value}
+
+    assert tuple(_normalize_domains(value) or ()) == expected
+    assert _stored_domains(value) == expected
+    assert read_web_search_policy({"enabled": True, "allowed_domains": value}).allowed_domains == expected
+    _canonicalize_web_search_request_domains(request_entry)
+    assert tuple(request_entry["allowed_domains"]) == expected
+    assert tuple(request_entry["blocked_domains"]) == expected
+
+
+def test_a_request_keeps_an_empty_domain_list_empty() -> None:
+    request_entry: dict[str, Any] = {"allowed_domains": [], "blocked_domains": None}
+
+    _canonicalize_web_search_request_domains(request_entry)
+
+    assert request_entry == {"allowed_domains": [], "blocked_domains": None}
+
+
+def test_a_blank_entry_is_refused_unless_a_caller_wrote_it() -> None:
+    assert _normalize_domains(["", "example.com"]) == ["example.com"]
+    with pytest.raises(InvalidStoredWebSearchDomainError):
+        _stored_domains(["", "example.com"])
+    with pytest.raises(ValueError):
+        read_web_search_policy({"enabled": True, "allowed_domains": ["", "example.com"]})
 
 
 def test_a_row_that_narrows_nothing_leaves_the_entry_alone() -> None:
@@ -166,7 +218,7 @@ def test_allow_list_intersection_canonicalizes_each_unique_rule_once(monkeypatch
         return canonicalize_domain_rule(value)
 
     monkeypatch.setattr(
-        "gateway.services.tenancy.workspace_web_search_service.canonicalize_domain_rule",
+        "gateway.services.tools._web_access.canonicalize_domain_rule",
         counted,
     )
     _narrow(
@@ -293,9 +345,71 @@ def _card_constant(name: str) -> int:
     return int(match.group(1))
 
 
+def test_a_control_plane_answer_reads_into_the_same_value_as_a_stored_row() -> None:
+    config = read_web_search_policy(
+        {
+            "enabled": True,
+            "max_results": 7,
+            "purpose_hint": "docs only",
+            "allowed_domains": [".Docs.Python.org", "docs.python.org"],
+            "blocked_domains": [],
+            "provider_options": {"search_depth": "advanced"},
+        }
+    )
+    assert config == ResolvedWebSearchConfig(
+        enabled=True,
+        max_results=7,
+        purpose_hint="docs only",
+        allowed_domains=("docs.python.org",),
+        blocked_domains=None,
+        provider_options={"search_depth": "advanced"},
+        authorized_tools=None,
+    )
+
+
+def test_a_control_plane_answer_with_only_enabled_narrows_nothing() -> None:
+    assert read_web_search_policy({"enabled": True}) == _config()
+
+
+def test_a_disabled_control_plane_answer_carries_the_veto() -> None:
+    assert read_web_search_policy({"enabled": False}) == _config(enabled=False)
+
+
+def test_a_whitespace_only_hint_from_the_control_plane_reads_as_absent() -> None:
+    assert read_web_search_policy({"enabled": True, "purpose_hint": "   "}).purpose_hint is None
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        pytest.param({}, id="enabled-missing"),
+        pytest.param({"enabled": "yes"}, id="enabled-not-bool"),
+        pytest.param({"enabled": True, "max_results": "5"}, id="max-results-string"),
+        pytest.param({"enabled": True, "max_results": True}, id="max-results-bool"),
+        pytest.param({"enabled": True, "max_results": 0}, id="max-results-zero"),
+        pytest.param({"enabled": True, "max_results": _MAX_RESULTS + 1}, id="max-results-over-ceiling"),
+        pytest.param({"enabled": True, "purpose_hint": 5}, id="hint-not-string"),
+        pytest.param({"enabled": True, "purpose_hint": "x" * 2049}, id="hint-too-long"),
+        pytest.param({"enabled": True, "provider_options": []}, id="options-not-object"),
+        pytest.param({"enabled": True, "provider_options": {"k": "x" * 5000}}, id="options-too-large"),
+        pytest.param({"enabled": True, "allowed_domains": "example.com"}, id="domains-not-list"),
+        pytest.param({"enabled": True, "blocked_domains": [1]}, id="domain-not-string"),
+        pytest.param({"enabled": True, "allowed_domains": ["https://example.com/path"]}, id="domain-not-host"),
+        pytest.param({"enabled": True, "blocked_domains": [".".join(["a" * 60] * 5)]}, id="domain-too-long"),
+        pytest.param(
+            {"enabled": True, "allowed_domains": [f"d{i}.example" for i in range(MAX_WEB_SEARCH_DOMAINS + 1)]},
+            id="too-many-domains",
+        ),
+    ],
+)
+def test_a_malformed_control_plane_answer_fails_closed(answer: dict[str, Any]) -> None:
+    with pytest.raises(ValueError):
+        read_web_search_policy(answer)
+
+
 @pytest.mark.parametrize(
     ("name", "server_value"),
-    [("MAX_RESULTS", _MAX_RESULTS), ("MAX_DOMAINS", _MAX_DOMAINS)],
+    [("MAX_RESULTS", _MAX_RESULTS), ("MAX_DOMAINS", MAX_WEB_SEARCH_DOMAINS)],
 )
 def test_the_card_repeats_the_ceiling_the_server_enforces(name: str, server_value: int) -> None:
     """The card cannot import a Python constant, so it repeats both and this pins the pair.

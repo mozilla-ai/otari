@@ -78,7 +78,7 @@ from gateway.services.external_usage_service import (
     ExternalEventsRequest,
     ExternalUsageEvent,
     ingest_external_events,
-    reserved_source_reason,
+    is_reserved_source,
 )
 
 router = APIRouter(tags=["otel"])
@@ -206,10 +206,9 @@ def _resolve_timestamp(attrs: dict[str, Any], default: datetime | None) -> datet
 
 def _sanitize_source(name: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9._:-]+", "-", name).strip("-")[:64]
-    # "gateway" is reserved for usage Otari served itself and the `otari-ai:` prefix for
-    # the provenance tags otari.ai writes; a client claiming either would masquerade as
-    # those rows (and fail the ingest schema with a 500).
-    if not slug or reserved_source_reason(slug) is not None:
+    # "gateway" is reserved for usage Otari served itself; a client claiming it would
+    # masquerade as those rows (and fail the ingest schema with a 500).
+    if not slug or is_reserved_source(slug):
         return _DEFAULT_SOURCE
     return slug
 
@@ -266,6 +265,7 @@ def _build_event(
     # No branch below reassigns this today: it stays a variable rather than a literal at
     # the construction site as the seam for an emitter that does report the split.
     cache_write_1h = 0
+    reasoning = 0
     event_name = attrs.get("event.name")
     if event_name == "api_request":
         # Claude Code: cache reads/writes are additive (outside input_tokens).
@@ -293,6 +293,7 @@ def _build_event(
             input_tokens = _int(attrs.get("input_token_count"))
             output_tokens = _int(attrs.get("output_token_count"))
             cache_read = _int(attrs.get("cached_token_count"))
+            reasoning = _int(attrs.get("reasoning_token_count"))
             event_id = _codex_event_id(attrs, None)
             duration = duration_ms
         else:  # codex.api_request (HTTP /models path)
@@ -339,6 +340,7 @@ def _build_event(
             cache_read_tokens=cache_read,
             cache_write_tokens=cache_write,
             cache_write_1h_tokens=cache_write_1h,
+            reasoning_tokens=reasoning,
             cache_tokens_in_prompt=cache_tokens_in_prompt,
             duration_ms=int(duration) if duration is not None else None,
             session_label=str(session) if session else None,

@@ -2,13 +2,17 @@ import { render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { CheckEmailPage } from "@/features/auth/CheckEmailPage"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
+import { bootstrap } from "@/tests/fixtures"
 
 function renderPage(hash: string) {
   return render(
-    <ThemeProvider>
-      <CheckEmailPage hash={hash} />
-    </ThemeProvider>,
+    <DeploymentProvider value={bootstrap()}>
+      <ThemeProvider>
+        <CheckEmailPage hash={hash} />
+      </ThemeProvider>
+    </DeploymentProvider>,
   )
 }
 

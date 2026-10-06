@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from time import monotonic
 from typing import Annotated, Any, Literal, NamedTuple, TypeVar, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import ColumnElement, and_, case, func, null, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_api_key_or_master_key
 from gateway.api.routes._billing_schemas import ChargeLine, MeterMap
 from gateway.core.config import GatewayConfig
+from gateway.core.metered_pricing import quantize_cost
 from gateway.core.sql import (
     MAX_FILTER_VALUES,
     bucket_expr,
@@ -26,13 +27,13 @@ from gateway.core.sql import (
     dialect_name,
     match_any,
     utc_bound,
+    utc_iso,
 )
 from gateway.core.surface import Surface
-from gateway.core.usage_source import is_served_here, not_served_here
 from gateway.inflight import get_registry
 from gateway.models.api_keys import APIKey
 from gateway.models.money import as_float
-from gateway.models.usage import UsageLog
+from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
 from gateway.models.users import User
 from gateway.services.external_usage_service import (
     ExternalEventsRequest,
@@ -55,8 +56,9 @@ from gateway.services.web_retrieval_backend import WEB_FETCH_TOOL_NAME, WEB_SEAR
 # authenticate differently. Reading or amending every tenant's usage rows is
 # deployment-wide, so that gate is declared on the router and a route added later
 # inherits it; ``POST /external-events`` files rows on behalf of the API key that
-# holds them, and is split onto a router of its own rather than left as a
-# route-level override so that admitting a non-operator is spelled here. Each
+# holds them, and ``GET /requests/{request_id}`` reads a key's own request back,
+# so both sit on a router of their own rather than a route-level override, and
+# admitting a non-operator is spelled here. Each
 # router names its own rule, so adding a route to either one inherits a gate
 # rather than none.
 operator_router = APIRouter(
@@ -64,7 +66,7 @@ operator_router = APIRouter(
     tags=["usage"],
     dependencies=[Depends(require_deployment_operator)],
 )
-ingest_router = APIRouter(
+key_router = APIRouter(
     prefix="/usage",
     tags=["usage"],
     dependencies=[Depends(verify_api_key_or_master_key)],
@@ -172,19 +174,6 @@ _TOOL_DIMENSION = "tool"
 _ALL_SUMMARY_DIMENSIONS: set[str] = set(_SUMMARY_DIMENSIONS) | {_ERROR_TAXONOMY_DIMENSION, _TOOL_DIMENSION}
 
 
-def _utc_iso(value: datetime) -> str:
-    """Serialize a stored timestamp as unambiguous UTC ISO-8601.
-
-    ``usage_logs.timestamp`` is timezone-aware, but SQLite returns it naive (it does
-    not persist the offset). A naive ``isoformat()`` has no ``+00:00``, so a browser
-    reads it in its own local zone and a recent UTC event can land in the future,
-    showing as "0s ago". Treat a naive value as the UTC it was stored as.
-    """
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.isoformat()
-
-
 class UsageEntry(BaseModel):
     """A single usage log entry."""
 
@@ -208,6 +197,8 @@ class UsageEntry(BaseModel):
     cache_read_tokens: int | None
     cache_write_tokens: int | None
     cache_write_1h_tokens: int | None
+    # A subset of completion_tokens; null on rows written before it was recorded.
+    reasoning_tokens: int | None = None
     # Precise shapes with a permissive fallback arm; see _billing_schemas for why
     # the fallback is what keeps a row written by an older gateway renderable.
     billing_meters: MeterMap | None
@@ -217,6 +208,7 @@ class UsageEntry(BaseModel):
     error_message: str | None
     status_code: int | None
     latency_ms: int | None
+    provider_latency_ms: int | None
     source: str
     source_label: str | None
     counts_toward_budget: bool
@@ -226,7 +218,8 @@ class UsageEntry(BaseModel):
     # composing it from the two fields above is a second copy of the rule, and the
     # copy is what let the dashboard offer a checkbox the delete then refused (#781).
     bulk_editable: bool
-    # Routing attribution. All null for a request that named a plain model.
+    # Routing attribution. All null for a request that named a plain model, except
+    # `request_group_id`, which is the request's `Otari-Request-ID` on every row.
     # `status == "absorbed"` marks an attempt a policy recovered from; those rows
     # are excluded from `error_count` and from `request_count`, since the request
     # they belong to is counted once by the attempt that served it.
@@ -250,20 +243,21 @@ class UsageEntry(BaseModel):
             user_alias=user_alias,
             api_key_id=log.api_key_id,
             api_key_name=api_key_name,
-            timestamp=_utc_iso(log.timestamp),
+            timestamp=utc_iso(log.timestamp),
             model=log.model,
             provider=log.provider,
             endpoint=log.endpoint,
             source=log.source,
             source_label=log.source_label,
             counts_toward_budget=log.counts_toward_budget,
-            bulk_editable=not is_served_here(log.source) and not log.counts_toward_budget,
+            bulk_editable=log.source != SERVED_HERE_SLUG and not log.counts_toward_budget,
             prompt_tokens=log.prompt_tokens,
             completion_tokens=log.completion_tokens,
             total_tokens=log.total_tokens,
             cache_read_tokens=log.cache_read_tokens,
             cache_write_tokens=log.cache_write_tokens,
             cache_write_1h_tokens=log.cache_write_1h_tokens,
+            reasoning_tokens=log.reasoning_tokens,
             billing_meters=log.billing_meters,
             pricing_breakdown=log.pricing_breakdown,
             cost=as_float(log.cost),
@@ -271,6 +265,7 @@ class UsageEntry(BaseModel):
             error_message=log.error_message,
             status_code=log.status_code,
             latency_ms=log.latency_ms,
+            provider_latency_ms=log.provider_latency_ms,
             policy_name=log.policy_name,
             selection_reason=log.selection_reason,
             attempt_position=log.attempt_position,
@@ -558,7 +553,7 @@ async def list_usage(
     ]
 
 
-@ingest_router.post("/external-events")
+@key_router.post("/external-events")
 async def ingest_external_usage(
     request: ExternalEventsRequest,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
@@ -584,6 +579,78 @@ async def ingest_external_usage(
         api_key=api_key,
         is_master_key=is_master_key,
         reject_user_mismatch=config.reject_user_mismatch,
+    )
+
+
+class RequestSettlement(BaseModel):
+    """What one request settled at, summed over every usage row it wrote.
+
+    A routed request writes a row per attempt and a vision-normalized one a row for
+    the describe call, all sharing the ``Otari-Request-ID`` the caller was sent as
+    their ``request_group_id``, so this is the request's whole bill rather than one
+    attempt's. ``cost_usd`` uses the inline ``usage.cost_usd`` format and is null
+    when no row was priced.
+    """
+
+    request_id: str
+    status: Literal["success", "error"]
+    cost_usd: str | None
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    row_count: int
+
+
+@key_router.get("/requests/{request_id}")
+async def get_request_settlement(
+    request_id: Annotated[str, Path(max_length=255)],
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> RequestSettlement:
+    """Look up a request's settled cost by the ``Otari-Request-ID`` it was sent (standalone).
+
+    This is how a caller recovers the cost of a request whose response never
+    carried one: a stream that failed or was disconnected mid-response, or a
+    request that errored. An API key sees only the requests it made; the master
+    key sees any. Returns 404 until the request has settled (its rows are written
+    by a background writer, so a lookup made the instant a stream closes can
+    precede them), and for an id that is unknown or belongs to another key, with
+    no way to tell those apart. A stream that ended before the provider reported
+    usage, and ran no gateway tools, writes no row, so its id stays 404.
+    """
+    api_key, is_master_key = auth_result
+    conditions: list[ColumnElement[bool]] = [UsageLog.request_group_id == request_id]
+    if not is_master_key:
+        if api_key is None:
+            raise HTTPException(status_code=404, detail="Request not found")
+        conditions.append(UsageLog.api_key_id == api_key.id)
+    stmt = select(
+        func.count(),
+        func.sum(UsageLog.cost),
+        func.count(UsageLog.cost),
+        func.coalesce(func.sum(UsageLog.prompt_tokens), 0),
+        func.coalesce(func.sum(UsageLog.completion_tokens), 0),
+        func.coalesce(func.sum(UsageLog.total_tokens), 0),
+        # A vision describe side-call's success row is written before the main
+        # call runs and is the only one with no latency, so it settles nothing.
+        func.count(case(((UsageLog.status == "success") & UsageLog.latency_ms.is_not(None), 1))),
+        func.count(case((UsageLog.status == "error", 1))),
+    ).where(*conditions)
+    row_count, cost, priced_rows, prompt_tokens, completion_tokens, total_tokens, served, errors = (
+        await db.execute(stmt)
+    ).one()
+    # Absorbed rows and a side-call alone mean the row that settles the request
+    # has not been written yet.
+    if served == 0 and errors == 0:
+        raise HTTPException(status_code=404, detail="Request not found")
+    return RequestSettlement(
+        request_id=request_id,
+        status="error" if errors else "success",
+        cost_usd=f"{quantize_cost(cost):.6f}" if priced_rows else None,
+        prompt_tokens=int(prompt_tokens),
+        completion_tokens=int(completion_tokens),
+        total_tokens=int(total_tokens),
+        row_count=int(row_count),
     )
 
 
@@ -647,7 +714,7 @@ async def count_usage(
         # counts_toward_budget alone does not say "imported": gateway traffic on an
         # exclude_from_budget key is also False, so without this the count would
         # promise rows _selection_conditions then refuses to touch.
-        conditions.append(not_served_here(UsageLog.source))
+        conditions.append(UsageLog.source != SERVED_HERE_SLUG)
     stmt: Any = select(func.count()).select_from(UsageLog).where(*conditions)
     total = (await db.execute(stmt)).scalar_one()
     return UsageCount(total=total)
@@ -743,6 +810,7 @@ class UsageTotals(BaseModel):
     cache_read_tokens: int
     cache_write_tokens: int
     cache_write_1h_tokens: int
+    reasoning_tokens: int = 0
     request_count: int
     error_count: int
     avg_latency_ms: float | None
@@ -1103,6 +1171,7 @@ async def _totals(
                 ),
                 _billed_input_sum(),
                 _billed_output_sum(),
+                func.coalesce(func.sum(UsageLog.reasoning_tokens), 0),
             ).where(*conditions)
         )
     ).one()
@@ -1120,6 +1189,7 @@ async def _totals(
         unpriced_requests=int(row[10]),
         billed_input_tokens=int(row[11]),
         billed_output_tokens=int(row[12]),
+        reasoning_tokens=int(row[13]),
     )
 
 

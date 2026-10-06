@@ -22,9 +22,7 @@ from gateway.models.budgets import (
 )
 from gateway.models.money import MAX_USD_LIMIT, as_float
 
-_PERIOD_DESCRIPTION = (
-    "Seconds between resets, counted from the last one. Mutually exclusive with reset_alignment"
-)
+_PERIOD_DESCRIPTION = "Seconds between resets, counted from the last one. Mutually exclusive with reset_alignment"
 _ALIGNMENT_DESCRIPTION = (
     "Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way "
     "to express a calendar month. Mutually exclusive with budget_duration_sec"
@@ -382,7 +380,8 @@ class OrganizationScopedBudgetCreate(BaseModel):
         default=None,
         description=(
             "Narrow the cap to one provider instance; omit or null to cap spend across every provider. "
-            "Must name a real instance: a blank value would store a ceiling that never binds"
+            "A blank value would store a ceiling that never binds, so it is refused; this does not check "
+            "that the value names a configured provider instance"
         ),
     )
     budget_id: str = Field(
@@ -443,7 +442,8 @@ class WorkspaceMemberBudgetPolicyCreate(BaseModel):
         default=None,
         description=(
             "Narrow the default to one provider instance; omit or null to apply to every provider. "
-            "Must name a real instance: a blank value would materialize ceilings that never bind"
+            "A blank value would materialize ceilings that never bind, so it is refused; this does not check "
+            "that the value names a configured provider instance"
         ),
     )
 

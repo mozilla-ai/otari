@@ -18,22 +18,23 @@ Reads and writes both require an owner or admin of the organization or of the wo
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from collections.abc import Mapping
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.exceptions.tools_exceptions import SandboxImageNotAllowedError, SandboxToolsUnrunnableError
 from gateway.models.tenancy import User, Workspace
-from gateway.models.tools import CodeExecutor, WorkspaceCodeExecutionPolicy
+from gateway.models.tools import CodeExecutor, ResolvedCodeExecutionPolicy, WorkspaceCodeExecutionPolicy
 from gateway.services.mcp_loop import MAX_TOOL_ITERATIONS_CAP
 from gateway.services.sandbox_backend import (
-    CODE_EXECUTION_TOOL_NAME,
     CODE_EXECUTION_TOOL_NAMES,
     DEFAULT_EXEC_TIMEOUT_S,
+    SERVED_TOOL_NAMES,
 )
 from gateway.services.tenancy import authorization
-from gateway.services.tenancy.errors import SandboxImageNotAllowedError, SandboxToolsUnrunnableError
 from gateway.services.tenancy.organization_service import OrganizationService
 
 # A policy may only narrow, so a value above either ceiling would read as a
@@ -44,11 +45,6 @@ _MAX_EXEC_TIMEOUT_S = int(DEFAULT_EXEC_TIMEOUT_S)
 # Matches the hosted column's own bound. An image reference longer than this is
 # already pathological, and the column is ``String(255)``.
 _MAX_IMAGE_LENGTH = 255
-# The tool kinds this deployment's sandbox backend actually serves, as opposed to
-# the vocabulary a policy may be written in. One today. A stored list intersects
-# with this, so a list sharing nothing with it narrows to an empty set, which is
-# refused rather than stored (see ``_require_runnable_tools``).
-SERVED_TOOL_NAMES: tuple[str, ...] = (CODE_EXECUTION_TOOL_NAME,)
 
 
 class WorkspaceCodeExecutionPolicyUpdate(BaseModel):
@@ -243,31 +239,6 @@ class WorkspaceCodeExecutionPolicyPublic(BaseModel):
         )
 
 
-@dataclass(frozen=True)
-class ResolvedCodeExecutionPolicy:
-    """What the request path reads off a stored policy.
-
-    A value type rather than the ORM row, so the admission check cannot lazily
-    touch the session after it has moved on, and so the tool context carries no
-    ORM identity into a streaming response that outlives the request handler.
-    """
-
-    enabled: bool
-    default_purpose_hint: str | None
-    max_iterations: int | None
-    exec_timeout_s: int | None
-    image: str | None
-    # ``frozenset`` rather than the stored list, because the request path only
-    # ever asks whether a tool kind is in it, and an immutable one cannot be
-    # edited by a backend it is handed to.
-    tools: frozenset[str] | None
-    # The workspace's pin on who runs code, or ``None`` for "the deployment and
-    # the request decide". Parsed on the way out, so a stored value outside the
-    # vocabulary (which the write refuses) reads as no pin rather than failing
-    # every request.
-    executor: CodeExecutor | None = None
-
-
 async def resolve_workspace_code_execution_policy(
     db: AsyncSession,
     workspace_id: uuid.UUID,
@@ -288,7 +259,37 @@ async def resolve_workspace_code_execution_policy(
         exec_timeout_s=policy.exec_timeout_s,
         image=policy.image,
         tools=frozenset(policy.tools) if policy.tools is not None else None,
+        # NOTE: a stored executor outside the vocabulary reads as no pin, so an old row does not fail every request.
         executor=CodeExecutor.parse(policy.executor),
+    )
+
+
+def read_code_execution_policy(answer: Mapping[str, Any]) -> ResolvedCodeExecutionPolicy:
+    """Read the control plane's answer for one workspace's code execution policy.
+
+    Raises ``ValueError`` when a field is malformed, so a policy that cannot be read fails closed.
+    A ceiling above this gateway's own is read as sent, because it can only lower a limit.
+    """
+    enabled = answer.get("enabled")
+    if not isinstance(enabled, bool):
+        raise ValueError("enabled must be a boolean")
+    hint = answer.get("default_purpose_hint")
+    if hint is not None and not isinstance(hint, str):
+        raise ValueError("default_purpose_hint must be a string")
+    tools = answer.get("tools")
+    if tools is not None and (not isinstance(tools, list) or any(not isinstance(tool, str) for tool in tools)):
+        raise ValueError("tools must be a list of strings")
+    executor = answer.get("executor")
+    if executor is not None and CodeExecutor.parse(executor) is None:
+        raise ValueError("executor must be one of auto, otari or provider")
+    return ResolvedCodeExecutionPolicy(
+        enabled=enabled,
+        default_purpose_hint=_blank_to_none(hint),
+        max_iterations=_answer_ceiling(answer, "max_iterations"),
+        exec_timeout_s=_answer_ceiling(answer, "exec_timeout_s"),
+        image=None,
+        tools=frozenset(tools) if tools is not None else None,
+        executor=CodeExecutor.parse(executor),
     )
 
 
@@ -389,8 +390,7 @@ class WorkspaceCodeExecutionPolicyService:
                 "Set sandbox_allowed_session_images (or sandbox_session_image) on the gateway first."
             )
         raise SandboxImageNotAllowedError(
-            f"Sandbox image {candidate!r} is not one this deployment allows. "
-            f"Allowed: {', '.join(self.allowed_images)}."
+            f"Sandbox image {candidate!r} is not one this deployment allows. Allowed: {', '.join(self.allowed_images)}."
         )
 
     async def _commit(self) -> None:
@@ -475,6 +475,17 @@ def _require_runnable_tools(tools: list[str] | None) -> None:
     if tools is None or set(tools) & set(SERVED_TOOL_NAMES):
         return
     raise SandboxToolsUnrunnableError(SERVED_TOOL_NAMES)
+
+
+def _answer_ceiling(answer: Mapping[str, Any], field: str) -> int | None:
+    """A ceiling from the control plane's answer, or ``None`` when it sends none."""
+    value = answer.get(field)
+    if value is None:
+        return None
+    # ``bool`` is an ``int`` subclass, so a JSON ``true`` would otherwise read as 1.
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{field} must be a positive integer")
+    return int(value)
 
 
 def _blank_to_none(value: str | None) -> str | None:

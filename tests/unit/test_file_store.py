@@ -20,14 +20,16 @@ async def _iter(chunks: list[bytes]) -> AsyncIterator[bytes]:
 @pytest.mark.asyncio
 async def test_put_get_roundtrip(tmp_path: Path) -> None:
     store = LocalDirFileStore(str(tmp_path))
-    ref = await store.put("file-abcdef0123", b"hello bytes")
+    ref = await store.allocate("file-abcdef0123")
+    await store.put(ref, b"hello bytes")
     assert await store.get(ref) == b"hello bytes"
 
 
 @pytest.mark.asyncio
 async def test_put_stream_get_roundtrip(tmp_path: Path) -> None:
     store = LocalDirFileStore(str(tmp_path))
-    ref, size = await store.put_stream("file-streamtest01", _iter([b"hello ", b"stream", b"ed bytes"]))
+    ref = await store.allocate("file-streamtest01")
+    size = await store.put_stream(ref, _iter([b"hello ", b"stream", b"ed bytes"]))
     assert size == len(b"hello streamed bytes")
     assert await store.get(ref) == b"hello streamed bytes"
 
@@ -35,7 +37,8 @@ async def test_put_stream_get_roundtrip(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_put_stream_handles_empty_chunks(tmp_path: Path) -> None:
     store = LocalDirFileStore(str(tmp_path))
-    ref, size = await store.put_stream("file-emptystream1", _iter([]))
+    ref = await store.allocate("file-emptystream1")
+    size = await store.put_stream(ref, _iter([]))
     assert size == 0
     assert await store.get(ref) == b""
 
@@ -44,7 +47,8 @@ async def test_put_stream_handles_empty_chunks(tmp_path: Path) -> None:
 async def test_get_stream_yields_all_bytes(tmp_path: Path) -> None:
     store = LocalDirFileStore(str(tmp_path))
     payload = b"x" * (3 * 1024 * 1024 + 17)  # spans multiple 1 MiB read chunks
-    ref = await store.put("file-bigstream0001", payload)
+    ref = await store.allocate("file-bigstream0001")
+    await store.put(ref, payload)
 
     collected = bytearray()
     async for chunk in store.get_stream(ref):
@@ -60,11 +64,10 @@ async def test_put_stream_cleans_up_partial_file_on_failure(tmp_path: Path) -> N
         yield b"partial data that should not survive"
         raise RuntimeError("simulated upstream failure mid-stream")
 
+    ref = await store.allocate("file-failmidstream")
     with pytest.raises(RuntimeError, match="simulated upstream failure"):
-        await store.put_stream("file-failmidstream", _failing_chunks())
+        await store.put_stream(ref, _failing_chunks())
 
-    # No orphaned blob: the ref was never returned, so nothing else could
-    # clean this up, which is why put_stream must do it itself.
     shard_dir = tmp_path / "fa"
     leftover = list(shard_dir.glob("*")) if shard_dir.exists() else []
     assert leftover == []
@@ -83,8 +86,9 @@ async def test_put_stream_cleans_up_partial_file_on_cancellation(tmp_path: Path)
         yield b"partial data that should not survive cancellation"
         raise asyncio.CancelledError
 
+    ref = await store.allocate("file-cancelmidstream")
     with pytest.raises(asyncio.CancelledError):
-        await store.put_stream("file-cancelmidstream", _cancelled_chunks())
+        await store.put_stream(ref, _cancelled_chunks())
 
     shard_dir = tmp_path / "ca"
     leftover = list(shard_dir.glob("*")) if shard_dir.exists() else []
@@ -109,8 +113,9 @@ async def test_put_stream_cleans_up_partial_file_on_http_exception(tmp_path: Pat
         yield b"x" * 10
         raise HTTPException(status_code=413, detail="File exceeds maximum upload size of 1 MB")
 
+    ref = await store.allocate("file-httpexcmidstream")
     with pytest.raises(HTTPException):
-        await store.put_stream("file-httpexcmidstream", _oversized_chunks())
+        await store.put_stream(ref, _oversized_chunks())
 
     shard_dir = tmp_path / "ht"
     leftover = list(shard_dir.glob("*")) if shard_dir.exists() else []
@@ -125,7 +130,8 @@ async def test_delete_removes_empty_shard_dir(tmp_path: Path) -> None:
     leaves an empty shard directory behind for every attempt.
     """
     store = LocalDirFileStore(str(tmp_path))
-    ref = await store.put("file-lonelyshard1", b"")
+    ref = await store.allocate("file-lonelyshard1")
+    await store.put(ref, b"")
     shard_dir = (tmp_path / ref).parent
     assert shard_dir.exists()
 
@@ -138,8 +144,10 @@ async def test_delete_keeps_shard_dir_with_other_files(tmp_path: Path) -> None:
     """rmdir must be harmless when the shard still has siblings in it."""
     store = LocalDirFileStore(str(tmp_path))
     # Both ids share the "ab" shard prefix.
-    ref1 = await store.put("file-ab111111", b"one")
-    ref2 = await store.put("file-ab222222", b"two")
+    ref1 = await store.allocate("file-ab111111")
+    await store.put(ref1, b"one")
+    ref2 = await store.allocate("file-ab222222")
+    await store.put(ref2, b"two")
     shard_dir = (tmp_path / ref1).parent
 
     await store.delete(ref1)
@@ -148,9 +156,19 @@ async def test_delete_keeps_shard_dir_with_other_files(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_allocate_writes_nothing(tmp_path: Path) -> None:
+    """A ref exists before its bytes do, so a caller can record it first."""
+    store = LocalDirFileStore(str(tmp_path))
+    ref = await store.allocate("file-ab12cd34")
+    assert ref == "ab/file-ab12cd34"
+    assert not (tmp_path / ref).exists()
+
+
+@pytest.mark.asyncio
 async def test_put_shards_by_prefix(tmp_path: Path) -> None:
     store = LocalDirFileStore(str(tmp_path))
-    ref = await store.put("file-ab12cd34", b"x")
+    ref = await store.allocate("file-ab12cd34")
+    await store.put(ref, b"x")
     # Sharded under the first two hex chars of the id token.
     assert ref == "ab/file-ab12cd34"
     assert (tmp_path / "ab" / "file-ab12cd34").exists()
@@ -159,7 +177,8 @@ async def test_put_shards_by_prefix(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_delete_is_idempotent(tmp_path: Path) -> None:
     store = LocalDirFileStore(str(tmp_path))
-    ref = await store.put("file-deadbeef", b"data")
+    ref = await store.allocate("file-deadbeef")
+    await store.put(ref, b"data")
     await store.delete(ref)
     assert not (tmp_path / ref).exists()
     # Deleting again must not raise.

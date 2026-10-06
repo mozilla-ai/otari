@@ -1,56 +1,24 @@
-"""A workspace's configuration over the deployment-wide web-search backend.
+"""A workspace's limits on the deployment-wide web search backend.
 
-The backend is an operator concern and stays one: ``web_search_url`` names it,
-and any credential belongs to the adapter sitting in front of it, so nothing
-here can point a workspace somewhere else. What a row decides is *who on this
-deployment may search, and how far their searches may reach*.
+The backend is an operator concern and stays one, so nothing here can point a workspace somewhere else.
+A workspace's policy decides who on this deployment may search, and how far their searches may reach.
 
-Composition follows the rule in ``src/gateway/AGENTS.md`` (#655, settled in
-#678): a workspace row may veto and may refine, never grant. So
+A policy may veto and may narrow, and it never grants.
+How it narrows one request is the tools domain's rule, in ``services/tools/_web_access.py``.
 
-* ``enabled=False`` refuses ``otari_web_search`` for the workspace;
-* ``max_results`` is floored against what the request would otherwise get,
-  which is the request's own value or, failing that, the deployment's, so a
-  workspace ceiling can only shrink a search;
-* ``blocked_domains`` is *added* to the request's own block-list, and
-  ``allowed_domains`` is *intersected* with the request's, so neither list can
-  be shed by a request that sends one of its own;
-* ``purpose_hint`` fills in only when the request named none;
-* and **no row means no narrowing**, which is what makes a deployment that
-  configures nothing behave exactly as it did.
+Reading or writing a stored policy requires an owner or admin of the workspace or of its organization.
+Reads are gated as well as writes, because the row is the workspace's posture and not one member's allowance.
 
-That parts company with the hybrid path in ``prepare_gateway_tools``, which
-treats the policy it resolves from otari.ai as a set of *defaults* a request
-overrides. The precedence there is the platform's own contract and is left
-alone; the rule above is this repository's, and it is the stricter of the two:
-under default-only precedence a request could shed a workspace's block-list
-simply by sending a block-list of its own, which is a guardrail that fails open.
-
-``provider_options`` is the one field that keeps the hybrid precedence, merged
-per key with the request winning. It is an opaque bag forwarded to the backend
-adapter rather than something this gateway enforces, so there is no narrowing
-relation between two values of it to apply.
-
-The CRUD half is master-key routed (``routes/workspace_web_search.py``) and
-role-gated per workspace: an organization owner/admin, or an owner/admin of the
-workspace itself, may read *and* write it. Reads are gated for the same reason
-``workspace_code_execution_policy_service`` gates them: the row is the
-workspace's posture, not one member's allowance. It is looser than the hosted
-service, which admits organization owners/admins only, because
-``authorization.require_workspace_management_access`` is the gate every other
-per-workspace surface in this repository uses.
-
-The request-path half is :func:`resolve_workspace_web_search_config` plus the
-pure :func:`narrow_web_search_tool_entry`, neither of which takes an identity:
-the caller has already authenticated, and the workspace comes off the key,
-never off a header (``services/workspace_scope``).
+:func:`resolve_workspace_web_search_config` reads a stored row.
+:func:`read_web_search_policy` reads a control plane's answer.
+None of them takes an identity, because the workspace comes from the authenticated key.
 """
 
 from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass
+from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -58,78 +26,35 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.models.tenancy import User, Workspace
-from gateway.models.tools import WorkspaceWebSearchConfig
+from gateway.models.tools import ResolvedWebSearchConfig, WorkspaceWebSearchConfig
 from gateway.services.tenancy import authorization
-from gateway.services.tenancy.errors import WorkspaceWebSearchDomainsExcludedError
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.web_retrieval_backend import MAX_RESULTS_CAP
-from gateway.services.web_retrieval_policy import (
-    CanonicalHost,
-    DomainRuleValidationError,
-    canonicalize_domain_rule,
-    domain_rule_matches,
-)
+from gateway.services.web_retrieval_policy import read_domain_list
 
 # The backend's own ceiling on returned hits. A stored value above it would read
 # as a configured limit and do nothing, since the backend clamps to this anyway,
 # so it is refused at the write rather than silently clamped at resolve time.
 # Same call as `workspace_code_execution_policy_service` makes for its two.
 _MAX_RESULTS = MAX_RESULTS_CAP
-# Bound the two lists and the opaque bag so one workspace's row cannot grow
-# without limit; the same numbers the hosted `WorkspaceWebSearchConfigUpdate`
-# uses, since this is the same configuration.
-MAX_WEB_SEARCH_DOMAINS = 100
-_MAX_DOMAINS = MAX_WEB_SEARCH_DOMAINS
+# Bound the opaque bag so one workspace's row cannot grow without limit; the
+# same numbers the hosted `WorkspaceWebSearchConfigUpdate` uses, since this is
+# the same configuration.
 _MAX_PROVIDER_OPTION_KEYS = 30
 _MAX_PROVIDER_OPTIONS_BYTES = 4096
-# The longest a DNS name can be. Not a policy, just the point past which a
-# string cannot be a host and is therefore a mistake worth naming at the write.
-_MAX_DOMAIN_LENGTH = 253
+_MAX_PURPOSE_HINT_LENGTH = 2048
 
 
 class InvalidStoredWebSearchDomainError(ValueError):
     """A legacy workspace row contains a domain rule that cannot be enforced."""
 
 
-def _canonical_host(raw: str) -> str:
-    """Canonicalize one domain-list entry, accepting cookie-style leading dots.
-
-    A leading dot is stripped rather than refused: ``.example.com`` has exactly
-    one reading, and an entry here already covers its subdomains, so it is the
-    same rule written in cookie syntax. Raises
-    :class:`DomainRuleValidationError` for anything that is not a bare host.
-    """
-    candidate = raw.strip()
-    if candidate.startswith("."):
-        candidate = candidate[1:]
-    return canonicalize_domain_rule(candidate).value
-
-
 def _normalize_domains(value: list[str] | None) -> list[str] | None:
-    """Canonicalize, drop empty entries, and de-duplicate a domain list.
-
-    An all-blank list becomes ``None``.
-    """
+    """Read a domain list a caller wrote, where a blank entry is an empty form field and is dropped."""
     if value is None:
         return None
-    seen: dict[str, None] = {}
-    for raw in value:
-        if not raw.strip():
-            continue
-        try:
-            host = _canonical_host(raw)
-        except DomainRuleValidationError as exc:
-            raise ValueError(
-                f"{raw.strip()!r} is not a bare valid hostname; give a domain such as 'example.com', "
-                "with no scheme, port or path"
-            ) from exc
-        if len(host) > _MAX_DOMAIN_LENGTH:
-            raise ValueError(f"a domain may be at most {_MAX_DOMAIN_LENGTH} characters")
-        seen.setdefault(host, None)
-    cleaned = list(seen)
-    if len(cleaned) > _MAX_DOMAINS:
-        raise ValueError(f"at most {_MAX_DOMAINS} domains are allowed")
-    return cleaned or None
+    hosts = read_domain_list([raw for raw in value if not (isinstance(raw, str) and not raw.strip())])
+    return list(hosts) if hosts else None
 
 
 def _check_provider_options(value: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -176,7 +101,7 @@ class WorkspaceWebSearchConfigUpdate(BaseModel):
     )
     purpose_hint: str | None = Field(
         default=None,
-        max_length=2048,
+        max_length=_MAX_PURPOSE_HINT_LENGTH,
         description="Search only: hint used when a request declares otari_web_search without one of its own",
     )
     allowed_domains: list[str] | None = Field(
@@ -268,23 +193,6 @@ class WorkspaceWebSearchConfigPublic(BaseModel):
         )
 
 
-@dataclass(frozen=True)
-class ResolvedWebSearchConfig:
-    """What the request path reads off a stored configuration.
-
-    A value type rather than the ORM row, so the admission check cannot lazily
-    touch the session after it has moved on, and so the tool context carries no
-    ORM identity into a streaming response that outlives the request handler.
-    """
-
-    enabled: bool
-    max_results: int | None
-    purpose_hint: str | None
-    allowed_domains: tuple[str, ...] | None
-    blocked_domains: tuple[str, ...] | None
-    provider_options: dict[str, Any] | None
-
-
 async def resolve_workspace_web_search_config(
     db: AsyncSession,
     workspace_id: uuid.UUID,
@@ -302,163 +210,50 @@ async def resolve_workspace_web_search_config(
         enabled=config.enabled,
         max_results=config.max_results,
         purpose_hint=config.purpose_hint,
-        allowed_domains=_as_tuple(config.allowed_domains, stored=True),
-        blocked_domains=_as_tuple(config.blocked_domains, stored=True),
+        allowed_domains=_stored_domains(config.allowed_domains),
+        blocked_domains=_stored_domains(config.blocked_domains),
         provider_options=config.provider_options,
+        authorized_tools=None,
     )
 
 
-def narrow_web_search_tool_entry(
-    tool_entry: dict[str, Any],
-    config: ResolvedWebSearchConfig,
-    *,
-    baseline_max_results: int,
-) -> dict[str, Any]:
-    """Compose a workspace's configuration onto the request's tool entry.
+def read_web_search_policy(answer: Mapping[str, Any]) -> ResolvedWebSearchConfig:
+    """Read the control plane's answer for one workspace's web search policy.
 
-    Returns a new entry rather than mutating the caller's, which is the one
-    reachable from the request body it was extracted from.
-
-    Assumes ``config.enabled``; the veto is the caller's to raise, because only
-    the caller knows which error shape the request format wants.
-
-    ``baseline_max_results`` is how many results this request would get without
-    a workspace row at all (``routes/_tools.web_search_max_results_baseline``:
-    the deployment's own setting, or the backend's built-in). The workspace
-    ceiling is floored against it and not merely written in, because writing it
-    in would let a workspace whose ceiling sits above the operator's *raise* the
-    operator's number, which is the one thing the narrowing rule forbids.
-
-    Raises :class:`WorkspaceWebSearchDomainsExcludedError` when the request
-    names an allow-list that overlaps the workspace's nowhere (see
-    :func:`_intersect` for what overlapping means when the entries are domain
-    suffixes rather than hosts). The
-    alternative is an empty effective allow-list, which
-    ``_build_web_retrieval_backend`` reads as *no* allow-list because an empty list
-    is falsy, and that turns the narrowest possible policy into no policy at
-    all. Refusing also tells the caller something a silent zero-result search
-    would not.
+    Raises ``ValueError`` when a recognized field is malformed, so a policy that cannot be read fails closed.
     """
-    narrowed = dict(tool_entry)
-
-    if config.max_results is not None:
-        requested_max = narrowed.get("max_results")
-        # ``bool`` is an ``int`` subclass, so exclude it: a JSON ``true`` must
-        # not be read as a one-result ceiling.
-        if not isinstance(requested_max, int) or isinstance(requested_max, bool) or requested_max <= 0:
-            requested_max = baseline_max_results
-        narrowed["max_results"] = min(requested_max, config.max_results)
-
-    if config.blocked_domains:
-        # Union: a workspace block a request could drop by sending a block-list
-        # of its own would be a guardrail that fails open.
-        narrowed["blocked_domains"] = _union(_entry_domains(narrowed.get("blocked_domains")), config.blocked_domains)
-
-    if config.allowed_domains:
-        requested_allowed = _entry_domains(narrowed.get("allowed_domains"))
-        if requested_allowed is None:
-            narrowed["allowed_domains"] = list(config.allowed_domains)
-        else:
-            both = _intersect(requested_allowed, config.allowed_domains)
-            if not both:
-                raise WorkspaceWebSearchDomainsExcludedError()
-            narrowed["allowed_domains"] = both
-
-    # A hint informs the model, it does not permit anything, so the request's
-    # own wins and the workspace's fills a gap.
-    if not narrowed.get("purpose_hint") and config.purpose_hint:
-        narrowed["purpose_hint"] = config.purpose_hint
-
-    if config.provider_options:
-        request_options = narrowed.get("provider_options")
-        narrowed["provider_options"] = (
-            {**config.provider_options, **request_options}
-            if isinstance(request_options, dict)
-            else dict(config.provider_options)
-        )
-
-    return narrowed
+    enabled = answer.get("enabled")
+    if not isinstance(enabled, bool):
+        raise ValueError("enabled must be a boolean")
+    max_results = answer.get("max_results")
+    if max_results is not None and (
+        not isinstance(max_results, int) or isinstance(max_results, bool) or not 1 <= max_results <= _MAX_RESULTS
+    ):
+        raise ValueError(f"max_results must be an integer from 1 to {_MAX_RESULTS}")
+    purpose_hint = answer.get("purpose_hint")
+    if purpose_hint is not None and (not isinstance(purpose_hint, str) or len(purpose_hint) > _MAX_PURPOSE_HINT_LENGTH):
+        raise ValueError(f"purpose_hint must be a string of at most {_MAX_PURPOSE_HINT_LENGTH} characters")
+    provider_options = answer.get("provider_options")
+    if provider_options is not None and not isinstance(provider_options, dict):
+        raise ValueError("provider_options must be an object")
+    provider_options = _check_provider_options(provider_options)
+    return ResolvedWebSearchConfig(
+        enabled=enabled,
+        max_results=max_results,
+        purpose_hint=_blank_to_none(purpose_hint),
+        allowed_domains=read_domain_list(answer.get("allowed_domains")),
+        blocked_domains=read_domain_list(answer.get("blocked_domains")),
+        provider_options=provider_options,
+        authorized_tools=None,
+    )
 
 
-def _as_tuple(value: list[str] | None, *, stored: bool = False) -> tuple[str, ...] | None:
-    """Read and canonicalize a JSON domain list without silently dropping rules."""
-    if value is None:
-        return None
-    if not isinstance(value, list):
-        if stored:
-            raise InvalidStoredWebSearchDomainError("stored web-search domain list is invalid")
-        return None
-    if not value:
-        return None
-    hosts: list[str] = []
-    for raw in value:
-        if not isinstance(raw, str) or not raw.strip():
-            if stored:
-                raise InvalidStoredWebSearchDomainError("stored web-search domain rule is invalid")
-            continue
-        try:
-            host = _canonical_host(raw)
-        except DomainRuleValidationError as exc:
-            if stored:
-                raise InvalidStoredWebSearchDomainError("stored web-search domain rule is invalid") from exc
-            continue
-        if host not in hosts:
-            hosts.append(host)
-    return tuple(hosts) or None
-
-
-def _entry_domains(value: Any) -> list[str] | None:
-    """Read a domain list off a request's tool entry, normalized like a stored one.
-
-    ``None`` for anything that is not a non-empty list, so a malformed or absent
-    field reads as "the request named no list" rather than as an empty one.
-    """
-    if not isinstance(value, list):
-        return None
-    hosts = [str(host).strip().lower() for host in value if str(host).strip()]
-    return hosts or None
-
-
-def _union(requested: list[str] | None, workspace: tuple[str, ...]) -> list[str]:
-    """Every domain either side named, in request-then-workspace order, de-duplicated."""
-    merged: dict[str, None] = {}
-    for host in (*(requested or ()), *workspace):
-        merged.setdefault(host, None)
-    return list(merged)
-
-
-def _canonical_rules(values: list[str] | tuple[str, ...]) -> list[tuple[str, CanonicalHost]]:
-    rules: list[tuple[str, CanonicalHost]] = []
-    for value in dict.fromkeys(values):
-        try:
-            rules.append((value, canonicalize_domain_rule(value)))
-        except DomainRuleValidationError:
-            continue
-    return rules
-
-
-def _intersect(requested: list[str], workspace: tuple[str, ...]) -> list[str]:
-    """The domains both sides permit, in the request's order.
-
-    Not a set intersection, because an entry in either list is a *suffix* and not
-    a host: ``WebSearchBackend._apply_domain_filters`` keeps a result when its hostname
-    equals an entry or ends in ``"." + entry``. So ``example.com`` on the
-    workspace's list already covers ``docs.example.com``, and a request naming
-    the subdomain is asking for strictly less than the workspace permits rather
-    than for something outside it. Whichever side is the narrower of an
-    overlapping pair is the one that survives; genuinely disjoint lists still
-    intersect to nothing, which is what the caller refuses.
-    """
-    requested_rules = _canonical_rules(requested)
-    workspace_rules = _canonical_rules(workspace)
-    kept: dict[str, None] = {}
-    for host, candidate in requested_rules:
-        for allowed, rule in workspace_rules:
-            if domain_rule_matches(rule, candidate):
-                kept.setdefault(host, None)
-            elif domain_rule_matches(candidate, rule):
-                kept.setdefault(allowed, None)
-    return list(kept)
+def _stored_domains(value: object) -> tuple[str, ...] | None:
+    """Read a stored row's domain list, refusing one that cannot be enforced."""
+    try:
+        return read_domain_list(value)
+    except ValueError as exc:
+        raise InvalidStoredWebSearchDomainError("stored web-search domain list is invalid") from exc
 
 
 class WorkspaceWebSearchService:

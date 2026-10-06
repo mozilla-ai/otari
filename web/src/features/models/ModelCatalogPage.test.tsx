@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
+  CatalogFacets,
   CatalogModelDetail,
   CatalogModelSummary,
   CatalogOffering,
@@ -139,6 +140,14 @@ const CATALOG: CatalogResponse = {
   metadata_available: true,
   count: 2,
   models: [GLM, KIMI],
+  facets: {
+    total_count: 2,
+    providers: ["fireworks", "nebius"],
+    vendors: [
+      { value: "Z.ai", vendor_slug: "z-ai" },
+      { value: "Moonshot AI", vendor_slug: "moonshot-ai" },
+    ],
+  },
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -149,7 +158,13 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function mockApi(
-  options: { catalog?: CatalogResponse; context?: OrganizationContext } = {},
+  options: {
+    catalog?: CatalogResponse
+    context?: OrganizationContext
+    list?: (
+      params: URLSearchParams,
+    ) => CatalogResponse | Response | Promise<CatalogResponse | Response>
+  } = {},
 ) {
   const catalog = options.catalog ?? CATALOG
   const context = options.context ?? organizationContext()
@@ -161,7 +176,31 @@ function mockApi(
     if (url.includes(`${API_ROOT}/catalog/models/`)) {
       return jsonResponse({ detail: "Model 'nope' not found" }, 404)
     }
-    if (url.includes(`${API_ROOT}/catalog/models`)) return jsonResponse(catalog)
+    if (url.includes(`${API_ROOT}/catalog/models`)) {
+      const params = new URL(url, "http://localhost").searchParams
+      if (options.list) {
+        const response = await options.list(params)
+        return response instanceof Response ? response : jsonResponse(response)
+      }
+      // Fixture responses emulate only the requests exercised by these UI tests.
+      // Selection semantics are covered by the backend's query tests.
+      let models = catalog.models
+      if (
+        params.get("provider") === "fireworks" ||
+        params.get("capability") === "reasoning"
+      )
+        models = [GLM]
+      if (
+        params.get("search") === "moonshot" ||
+        params.get("output_modality") === "image"
+      )
+        models = [KIMI]
+      return jsonResponse({
+        ...catalog,
+        count: models === catalog.models ? catalog.count : models.length,
+        models,
+      })
+    }
     if (url.includes(`${API_ROOT}/organizations/me`))
       return jsonResponse(context)
     return jsonResponse([])
@@ -321,26 +360,46 @@ describe("ModelCatalogPage", () => {
     expect(
       within(list).getByRole("link", { name: "Z.ai: GLM-5.3" }),
     ).toBeInTheDocument()
-    expect(within(list).queryByText(/Kimi K2.6/)).toBeNull()
+    await waitFor(() =>
+      expect(within(list).queryByText(/Kimi K2.6/)).toBeNull(),
+    )
     // The rail says one provider is in force.
     // The rail names the vendor and filters on the instance id (otari#990).
     expect(screen.getByRole("checkbox", { name: "Fireworks AI" })).toBeChecked()
   })
 
-  it("searches by vendor", async () => {
-    mockApi()
+  it("debounces search and sends the vendor term to the server", async () => {
+    const fetchMock = mockApi()
     renderPage(<ModelCatalogPage />)
-    const user = userEvent.setup()
-
     await screen.findByRole("list", { name: "Models" })
-    await user.type(
-      screen.getByRole("searchbox", { name: "Search models" }),
-      "moonshot",
-    )
-
-    const list = screen.getByRole("list", { name: "Models" })
-    expect(within(list).queryByText(/GLM-5.3/)).toBeNull()
-    expect(within(list).getByText(/Kimi K2.6/)).toBeInTheDocument()
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      await user.type(
+        screen.getByRole("searchbox", { name: "Search models" }),
+        "moonshot",
+      )
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes("search="),
+        ),
+      ).toBe(false)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200)
+      })
+      const list = screen.getByRole("list", { name: "Models" })
+      await waitFor(() =>
+        expect(within(list).queryByText(/GLM-5.3/)).toBeNull(),
+      )
+      expect(within(list).getByText(/Kimi K2.6/)).toBeInTheDocument()
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes("search=moonshot"),
+        ),
+      ).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("narrows by a checkbox in the rail and says how many are in force", async () => {
@@ -354,7 +413,9 @@ describe("ModelCatalogPage", () => {
     await user.click(screen.getByRole("checkbox", { name: "Reasoning" }))
 
     const list = screen.getByRole("list", { name: "Models" })
-    expect(within(list).queryByText(/Kimi K2.6/)).toBeNull()
+    await waitFor(() =>
+      expect(within(list).queryByText(/Kimi K2.6/)).toBeNull(),
+    )
     expect(within(list).getByText(/GLM-5.3/)).toBeInTheDocument()
     expect(
       screen.getByRole("button", { name: /^Capabilities\s*1$/ }),
@@ -380,7 +441,7 @@ describe("ModelCatalogPage", () => {
     await user.click(image as HTMLElement)
 
     const list = screen.getByRole("list", { name: "Models" })
-    expect(within(list).queryByText(/GLM-5.3/)).toBeNull()
+    await waitFor(() => expect(within(list).queryByText(/GLM-5.3/)).toBeNull())
     expect(within(list).getByText(/Kimi K2.6/)).toBeInTheDocument()
   })
 
@@ -412,7 +473,7 @@ describe("ModelCatalogPage", () => {
     expect(await screen.findByText("opened a model")).toBeInTheDocument()
   })
 
-  it("asks for the whole catalog, not the endpoint's default window", async () => {
+  it("requests one sorted page and complete facet metadata", async () => {
     const fetchMock = mockApi()
     renderPage(<ModelCatalogPage />)
 
@@ -421,17 +482,113 @@ describe("ModelCatalogPage", () => {
     const listCall = fetchMock.mock.calls
       .map(([input]) => String(input))
       .find((url) => url.includes(`${API_ROOT}/catalog/models?`))
-    expect(listCall).toContain("limit=1000")
+    expect(listCall).toContain("limit=25")
+    expect(listCall).toContain("skip=0")
+    expect(listCall).toContain("include_facets=true")
+    expect(listCall).toContain("sort=released")
   })
 
-  it("says so when the catalog is larger than the page holds", async () => {
-    mockApi({ catalog: { ...CATALOG, count: 126 } })
+  it("uses server totals and choices even when they are absent from the page", async () => {
+    const facets: CatalogFacets = {
+      ...CATALOG.facets!,
+      total_count: 1206,
+      vendors: [
+        ...CATALOG.facets!.vendors,
+        { value: "Off-page vendor", vendor_slug: null },
+      ],
+    }
+    mockApi({ catalog: { ...CATALOG, count: 1206, facets } })
     renderPage(<ModelCatalogPage />)
 
-    // Every facet on this page is computed from what arrived, so the count the
-    // reader is shown has to be the one they can actually filter.
-    expect(await screen.findByText(/holds the first 2/)).toBeInTheDocument()
-    expect(screen.getByText(/remaining/)).toHaveTextContent("124")
+    await screen.findByRole("list", { name: "Models" })
+    expect(screen.getByText(/1,206 models/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: "Vendors" }))
+    expect(
+      screen.getByRole("checkbox", { name: "Off-page vendor" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/holds the first/)).not.toBeInTheDocument()
+  })
+
+  it("requests the next page and preserves the full result count", async () => {
+    const fetchMock = mockApi({
+      list: (params) => ({
+        ...CATALOG,
+        count: 26,
+        facets: { ...CATALOG.facets!, total_count: 26 },
+        models: params.get("skip") === "25" ? [KIMI] : [GLM],
+      }),
+    })
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+    await screen.findByRole("list", { name: "Models" })
+    await user.click(screen.getByRole("button", { name: /next/i }))
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes("skip=25"),
+        ),
+      ).toBe(true),
+    )
+    const list = screen.getByRole("list", { name: "Models" })
+    expect(await within(list).findByText(/Kimi K2.6/)).toBeInTheDocument()
+    expect(within(list).queryByText(/GLM-5.3/)).toBeNull()
+    expect(screen.getByText(/26 models/)).toBeInTheDocument()
+  })
+
+  it("keeps the current rows visible until the next page arrives", async () => {
+    let complete!: (response: CatalogResponse) => void
+    mockApi({
+      list: (params) =>
+        params.get("skip") === "25"
+          ? new Promise<CatalogResponse>((resolve) => {
+              complete = resolve
+            })
+          : { ...CATALOG, count: 26, models: [GLM] },
+    })
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+    await screen.findByRole("list", { name: "Models" })
+    await user.click(screen.getByRole("button", { name: /next/i }))
+    expect(await screen.findByText("Updating models…")).toHaveAttribute(
+      "role",
+      "status",
+    )
+    expect(
+      within(screen.getByRole("list", { name: "Models" })).getByText(/GLM-5.3/),
+    ).toBeInTheDocument()
+    await act(async () => {
+      complete({ ...CATALOG, count: 26, models: [KIMI] })
+    })
+    expect(
+      await within(screen.getByRole("list", { name: "Models" })).findByText(
+        /Kimi K2.6/,
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Updating models…")).not.toBeInTheDocument()
+  })
+
+  it("shows a request error and lets clearing filters recover the cached catalog", async () => {
+    mockApi({
+      list: (params) =>
+        params.has("capability")
+          ? jsonResponse({ detail: "Catalog temporarily unavailable" }, 503)
+          : CATALOG,
+    })
+    renderPage(<ModelCatalogPage />)
+    const user = userEvent.setup()
+    await screen.findByRole("list", { name: "Models" })
+    await user.click(screen.getByRole("button", { name: "Capabilities" }))
+    await user.click(screen.getByRole("checkbox", { name: "Reasoning" }))
+    expect(
+      await screen.findByText("The catalog could not be loaded."),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Clear" }))
+    const list = await screen.findByRole("list", { name: "Models" })
+    expect(within(list).getByText(/GLM-5.3/)).toBeInTheDocument()
+    expect(within(list).getByText(/Kimi K2.6/)).toBeInTheDocument()
+    expect(
+      screen.queryByText("The catalog could not be loaded."),
+    ).not.toBeInTheDocument()
   })
 
   it("draws no truncation notice when the whole catalog arrived", async () => {

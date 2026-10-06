@@ -1,9 +1,9 @@
-"""Bounded ``tools/list`` collection (R-DISC-1, R-DISC-4, L-DISC-* ceilings).
+"""Bounded ``tools/list`` collection.
 
 The live catalog of a remote MCP server is untrusted and paginated. Discovery
 follows the cursor, stops at the first ceiling it reaches, and either returns
 the complete authorized catalog or nothing: a partial page would be read by
-an application as the whole authorization and risk-policy input (R-DISC-5).
+an application as the whole authorization and risk-policy input.
 """
 
 from __future__ import annotations

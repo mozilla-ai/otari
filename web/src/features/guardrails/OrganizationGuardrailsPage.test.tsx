@@ -235,13 +235,13 @@ describe("OrganizationGuardrailsPage", () => {
 
     const mandate = await row("Where they run", "pii")
     const pause = mandate.getByRole("button", { name: "Pause pii" })
-    // Pause first, then edit and remove, and no status column beside them.
+    // Pause first, then test, edit and remove, and no status column beside them.
     const actions = pause.closest("td")
     expect(
       [...(actions?.querySelectorAll("button") ?? [])].map((control) =>
         control.getAttribute("aria-label"),
       ),
-    ).toEqual(["Pause pii", "Edit pii", "Remove pii"])
+    ).toEqual(["Pause pii", "Test pii", "Edit pii", "Remove pii"])
     expect(
       within(screen.getByRole("grid", { name: "Where they run" })).queryByRole(
         "columnheader",
@@ -279,6 +279,33 @@ describe("OrganizationGuardrailsPage", () => {
     expect(
       await screen.findByRole("heading", { name: "Test guardrail" }),
     ).toBeInTheDocument()
+  })
+
+  it("tests a mandate on your own service from its row", async () => {
+    mockApi({
+      definitions: [lakera],
+      mandates: [
+        organizationGuardrail({ id: "a", profile: "pii" }),
+        organizationGuardrail({
+          id: "b",
+          profile: "lakera",
+          definition_id: "d1",
+        }),
+      ],
+    })
+    renderPage()
+
+    const linked = await row("Where they run", "lakera")
+    // Tested from the configured guardrail's own row instead.
+    expect(linked.queryByRole("button", { name: "Test lakera" })).toBeNull()
+
+    const remote = await row("Where they run", "pii")
+    await userEvent.click(remote.getByRole("button", { name: "Test pii" }))
+
+    expect(
+      await screen.findByRole("heading", { name: "Test guardrail" }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("dialog")).toHaveTextContent("Runs pii over")
   })
 
   it("says what removing a blocking mandate serves", async () => {

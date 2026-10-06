@@ -32,7 +32,7 @@ from gateway.core.metered_pricing import BillableUsage, ChargeLine, billable_usa
 from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
-from gateway.models.usage import UsageLog
+from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
 from gateway.models.users import User
 from gateway.services.pricing_service import (
     OverridePeriod,
@@ -44,10 +44,12 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
-# Bounds. Batch size mirrors the /v1/usage list `limit` cap; the error list is
-# capped so one bad batch can't return an unbounded payload; the IN() list is
-# chunked to stay under SQLite's default variable limit (999).
-MAX_EVENTS_PER_BATCH = 1000
+# Bounds. The batch cap is owned by the CLI's distribution (see
+# otari_agent.usage_import) and re-exported here for the OTLP route; the error
+# list is capped so one bad batch can't return an unbounded payload; the IN()
+# list is chunked to stay under SQLite's default variable limit (999).
+from otari_agent.usage_import import MAX_EVENTS_PER_BATCH as MAX_EVENTS_PER_BATCH
+
 _MAX_ERRORS = 100
 _IN_CHUNK = 500
 # Slug pattern for a source: keep provenance identifiers boring so they are safe to
@@ -62,31 +64,16 @@ _IDENT_PATTERN = r"^[A-Za-z0-9._:/\-]+$"
 # Cap numeric fields at the usage_logs 32-bit integer column width so absurd
 # counts are a 422, not a database error that fails the whole batch.
 _MAX_TOKENS = 2_147_483_647
-# "gateway" tags rows Otari served itself; an import claiming it would masquerade
-# as native traffic in every provenance breakdown.
-RESERVED_SOURCES = {"gateway"}
-# otari.ai owns this namespace: its backfill stamps the rows it writes `otari-ai:gateway`,
-# `otari-ai:claude_code`, and so on. An import under the same prefix produces lookalike
-# rows that inflate reconciliation totals and read as a mismatch during a cutover.
-RESERVED_SOURCE_PREFIXES = ("otari-ai:",)
 
 
-def reserved_source_reason(value: str) -> str | None:
-    """Why ``value`` may not be used as a provenance slug, or None when it is free.
+def is_reserved_source(value: str) -> bool:
+    """Whether ``value`` claims to be usage Otari served itself, in any case.
 
-    Both ingest doors read this: the batch schema below turns it into a 422, and the
-    OTLP route falls back to its default source rather than 422-ing an exporter.
+    An import under that slug would masquerade as native traffic. Both ingest doors
+    read this: the batch schema below turns it into a 422, and the OTLP route falls
+    back to its default source rather than 422-ing an exporter.
     """
-    lowered = value.lower()
-    if lowered in RESERVED_SOURCES:
-        return f"source '{lowered}' is reserved for usage Otari served itself; pick another slug."
-    for prefix in RESERVED_SOURCE_PREFIXES:
-        if lowered.startswith(prefix.lower()):
-            return (
-                f"source prefix '{prefix}' is reserved for provenance tags otari.ai writes itself; "
-                "pick another slug."
-            )
-    return None
+    return value.lower() == SERVED_HERE_SLUG
 
 
 class ExternalUsageEvent(BaseModel):
@@ -112,6 +99,7 @@ class ExternalUsageEvent(BaseModel):
     cache_read_tokens: int = Field(default=0, ge=0, le=_MAX_TOKENS)
     cache_write_tokens: int = Field(default=0, ge=0, le=_MAX_TOKENS)
     cache_write_1h_tokens: int = Field(default=0, ge=0, le=_MAX_TOKENS)
+    reasoning_tokens: int = Field(default=0, ge=0, le=_MAX_TOKENS)
     # Whether ``input_tokens`` already includes the cache counts (OpenAI shape,
     # where ``cached_tokens`` is a subset of ``prompt_tokens``) or excludes them
     # (Anthropic / Claude Code shape, where the cache buckets are additive). The
@@ -145,9 +133,10 @@ class ExternalEventsRequest(BaseModel):
     @field_validator("source")
     @classmethod
     def _not_reserved(cls, value: str) -> str:
-        reason = reserved_source_reason(value)
-        if reason is not None:
-            raise ValueError(reason)
+        if is_reserved_source(value):
+            raise ValueError(
+                f"source '{SERVED_HERE_SLUG}' is reserved for usage Otari served itself; pick another slug."
+            )
         return value
 
 
@@ -216,13 +205,17 @@ async def _existing_event_ids(db: AsyncSession, source: str, event_ids: list[str
         if not chunk:
             continue
         rows = (
-            await db.execute(
-                select(UsageLog.source_event_id).where(
-                    UsageLog.source == source,
-                    UsageLog.source_event_id.in_(chunk),
+            (
+                await db.execute(
+                    select(UsageLog.source_event_id).where(
+                        UsageLog.source == source,
+                        UsageLog.source_event_id.in_(chunk),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         found.update(row for row in rows if row is not None)
     return found
 
@@ -274,9 +267,7 @@ async def _load_pricing_index(
         chunk = list(keys)[start : start + _IN_CHUNK]
         if not chunk:
             continue
-        rows = (
-            await db.execute(select(ModelPricing).where(ModelPricing.model_key.in_(chunk)))
-        ).scalars().all()
+        rows = (await db.execute(select(ModelPricing).where(ModelPricing.model_key.in_(chunk)))).scalars().all()
         for row in rows:
             index.setdefault(row.model_key, []).append((normalize_effective_at(row.effective_at), row))
     for entries in index.values():
@@ -382,6 +373,7 @@ def _build_row(
         cache_read_tokens=event.cache_read_tokens,
         cache_write_tokens=event.cache_write_tokens,
         cache_write_1h_tokens=event.cache_write_1h_tokens,
+        reasoning_tokens=event.reasoning_tokens,
         # Persist the convention the submitter stated, so a row repriced later
         # (POST /v1/usage/set-price) is priced the way it was reported rather than
         # the way its numbers happen to look. A row that arrives with no rate to
@@ -507,9 +499,9 @@ async def ingest_external_events(
     for start in range(0, len(candidate_users), _IN_CHUNK):
         chunk = candidate_users[start : start + _IN_CHUNK]
         active_users.update(
-            (
-                await db.execute(select(User.user_id).where(User.user_id.in_(chunk), User.deleted_at.is_(None)))
-            ).scalars().all()
+            (await db.execute(select(User.user_id).where(User.user_id.in_(chunk), User.deleted_at.is_(None))))
+            .scalars()
+            .all()
         )
     # The organization comes off the workspace the key named, never off the
     # request: the organization decides what an event costs, so taking it from

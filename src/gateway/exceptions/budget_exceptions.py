@@ -4,7 +4,12 @@ The surface errors carry the HTTP status each renders as.
 The repository errors are internal: a service translates each into a surface error and never renders it.
 """
 
-from gateway.exceptions import TenancyConflictError, TenancyNotFoundError
+from gateway.exceptions import (
+    TenancyConflictError,
+    TenancyForbiddenError,
+    TenancyNotFoundError,
+    TenancyValidationError,
+)
 
 
 class WorkspaceBudgetDefaultNotFoundError(TenancyNotFoundError):
@@ -65,8 +70,8 @@ class OrganizationBudgetInUseError(TenancyConflictError):
 class OrganizationBudgetHeldElsewhereError(TenancyConflictError):
     """Something outside this organization's own surface still names the budget.
 
-    ``users.budget_id`` and ``budget_reset_logs.budget_id``, neither of which is a
-    tenant's to see, so the refusal does not name the rows holding it.
+    ``users.budget_id``, which is not a tenant's to see, so the refusal does not
+    name the rows holding it.
     """
 
     def __init__(self, budget_id: object):
@@ -74,6 +79,50 @@ class OrganizationBudgetHeldElsewhereError(TenancyConflictError):
             f"Budget {budget_id} is still in use outside this organization and cannot be deleted. "
             "Ask a deployment operator to release it."
         )
+
+
+class DeploymentBudgetNotFoundError(TenancyNotFoundError):
+    def __init__(self, budget_id: object):
+        super().__init__(f"Budget with id '{budget_id}' not found")
+
+
+class DeploymentBudgetOwnedByOrganizationError(TenancyConflictError):
+    """The operator may edit an organization's budget but not delete it out from under the tenant."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This budget is owned by an organization. It can be edited here but not "
+            "deleted; the organization that owns it manages it."
+        )
+
+
+class DeploymentBudgetIsMemberDefaultError(TenancyConflictError):
+    """A workspace hands the budget to its members, so the delete is refused by workspace name."""
+
+    def __init__(self, workspaces: list[str]):
+        super().__init__(
+            f"This budget is the member default for {', '.join(workspaces)}. Change or remove that "
+            "default on the workspace (Organization > Workspaces > Edit) before deleting it."
+        )
+
+
+class DeploymentBudgetEnforcedError(TenancyConflictError):
+    """Ceilings still enforce the budget.
+
+    Counted rather than named: a scope id is a bare uuid, so listing them would say less than the number does.
+    """
+
+    def __init__(self, ceilings: int):
+        super().__init__(
+            f"This budget is enforced by {ceilings} spend {'ceiling' if ceilings == 1 else 'ceilings'}. "
+            "A member's ceiling is changed on Members & roles (Edit > Workspace access); others are managed "
+            "through /api/v1/scoped-budgets."
+        )
+
+
+class DeploymentBudgetStillReferencedError(TenancyConflictError):
+    def __init__(self, budget_id: object):
+        super().__init__(f"Budget {budget_id} is still in use and cannot be deleted.")
 
 
 class OrganizationScopeNotFoundError(TenancyNotFoundError):
@@ -115,6 +164,14 @@ class BudgetStillReferencedError(Exception):
         super().__init__(f"Budget {budget_id} is still referenced")
 
 
+class MemberBudgetPolicyAlreadyExistsError(Exception):
+    """A policy already caps this workspace's members for this provider."""
+
+    def __init__(self, workspace_id: object, provider_key_id: object):
+        provider = "every provider" if provider_key_id is None else f"provider '{provider_key_id}'"
+        super().__init__(f"Workspace {workspace_id} already has a member budget policy for {provider}")
+
+
 class SpendCeilingAlreadyExistsError(Exception):
     """A ceiling already caps this scope for this provider."""
 
@@ -122,8 +179,37 @@ class SpendCeilingAlreadyExistsError(Exception):
         super().__init__(f"A spend ceiling already exists for {scope_type} {scope_id}")
 
 
+class EndUserBudgetNotFoundError(TenancyNotFoundError):
+    """A service key names an end-user budget that does not exist, or that a tenant owns.
+
+    One answer for both, as ``POST /users`` gives: an end user is a deployment
+    user, so a tenant's budget is not one it may be capped at.
+    """
+
+    def __init__(self, budget_id: str):
+        super().__init__(f"Budget with id '{budget_id}' not found")
+
+
+class EndUserIdInvalidError(TenancyValidationError):
+    """A service key named an end user by an id it cannot be stored under."""
+
+    def __init__(self, max_length: int):
+        super().__init__(f"'user' must be at most {max_length} characters to name an end user")
+
+
+class EndUserOwnerUnavailableError(TenancyForbiddenError):
+    """The service key's own user is blocked or deleted, so none of its end users may spend."""
+
+    def __init__(self) -> None:
+        super().__init__("The user this key belongs to is blocked")
+
+
 __all__ = [
     "BudgetStillReferencedError",
+    "EndUserBudgetNotFoundError",
+    "EndUserIdInvalidError",
+    "EndUserOwnerUnavailableError",
+    "MemberBudgetPolicyAlreadyExistsError",
     "OrganizationBudgetHeldElsewhereError",
     "OrganizationBudgetInUseError",
     "OrganizationBudgetNotFoundError",

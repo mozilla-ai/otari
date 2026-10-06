@@ -14,6 +14,14 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.organizations_exceptions import (
+    InvitationAlreadyPendingError,
+    MembershipUpdateError,
+    NotAuthorizedError,
+    OrganizationNameRequiredError,
+    OrganizationNotFoundError,
+    WorkspaceNotFoundError,
+)
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberUpdateRequest,
@@ -34,18 +42,11 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.authorization import resolve_visible_workspace_scope
-from gateway.services.tenancy.errors import (
-    InvitationAlreadyPendingError,
-    MembershipUpdateError,
-    NotAuthorizedError,
-    OrganizationNameRequiredError,
-    OrganizationNotFoundError,
-    WorkspaceNotFoundError,
-)
 from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
+
+from .tenancy_helpers import membership_writes
 
 _TEST_CONFIG = GatewayConfig()
 
@@ -187,7 +188,7 @@ async def test_an_admin_cannot_modify_an_owner(async_db: AsyncSession) -> None:
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     second_owner = await _member(async_db, organization, role="owner", full_name="Second owner")
     admin = await _member(async_db, organization, role="admin", full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = OrganizationService(async_db, **membership_writes(async_db))
     target = await service.members.get_active_by_organization_and_user(organization.id, owner.id)
     assert target is not None
     # A second owner exists, so the last-owner guard is not what refuses this.
@@ -213,7 +214,7 @@ async def test_an_admin_cannot_promote_themselves_to_owner(async_db: AsyncSessio
     organization = await _organization(async_db)
     await _member(async_db, organization, role="owner", full_name="Owner")
     admin = await _member(async_db, organization, role="admin", full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = OrganizationService(async_db, **membership_writes(async_db))
     own = await service.members.get_active_by_organization_and_user(organization.id, admin.id)
     assert own is not None
 
@@ -231,7 +232,7 @@ async def test_an_admin_cannot_promote_another_member_to_owner(async_db: AsyncSe
     await _member(async_db, organization, role="owner", full_name="Owner")
     admin = await _member(async_db, organization, role="admin", full_name="Admin")
     member = await _member(async_db, organization, role="member", full_name="Member")
-    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = OrganizationService(async_db, **membership_writes(async_db))
     target = await service.members.get_active_by_organization_and_user(organization.id, member.id)
     assert target is not None
 
@@ -254,9 +255,7 @@ async def test_an_admin_cannot_add_a_new_owner(async_db: AsyncSession) -> None:
     admin = await _member(async_db, organization, role="admin", full_name="Admin")
 
     with pytest.raises(MembershipUpdateError, match="grant the owner role"):
-        await OrganizationService(
-            async_db, membership_listener=WorkspaceBudgetDefaultService(async_db)
-        ).create_active_organization_member_for_user(
+        await OrganizationService(async_db, **membership_writes(async_db)).create_active_organization_member_for_user(
             user=admin,
             request=ActiveOrganizationMemberCreateRequest(email="ada@example.com", role="owner"),
         )
@@ -267,7 +266,7 @@ async def test_an_owner_can_promote_someone_to_owner(async_db: AsyncSession) -> 
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     member = await _member(async_db, organization, role="member", full_name="Member")
-    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = OrganizationService(async_db, **membership_writes(async_db))
     target = await service.members.get_active_by_organization_and_user(organization.id, member.id)
     assert target is not None
 
@@ -285,9 +284,7 @@ async def test_a_plain_member_cannot_add_members(async_db: AsyncSession) -> None
     member = await _member(async_db, organization, role="member", full_name="Member")
 
     with pytest.raises(NotAuthorizedError):
-        await OrganizationService(
-            async_db, membership_listener=WorkspaceBudgetDefaultService(async_db)
-        ).create_active_organization_member_for_user(
+        await OrganizationService(async_db, **membership_writes(async_db)).create_active_organization_member_for_user(
             user=member,
             request=ActiveOrganizationMemberCreateRequest(email="ada@example.com"),
         )
@@ -298,7 +295,7 @@ async def test_an_admin_can_add_members(async_db: AsyncSession) -> None:
     admin = await _member(async_db, organization, role="admin", full_name="Admin")
 
     result = await OrganizationService(
-        async_db, membership_listener=WorkspaceBudgetDefaultService(async_db)
+        async_db, **membership_writes(async_db)
     ).create_active_organization_member_for_user(
         user=admin,
         request=ActiveOrganizationMemberCreateRequest(email="ada@example.com", role="member"),
@@ -313,7 +310,7 @@ async def test_an_added_member_lands_in_the_adding_organization_only(async_db: A
     organization = await _organization(async_db, slug="acme")
     elsewhere = await _organization(async_db, slug="globex")
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
-    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = OrganizationService(async_db, **membership_writes(async_db))
 
     result = await service.create_active_organization_member_for_user(
         user=owner,
@@ -331,7 +328,7 @@ async def test_an_owner_can_demote_another_owner(async_db: AsyncSession) -> None
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     other_owner = await _member(async_db, organization, role="owner", full_name="Other owner")
-    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = OrganizationService(async_db, **membership_writes(async_db))
     target = await service.members.get_active_by_organization_and_user(organization.id, other_owner.id)
     assert target is not None
 
@@ -417,7 +414,7 @@ async def test_anyone_may_create_an_organization_and_owns_the_one_they_create(
     """
     organization = await _organization(async_db)
     viewer = await _member(async_db, organization, role="viewer", full_name="Viewer")
-    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = OrganizationService(async_db, **membership_writes(async_db))
 
     created = await service.create_organization_for_user(
         user=viewer,
@@ -519,7 +516,7 @@ async def test_accepting_an_invitation_into_a_second_organization_is_no_longer_a
     await OrganizationMemberRepository(async_db).create_membership(
         organization_id=home.id, user_id=invitee.id, role="owner"
     )
-    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = OrganizationService(async_db, **membership_writes(async_db))
 
     invitation = await service.invite_active_organization_member_for_user(
         user=admin,
@@ -547,7 +544,7 @@ async def test_a_plain_member_cannot_create_a_workspace(async_db: AsyncSession) 
     member = await _member(async_db, organization, role="member", full_name="Member")
 
     with pytest.raises(NotAuthorizedError):
-        await WorkspaceService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db)).create_workspace(
+        await WorkspaceService(async_db, **membership_writes(async_db)).create_workspace(
             user=member,
             workspace_create=WorkspaceCreate(name="Research"),
         )
@@ -559,7 +556,7 @@ async def test_a_member_only_sees_the_workspaces_they_belong_to(async_db: AsyncS
     member = await _member(async_db, organization, role="member", full_name="Member")
     theirs = await _workspace(async_db, organization, name="Theirs", owner=member)
     await _workspace(async_db, organization, name="Not theirs", owner=owner)
-    service = WorkspaceService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = WorkspaceService(async_db, **membership_writes(async_db))
 
     as_member = await service.list_workspaces(user=member)
     as_owner = await service.list_workspaces(user=owner)
@@ -576,7 +573,7 @@ async def test_a_workspace_the_member_is_not_in_is_not_found(async_db: AsyncSess
     private = await _workspace(async_db, organization, name="Private", owner=owner)
 
     with pytest.raises(WorkspaceNotFoundError):
-        await WorkspaceService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db)).get_workspace(
+        await WorkspaceService(async_db, **membership_writes(async_db)).get_workspace(
             user=member, workspace_id=private.id
         )
 
@@ -587,9 +584,7 @@ async def test_a_workspace_owner_can_rename_their_own_workspace(async_db: AsyncS
     member = await _member(async_db, organization, role="member", full_name="Member")
     workspace = await _workspace(async_db, organization, name="Theirs", owner=member)
 
-    updated = await WorkspaceService(
-        async_db, membership_listener=WorkspaceBudgetDefaultService(async_db)
-    ).update_workspace(
+    updated = await WorkspaceService(async_db, **membership_writes(async_db)).update_workspace(
         user=member,
         workspace_id=workspace.id,
         workspace_update=WorkspaceUpdate(name="Renamed"),
@@ -610,7 +605,7 @@ async def test_a_plain_workspace_member_cannot_rename_it(async_db: AsyncSession)
     )
 
     with pytest.raises(NotAuthorizedError):
-        await WorkspaceService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db)).update_workspace(
+        await WorkspaceService(async_db, **membership_writes(async_db)).update_workspace(
             user=member,
             workspace_id=workspace.id,
             workspace_update=WorkspaceUpdate(name="Renamed"),
@@ -624,7 +619,7 @@ async def test_a_workspace_owner_cannot_delete_their_workspace(async_db: AsyncSe
     workspace = await _workspace(async_db, organization, name="Theirs", owner=member)
 
     with pytest.raises(NotAuthorizedError):
-        await WorkspaceService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db)).delete_workspace(
+        await WorkspaceService(async_db, **membership_writes(async_db)).delete_workspace(
             user=member, workspace_id=workspace.id
         )
 
@@ -640,7 +635,7 @@ async def test_a_superuser_with_only_a_member_role_sees_no_more_than_a_member(as
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     operator = await _member(async_db, organization, role="member", full_name="Operator", is_superuser=True)
     workspace = await _workspace(async_db, organization, name="Theirs", owner=owner)
-    service = WorkspaceService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = WorkspaceService(async_db, **membership_writes(async_db))
 
     listed = await service.list_workspaces(user=operator)
 
@@ -656,7 +651,7 @@ async def test_a_workspace_id_from_another_organization_is_not_found(async_db: A
     elsewhere = await _workspace(async_db, other_organization, name="Elsewhere")
 
     with pytest.raises(WorkspaceNotFoundError):
-        await WorkspaceService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db)).get_workspace(
+        await WorkspaceService(async_db, **membership_writes(async_db)).get_workspace(
             user=owner, workspace_id=elsewhere.id
         )
 
@@ -666,7 +661,7 @@ async def test_an_unknown_workspace_id_is_not_found(async_db: AsyncSession) -> N
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
 
     with pytest.raises(WorkspaceNotFoundError):
-        await WorkspaceService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db)).get_workspace(
+        await WorkspaceService(async_db, **membership_writes(async_db)).get_workspace(
             user=owner, workspace_id=uuid.uuid4()
         )
 
@@ -677,9 +672,7 @@ async def test_an_organization_admin_manages_workspaces_they_are_not_in(async_db
     admin = await _member(async_db, organization, role="admin", full_name="Admin")
     workspace = await _workspace(async_db, organization, name="Someone else's", owner=owner)
 
-    updated = await WorkspaceService(
-        async_db, membership_listener=WorkspaceBudgetDefaultService(async_db)
-    ).update_workspace(
+    updated = await WorkspaceService(async_db, **membership_writes(async_db)).update_workspace(
         user=admin,
         workspace_id=workspace.id,
         workspace_update=WorkspaceUpdate(description="Reviewed"),
@@ -726,7 +719,7 @@ async def test_a_suspended_workspace_membership_grants_no_visibility(async_db: A
     await members.update(membership, WorkspaceMemberUpdate(status="suspended"))
     await async_db.commit()
 
-    service = WorkspaceService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
+    service = WorkspaceService(async_db, **membership_writes(async_db))
     with pytest.raises(WorkspaceNotFoundError):
         await service.get_workspace(user=plain, workspace_id=workspace.id)
     with pytest.raises(WorkspaceNotFoundError):
@@ -771,7 +764,7 @@ async def test_a_superuser_with_only_a_member_role_cannot_manage_a_workspace_the
     await async_db.commit()
 
     with pytest.raises(WorkspaceNotFoundError):
-        await WorkspaceService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db)).update_workspace(
+        await WorkspaceService(async_db, **membership_writes(async_db)).update_workspace(
             user=outsider,
             workspace_id=workspace.id,
             workspace_update=WorkspaceUpdate(name="Renamed"),
@@ -795,7 +788,7 @@ async def test_a_superuser_with_only_a_plain_workspace_role_cannot_manage_it(asy
     )
 
     with pytest.raises(NotAuthorizedError):
-        await WorkspaceService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db)).update_workspace(
+        await WorkspaceService(async_db, **membership_writes(async_db)).update_workspace(
             user=operator,
             workspace_id=workspace.id,
             workspace_update=WorkspaceUpdate(name="Renamed"),
@@ -867,9 +860,7 @@ async def test_an_admin_cannot_invite_an_owner(async_db: AsyncSession) -> None:
     admin = await _member(async_db, organization, role="admin", full_name="Admin")
 
     with pytest.raises(MembershipUpdateError, match="grant the owner role"):
-        await OrganizationService(
-            async_db, membership_listener=WorkspaceBudgetDefaultService(async_db)
-        ).invite_active_organization_member_for_user(
+        await OrganizationService(async_db, **membership_writes(async_db)).invite_active_organization_member_for_user(
             user=admin,
             request=InviteOrganizationMemberRequest(email="ada@example.com", role="owner"),
             config=_TEST_CONFIG,

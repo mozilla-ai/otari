@@ -13,11 +13,12 @@ upstream text.
 """
 
 import asyncio
+import json
 
 import httpx
 import pytest
 from anthropic import APITimeoutError as AnthropicAPITimeoutError
-from any_llm.exceptions import UnsupportedParameterError
+from any_llm.exceptions import ContextLengthExceededError, InvalidRequestError, UnsupportedParameterError
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from gateway.api.routes._pipeline import (
@@ -31,11 +32,13 @@ from gateway.api.routes._pipeline import (
     classify_provider_error,
     failure_status_code,
     provider_error_headers,
+    refusal_code,
 )
 from gateway.api.routes._platform import _provider_failure_http_exc, upstream_retry_after
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.upstream_redaction import MAX_EXPOSED_DETAIL_CHARS, redact_upstream_message
+from gateway.streaming import OPENAI_STREAM_FORMAT, openai_error_event
 
 _RAW = "raw provider detail SECRET token=abc123"
 
@@ -251,19 +254,28 @@ def _rate_limited_with(retry_after: str) -> Exception:
 
 
 def test_retry_after_is_forwarded_on_a_429() -> None:
-    assert provider_error_headers(_rate_limited_with("34"), 429) == {"Retry-After": "34"}
+    assert provider_error_headers(_rate_limited_with("34"), 429) == {
+        "Otari-Error-Code": "upstream_rate_limited",
+        "Retry-After": "34",
+    }
 
 
 def test_retry_after_rounds_a_fraction_up() -> None:
     """A client honoring the header must not retry before the window the
     provider named, so 0.4s becomes 1s rather than 0s."""
-    assert provider_error_headers(_rate_limited_with("0.4"), 429) == {"Retry-After": "1"}
+    assert provider_error_headers(_rate_limited_with("0.4"), 429) == {
+        "Otari-Error-Code": "upstream_rate_limited",
+        "Retry-After": "1",
+    }
 
 
 def test_retry_after_is_clamped() -> None:
     """A provider does not get to tell this gateway's callers to sleep for a
     year."""
-    assert provider_error_headers(_rate_limited_with("99999999"), 429) == {"Retry-After": "86400"}
+    assert provider_error_headers(_rate_limited_with("99999999"), 429) == {
+        "Otari-Error-Code": "upstream_rate_limited",
+        "Retry-After": "86400",
+    }
 
 
 @pytest.mark.parametrize(
@@ -286,7 +298,7 @@ def test_retry_after_that_is_not_a_number_is_dropped(raw: str) -> None:
     """The value is re-serialized from a parsed number, never relayed as
     received: a header value is not a body, and CRLF in one is not a formatting
     problem."""
-    assert provider_error_headers(_rate_limited_with(raw), 429) is None
+    assert provider_error_headers(_rate_limited_with(raw), 429) == {"Otari-Error-Code": "upstream_rate_limited"}
 
 
 def test_retry_after_is_not_forwarded_on_a_gateway_fault() -> None:
@@ -297,8 +309,8 @@ def test_retry_after_is_not_forwarded_on_a_gateway_fault() -> None:
     assert provider_error_headers(exc, 502) is None
 
 
-def test_retry_after_absent_sends_no_header() -> None:
-    assert provider_error_headers(_StatusError(429), 429) is None
+def test_retry_after_absent_sends_only_the_error_code() -> None:
+    assert provider_error_headers(_StatusError(429), 429) == {"Otari-Error-Code": "upstream_rate_limited"}
 
 
 def test_retry_after_read_through_the_exception_chain() -> None:
@@ -310,7 +322,7 @@ def test_retry_after_read_through_the_exception_chain() -> None:
 def test_platform_terminal_exc_forwards_retry_after() -> None:
     exc = _provider_failure_http_exc(_rate_limited_with("34"), fallback_detail="LLM provider error")
     assert exc.status_code == 429
-    assert exc.headers == {"Retry-After": "34"}
+    assert exc.headers == {"Otari-Error-Code": "upstream_rate_limited", "Retry-After": "34"}
 
 
 @pytest.mark.parametrize("exc", [_StatusError(500), _StatusError(503), Exception(_RAW), ValueError(_RAW)])
@@ -723,3 +735,106 @@ def test_failure_status_code_keeps_the_upstream_status_for_billing() -> None:
     of my error rate is an empty wallet" stays answerable even though the caller
     saw a 502."""
     assert failure_status_code(_ParamError(400, None, _ANTHROPIC_BILLING_MSG)) == 400
+
+
+# ---------------------------------------------------------------------------
+# InvalidRequestError with no HTTP status maps to 400 (Fixes #989)
+# ---------------------------------------------------------------------------
+
+
+def test_status_less_invalid_request_error_maps_to_400() -> None:
+    """A bare InvalidRequestError with no HTTP status (as raised by gemini,
+    bedrock, and anthropic for bad request shapes) must map to HTTP 400 with
+    the provider's own explanation, not fall through to the generic 502."""
+    exc = InvalidRequestError("max_tokens exceeds context window for this model")
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert "max_tokens" in mapping.detail
+
+
+class _StatusLessWrapper(Exception):
+    """A wrapper carrying no status of its own, holding the real failure on
+    ``original_exception``. ``_WrappedError`` cannot model this: it requires a
+    status, and a failure that carries one is classified by that status."""
+
+    def __init__(self, original: BaseException) -> None:
+        super().__init__("Invalid request")
+        self.status_code = None
+        self.original_exception = original
+
+
+def test_status_less_invalid_request_error_survives_wrapped_error() -> None:
+    """The InvalidRequestError type check fires when it lives on
+    ``original_exception`` rather than on the failure itself."""
+    original = InvalidRequestError("invalid message role: 'system'")
+    mapping = classify_provider_error(_StatusLessWrapper(original))
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert "invalid message role" in mapping.detail
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_status"),
+    [(401, 502), (403, 502), (429, 429)],
+)
+def test_a_carried_status_wins_over_an_invalid_request_error_in_the_chain(
+    status_code: int, expected_status: int
+) -> None:
+    """A failure that carries its own status keeps it, even when a status-less
+    InvalidRequestError sits anywhere on ``original_exception``.
+
+    Guarding per-link rather than on the failure's own status turned all of
+    these into a client 400, which is how a rejected credential's message would
+    have reached the caller."""
+    wrapped = _WrappedError(status_code, InvalidRequestError("upstream text"))
+    mapping = classify_provider_error(wrapped)
+    assert mapping is not None
+    assert mapping.status_code == expected_status
+
+
+def test_a_credential_failure_keeps_its_fixed_detail_over_a_chained_invalid_request() -> None:
+    """The 401 case specifically: its detail is fixed precisely so an upstream
+    message never reaches the caller, which is the invariant
+    ``redact_upstream_message`` documents about itself."""
+    wrapped = _WrappedError(401, InvalidRequestError("sk-ant-would-leak-here"))
+    mapping = classify_provider_error(wrapped)
+    assert mapping is not None
+    assert mapping.detail == PROVIDER_CREDENTIALS_DETAIL
+    assert "sk-ant" not in mapping.detail
+
+
+def test_status_less_invalid_request_error_is_recorded_as_400() -> None:
+    """failure_status_code records 400 for a status-less InvalidRequestError so
+    the usage log reflects the real classification, not the generic 502."""
+    exc = InvalidRequestError("unknown parameter 'response_format'")
+    assert failure_status_code(exc) == 400
+
+
+def test_invalid_request_error_with_status_is_classified_by_status() -> None:
+    """An InvalidRequestError that already carries an HTTP status must not be
+    rerouted by the type-based branch; the status branch handles it as usual."""
+    exc = InvalidRequestError("bad request shape")
+    exc.status_code = 400
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.status_code == 400
+
+
+def test_a_prompt_too_long_for_the_model_has_its_own_code() -> None:
+    exc = ContextLengthExceededError("prompt is too long", status_code=400)
+
+    mapping = classify_provider_error(exc)
+
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert provider_error_headers(exc, 400) == {"Otari-Error-Code": "context_length_exceeded"}
+    assert refusal_code(exc) == "context_length_exceeded"
+
+
+def test_a_stream_error_event_carries_the_code_that_ended_it() -> None:
+    event = openai_error_event(OPENAI_STREAM_FORMAT, refusal_code(_rate_limited_with("3")))
+
+    payload = json.loads(event.removeprefix("data: "))
+    assert payload["error"]["code"] == "upstream_rate_limited"
+    assert openai_error_event(OPENAI_STREAM_FORMAT, None) == OPENAI_STREAM_FORMAT.error_payload

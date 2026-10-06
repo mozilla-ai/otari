@@ -5,9 +5,11 @@ import type {
   CreateWorkspaceMcpServerRequest,
   GuardrailCatalog,
   OrganizationGuardrail,
+  OrganizationGuardrailTestResult,
   SearchProviderInfo,
   SearchToolsResponse,
   StoredSearchTool,
+  TestOrganizationGuardrailRequest,
   TestServiceResponse,
   ToolSettingsResponse,
   ToolsResponse,
@@ -227,6 +229,22 @@ export function useUpdateOrganizationGuardrail() {
         queryKey: [ORGANIZATION_GUARDRAILS],
       })
     },
+  })
+}
+
+export function useTestOrganizationGuardrail() {
+  return useMutation({
+    mutationFn: ({
+      guardrailId,
+      body,
+    }: {
+      guardrailId: string
+      body: TestOrganizationGuardrailRequest
+    }) =>
+      apiFetch<OrganizationGuardrailTestResult>(
+        `/organizations/me/guardrails/${encodeURIComponent(guardrailId)}/test`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
   })
 }
 

@@ -39,6 +39,7 @@ from gateway.ports.telemetry_storage_port import (
     TelemetryGroupBy,
     TelemetryRecord,
     TelemetryScanTooLargeError,
+    TelemetryStoragePort,
 )
 
 # TelemetryRecord fields that feed a dedup key but are not their own
@@ -73,13 +74,17 @@ def _build_row(api_key_id: str, user_id: str, record: TelemetryRecord) -> AgentT
 
 async def _existing_dedup_keys(db: AsyncSession, source: str, dedup_keys: list[str]) -> set[str]:
     rows = (
-        await db.execute(
-            select(AgentTelemetry.dedup_key).where(
-                AgentTelemetry.source == source,
-                AgentTelemetry.dedup_key.in_(dedup_keys),
+        (
+            await db.execute(
+                select(AgentTelemetry.dedup_key).where(
+                    AgentTelemetry.source == source,
+                    AgentTelemetry.dedup_key.in_(dedup_keys),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return set(rows)
 
 
@@ -123,7 +128,7 @@ async def _insert_same_source_batch(db: AsyncSession, source: str, rows: list[Ag
     return IngestResult(accepted=accepted, duplicate=duplicate + still_duplicate)
 
 
-class DatabaseTelemetryStorageAdapter:
+class DatabaseTelemetryStorageAdapter(TelemetryStoragePort):
     """Core adapter: telemetry lives in this deployment's own database.
 
     Session-bound, unlike the stateless core adapters beside it: every method

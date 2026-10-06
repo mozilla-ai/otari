@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from opentelemetry import trace
 
+from gateway.models.tools import WebTool
 from gateway.services._tool_loop import MaxToolIterationsExceeded
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.web_extraction import ExtractionError
@@ -50,17 +51,19 @@ if TYPE_CHECKING:
 tracer = trace.get_tracer(__name__)
 
 
-WEB_SEARCH_TOOL_NAME = "web_search"
-WEB_FETCH_TOOL_NAME = "web_fetch"
+WEB_SEARCH_TOOL_NAME = WebTool.SEARCH.value
+# The dated and preview spellings of a provider's own web-search tool type
+# (``web_search_20250305``, ``web_search_preview``). A caller using one is asking in
+# the provider's own vocabulary rather than the gateway's.
+WEB_SEARCH_NATIVE_TYPE_PREFIX = "web_search_"
+WEB_FETCH_TOOL_NAME = WebTool.FETCH.value
 MAX_WEB_RETRIEVAL_CALLS = 10
 
 # Gateway-controlled /search query params that provider_options must never override.
 _RESERVED_SEARCH_PARAMS = frozenset({"q", "format", "engines"})
 
 _DEFAULT_SEARCH_TIMEOUT_S = 15.0
-# Public alongside the cap below: `routes/_tools.web_search_max_results_baseline`
-# needs the value a request gets when neither the deployment nor the request
-# names one, because that is what a workspace ceiling is floored against.
+# Public because the tools package falls back to it when neither the deployment nor the request names one.
 DEFAULT_MAX_RESULTS = 5
 # Public because a workspace's stored web-search ceiling is validated against it
 # (`services/tenancy/workspace_web_search_service.py`): a value above what this
@@ -269,9 +272,7 @@ class WebRetrievalBackend:
     async def __aenter__(self) -> WebRetrievalBackend:
         try:
             if self._enable_search:
-                self._client = await self._stack.enter_async_context(
-                    httpx.AsyncClient(timeout=self._search_timeout_s)
-                )
+                self._client = await self._stack.enter_async_context(httpx.AsyncClient(timeout=self._search_timeout_s))
             if self._retrieval_service is None:
                 transport = TrustedProxyAsyncHTTPTransport() if self._trust_env_proxy else PinnedAsyncHTTPTransport()
                 retrieval_client = await self._stack.enter_async_context(

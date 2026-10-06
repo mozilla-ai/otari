@@ -97,6 +97,7 @@ export function usageTotals(overrides: Partial<UsageTotals> = {}): UsageTotals {
     cache_read_tokens: 0,
     cache_write_tokens: 0,
     cache_write_1h_tokens: 0,
+    reasoning_tokens: 0,
     billed_input_tokens: 0,
     billed_output_tokens: 0,
     request_count: 0,
@@ -205,6 +206,8 @@ export function bootstrap(
     // account-menu tests set them.
     terms_url: null,
     privacy_url: null,
+    // No public website: the public catalog's logo links to the catalog.
+    site_url: null,
     // Not frozen, because a fixture describes a deployment somebody can sign
     // in to; the maintenance-mode tests override it.
     maintenance_mode: false,
@@ -216,6 +219,7 @@ export function bootstrap(
     // clearing a list it does not care about.
     oauth_providers: [],
     mail_ready: false,
+    feedback_enabled: false,
     // Off by default, matching the config default; the public-catalog tests
     // turn it on.
     public_catalog: false,
@@ -506,6 +510,8 @@ export function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
     allowed_models: null,
     exclude_from_budget: false,
     reject_user_mismatch: null,
+    is_service_key: false,
+    end_user_budget_id: null,
     metadata: {},
     ...overrides,
   }

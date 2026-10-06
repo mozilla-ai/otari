@@ -67,6 +67,7 @@ import {
 } from "@/shared/helpers/tableSelection"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+import { ExpiryFields } from "./ExpiryFields"
 import { KeyActionsMenu } from "./KeyActionsMenu"
 import { isVirtualUser, keyFingerprint, secretCaption } from "./secretCaption"
 
@@ -611,11 +612,10 @@ function CreateKeyDialog({
         description="A label to recognize this key later."
         shouldReserveMessage
       />
-      <Field
+      <ExpiryFields
         label="Expires (optional)"
         value={expiresAt}
         onChange={setExpiresAt}
-        type="datetime-local"
         description={
           expiresInPast ? (
             <span className="text-danger">
@@ -625,7 +625,6 @@ function CreateKeyDialog({
             "Leave blank for a key that never expires."
           )
         }
-        shouldReserveMessage
       />
       {isDeploymentWide ? (
         <UserComboBox
@@ -805,13 +804,11 @@ function EditKeyForm({
         autoFocus
         shouldReserveMessage={false}
       />
-      <Field
+      <ExpiryFields
         label="Expires"
         value={expiresAt}
         onChange={setExpiresAt}
-        type="datetime-local"
         description="Blank clears the expiry."
-        shouldReserveMessage
       />
       {isDeploymentWide && apiKey.user_id ? (
         <OwnerAccessNote userId={apiKey.user_id} users={users.data ?? []} />

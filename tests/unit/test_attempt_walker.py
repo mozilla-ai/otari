@@ -17,6 +17,7 @@ from gateway.api.routes._attempts import (
     ALL_ATTEMPTS_FAILED_DETAIL,
     ALL_ATTEMPTS_TIMED_OUT_DETAIL,
     EMPTY_PLAN_DETAIL,
+    CandidateCannotServe,
     classify_local_attempt_error,
     walk_attempts,
 )
@@ -478,3 +479,349 @@ async def test_capacity_failure_does_not_try_another_provider() -> None:
     with pytest.raises(SandboxUnavailableError) as caught:
         await _walk([_attempt(1, "a"), _attempt(2, "b")], [SandboxUnavailableError("15"), "ok"])
     assert caught.value.retry_after == "15"
+
+
+# ---------------------------------------------------------------------------
+# Preparing each candidate
+# ---------------------------------------------------------------------------
+
+
+async def _walk_prepared(
+    attempts: list[Attempt], prepare: Any, behaviors: list[Any] | None = None
+) -> tuple[Attempt, list[dict[str, Any]]]:
+    sent: list[dict[str, Any]] = []
+
+    async def run_attempt(attempt: Attempt, call_kwargs: dict[str, Any], mark_locked_in: Any) -> Any:
+        sent.append(call_kwargs)
+        behavior = (behaviors or [])[attempt.position - 1] if behaviors else "ok"
+        if isinstance(behavior, BaseException):
+            raise behavior
+        return behavior
+
+    chosen, _ = await walk_attempts(
+        attempts=attempts,
+        base_request_fields={"messages": [{"role": "user", "content": "hi"}]},
+        run_attempt=run_attempt,
+        max_tool_iterations=10,
+        prepare_kwargs=prepare,
+    )
+    return chosen, sent
+
+
+@pytest.mark.asyncio
+async def test_each_candidate_is_sent_what_was_prepared_for_it() -> None:
+    async def prepare(instance: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        return {**kwargs, "prepared_for": instance}
+
+    attempts = [_attempt(1, "a", instance="first"), _attempt(2, "b", instance="second")]
+    _, sent = await _walk_prepared(attempts, prepare, [_http_error(503), "ok"])
+
+    assert [kwargs["prepared_for"] for kwargs in sent] == ["first", "second"]
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_that_cannot_serve_is_skipped_without_reordering() -> None:
+    async def prepare(instance: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        if instance == "first":
+            raise CandidateCannotServe(HTTPException(status_code=400, detail="no"))
+        return kwargs
+
+    attempts = [_attempt(1, "a", instance="first"), _attempt(2, "b", instance="second")]
+    chosen, sent = await _walk_prepared(attempts, prepare)
+
+    assert chosen.instance == "second"
+    assert len(sent) == 1
+
+
+@pytest.mark.asyncio
+async def test_no_candidate_that_can_serve_raises_the_refusal_it_was_given() -> None:
+    async def prepare(instance: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        raise CandidateCannotServe(HTTPException(status_code=400, detail="no model can"))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk_prepared([_attempt(1, "a"), _attempt(2, "b")], prepare)
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "no model can"
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_while_preparing_a_candidate_stops_the_walk() -> None:
+    async def prepare(instance: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        raise HTTPException(status_code=400, detail="refused")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk_prepared([_attempt(1, "a"), _attempt(2, "b")], prepare)
+
+    assert exc_info.value.detail == "refused"
+
+
+@pytest.mark.asyncio
+async def test_a_provider_failure_while_preparing_a_candidate_falls_over() -> None:
+    async def prepare(instance: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        if instance == "first":
+            raise _http_error(503)
+        return kwargs
+
+    attempts = [_attempt(1, "a", instance="first"), _attempt(2, "b", instance="second")]
+    chosen, _ = await _walk_prepared(attempts, prepare)
+
+    assert chosen.instance == "second"
+
+
+async def _walk_recording(
+    attempts: list[Attempt], prepare: Any, behaviors: list[Any]
+) -> tuple[list[Attempt], list[Attempt], BaseException | None]:
+    terminal: list[Attempt] = []
+    absorbed: list[Attempt] = []
+
+    async def run_attempt(attempt: Attempt, call_kwargs: dict[str, Any], mark_locked_in: Any) -> Any:
+        behavior = behaviors[attempt.position - 1]
+        if isinstance(behavior, BaseException):
+            raise behavior
+        return behavior
+
+    async def on_absorbed(attempt: Attempt, exc: BaseException, total: int) -> None:
+        absorbed.append(attempt)
+
+    try:
+        await walk_attempts(
+            attempts=attempts,
+            base_request_fields={"messages": []},
+            run_attempt=run_attempt,
+            max_tool_iterations=10,
+            prepare_kwargs=prepare,
+            on_absorbed=on_absorbed,
+            on_terminal=terminal.append,
+        )
+    except BaseException as exc:  # noqa: BLE001 - the test inspects what the walk raised
+        return terminal, absorbed, exc
+    return terminal, absorbed, None
+
+
+def _cannot_serve(*instances: str) -> Any:
+    async def prepare(instance: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        if instance in instances:
+            raise CandidateCannotServe(HTTPException(status_code=400, detail="no"))
+        return kwargs
+
+    return prepare
+
+
+@pytest.mark.asyncio
+async def test_a_failure_before_a_candidate_that_cannot_serve_is_the_requests_outcome() -> None:
+    attempts = [_attempt(1, "a", instance="first"), _attempt(2, "b", instance="second")]
+
+    terminal, absorbed, exc = await _walk_recording(attempts, _cannot_serve("second"), [_http_error(429), "ok"])
+
+    assert [attempt.instance for attempt in terminal] == ["first"]
+    assert absorbed == [], "the only provider called was recorded as a failure the request recovered from"
+    assert isinstance(exc, HTTPException)
+    assert exc.status_code == 429, "one candidate ran, so its own status is the answer"
+
+
+@pytest.mark.asyncio
+async def test_a_failure_after_a_candidate_that_cannot_serve_names_the_candidate_that_ran() -> None:
+    attempts = [_attempt(1, "a", instance="first"), _attempt(2, "b", instance="second")]
+
+    terminal, absorbed, exc = await _walk_recording(attempts, _cannot_serve("first"), ["ok", _http_error(429)])
+
+    assert [attempt.instance for attempt in terminal] == ["second"]
+    assert absorbed == []
+    assert isinstance(exc, HTTPException)
+    assert exc.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_a_failure_is_absorbed_once_another_candidate_is_sent_the_request() -> None:
+    attempts = [_attempt(1, "a", instance="first"), _attempt(2, "b"), _attempt(3, "c", instance="third")]
+
+    terminal, absorbed, exc = await _walk_recording(
+        attempts, _cannot_serve("openai"), [_http_error(503), "unused", "ok"]
+    )
+
+    assert exc is None
+    assert [attempt.instance for attempt in absorbed] == ["first"]
+    assert terminal == []
+
+
+async def _walk_admitted(
+    attempts: list[Attempt],
+    full: set[str],
+    behaviors: dict[str, Any] | None = None,
+    skipped: list[tuple[str, Any]] | None = None,
+    prepare_kwargs: Any = None,
+    retry_after: dict[str, str] | None = None,
+    terminal: list[str] | None = None,
+    dropped: list[tuple[str, bool]] | None = None,
+) -> tuple[tuple[Attempt, Any], list[str], list[tuple[str, bool]]]:
+    """Walk with every model in ``full`` refused admission.
+
+    Returns the result, the models sent, and each dropped hold with whether its model was sent.
+    """
+    sent: list[str] = []
+    dropped = dropped if dropped is not None else []
+    skipped = skipped if skipped is not None else []
+
+    async def on_skipped(attempt: Attempt, refusal: HTTPException) -> None:
+        skipped.append((attempt.model, refusal.detail))
+
+    async def admit(attempt: Attempt) -> Any:
+        if attempt.model in full:
+            wait = (retry_after or {}).get(attempt.model)
+            headers = {"Retry-After": wait} if wait is not None else None
+            raise CandidateCannotServe(
+                HTTPException(status_code=429, detail=f"{attempt.model} is full", headers=headers)
+            )
+
+        async def drop(was_sent: bool) -> None:
+            dropped.append((attempt.model, was_sent))
+
+        return drop
+
+    async def run_attempt(attempt: Attempt, call_kwargs: dict[str, Any], mark_locked_in: Any) -> Any:
+        sent.append(attempt.model)
+        behavior = (behaviors or {}).get(attempt.model, "ok")
+        if isinstance(behavior, BaseException):
+            raise behavior
+        return behavior
+
+    result = await walk_attempts(
+        attempts=attempts,
+        base_request_fields={"messages": [{"role": "user", "content": "hi"}]},
+        run_attempt=run_attempt,
+        max_tool_iterations=10,
+        prepare_kwargs=prepare_kwargs,
+        admit_attempt=admit,
+        on_skipped=on_skipped,
+        on_terminal=(lambda attempt: terminal.append(attempt.model)) if terminal is not None else None,
+    )
+    return result, sent, dropped
+
+
+@pytest.mark.asyncio
+async def test_a_full_candidate_is_skipped_for_the_next_one_with_room() -> None:
+    (chosen, _), sent, _ = await _walk_admitted([_attempt(1, "a"), _attempt(2, "b")], full={"a"})
+
+    assert chosen.model == "b"
+    assert sent == ["b"]
+
+
+@pytest.mark.asyncio
+async def test_every_candidate_full_answers_with_the_last_refusal() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk_admitted([_attempt(1, "a"), _attempt(2, "b")], full={"a", "b"})
+
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.detail == "b is full"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_candidate_gives_back_what_it_was_admitted_with() -> None:
+    (chosen, _), sent, dropped = await _walk_admitted(
+        [_attempt(1, "a"), _attempt(2, "b")], full=set(), behaviors={"a": _http_error(503)}
+    )
+
+    assert chosen.model == "b"
+    assert sent == ["a", "b"]
+    assert dropped == [("a", True)]
+
+
+@pytest.mark.asyncio
+async def test_a_skip_is_recorded_once_another_candidate_is_sent_the_request() -> None:
+    skipped: list[tuple[str, Any]] = []
+
+    await _walk_admitted([_attempt(1, "a"), _attempt(2, "b")], full={"a"}, skipped=skipped)
+
+    assert skipped == [("a", "a is full")]
+
+
+@pytest.mark.asyncio
+async def test_a_skip_the_request_ends_on_is_its_outcome_not_a_record() -> None:
+    skipped: list[tuple[str, Any]] = []
+
+    with pytest.raises(HTTPException):
+        await _walk_admitted([_attempt(1, "a"), _attempt(2, "b")], full={"a", "b"}, skipped=skipped)
+
+    assert skipped == []
+
+
+@pytest.mark.asyncio
+async def test_every_candidate_full_answers_with_the_soonest_retry_after() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk_admitted([_attempt(1, "a"), _attempt(2, "b")], full={"a", "b"}, retry_after={"a": "5", "b": "40"})
+
+    assert exc_info.value.detail == "a is full"
+    assert exc_info.value.headers == {"Retry-After": "5"}
+
+
+@pytest.mark.asyncio
+async def test_an_all_full_refusal_is_reported_on_the_candidate_whose_refusal_answers() -> None:
+    terminal: list[str] = []
+
+    with pytest.raises(HTTPException):
+        await _walk_admitted(
+            [_attempt(1, "a"), _attempt(2, "b")],
+            full={"a", "b"},
+            retry_after={"a": "5", "b": "40"},
+            terminal=terminal,
+        )
+
+    assert terminal == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_before_the_provider_answers_gives_back_the_models_request() -> None:
+    """A refused reservation top-up is terminal, and the model was never called for it."""
+    dropped: list[tuple[str, bool]] = []
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk_admitted(
+            [_attempt(1, "a")],
+            full=set(),
+            behaviors={"a": HTTPException(status_code=402, detail="top-up refused")},
+            dropped=dropped,
+        )
+
+    assert exc_info.value.status_code == 402
+    assert dropped == [("a", False)]
+
+
+@pytest.mark.asyncio
+async def test_a_full_candidate_is_not_prepared_for() -> None:
+    prepared: list[str] = []
+
+    async def prepare(instance: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        prepared.append(kwargs["model"].rsplit(":", 1)[-1])
+        return kwargs
+
+    await _walk_admitted([_attempt(1, "a"), _attempt(2, "b")], full={"a"}, prepare_kwargs=prepare)
+
+    assert prepared == ["b"]
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_that_cannot_be_prepared_keeps_nothing_it_was_admitted_with() -> None:
+    async def prepare(instance: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+        if kwargs["model"].rsplit(":", 1)[-1] == "a":
+            raise CandidateCannotServe(HTTPException(status_code=400, detail="cannot hold copies"))
+        return kwargs
+
+    (chosen, _), sent, dropped = await _walk_admitted(
+        [_attempt(1, "a"), _attempt(2, "b")], full=set(), prepare_kwargs=prepare
+    )
+
+    assert chosen.model == "b"
+    assert sent == ["b"]
+    assert dropped == [("a", False)]
+
+
+@pytest.mark.asyncio
+async def test_a_skip_after_the_last_candidate_called_is_recorded_when_the_walk_fails() -> None:
+    skipped: list[tuple[str, Any]] = []
+
+    with pytest.raises(HTTPException):
+        await _walk_admitted(
+            [_attempt(1, "a"), _attempt(2, "b")], full={"b"}, behaviors={"a": _http_error(503)}, skipped=skipped
+        )
+
+    assert skipped == [("b", "b is full")]

@@ -88,7 +88,7 @@ def _post_with_sandbox_patched(
     seen = _Dispatch()
 
     async def fake_loop(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> MessageResponse:
         seen.max_iterations = max_iterations
         return _text_response("via-sandbox-loop")
@@ -270,7 +270,7 @@ def test_a_streaming_request_gets_the_same_ceilings(
     seen = _Dispatch()
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, native_tools: frozenset[str] = frozenset()
     ) -> AsyncIterator[MessageStreamEvent]:
         seen.max_iterations = max_iterations
         yield MessageStopEvent(type="message_stop")
@@ -446,7 +446,7 @@ def test_an_unresolvable_workspace_refuses_rather_than_running_the_sandbox(
     this, and `resolve_workspace_id` always answers, falling back to the default
     workspace. It is pinned anyway because the arm guards a veto, so falling
     through would hand code execution to a workspace whose row refuses it, with
-    nothing to notice. `_resolve_mcp_server_ids` refuses at the same condition.
+    nothing to notice. The MCP server adapter's `resolve_many` refuses at the same condition.
     """
     monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
 

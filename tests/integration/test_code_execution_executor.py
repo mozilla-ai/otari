@@ -19,6 +19,7 @@ from openai.types.responses import Response, ResponseUsage
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
 from gateway.core.config import API_ROOT
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 
 _SANDBOX_URL = "http://127.0.0.1:9999/sandbox"
 _ANTHROPIC = "anthropic:claude-3-5-sonnet-20241022"
@@ -233,7 +234,7 @@ def test_auto_brings_anthropics_declaration_here_for_a_model_that_cannot_run_it(
     assert "tools" not in seen.loop_kwargs or not seen.loop_kwargs["tools"], "the claimed declaration was forwarded"
     # The caller spoke Anthropic's vocabulary, so it is answered in it.
     assert seen.loop_extra is not None
-    assert seen.loop_extra.get("emit_native_code_execution") is True
+    assert seen.loop_extra.get("native_tools") == frozenset({CODE_EXECUTION_TOOL_NAME})
 
 
 def test_auto_claims_the_bare_keyword_which_no_provider_owns(
@@ -247,7 +248,7 @@ def test_auto_claims_the_bare_keyword_which_no_provider_owns(
     assert seen.loop_kwargs is not None
     # The bare form implies no native response shape, so the plain result is kept.
     assert seen.loop_extra is not None
-    assert "emit_native_code_execution" not in seen.loop_extra
+    assert "native_tools" not in seen.loop_extra
 
 
 def test_without_a_sandbox_a_provider_declaration_is_forwarded_and_nothing_else_happens(
@@ -274,7 +275,7 @@ def test_the_header_can_bring_anthropics_declaration_here_even_for_anthropic(
     assert response.status_code == 200, response.text
     assert seen.loop_kwargs is not None
     assert seen.loop_extra is not None
-    assert seen.loop_extra.get("emit_native_code_execution") is True
+    assert seen.loop_extra.get("native_tools") == frozenset({CODE_EXECUTION_TOOL_NAME})
 
 
 def test_the_header_can_leave_a_claimed_keyword_with_the_provider(
@@ -356,7 +357,7 @@ def test_the_explicit_type_is_always_the_gateways_whatever_the_default_says(
     assert response.status_code == 200, response.text
     assert seen.loop_kwargs is not None
     assert seen.loop_extra is not None
-    assert "emit_native_code_execution" not in seen.loop_extra
+    assert "native_tools" not in seen.loop_extra
 
 
 def test_an_otari_default_claims_anthropics_declaration_for_anthropic(
@@ -370,7 +371,7 @@ def test_an_otari_default_claims_anthropics_declaration_for_anthropic(
     assert response.status_code == 200, response.text
     assert seen.loop_kwargs is not None
     assert seen.loop_extra is not None
-    assert seen.loop_extra.get("emit_native_code_execution") is True
+    assert seen.loop_extra.get("native_tools") == frozenset({CODE_EXECUTION_TOOL_NAME})
 
 
 # --- the workspace pin ---------------------------------------------------------------------
@@ -515,7 +516,7 @@ def test_the_explicit_type_beside_a_claimed_keyword_is_folded_in(
     assert seen.backend_kwargs is not None
     assert seen.backend_kwargs["purpose_hint"] == "Show your working"
     assert seen.loop_extra is not None
-    assert seen.loop_extra.get("emit_native_code_execution") is True
+    assert seen.loop_extra.get("native_tools") == frozenset({CODE_EXECUTION_TOOL_NAME})
 
 
 def test_the_explicit_type_beside_a_keyword_the_provider_keeps_is_still_two_sandboxes(
@@ -559,7 +560,7 @@ def test_responses_answers_a_claimed_interpreter_in_openais_vocabulary(
     assert response.status_code == 200, response.text
     assert seen.loop_kwargs is not None
     assert seen.loop_extra is not None
-    assert seen.loop_extra.get("emit_native_code_execution") is True
+    assert seen.loop_extra.get("native_tools") == frozenset({CODE_EXECUTION_TOOL_NAME})
 
 
 def test_responses_brings_anthropics_words_here_but_answers_plainly(
@@ -573,7 +574,7 @@ def test_responses_brings_anthropics_words_here_but_answers_plainly(
     assert response.status_code == 200, response.text
     assert seen.loop_kwargs is not None
     assert seen.loop_extra is not None
-    assert "emit_native_code_execution" not in seen.loop_extra
+    assert "native_tools" not in seen.loop_extra
 
 
 def test_responses_header_outside_the_vocabulary_is_refused_in_its_own_envelope(

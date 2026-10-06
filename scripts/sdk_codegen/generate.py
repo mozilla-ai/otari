@@ -4,9 +4,8 @@
 Two modes:
 
 - ``control-plane`` (default): typed clients for the management endpoints only
-  (keys, users, budgets, pricing, usage). The inference surface stays a
-  hand-written wrapper around the official OpenAI SDK; batches are hand-written
-  (their responses are untyped in the spec).
+  (keys, users, budgets, pricing, usage). Inference and batch endpoints are
+  excluded from this mode.
 
 - ``full``: enriches the spec's inference surface with the real typed
   completion schemas (from ``any-llm``), then generates a typed core covering
@@ -48,13 +47,9 @@ DEFAULT_OUT_DIR = REPO_ROOT / "dist" / "sdk-codegen"
 # a marker is always written even outside a release build.
 DEFAULT_SPEC_VERSION = "0.0.0-dev"
 
-# Operations carrying one of these tags form the control plane we generate: the
-# management endpoints whose responses are fully typed in the spec. See the
-# module docstring for what is excluded and why (notably batches, whose
-# responses are untyped in the spec and already hand-written in every SDK).
-CONTROL_PLANE_TAGS: frozenset[str] = frozenset(
-    {"keys", "users", "budgets", "pricing", "usage"}
-)
+# Management tags included in control-plane mode. Full mode also types
+# inference and batch responses through enrich_spec.
+CONTROL_PLANE_TAGS: frozenset[str] = frozenset({"keys", "users", "budgets", "pricing", "usage"})
 
 
 @dataclass(frozen=True)
@@ -251,6 +246,7 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
     Streaming still cannot be generated (OpenAPI Generator emits no SSE); the SDK
     shell hand-writes the stream iterator over the generated client.
     """
+    from any_llm.types.batch import Batch
     from any_llm.types.completion import (
         ChatCompletion,
         ChatCompletionChunk,
@@ -322,8 +318,49 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
         "IMG",
     )
 
-    def set_json_200(path: str, schema_name: str, description: str) -> None:
-        op = spec["paths"][path]["post"]
+    schemas["BatchResponse"] = absorb(
+        Batch.model_json_schema(mode="serialization", ref_template="#/components/schemas/BATCH_{model}"),
+        "BATCH",
+    )
+    schemas["BatchResponse"]["properties"]["provider"] = {
+        "type": "string",
+        "description": "Provider instance that owns the batch.",
+    }
+    schemas["BatchResponse"].setdefault("required", []).append("provider")
+    schemas["BatchListResponse"] = {
+        "type": "object",
+        "required": ["data"],
+        "properties": {"data": {"type": "array", "items": {"$ref": "#/components/schemas/BatchResponse"}}},
+    }
+    schemas["BatchResultItem"] = {
+        "type": "object",
+        "required": ["custom_id", "result", "error"],
+        "properties": {
+            "custom_id": {"type": "string", "description": "Identifier supplied for this request in the batch."},
+            "result": {
+                "description": "Serialized provider result, or null when the request failed.",
+                "anyOf": [{"$ref": "#/components/schemas/ChatCompletion"}, {"type": "null"}],
+            },
+            "error": {
+                "anyOf": [
+                    {
+                        "type": "object",
+                        "required": ["code", "message"],
+                        "properties": {"code": {"type": "string"}, "message": {"type": "string"}},
+                    },
+                    {"type": "null"},
+                ]
+            },
+        },
+    }
+    schemas["BatchResultsResponse"] = {
+        "type": "object",
+        "required": ["results"],
+        "properties": {"results": {"type": "array", "items": {"$ref": "#/components/schemas/BatchResultItem"}}},
+    }
+
+    def set_json_200(path: str, schema_name: str, description: str, method: str = "post") -> None:
+        op = spec["paths"][path][method]
         op["responses"]["200"] = {
             "description": description,
             "content": {"application/json": {"schema": {"$ref": f"#/components/schemas/{schema_name}"}}},
@@ -334,6 +371,11 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
     set_json_200(f"{API_ROOT}/rerank", "RerankResponse", "Rerank result")
     set_json_200(f"{API_ROOT}/embeddings", "CreateEmbeddingResponse", "Embeddings")
     set_json_200(f"{API_ROOT}/images/generations", "ImagesResponse", "Generated images")
+    set_json_200(f"{API_ROOT}/batches", "BatchResponse", "Created batch")
+    set_json_200(f"{API_ROOT}/batches", "BatchListResponse", "Batches", method="get")
+    set_json_200(f"{API_ROOT}/batches/{{batch_id}}", "BatchResponse", "Batch", method="get")
+    set_json_200(f"{API_ROOT}/batches/{{batch_id}}/cancel", "BatchResponse", "Canceled batch")
+    set_json_200(f"{API_ROOT}/batches/{{batch_id}}/results", "BatchResultsResponse", "Batch results", method="get")
 
     schemas["ChatCompletionRequest"]["properties"]["messages"] = {
         "type": "array",
@@ -481,9 +523,8 @@ def _patch_rust_cargo_toml(dest: Path) -> None:
 
     # reqwest dependency: pin to 0.12 and keep only the features the SDK builds with.
     text = re.sub(
-        r'^reqwest\s*=\s*\{[^}]*\}',
-        'reqwest = { version = "0.12", default-features = false, '
-        'features = ["json", "multipart"] }',
+        r"^reqwest\s*=\s*\{[^}]*\}",
+        'reqwest = { version = "0.12", default-features = false, features = ["json", "multipart"] }',
         text,
         count=1,
         flags=re.MULTILINE,
@@ -683,9 +724,7 @@ def _rust_inline_module(dest: Path) -> None:
     _rustfmt_tree(dest)
 
 
-def generate_language(
-    language: str, spec_path: Path, out_dir: Path, target: LanguageTarget, spec_version: str
-) -> Path:
+def generate_language(language: str, spec_path: Path, out_dir: Path, target: LanguageTarget, spec_version: str) -> Path:
     """Run OpenAPI Generator for ``language`` and return the output directory."""
     dest = out_dir / language
     cmd = [

@@ -11,7 +11,7 @@ Deliberately a shape check and nothing more; see ``InvalidEmailError`` for why.
 """
 
 from gateway.core.addresses import normalized_address
-from gateway.services.tenancy.errors import InvalidEmailError
+from gateway.exceptions.identity_exceptions import InvalidEmailError
 
 # ``user.email`` is ``varchar(255)``, so this is the column's width and not a
 # policy. Request schemas carry it too, but theirs bounds the *raw* value and

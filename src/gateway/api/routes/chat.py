@@ -2,7 +2,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
-from any_llm import LLMProvider, acompletion
+from any_llm import acompletion
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -10,13 +10,14 @@ from any_llm.types.completion import (
     CompletionUsage,
 )
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
-from fastapi.responses import StreamingResponse
 from pydantic import Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
-    CodeExecutionPortDep,
     ModelProviderPortDep,
+    OptionalFileServiceDep,
+    ToolPorts,
+    ToolPortsDep,
     build_sandbox_container_registry,
     build_sandbox_file_bridge,
     get_config,
@@ -25,11 +26,14 @@ from gateway.api.deps import (
     get_unit_of_work_if_needed,
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
+from gateway.api.routes._idempotency import IdempotencyGuard, IdempotencyGuardDep, IdempotentReplay
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     NO_RESOLVABLE_PROVIDER_DETAIL,
     PROVIDER_ERROR_DETAIL,
+    DeclaredTools,
     ErrorKind,
+    ToolBackends,
     classify_provider_error,
     default_attempt_kwargs,
     log_usage,
@@ -37,6 +41,7 @@ from gateway.api.routes._pipeline import (
     provider_error_headers,
     raise_all_streaming_attempts_failed,
     rate_limit_headers,
+    refusal_code,
     resolve_dispatch_provider,
     resolve_request_context,
     run_platform_non_stream,
@@ -47,18 +52,17 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
-from gateway.api.routes._tools import CODE_EXECUTION_HEADER, _strip_gateway_fields
+from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.core.usage import GatewayUsage
-from gateway.core.usage_source import PLAYGROUND_USAGE_ENDPOINT
+from gateway.core.usage import GatewayUsage, reasoning_tokens_of
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
-from gateway.models.tools import CodeExecutor
-from gateway.ports.code_execution_port import CodeExecutionPort
+from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.ports.model_provider_port import ModelProviderPort
-from gateway.services.file_service import StagedFile
+from gateway.provider_fields import surface_provider_fields
+from gateway.services.files import FileService, StagedFile
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import (
     MAX_TOOL_ITERATIONS_CAP,
@@ -68,9 +72,10 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop_stream,
 )
 from gateway.services.provider_kwargs import apply_endpoint_defaults
-from gateway.services.web_search_budget import WebSearchBudget
-from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
+from gateway.services.tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, Dialect, ToolUseBudget
+from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
+from gateway.types.normalization_target import NormalizationTarget
 from gateway.types.session_principal import SessionPrincipal
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -78,10 +83,6 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 # The label written to a usage-log row. An identifier, not a URL: it stays as
 # it is so new rows compare with old ones.
 USAGE_ENDPOINT = "/v1/chat/completions"
-
-# The label a Playground request carries instead, declared in
-# ``core/usage_source`` because the activation guide filters on it and a service
-# may not import this layer. That module says which readers care and why.
 
 __all__ = [
     "ChatCompletionRequest",
@@ -177,7 +178,7 @@ class _ChatAdapter:
     and friends.
     """
 
-    name = "chat"
+    name = Dialect.CHAT
     stream_format: StreamFormat = OPENAI_STREAM_FORMAT
     log_success_without_usage = True
 
@@ -209,20 +210,28 @@ class _ChatAdapter:
             detail=PROVIDER_ERROR_DETAIL,
         )
 
+    def stream_error_payload(self, exc: BaseException) -> str:
+        return openai_error_event(self.stream_format, refusal_code(exc))
+
     def format_chunk(self, chunk: ChatCompletionChunk) -> str:
-        return f"data: {chunk.model_dump_json()}\n\n"
+        return f"data: {surface_provider_fields(chunk).model_dump_json()}\n\n"
 
     def extract_stream_usage(self, chunk: ChatCompletionChunk) -> CompletionUsage | None:
         if not chunk.usage:
             return None
         details = chunk.usage.prompt_tokens_details
-        return GatewayUsage(
+        # Forward provider extras (streamed timing lands in the final chunk's
+        # usage), as GatewayUsage.from_completion_usage does.
+        fields = GatewayUsage.external_extras(chunk.usage)
+        fields.update(
             prompt_tokens=chunk.usage.prompt_tokens or 0,
             completion_tokens=chunk.usage.completion_tokens or 0,
             total_tokens=chunk.usage.total_tokens or 0,
             prompt_tokens_details=details,
             cache_read_tokens=(details.cached_tokens or 0) if details is not None else 0,
+            reasoning_tokens=reasoning_tokens_of(chunk.usage),
         )
+        return GatewayUsage(**fields)
 
     def extract_usage(self, result: ChatCompletion) -> CompletionUsage | None:
         if result.usage is None:
@@ -276,23 +285,22 @@ class _ChatAdapter:
         max_iterations: int,
         on_first_response: Callable[[], None] | None = None,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
-        web_search_budget: WebSearchBudget | None = None,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: ToolUseBudget | None = None,
     ) -> ChatCompletion:
-        # The two ``emit_native_*`` flags are accepted for interface parity and
-        # ignored: this format has no native vocabulary for a server-side tool
-        # call, so a gateway-run search or execution stays invisible on the wire
-        # (see docs/tools.md).
-        # ``web_search_budget`` is not: the cap bounds what the caller is billed
+        # ``native_tools`` is accepted for interface parity and always empty: this
+        # format has no native vocabulary for a server-side tool call, so a
+        # gateway-run search or execution stays invisible on the wire (see
+        # docs/tools.md).
+        # ``use_budget`` is not: the cap bounds what the caller is billed
         # for, which every format owes whether or not it can describe the search.
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
         # the platform-attempt path so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
         if on_first_response is not None:
             extra["on_first_response"] = on_first_response
-        if web_search_budget is not None:
-            extra["web_search_budget"] = web_search_budget
+        if use_budget is not None:
+            extra["use_budget"] = use_budget
         return await mcp_tool_loop(
             completion_kwargs=kwargs,
             pool=pool,
@@ -306,13 +314,12 @@ class _ChatAdapter:
         pool: ToolBackend,
         max_iterations: int,
         *,
-        emit_native_web_search: bool = False,
-        emit_native_code_execution: bool = False,
-        web_search_budget: WebSearchBudget | None = None,
+        native_tools: frozenset[str] = frozenset(),
+        use_budget: ToolUseBudget | None = None,
     ) -> AsyncIterator[ChatCompletionChunk]:
         extra: dict[str, Any] = {}
-        if web_search_budget is not None:
-            extra["web_search_budget"] = web_search_budget
+        if use_budget is not None:
+            extra["use_budget"] = use_budget
         return mcp_tool_loop_stream(
             completion_kwargs=kwargs,
             pool=pool,
@@ -397,11 +404,13 @@ async def chat_completions(
     request: ChatCompletionRequest,
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    files: OptionalFileServiceDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     model_provider: ModelProviderPortDep,
-    code_execution_port: CodeExecutionPortDep,
-) -> ChatCompletion | StreamingResponse:
+    tool_ports: ToolPortsDep,
+    idempotency: IdempotencyGuardDep,
+) -> ChatCompletion | Response:
     """OpenAI-compatible chat completions endpoint.
 
     Supports both streaming and non-streaming responses.
@@ -419,10 +428,12 @@ async def chat_completions(
         request=request,
         db=db,
         uow=uow,
+        files=files,
         config=config,
         log_writer=log_writer,
         model_provider=model_provider,
-        code_execution_port=code_execution_port,
+        tool_ports=tool_ports,
+        idempotency=idempotency,
     )
 
 
@@ -434,12 +445,14 @@ async def run_chat_completion(
     request: ChatCompletionRequest,
     db: AsyncSession | None,
     uow: UnitOfWork | None,
+    files: FileService | None,
     config: GatewayConfig,
     log_writer: LogWriter,
     model_provider: ModelProviderPort,
-    code_execution_port: CodeExecutionPort | None,
+    tool_ports: ToolPorts,
     session_principal: SessionPrincipal | None = None,
-) -> ChatCompletion | StreamingResponse:
+    idempotency: IdempotencyGuard | None = None,
+) -> ChatCompletion | Response:
     """Serve one chat completion, from the resolved preamble to the response.
 
     The body of :func:`chat_completions`, as a plain function so a second route
@@ -454,8 +467,7 @@ async def run_chat_completion(
     endpoint, which keeps its API-key-or-master-key rule exactly as it was; see
     :class:`SessionPrincipal` for what a caller owes before building one. It is
     also what picks the usage row's endpoint label, so a Playground request is
-    countable separately from a customer's; ``PLAYGROUND_USAGE_ENDPOINT`` says
-    who reads that distinction and why.
+    countable separately from a customer's (``PLAYGROUND_USAGE_ENDPOINT``).
     """
     adapter = _PLAYGROUND_ADAPTER if session_principal is not None else _ADAPTER
     if not request.model.strip():
@@ -468,14 +480,7 @@ async def run_chat_completion(
     # sandbox session once the billed user and workspace are resolved.
     sandbox_inputs: list[StagedFile] = []
 
-    async def _normalize(
-        user_id: str,
-        provider: LLMProvider | None,
-        model: str,
-        instance: str | None,
-        workspace_id: uuid.UUID | None,
-        workspace_executor: CodeExecutor | None,
-    ) -> tuple[int, CompletionUsage | None]:
+    async def _normalize(target: NormalizationTarget) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the wire payload (extract to
         # text for text-only models, inline for natively-capable ones) before
         # the cost estimate. Standalone only; no-op when the files feature is
@@ -484,20 +489,19 @@ async def run_chat_completion(
             request.messages,
             fmt="openai",
             config=config,
-            provider=provider,
-            model=model,
-            db=db,
-            raw_request=raw_request,
-            user_id=user_id,
-            instance=instance,
-            workspace_id=workspace_id,
+            provider=target.provider,
+            model=target.model,
+            files=files,
+            user_id=target.user_id,
+            instance=target.instance,
+            workspace_id=target.file_workspace_id,
             sandbox_requested=sandbox_requested(
                 request.tools,
                 config=config,
-                provider=provider,
+                provider=target.provider,
                 dialect=adapter.name,
                 code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-                workspace_executor=workspace_executor,
+                workspace_executor=target.workspace_executor,
             ),
         )
         sandbox_inputs.extend(stats.sandbox_inputs)
@@ -505,55 +509,64 @@ async def run_chat_completion(
 
     output_cap = _effective_output_cap(request.max_tokens, request.max_completion_tokens)
 
-    ctx = await resolve_request_context(
-        adapter=adapter,
-        raw_request=raw_request,
-        response=response,
-        db=db,
-        uow=uow,
-        config=config,
-        log_writer=log_writer,
-        model=request.model,
-        user_id_from_request=request.user,
-        estimate_prompt_chars=len(str(request.messages)),
-        estimate_max_output_tokens=output_cap,
-        master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
-        user_forbidden_detail=_USER_FORBIDDEN,
-        session_principal=session_principal,
-        routing_signal=lambda: routing_signal_from_messages(
-            request.messages, raw_request, has_tools=bool(request.tools)
-        ),
-        normalize_messages=_normalize,
-        tools=request.tools,
-    )
+    try:
+        ctx = await resolve_request_context(
+            adapter=adapter,
+            raw_request=raw_request,
+            response=response,
+            db=db,
+            uow=uow,
+            config=config,
+            log_writer=log_writer,
+            model=request.model,
+            user_id_from_request=request.user,
+            estimate_prompt_chars=len(str(request.messages)),
+            estimate_max_output_tokens=output_cap,
+            master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
+            user_forbidden_detail=_USER_FORBIDDEN,
+            session_principal=session_principal,
+            routing_signal=lambda: routing_signal_from_messages(
+                request.messages, raw_request, has_tools=bool(request.tools)
+            ),
+            normalize_messages=_normalize,
+            tools=request.tools,
+            idempotency=None if request.stream else idempotency,
+        )
+    except IdempotentReplay as replay:
+        return replay.response()
 
     tool_ctx = await prepare_gateway_tools(
         adapter=adapter,
         ctx=ctx,
         response=response,
-        guardrails=request.guardrails,
-        guardrail_text=latest_user_text(request.messages),
-        tools=request.tools,
-        mcp_servers=request.mcp_servers,
-        mcp_server_ids=request.mcp_server_ids,
-        max_tool_iterations=request.max_tool_iterations,
-        tools_header=request.tools_header,
-        code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
-        code_execution_port=code_execution_port,
-        sandbox_containers=build_sandbox_container_registry(
-            config=config,
-            uow=ctx.uow,
-            user_id=ctx.user_id,
-            workspace_id=ctx.workspace_id,
-            port=code_execution_port,
+        declared=DeclaredTools(
+            guardrails=request.guardrails,
+            guardrail_text=latest_user_text(request.messages),
+            tools=request.tools,
+            mcp_servers=request.mcp_servers,
+            mcp_server_ids=request.mcp_server_ids,
+            max_tool_iterations=request.max_tool_iterations,
+            tools_header=request.tools_header,
+            code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
+            web_search_header=raw_request.headers.get(WEB_SEARCH_HEADER),
         ),
-        sandbox_files=build_sandbox_file_bridge(
-            raw_request=raw_request,
-            config=config,
-            uow=ctx.uow,
-            user_id=ctx.user_id,
-            workspace_id=ctx.workspace_id,
-            inputs=sandbox_inputs,
+        backends=ToolBackends(
+            ports=tool_ports,
+            sandbox_containers=build_sandbox_container_registry(
+                config=config,
+                uow=ctx.uow,
+                user_id=ctx.user_id,
+                workspace_id=ctx.workspace_id,
+                port=tool_ports.code_execution,
+            ),
+            sandbox_files=build_sandbox_file_bridge(
+                raw_request=raw_request,
+                config=config,
+                uow=ctx.uow,
+                user_id=ctx.user_id,
+                workspace_id=ctx.workspace_id,
+                inputs=sandbox_inputs,
+            ),
         ),
     )
 
@@ -643,7 +656,7 @@ async def run_chat_completion(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Internal error: missing route context",
             )
-        return await run_platform_non_stream(
+        platform_result = await run_platform_non_stream(
             adapter=adapter,
             route=route,
             base_request_fields=request_fields,
@@ -654,6 +667,7 @@ async def run_chat_completion(
             rate_limit_info=ctx.rate_limit_info,
             session_label=request.session_label,
         )
+        return surface_provider_fields(platform_result)
 
     resolved = await resolve_dispatch_provider(
         ctx, config, request.model, adapter=adapter, model_provider=model_provider
@@ -661,7 +675,7 @@ async def run_chat_completion(
     call_kwargs = apply_endpoint_defaults(
         {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}, resolved
     )
-    return await run_standalone_non_stream(
+    result = await run_standalone_non_stream(
         adapter=adapter,
         ctx=ctx,
         tool_ctx=tool_ctx,
@@ -672,3 +686,7 @@ async def run_chat_completion(
         display_model=resolved.alias,
         base_request_fields=request_fields,
     )
+    surface_provider_fields(result)
+    if idempotency is not None:
+        await idempotency.complete(result, response)
+    return result

@@ -18,6 +18,16 @@ from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
+from gateway.exceptions.organizations_exceptions import (
+    NotAuthorizedError,
+    OrganizationDomainAlreadyClaimedError,
+    OrganizationDomainClaimedHereError,
+    OrganizationDomainNotFoundError,
+    OrganizationDomainNotVerifiedError,
+    PublicEmailDomainError,
+    TooManyOrganizationDomainsError,
+    UnregistrableDomainError,
+)
 from gateway.models.tenancy import (
     DOMAIN_PROOF_TTL,
     DOMAIN_VERIFICATION_TXT_PREFIX,
@@ -33,16 +43,6 @@ from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
     UserRepository,
-)
-from gateway.services.tenancy.errors import (
-    NotAuthorizedError,
-    OrganizationDomainAlreadyClaimedError,
-    OrganizationDomainClaimedHereError,
-    OrganizationDomainNotFoundError,
-    OrganizationDomainNotVerifiedError,
-    PublicEmailDomainError,
-    TooManyOrganizationDomainsError,
-    UnregistrableDomainError,
 )
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 

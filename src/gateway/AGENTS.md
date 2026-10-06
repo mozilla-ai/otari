@@ -10,8 +10,8 @@ artifacts. [ARCHITECTURE.md](../../ARCHITECTURE.md) owns the extension boundary.
 [The modular monolith](../../ARCHITECTURE.md#the-modular-monolith) names the
 target shape and its import rules,
 [Layering](../../.github/skills/backend-standards/SKILL.md#layering) gives the
-rules for each layer, and [docs/domains.md](../../docs/domains.md) maps every
-module to its domain.
+rules for each layer, and [docs/domains.md](../../docs/domains.md) says what each
+domain owns.
 
 ## Ports and composition
 
@@ -155,19 +155,27 @@ router backends outside it so CLI and API explain can compile without I/O.
 Asynchronous router decisions live under `services/routing/` and pass a
 `RouterOrdering` into the compiler. A declined decision uses the policy
 default. The API attempt walker executes the compiled order and owns fallback
-settlement.
+settlement. Work that depends on the account a candidate's credential reaches
+runs in its `prepare_kwargs` step, once per candidate, and a candidate that step
+cannot serve is skipped without reordering the plan (`CandidateCannotServe`).
 
 ## Tools, MCP, and guardrails
 
-An `otari_*` tool type always runs in the gateway. A provider-native web-search
-type passes through unless `web_search_intercept` is on. A provider-native
+An `otari_*` tool type always runs in the gateway. Who runs a provider-native
+web-search type is described in
+[web-search interception](../../docs/tools.md#web-search-interception) and
+decided by `claims_provider_web_search` in `services/tools/_web_declarations.py`.
+Each tool's admission step (web, code execution, MCP) lives in `services/tools/`, and
+`prepare_gateway_tools` only calls them and renders their refusals. A provider-native
 code-execution type is decided by the executor (`models/tools.py`,
-resolved in `api/routes/_tools.py`): a workspace pin wins over everything, the
+resolved in `services/tools/_code_execution_declarations.py`): a workspace pin wins over everything, the
 `Otari-Code-Execution` header wins over the deployment default, and `auto`
 claims a declaration only when the dispatched provider does not run it
 natively. The workspace policy is read once, in the request preamble, and
-reused at admission; the same decision says whether a referenced upload is
-staged for the sandbox. The tool loop is in
+reused at admission; the same decision says where a referenced upload goes,
+staged for the gateway's sandbox or copied, for each candidate as it is
+dispatched, into the provider account whose container will read it
+(`FileService.provider_file_ids`). The tool loop is in
 `services/mcp_loop.py`, sandbox and search backends under `services/`, and
 outbound URL checks in `services/url_safety.py`.
 
@@ -226,7 +234,7 @@ and use the shared renderer and header sanitization.
 usage row served by this deployment. Imported and absorbed rows do not count,
 and neither does a Playground row: the guide marks somebody integrating Otari
 from their own code, so it filters on the endpoint label as well as the source
-(`core/usage_source.integration_traffic`).
+(`_integration_traffic`).
 The activation-state table stores only dismissal and setup-key state.
 
 Key issuance requires workspace management authority and rotates the existing
@@ -297,18 +305,21 @@ rather than a page. A count that sizes a mutation applies the mutation's fixed
 scope and not only its filter set. Nothing else narrows it, and
 `UsageEntry.bulk_editable` is how a client learns which rows that scope admits.
 
-## Agent Gates
+## Agent Guardrails
 
-`agent_runtime/` evaluates a caller-submitted `.otari-gates.yml` policy
-against caller-submitted evidence. Everything under it is pure: no
-filesystem, network, subprocess, or clock access. Otari never reads a
-caller's repository itself. `agent_runtime/domain/check.py`'s
+`otari_agent.domain` (in the `otari-agent` workspace member, `cli/`) evaluates
+a caller-submitted `.otari-guardrails.yml` policy against caller-submitted evidence.
+Everything under it is pure: no filesystem, network, subprocess, or clock
+access. Otari never reads a caller's repository itself. It lives beside the CLI
+rather than in the gateway so `otari hook` installs without the server;
+`routes/hooks.py` imports it from there. `otari_agent.domain.check`'s
 `run_policy_check` is the shared orchestration (parse, budget-guard,
 dispatch to each gate's evaluator): `otari hook` (`cli.py`) calls it in
-process by default, needing no running gateway, and the Hook Server
-(`POST /api/v1/hooks/check`, `routes/hooks.py`) calls the same function for
-whoever opts a hook into checking against a gateway over HTTP instead. See
-[docs/agent-gates.md](../../docs/agent-gates.md).
+process, needing no running gateway and no credential, and the Hook Server
+(`POST /api/v1/hooks/check`, `routes/hooks.py`) calls the same function for a
+caller that wants a gateway to evaluate over HTTP. Otari ships no such caller;
+the route's rework is tracked in #1699. See
+[docs/agent-guardrails.md](../../docs/agent-guardrails.md).
 
 ## Logging
 

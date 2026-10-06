@@ -63,15 +63,23 @@ services:
       # callers who want a custom framing should set their own system message.
       - OTARI_TOOLS_HEADER=${OTARI_TOOLS_HEADER:-}
       # Pass provider API keys from host env so config.yml stays free of
-      # secrets. any-llm/the underlying SDK picks them up when the config
-      # doesn't override.
+      # secrets: reference them there as `api_key: ${OPENAI_API_KEY}` under
+      # the provider's `providers:` entry.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Deployment-wide management credential; overrides `master_key` in
+      # config.yml. Unset, Otari generates one on first boot and prints it once.
+      - OTARI_MASTER_KEY=${OTARI_MASTER_KEY:-}
       # Fernet key that encrypts provider credentials added through the admin
       # dashboard. Needed only for the dashboard-first flow (add providers in
       # the browser); unset is fine when providers live in config.yml. Generate
       # one with `docker run --rm mzdotai/otari:latest otari gen-secret-key`.
       - OTARI_SECRET_KEY=${OTARI_SECRET_KEY:-}
+      # Key that names the provider account a copy of an attached file is in.
+      # Required while provider copies are on, which they are by default, and
+      # it must differ from OTARI_SECRET_KEY. Generate one with
+      # `openssl rand -base64 32`.
+      - OTARI_PROVIDER_ACCOUNT_PEPPER=${OTARI_PROVIDER_ACCOUNT_PEPPER:?set OTARI_PROVIDER_ACCOUNT_PEPPER, for example to the output of openssl rand -base64 32}
       # Local llamafile (open-weight model) endpoint. host.docker.internal
       # routes from Otari container back to a llamafile running on
       # the macOS/Windows host. Override if you run the model elsewhere.

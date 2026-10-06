@@ -228,3 +228,17 @@ export function deltaFraction(
   if (previous === undefined || previous === 0) return null
   return (current - previous) / previous
 }
+
+const fileSize = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 })
+const FILE_SIZE_UNITS = ["B", "kB", "MB", "GB"] as const
+
+// A file's size in the largest unit it reaches, counted in 1024s: 82.2 kB.
+export function formatFileSize(bytes: number): string {
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < FILE_SIZE_UNITS.length - 1) {
+    value /= 1024
+    unit += 1
+  }
+  return `${fileSize.format(value)} ${FILE_SIZE_UNITS[unit]}`
+}

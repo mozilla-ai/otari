@@ -87,9 +87,7 @@ def _completion() -> ChatCompletion:
     )
 
 
-def _chat(
-    client: TestClient, headers: dict[str, str], model: str, **fields: Any
-) -> tuple[Any, list[dict[str, Any]]]:
+def _chat(client: TestClient, headers: dict[str, str], model: str, **fields: Any) -> tuple[Any, list[dict[str, Any]]]:
     calls: list[dict[str, Any]] = []
 
     async def fake_acompletion(**kwargs: Any) -> ChatCompletion:

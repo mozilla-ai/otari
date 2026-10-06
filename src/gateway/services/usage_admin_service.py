@@ -30,10 +30,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.metered_pricing import BillableUsage, billable_usage, price_billable_usage
 from gateway.core.sql import MAX_FILTER_VALUES, match_any, utc_bound
-from gateway.core.usage_source import not_served_here
 from gateway.log_config import logger
 from gateway.models.pricing import ModelPricing
-from gateway.models.usage import UsageLog
+from gateway.models.usage import SERVED_HERE_SLUG, UsageLog
 from gateway.services.tool_usage import TOOL_METER_NAMESPACE
 
 # Cap on an explicit id list. Page selections drive the id path and the largest
@@ -144,16 +143,12 @@ def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]
     Two fixed conditions pin the target set to imported usage regardless of the
     caller's input:
 
-    - :func:`not_served_here` is the provenance invariant: imported rows carry a
+    - ``source != 'gateway'`` is the provenance invariant: imported rows carry a
       source slug (e.g. ``claude_code``), while usage Otari served itself is tagged
-      ``gateway`` (or ``otari-ai:gateway`` when it was backfilled from hosted
-      history). This is the load-bearing guard, because ``counts_toward_budget``
+      ``gateway``. This is the load-bearing guard, because ``counts_toward_budget``
       alone is *not* an imported-only flag: gateway traffic on a budget-exempt API
       key (``exclude_from_budget``) is also ``counts_toward_budget = False``, and
-      those are real gateway rows a cleanup / reprice must never touch. Matching the
-      slug behind the legacy prefix, rather than the prefix itself, is what keeps a
-      migrated import (``otari-ai:claude_code``) repriceable while a migrated hosted
-      row is not; see :mod:`gateway.core.usage_source`.
+      those are real gateway rows a cleanup / reprice must never touch.
     - ``counts_toward_budget = False`` is kept as a defense-in-depth budget guard, so
       the spend ledger can never be affected even if the provenance guard ever slips.
 
@@ -161,7 +156,7 @@ def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]
     rows cannot reach them: they simply do not match.
     """
     conditions: list[ColumnElement[bool]] = [
-        not_served_here(UsageLog.source),
+        UsageLog.source != SERVED_HERE_SLUG,
         UsageLog.counts_toward_budget.is_(False),
     ]
     if selection.ids:
@@ -306,13 +301,17 @@ async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> Us
         last_id = ""
         while True:
             rows = (
-                await db.execute(
-                    select(UsageLog)
-                    .where(*conditions, UsageLog.id > last_id)
-                    .order_by(UsageLog.id)
-                    .limit(_REPRICE_CHUNK)
+                (
+                    await db.execute(
+                        select(UsageLog)
+                        .where(*conditions, UsageLog.id > last_id)
+                        .order_by(UsageLog.id)
+                        .limit(_REPRICE_CHUNK)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             if not rows:
                 break
             for row in rows:
@@ -354,4 +353,3 @@ async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> Us
         request.by_filter,
     )
     return result
-

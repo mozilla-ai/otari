@@ -114,13 +114,28 @@ def test_messages_request_preserves_container_for_upstream() -> None:
     assert request.model_dump(exclude_unset=True)["container"] == "container_01ABC"
 
 
+def test_messages_request_preserves_a_container_object_for_upstream() -> None:
+    """Anthropic's object form, an id and the skills to load, survives validation unchanged."""
+    container = {"id": "container_01ABC", "skills": [{"type": "anthropic", "skill_id": "pptx"}]}
+    request = MessagesRequest.model_validate(
+        {
+            "model": "anthropic:claude-sonnet-4-5",
+            "messages": [{"role": "user", "content": "Continue"}],
+            "max_tokens": 100,
+            "container": container,
+        }
+    )
+
+    assert request.model_dump(exclude_unset=True)["container"] == container
+
+
 def test_messages_openapi_request_schema_includes_container() -> None:
-    """The published Messages request contract advertises container continuity."""
+    """The published Messages request contract advertises container continuity, as an id or an object."""
     spec_path = Path(__file__).resolve().parents[2] / "docs/public/openapi.json"
     spec = json.loads(spec_path.read_text())
 
     container = spec["components"]["schemas"]["MessagesRequest"]["properties"]["container"]
-    assert {variant.get("type") for variant in container["anyOf"]} == {"string", "null"}
+    assert {variant.get("type") for variant in container["anyOf"]} == {"string", "object", "null"}
 
 
 def test_derived_and_hand_written_endpoints_are_disjoint() -> None:

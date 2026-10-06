@@ -37,6 +37,18 @@ Enforces:
 17. Unit of Work construction: only the request's factory builds one, outside
     the module that defines it and holds the worker factories, so a scope has
     exactly one and an inner block still joins the outer one.
+18. Light CLI: nothing under cli/src/otari_agent imports the gateway or the
+    server stack it drags in (uvicorn, any-llm, SQLAlchemy, pydantic,
+    FastAPI), so the `otari` command ships alone with a handful of pure-Python
+    dependencies. The one exemption is otari_agent/cli.py, which names
+    gateway.cli inside a find_spec guard to attach the server commands when
+    the gateway is installed too. The member lives outside src/ on purpose:
+    rule 10 keeps src/ to the gateway, and this one keeps the CLI out of it.
+19. Domain names: a package in services/ or repositories/, a module in
+    schemas/ and a module in exceptions/ take their domain from their name, so
+    each name is a domain that docs/domains.md gives a section. An exceptions
+    module is named <domain>_exceptions.py. The names that do not match yet are
+    on a baseline, and the baseline only shrinks.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -47,7 +59,9 @@ Exit codes:
 """
 
 import ast
+import re
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TypedDict
 
@@ -55,6 +69,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = REPO_ROOT / "src"
 GATEWAY_ROOT = SRC_ROOT / "gateway"
 TESTS_ROOT = REPO_ROOT / "tests"
+# The otari-agent workspace member (cli/pyproject.toml); its files are checked
+# relative to this root so the "otari_agent" rule key matches them.
+CLI_ROOT = REPO_ROOT / "cli" / "src"
 
 
 # session_for hands out the Unit of Work's session, so the repositories package is
@@ -105,6 +122,23 @@ RULES: dict[str, LayerRule] = {
         "allowed": [],
         "forbidden": ["gateway.overlay", "overlay"],
         "description": "OSS test suite",
+    },
+    # The laptop CLI ships on its own (Homebrew) with a dozen pure-Python
+    # dependencies, so it may not reach the server stack. gateway is the whole
+    # reason the split exists; the rest are what gateway.core.config drags in.
+    "otari_agent": {
+        "allowed": [],
+        "forbidden": [
+            "gateway",
+            "uvicorn",
+            "any_llm",
+            "sqlalchemy",
+            "sqlmodel",
+            "pydantic",
+            "pydantic_settings",
+            "fastapi",
+        ],
+        "description": "Light CLI (otari-agent)",
     },
     "gateway/services": {
         "allowed": ["gateway.repositories", "gateway.models", "gateway.core", "gateway.auth", "gateway.ports"],
@@ -219,11 +253,17 @@ COMPOSITION_ROOT = "gateway/container.py"
 ADAPTERS_PACKAGE = "gateway/adapters/"
 ADAPTER_IMPORT = "gateway.adapters"
 
-# Entry-point discovery is banned everywhere under gateway/, with a message of
-# its own because "OSS base" would not say why: the feature registry in
-# gateway/features.py is a literal tuple on purpose (ARCHITECTURE.md), and these
-# are the modules discovery is written with.
-DISCOVERY_SCOPE = "gateway/"
+# The one light-CLI module that may name gateway.cli, and nothing else of the
+# gateway: it attaches the server commands when
+# `importlib.util.find_spec("gateway")` finds one installed.
+LIGHT_CLI_ATTACH_POINT = "otari_agent/cli.py"
+LIGHT_CLI_ATTACH_IMPORT = "gateway.cli"
+
+# Entry-point discovery is banned everywhere under gateway/ and otari_agent/,
+# with a message of its own because "OSS base" would not say why: the feature
+# registry in gateway/features.py is a literal tuple on purpose
+# (ARCHITECTURE.md), and these are the modules discovery is written with.
+DISCOVERY_SCOPE = ("gateway/", "otari_agent/")
 DISCOVERY_IMPORTS = ("importlib.metadata", "importlib_metadata", "pkg_resources")
 DISCOVERY_RULE = "OSS base (no entry-point discovery; the feature registry is a literal tuple)"
 
@@ -304,6 +344,8 @@ def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
         if not isinstance(node, ast.Import | ast.ImportFrom):
             continue
         for module in _imported_modules(node, file_path, src_root):
+            if relative_path == LIGHT_CLI_ATTACH_POINT and _matches(module, LIGHT_CLI_ATTACH_IMPORT):
+                continue
             offended = next((description for prefix, description in forbidden if _matches(module, prefix)), None)
             if offended is not None:
                 violations.append((node.lineno, module, f"Forbidden import in {offended}"))
@@ -323,14 +365,11 @@ SERVICE_DATABASE_IMPORT_BASELINE = (
     "gateway/services/batch_service.py",
     "gateway/services/bootstrap_service.py",
     "gateway/services/budgets/_ledger.py",
-    "gateway/services/budgets/_member_policies.py",
     "gateway/services/budgets/_reservations.py",
     "gateway/services/budgets/_retiming.py",
     "gateway/services/budgets/_scoped_enforcement.py",
-    "gateway/services/content_normalizer.py",
     "gateway/services/dashboard_session_service.py",
     "gateway/services/external_usage_service.py",
-    "gateway/services/file_service.py",
     "gateway/services/maintenance_mode_service.py",
     "gateway/services/master_key_service.py",
     "gateway/services/merged_catalog_service.py",
@@ -369,7 +408,6 @@ SERVICE_DATABASE_IMPORT_BASELINE = (
 )
 ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/_helpers.py",
-    "gateway/api/routes/_normalize.py",
     "gateway/api/routes/_passthrough.py",
     "gateway/api/routes/_pipeline.py",
     "gateway/api/routes/admin.py",
@@ -389,7 +427,6 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/catalog.py",
     "gateway/api/routes/chat.py",
     "gateway/api/routes/embeddings.py",
-    "gateway/api/routes/files.py",
     "gateway/api/routes/health.py",
     "gateway/api/routes/hooks.py",
     "gateway/api/routes/images.py",
@@ -425,10 +462,22 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/workspace_activation.py",
     "gateway/api/routes/workspace_code_execution_policy.py",
     "gateway/api/routes/workspace_mcp_servers.py",
-    "gateway/api/routes/workspace_member_budget_policies.py",
     "gateway/api/routes/workspace_web_search.py",
     "gateway/api/routes/workspaces.py",
 )
+
+
+def _parsed_modules(src_root: Path, scope: str, exempt: tuple[str, ...] = ()) -> Iterator[tuple[str, ast.Module]]:
+    """Yield the path relative to src_root and the tree of each parseable module under scope, in path order."""
+    for py_file in sorted((src_root / scope).rglob("*.py")):
+        relative_path = py_file.relative_to(src_root).as_posix()
+        if relative_path in exempt or "__pycache__" in py_file.parts:
+            continue
+        try:
+            tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+        except SyntaxError:
+            continue  # check_file already reports an unparseable file.
+        yield relative_path, tree
 
 
 def _database_imports(tree: ast.Module) -> list[tuple[int, str]]:
@@ -453,12 +502,7 @@ def _check_layer_database_imports(src_root: Path, scope: str, baseline: tuple[st
     """Check one layer against its database import baseline, reporting new importers and stale entries."""
     violations: list[str] = []
     importing: set[str] = set()
-    for py_file in sorted((src_root / scope).rglob("*.py")):
-        relative_path = py_file.relative_to(src_root).as_posix()
-        try:
-            tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
-        except SyntaxError:
-            continue  # check_file already reports an unparseable file.
+    for relative_path, tree in _parsed_modules(src_root, scope):
         imports = _database_imports(tree)
         if not imports:
             continue
@@ -504,7 +548,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/api/routes/auth_webauthn.py",
     "gateway/api/routes/batches.py",
     "gateway/api/routes/budgets.py",
-    "gateway/api/routes/files.py",
     "gateway/api/routes/keys.py",
     "gateway/api/routes/maintenance_mode.py",
     "gateway/api/routes/organization_keys.py",
@@ -522,7 +565,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/services/batch_service.py",
     "gateway/services/bootstrap_service.py",
     "gateway/services/budgets/_ledger.py",
-    "gateway/services/budgets/_member_policies.py",
     "gateway/services/budgets/_reservations.py",
     "gateway/services/budgets/_scoped_enforcement.py",
     "gateway/services/dashboard_session_service.py",
@@ -540,7 +582,6 @@ TRANSACTION_CONTROL_BASELINE = (
     "gateway/services/tenancy/organization_domain_service.py",
     "gateway/services/tenancy/organization_guardrail_service.py",
     "gateway/services/tenancy/organization_service.py",
-    "gateway/services/tenancy/provisioning_service.py",
     "gateway/services/tenancy/user_service.py",
     "gateway/services/tenancy/webauthn_service.py",
     "gateway/services/tenancy/workspace_activation_service.py",
@@ -565,14 +606,7 @@ def check_transaction_control(src_root: Path) -> list[str]:
     """Check that no module off the baseline ends a transaction itself, and that every baseline entry still does."""
     violations: list[str] = []
     ending: set[str] = set()
-    for py_file in sorted((src_root / "gateway").rglob("*.py")):
-        relative_path = py_file.relative_to(src_root).as_posix()
-        if relative_path == UNIT_OF_WORK or "__pycache__" in py_file.parts:
-            continue
-        try:
-            tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
-        except SyntaxError:
-            continue  # check_file already reports an unparseable file.
+    for relative_path, tree in _parsed_modules(src_root, "gateway", exempt=(UNIT_OF_WORK,)):
         calls = _transaction_calls(tree)
         if not calls:
             continue
@@ -652,14 +686,7 @@ def check_unit_of_work_construction(src_root: Path) -> list[str]:
     An import that renames the Unit of Work would hide a construction from it, so such an import is refused.
     """
     violations: list[str] = []
-    for py_file in sorted((src_root / "gateway").rglob("*.py")):
-        relative_path = py_file.relative_to(src_root).as_posix()
-        if relative_path == UNIT_OF_WORK or "__pycache__" in py_file.parts:
-            continue
-        try:
-            tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
-        except SyntaxError:
-            continue  # check_file already reports an unparseable file.
+    for relative_path, tree in _parsed_modules(src_root, "gateway", exempt=(UNIT_OF_WORK,)):
         allowed = _factory_constructions(tree) if relative_path == UNIT_OF_WORK_FACTORY else set()
         violations.extend(
             f"{relative_path}:{call.lineno} constructs a {UNIT_OF_WORK_TYPE}; a request takes one from "
@@ -670,7 +697,7 @@ def check_unit_of_work_construction(src_root: Path) -> list[str]:
         violations.extend(
             f"{relative_path}:{line} imports {UNIT_OF_WORK_TYPE} as {name}; the rule reads the name at the "
             "call site, so import it under its own name"
-            for line, name in _renamed_unit_of_work_imports(tree, py_file, src_root)
+            for line, name in _renamed_unit_of_work_imports(tree, src_root / relative_path, src_root)
         )
     return violations
 
@@ -726,12 +753,10 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/bedrock_gateway_auth.py",
     "gateway/services/bootstrap_service.py",
     "gateway/services/catalog_selectors.py",
-    "gateway/services/claude_code_import.py",
     "gateway/services/content_normalizer.py",
     "gateway/services/dashboard_session_service.py",
     "gateway/services/external_usage_service.py",
     "gateway/services/file_extractors.py",
-    "gateway/services/file_service.py",
     "gateway/services/guardrail_catalog.py",
     "gateway/services/guardrails.py",
     "gateway/services/log_writer.py",
@@ -780,7 +805,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/web_retrieval_network.py",
     "gateway/services/web_retrieval_policy.py",
     "gateway/services/web_search_backend.py",
-    "gateway/services/web_search_budget.py",
     "gateway/services/web_search_providers.py",
     "gateway/services/workspace_scope.py",
 )
@@ -816,11 +840,102 @@ def check_flat_modules(src_root: Path) -> list[str]:
     return violations
 
 
+DOMAINS_DOC = "docs/domains.md"
+DOMAINS_SECTION = "## The domains"
+DOMAIN_HEADING = re.compile(r"^### (.*)$", re.MULTILINE)
+DOMAIN_NAME = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+SHARED_HEADING = "Shared"
+# These names do not match a domain yet. The baseline only shrinks, so a reviewer refuses a new entry.
+DOMAIN_NAME_BASELINE = (
+    "gateway/exceptions/budget_exceptions.py",
+    "gateway/exceptions/control_plane_exceptions.py",
+    "gateway/repositories/code_execution/",
+    "gateway/repositories/tenancy/",
+    "gateway/services/code_execution/",
+    "gateway/services/control_plane/",
+    "gateway/services/mail/",
+    "gateway/services/tenancy/",
+)
+# These modules belong to no domain. The set grows when the shared set does.
+SHARED_EXCEPTION_MODULES = ("gateway/exceptions/_base.py", "gateway/exceptions/shared_exceptions.py")
+
+
+def documented_domains(doc_text: str) -> tuple[set[str], list[str]]:
+    """Return the domains the page gives a section, and each problem with its headings."""
+    start = re.search(rf"^{DOMAINS_SECTION}$", doc_text, re.MULTILINE)
+    if start is None:
+        return set(), [f"{DOMAINS_DOC} has no '{DOMAINS_SECTION}' section"]
+    end = re.compile(r"^## ", re.MULTILINE).search(doc_text, start.end())
+    section = doc_text[start.end() : end.start() if end else len(doc_text)]
+    domains: set[str] = set()
+    violations: list[str] = []
+    for heading in DOMAIN_HEADING.findall(section):
+        if heading.casefold() == SHARED_HEADING.casefold():
+            continue
+        name = heading.replace("-", "_")
+        if not DOMAIN_NAME.fullmatch(heading):
+            violations.append(f"{DOMAINS_DOC} heading '### {heading}' is not a domain name in lower case with hyphens")
+        elif name in domains:
+            violations.append(f"{DOMAINS_DOC} names the domain '{heading}' twice")
+        domains.add(name)
+    if not domains and not violations:
+        violations.append(f"{DOMAINS_DOC} gives no domain a section")
+    return domains, violations
+
+
+def _domain_named_locations(src_root: Path) -> tuple[dict[str, str], list[str]]:
+    """Return the domain each domain package and domain module is named for, and each misnamed exceptions module."""
+    locations: dict[str, str] = {}
+    misnamed: list[str] = []
+    for layer in DOMAIN_PACKAGE_LAYERS:
+        layer_root = src_root / layer
+        if layer_root.is_dir():
+            for package in sorted(layer_root.iterdir()):
+                if (package / "__init__.py").is_file():
+                    locations[f"{layer}/{package.name}/"] = package.name
+    schemas_root = src_root / "gateway" / "schemas"
+    for module in sorted(schemas_root.glob("*.py")):
+        if module.name != "__init__.py":
+            locations[f"gateway/schemas/{module.name}"] = module.stem
+    exceptions_root = src_root / "gateway" / "exceptions"
+    for module in sorted(exceptions_root.glob("*.py")):
+        relative_path = f"gateway/exceptions/{module.name}"
+        if module.name == "__init__.py" or relative_path in SHARED_EXCEPTION_MODULES:
+            continue
+        if module.stem.endswith("_exceptions"):
+            locations[relative_path] = module.stem.removesuffix("_exceptions")
+        elif relative_path not in DOMAIN_NAME_BASELINE:
+            misnamed.append(f"{relative_path} is not named <domain>_exceptions.py")
+    return locations, misnamed
+
+
+def check_domain_names(src_root: Path, doc_path: Path) -> list[str]:
+    """Check that each domain package and domain module names a domain the domains page gives a section."""
+    if not doc_path.is_file():
+        return [f"{DOMAINS_DOC} not found; the domain names are read from its '{DOMAINS_SECTION}' section"]
+    domains, violations = documented_domains(doc_path.read_text(encoding="utf-8"))
+    locations, misnamed = _domain_named_locations(src_root)
+    violations.extend(misnamed)
+    violations.extend(
+        f"{relative_path} names no domain in {DOMAINS_DOC}; "
+        "name it for a domain there, or give the new domain a section"
+        for relative_path, name in locations.items()
+        if name not in domains and relative_path not in DOMAIN_NAME_BASELINE
+    )
+    violations.extend(
+        f"{relative_path} is on the domain name baseline but no longer exists or now names a domain; "
+        "remove it from the baseline"
+        for relative_path in DOMAIN_NAME_BASELINE
+        if not (src_root / relative_path).exists() or locations.get(relative_path) in domains
+    )
+    return violations
+
+
 def main() -> int:
-    """Run the architecture checks over the gateway package and the OSS test suite."""
-    # Both must exist: silently skipping either would let its rules (including
+    """Run the architecture checks over the gateway package, the light CLI and the OSS test suite."""
+    # All must exist: silently skipping one would let its rules (including
     # the OSS/enterprise boundary) stop enforcing while the check stays green.
-    for required_root in (GATEWAY_ROOT, TESTS_ROOT):
+    for required_root in (GATEWAY_ROOT, TESTS_ROOT, CLI_ROOT):
         if not required_root.is_dir():
             print(f"❌ Expected directory not found at {required_root}")
             return 1
@@ -831,6 +946,12 @@ def main() -> int:
             continue
         import_violations.extend(
             (py_file, lineno, module, message) for lineno, module, message in check_file(py_file, SRC_ROOT)
+        )
+    for py_file in sorted(CLI_ROOT.rglob("*.py")):
+        if "__pycache__" in py_file.parts:
+            continue
+        import_violations.extend(
+            (py_file, lineno, module, message) for lineno, module, message in check_file(py_file, CLI_ROOT)
         )
     # tests/ sits beside src/, not under it, so its relative paths (and the
     # "tests" rule key above) are rooted at the repo root instead.
@@ -847,6 +968,7 @@ def main() -> int:
     database_violations = check_database_imports(SRC_ROOT)
     transaction_violations = check_transaction_control(SRC_ROOT)
     unit_of_work_violations = check_unit_of_work_construction(SRC_ROOT)
+    domain_name_violations = check_domain_names(SRC_ROOT, REPO_ROOT / DOMAINS_DOC)
 
     if import_violations:
         print("❌ Architecture violations found:\n")
@@ -891,6 +1013,12 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal flat module violations: {len(flat_module_violations)}")
 
+    if domain_name_violations:
+        print("\n❌ Domain name violations:\n")
+        for violation in domain_name_violations:
+            print(f"  {violation}")
+        print(f"\nTotal domain name violations: {len(domain_name_violations)}")
+
     if (
         import_violations
         or naming_violations
@@ -899,6 +1027,7 @@ def main() -> int:
         or transaction_violations
         or unit_of_work_violations
         or flat_module_violations
+        or domain_name_violations
     ):
         print("\n💡 See ARCHITECTURE.md for the intended layering")
         return 1

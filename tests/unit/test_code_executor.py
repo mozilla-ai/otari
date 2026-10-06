@@ -1,6 +1,6 @@
 """Who runs a provider-native code-execution declaration: the executor decision.
 
-Pure logic in ``gateway.api.routes._tools``, the settings that feed it, and the
+Pure logic in ``gateway.services.tools``, the settings that feed it, and the
 workspace policy write schema. The request-path wiring (claiming the keyword,
 the policy pin, the header) is covered by
 ``tests/integration/test_code_execution_executor.py``.
@@ -14,24 +14,25 @@ import pytest
 from any_llm import LLMProvider
 from pydantic import ValidationError
 
-from gateway.api.routes._normalize import sandbox_requested
-from gateway.api.routes._tools import (
-    CODE_EXECUTION_HEADER,
-    _extract_code_execution_tool,
-    code_execution_declaration_forms,
-    decide_code_executor,
-    first_provider_code_execution_tool,
-    native_code_execution_dialect,
-    parse_code_execution_header,
-    provider_runs_code_natively,
-    resolve_code_executor_preference,
-)
+from gateway.api.routes._normalize import provider_container_requested, sandbox_requested
 from gateway.core.config import GatewayConfig
 from gateway.models.tools import CodeExecutor
 from gateway.services.tenancy.workspace_code_execution_policy_service import (
     WorkspaceCodeExecutionPolicyUpdate,
 )
 from gateway.services.tool_settings_service import get_field_options, validate_value
+from gateway.services.tools import (
+    CODE_EXECUTION_HEADER,
+    Dialect,
+    code_execution_declaration_forms,
+    decide_code_executor,
+    extract_code_execution_tool,
+    first_provider_code_execution_tool,
+    native_code_execution_dialect,
+    parse_code_execution_header,
+    provider_runs_code_natively,
+    resolve_code_executor_preference,
+)
 
 ANTHROPIC_DATED = {"type": "code_execution_20250825", "name": "code_execution"}
 OPENAI_INTERPRETER = {"type": "code_interpreter", "container": {"type": "auto"}}
@@ -145,35 +146,35 @@ def test_auto_leaves_the_provider_in_charge_when_there_is_no_sandbox() -> None:
 
 
 def test_anthropics_dated_keyword_is_native_on_messages_against_anthropic() -> None:
-    assert provider_runs_code_natively(ANTHROPIC_DATED, provider="anthropic", dialect="messages") is True
+    assert provider_runs_code_natively(ANTHROPIC_DATED, provider="anthropic", dialect=Dialect.MESSAGES) is True
 
 
 def test_openais_interpreter_is_native_on_responses_against_openai() -> None:
-    assert provider_runs_code_natively(OPENAI_INTERPRETER, provider="openai", dialect="responses") is True
+    assert provider_runs_code_natively(OPENAI_INTERPRETER, provider="openai", dialect=Dialect.RESPONSES) is True
 
 
 @pytest.mark.parametrize(
     ("entry", "provider", "dialect"),
     [
-        (ANTHROPIC_DATED, "mistral", "messages"),  # the model swap the executor exists for
-        (ANTHROPIC_DATED, "anthropic", "chat"),  # no native form on Chat Completions
-        (ANTHROPIC_DATED, "anthropic", "responses"),  # Anthropic's words in OpenAI's format
-        (OPENAI_INTERPRETER, "openai", "chat"),
-        (OPENAI_INTERPRETER, "anthropic", "responses"),
-        (BARE, "anthropic", "messages"),  # the bare short form is nobody's
-        (BARE, "openai", "responses"),
-        (ANTHROPIC_DATED, None, "messages"),  # provider unknown
-        (None, "anthropic", "messages"),
+        (ANTHROPIC_DATED, "mistral", Dialect.MESSAGES),  # the model swap the executor exists for
+        (ANTHROPIC_DATED, "anthropic", Dialect.CHAT),  # no native form on Chat Completions
+        (ANTHROPIC_DATED, "anthropic", Dialect.RESPONSES),  # Anthropic's words in OpenAI's format
+        (OPENAI_INTERPRETER, "openai", Dialect.CHAT),
+        (OPENAI_INTERPRETER, "anthropic", Dialect.RESPONSES),
+        (BARE, "anthropic", Dialect.MESSAGES),  # the bare short form is nobody's
+        (BARE, "openai", Dialect.RESPONSES),
+        (ANTHROPIC_DATED, None, Dialect.MESSAGES),  # provider unknown
+        (None, "anthropic", Dialect.MESSAGES),
     ],
 )
 def test_everything_else_is_not_natively_served(
-    entry: dict[str, str] | None, provider: str | None, dialect: str
+    entry: dict[str, str] | None, provider: str | None, dialect: Dialect
 ) -> None:
     assert provider_runs_code_natively(entry, provider=provider, dialect=dialect) is False
 
 
 def test_provider_name_is_matched_case_insensitively() -> None:
-    assert provider_runs_code_natively(ANTHROPIC_DATED, provider="Anthropic", dialect="messages") is True
+    assert provider_runs_code_natively(ANTHROPIC_DATED, provider="Anthropic", dialect=Dialect.MESSAGES) is True
 
 
 # --- which native result shape a caller expects back -----------------------------------
@@ -207,13 +208,13 @@ def test_a_function_named_code_execution_is_the_callers_own() -> None:
 
 def test_intercept_claims_the_provider_keyword_and_leaves_the_rest() -> None:
     user_tool = {"type": "function", "function": {"name": "get_weather"}}
-    entry, remaining = _extract_code_execution_tool([user_tool, ANTHROPIC_DATED], intercept=True)
+    entry, remaining = extract_code_execution_tool([user_tool, ANTHROPIC_DATED], intercept=True)
     assert entry == ANTHROPIC_DATED
     assert remaining == [user_tool]
 
 
 def test_intercept_off_still_leaves_the_provider_keyword_alone() -> None:
-    entry, remaining = _extract_code_execution_tool([ANTHROPIC_DATED])
+    entry, remaining = extract_code_execution_tool([ANTHROPIC_DATED])
     assert entry is None
     assert remaining == [ANTHROPIC_DATED]
 
@@ -280,7 +281,7 @@ def _requested(
     tools: list[dict[str, Any]],
     *,
     provider: str | None,
-    dialect: str = "messages",
+    dialect: Dialect = Dialect.MESSAGES,
     header: str | None = None,
     pin: CodeExecutor | None = None,
     **config: Any,
@@ -327,8 +328,52 @@ def test_no_sandbox_means_nothing_is_staged() -> None:
             [BARE],
             config=GatewayConfig(),
             provider=LLMProvider("mistral"),
-            dialect="messages",
+            dialect=Dialect.MESSAGES,
             code_execution_header=None,
         )
         is False
     )
+
+
+def _provider_runs(
+    tools: list[dict[str, Any]],
+    *,
+    provider: str | None,
+    header: str | None = None,
+    pin: CodeExecutor | None = None,
+    sandbox: bool = True,
+    **config: Any,
+) -> bool:
+    return provider_container_requested(
+        tools,
+        config=GatewayConfig(sandbox_url="http://sandbox:8080" if sandbox else None, **config),
+        provider=LLMProvider(provider) if provider else None,
+        dialect=Dialect.MESSAGES,
+        code_execution_header=header,
+        workspace_executor=pin,
+    )
+
+
+def test_a_natively_served_declaration_runs_in_the_providers_container() -> None:
+    assert _provider_runs([ANTHROPIC_DATED], provider="anthropic") is True
+    assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", sandbox=False) is True
+
+
+def test_the_explicit_type_never_runs_in_the_providers_container() -> None:
+    assert _provider_runs([{"type": "otari_code_execution"}, ANTHROPIC_DATED], provider="anthropic") is False
+
+
+def test_a_declaration_the_provider_cannot_run_is_not_its_container() -> None:
+    assert _provider_runs([ANTHROPIC_DATED], provider="mistral") is False
+    assert _provider_runs([BARE], provider="anthropic") is False
+    assert _provider_runs([], provider="anthropic") is False
+
+
+def test_the_header_the_pin_and_the_default_can_each_bring_the_code_to_the_sandbox() -> None:
+    assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", header="otari") is False
+    assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", pin=CodeExecutor.OTARI) is False
+    assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", code_execution_executor="otari") is False
+
+
+def test_a_header_outside_the_vocabulary_decides_nothing() -> None:
+    assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", header="somewhere-else") is False

@@ -33,6 +33,7 @@ import {
   runsOnLabel,
 } from "@/features/guardrails/guardrailRows"
 import { MandateDialog } from "@/features/guardrails/MandateDialog"
+import { MandateTestDialog } from "@/features/guardrails/MandateTestDialog"
 import { scopeLabel } from "@/features/guardrails/WorkspaceScope"
 import { canManage } from "@/features/organization/roles"
 import {
@@ -60,9 +61,8 @@ import { useWorkspaces } from "@/shared/api/workspaces"
 // guardrails service. Rows here are keyed on the organization, which is why a
 // hosted deployment publishes this page too.
 
-type Open =
-  | { kind: "" }
-  | { kind: "definition" | "mandate" | "test"; editingId: string }
+type OpenKind = "definition" | "mandate" | "test" | "mandate-test"
+type Open = { kind: "" } | { kind: OpenKind; editingId: string }
 
 export function OrganizationGuardrailsPage() {
   const context = useOrganizationContext()
@@ -88,10 +88,7 @@ export function OrganizationGuardrailsPage() {
   const [pendingMandateDelete, setPendingMandateDelete] =
     useState<OrganizationGuardrail>()
 
-  const openDialog = (
-    kind: "definition" | "mandate" | "test",
-    editingId = "",
-  ) => {
+  const openDialog = (kind: OpenKind, editingId = "") => {
     setOpenCount((count) => count + 1)
     setOpen({ kind, editingId })
   }
@@ -111,6 +108,10 @@ export function OrganizationGuardrailsPage() {
   const testing =
     open.kind === "test"
       ? defined.find((row) => row.id === open.editingId)
+      : undefined
+  const testingMandate =
+    open.kind === "mandate-test"
+      ? entries.find((row) => row.id === open.editingId)
       : undefined
   const blockingDelete = pendingDefinitionDelete
     ? mandatesOn(pendingDefinitionDelete, entries)
@@ -258,6 +259,15 @@ export function OrganizationGuardrailsPage() {
               })
             }
           />
+          {/* A mandate on a configured guardrail is tested from that row. */}
+          {row.definition_id ? null : (
+            <RowAction
+              icon={FiZap}
+              label="Test"
+              ariaLabel={`Test ${row.profile}`}
+              onPress={() => openDialog("mandate-test", row.id)}
+            />
+          )}
           <RowAction
             icon={FiEdit2}
             label="Edit"
@@ -366,7 +376,7 @@ export function OrganizationGuardrailsPage() {
             takenNames={defined.map((row) => row.name)}
             onSaved={() => {}}
           />
-          {/* Only while one is being tested, since it needs the row. */}
+          {/* Each test dialog only while one is being tested, since it needs the row. */}
           {testing ? (
             <DefinitionTestDialog
               key={`test-${openCount}`}
@@ -374,6 +384,15 @@ export function OrganizationGuardrailsPage() {
               onClose={close}
               definition={testing}
               catalog={builtInCatalog.data}
+            />
+          ) : null}
+          {testingMandate ? (
+            <MandateTestDialog
+              key={`mandate-test-${openCount}`}
+              isOpen
+              onClose={close}
+              mandate={testingMandate}
+              catalog={remoteCatalog.data}
             />
           ) : null}
           <MandateDialog

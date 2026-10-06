@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import userEvent from "@testing-library/user-event"
+import { describe, expect, it, vi } from "vitest"
 import { WalletNavSlot } from "@/app/nav/overlayWalletSlot"
 import { TopBarActions } from "@/app/nav/TopBarActions"
 import type { DeploymentBootstrap } from "@/client"
@@ -10,11 +11,14 @@ import { renderWithRouter } from "@/tests/router"
 
 // The cluster holds a router Link, so it needs a real router; `renderWithRouter`
 // mounts it at "/" and resolves the first location before the assertions run.
-function renderActions(overrides: Partial<DeploymentBootstrap> = {}) {
+function renderActions(
+  overrides: Partial<DeploymentBootstrap> = {},
+  onOpenFeedback?: () => void,
+) {
   return renderWithRouter(
     <AppProviders>
       <DeploymentProvider value={bootstrap(overrides)}>
-        <TopBarActions />
+        <TopBarActions onOpenFeedback={onOpenFeedback} />
       </DeploymentProvider>
     </AppProviders>,
   )
@@ -85,5 +89,28 @@ describe("TopBarActions", () => {
     // app, where the bundled guide is a page inside it.
     expect(link).toHaveAttribute("target", "_blank")
     expect(link).toHaveAttribute("rel", "noopener noreferrer")
+  })
+
+  it("places Feedback immediately after Documentation and opens it", async () => {
+    const onOpenFeedback = vi.fn()
+    await renderActions({ feedback_enabled: true }, onOpenFeedback)
+    const button = screen.getByRole("button", { name: "Feedback" })
+    expect(
+      screen.getByRole("link", { name: "Documentation" }).nextElementSibling,
+    ).toBe(button)
+    // The same class as the links beside it, so it reads as one of them.
+    expect(button.className).toContain(
+      screen.getByRole("link", { name: "Documentation" }).className,
+    )
+    await userEvent.setup().click(button)
+    expect(onOpenFeedback).toHaveBeenCalledOnce()
+  })
+
+  it("offers no Feedback when the deployment has it off", async () => {
+    await renderActions({ feedback_enabled: false }, vi.fn())
+    expect(await cluster()).toHaveTextContent("Documentation")
+    expect(
+      screen.queryByRole("button", { name: "Feedback" }),
+    ).not.toBeInTheDocument()
   })
 })

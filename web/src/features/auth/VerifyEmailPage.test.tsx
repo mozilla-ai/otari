@@ -4,8 +4,10 @@ import { StrictMode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { VerifyEmailPage } from "@/features/auth/VerifyEmailPage"
 import { ApiError, apiFetch } from "@/shared/api/client"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { ThemeProvider } from "@/shared/hooks/useTheme"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { bootstrap } from "@/tests/fixtures"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
 
 vi.mock("@/shared/api/client", async (importOriginal) => {
@@ -28,11 +30,13 @@ function renderPage(hash: string) {
   return {
     client,
     ...render(
-      <ThemeProvider>
-        <QueryClientProvider client={client}>
-          <VerifyEmailPage hash={hash} />
-        </QueryClientProvider>
-      </ThemeProvider>,
+      <DeploymentProvider value={bootstrap()}>
+        <ThemeProvider>
+          <QueryClientProvider client={client}>
+            <VerifyEmailPage hash={hash} />
+          </QueryClientProvider>
+        </ThemeProvider>
+      </DeploymentProvider>,
     ),
   }
 }
@@ -76,11 +80,13 @@ describe("VerifyEmailPage", () => {
 
     render(
       <StrictMode>
-        <ThemeProvider>
-          <QueryClientProvider client={client}>
-            <VerifyEmailPage hash="#/verify-email?token=abc123" />
-          </QueryClientProvider>
-        </ThemeProvider>
+        <DeploymentProvider value={bootstrap()}>
+          <ThemeProvider>
+            <QueryClientProvider client={client}>
+              <VerifyEmailPage hash="#/verify-email?token=abc123" />
+            </QueryClientProvider>
+          </ThemeProvider>
+        </DeploymentProvider>
       </StrictMode>,
     )
 
@@ -98,11 +104,13 @@ describe("VerifyEmailPage", () => {
     const { client, rerender } = renderPage("#/verify-email?token=abc123")
     await screen.findByRole("heading", { name: "Email verified" })
     rerender(
-      <ThemeProvider>
-        <QueryClientProvider client={client}>
-          <VerifyEmailPage hash="#/verify-email?token=abc123" />
-        </QueryClientProvider>
-      </ThemeProvider>,
+      <DeploymentProvider value={bootstrap()}>
+        <ThemeProvider>
+          <QueryClientProvider client={client}>
+            <VerifyEmailPage hash="#/verify-email?token=abc123" />
+          </QueryClientProvider>
+        </ThemeProvider>
+      </DeploymentProvider>,
     )
 
     expect(apiFetch).toHaveBeenCalledTimes(1)
@@ -191,11 +199,13 @@ describe("the telemetry the verification page records", () => {
 
     render(
       <StrictMode>
-        <ThemeProvider>
-          <QueryClientProvider client={client}>
-            <VerifyEmailPage hash="#/verify-email?token=abc123" />
-          </QueryClientProvider>
-        </ThemeProvider>
+        <DeploymentProvider value={bootstrap()}>
+          <ThemeProvider>
+            <QueryClientProvider client={client}>
+              <VerifyEmailPage hash="#/verify-email?token=abc123" />
+            </QueryClientProvider>
+          </ThemeProvider>
+        </DeploymentProvider>
       </StrictMode>,
     )
 

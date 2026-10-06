@@ -1,16 +1,15 @@
 import { Button } from "@heroui/react"
 import { Link, useNavigate } from "@tanstack/react-router"
 import type { ReactNode } from "react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import type { SortDescriptor } from "react-aria-components"
 import { FiChevronDown } from "react-icons/fi"
 
-import type { CatalogModelSummary } from "@/client"
+import type { CatalogFacets, CatalogModelSummary } from "@/client"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { TablePagination } from "@/design-system/data/TablePagination"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { INPUT_CLASS } from "@/design-system/forms/inputClass"
@@ -25,9 +24,8 @@ import {
   type CatalogFilters,
   type CatalogSortColumn,
   CONTEXT_OPTIONS,
-  compareModels,
+  catalogRequest,
   EMPTY_FILTERS,
-  filterModels,
   MODALITIES,
   MODALITY_LABELS,
   makerKeyOf,
@@ -49,11 +47,13 @@ import {
 } from "@/shared/components/marks/BrandMark"
 import {
   formatContext,
+  formatNumber,
   formatRate,
   formatRelative,
   formatReleaseDate,
 } from "@/shared/helpers/format"
 import { useUrlValue } from "@/shared/helpers/urlState"
+import { useDebounced } from "@/shared/hooks/useDebounced"
 
 // The catalog, grouped by model: a rail of filters on the left, and on the
 // right a search, a sort, and one card per model. A card is a link to the model's own page, `/models/<id>`,
@@ -81,6 +81,7 @@ function SearchInput({
   return (
     <input
       type="search"
+      maxLength={200}
       value={value}
       onChange={(event) => onChange(event.target.value)}
       placeholder="Search models…"
@@ -169,11 +170,11 @@ function RadioList({
 }
 
 function FilterRail({
-  models,
+  facets,
   filters,
   onChange,
 }: {
-  models: CatalogModelSummary[]
+  facets: CatalogFacets | undefined
   filters: CatalogFilters
   onChange: (next: CatalogFilters) => void
 }) {
@@ -181,13 +182,13 @@ function FilterRail({
     key: K,
     value: CatalogFilters[K],
   ) => onChange({ ...filters, [key]: value })
-  const providers = providerOptions(models)
+  const providers = providerOptions(facets?.providers ?? [])
   // Decided per list rather than per row: a rail where nothing resolves would
   // be a column of identical tiles, which says nothing and indents every label.
   const providersMarked = anyProviderMark(
     providers.map((option) => option.value),
   )
-  const vendors = vendorOptions(models)
+  const vendors = vendorOptions(facets?.vendors ?? [])
   const vendorsMarked = anyMakerMark(
     vendors.flatMap((option) => (option.markKey ? [option.markKey] : [])),
   )
@@ -568,8 +569,6 @@ export function ModelCatalogView({
   /** A provider instance to start filtered on. */
   initialProvider?: string
 }) {
-  const catalog = useCatalog()
-
   const [filters, setFilters] = useState<CatalogFilters>({
     ...EMPTY_FILTERS,
     providers: initialProvider ? [initialProvider] : [],
@@ -581,6 +580,7 @@ export function ModelCatalogView({
   const changeView = (next: string) => {
     const chosen = isCatalogView(next) ? next : "list"
     setView(chosen)
+    setPage(0)
     try {
       window.localStorage.setItem(VIEW_STORAGE_KEY, chosen)
     } catch {
@@ -595,21 +595,31 @@ export function ModelCatalogView({
     direction: "asc" | "desc"
   }>({ column: "name", direction: "asc" })
 
-  const models = catalog.data?.models ?? []
   const sortChoice =
     SORT_OPTIONS.find((option) => option.value === sort) ?? SORT_OPTIONS[0]
-  const order =
-    view === "table"
-      ? compareModels(tableSort.column, tableSort.direction)
-      : compareModels(sortChoice.column, sortChoice.direction)
-  const filtered = filterModels(models, filters).sort(order)
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
-  const clampedPage = Math.min(page, pageCount - 1)
-  const pageRows = filtered.slice(
-    clampedPage * pageSize,
-    (clampedPage + 1) * pageSize,
+  const ordering = view === "table" ? tableSort : sortChoice
+  const search = useDebounced(filters.query, 200)
+  const catalog = useCatalog(
+    catalogRequest(
+      { ...filters, query: search },
+      ordering.column,
+      ordering.direction,
+      page,
+      pageSize,
+    ),
   )
-  const providerCount = new Set(models.flatMap((model) => model.providers)).size
+  const pageRows = catalog.data?.models ?? []
+  const count = catalog.data?.count ?? 0
+  const facets = catalog.data?.facets ?? undefined
+  const totalCount = facets?.total_count ?? count
+  const providerCount = facets?.providers.length
+  const hasModels = totalCount > 0
+
+  useEffect(() => {
+    if (!catalog.data || catalog.isPlaceholderData) return
+    const lastPage = Math.max(0, Math.ceil(catalog.data.count / pageSize) - 1)
+    if (page > lastPage) setPage(lastPage)
+  }, [catalog.data, catalog.isPlaceholderData, page, pageSize])
   const activeCount = activeFilterCount(filters)
 
   const updateFilters = (next: CatalogFilters) => {
@@ -630,11 +640,6 @@ export function ModelCatalogView({
   }
 
   const defaultsAsOf = catalog.data?.defaults_as_of
-  // The filters, the sort, the provider count and the filter rail are all built
-  // from `models`, so a catalog larger than one request can carry makes every
-  // one of them describe a prefix. Say so rather than let them read as totals.
-  const withheld = Math.max(0, (catalog.data?.count ?? 0) - models.length)
-
   return (
     <div className="flex flex-col gap-5">
       <header className="flex flex-col gap-1">
@@ -642,8 +647,15 @@ export function ModelCatalogView({
         <p className="max-w-[38.75rem] text-sm text-muted">
           {catalog.data ? (
             <>
-              {models.length} {models.length === 1 ? "model" : "models"} across{" "}
-              {providerCount} {providerCount === 1 ? "provider" : "providers"}.{" "}
+              {formatNumber(totalCount)} {totalCount === 1 ? "model" : "models"}
+              {providerCount !== undefined ? (
+                <>
+                  {" "}
+                  across {formatNumber(providerCount)}{" "}
+                  {providerCount === 1 ? "provider" : "providers"}
+                </>
+              ) : null}
+              .{" "}
               {publicView
                 ? "Prices are this deployment's list rates, cheapest offering first."
                 : "Prices are what your organization is charged, cheapest offering first."}{" "}
@@ -660,15 +672,6 @@ export function ModelCatalogView({
       </header>
 
       <ErrorBanner error={catalog.error} />
-
-      {withheld > 0 ? (
-        <InfoBanner tone="warning">
-          This deployment serves {catalog.data?.count} models, and this page
-          holds the first {models.length}. The filters, the sort and the
-          provider counts describe those {models.length}; the remaining{" "}
-          {withheld} are reachable by name from a model's own page.
-        </InfoBanner>
-      ) : null}
 
       <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-8">
         <aside
@@ -688,13 +691,16 @@ export function ModelCatalogView({
             ) : null}
           </div>
           <FilterRail
-            models={models}
+            facets={facets}
             filters={filters}
             onChange={updateFilters}
           />
         </aside>
 
-        <div className="flex min-w-0 flex-col gap-4">
+        <div
+          className="flex min-w-0 flex-col gap-4"
+          aria-busy={catalog.isFetching}
+        >
           <div className="otari-toolbar flex flex-wrap items-center gap-2">
             <div className="min-w-[12rem] flex-1">
               <SearchInput
@@ -737,6 +743,11 @@ export function ModelCatalogView({
             </Button>
           </div>
 
+          {catalog.isFetching && catalog.data ? (
+            <p role="status" className="text-caption">
+              Updating models…
+            </p>
+          ) : null}
           {catalog.isPending && !catalog.data ? (
             <PageLoading label="Loading models…" />
           ) : catalog.isError && !catalog.data ? (
@@ -758,7 +769,7 @@ export function ModelCatalogView({
                 onRowAction={onOpen}
                 emptyContent={
                   <EmptyMessage>
-                    {models.length === 0
+                    {!hasModels
                       ? "No models yet. Configure a provider, or price a model on Providers."
                       : "No models match these filters."}
                   </EmptyMessage>
@@ -767,7 +778,7 @@ export function ModelCatalogView({
             </TableScrollFrame>
           ) : pageRows.length === 0 ? (
             <EmptyMessage minHeightClass="min-h-[12rem]">
-              {models.length === 0
+              {!hasModels
                 ? "No models yet. Configure a provider, or price a model on Providers."
                 : "No models match these filters."}
             </EmptyMessage>
@@ -781,9 +792,9 @@ export function ModelCatalogView({
             </ul>
           )}
           <TablePagination
-            page={clampedPage}
+            page={page}
             pageSize={pageSize}
-            total={filtered.length}
+            total={count}
             rowsOnPage={pageRows.length}
             onPageChange={setPage}
             onPageSizeChange={(size) => {

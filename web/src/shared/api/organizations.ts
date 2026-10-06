@@ -8,6 +8,8 @@ import {
 import type {
   AcceptInvitationRequest,
   AcceptInvitationResult,
+  BulkInviteOrganizationMembersRequest,
+  BulkInviteOrganizationMembersResult,
   CallerOrganizationMembership,
   CreateOrganizationDomainRequest,
   CreateOrganizationRequest,
@@ -68,6 +70,68 @@ export function useOrganizationContext(enabled = true) {
     staleTime: 60_000,
     enabled,
   })
+}
+
+/**
+ * What the organization context says about whether the caller operates the
+ * deployment, as one of four answers rather than a boolean.
+ *
+ * `"unavailable"` is the read having failed with nothing cached to fall back
+ * on. It is kept apart from `"not-operator"` because the two call for opposite
+ * behavior: a resolved no withholds the operator surface silently, while a
+ * failed read cannot say whether anything is being withheld from its owner.
+ */
+export type DeploymentOperatorAnswer =
+  | "operator"
+  | "not-operator"
+  | "pending"
+  | "unavailable"
+
+/**
+ * Derive the answer from the context query.
+ *
+ * Cached data wins over a later failed refetch. `isFetched` rather than
+ * `isError` marks a failure, because a query that errored with no data goes
+ * back to pending on its next fetch, and a caller that read that as "still
+ * loading" would swap pages on every retry. An older gateway that omits the
+ * field reads as not an operator.
+ */
+export function deploymentOperatorAnswer(query: {
+  data?: OrganizationContext
+  isFetched: boolean
+}): DeploymentOperatorAnswer {
+  if (query.data) {
+    return query.data.deployment_operator === true ? "operator" : "not-operator"
+  }
+  return query.isFetched ? "unavailable" : "pending"
+}
+
+/**
+ * Whether to treat the caller as a deployment operator, for every page, rail
+ * row and scope hook that asks (otari#876).
+ *
+ * `isOperator` **fails open** on an unavailable answer. Every deployment-wide
+ * route it gates refuses a non-operator with a 403 that names the reason, so
+ * offering the surface costs a tenant a refusal during the outage, while
+ * withholding it would silently take an operator's controls away with nothing
+ * on screen saying why. It is false while the answer is pending, so nothing
+ * deployment-wide is asked for and then refused on an ordinary first paint;
+ * `isSettled` is for a caller that must wait rather than render that window.
+ *
+ * Client-side only: it decides what to offer, and the server still authorizes
+ * every request.
+ */
+export function useDeploymentOperator(enabled = true): {
+  answer: DeploymentOperatorAnswer
+  isOperator: boolean
+  isSettled: boolean
+} {
+  const answer = deploymentOperatorAnswer(useOrganizationContext(enabled))
+  return {
+    answer,
+    isOperator: answer === "operator" || answer === "unavailable",
+    isSettled: answer !== "pending",
+  }
 }
 
 // Whether the deployment can encrypt a provider credential at rest, i.e. whether
@@ -273,6 +337,23 @@ export function useInviteOrganizationMember() {
     mutationFn: (body: InviteOrganizationMemberRequest) =>
       apiFetch<InviteOrganizationMemberResult>(
         "/organizations/me/member-invitations",
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
+    },
+  })
+}
+
+// Several addresses in one call: each is invited or refused on its own, and
+// every invited entry carries its own `mail_sent` and accept link.
+export function useBulkInviteOrganizationMembers() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: BulkInviteOrganizationMembersRequest) =>
+      apiFetch<BulkInviteOrganizationMembersResult>(
+        "/organizations/me/member-invitations/bulk",
         { method: "POST", body: JSON.stringify(body) },
       ),
     onSuccess: () => {

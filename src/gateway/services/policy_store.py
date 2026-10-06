@@ -80,9 +80,7 @@ def _scope(workspace_id: uuid.UUID | None) -> uuid.UUID | None:
     return workspace_id if workspace_id is not None else _default_workspace
 
 
-def cached_policies(
-    user_id: str | None = None, *, workspace_id: uuid.UUID | None = None
-) -> dict[str, PolicySpec]:
+def cached_policies(user_id: str | None = None, *, workspace_id: uuid.UUID | None = None) -> dict[str, PolicySpec]:
     """The stored policies this worker last loaded. Empty before the first load."""
     scope = _scope(workspace_id)
     if scope is None:

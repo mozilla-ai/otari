@@ -125,6 +125,7 @@ class OrgProviderKey(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
 # Workspace overrides
 # ==============================================================================
 
+
 class WorkspaceProviderKeyOverride(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
     """A workspace's departure from its organization's default for one key."""
 
@@ -232,7 +233,6 @@ class OrgProviderKeyModel(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMi
     # A model nothing prices is offered but not served, so a model the pricing
     # data has not caught up with cannot be billed at nothing.
     enabled: bool = Field(default=True, nullable=False, sa_column_kwargs={"server_default": true()})
-
 
 
 __all__ = [

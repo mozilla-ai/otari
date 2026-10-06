@@ -60,12 +60,12 @@ Otari implements three completion surfaces:
 - `POST /api/v1/responses`, OpenAI Responses
 
 Standalone mode also serves embeddings, images, audio, files, batches,
-moderations, rerank, and search. Provider support differs by endpoint, so use
+moderations, rerank, search, and decisions. Provider support differs by endpoint, so use
 `GET /api/v1/models` and the OpenAPI document for the deployment you are calling.
 
 ### Request ID and inline cost
 
-Every Chat, Messages, and Responses response carries an `X-Otari-Request-ID`
+Every Chat, Messages, and Responses response carries an `Otari-Request-ID`
 header, streaming or not. In hybrid mode it is the platform's id for the
 request; a standalone gateway mints its own.
 
@@ -83,6 +83,111 @@ rate that priced the model: `organization` (an organization's override),
 genai-prices dataset). Hybrid mode attaches the platform's settlement instead;
 see [Hybrid mode protocol](hybrid-mode-protocol.md#inline-response-fields).
 
+### Provider-specific fields
+
+A field a provider adds to a chat completion's message beyond the OpenAI schema
+(Exa's `citations`, for instance) is kept where the provider put it and copied
+under `message.provider_specific_fields` (`delta.provider_specific_fields` on a
+stream), where clients written against LiteLLM look for it.
+
+### Cost of a failed or interrupted request
+
+A stream that fails mid-response ends in an error event, and one the client
+disconnects from ends with nothing, so neither delivers `usage.cost_usd`. The
+provider may still have charged for the tokens it reported before the stream
+ended (an Anthropic stream reports its input tokens in `message_start`), and a
+standalone gateway records and bills those tokens rather than treating the
+request as free.
+
+To recover that amount, look the request up by its `Otari-Request-ID`:
+
+```
+GET /api/v1/usage/requests/{request_id}
+```
+
+```json
+{
+  "request_id": "5f0c…",
+  "status": "error",
+  "cost_usd": "0.012400",
+  "prompt_tokens": 4100,
+  "completion_tokens": 0,
+  "total_tokens": 4100,
+  "row_count": 1
+}
+```
+
+The response sums every usage row the request wrote: a request routed through a
+policy writes one per attempt, all sharing that id as their `request_group_id`,
+so the total covers the attempts it fell over from as well as the one that
+served. `cost_usd` uses the inline format and is `null` when nothing was priced.
+An API key sees only its own requests and the master key sees any. The endpoint
+answers 404 until the request has settled, since usage rows are written in the
+background, and for an id that is unknown or belongs to another key. A stream the
+client abandoned before the provider reported any usage, and that ran no gateway
+tools, has nothing to bill and writes no row, so its id stays 404.
+
+This lookup is standalone only. In hybrid mode the platform owns settlement, and
+a failed stream reports no usage to it; see
+[Hybrid mode protocol](hybrid-mode-protocol.md).
+
+### Retrying safely
+
+A request the provider or the gateway refused (a 429, a 529, any other error) is
+not billed: its budget hold is refunded, so a client can retry it as it is. A
+stream that fails or that the client disconnects from is billed for the tokens
+the provider reported before it ended, and nothing more (see
+[Cost of a failed or interrupted request](#cost-of-a-failed-or-interrupted-request));
+a retry of it is a new request, billed on its own. The case that does bill twice
+is a
+non-streaming request that succeeded while its response was lost on the way
+back, through a dropped connection or a client timeout, because the retry calls
+the provider again.
+
+Send an `Idempotency-Key` header on a non-streaming Chat, Messages, or Responses
+request to make that retry safe. The value is any unique string of 1 to 255
+printable ASCII characters; a UUID is the usual choice. A retry with the same key
+and the same body then gets the original response, with its original
+`Otari-Request-ID` and `usage.cost_usd`, and an `Otari-Idempotent-Replayed: true`
+header, without calling the provider or billing again. While the original is
+still running, a retry is answered 409 with `Retry-After`, and if the original
+fails the next retry runs in its place.
+
+- A key belongs to the API key that sent it (or, for the master key, to the
+  billed user), so two callers never see each other's responses.
+- A retry has to be the same request: the same body, and the same
+  `Otari-Code-Execution`, `Otari-Web-Search`, `Otari-Router`,
+  `Otari-Router-Task`, `Otari-Conversation-Id` and `anthropic-beta` headers,
+  since those change what the request does. The same key with a different body
+  or different values for those headers is refused with 422, so send a new key
+  for a new request. Key order and whitespace in the JSON body do not count as a
+  difference.
+- A retry that arrives while the original is still running is answered 409
+  with `Retry-After` at once, as the IETF `Idempotency-Key` draft and Stripe's
+  API do. Retry again later with the same key, backing off exponentially.
+- The request holding a key renews its claim while it runs, so a retry does not
+  run it a second time however long it takes. If the worker running it dies, its
+  key frees up within `idempotency_lease_sec` (a minute by default).
+- A response is kept for `idempotency_retention_sec` (a day by default),
+  generated content included, and then deleted. It is stored encrypted with
+  `OTARI_SECRET_KEY`, so a deployment without that key ignores the header, and
+  a response no configured key can decrypt (after the key was rotated away)
+  runs again. Responses larger than 8 MiB are not kept, so a retry of one runs
+  again. Expired responses are still deleted after the header is turned off.
+- Only a successful response is kept. On a retry the request is still
+  authenticated and checked against the key's model access, and a user who has
+  since been blocked is refused rather than given the stored response.
+- Streaming requests ignore the header, and so does hybrid mode, which has no
+  local database to keep the response in.
+
+A retry runs again, and is billed again, whenever the original's response was
+not stored or can no longer be read. The cases above are the ones a deployment
+chooses: the response was larger than 8 MiB, its retention passed, the header was
+turned off, or `OTARI_SECRET_KEY` was rotated away. Two more come from failures:
+the gateway stops after the provider answers and before the response is stored,
+or the database stays unreachable for about `idempotency_lease_sec` while the
+original runs, so its claim lapses and a retry takes it over.
+
 ## Search
 
 `POST /api/v1/search` and `POST /api/v1/search/{search_tool_name}` run a configured
@@ -90,8 +195,52 @@ search tool directly. This is separate from `otari_web_search`, which lets a
 model request searches during a completion. Both are described in
 [Built-in tools](tools.md).
 
+A service key's `user` field names one of its end users here as it does on chat
+completions: the search is billed to that end user, under the key's end-user
+budget, and counted by `rate_limits`.
+
 Search-tool management lives under `/api/v1/search-tools`. The generated OpenAPI
 document describes the supported providers, filters, and management schemas.
+
+## Decisions
+
+`POST /api/v1/decisions` answers typed questions about a piece of content with
+probabilities rather than generated text: `noul` (the probability of yes),
+`choice` (one of the named options) and `score` (a level on an ordered scale).
+The body is TypeSafe's System One shape, which OpenRouter's alpha Decisions API
+and llama-server also take:
+
+```json
+{
+  "model": "typesafe:jev-latest",
+  "state": "I've been trying to connect Stripe for 3 days and I'm losing sales.",
+  "questions": {
+    "urgency": {"type": "noul", "instructions": "Does this message express urgency?"},
+    "team": {
+      "type": "choice",
+      "instructions": "Which team should handle this?",
+      "criteria": {"billing": null, "technical": "Integrations and outages"}
+    }
+  }
+}
+```
+
+`model` is `<provider>:<model>`, where the provider is an entry under
+[`decision_providers`](configuration.md#decision-providers). The answer comes back
+as the provider returned it, keyed like the questions, with `probabilities`,
+`confidence` and `usage`. `images` takes data URLs for a vision decision model
+served by llama-server; other providers refuse it.
+
+`POST /api/v1/systemone` serves the same request at the path TypeSafe's SDK and
+llama-server use, so a client written for either works against Otari with its
+base URL set to `https://<otari>/api`.
+
+A decision is billed like a completion: the `<provider>:<model>` rate prices the
+reported tokens, the provider's own reported cost is used when no rate is set
+(only OpenRouter reports one), and it is subject to budgets, key allow-lists and
+`require_pricing`. A provider's refusal of the request (400, 422, or llama-server's
+501 for a model that cannot answer it) returns 400, its rate limit returns 429, and
+any other failure returns 502.
 
 ## Routing policies
 
@@ -110,6 +259,30 @@ removed.
 Gateway-side failures use fixed public messages. Diagnose them with protected
 logs and safe metadata such as request ID, provider, model, and status. Do not
 log provider keys, prompts, responses, or raw upstream bodies.
+
+## Error codes
+
+A refusal a caller is expected to act on carries a stable code, both as an
+`Otari-Error-Code` header and as `code` in the body beside the human-readable
+`detail`: `{"detail": "...", "code": "budget_exceeded"}`. Map refusals by the
+code: it keeps its meaning across releases, while the `detail` text may be
+reworded.
+
+| `Otari-Error-Code` | Status | Meaning | Also sent |
+|---|---|---|---|
+| `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token` |
+| `user_blocked` | 403 | The billed user is blocked | |
+| `user_not_found` | 404 | The billed user does not exist | |
+| `rate_limited` | 429 | A gateway rate limit is full | `Otari-Rate-Limit-Rule` for a `rate_limits` rule; `Retry-After` when waiting helps |
+| `upstream_rate_limited` | 429 | The provider rate limited the gateway | `Retry-After` when the provider sent one |
+| `invalid_model` | 400 | The model selector names no configured provider | |
+| `model_not_allowed` | 403 | The key may not use the model | |
+| `context_length_exceeded` | 400 | The prompt is too long for the model | |
+| `pricing_required` | 402 | `require_pricing` is on and the model has no price | |
+
+A failure after a stream has started arrives as an error event, which carries
+the code as `error.code` on Chat Completions and Responses:
+`{"error": {"message": "...", "type": "server_error", "code": "upstream_rate_limited"}}`.
 
 ## Caller-orchestrated MCP
 

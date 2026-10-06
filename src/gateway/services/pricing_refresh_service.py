@@ -186,9 +186,7 @@ async def confirm_price_refresh(session: AsyncSession, *, accepted_by: str = "op
     # lock is defensive rather than load-bearing.
     pending_row = (
         await session.execute(
-            select(PricingSnapshot)
-            .where(PricingSnapshot.source == GENAI_PRICES_PENDING_SOURCE)
-            .with_for_update()
+            select(PricingSnapshot).where(PricingSnapshot.source == GENAI_PRICES_PENDING_SOURCE).with_for_update()
         )
     ).scalar_one_or_none()
     if pending_row is None:
@@ -397,9 +395,7 @@ async def reject_price_refresh(session: AsyncSession) -> bool:
     # See confirm_price_refresh: best-effort lock, a no-op on SQLite.
     pending_row = (
         await session.execute(
-            select(PricingSnapshot)
-            .where(PricingSnapshot.source == GENAI_PRICES_PENDING_SOURCE)
-            .with_for_update()
+            select(PricingSnapshot).where(PricingSnapshot.source == GENAI_PRICES_PENDING_SOURCE).with_for_update()
         )
     ).scalar_one_or_none()
     if pending_row is None:

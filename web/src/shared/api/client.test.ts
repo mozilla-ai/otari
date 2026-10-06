@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { API_ROOT, DASHBOARD_BUILD_PATH } from "@/shared/api/client"
+import type { RequestPolicy } from "@/shared/api/requestPolicy"
 import {
   ApiError,
   apiFetch,
@@ -8,11 +9,81 @@ import {
   siteFetch,
 } from "./client"
 
+// The seam this build answers "same origin" through, made mutable so the
+// cases below can stand in for a build that answers with another host.
+const policy = vi.hoisted(
+  (): RequestPolicy => ({ origin: "", credentials: "same-origin" }),
+)
+vi.mock("@/shared/api/overlayRequestPolicy", () => ({
+  prepareRequests: async () => {},
+  requestPolicy: () => policy,
+}))
+
 afterEach(() => {
   vi.restoreAllMocks()
+  policy.origin = ""
+  policy.credentials = "same-origin"
+})
+
+describe("the request policy", () => {
+  it("builds every management URL on the policy's origin and sends its credential", async () => {
+    policy.origin = "https://eu.example.com"
+    policy.credentials = "include"
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ ok: true }))
+
+    await apiFetch("/models")
+    await createSession({ masterKey: "k" })
+    await deleteSession()
+
+    for (const [url, init] of fetchMock.mock.calls) {
+      expect(String(url)).toMatch(/^https:\/\/eu\.example\.com\/api\/v1\//)
+      expect((init as RequestInit).credentials).toBe("include")
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it("stays relative, with the page's own cookies, in this build", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ ok: true }))
+
+    await apiFetch("/models")
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe(`${API_ROOT}/models`)
+    expect((init as RequestInit).credentials).toBe("same-origin")
+  })
+
+  it("leaves a site read on the page's own origin whatever the policy says", async () => {
+    policy.origin = "https://eu.example.com"
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ build: "x" }))
+
+    await siteFetch(DASHBOARD_BUILD_PATH)
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(DASHBOARD_BUILD_PATH)
+  })
 })
 
 describe("apiFetch", () => {
+  it("leaves a form body's content type to the browser", async () => {
+    // The browser writes the multipart boundary into the header itself, so a
+    // JSON content type set here would make the upload unreadable.
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ ok: true }))
+    const body = new FormData()
+    body.append("file", new Blob(["x"]), "a.txt")
+
+    await apiFetch("/playground/files", { method: "POST", body })
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit
+    expect(new Headers(init.headers).has("Content-Type")).toBe(false)
+  })
+
   it("bounds a request that never settles", async () => {
     // A hung request holds one of the browser's ~6 sockets per origin. Enough of
     // them and everything an operator clicks afterwards queues behind them, which

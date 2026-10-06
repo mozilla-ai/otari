@@ -1,18 +1,20 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=84.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 # Distribution + import package stay `gateway`: the `otari` name on PyPI is the
 # Otari client SDK (a transitive dep via any-llm-sdk), so a top-level `otari`
 # package here would collide with it. User-facing names (CLI, env vars, docs)
-# are `otari`; only the internal import path remains `gateway`.
+# are `otari`; only the internal import path remains `gateway`. The laptop-side
+# CLI is the workspace member at cli/ (distribution `otari-agent`, import
+# package `otari_agent`), which owns the `otari` console script.
 name = "gateway"
 version = "0.0.0"
 description = "otari, an OpenAI-compatible LLM gateway"
 requires-python = ">=3.13"
 dependencies = [
-    "any-llm-sdk[all]>=1.28.0",
+    "any-llm-sdk[all]>=1.29.0",
     # The built-in guardrail catalog (`services/guardrail_catalog.py`) and the
     # runner that builds an organization's definitions from it
     # (`services/tenancy/organization_guardrail_runner.py`). The extras are the
@@ -59,7 +61,7 @@ dependencies = [
     # is IDNA2003 and folds `faß.de` into `fass.de`, which would let a proof
     # taken on one domain admit addresses at another.
     "idna>=3.10",
-    "markitdown[docx,pptx,xlsx,pdf]>=0.1.0",
+    "markitdown[docx,pptx,xlsx,pdf]>=0.1.7",
     # Pinned to one minor line, not just below the next major. The major
     # ceiling is #689: mcp 2.0 removed
     # `mcp.client.streamable_http.streamablehttp_client`, which
@@ -78,9 +80,12 @@ dependencies = [
     # Artifacts").
     "mcp>=1.28.1,<1.29.0",
     "opentelemetry-api>=1.39.1",
+    # The laptop-side CLI, a workspace member at cli/. The gateway needs it for
+    # the Agent Gates evaluator the Hook Server runs (otari_agent.domain) and
+    # so that `uv sync` installs the `otari` console script it owns.
+    "otari-agent",
     "pillow>=12.3.0",
     "pypdfium2>=4.30.0",
-    "prometheus-client>=0.20.0",
     "psycopg2-binary>=2.9.9",
     "pydantic-settings>=2.14.2",
     "python-dotenv>=1.0.0",
@@ -89,7 +94,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.0",
     "sqlmodel>=0.0.24",
     "trafilatura>=2.0.0",
-    "uvicorn[standard]>=0.30.0",
+    "uvicorn[standard]>=0.53.0",
     "opentelemetry-proto>=1.39.1",
     "webauthn>=2.5.0",
 ]
@@ -115,7 +120,7 @@ s3 = [
 # on that implementation detail. The protocol's own package (gcsfs, adlfs, s3fs,
 # paramiko, ...) is the operator's to install.
 fsspec = [
-    "fsspec>=2024.6.0",
+    "fsspec>=2026.6.0",
 ]
 # Hosted sandboxes through E2B, for a deployment that cannot run the reference
 # code-execution container with the isolation untrusted code needs. Selected
@@ -128,22 +133,41 @@ e2b = [
     "e2b>=2.0.0",
     "e2b-code-interpreter>=2.0.0",
 ]
+# A rate-limit store every gateway process shares (`rate_limit_store: redis`),
+# so a limit holds across replicas rather than per process. The adapter imports
+# the client only when that store is selected.
+redis = [
+    "redis>=5.0.1",
+]
+# Prometheus scrape at /metrics. Optional so a deployment that never scrapes
+# pays neither the import (prometheus_client.exposition pulls in http.server and
+# wsgiref.simple_server, which nothing else here needs) nor the collection; when
+# absent the metric objects in gateway.metrics are no-ops and `enable_metrics`
+# refuses to start. The Docker image installs it.
+metrics = [
+    "prometheus-client>=0.20.0",
+]
 
 [dependency-groups]
 dev = [
     "boto3-stubs[s3]",
+    # The metrics extra, which the dev group installs unconditionally: the tests
+    # that pin the exposed metric families need the real library, and mypy checks
+    # gateway.metrics against it rather than against its no-op fallback.
+    "prometheus-client>=0.20.0",
     # Validating payloads against the published code-execution contract
     # (docs/public/code-execution-openapi.yaml), in its conformance script and
     # the test that keeps the spec and the doc in agreement. Nothing at runtime
     # uses it: the gateway parses that contract with its own Pydantic models.
     "jsonschema>=4.26.0",
     "types-jsonschema",
-    "moto[s3]>=5.0.0",
+    "moto[s3]>=5.2.3",
     "mypy",
     # Parses the mcp dependency spec straight out of this file's own
     # [project.dependencies], in the regression test for #689, instead of
     # relying on packaging being pulled in transitively.
     "packaging>=24.0",
+    "pre-commit>=4.6.2",
     "pytest>=9.0.3,<10",
     "pytest-asyncio>=0.26.0",
     "pytest-cov>=6.2.1,<8",
@@ -154,11 +178,8 @@ dev = [
     # The fsspec file store test reaches a real S3-compatible store through s3fs.
     # Its aiobotocore dependency pins botocore, so it also bounds the boto3 this lock can take.
     "s3fs>=2026.3.0",
-    "testcontainers[postgres]>=4.0.0",
+    "testcontainers[postgres,redis]>=4.0.0",
 ]
-
-[project.scripts]
-otari = "gateway.cli:main"
 
 [tool.uv]
 # Otari is deployed as a Linux server and developed on Linux / macOS; it is
@@ -187,6 +208,12 @@ environments = [
 # own maintainer sets the real floor. Revisit if Otari is ever published as a
 # wheel people pip-install directly.
 constraint-dependencies = ["authlib>=1.7.2"]
+
+[tool.uv.workspace]
+members = ["cli"]
+
+[tool.uv.sources]
+otari-agent = { workspace = true }
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -219,7 +246,7 @@ gateway = [
 [tool.ruff]
 target-version = "py313"
 line-length = 120
-src = ["src", "tests", "scripts"]
+src = ["src", "cli/src", "tests", "scripts"]
 # `demo/` is shell scripts; nothing for ruff to do there.
 extend-exclude = ["demo/"]
 
@@ -233,12 +260,18 @@ select = ["E", "F", "I", "PERF"]
 [tool.mypy]
 python_version = "3.13"
 strict = true
-files = ["src", "tests", "scripts"]
+files = ["src", "cli/src", "tests", "scripts"]
 # Standalone web-search adapters are independent services (own Dockerfile +
 # requirements), not part of the gateway package. They each ship a top-level
 # `app.py`, so type-checking them together trips mypy's duplicate-module guard.
 # Their behavior is covered by tests/unit/test_*_adapter.py.
 exclude = ["scripts/web-search-[^/]+-adapter/"]
+
+[[tool.mypy.overrides]]
+# setuptools-scm writes otari_agent/_version.py at build time, so it is absent
+# from a source tree nothing has built yet; __init__.py falls back when it is.
+module = ["otari_agent._version"]
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["testcontainers.*"]
