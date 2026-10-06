@@ -5,6 +5,7 @@ import ipaddress
 import pytest
 
 from gateway.services.web_retrieval_policy import (
+    MAX_WEB_SEARCH_DOMAINS,
     CanonicalHost,
     DisjointDomainAllowListsError,
     DomainPolicy,
@@ -16,6 +17,7 @@ from gateway.services.web_retrieval_policy import (
     canonicalize_web_url,
     domain_rule_matches,
     intersect_domain_allow_lists,
+    read_domain_list,
     resolve_redirect_url,
     union_domain_block_lists,
 )
@@ -259,3 +261,42 @@ def test_canonical_host_ip_value_uses_standard_library_identity() -> None:
     host = canonicalize_host("2001:0db8::1")
 
     assert host == CanonicalHost("2001:db8::1", ipaddress.ip_address("2001:db8::1"))
+
+
+@pytest.mark.parametrize("value", [None, []])
+def test_read_domain_list_reads_no_list_as_none(value: list[str] | None) -> None:
+    assert read_domain_list(value) is None
+
+
+def test_read_domain_list_canonicalizes_and_keeps_first_occurrence_order() -> None:
+    result = read_domain_list([" Spam.Example ", ".example.com", "example.com.", "spam.example", "BÜCHER.example"])
+
+    assert result == ("spam.example", "example.com", "xn--bcher-kva.example")
+
+
+def test_read_domain_list_accepts_exactly_the_bound() -> None:
+    hosts = [f"host{i}.example" for i in range(MAX_WEB_SEARCH_DOMAINS)]
+
+    assert read_domain_list(hosts) == tuple(hosts)
+
+
+def test_read_domain_list_refuses_one_over_the_bound() -> None:
+    hosts = [f"host{i}.example" for i in range(MAX_WEB_SEARCH_DOMAINS + 1)]
+
+    with pytest.raises(ValueError, match=f"at most {MAX_WEB_SEARCH_DOMAINS} domains"):
+        read_domain_list(hosts)
+
+
+@pytest.mark.parametrize("value", ["example.com", ("example.com",), ["example.com", 7]])
+def test_read_domain_list_refuses_anything_but_a_list_of_strings(value: object) -> None:
+    with pytest.raises(ValueError, match="a domain list must be a list of hostnames"):
+        read_domain_list(value)
+
+
+@pytest.mark.parametrize("raw", ["https://example.com", "example.com:443", "example.com/path", "*.example.com"])
+def test_read_domain_list_names_an_entry_that_is_not_a_bare_host(raw: str) -> None:
+    with pytest.raises(ValueError, match="is not a bare valid hostname") as raised:
+        read_domain_list(["example.org", f" {raw} "])
+
+    assert repr(raw) in str(raised.value)
+    assert isinstance(raised.value.__cause__, DomainRuleValidationError)
