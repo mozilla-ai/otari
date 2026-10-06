@@ -5,7 +5,7 @@ Everything a request could shed if they were only defaults is pinned here,
 because shedding it is how a guardrail fails open.
 
 The two ceilings the dashboard card repeats as literals are pinned at the
-bottom, the same drift `test_code_execution_policy_limits.py` catches next door.
+bottom, so the form and the API cannot disagree about which values are acceptable.
 """
 
 from __future__ import annotations

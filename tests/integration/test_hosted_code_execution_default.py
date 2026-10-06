@@ -95,7 +95,9 @@ def test_a_self_serve_signup_s_workspace_starts_with_code_execution_on(
     )
     assert response.status_code == 200, response.text
 
-    added = {workspace: enabled for workspace, enabled in _policies(db_session_factory).items() if workspace not in before}
+    added = {
+        workspace: enabled for workspace, enabled in _policies(db_session_factory).items() if workspace not in before
+    }
     assert list(added.values()) == [True]
 
 
