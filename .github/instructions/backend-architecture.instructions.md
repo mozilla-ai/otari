@@ -17,7 +17,8 @@ from `gateway.core.database` rather than importing `sqlalchemy`. Review new and 
 against the rules below, and do not accept "the module next to it does the
 same" as a reason.
 
-`SERVICE_DATABASE_IMPORT_BASELINE`, `ROUTE_DATABASE_IMPORT_BASELINE` and `FLAT_MODULE_BASELINE` in
+`SERVICE_DATABASE_IMPORT_BASELINE`, `ROUTE_DATABASE_IMPORT_BASELINE`, `FLAT_MODULE_BASELINE`,
+`SERVICE_MODE_READ_BASELINE` and the baseline on each `MODEL_ACCESS` entry in
 `scripts/check_architecture.py` name the code still in the old shape.
 
 - Do not flag an existing baseline entry the PR does not touch.

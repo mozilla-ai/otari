@@ -69,7 +69,8 @@ domain fits together and the domain test, says what each domain owns, and gives 
 moving one domain into the shape. This section adds the house style for code in those layers.
 
 **New and moved code follows the target shape. Most existing code does not, so never copy the
-module beside yours.** `SERVICE_DATABASE_IMPORT_BASELINE`, `ROUTE_DATABASE_IMPORT_BASELINE` and `FLAT_MODULE_BASELINE` in
+module beside yours.** `SERVICE_DATABASE_IMPORT_BASELINE`, `ROUTE_DATABASE_IMPORT_BASELINE`, `FLAT_MODULE_BASELINE`,
+`SERVICE_MODE_READ_BASELINE` and the baseline on each `MODEL_ACCESS` entry in
 `scripts/check_architecture.py` name the code still in the old shape. A baseline only shrinks:
 remove a name when you move its code, and never add one.
 

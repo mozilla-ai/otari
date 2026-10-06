@@ -65,8 +65,8 @@ lint-python:
 lint-web: web/node_modules/.install-stamp
 	pnpm --dir web run lint:fix
 
-# Enforce gateway layer rules. Pure stdlib; runs as part of `make lint-python` (which
-# otari-lint.yml calls on every PR) and stays independently runnable.
+# Enforce gateway layer rules with the standard library only.
+# `make lint-python` runs it, and otari-lint.yml runs it as its own step instead, so a failure is named on the PR.
 check-architecture:
 	uv run python scripts/check_architecture.py
 
