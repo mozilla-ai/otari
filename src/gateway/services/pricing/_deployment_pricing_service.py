@@ -156,10 +156,11 @@ class DeploymentPricingService:
         async with self.uow:
             latest = (await self.pricing.latest_versions([model_key])).get(model_key)
 
-            def cache_rate(field: str) -> object:
+            def cache_rate(field: str) -> Decimal | None:
                 if field in cache_rates:
                     return to_usd_or_none(cache_rates[field])
-                return getattr(latest, field) if latest is not None else None
+                inherited: Decimal | None = getattr(latest, field) if latest is not None else None
+                return inherited
 
             version = latest if latest is not None and latest.effective_at == effective_at else None
             if version is None:
@@ -172,9 +173,9 @@ class DeploymentPricingService:
                 self.pricing.add_all([version])
             version.input_price_per_million = to_usd(input_price_per_million)
             version.output_price_per_million = to_usd(output_price_per_million)
-            version.cache_read_price_per_million = cache_rate("cache_read_price_per_million")  # type: ignore[assignment]
-            version.cache_write_price_per_million = cache_rate("cache_write_price_per_million")  # type: ignore[assignment]
-            version.cache_write_1h_price_per_million = cache_rate("cache_write_1h_price_per_million")  # type: ignore[assignment]
+            version.cache_read_price_per_million = cache_rate("cache_read_price_per_million")
+            version.cache_write_price_per_million = cache_rate("cache_write_price_per_million")
+            version.cache_write_1h_price_per_million = cache_rate("cache_write_1h_price_per_million")
             version.origin = API_ORIGIN
             await self.pricing.flush()
             return version
