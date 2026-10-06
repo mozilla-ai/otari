@@ -6613,6 +6613,8 @@ export interface components {
             request_limit: number | null;
             /** Reset Alignment */
             reset_alignment: string | null;
+            /** Rpm Limit */
+            rpm_limit?: number | null;
             /** Token Limit */
             token_limit: number | null;
             /**
@@ -6625,6 +6627,8 @@ export interface components {
              * @default 0
              */
             total_spend: number;
+            /** Tpm Limit */
+            tpm_limit?: number | null;
             /** Updated At */
             updated_at: string;
             /**
@@ -7606,10 +7610,20 @@ export interface components {
              */
             reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
             /**
+             * Rpm Limit
+             * @description Requests per minute for each user on this budget, across replicas; null is unlimited
+             */
+            rpm_limit?: number | null;
+            /**
              * Token Limit
              * @description Maximum tokens over the period. Independent of max_budget; null is unlimited
              */
             token_limit?: number | null;
+            /**
+             * Tpm Limit
+             * @description Tokens per minute for each user on this budget, counted on what requests used: a request is admitted while the user's minute is under the limit. Null is unlimited
+             */
+            tpm_limit?: number | null;
         };
         /**
          * CreateKeyRequest
@@ -13445,10 +13459,20 @@ export interface components {
             /** Reset Alignment */
             reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
             /**
+             * Rpm Limit
+             * @description Requests per minute for each user on this budget, across replicas; null is unlimited
+             */
+            rpm_limit?: number | null;
+            /**
              * Token Limit
              * @description Maximum tokens over the period. Independent of max_budget; null is unlimited
              */
             token_limit?: number | null;
+            /**
+             * Tpm Limit
+             * @description Tokens per minute for each user on this budget, counted on what requests used: a request is admitted while the user's minute is under the limit. Null is unlimited
+             */
+            tpm_limit?: number | null;
         };
         /**
          * UpdateKeyRequest

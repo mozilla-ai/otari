@@ -557,7 +557,8 @@ async def test_file_refs_are_listed(monkeypatch: pytest.MonkeyPatch) -> None:
     async with _sandbox() as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "savefig()"})
 
-    assert "files: chart.png, ?" in result
+    assert "files: chart.png\n" in f"{result}\n"
+    assert "?" not in result
 
 
 @pytest.mark.asyncio
@@ -729,7 +730,7 @@ async def test_session_handle_violation_message_omits_the_payload(monkeypatch: p
         ),
         pytest.param(
             {"stdout": "ok", "return_code": 0, "content": [{"filename": None}, "bare-id"]},
-            "stdout:\nok\nfiles: ?",
+            "stdout:\nok",
             id="file-ref-unnameable",
         ),
     ],

@@ -320,3 +320,61 @@ def test_end_users_are_listed_and_counted_by_owner_and_external_id(
     assert [user["external_id"] for user in one.json()] == ["erin:ai"]
     assert len(counted.json()) == 1
     assert counted.headers["Otari-Total-Count"] == "2"
+
+
+def test_an_end_users_minute_limits_follow_its_budget(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """LiteLLM keeps rpm on the budget, so moving a user to another budget moves its limits too."""
+    tight = client.post(
+        f"{API_ROOT}/budgets", json={"rpm_limit": 1, "budget_duration_sec": 86400}, headers=master_key_header
+    ).json()
+    roomy = client.post(
+        f"{API_ROOT}/budgets", json={"rpm_limit": 100, "budget_duration_sec": 86400}, headers=master_key_header
+    ).json()
+    _, headers = _service_key(client, master_key_header, "svc-rpm", end_user_budget_id=tight["budget_id"])
+
+    assert _chat(client, headers, "frank").status_code == 200
+    refused = _chat(client, headers, "frank")
+    assert _chat(client, headers, "grace").status_code == 200
+    frank = client.get(
+        f"{API_ROOT}/users", params={"parent_user_id": "svc-rpm", "external_id": "frank"}, headers=master_key_header
+    ).json()[0]
+    client.patch(
+        f"{API_ROOT}/users/{frank['user_id']}", json={"budget_id": roomy["budget_id"]}, headers=master_key_header
+    )
+
+    assert refused.status_code == 429
+    assert refused.headers["Otari-Error-Code"] == "rate_limited"
+    assert refused.headers["Otari-Rate-Limit-Rule"] == "budget"
+    assert _chat(client, headers, "frank").status_code == 200
+
+
+def test_a_key_excluded_from_budget_skips_its_budgets_minute_limits(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    budget = client.post(
+        f"{API_ROOT}/budgets", json={"rpm_limit": 1, "budget_duration_sec": 86400}, headers=master_key_header
+    ).json()
+    client.post(
+        f"{API_ROOT}/users", json={"user_id": "henry", "budget_id": budget["budget_id"]}, headers=master_key_header
+    )
+    client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": MODEL_NAME, "input_price_per_million": 1.0, "output_price_per_million": 1.0},
+        headers=master_key_header,
+    )
+
+    def key(name: str, **settings: Any) -> dict[str, str]:
+        created = client.post(
+            f"{API_ROOT}/keys", json={"key_name": name, "user_id": "henry", **settings}, headers=master_key_header
+        )
+        assert created.status_code == 200, created.text
+        return {API_KEY_HEADER: f"Bearer {created.json()['key']}"}
+
+    exempt = key("henry-exempt", exclude_from_budget=True)
+    counted = key("henry-counted")
+
+    exempt_statuses = [_chat(client, exempt, None).status_code for _ in range(2)]
+    counted_statuses = [_chat(client, counted, None).status_code for _ in range(2)]
+
+    assert exempt_statuses == [200, 200]
+    assert counted_statuses == [200, 429]

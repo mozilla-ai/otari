@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, Request, status
 
+from gateway.core.config import RateLimitRule
 from gateway.core.error_codes import RATE_LIMITED, error_headers
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
@@ -18,7 +19,7 @@ from gateway.ports.rate_limit_store_port import RateLimitStorePort, RateLimitWin
 if TYPE_CHECKING:
     from starlette.types import ASGIApp, Receive, Scope, Send
 
-    from gateway.core.config import GatewayConfig, RateLimitRule
+    from gateway.core.config import GatewayConfig
 
 RATE_LIMIT_HITS = Counter(
     "gateway_rate_limit_hits",
@@ -369,6 +370,15 @@ async def _undo(store: RateLimitStorePort, hold: _Hold) -> None:
         await store.release(key, lease)
 
 
+@dataclass(frozen=True)
+class BudgetMinuteLimits:
+    """The per-minute limits of the budget a request's user is on."""
+
+    budget_id: str
+    rpm: int | None
+    tpm: int | None
+
+
 class RateLimitRules:
     """The ``rate_limits`` rules, counted in one store.
 
@@ -386,7 +396,13 @@ class RateLimitRules:
         return bool(self._config.rate_limits)
 
     async def admit(
-        self, request: Request, *, key_id: str | None, user_id: str | None, estimated_tokens: int
+        self,
+        request: Request,
+        *,
+        key_id: str | None,
+        user_id: str | None,
+        estimated_tokens: int,
+        budget_limits: BudgetMinuteLimits | None = None,
     ) -> RateLimitGrant:
         """Count a request against every rule that applies to it, or against none.
 
@@ -410,20 +426,40 @@ class RateLimitRules:
                 if subject is None:
                     continue
                 await _count_rule(self._store, rule, subject, estimated_tokens, hold)
+            if budget_limits is not None and user_id is not None:
+                await _count_rule(
+                    self._store,
+                    _budget_rule(budget_limits),
+                    f"{budget_limits.budget_id}:{user_id}",
+                    estimated_tokens,
+                    hold,
+                )
         except HTTPException:
             await _undo(self._store, hold)
             raise
         return grant
 
 
+def _budget_rule(limits: BudgetMinuteLimits) -> RateLimitRule:
+    """A budget's per-minute limits as a ``per: user`` rule, counting tokens on what was used, as LiteLLM does."""
+    return RateLimitRule(name="budget", per="user", rpm=limits.rpm, tpm=limits.tpm, tpm_admission="used")
+
+
 async def admit_rate_limit_rules(
-    request: Request, *, key_id: str | None, user_id: str | None, estimated_tokens: int
+    request: Request,
+    *,
+    key_id: str | None,
+    user_id: str | None,
+    estimated_tokens: int,
+    budget_limits: BudgetMinuteLimits | None = None,
 ) -> RateLimitGrant | None:
-    """Count a request against the deployment's ``rate_limits``, or ``None`` when it has none."""
+    """Count a request against ``rate_limits`` and its user's budget, or ``None`` when neither limits it."""
     rules: RateLimitRules | None = getattr(request.app.state, "rate_limit_rules", None)
-    if rules is None or not rules.active:
+    if rules is None or (not rules.active and budget_limits is None):
         return None
-    return await rules.admit(request, key_id=key_id, user_id=user_id, estimated_tokens=estimated_tokens)
+    return await rules.admit(
+        request, key_id=key_id, user_id=user_id, estimated_tokens=estimated_tokens, budget_limits=budget_limits
+    )
 
 
 async def _close_grant(grant: RateLimitGrant) -> None:

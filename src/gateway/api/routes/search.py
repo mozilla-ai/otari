@@ -377,7 +377,15 @@ async def _dispatch_search(
     )
     # After the gates above, so a search they refuse is counted by no rule, and
     # before the reservation, so one the rules refuse holds no budget to refund.
-    rate_limit_grant = await admit_rate_limit_rules(raw_request, key_id=api_key_id, user_id=user_id, estimated_tokens=0)
+    rate_limit_grant = await admit_rate_limit_rules(
+        raw_request,
+        key_id=api_key_id,
+        user_id=user_id,
+        estimated_tokens=0,
+        budget_limits=None
+        if budget_exempt
+        else await budget_service.minute_limits(user_id, strategy=config.budget_strategy),
+    )
     if rate_limit_grant is not None:
         # A `per: model` rule names a search tool by its pricing key, <provider>:<tool>.
         await rate_limit_grant.admit_model(tool.provider, tool.name)

@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from gateway.models.budgets import (
     MAX_COUNT_LIMIT,
+    MAX_MINUTE_LIMIT,
     Budget,
     BudgetResetLog,
     ResetAlignment,
@@ -49,6 +50,21 @@ class CreateBudgetRequest(BaseModel):
         le=MAX_COUNT_LIMIT,
         description="Maximum requests over the period. Independent of max_budget; null is unlimited",
     )
+    rpm_limit: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_MINUTE_LIMIT,
+        description="Requests per minute for each user on this budget, across replicas; null is unlimited",
+    )
+    tpm_limit: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_MINUTE_LIMIT,
+        description=(
+            "Tokens per minute for each user on this budget, counted on what requests used: a request is "
+            "admitted while the user's minute is under the limit. Null is unlimited"
+        ),
+    )
     budget_duration_sec: int | None = Field(
         default=None, gt=0, description="Budget duration in seconds (e.g., 86400 for daily, 604800 for weekly)"
     )
@@ -77,6 +93,8 @@ class BudgetResponse(BaseModel):
     max_budget: float | None
     token_limit: int | None
     request_limit: int | None
+    rpm_limit: int | None = None
+    tpm_limit: int | None = None
     budget_duration_sec: int | None
     reset_alignment: str | None
     created_at: str
@@ -102,6 +120,8 @@ class BudgetResponse(BaseModel):
             max_budget=as_float(budget.max_budget),
             token_limit=budget.token_limit,
             request_limit=budget.request_limit,
+            rpm_limit=budget.rpm_limit,
+            tpm_limit=budget.tpm_limit,
             budget_duration_sec=budget.budget_duration_sec,
             reset_alignment=budget.reset_alignment,
             created_at=budget.created_at.isoformat(),
@@ -128,6 +148,21 @@ class UpdateBudgetRequest(BaseModel):
         ge=0,
         le=MAX_COUNT_LIMIT,
         description="Maximum requests over the period. Independent of max_budget; null is unlimited",
+    )
+    rpm_limit: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_MINUTE_LIMIT,
+        description="Requests per minute for each user on this budget, across replicas; null is unlimited",
+    )
+    tpm_limit: int | None = Field(
+        default=None,
+        ge=1,
+        le=MAX_MINUTE_LIMIT,
+        description=(
+            "Tokens per minute for each user on this budget, counted on what requests used: a request is "
+            "admitted while the user's minute is under the limit. Null is unlimited"
+        ),
     )
     budget_duration_sec: int | None = Field(default=None, gt=0)
     reset_alignment: ResetAlignment | None = Field(default=None)

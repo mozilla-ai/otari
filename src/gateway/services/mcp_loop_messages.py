@@ -30,7 +30,13 @@ from any_llm.types.messages import (
 )
 
 from gateway.log_config import logger
-from gateway.services._tool_loop import StreamAction, run_tool_loop, run_tool_loop_stream
+from gateway.services._tool_loop import (
+    StreamAction,
+    log_tool_failure,
+    run_tool_loop,
+    run_tool_loop_stream,
+    tool_failure_detail,
+)
 from gateway.services.code_execution import ContainerLease
 from gateway.services.mcp_loop import (
     DEFAULT_MAX_TOOL_ITERATIONS,
@@ -180,8 +186,9 @@ async def _execute_tool_uses(
         except MaxToolIterationsExceeded:
             raise
         except Exception as exc:  # noqa: BLE001 — see docstring
-            logger.warning("MCP tool %s execution failed: %s", block.name, exc)
-            text = f"[tool error] {exc}"
+            detail = tool_failure_detail(pool, block.name)
+            log_tool_failure(block.name, detail, exc)
+            text = f"[tool error] {detail}"
         else:
             if capped and budget is not None:
                 budget.record(text)
@@ -360,10 +367,8 @@ async def _call_stream_tool(
     except MaxToolIterationsExceeded:
         raise
     except Exception as exc:  # noqa: BLE001 - recoverable tool failure is model input
-        # An unexpected backend exception may include URLs, headers, or credentials.
-        # Neither logs, client events, nor the model-facing result receives its detail.
-        logger.warning("Gateway tool %s execution failed: %s", name, type(exc).__name__)
-        detail = "MCP tool execution failed" if mcp_backend is not None else "Gateway tool execution failed"
+        detail = tool_failure_detail(pool, name)
+        log_tool_failure(name, detail, exc)
         return f"[tool error] {detail}", detail, True, True
 
 
