@@ -340,6 +340,33 @@ async def test_bare_responses_input_file_item_inlined_for_native() -> None:
     assert out[0]["file_data"].startswith("data:application/pdf;base64,")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fmt", "block"),
+    [
+        ("openai", {"type": "file", "file": {"file_id": "file-md"}}),
+        ("responses", {"type": "input_file", "file_id": "file-md"}),
+        ("anthropic", {"type": "document", "source": {"type": "file", "file_id": "file-md"}}),
+    ],
+)
+async def test_text_document_is_extracted_for_a_pdf_capable_model(
+    monkeypatch: pytest.MonkeyPatch, fmt: cn.WireFormat, block: dict[str, Any]
+) -> None:
+    # A model that reads PDFs natively is not one that reads Markdown natively:
+    # the provider's document part refuses that MIME type.
+    async def fake_extract(data: bytes, mime: str, filename: str | None) -> ExtractionResult:
+        return ExtractionResult(data.decode("utf-8"), True, "ok")
+
+    monkeypatch.setattr(cn, "extract_text_from_file", fake_extract)
+    files = _files(_stored("file-md", "README.md", "text/markdown"), data=b"# Otari")
+    msgs = [{"role": "user", "content": [block]}]
+    out, stats = await normalize_messages(msgs, config=GatewayConfig(), caps=_NATIVE, fmt=fmt, files=files, user_id="u")
+    text_type = "input_text" if fmt == "responses" else "text"
+    assert out[0]["content"][0]["type"] == text_type
+    assert "# Otari" in out[0]["content"][0]["text"]
+    assert stats.files_extracted == 1
+
+
 @pytest.mark.parametrize(
     ("filename", "taken", "expected"),
     [

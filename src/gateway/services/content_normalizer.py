@@ -354,6 +354,17 @@ async def _describe_pdf_pages(src: _Source, config: GatewayConfig, stats: Normal
     return f"[Attached scanned file: {label}]\n" + "\n".join(descriptions) + f"\n[End of {label}]"
 
 
+def _is_native_document(src: _Source) -> bool:
+    """Whether a PDF-capable model may be sent ``src`` as a document part.
+
+    Only an upload Otari inlines itself is judged here: the provider's document
+    part takes PDFs (OpenAI accepts nothing else), so an uploaded Markdown or CSV
+    file is extracted instead. A block the caller wrote inline is forwarded as
+    written.
+    """
+    return not src.needs_inline or src.mime.split(";", 1)[0] == "application/pdf"
+
+
 def _is_container_block(block: dict[str, Any], fmt: WireFormat) -> bool:
     """Whether ``block`` is Anthropic's block naming a file for a code-execution container.
 
@@ -449,7 +460,7 @@ async def _normalize_block(
             return {**block, "file_id": src.staged.file_id}
         src.kind = _DOCUMENT
 
-    native = caps.image if src.kind == _IMAGE else caps.pdf
+    native = caps.image if src.kind == _IMAGE else caps.pdf and _is_native_document(src)
     if native:
         # Only rewrite when bytes came from a stored file_id (the provider can't
         # resolve our ids); already-inline / remote blocks pass through as-is.

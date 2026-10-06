@@ -288,6 +288,11 @@ For each file/image block it resolves the **target model's** capabilities, then:
 | **Text-only** (most local models)                     | extracted to text (markitdown) and inlined | captioned by a vision model / OCR, or dropped with a log line |
 
 
+A natively capable model is sent an uploaded document only when it is a PDF,
+because the providers' document parts take PDFs. Any other upload (Markdown,
+CSV, plain text, an office document) is extracted to text for every model. A
+document block the caller wrote inline is forwarded as written.
+
 Scanned/image-only PDFs (no extractable text) are rasterized page-by-page and
 sent through the image path.
 
