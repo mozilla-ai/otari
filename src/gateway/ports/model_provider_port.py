@@ -9,9 +9,11 @@ port + hosted adapter" row of ``ARCHITECTURE.md``'s capability lines.
 
 Self-hosting is a first-class path *upstream* of this port, not behind it: a
 deployment pointing at its own backends resolves a credential the ordinary way
-and never asks here. So the core adapter answers "unavailable" for every
-candidate by design rather than by omission, and an overlay binds an adapter
-that resolves against the upstreams it owns.
+and never asks here. The core adapter answers from the deployment's hosted
+providers (``services/providers``), the credentials an operator configures for
+the deployment to serve a request on, and answers "unavailable" where none is
+configured. An overlay binds an adapter that resolves differently, for example
+one that decides per organization.
 
 Stability: this interface is not frozen while Otari is pre-1.0. Overlay authors
 should pin a released tag and expect the shape to move.
@@ -20,7 +22,7 @@ should pin a released tag and expect the shape to move.
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 HostedModels = Mapping[str, frozenset[str] | None]
 """The hosted providers a caller may use, each with the models the deployment advertises on it.
@@ -48,6 +50,9 @@ class HostedCredential:
     api_key: str
     api_base: str | None
     response_provider: str
+    # What the upstream SDK client needs beyond the key (Bedrock's region and
+    # IAM pair), in the shape a ``config.yml`` instance's ``client_args`` takes.
+    client_args: Mapping[str, Any] | None = None
 
 
 class HostedAccessDeniedError(Exception):
@@ -87,9 +92,9 @@ class ModelProviderPort(Protocol):
 
         Returns:
             ``None`` when this build has no hosted-inference path for this
-            candidate at all: the core answer for every candidate, and an
-            overlay's honest answer when its own credential for the candidate
-            is absent, disabled, or undecryptable.
+            candidate: no hosted provider is configured for it, or the one
+            that is has been switched off, switches this model off, or holds a
+            credential no configured key can read.
 
         Raises:
             HostedAccessDeniedError: If the organization may not use the

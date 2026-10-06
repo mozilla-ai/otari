@@ -1228,9 +1228,17 @@ def get_mcp_server_port(db: PortSessionDep, container: ContainerDep) -> McpServe
     return container.resolve(McpServerPort, db)
 
 
-def get_model_provider_port(db: PortSessionDep, container: ContainerDep) -> ModelProviderPort:
-    """Resolve the model-provider adapter this build bound at startup."""
-    return container.resolve(ModelProviderPort, db)
+def get_model_provider_port(
+    db: PortSessionDep,
+    uow: Annotated[UnitOfWork | None, Depends(get_unit_of_work_if_needed)],
+    container: ContainerDep,
+) -> ModelProviderPort:
+    """Resolve the model-provider adapter this build bound at startup.
+
+    On the request's session and Unit of Work, both ``None`` in hybrid mode:
+    the core adapter reads the hosted-providers store through a block on it.
+    """
+    return container.resolve(ModelProviderPort, db, uow=uow)
 
 
 # ``get_db`` rather than ``PortSessionDep``, for a route or builder whose own
@@ -1238,10 +1246,11 @@ def get_model_provider_port(db: PortSessionDep, container: ContainerDep) -> Mode
 # same one hands the adapter that session instead of opening a second one.
 def get_request_session_model_provider_port(
     db: Annotated[AsyncSession, Depends(get_db)],
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     container: ContainerDep,
 ) -> ModelProviderPort:
-    """Resolve the model-provider adapter on the request's ``get_db`` session."""
-    return container.resolve(ModelProviderPort, db)
+    """Resolve the model-provider adapter on the request's ``get_db`` session and its Unit of Work."""
+    return container.resolve(ModelProviderPort, db, uow=uow)
 
 
 # Deliberately ``get_db`` and not ``PortSessionDep``: every surface that
@@ -1543,15 +1552,14 @@ def get_workspace_search_keys(db: Annotated[AsyncSession, Depends(get_db)]) -> W
     )
 
 
-def get_hosted_provider_service(
-    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> HostedProviderService:
-    """Build the hosted-providers service on the request's unit of work.
+def build_hosted_provider_service(uow: UnitOfWork, *, config: GatewayConfig) -> HostedProviderService:
+    """Build the hosted-providers service on ``uow``.
 
-    The deployment price list is reached through the pricing domain's own
-    service, built on the same unit of work, so a rate written while offering a
-    model lands in the same transaction as the offer.
+    The one assembly, used by the request dependency below and handed to the
+    composition root for the model provider adapter, the way the membership
+    listener's builder is. The deployment price list is reached through the
+    pricing domain's own service on the same unit of work, so a rate written
+    while offering a model lands in the same transaction as the offer.
     """
     return HostedProviderService(
         uow,
@@ -1565,6 +1573,14 @@ def get_hosted_provider_service(
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
         organization_exists=OrganizationRepository(uow).exists,
     )
+
+
+def get_hosted_provider_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> HostedProviderService:
+    """Build the hosted-providers service on the request's unit of work."""
+    return build_hosted_provider_service(uow, config=config)
 
 
 HostedProviderServiceDep = Annotated[HostedProviderService, Depends(get_hosted_provider_service)]
