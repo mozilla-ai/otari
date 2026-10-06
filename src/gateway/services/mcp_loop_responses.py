@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from any_llm import aresponses
@@ -40,6 +41,7 @@ from gateway.services.mcp_loop import (
     ToolBackend,
 )
 from gateway.services.tool_format import openai_to_responses_tools
+from gateway.services.tool_usage import is_tool_error
 from gateway.services.tools import (
     MAX_USES_EXCEEDED_ERROR,
     Dialect,
@@ -125,7 +127,7 @@ async def _execute_function_calls(
             if capped and budget is not None:
                 budget.record(text)
         if native_items is not None:
-            native_items.extend(_native_items(call, pool, tools, refused=False))
+            native_items.extend(_native_items(replace(call, failed=is_tool_error(text)), pool, tools, refused=False))
         out.append({"type": "function_call_output", "call_id": item.call_id, "output": text})
     return out
 
@@ -275,7 +277,7 @@ async def _execute_stream_owned(
         else:
             if capped and budget is not None:
                 budget.record(text)
-        state.native_items.extend(_native_items(call, pool, tools, refused=False))
+        state.native_items.extend(_native_items(replace(call, failed=is_tool_error(text)), pool, tools, refused=False))
         results.append({"type": "function_call_output", "call_id": call.id, "output": text})
     return results
 

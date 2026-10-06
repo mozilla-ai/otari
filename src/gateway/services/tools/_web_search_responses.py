@@ -29,20 +29,17 @@ class ResponsesWebSearchRendering:
         return True
 
     def ran(self, call: NativeCall, pool: ToolBackend) -> list[Any]:
-        """The item for one search, whether or not it returned hits.
+        """The item for one search, ``failed`` where its backend errored and ``completed`` otherwise.
 
         ``pool`` carries no part of the item: unlike the Messages rendering, this
-        vocabulary reports that a search happened rather than what it found.
-        ``call.failed`` is not read either, so a search whose backend errored is still
-        announced as completed. The model is told about the failure in the call's own
-        output, and reporting it here as well needs an outcome the non-streaming caller
-        does not hold.
+        vocabulary reports that a search happened rather than what it found, so a
+        search that returned no hits is still completed.
         """
         return [
             ResponseFunctionWebSearch(
                 id=call.id,
                 action=ActionSearch(type="search", query=str(call.arguments.get("query") or "")),
-                status="completed",
+                status="failed" if call.failed else "completed",
                 type="web_search_call",
             )
         ]

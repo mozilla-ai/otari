@@ -951,6 +951,74 @@ async def test_stream_function_call_arguments_accumulate_across_deltas(
     assert pool.calls == [("fetch_url", {"u": "x", "n": 3})]
 
 
+_FAILED_SEARCH = "[tool error] web_search backend unreachable"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_search_is_announced_as_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The model saw the tool error, so the caller is not told the search completed."""
+    responses = iter(
+        [
+            _response(output=[_function_call("call_1", "web_search", '{"query": "otari gateway"}')]),
+            _response(output=[], status="completed"),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        return next(responses)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    out = await responses_tool_loop(
+        completion_kwargs={"model": "fake", "input_data": "go"},
+        pool=cast(Any, _FakePool(tool_names=["web_search"], results={"web_search": _FAILED_SEARCH})),
+        max_iterations=5,
+        native_tools=_SEARCH,
+    )
+
+    announced = [item for item in (out.output or []) if getattr(item, "type", None) == "web_search_call"]
+    assert [cast(Any, item).status for item in announced] == ["failed"]
+
+
+@pytest.mark.asyncio
+async def test_stream_announces_a_failed_search_as_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    args = '{"query": "otari gateway"}'
+    iter_streams = iter(
+        [
+            _async_iter(
+                _output_item_added(0, _function_call("call_1", "web_search", "")),
+                _function_call_args_done(0, "fc_item_1", "web_search", args),
+                _output_item_done(0, _function_call("call_1", "web_search", args)),
+                _response_completed(),
+            ),
+            _async_iter(_text_delta("msg_1", 0, "no luck"), _response_completed()),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, _FakePool(tool_names=["web_search"], results={"web_search": _FAILED_SEARCH})),
+            max_iterations=5,
+            native_tools=_SEARCH,
+        )
+    ]
+
+    statuses = [
+        getattr(e, "item").status
+        for e in events
+        if getattr(getattr(e, "item", None), "type", None) == "web_search_call"
+    ]
+    # One added and one done event, both carrying the item.
+    assert statuses == ["failed", "failed"]
+
+
 @pytest.mark.asyncio
 async def test_stream_announces_gateway_search_as_native_web_search_call(
     monkeypatch: pytest.MonkeyPatch,
