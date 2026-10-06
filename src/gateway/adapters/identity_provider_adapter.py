@@ -99,7 +99,7 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         self._session.add(identity)
         return identity
 
-    async def _register(self, address: str, *, full_name: str | None) -> User | None:
+    async def _register(self, address: str, *, full_name: str | None) -> User:
         """Create an account for the address, or return the account a concurrent sign-in created first.
 
         NOTE: A lost race rolls back only to the savepoint, so the session's transaction stays usable.

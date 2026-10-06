@@ -466,12 +466,12 @@ def test_a_lost_registration_race_signs_in_to_the_winner_rather_than_failing(
     NOTE: The test runs the race in sequence, because SQLite has no row locks.
     The winning account is committed after the adapter reads the address and before it inserts.
     """
-    organization_id = db_session.execute(select(Organization)).scalars().first()
-    assert organization_id is not None
+    organization = db_session.execute(select(Organization)).scalars().first()
+    assert organization is not None
     original = OrganizationService.provision_signup_tenancy
 
     async def _lose_the_race(self: OrganizationService, *, email: str, full_name: str | None) -> User:
-        db_session.add(User(email=email, is_active=True, active_organization_id=organization_id.id))
+        db_session.add(User(email=email, is_active=True, active_organization_id=organization.id))
         db_session.commit()
         return await original(self, email=email, full_name=full_name)
 
