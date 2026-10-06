@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, text, true
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, text, true
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlmodel import Field, SQLModel
 
@@ -224,10 +224,10 @@ class HostedProvider(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
     api_key_last4: str | None = Field(default=None, max_length=4)
     api_base: str | None = Field(default=None, max_length=1024)
     # What the provider's SDK client needs beyond a key (Bedrock's region and
-    # IAM pair). Stored unencrypted like ``OrgProviderKey.client_args``, with
-    # the same trade: credential-shaped values are masked on the way out
-    # (``redact_secret_like_values``) and are not encrypted at rest.
-    client_args: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
+    # IAM pair), as one JSON document encrypted the way the key is: an IAM
+    # secret in there is a credential, and masking it on the way out does not
+    # protect a copy of the database. Read back in one place, the service.
+    encrypted_client_args: str | None = Field(default=None)
     enabled: bool = Field(default=True, nullable=False, sa_column_kwargs={"server_default": true()})
 
 

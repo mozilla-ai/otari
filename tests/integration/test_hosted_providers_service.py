@@ -204,6 +204,28 @@ async def test_creating_a_provider_offers_what_it_lists_and_returns_no_key(
     assert await _versions(async_db, "openai:gpt-4o-mini") == []
 
 
+async def test_client_args_are_encrypted_at_rest_and_read_back_whole(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An IAM secret in the extras is a credential; masking the response does not protect a database copy."""
+    _discovery(monkeypatch)
+    service = _service(async_db)
+    await service.create_provider(
+        HostedProviderCreateRequest(
+            provider="bedrock", api_key=KEY, client_args={"region": "eu-west-1", "aws_secret_access_key": "shh"}
+        )
+    )
+
+    [row] = (await async_db.execute(select(HostedProvider))).scalars().all()
+    assert row.encrypted_client_args is not None
+    assert "shh" not in row.encrypted_client_args
+    assert "eu-west-1" not in row.encrypted_client_args
+    assert not hasattr(row, "client_args")
+    resolved = await service.resolve("bedrock")
+    assert resolved is not None
+    assert resolved.client_args == {"region": "eu-west-1", "aws_secret_access_key": "shh"}
+
+
 async def test_a_provider_that_will_not_list_still_lands(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
