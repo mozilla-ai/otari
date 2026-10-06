@@ -33,6 +33,13 @@ from gateway.types.provider_account import ResolvedCredential
 from gateway.types.provider_file import ProviderFile
 
 
+@pytest.fixture(autouse=True)
+def _no_sdk_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unset the base URLs the provider SDKs fall back to, so a developer's shell cannot redirect a read."""
+    for name in ("ANTHROPIC_BASE_URL", "OPENAI_BASE_URL"):
+        monkeypatch.delenv(name, raising=False)
+
+
 def _anthropic_reply(*outputs: list[dict[str, str]]) -> SimpleNamespace:
     """A Messages response whose tool-result blocks carry ``outputs``."""
     return SimpleNamespace(
