@@ -80,8 +80,11 @@ async def record(
     scoped_token_estimate: int = 0,
     request_estimate: int = 0,
     ttl_seconds: int,
+    commit: bool = True,
 ) -> str | None:
     """Write the row for a hold that has already been taken, returning its id.
+
+    ``commit=False`` stages the row in the caller's transaction for it to commit.
 
     Returns ``None`` when the request holds nothing on either mechanism, which
     is the common case for a free model, a budget-exempt key or a user with no
@@ -120,7 +123,8 @@ async def record(
                 request_amount=request_estimate,
             )
         )
-    await db.commit()
+    if commit:
+        await db.commit()
     return reservation_id
 
 
@@ -280,16 +284,7 @@ async def _release_holds(db: AsyncSession, reservation: BudgetReservation) -> No
     for scoped_budget_id, amount, token_amount, request_amount in lines:
         if amount > ZERO or token_amount > 0 or request_amount > 0:
             by_amounts.setdefault((amount, token_amount, request_amount), []).append(scoped_budget_id)
-    for (amount, token_amount, request_amount), budget_ids in by_amounts.items():
-        await release_scoped(
-            db,
-            budget_ids,
-            amount,
-            tokens=token_amount,
-            requests=request_amount,
-            commit=False,
-        )
-
+    # The user's row first, the ceilings last, the order every settlement locks them in.
     if reservation.user_reserved:
         values: dict[str, object] = {}
         if reservation.estimate > ZERO:
@@ -309,6 +304,16 @@ async def _release_holds(db: AsyncSession, reservation: BudgetReservation) -> No
                 .values(**values)
                 .execution_options(synchronize_session=False)
             )
+
+    for (amount, token_amount, request_amount), budget_ids in by_amounts.items():
+        await release_scoped(
+            db,
+            budget_ids,
+            amount,
+            tokens=token_amount,
+            requests=request_amount,
+            commit=False,
+        )
 
 
 async def _reclaim(db: AsyncSession, expired: Sequence[BudgetReservation]) -> int:

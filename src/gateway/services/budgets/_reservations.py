@@ -15,6 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core import error_codes
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.metered_pricing import estimate_metered_cost
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
@@ -62,6 +63,18 @@ ZERO = Decimal(0)
 # this. Fifteen minutes is well past the slowest request any of them serves, and
 # reclaiming a live hold is the one failure the TTL must not have.
 DEFAULT_RESERVATION_TTL_SEC = 900
+
+
+async def _active_user_with_budget(db: AsyncSession, user_id: str) -> tuple[User, Budget | None] | None:
+    """A non-deleted user and the budget it is attached to, in one query; no lock is taken."""
+    row = (
+        await db.execute(
+            select(User, Budget)
+            .outerjoin(Budget, Budget.budget_id == User.budget_id)
+            .where(User.user_id == user_id, User.deleted_at.is_(None))
+        )
+    ).first()
+    return None if row is None else (row[0], row[1])
 
 
 async def _cas_reset_user_budget(db: AsyncSession, user: User, budget: Budget, now: datetime) -> User:
@@ -118,13 +131,13 @@ async def _cas_reset_user_budget(db: AsyncSession, user: User, budget: Budget, n
         refreshed = await get_active_user(db, user_id_str)
         return refreshed or user
 
-    await db.rollback()
+    # Another request rolled the window first. Commit the empty transaction rather
+    # than roll it back: rollback() expires every instance in the session, and the
+    # caller goes on to read this user, its budget and the request's resolved
+    # prices. Refreshed, since the row now holds the other request's reset.
+    await db.commit()
+    await db.refresh(user)
     return user
-
-
-async def _get_budget(db: AsyncSession, budget_id: str) -> Budget | None:
-    result = await db.execute(select(Budget).where(Budget.budget_id == budget_id))
-    return result.scalar_one_or_none()
 
 
 async def get_budget_state(db: AsyncSession, user_id: str) -> BudgetState:
@@ -396,6 +409,7 @@ async def _held_handle(
     request_estimate: int,
     ttl_seconds: int,
     record_reservation: bool,
+    user_hold_uncommitted: bool = False,
 ) -> ReservationHandle:
     """Build the handle for a hold that has been taken, and ledger it.
 
@@ -409,9 +423,55 @@ async def _held_handle(
     or refund and guarantee the very leak the ledger exists to prevent. Degrading
     to an unledgered hold keeps the caller's normal settlement path working,
     which is exactly the behavior every reservation had before this table existed.
+
+    ``user_hold_uncommitted`` says the per-user hold is still in this transaction,
+    so it commits with its ledger row, one commit where there were two. A failure
+    then takes the hold with it, and the ceilings' holds, committed already, are
+    given back before the error is raised, so the request is refused holding
+    nothing rather than served on a hold that is not there.
     """
     reservation_id: str | None = None
-    if record_reservation:
+    if user_hold_uncommitted:
+        try:
+            if record_reservation:
+                reservation_id = await ledger.record(
+                    db,
+                    user_id=user_id,
+                    estimate=estimate,
+                    user_reserved=user_reserved,
+                    scoped_budgets=scoped,
+                    scoped_estimate=scoped_estimate,
+                    token_estimate=token_estimate,
+                    scoped_token_estimate=scoped_token_estimate,
+                    request_estimate=request_estimate,
+                    ttl_seconds=ttl_seconds,
+                    commit=False,
+                )
+            await db.flush()
+        except DATABASE_ERRORS:
+            # Before the commit, so nothing of this transaction landed.
+            with contextlib.suppress(*DATABASE_ERRORS):
+                await db.rollback()
+            if scoped:
+                await release_scoped(
+                    db,
+                    [item.budget_id for item in scoped],
+                    scoped_estimate,
+                    tokens=scoped_token_estimate,
+                    requests=request_estimate,
+                )
+            raise
+        try:
+            await db.commit()
+        except DATABASE_ERRORS:
+            # A commit can land and still report failure, a lost connection say,
+            # and then the sweep returns these holds through the ledger row, so
+            # giving the ceilings back here would release them twice. They are
+            # left as a failed commit always left them.
+            with contextlib.suppress(*DATABASE_ERRORS):
+                await db.rollback()
+            raise
+    elif record_reservation:
         try:
             reservation_id = await ledger.record(
                 db,
@@ -503,7 +563,8 @@ async def reserve_budget(
     held_tokens = min(max(estimated_tokens, 0), MAX_COUNT_LIMIT)
     held_requests = max(requests, 0)
     normalized = _normalize_strategy(strategy)
-    user = await get_active_user(db, user_id, for_update=False)
+    loaded = await _active_user_with_budget(db, user_id)
+    user, attached_budget = loaded if loaded is not None else (None, None)
 
     if not user:
         raise HTTPException(
@@ -536,7 +597,7 @@ async def reserve_budget(
     if normalized == "disabled":
         return no_reservation
 
-    budget = await _get_budget(db, user.budget_id) if user.budget_id else None
+    budget = attached_budget
 
     if budget is not None:
         now = datetime.now(UTC)
@@ -585,7 +646,13 @@ async def reserve_budget(
     # strategy, an exempt key), and none of those can be refused by a leak, so
     # sweeping for one would be a read per request bought for nothing. Skipped on
     # a top-up too, which runs inside a request whose own hold is live.
-    if record_reservation:
+    #
+    # Skipped as well when the row just read holds nothing: with a per-user budget
+    # every hold of this user, leaked or live, holds a request on the row, so a row
+    # holding none has nothing of this user's to reclaim. A user with no budget
+    # holds on the ceilings alone, which the row does not show, so it still looks.
+    holds_nothing = budget is not None and not (user.reserved or user.reserved_tokens or user.reserved_requests)
+    if record_reservation and not holds_nothing:
         await ledger.reclaim_expired_for_user(db, user_id)
 
     if scoped:
@@ -642,12 +709,12 @@ async def reserve_budget(
             )
             .execution_options(synchronize_session=False)
         )
-        await db.commit()
         return await _held_handle(
             db,
             user_id=user_id,
             estimate=usd or ZERO,
             user_reserved=True,
+            user_hold_uncommitted=True,
             strategy=normalized,
             counts_toward_budget=counts_toward_budget,
             scoped=scoped,
@@ -693,9 +760,9 @@ async def reserve_budget(
         )
         .execution_options(synchronize_session=False)
     )
-    await db.commit()
 
     if not getattr(result, "rowcount", 0):
+        await db.commit()
         BUDGET_EXCEEDED.inc()
         # The scoped ceilings admitted this request and are already holding it, so
         # give every axis back before rejecting. Without this the holds would leak
@@ -739,6 +806,7 @@ async def reserve_budget(
         user_id=user_id,
         estimate=usd or ZERO,
         user_reserved=True,
+        user_hold_uncommitted=True,
         strategy=normalized,
         counts_toward_budget=counts_toward_budget,
         scoped=scoped,
@@ -854,6 +922,16 @@ async def reconcile_reservation(
             values["reserved_requests"] = ledger.release_reserved_count_expression(
                 User.reserved_requests, handle.request_estimate
             )
+    # The user's row before the ceilings, here and in every transaction that writes
+    # both, so they always lock in one order; the ceilings last because a key's
+    # requests all share its ceiling's row, which is then locked only until the commit.
+    if values:
+        await db.execute(
+            update(User)
+            .where(User.user_id == handle.user_id, User.deleted_at.is_(None))
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
     # Every scoped ceiling the reservation held against has to be unwound too, or
     # the hold outlives the request and permanently shrinks that ceiling.
     await settle_scoped(
@@ -868,13 +946,6 @@ async def reconcile_reservation(
         counts_toward_budget=handle.counts_toward_budget,
         commit=False,
     )
-    if values:
-        await db.execute(
-            update(User)
-            .where(User.user_id == handle.user_id, User.deleted_at.is_(None))
-            .values(**values)
-            .execution_options(synchronize_session=False)
-        )
     # One commit for the claim, the ceilings and the user row. Committing the
     # claim on its own would mean a failure below left the row terminal with its
     # hold still held and its spend unrecorded, which no sweep would ever revisit.
@@ -922,14 +993,7 @@ async def refund_reservation(db: AsyncSession, handle: ReservationHandle) -> Non
         # turning the caller's next attribute read into sync IO on an async session.
         await db.commit()
         return
-    await release_scoped(
-        db,
-        handle.scoped_budget_ids,
-        handle.scoped_estimate,
-        tokens=handle.scoped_token_estimate,
-        requests=handle.request_estimate,
-        commit=False,
-    )
+    # The user's row first, the ceilings last; see :func:`reconcile_reservation`.
     if handle.reserved:
         values: dict[str, object] = {"reserved": _release_reserved(handle.estimate)}
         if handle.token_estimate:
@@ -946,6 +1010,14 @@ async def refund_reservation(db: AsyncSession, handle: ReservationHandle) -> Non
             .values(**values)
             .execution_options(synchronize_session=False)
         )
+    await release_scoped(
+        db,
+        handle.scoped_budget_ids,
+        handle.scoped_estimate,
+        tokens=handle.scoped_token_estimate,
+        requests=handle.request_estimate,
+        commit=False,
+    )
     # One commit, for the reason given in :func:`reconcile_reservation`.
     await db.commit()
 

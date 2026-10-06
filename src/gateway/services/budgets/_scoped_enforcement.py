@@ -33,7 +33,7 @@ from gateway.models.budgets import (
 )
 from gateway.models.tenancy import OrganizationMember, Workspace, WorkspaceMember
 from gateway.services.budgets._periods import period_window
-from gateway.services.workspace_scope import resolve_workspace_id
+from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -154,9 +154,7 @@ async def _resolve_identities(
     org_member_id: uuid.UUID | None = None
 
     if identity is None:
-        organization_id = (
-            await db.execute(select(col(Workspace.organization_id)).where(col(Workspace.id) == workspace_id))
-        ).scalar_one_or_none()
+        organization_id = await organization_for_workspace_id(db, workspace_id)
     else:
         # One query rather than three: the workspace names its organization, and
         # both membership rows hang off those two ids for this identity.

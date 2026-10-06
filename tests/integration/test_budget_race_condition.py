@@ -8,10 +8,10 @@ to binary floating point: the drift is far too small for ``approx`` to see.
 
 from decimal import Decimal
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import event
 
 from gateway.models.budgets import MAX_COUNT_LIMIT, Budget
 from gateway.models.pricing import ModelPricing
@@ -45,14 +45,21 @@ async def test_reserve_budget_reads_user_without_locking(
     async_db.add(user)
     await async_db.commit()
 
-    with patch(
-        "gateway.services.budgets._reservations.get_active_user",
-        wraps=get_active_user,
-    ) as mock_get_active_user:
+    statements: list[str] = []
+
+    def record(_conn: Any, _cursor: Any, statement: str, *_: Any) -> None:
+        statements.append(statement)
+
+    sync_engine = async_db.bind.sync_engine
+    event.listen(sync_engine, "before_cursor_execute", record)
+    try:
         handle = await reserve_budget(async_db, "race-user", 0.5, strategy="cas")
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", record)
 
     assert handle.reserved
-    assert mock_get_active_user.call_args.kwargs.get("for_update", False) is False
+    assert statements
+    assert not [statement for statement in statements if "FOR UPDATE" in statement.upper()]
 
 
 @pytest.mark.asyncio
