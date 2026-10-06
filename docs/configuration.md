@@ -200,6 +200,8 @@ skips a full model and tries its next candidate, and a request is refused with a
 429 only when no candidate has room. A direct call to a full model is refused.
 A candidate that fails before responding gives back its tokens and its slot but
 keeps its request counted, since the provider was sent it.
+A search tool is limited the same way, named as `provider:tool` (`exa:exa-search`),
+the name its pricing uses.
 
 Rules can also be added, changed and removed from the dashboard (Settings, Rate
 limit rules) or through `/api/v1/rate-limits`. A change applies at once on the

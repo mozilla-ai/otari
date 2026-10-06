@@ -1,7 +1,8 @@
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 
-from sqlalchemy import String, and_, cast, or_, select
+from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -221,3 +222,39 @@ async def owned_by_organization(db: AsyncSession, user_id: str, organization_id:
     """
     found = await db.execute(select(User.user_id).where(User.user_id == user_id, in_organization(organization_id)))
     return found.scalar_one_or_none() is not None
+
+
+@dataclass(frozen=True)
+class UserFilter:
+    """Narrows a ``users`` listing; a field left ``None`` does not filter."""
+
+    parent_user_id: str | None = None
+    external_id: str | None = None
+    blocked: bool | None = None
+
+
+def _listed(organization_id: uuid.UUID, filters: UserFilter) -> list[ColumnElement[bool]]:
+    conditions: list[ColumnElement[bool]] = [User.deleted_at.is_(None), in_organization(organization_id)]
+    if filters.parent_user_id is not None:
+        conditions.append(User.parent_user_id == filters.parent_user_id)
+    if filters.external_id is not None:
+        conditions.append(User.external_id == filters.external_id)
+    if filters.blocked is not None:
+        conditions.append(User.blocked.is_(filters.blocked))
+    return conditions
+
+
+async def page_users(
+    db: AsyncSession, organization_id: uuid.UUID, filters: UserFilter, *, skip: int, limit: int
+) -> Sequence[User]:
+    """One page of the live users ``organization_id`` can name, in ``user_id`` order."""
+    result = await db.execute(
+        select(User).where(*_listed(organization_id, filters)).order_by(User.user_id).offset(skip).limit(limit)
+    )
+    return result.scalars().all()
+
+
+async def count_users(db: AsyncSession, organization_id: uuid.UUID, filters: UserFilter) -> int:
+    """How many users :func:`page_users` would page through."""
+    total = await db.scalar(select(func.count()).select_from(User).where(*_listed(organization_id, filters)))
+    return int(total or 0)

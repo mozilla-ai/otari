@@ -5,7 +5,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +24,7 @@ from gateway.models.budgets import Budget
 from gateway.models.money import as_float
 from gateway.models.usage import UsageLog
 from gateway.models.users import User
-from gateway.repositories.users_repository import in_organization
+from gateway.repositories.users_repository import UserFilter, count_users, in_organization, page_users
 from gateway.services.budgets import budget_window
 from gateway.services.model_access import validate_allowed_models
 
@@ -275,22 +275,6 @@ _TOTAL_DESC = "Also count every matching user, in the Otari-Total-Count response
 TOTAL_COUNT_HEADER = "Otari-Total-Count"
 
 
-def _user_filters(
-    organization_id: uuid.UUID,
-    parent_user_id: str | None,
-    external_id: str | None,
-    blocked: bool | None,
-) -> list[Any]:
-    conditions: list[Any] = [User.deleted_at.is_(None), in_organization(organization_id)]
-    if parent_user_id is not None:
-        conditions.append(User.parent_user_id == parent_user_id)
-    if external_id is not None:
-        conditions.append(User.external_id == external_id)
-    if blocked is not None:
-        conditions.append(User.blocked.is_(blocked))
-    return conditions
-
-
 @router.get("")
 async def list_users(
     response: Response,
@@ -316,13 +300,10 @@ async def list_users(
     Otari's. ``include_total`` adds an ``Otari-Total-Count`` header counting
     every match, so ``limit=1`` with it counts a service key's end users.
     """
-    conditions = _user_filters(organization_id, parent_user_id, external_id, blocked)
+    filters = UserFilter(parent_user_id=parent_user_id, external_id=external_id, blocked=blocked)
     if include_total:
-        total = await db.scalar(select(func.count()).select_from(User).where(*conditions))
-        response.headers[TOTAL_COUNT_HEADER] = str(int(total or 0))
-    result = await db.execute(select(User).where(*conditions).order_by(User.user_id).offset(skip).limit(limit))
-    users = result.scalars().all()
-
+        response.headers[TOTAL_COUNT_HEADER] = str(await count_users(db, organization_id, filters))
+    users = await page_users(db, organization_id, filters, skip=skip, limit=limit)
     return [UserResponse.from_model(user) for user in users]
 
 

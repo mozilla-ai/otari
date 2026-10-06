@@ -275,7 +275,6 @@ async def _dispatch_search(
     else:
         user_id = resolve_passthrough_user_id(auth_result, request.user, reject_mismatch=config.reject_user_mismatch)
         rate_limit_info = await check_rate_limit(raw_request, user_id)
-    await admit_rate_limit_rules(raw_request, key_id=api_key_id, user_id=user_id, estimated_tokens=0)
 
     async def log_rejection(detail: str, *, row_model: str, row_provider: str | None, status_code: int) -> None:
         """Record a search the gateway itself refused.
@@ -376,6 +375,12 @@ async def _dispatch_search(
         use_defaults=False,
         organization_id=await organization_for_key_id(db, api_key_id),
     )
+    # After the gates above, so a search they refuse is counted by no rule, and
+    # before the reservation, so one the rules refuse holds no budget to refund.
+    rate_limit_grant = await admit_rate_limit_rules(raw_request, key_id=api_key_id, user_id=user_id, estimated_tokens=0)
+    if rate_limit_grant is not None:
+        # A `per: model` rule names a search tool by its pricing key, <provider>:<tool>.
+        await rate_limit_grant.admit_model(tool.provider, tool.name)
     reservation = await reserve_budget(
         db,
         user_id,
