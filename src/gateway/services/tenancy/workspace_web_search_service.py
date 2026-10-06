@@ -42,7 +42,6 @@ from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.web_retrieval_backend import MAX_RESULTS_CAP
 from gateway.services.web_retrieval_policy import (
-    MAX_WEB_SEARCH_DOMAINS,
     CanonicalHost,
     DomainRuleValidationError,
     canonicalize_domain_rule,
@@ -58,7 +57,6 @@ _MAX_RESULTS = MAX_RESULTS_CAP
 # Bound the opaque bag so one workspace's row cannot grow without limit; the
 # same numbers the hosted `WorkspaceWebSearchConfigUpdate` uses, since this is
 # the same configuration.
-_MAX_DOMAINS = MAX_WEB_SEARCH_DOMAINS
 _MAX_PROVIDER_OPTION_KEYS = 30
 _MAX_PROVIDER_OPTIONS_BYTES = 4096
 _MAX_PURPOSE_HINT_LENGTH = 2048

@@ -20,7 +20,6 @@ from gateway.api.routes._pipeline import _canonicalize_web_search_request_domain
 from gateway.exceptions.tools_exceptions import WorkspaceWebSearchDomainsExcludedError
 from gateway.models.tools import ResolvedWebSearchConfig
 from gateway.services.tenancy.workspace_web_search_service import (
-    _MAX_DOMAINS,
     _MAX_RESULTS,
     InvalidStoredWebSearchDomainError,
     _normalize_domains,
@@ -28,7 +27,7 @@ from gateway.services.tenancy.workspace_web_search_service import (
     narrow_web_search_tool_entry,
     read_web_search_policy,
 )
-from gateway.services.web_retrieval_policy import canonicalize_domain_rule
+from gateway.services.web_retrieval_policy import MAX_WEB_SEARCH_DOMAINS, canonicalize_domain_rule
 
 
 def _config(**overrides: object) -> ResolvedWebSearchConfig:
@@ -92,7 +91,7 @@ def test_empty_stored_domain_list_remains_unconfigured(value: list[str] | None) 
     assert _stored_domains(value) is None
 
 
-_TOO_MANY = [f"d{i}.example" for i in range(_MAX_DOMAINS + 1)]
+_TOO_MANY = [f"d{i}.example" for i in range(MAX_WEB_SEARCH_DOMAINS + 1)]
 
 
 @pytest.mark.parametrize(
@@ -398,7 +397,7 @@ def test_a_whitespace_only_hint_from_the_control_plane_reads_as_absent() -> None
         pytest.param({"enabled": True, "allowed_domains": ["https://example.com/path"]}, id="domain-not-host"),
         pytest.param({"enabled": True, "blocked_domains": [".".join(["a" * 60] * 5)]}, id="domain-too-long"),
         pytest.param(
-            {"enabled": True, "allowed_domains": [f"d{i}.example" for i in range(_MAX_DOMAINS + 1)]},
+            {"enabled": True, "allowed_domains": [f"d{i}.example" for i in range(MAX_WEB_SEARCH_DOMAINS + 1)]},
             id="too-many-domains",
         ),
     ],
@@ -410,7 +409,7 @@ def test_a_malformed_control_plane_answer_fails_closed(answer: dict[str, Any]) -
 
 @pytest.mark.parametrize(
     ("name", "server_value"),
-    [("MAX_RESULTS", _MAX_RESULTS), ("MAX_DOMAINS", _MAX_DOMAINS)],
+    [("MAX_RESULTS", _MAX_RESULTS), ("MAX_DOMAINS", MAX_WEB_SEARCH_DOMAINS)],
 )
 def test_the_card_repeats_the_ceiling_the_server_enforces(name: str, server_value: int) -> None:
     """The card cannot import a Python constant, so it repeats both and this pins the pair.
