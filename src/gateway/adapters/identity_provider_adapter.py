@@ -2,7 +2,6 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.exceptions.identity_exceptions import (
@@ -77,7 +76,11 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         users = UserRepository(self._session)
         identity = await users.get_by_email(address)
         if identity is None and self._open_signup:
-            identity = await self._register(address, full_name=full_name)
+            registration = await OrganizationService(
+                self._session,
+                membership_listener=WorkspaceBudgetDefaultService(self._session),
+            ).provision_signup_tenancy(email=address, full_name=full_name)
+            identity = registration.identity
         # A deactivated account is refused as unknown, so the response does not confirm that the account exists.
         if identity is None or not identity.is_active:
             raise OAuthIdentityUnknownError(provider)
@@ -98,24 +101,6 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
             identity.full_name = full_name
         self._session.add(identity)
         return identity
-
-    async def _register(self, address: str, *, full_name: str | None) -> User:
-        """Create an account for the address, or return the account a concurrent sign-in created first.
-
-        NOTE: A lost race rolls back only to the savepoint, so the session's transaction stays usable.
-        """
-        assert self._session is not None
-        try:
-            async with self._session.begin_nested():
-                return await OrganizationService(
-                    self._session,
-                    membership_listener=WorkspaceBudgetDefaultService(self._session),
-                ).provision_signup_tenancy(email=address, full_name=full_name)
-        except IntegrityError:
-            identity = await UserRepository(self._session).get_by_email(address)
-            if identity is None:
-                raise
-            return identity
 
 
 __all__ = ["DeploymentIdentityProviderAdapter"]

@@ -322,31 +322,14 @@ async def create_user_for_signup(
             # the time one it would register takes.
             await verify_absent_password_async(password)
             return None
-        # Staged into this call's transaction rather than committed on its own,
-        # so the password and verification token below land with it: an account
-        # committed here and nowhere else would be live, password-less and
-        # unverifiable.
-        try:
-            identity = await OrganizationService(db, membership_listener=membership_listener).provision_signup_tenancy(
-                email=address,
-                full_name=full_name,
-            )
-        except IntegrityError as exc:
-            # Two registrations of the same address at once. The unique index on
-            # email decides, and the loser answers like every other
-            # enumeration-safe path rather than reporting a 500 or admitting
-            # that the address is now taken.
-            #
-            # Matched on that index rather than on "an IntegrityError happened",
-            # the same discrimination ``update_password`` already makes with
-            # this helper: the other constraints this unit of work can violate
-            # (the organization slug, a membership) are not a taken address, and
-            # swallowing one as though it were would answer a failed
-            # registration with the sentence that says it succeeded.
-            await db.rollback()
-            if not _is_email_conflict(exc):
-                raise
+        # The registration, the password and the verification token below are committed together.
+        registration = await OrganizationService(db, membership_listener=membership_listener).provision_signup_tenancy(
+            email=address, full_name=full_name
+        )
+        if not registration.created:
+            # This answers like every other enumeration-safe refusal.
             return None
+        identity = registration.identity
 
     token = generate_token()
     values: dict[str, str | datetime | None] = {

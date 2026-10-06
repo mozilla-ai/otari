@@ -6,7 +6,7 @@ An ID that names another tenant's row answers not-found, so a caller cannot prob
 
 A deployment can hold more than one organization.
 Creating, listing and switching organizations therefore belong here rather than in an overlay.
-The service offers no way to delete an organization, because historical attribution resolves through its rows.
+No organization a caller can reach is ever deleted, because its usage history must keep pointing at it.
 """
 
 import asyncio
@@ -14,6 +14,7 @@ import hashlib
 import re
 import secrets
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -34,6 +35,7 @@ from gateway.exceptions.organizations_exceptions import (
     OrganizationNameRequiredError,
     OrganizationNotFoundError,
     OrganizationSlugUnavailableError,
+    SignupRegistrationUnresolvedError,
     WorkspaceNotFoundError,
 )
 from gateway.models.money import as_float
@@ -211,6 +213,14 @@ CALLER_WORKSPACE_LIMIT = 1000
 
 # How many invitation emails a bulk invite sends at once.
 _BULK_INVITE_MAIL_CONCURRENCY = 5
+
+
+@dataclass(frozen=True, slots=True)
+class SignupRegistration:
+    """Holds the identity a signup resolves to, and whether that signup created it."""
+
+    identity: User
+    created: bool
 
 
 class OrganizationService:
@@ -511,46 +521,33 @@ class OrganizationService:
 
         return OrganizationPublic.model_validate(organization)
 
-    async def provision_signup_tenancy(self, *, email: str, full_name: str | None) -> User:
-        """Create an identity for an address nobody has added, with a tenant of its own.
+    async def provision_signup_tenancy(self, *, email: str, full_name: str | None) -> SignupRegistration:
+        """Create an identity with its own organization and workspace, for the caller to commit.
 
-        The self-serve half of signup (otari-ai#2100), reached only where
-        ``open_signup`` is on: an address an admin already put on the roster is
-        claimed by ``user_service.create_user_for_signup`` instead and nothing
-        here runs. The rows are the ones every other identity on the deployment
-        holds, which is the point: an account that arrived this way is not a
-        second kind of member, so nothing downstream has to ask how it got here.
+        If another registration holds the address first, nothing is created, and the result holds that identity.
+        No role check applies, because no organization exists to hold a role until this returns.
 
-        The sibling of ``create_organization_for_user`` with the order reversed.
-        That one has a caller already and creates an organization for them; this
-        one has an address and no identity yet, and ``User.active_organization_id``
-        is not nullable, so the organization is created first and stamped with
-        its creator once the identity exists. No role check for the same reason
-        that one gives, and a stronger one: there is no organization to hold a
-        role in until this returns.
-
-        **Flushes and does not commit**, unlike every other write on this
-        service. The caller is mid-unit-of-work: signup hashes a password and
-        mints a verification token onto the row this returns, and an account
-        committed here without them would be a live, password-less,
-        unverifiable identity if the rest of that call failed.
-
-        The slug carries ``_generated_slug``'s random suffix, so two people
-        registering under the same name do not collide and the organization can
-        never be mistaken for first boot's ``default``.
+        NOTE: This does not commit. The caller must commit, or the registration is lost.
         """
         address = _validated_email(email)
         name = _default_organization_name(address, full_name)
+        # The organization is created first, because every identity must name one.
         organization = await self.organizations.create_organization(
             name=name,
             slug=_generated_slug(name),
             created_by_user_id=None,
         )
-        identity = await self.users.create_local_identity(
-            full_name=full_name,
+        identity = await self.users.try_create(
             email=address,
+            full_name=full_name,
             active_organization_id=organization.id,
         )
+        if identity is None:
+            await self.organizations.delete(organization)
+            winner = await self.users.get_by_email(address)
+            if winner is None:
+                raise SignupRegistrationUnresolvedError
+            return SignupRegistration(identity=winner, created=False)
         await self.organizations.update_organization(organization, {"created_by_user_id": identity.id})
         await self.members.create_membership(
             organization_id=organization.id,
@@ -570,7 +567,7 @@ class OrganizationService:
             user_id=identity.id,
             assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="owner")],
         )
-        return identity
+        return SignupRegistration(identity=identity, created=True)
 
     async def list_organization_memberships_for_user(
         self,
@@ -1889,4 +1886,4 @@ class OrganizationService:
         )
 
 
-__all__ = ["OrganizationService"]
+__all__ = ["OrganizationService", "SignupRegistration"]

@@ -42,6 +42,7 @@ from gateway.exceptions.organizations_exceptions import (
     MembershipUpdateError,
     NotAuthorizedError,
     OrganizationMemberAlreadyExistsError,
+    SignupRegistrationUnresolvedError,
     WorkspaceAlreadyExistsError,
     WorkspaceMemberAlreadyExistsError,
 )
@@ -80,6 +81,7 @@ from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetService, WorkspaceBudgetDefaultService
 from gateway.services.password_service import verify_password_async
 from gateway.services.tenancy import OrganizationService, WorkspaceService, user_service
+from gateway.services.tenancy.organization_service import SignupRegistration
 from gateway.services.tenancy.provisioning_service import (
     BOOTSTRAP_IDENTITY_KEY,
     ensure_bootstrap_identity,
@@ -158,7 +160,9 @@ def _register_together(monkeypatch: pytest.MonkeyPatch) -> None:
     real = OrganizationService.provision_signup_tenancy
     all_looked_up = asyncio.Barrier(_RACERS)
 
-    async def register_after_all_look_up(self: OrganizationService, *, email: str, full_name: str | None) -> User:
+    async def register_after_all_look_up(
+        self: OrganizationService, *, email: str, full_name: str | None
+    ) -> SignupRegistration:
         async with asyncio.timeout(_CHECKPOINT_TIMEOUT):
             await all_looked_up.wait()
         return await real(self, email=email, full_name=full_name)
@@ -1083,6 +1087,32 @@ async def test_concurrent_first_oauth_sign_ins_of_one_address_share_one_identity
     assert len(identities) == 1
     assert outcomes == [identities[0].id] * _RACERS
     assert await _organization_count(async_db) == organizations_before + 1
+
+
+async def test_a_lost_registration_whose_winner_cannot_be_read_is_unresolved(
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A registration that loses to an identity it then cannot find fails, and leaves no organization behind."""
+    organization, _ = await _seed_owner(async_db)
+    await UserRepository(async_db).create_local_identity(
+        full_name=None,
+        email="nova@example.com",
+        active_organization_id=organization.id,
+    )
+    await async_db.commit()
+    organizations_before = await _organization_count(async_db)
+
+    async def find_nobody(self: UserRepository, email: str) -> User | None:
+        return None
+
+    monkeypatch.setattr(UserRepository, "get_by_email", find_nobody)
+
+    with pytest.raises(SignupRegistrationUnresolvedError):
+        await OrganizationService(
+            async_db, membership_listener=WorkspaceBudgetDefaultService(async_db)
+        ).provision_signup_tenancy(email="nova@example.com", full_name=None)
+    assert await _organization_count(async_db) == organizations_before
 
 
 async def test_concurrent_accept_and_revoke_of_one_invitation_produce_one_consistent_outcome(

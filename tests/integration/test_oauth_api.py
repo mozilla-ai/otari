@@ -36,7 +36,7 @@ from gateway.models.tenancy import Organization, User
 from gateway.services import oauth_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 from gateway.services.oauth_service import FLOW_COOKIE_NAME, FLOW_COOKIE_PATH, OAuthIdentity
-from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.organization_service import OrganizationService, SignupRegistration
 
 ORIGIN = "http://testserver"
 PASSWORD = "a-real-password"  # pragma: allowlist secret
@@ -470,7 +470,7 @@ def test_a_lost_registration_race_signs_in_to_the_winner_rather_than_failing(
     assert organization is not None
     original = OrganizationService.provision_signup_tenancy
 
-    async def _lose_the_race(self: OrganizationService, *, email: str, full_name: str | None) -> User:
+    async def _lose_the_race(self: OrganizationService, *, email: str, full_name: str | None) -> SignupRegistration:
         db_session.add(User(email=email, is_active=True, active_organization_id=organization.id))
         db_session.commit()
         return await original(self, email=email, full_name=full_name)
