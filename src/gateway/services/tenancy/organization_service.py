@@ -76,7 +76,6 @@ from gateway.models.tenancy import (
     WorkspaceMember,
     WorkspaceMemberUpdate,
 )
-from gateway.repositories.code_execution import WorkspaceCodeExecutionPolicyRepository
 from gateway.repositories.tenancy import (
     InvitationRepository,
     OrganizationMemberRepository,
@@ -106,6 +105,7 @@ from gateway.services.tenancy.invitation_email import render_invitation_email
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.password_policy import validate_new_password
 from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME, password_claims_deployment
+from gateway.services.tenancy.workspace_listener import WorkspaceListener
 
 
 def _validated_organization_name(name: str | None) -> str:
@@ -234,17 +234,16 @@ class OrganizationService:
         *,
         membership_listener: MembershipListener | None,
         uow: UnitOfWork | None = None,
-        code_execution_on_by_default: bool = False,
+        workspace_listener: WorkspaceListener | None = None,
     ):
         """Build the service on a session.
 
         A service that changes workspace membership needs a listener and a Unit of Work over the same session,
         because the listener writes through that Unit of Work's open block. A read-only service needs neither.
-        ``code_execution_on_by_default`` starts each workspace this service creates with code execution on,
-        which a hosted control plane needs because it reads a workspace with no policy as off.
+        ``workspace_listener`` sets up each workspace this service creates, inside the same transaction.
         """
         self.db = db
-        self._code_execution_on_by_default = code_execution_on_by_default
+        self._workspace_listener = workspace_listener
         self._membership_listener = membership_listener
         self._uow = uow
         self.organizations = OrganizationRepository(db)
@@ -256,8 +255,8 @@ class OrganizationService:
 
     async def _start_new_workspace(self, workspace_id: uuid.UUID) -> None:
         """Stage what a workspace this service just created starts with, inside the open transaction."""
-        if self._code_execution_on_by_default:
-            await WorkspaceCodeExecutionPolicyRepository(self.db).create_enabled(workspace_id)
+        if self._workspace_listener is not None:
+            await self._workspace_listener.workspace_created(workspace_id)
 
     # ------------------------------------------------------------------
     # Context resolution and authorization

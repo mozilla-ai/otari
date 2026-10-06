@@ -51,6 +51,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import (
     MembershipListenerDep,
     UnitOfWorkDep,
+    WorkspaceListenerDep,
     get_config,
     get_db,
     is_valid_master_key,
@@ -77,6 +78,7 @@ from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.user_service import authenticate, operator_has_password
+from gateway.services.tenancy.workspace_listener import WorkspaceListener
 
 router = APIRouter(prefix="/auth/session", tags=["auth"])
 
@@ -215,6 +217,7 @@ async def _sign_in_with_master_key(
     *,
     uow: UnitOfWork,
     membership_listener: MembershipListener,
+    workspace_listener: WorkspaceListener,
 ) -> TenancyUser:
     """Bootstrap sign-in: verify the master key and resolve the operator identity.
 
@@ -244,7 +247,7 @@ async def _sign_in_with_master_key(
         db,
         uow=uow,
         membership_listener=membership_listener,
-        code_execution_on_by_default=config.is_hosted_mode,
+        workspace_listener=workspace_listener,
     )
 
 
@@ -282,6 +285,7 @@ async def create_session(
     config: Annotated[GatewayConfig, Depends(get_config)],
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
+    workspace_listener: WorkspaceListenerDep,
 ) -> SessionResponse:
     """Verify a sign-in credential and set the HttpOnly session cookie.
 
@@ -325,7 +329,13 @@ async def create_session(
         )
     if body.master_key is not None:
         identity = await _sign_in_with_master_key(
-            body.master_key, request, db, config, uow=uow, membership_listener=membership_listener
+            body.master_key,
+            request,
+            db,
+            config,
+            uow=uow,
+            membership_listener=membership_listener,
+            workspace_listener=workspace_listener,
         )
     else:
         assert body.email is not None and body.password is not None  # guaranteed by the model validator

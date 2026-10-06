@@ -36,7 +36,6 @@ from gateway.exceptions.organizations_exceptions import ForeignTenancyError
 from gateway.log_config import logger
 from gateway.models.platform import RuntimeSetting
 from gateway.models.tenancy import Organization, User
-from gateway.repositories.code_execution import WorkspaceCodeExecutionPolicyRepository
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -46,6 +45,7 @@ from gateway.repositories.tenancy import (
 )
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy.membership_listener import MembershipListener
+from gateway.services.tenancy.workspace_listener import WorkspaceListener
 
 # Stored in runtime_settings, and deliberately not a SETTABLE_KEY, so
 # runtime_settings_service ignores it exactly as it ignores the master-key hash
@@ -74,12 +74,11 @@ async def ensure_bootstrap_identity(
     *,
     uow: UnitOfWork,
     membership_listener: MembershipListener,
-    code_execution_on_by_default: bool = False,
+    workspace_listener: WorkspaceListener | None = None,
 ) -> User:
     """Return the operator identity, provisioning the tenancy root on first call.
 
-    ``code_execution_on_by_default`` starts a workspace this provisions with code
-    execution on, which a hosted control plane needs (it reads no policy as off).
+    ``workspace_listener`` sets up a workspace this provisions, inside the same transaction.
 
     Idempotent: the marker row makes the common path a single indexed lookup and
     the provisioning path run once per deployment. Commits, because it is the
@@ -96,7 +95,7 @@ async def ensure_bootstrap_identity(
             db,
             uow=uow,
             membership_listener=membership_listener,
-            code_execution_on_by_default=code_execution_on_by_default,
+            workspace_listener=workspace_listener,
         )
     except IntegrityError:
         # Two first requests raced. Whichever lost re-reads the winner's work:
@@ -222,7 +221,7 @@ async def _provision(
     *,
     uow: UnitOfWork,
     membership_listener: MembershipListener,
-    code_execution_on_by_default: bool,
+    workspace_listener: WorkspaceListener | None,
 ) -> User:
     """Create the default organization, workspace, operator identity, and memberships.
 
@@ -263,8 +262,8 @@ async def _provision(
                 organization_id=organization.id,
                 created_by_user_id=operator.id,
             )
-            if code_execution_on_by_default:
-                await WorkspaceCodeExecutionPolicyRepository(db).create_enabled(workspace.id)
+            if workspace_listener is not None:
+                await workspace_listener.workspace_created(workspace.id)
         # Serialized against a concurrent ``create_default`` on this workspace, via
         # the same lock ``WorkspaceService.add_member`` takes and for the reason
         # ``WorkspaceRepository.lock`` gives: this path reads the workspace's

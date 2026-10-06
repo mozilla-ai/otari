@@ -35,6 +35,7 @@ from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.api_keys import ApiKeyRepository
 from gateway.repositories.budgets import BudgetRepositories
+from gateway.repositories.code_execution import WorkspaceCodeExecutionPolicyRepository
 from gateway.repositories.files import FileRepositories
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
@@ -48,7 +49,7 @@ from gateway.repositories.tenancy import (
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetMembershipListener, BudgetService
-from gateway.services.code_execution import SandboxContainerRegistry
+from gateway.services.code_execution import CodeExecutionWorkspaceDefaults, SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
@@ -69,6 +70,7 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
 )
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
+from gateway.services.tenancy.workspace_listener import WorkspaceListener
 from gateway.services.tenancy.workspace_service import WorkspaceService
 from gateway.services.workspace_scope import default_workspace_id
 
@@ -804,13 +806,28 @@ def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
 MembershipListenerDep = Annotated[MembershipListener, Depends(get_membership_listener)]
 
 
+def get_workspace_listener(
+    uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]
+) -> WorkspaceListener:
+    """Return what sets up a workspace this request creates: code execution on, where no policy reads as off.
+
+    It writes through the request's Unit of Work, so a service that creates workspaces must be built on the same one.
+    """
+    return CodeExecutionWorkspaceDefaults(
+        WorkspaceCodeExecutionPolicyRepository(uow), on_by_default=config.is_hosted_mode
+    )
+
+
+WorkspaceListenerDep = Annotated[WorkspaceListener, Depends(get_workspace_listener)]
+
+
 async def get_current_identity(
     db: Annotated[AsyncSession, Depends(get_db)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
     _master_key: Annotated[str | None, Depends(verify_master_key)],
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
-    config: Annotated[GatewayConfig, Depends(get_config)],
+    workspace_listener: WorkspaceListenerDep,
 ) -> TenancyUser:
     """Resolve the tenancy identity acting on this request.
 
@@ -837,7 +854,7 @@ async def get_current_identity(
         db,
         uow=uow,
         membership_listener=membership_listener,
-        code_execution_on_by_default=config.is_hosted_mode,
+        workspace_listener=workspace_listener,
     )
 
 

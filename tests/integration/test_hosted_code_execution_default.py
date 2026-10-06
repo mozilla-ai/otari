@@ -18,6 +18,8 @@ from sqlmodel import col
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.tenancy import Workspace, WorkspaceMember
 from gateway.models.tools import WorkspaceCodeExecutionPolicy
+from gateway.repositories.code_execution import WorkspaceCodeExecutionPolicyRepository
+from gateway.services.code_execution import CodeExecutionWorkspaceDefaults
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 
 from .tenancy_helpers import membership_writes
@@ -122,9 +124,9 @@ async def test_first_sign_in_provisioning_starts_its_workspace_with_code_executi
     await async_db.execute(delete(Workspace).where(col(Workspace.name) == "Default workspace"))
     await async_db.commit()
 
-    operator = await ensure_bootstrap_identity(
-        async_db, **membership_writes(async_db), code_execution_on_by_default=True
-    )
+    writes = membership_writes(async_db)
+    defaults = CodeExecutionWorkspaceDefaults(WorkspaceCodeExecutionPolicyRepository(writes["uow"]), on_by_default=True)
+    operator = await ensure_bootstrap_identity(async_db, **writes, workspace_listener=defaults)
 
     workspace_ids = (
         (

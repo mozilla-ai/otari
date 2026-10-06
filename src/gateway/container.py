@@ -62,8 +62,10 @@ from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.budgets import BudgetRepositories
+from gateway.repositories.code_execution import WorkspaceCodeExecutionPolicyRepository
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.budgets import BudgetMembershipListener
+from gateway.services.code_execution import CodeExecutionWorkspaceDefaults
 from gateway.services.tenancy.organization_service import OrganizationService
 
 T = TypeVar("T")
@@ -266,7 +268,12 @@ def _identity_provider_adapter_factory(config: GatewayConfig | None) -> UnitOfWo
         return DeploymentIdentityProviderAdapter(
             UserRepository(session),
             OrganizationService(
-                session, membership_listener=BudgetMembershipListener(BudgetRepositories.on(uow)), uow=uow
+                session,
+                membership_listener=BudgetMembershipListener(BudgetRepositories.on(uow)),
+                uow=uow,
+                workspace_listener=CodeExecutionWorkspaceDefaults(
+                    WorkspaceCodeExecutionPolicyRepository(uow), on_by_default=bool(config and config.is_hosted_mode)
+                ),
             ),
             open_signup=bool(config and config.open_signup),
         )

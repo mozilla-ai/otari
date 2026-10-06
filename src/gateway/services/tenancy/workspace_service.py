@@ -45,11 +45,11 @@ from gateway.models.tenancy import (
     WorkspacesPublic,
     WorkspaceUpdate,
 )
-from gateway.repositories.code_execution import WorkspaceCodeExecutionPolicyRepository
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_listener import WorkspaceListener
 
 
 class WorkspaceService:
@@ -61,7 +61,7 @@ class WorkspaceService:
         *,
         uow: UnitOfWork,
         membership_listener: MembershipListener,
-        code_execution_on_by_default: bool = False,
+        workspace_listener: WorkspaceListener | None = None,
     ):
         """Build the service on a session and a Unit of Work over it, which the listener writes through."""
         self.db = db
@@ -69,7 +69,7 @@ class WorkspaceService:
         self.workspaces = WorkspaceRepository(db)
         self.members = WorkspaceMemberRepository(db)
         self.organizations = OrganizationService(db, membership_listener=None)
-        self._code_execution_on_by_default = code_execution_on_by_default
+        self._workspace_listener = workspace_listener
         self._membership_listener = membership_listener
 
     # ------------------------------------------------------------------
@@ -184,8 +184,8 @@ class WorkspaceService:
                     organization_id=organization.id,
                     created_by_user_id=user.id,
                 )
-                if self._code_execution_on_by_default:
-                    await WorkspaceCodeExecutionPolicyRepository(self.db).create_enabled(workspace.id)
+                if self._workspace_listener is not None:
+                    await self._workspace_listener.workspace_created(workspace.id)
                 member = await self.members.create(workspace_id=workspace.id, user_id=user.id, role="owner")
                 # No-op today: a workspace this fresh has no defaults of its own yet.
                 # Called anyway so every WorkspaceMember-creating path materializes

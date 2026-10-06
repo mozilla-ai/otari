@@ -85,6 +85,7 @@ from gateway.services.tenancy.password_reset_email import render_password_reset_
 from gateway.services.tenancy.provisioning_service import load_bootstrap_identity
 from gateway.services.tenancy.tokens import generate_token, hash_token
 from gateway.services.tenancy.verification_email import render_verification_email
+from gateway.services.tenancy.workspace_listener import WorkspaceListener
 
 # The unique index alembic creates on ``user.email`` (c4b6d8e0f2a3).
 _EMAIL_UNIQUE_INDEX = "ix_user_email"
@@ -268,6 +269,7 @@ async def create_user_for_signup(
     password: str,
     uow: UnitOfWork,
     membership_listener: MembershipListener,
+    workspace_listener: WorkspaceListener | None = None,
     full_name: str | None = None,
     terms_accepted: bool = False,
 ) -> User | None:
@@ -336,7 +338,7 @@ async def create_user_for_signup(
                     db,
                     membership_listener=membership_listener,
                     uow=uow,
-                    code_execution_on_by_default=config.is_hosted_mode,
+                    workspace_listener=workspace_listener,
                 ).provision_signup_tenancy(email=address, full_name=full_name)
                 if not registration.created:
                     # This answers like every other enumeration-safe refusal.
