@@ -203,9 +203,39 @@ class ProviderEndpointInvalidError(TenancyValidationError):
     """A name, provider, base URL or default field the endpoint cannot be saved with."""
 
 
-class HostedProviderNotFoundError(TenancyNotFoundError):
-    def __init__(self, provider: str) -> None:
-        super().__init__(f"Hosted provider '{provider}' not found")
+class HostedCatalogEmptyError(TenancyConflictError):
+    """A catalog sweep was asked for while no hosted provider offers a model.
+
+    Refused rather than run: the sweep keeps what is offered and removes the
+    rest, so with nothing offered the whole deployment price list would read as
+    serving nothing. A deployment in that state is unconfigured, which is a
+    different thing from one whose catalog has drifted.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "No hosted provider offers a model yet, so there is nothing to reconcile the catalog against. "
+            "Configure a provider and its models first."
+        )
+
+
+class HostedModelAlreadyOfferedError(TenancyConflictError):
+    """The unique index is the arbiter; a racing insert's conflict is mapped to this."""
+
+    def __init__(self, provider: str, model: str) -> None:
+        super().__init__(f"'{model}' is already offered on the '{provider}' hosted provider")
+
+
+class HostedModelNameRequiredError(TenancyValidationError):
+    """A model name that is blank once trimmed: half of a pricing key nothing could price."""
+
+    def __init__(self) -> None:
+        super().__init__("A model name is required")
+
+
+class HostedModelNotFoundError(TenancyNotFoundError):
+    def __init__(self, model_id: object) -> None:
+        super().__init__(f"Hosted model {model_id} not found")
 
 
 class HostedProviderAlreadyExistsError(TenancyConflictError):
@@ -213,14 +243,42 @@ class HostedProviderAlreadyExistsError(TenancyConflictError):
         super().__init__(f"A hosted provider for '{provider}' is already configured")
 
 
+class HostedProviderClientArgsUnreadableError(TenancyValidationError):
+    """A masked client argument was echoed back with nothing stored to keep under it.
+
+    Taken literally, the mask would be stored as the value and sent to the
+    provider. Refused so the operator enters the value in full, which is what
+    a rotated secret key needs anyway.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A masked client argument keeps the stored value, and there is none that can be read back. "
+            "Enter the client arguments in full."
+        )
+
+
+class HostedProviderKeyRequiredError(TenancyValidationError):
+    """The base was repointed at another host without the key being entered again.
+
+    Repointing alone would send the stored key to a host the caller chose
+    without the caller ever having to know the key.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Pointing a hosted provider at another host requires entering its key again")
+
+
+class HostedProviderNotFoundError(TenancyNotFoundError):
+    def __init__(self, provider: str) -> None:
+        super().__init__(f"Hosted provider '{provider}' not found")
+
+
 class HostedProviderUnknownProviderError(TenancyValidationError):
     """A ``provider`` that is blank, or names no any-llm implementation this build can dispatch to.
 
-    Refused on the way in rather than discovered at dispatch: the runtime turns
-    an unknown ``response_provider`` into a 502 for the caller whose request
-    hit it (``_pipeline.py``), which is a bad way for an operator to learn they
-    made a typo in an admin form. The same guard, including
-    ``PROVIDER_TYPE_ALIASES``, that ``OrgProviderKeyUnknownProviderError`` is.
+    Refused on the way in rather than discovered at dispatch, with the same
+    alias folding ``OrgProviderKeyUnknownProviderError`` applies.
     """
 
     def __init__(self, provider: str) -> None:
@@ -237,53 +295,6 @@ class HostedProviderUnsafeApiBaseError(TenancyValidationError):
         super().__init__(message)
 
 
-class HostedProviderSecretStorageError(TenancyValidationError):
-    """``OTARI_SECRET_KEY`` is unset or unusable, so no credential can be stored.
-
-    The message names the variable and never the key, and neither does the
-    ``SecretBoxUnavailableError`` it wraps.
-    """
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-
-
-class HostedModelNotFoundError(TenancyNotFoundError):
-    def __init__(self, model_id: object) -> None:
-        super().__init__(f"Hosted model {model_id} not found")
-
-
-class HostedModelNameRequiredError(TenancyValidationError):
-    """A model name that is blank once trimmed: half of a pricing key nothing could ever price."""
-
-    def __init__(self) -> None:
-        super().__init__("A model name is required")
-
-
-class HostedModelAlreadyOfferedError(TenancyConflictError):
-    """The unique index is the arbiter; this is what a racing insert's conflict is mapped to."""
-
-    def __init__(self, provider: str, model: str) -> None:
-        super().__init__(f"'{model}' is already offered on the '{provider}' hosted provider")
-
-
-class HostedCatalogEmptyError(TenancyConflictError):
-    """A catalog sweep was asked for while no hosted provider offers a model.
-
-    Refused rather than run. The sweep keeps the models this surface offers and
-    removes the rest, so with nothing offered there is no roster to reconcile
-    against and the whole deployment price list would read as serving nothing.
-    A deployment in that state has not been configured yet, which is a
-    different thing from one whose catalog has drifted.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(
-            "No hosted provider offers a model yet, so there is nothing to reconcile the catalog against. "
-            "Configure a provider and its models first."
-        )
-
-
 __all__ = [
     "HostedCatalogEmptyError",
     "HostedModelAlreadyOfferedError",
@@ -291,7 +302,8 @@ __all__ = [
     "HostedModelNotFoundError",
     "HostedProviderAlreadyExistsError",
     "HostedProviderNotFoundError",
-    "HostedProviderSecretStorageError",
+    "HostedProviderClientArgsUnreadableError",
+    "HostedProviderKeyRequiredError",
     "HostedProviderUnknownProviderError",
     "HostedProviderUnsafeApiBaseError",
     "OrgDefaultProviderKeyConflictError",

@@ -7,8 +7,9 @@ offers on each, with a serving switch per model; the rate stays in
 ``model_pricing``.
 
 The roster keys on the provider's name rather than on a foreign key, because a
-hosted provider may also be declared in ``config.yml`` or the environment, with
-no row of its own, and its roster still has to live somewhere.
+hosted provider may also be declared in configuration with no row of its own,
+and its roster still has to live somewhere. A seeded rate is told from a chosen
+one by the price version's ``origin``, so the roster carries no timestamp.
 
 Revision ID: e4410dfaf0db
 Revises: d4f7a2b9e6c1
@@ -27,7 +28,6 @@ depends_on: str | Sequence[str] | None = None
 
 _PROVIDERS = "hosted_providers"
 _MODELS = "hosted_provider_models"
-_MODELS_PROVIDER_INDEX = "ix_hosted_provider_models_provider"
 
 
 def upgrade() -> None:
@@ -39,8 +39,8 @@ def upgrade() -> None:
         sa.Column("api_key_last4", sa.String(length=4), nullable=True),
         sa.Column("api_base", sa.String(length=1024), nullable=True),
         sa.Column("encrypted_client_args", sa.String(), nullable=True),
-        sa.Column("enabled", sa.Boolean(), server_default=sa.true(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("enabled", sa.Boolean(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("provider", name="uq_hosted_providers_provider"),
@@ -50,17 +50,15 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("provider", sa.String(length=64), nullable=False),
         sa.Column("model", sa.String(length=255), nullable=False),
-        sa.Column("enabled", sa.Boolean(), server_default=sa.true(), nullable=False),
-        sa.Column("seeded_price_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("enabled", sa.Boolean(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint("id"),
+        # Leads with ``provider``, so a per-provider read needs no index of its own.
         sa.UniqueConstraint("provider", "model", name="uq_hosted_provider_models_provider_model"),
     )
-    op.create_index(_MODELS_PROVIDER_INDEX, _MODELS, ["provider"])
 
 
 def downgrade() -> None:
-    op.drop_index(_MODELS_PROVIDER_INDEX, table_name=_MODELS)
     op.drop_table(_MODELS)
     op.drop_table(_PROVIDERS)

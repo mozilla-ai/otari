@@ -8,16 +8,17 @@ domain reads and writes that list without naming the table: the surface that
 offers models on the deployment's hosted providers stores a rate here, seeds a
 community default here, and asks here what a model is currently served at.
 
-Writes follow ``POST /pricing``: a new version at the current instant, a cache
-rate the caller omitted inheriting the latest stored value and an explicit null
-clearing it, and a second write in the same instant landing on that instant's
-row rather than colliding on the composite key.
+A write is a new version at the current instant: a cache rate the caller
+omitted inherits the latest stored value and an explicit null clears it, and a
+second write in the same instant lands on that instant's row rather than
+colliding on the composite key.
 
 Every method that reaches the database opens a block on the Unit of Work it was
 built on, so a caller already inside a block has this work join its own.
 """
 
 import asyncio
+import uuid
 from collections.abc import Collection, Mapping, Sequence
 from datetime import datetime
 from decimal import Decimal
@@ -25,7 +26,7 @@ from decimal import Decimal
 from gateway.core.metered_pricing import quantize_rate
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.money import to_usd, to_usd_or_none
-from gateway.models.pricing import API_ORIGIN, ModelPricing
+from gateway.models.pricing import API_ORIGIN, SEED_ORIGIN, ModelPricing
 from gateway.repositories.pricing import ModelPricingRepository
 from gateway.services.pricing_service import default_model_pricing, normalize_effective_at
 
@@ -48,11 +49,10 @@ def _resolve_defaults(provider: str, models: Sequence[str], as_of: datetime) -> 
 
 
 def _stored_default(model_key: str, default: ModelPricing, effective_at: datetime) -> ModelPricing:
-    """The version that stores a community default as the deployment's own rate.
+    """The version that stores a community default on a hosted model's behalf.
 
-    ``origin`` is the API's, because from the ladder's point of view it is a
-    rate the deployment set; what tells it apart from one an operator chose is
-    the timestamp the offering surface keeps beside its model row.
+    ``SEED_ORIGIN`` is what lets a refresh move it with the dataset, where a
+    version somebody chose is left alone.
     """
     return ModelPricing(
         model_key=model_key,
@@ -64,7 +64,7 @@ def _stored_default(model_key: str, default: ModelPricing, effective_at: datetim
         cache_write_1h_price_per_million=default.cache_write_1h_price_per_million,
         pricing_tiers=list(default.pricing_tiers or []),
         unit=default.unit or "tokens",
-        origin=API_ORIGIN,
+        origin=SEED_ORIGIN,
     )
 
 
@@ -185,24 +185,23 @@ class DeploymentPricingService:
         async with self.uow:
             return await self.pricing.all_keys()
 
-    async def count_doomed_overrides(self, canonical_keys: Sequence[str]) -> int:
-        """How many organization overrides :meth:`delete_keys` would take above ``canonical_keys``."""
-        if not canonical_keys:
-            return 0
-        async with self.uow:
-            return await self.pricing.count_doomed_overrides(canonical_keys)
+    async def doomed_overrides(self, canonical_keys: Sequence[str]) -> list[tuple[uuid.UUID, uuid.UUID, str]]:
+        """Every organization override above ``canonical_keys``, as ``(id, organization_id, model_key)``.
 
-    async def delete_keys(self, model_keys: Sequence[str], canonical_keys: Sequence[str]) -> tuple[int, int]:
-        """Take every version of ``model_keys`` off the list, with the overrides above ``canonical_keys``.
-
-        Returns the rows removed from each table. An override an organization
-        holds on a model it reaches on its own key is spared; the repository
-        says why.
+        Listed rather than judged: which of them a sweep spares is a question
+        about the organizations' own provider keys, which another domain holds.
         """
-        if not model_keys and not canonical_keys:
+        if not canonical_keys:
+            return []
+        async with self.uow:
+            return await self.pricing.overrides_for_keys(canonical_keys)
+
+    async def delete_keys(self, model_keys: Sequence[str], override_ids: Sequence[uuid.UUID]) -> tuple[int, int]:
+        """Take every version of ``model_keys`` off the list, with the overrides named by id."""
+        if not model_keys and not override_ids:
             return 0, 0
         async with self.uow:
-            return await self.pricing.delete_keys(model_keys, canonical_keys)
+            return await self.pricing.delete_keys(model_keys, override_ids)
 
 
 __all__ = ["DeploymentPricingService"]

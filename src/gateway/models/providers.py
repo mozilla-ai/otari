@@ -4,11 +4,10 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, text, true
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlmodel import Field, SQLModel
 
-from gateway.models.base import Base, CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, _timestamp_field
+from gateway.models.base import Base
 from gateway.models.secret_fields import redact_secret_like_values
 
 
@@ -190,77 +189,61 @@ class ProviderEndpoint(Base):
 # ==============================================================================
 
 
-class HostedProvider(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+class HostedProvider(Base):
     """A provider this deployment serves hosted inference on, and the key it serves it with.
 
-    The deployment's own upstream credential, one row per any-llm
-    implementation: what serves a request that brings no BYO key and names no
-    configured instance. It is the last rung of the credential ladder
-    (``api/routes/_pipeline.resolve_dispatch_provider``), asked only after an
-    organization's key and a ``config.yml`` instance have both missed, so a row
-    here never displaces a credential the caller supplied.
+    One row per any-llm implementation: the deployment's own credential for a
+    request that brings none and names no configured instance, asked for only
+    after every rung upstream of it has missed. Keyed on the implementation
+    because the runtime echoes ``provider`` back as the name usage is keyed on;
+    named instances of one implementation stay a configuration concern.
 
-    Keyed on the implementation rather than an instance name because the
-    runtime echoes ``provider`` back as the upstream usage is keyed on, which is
-    what keeps a hosted request's pricing key stable. Named instances of one
-    implementation stay a ``config.yml`` concern.
-
-    The key is stored encrypted (``services/secret_box``) and is read back in
-    one place, the ``ModelProviderPort`` adapter, which hands it to the upstream
-    SDK in this process and never over the wire. ``api_key_last4`` is a separate
-    plaintext column so the admin list can tell rows apart without decrypting
-    every stored credential to draw a table.
-
-    SQLModel rather than the declarative ``Base`` style of the tables above,
-    because its ``Public`` schema is an endpoint contract the dashboard client
-    is generated from (``src/gateway/AGENTS.md``, "Data and migrations").
+    The key and the SDK client extras are both stored encrypted and read back
+    in one place. ``api_key_last4`` is kept in clear so a listing can tell rows
+    apart without decrypting every credential.
     """
 
     __tablename__ = "hosted_providers"
     __table_args__ = (UniqueConstraint("provider", name="uq_hosted_providers_provider"),)
 
-    provider: str = Field(max_length=64)
-    encrypted_api_key: str
-    api_key_last4: str | None = Field(default=None, max_length=4)
-    api_base: str | None = Field(default=None, max_length=1024)
-    # What the provider's SDK client needs beyond a key (Bedrock's region and
-    # IAM pair), as one JSON document encrypted the way the key is: an IAM
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    provider: Mapped[str] = mapped_column(String(64))
+    encrypted_api_key: Mapped[str] = mapped_column()
+    api_key_last4: Mapped[str | None] = mapped_column(String(4))
+    api_base: Mapped[str | None] = mapped_column(String(1024))
+    # Bedrock's region and IAM pair, as one encrypted JSON document: an IAM
     # secret in there is a credential, and masking it on the way out does not
-    # protect a copy of the database. Read back in one place, the service.
-    encrypted_client_args: str | None = Field(default=None)
-    enabled: bool = Field(default=True, nullable=False, sa_column_kwargs={"server_default": true()})
+    # protect a copy of the database.
+    encrypted_client_args: Mapped[str | None] = mapped_column()
+    enabled: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
+    )
 
 
-class HostedProviderModel(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+class HostedProviderModel(Base):
     """One model the deployment offers on a hosted provider.
 
     Membership and a serving switch. The rate lives in ``model_pricing`` keyed
-    ``provider:model``, the deployment price list billing already reads, so
-    this table cannot drift from what a request settles at.
+    ``provider:model``, so this table cannot drift from what a request settles
+    at. Keyed on the provider's name rather than a foreign key, because a
+    hosted provider may also be declared in configuration with no row of its
+    own, and its roster still lives here.
 
-    Keyed on the provider's *name* rather than a foreign key to
-    ``hosted_providers``, because a hosted provider need not be a row: a
-    deployment may declare one in ``config.yml`` or the environment, and its
-    roster, toggles and prices still live here. The service removes a
-    provider's model rows when the provider leaves, which the database cannot
-    do for it without the foreign key.
-
-    The serving switch is one-sided at dispatch: a row that is switched off
-    refuses, and a model with no row is served but not advertised. The offered
-    list is discovery's best effort, and a model the provider grew between
-    refreshes must not turn the whole provider off.
+    The switch is one-sided at dispatch: a row switched off refuses, and a
+    model with no row is served but not advertised.
     """
 
     __tablename__ = "hosted_provider_models"
     __table_args__ = (UniqueConstraint("provider", "model", name="uq_hosted_provider_models_provider_model"),)
 
-    provider: str = Field(max_length=64, index=True)
-    model: str = Field(max_length=255)
-    # A model nothing prices is offered but not served, so a model the pricing
-    # data has not caught up with cannot be billed at nothing.
-    enabled: bool = Field(default=True, nullable=False, sa_column_kwargs={"server_default": true()})
-    # Equal to ``effective_at`` of the model's latest ``model_pricing`` version
-    # only while that version is the community default this surface stored. Any
-    # later version, from this surface or ``POST /pricing``, is an operator's
-    # rate, and a refresh then leaves it alone.
-    seeded_price_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    provider: Mapped[str] = mapped_column(String(64))
+    model: Mapped[str] = mapped_column(String(255))
+    # A model nothing prices is offered but not served.
+    enabled: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
+    )
