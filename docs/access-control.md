@@ -226,8 +226,7 @@ The gateway answers that path itself and redirects the browser into the
 dashboard to finish. Where an edge serves the dashboard elsewhere, set
 `ui_base_url` too; see [Configuration](configuration.md#the-interface-address).
 
-OAuth signs in an existing Otari identity whose email the provider verifies. It
-does not provision arbitrary provider accounts.
+OAuth signs in the account that holds the address the provider verified. If no account holds that address, the result depends on `open_signup`, as it does for [signup](#signup). When `open_signup` is disabled, the sign-in is refused. When it is enabled, Otari creates an account with its own organization and workspace, and sends no verification email, because the provider has already verified the address. A sign-in is always refused if the provider did not verify the address, or if the account for it is deactivated.
 
 A provider sign-in on an address that is not yet verified marks it verified. It also removes any password and verification link set on that address before then: the provider confirms who owns the address, not who chose that password. The person can set a new password from their account page once signed in. A password on an address that was already verified is kept.
 

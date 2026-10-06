@@ -482,17 +482,13 @@ where logs are shared. Test delivery from Settings or
 
 ## Signup
 
-Signup is closed by default: only an address an owner or admin already added or
-invited can set a password. Open it where the deployment serves many tenants and
-each new address should arrive with an organization of its own:
+Signup is closed by default: only an address an owner or admin already added or invited can get an account, by setting a password or by signing in with Google or GitHub. Open it where the deployment serves many tenants and each new address should arrive with an organization of its own:
 
 ```yaml
 open_signup: true
 ```
 
-Mail has to be configured for either posture, since signup sends a verification
-link. See [Access control](access-control.md) for what each posture does with an
-address nobody has added.
+The signup form needs mail configured in either case, because it sends a verification link. A Google or GitHub sign-in needs no mail, because the provider has already verified the address. See [Access control](access-control.md) for what each value does with an address nobody has added.
 
 ## Built-in tools and guardrails variables
 

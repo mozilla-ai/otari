@@ -209,13 +209,7 @@ workspace roles. Deployment-wide operations require an operator. See
 
 ## Authentication options
 
-Password sign-in is tied to an existing identity, unless the deployment sets
-`open_signup: true`, which lets an unknown address register itself with an
-organization of its own. Optional passkeys, Google OAuth, and GitHub OAuth add
-ways for an existing identity to sign in; they do not make an unknown account a
-member. OAuth requires `public_base_url` plus the
-provider's client ID and secret. Passkeys can instead use `public_base_url`, or
-an explicit `webauthn_rp_id` and `webauthn_allowed_origins` pair.
+Password sign-in works for an existing account. Optional passkeys, Google OAuth and GitHub OAuth add more ways to sign in. When the deployment sets `open_signup: true`, a new address can also create an account with its own organization, through the signup form or a Google or GitHub sign-in. A passkey never creates an account. OAuth requires `public_base_url` plus the provider's client ID and secret. Passkeys can instead use `public_base_url`, or an explicit `webauthn_rp_id` and `webauthn_allowed_origins` pair.
 
 Signing in *can* add a membership in one case. If an organization has claimed and
 proven the email domain that the identity's verified address belongs to, the
