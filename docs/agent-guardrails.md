@@ -428,7 +428,9 @@ that touched nothing relevant does not pay for it. Setting
 have been made, and their approximate size, without making them.
 
 Run `otari guardrails validate --strict` in CI. A gate that has stopped matching
-reports the same as a gate that passed.
+reports the same as a gate that passed. A guardrail with more judge gates than
+one Stop event evaluates always carries the judge cap warning. `validate` has no
+way to accept a warning, so such a guardrail runs `validate` without `--strict`.
 
 Keep one file until the concerns can be named, then split by concern.
 
