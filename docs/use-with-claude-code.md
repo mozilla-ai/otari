@@ -113,6 +113,35 @@ The caller's own `requested_model` is received as a fact but kept out of the
 question, so the orchestrator's guess cannot pull the answer toward itself.
 The task reaches the decision model shortened to its first 32,000 characters.
 
+### Install the plugin
+
+The Claude Code side is the `otari-router` plugin, which this repository
+publishes as a plugin marketplace. In a Claude Code session:
+
+```
+/plugin marketplace add mozilla-ai/otari
+/plugin install otari-router@otari
+```
+
+The install asks for the gateway URL and an API key. Both are required; the
+key goes to Claude Code's secure storage, never to a settings file. The URL
+must be `https` unless the gateway runs on the same machine, since the key
+travels in a header, and it must point at a standalone gateway: a hybrid one
+does not serve the route, so every spawn would fall back. The plugin is
+active from then on, in that session and
+every one after. The
+[plugin's README](../plugins/otari-router/README.md) has the options, the
+scopes, how to update, and how to run the checkout's copy while developing.
+
+The plugin hooks `agent.spawn`, sends the request above, and passes the
+answer on with `next({ ...e, model })`. A settings-file hook cannot do this:
+`SubagentStart` only adds context. A fork always inherits its parent's model,
+so the plugin does not ask about one. Each spawn leaves a dim line in the
+transcript naming the model Otari chose and why, and each finished subagent
+one with the model it ran on and its token counts. When Otari does not
+answer, the subagent starts on the model it would have had anyway, and the
+line says so.
+
 ## Import Claude Code usage without routing
 
 Claude Code can send subscription usage to Otari over OpenTelemetry. This is for
