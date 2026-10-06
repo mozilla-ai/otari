@@ -131,6 +131,22 @@ def test_load_config_treats_empty_otari_scalar_env_as_unset(tmp_path: Path, monk
     assert config.master_key is None
 
 
+@pytest.mark.parametrize("yaml_value", ["${OTARI_MASTER_KEY}", '"   "'])
+def test_load_config_reads_a_blank_yaml_master_key_as_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, yaml_value: str
+) -> None:
+    # Compose forwards an unset OTARI_MASTER_KEY as "", which the interpolated
+    # form in config.example.yml then resolves to.
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text(f"master_key: {yaml_value}\n", encoding="utf-8")
+
+    monkeypatch.setenv("OTARI_MASTER_KEY", "")
+
+    config = load_config(str(config_file))
+
+    assert config.master_key is None
+
+
 def test_load_config_ignores_legacy_gateway_prefix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # The GATEWAY_ prefix was removed after the Otari rename deprecation window;
     # it no longer configures anything, so a value set only under GATEWAY_ falls
