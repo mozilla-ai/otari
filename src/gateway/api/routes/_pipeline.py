@@ -249,7 +249,6 @@ from gateway.services.tools import (
     claim_web_declarations,
     declares_code_execution,
     extract_web_tools,
-    native_code_execution_dialect,
     native_rendering,
     read_web_search_max_uses,
     web_search_intercept_enabled,
@@ -2471,30 +2470,13 @@ class ToolContext:
 
         A caller who declared a tool in a provider's words is owed that provider's
         items back, and each tool's registry entry decides whether its declaration
-        asks for them. Code execution answers from :attr:`native_code_execution_dialect`
-        instead, because the dialect loops still build its blocks themselves.
+        asks for them.
         """
-        names = {
+        return frozenset(
             name
             for name, entry in self.declared_gateway_tools.items()
             if (rendering := native_rendering(name, dialect)) is not None and rendering.declared(entry)
-        }
-        if self.use_sandbox and self.native_code_execution_dialect == dialect:
-            names.add(CODE_EXECUTION_TOOL_NAME)
-        return frozenset(names)
-
-    @property
-    def native_code_execution_dialect(self) -> Dialect | None:
-        """The wire format whose native code-execution blocks this request expects.
-
-        Set only when the gateway runs a declaration made in a provider's own
-        vocabulary: the caller asked in Anthropic's or OpenAI's words and its SDK
-        will look for that provider's result shape, so the loop answers in it.
-        ``None`` for ``otari_code_execution``, whose callers get the plain result.
-        """
-        if not self.use_sandbox:
-            return None
-        return native_code_execution_dialect(self.sandbox_tool_entry)
+        )
 
     @property
     def max_web_search_uses(self) -> int | None:

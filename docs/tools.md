@@ -257,7 +257,8 @@ because a beta names an Anthropic feature that provider was never going to
 serve, and refusing it would make the request fail purely because its model
 changed. On
 Responses a claimed `code_interpreter` is answered with a `code_interpreter_call`
-item. Chat Completions has no native shape, so a claimed declaration there
+item per run, in the order the calls ran among the gateway's other native items
+(a `web_search_call`, say). Chat Completions has no native shape, so a claimed declaration there
 resolves inside the tool loop and only the final message is returned. Nothing
 runs natively on Chat Completions, and the bare `code_execution` form is no
 provider's, so under `auto` both always run on the sandbox.

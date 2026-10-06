@@ -18,15 +18,8 @@ import json
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, cast, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, TypedDict, runtime_checkable
 
-from anthropic.types import (
-    CodeExecutionOutputBlock,
-    CodeExecutionResultBlock,
-    CodeExecutionToolResultBlock,
-    CodeExecutionToolResultError,
-    ServerToolUseBlock,
-)
 from anthropic.types.beta import BetaMCPToolResultBlock, BetaMCPToolUseBlock
 from anthropic.types.beta.beta_container import BetaContainer
 from any_llm import amessages
@@ -45,12 +38,10 @@ from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
     ToolBackend,
 )
-from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, CodeExecution
 from gateway.services.tool_format import openai_to_anthropic_tools
 from gateway.services.tool_usage import is_tool_error
 from gateway.services.tools import (
     MAX_USES_EXCEEDED_ERROR,
-    SERVER_TOOL_USE_ID_PREFIX,
     Dialect,
     NativeCall,
     ToolUseBudget,
@@ -126,59 +117,11 @@ def _max_uses_exceeded_result(call: NativeCall, native: _NativeSink | None) -> d
     return {"type": "tool_result", "tool_use_id": call.id, "content": MAX_USES_EXCEEDED_ERROR}
 
 
-def _native_code_execution_blocks(execution: CodeExecution) -> list[Any]:
-    """A ``server_tool_use`` / ``code_execution_tool_result`` pair for one gateway execution.
-
-    Emitted for a caller that declared code execution in Anthropic's own
-    vocabulary and whose request the gateway's sandbox ran instead. The result
-    block is the contract's own shape, which mirrors Anthropic's, so a client
-    parsing Anthropic responses reads it with no translation. A call the backend
-    never answered is reported in the vocabulary's error shape rather than
-    dropped, because the model was told about the failure and the client should
-    see the same story.
-    """
-    tool_use_id = f"{SERVER_TOOL_USE_ID_PREFIX}{uuid.uuid4().hex}"
-    content: CodeExecutionResultBlock | CodeExecutionToolResultError
-    if execution.result is None:
-        content = CodeExecutionToolResultError(type="code_execution_tool_result_error", error_code="unavailable")
-    else:
-        result = execution.result.content
-        content = CodeExecutionResultBlock(
-            type="code_execution_result",
-            stdout=result.stdout,
-            stderr=result.stderr,
-            return_code=result.return_code if result.return_code is not None else 0,
-            # The ids are the ones ``/v1/files`` serves, not the sandbox's own: a
-            # produced file that was not stored has no id the caller could use.
-            content=[
-                CodeExecutionOutputBlock(type="code_execution_output", file_id=file_id)
-                for file_id in execution.file_ids.values()
-            ],
-        )
-    return [
-        ServerToolUseBlock(
-            id=tool_use_id,
-            name=cast('Literal["code_execution"]', CODE_EXECUTION_TOOL_NAME),
-            input={"code": execution.code},
-            type="server_tool_use",
-        ),
-        CodeExecutionToolResultBlock(tool_use_id=tool_use_id, type="code_execution_tool_result", content=content),
-    ]
-
-
 def _native_blocks_for_call(pool: ToolBackend, call: NativeCall) -> list[Any]:
     """Native blocks describing one gateway tool call, if its tool has any in this dialect.
 
-    A code execution contributes blocks whether or not the program succeeded, because
-    a non-zero exit is a result the vocabulary can carry and a call the backend never
-    ran has an error shape of its own. An MCP call has no Anthropic block that would
-    be honest to emit and stays invisible.
+    An MCP call has no Anthropic block that would be honest to emit and stays invisible.
     """
-    if call.name == CODE_EXECUTION_TOOL_NAME:
-        take_executions = getattr(pool, "take_executions", None)
-        if take_executions is None:
-            return []
-        return [block for execution in take_executions() for block in _native_code_execution_blocks(execution)]
     rendering = native_rendering(call.name, Dialect.MESSAGES)
     return rendering.ran(call, pool) if rendering is not None else []
 
