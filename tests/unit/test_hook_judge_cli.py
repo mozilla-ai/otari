@@ -9,7 +9,7 @@ selection mechanism itself and the `codex exec` backend's own call shape.
 import json
 import shutil
 import subprocess
-import time
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -362,15 +362,17 @@ def test_judge_cli_flag_rejects_an_unsupported_backend(repo: Path) -> None:
 
 
 def test_judge_gates_run_concurrently_not_sequentially(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
-    """Five judge gates, each faked to take ~0.3s, must finish in well under
-    5 * 0.3s: `_hook_collect_judge_verdicts` runs them through a
-    `ThreadPoolExecutor` (`_HOOK_GATE_MAX_WORKERS`), not one after another.
-    Also pins that results keep declaration order despite running out of
-    order (`ThreadPoolExecutor.map` guarantees this; completion order would
+    """Five judge gates must all be in flight at once: `_hook_collect_judge_verdicts`
+    runs them through a `ThreadPoolExecutor` (`_HOOK_GATE_MAX_WORKERS`), not one
+    after another. Also pins that results keep declaration order despite running
+    out of order (`ThreadPoolExecutor.map` guarantees this; completion order would
     not).
+
+    A barrier every fake call must reach before any returns proves the overlap
+    directly. A wall-clock bound did not: on a loaded runner, scheduling overhead
+    alone pushed a concurrent run past it.
     """
     gate_count = 5
-    per_gate_seconds = 0.3
     gates_yaml = "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n" + "".join(
         f"  - id: g{i}\n    type: judge\n"
         "    runs: [stop.session]\n    enforcement: advisory\n    rubric: r{i}\n    message: m{i}\n"
@@ -378,6 +380,9 @@ def test_judge_gates_run_concurrently_not_sequentially(monkeypatch: pytest.Monke
     )
 
     monkeypatch.setattr(hook_cli, "_hook_collect_diff", lambda repo_root: "diff")
+    # Sequential execution leaves the first caller alone at the barrier until
+    # the timeout breaks it, so the test fails rather than hangs.
+    barrier = threading.Barrier(gate_count, timeout=10)
 
     def fake_run_judge(
         rubric: str,
@@ -389,12 +394,11 @@ def test_judge_gates_run_concurrently_not_sequentially(monkeypatch: pytest.Monke
         deadline: float,
         dry_run: bool = False,
     ) -> tuple[str, str]:
-        time.sleep(per_gate_seconds)
+        barrier.wait()
         return "pass", f"checked {rubric}"
 
     monkeypatch.setattr(hook_cli, "_hook_run_judge", fake_run_judge)
 
-    start = time.monotonic()
     results = hook_cli._hook_collect_judge_verdicts(
         parse_policy(gates_yaml, source="test.yml"),
         repo,
@@ -402,17 +406,9 @@ def test_judge_gates_run_concurrently_not_sequentially(monkeypatch: pytest.Monke
         [],
         judge_model=None,
     )
-    elapsed = time.monotonic() - start
 
     assert [result.gate_id for result in results] == [f"g{i}" for i in range(gate_count)]
     assert all(result.outcome == "pass" for result in results)
-    # Sequential would take at least gate_count * per_gate_seconds (1.5s);
-    # concurrent, with headroom to _HOOK_GATE_MAX_WORKERS >= gate_count,
-    # should take close to one gate's own time. Generous slack for CI jitter,
-    # still nowhere near the sequential floor.
-    assert elapsed < gate_count * per_gate_seconds * 0.6, (
-        f"took {elapsed:.2f}s for {gate_count} gates at {per_gate_seconds}s each -- looks sequential"
-    )
 
 
 _JUDGE_AND_DETERMINISTIC_YAML = (
