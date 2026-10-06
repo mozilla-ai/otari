@@ -9,9 +9,8 @@ gates:
     type: command
     runs: [pre_tool_use.command]
     enforcement: required
-    # Narrowed to real invocations rather than the bare tool name: a phrase
-    # matches a token in any position, so "npm" alone also refused ordinary
-    # commands that merely mention it, `grep -rn npm web/` among them.
+    # A phrase matches a token in any position, so the bare tool name would also
+    # refuse a command that only mentions it, such as `grep -rn npm web/`.
     # NOTE: A heredoc body is data to this gate, so a body that a shell runs is not checked.
     forbidden: ["npm install", "npm ci", "npm run", "npm i", "npm exec"]
     message: >-
