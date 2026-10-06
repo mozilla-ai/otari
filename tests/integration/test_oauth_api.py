@@ -322,9 +322,7 @@ def test_a_second_change_from_that_session_asks_for_the_password_it_now_holds(
 def test_an_address_nobody_put_on_the_roster_is_refused_rather_than_provisioned(
     client: TestClient, oauth_configured: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The closed posture, which is the default: social sign-in widens how a
-    # member authenticates, never who may. Registering here would let any holder
-    # of a Google account into a self-hosted gateway.
+    # With open_signup disabled (the default), a verified Google address alone must not create an account.
     stub_exchange(monkeypatch, email="stranger@example.com")
 
     response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
@@ -334,12 +332,9 @@ def test_an_address_nobody_put_on_the_roster_is_refused_rather_than_provisioned(
     assert SESSION_COOKIE_NAME not in response.cookies
 
 
-# ---------- the open posture ----------
-
-
 @pytest.fixture
 def signup_open(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The multi-tenant posture, which a control plane serving many tenants runs."""
+    """Enable open_signup on the deployment that TestClient serves."""
     monkeypatch.setattr(test_config, "open_signup", True)
 
 
@@ -350,10 +345,6 @@ def test_open_signup_registers_an_address_nobody_holds_and_signs_it_in(
     monkeypatch: pytest.MonkeyPatch,
     db_session: Session,
 ) -> None:
-    # The same answer `POST /auth/signup` already gives this address. Refusing
-    # here would leave one deployment registering a stranger who types a
-    # password and turning away the same stranger who proves the same address
-    # through Google.
     stub_exchange(monkeypatch, email="stranger@example.com")
 
     response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
@@ -370,9 +361,7 @@ def test_the_registered_identity_lands_the_tenancy_the_signup_form_lands(
     signup_open: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # An account that arrived through a provider is not a second kind of member,
-    # so nothing downstream has to ask how it got here. Read back through the
-    # session it just minted, which is what the dashboard does first.
+    # Read the tenancy through the new session, as the dashboard does.
     stub_exchange(monkeypatch, email="stranger@example.com", full_name="A Stranger")
 
     response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
@@ -395,9 +384,6 @@ def test_a_registered_identity_holds_the_provider_and_a_verified_address_and_no_
     monkeypatch: pytest.MonkeyPatch,
     db_session: Session,
 ) -> None:
-    # Verified because the provider proved the mailbox, and password-less
-    # because nobody set one: the registration path leaves both for the same
-    # block that stamps them on a rostered identity.
     stub_exchange(monkeypatch, email="stranger@example.com", full_name="A Stranger")
 
     assert client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"}).status_code == 200
@@ -434,9 +420,7 @@ def test_open_signup_registers_nobody_from_an_address_the_provider_would_not_ver
     monkeypatch: pytest.MonkeyPatch,
     db_session: Session,
 ) -> None:
-    # The refusal that has to come first: registering from an unverified address
-    # would let anybody who can make a provider echo a string take an account on
-    # somebody else's mailbox.
+    # Creating an account for an unverified address would let anyone hold an account on another person's address.
     stub_exchange(monkeypatch, email="stranger@example.com", email_verified=False)
 
     response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
@@ -453,8 +437,7 @@ def test_open_signup_does_not_register_a_deactivated_identity_afresh(
     monkeypatch: pytest.MonkeyPatch,
     db_session: Session,
 ) -> None:
-    # Reading "no account I may sign in" as "no account" would hand somebody an
-    # operator shut out a brand-new tenant and undo the deactivation.
+    # A new account here would undo the deactivation.
     add_member(client, master_key_header, email="ada@example.com")
     identity = _identity(db_session, "ada@example.com")
     identity.is_active = False
@@ -478,23 +461,16 @@ def test_a_lost_registration_race_signs_in_to_the_winner_rather_than_failing(
     monkeypatch: pytest.MonkeyPatch,
     db_session: Session,
 ) -> None:
-    """Two first sign-ins on one address: the loser takes the winner's account.
+    """A sign-in that loses the registration race signs in to the account the winner created.
 
-    Sequenced rather than raced, because this suite runs on SQLite, which has no
-    row locks and whose driver opens no transaction for a bare SELECT. The
-    second connection commits the winning row in the window the adapter has
-    already read through, so the registration below hits the unique index on
-    ``user.email`` exactly as a real racer would. Without the savepoint the
-    ``IntegrityError`` would poison the transaction the session row is written
-    in, and a lost race would answer 500 instead of signing the person in.
+    NOTE: The test runs the race in sequence, because SQLite has no row locks.
+    The winning account is committed after the adapter reads the address and before it inserts.
     """
     organization_id = db_session.execute(select(Organization)).scalars().first()
     assert organization_id is not None
     original = OrganizationService.provision_signup_tenancy
 
     async def _lose_the_race(self: OrganizationService, *, email: str, full_name: str | None) -> User:
-        # The winner, committed on another connection between this call's own
-        # read of the address and its insert.
         db_session.add(User(email=email, is_active=True, active_organization_id=organization_id.id))
         db_session.commit()
         return await original(self, email=email, full_name=full_name)
@@ -518,9 +494,7 @@ def test_open_signup_claims_a_rostered_address_rather_than_founding_a_second_ten
     signup_open: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Registering widens who may sign in; it does not change what happens to
-    # somebody already here, who would otherwise be moved out of the
-    # organization that added them and into an empty one of their own.
+    # An existing member signs in to their organization, and no new organization is created.
     user_id = add_member(client, master_key_header, email="ada@example.com")
     stub_exchange(monkeypatch)
 

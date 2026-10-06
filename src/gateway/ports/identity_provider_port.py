@@ -9,12 +9,8 @@ edition, so it stays a plain service (``gateway.services.oauth_service``, on
 apron-auth). What varies is the *policy* applied to the proven identity, and
 that is the whole of this port.
 
-The core adapter applies the posture ``open_signup`` already sets for the signup
-form: closed, an OAuth identity signs in as an account an operator put here and
-never creates one; open, an address nobody holds is registered with a tenant of
-its own. An overlay binds a different policy behind the same interface, an
-enterprise OIDC connection that maps a directory group onto an organization,
-without editing any file in this tree.
+An overlay can bind its own policy to this port without editing any file in this tree.
+For example, an enterprise edition can map an OIDC directory group to an organization.
 
 Scope is OAuth and OpenID Connect. Other federation shapes are separate
 surfaces rather than this method widened: a SAML assertion is keyed on a subject
@@ -62,9 +58,8 @@ class IdentityProviderPort(Protocol):
         collapse to the unverified side rather than be laundered into a verified
         identity. See the module docstring for where the tri-state model lands.
 
-        An adapter decides for itself what to do with an identity it does not
-        recognize, and both answers are legitimate: refuse, or register. The core
-        picks between them by ``open_signup``. Nothing here is required to write.
+        Each adapter decides whether to refuse an unknown identity or create an account for it.
+        An adapter does not have to write anything.
 
         Raises:
             TenancyError: If this identity may not sign in to this deployment.

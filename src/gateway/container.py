@@ -234,14 +234,7 @@ def _growth_signal_adapter(session: AsyncSession | None) -> GrowthSignalPort:
 
 
 def _identity_provider_adapter_factory(config: GatewayConfig | None) -> PortFactory[IdentityProviderPort]:
-    """The core ``IdentityProviderPort`` factory, closed over this app's signup posture.
-
-    Config as well as a session, because whether an address nobody holds may
-    register is a deployment setting (``open_signup``) and not a per-request
-    fact. A container built without config (the test helper's default) keeps the
-    closed posture, which is also the setting's own default: a build that cannot
-    say it is open is not one that should register strangers.
-    """
+    """Build the core ``IdentityProviderPort`` factory, bound to this app's ``open_signup`` setting."""
 
     def factory(session: AsyncSession | None) -> IdentityProviderPort:
         return DeploymentIdentityProviderAdapter(session, open_signup=bool(config and config.open_signup))
@@ -458,10 +451,7 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
     # this deployment's own database, which is where it has always gone. An
     # overlay binds a scale-out store behind the same port.
     container.bind(TelemetryStoragePort, _telemetry_storage_adapter)
-    # OAuth sign-in: the base applies the posture `open_signup` already sets for
-    # the signup form, so one deployment answers an unknown address the same way
-    # whichever door it arrives at. This one is a real implementation rather than
-    # a Null Object, because registering or refusing is itself the base's answer.
+    # OAuth sign-in: the base applies this deployment's `open_signup` setting.
     container.bind(IdentityProviderPort, _identity_provider_adapter_factory(config))
     # API key format: the base mints the open-source shape and checks every
     # presented key against its own rows. A hosted overlay binds a format that
