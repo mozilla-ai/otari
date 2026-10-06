@@ -1,0 +1,152 @@
+# Load-test stack: two Otari replicas behind nginx, one Postgres,
+# one Redis, and a fake provider. See README.md; ./run.sh drives it.
+name: otari-loadtest
+
+x-otari: &otari
+  build:
+    # Any checkout can be under test: OTARI_BUILD_CONTEXT=../../otari-pr1948.
+    context: ${OTARI_BUILD_CONTEXT:-..}
+    dockerfile: Dockerfile
+  image: otari:loadtest
+  command: ["otari", "serve", "--config", "/app/config.yml", "--log-level", "${OTARI_LOG_LEVEL:-WARNING}"]
+  volumes:
+    - ${OTARI_LOADTEST_CONFIG:-./otari-config.yml}:/app/config.yml:ro
+  environment:
+    - OTARI_PROVIDER_ACCOUNT_PEPPER=loadtest-pepper-not-a-secret-0123456789abcdef
+    - OTARI_SECRET_KEY=${OTARI_SECRET_KEY:-}
+  restart: "no"
+  deploy:
+    resources:
+      limits:
+        cpus: "${OTARI_REPLICA_CPUS:-2}"
+        memory: 2g
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    command:
+      - postgres
+      - -c
+      - max_connections=300
+      - -c
+      - shared_buffers=256MB
+      # For profile.py: per-statement timings and lock waits.
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
+      - -c
+      - track_io_timing=on
+    environment:
+      - POSTGRES_USER=otari
+      - POSTGRES_PASSWORD=otari
+      - POSTGRES_DB=otari
+    ports:
+      - "127.0.0.1:${LOADTEST_POSTGRES_PORT:-15432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U otari"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  fakeprovider:
+    image: python:3.14-slim
+    command: ["python", "-u", "/app/fakeprovider.py"]
+    volumes:
+      - ./fakeprovider.py:/app/fakeprovider.py:ro
+    environment:
+      - FAKE_LATENCY_MS=${FAKE_LATENCY_MS:-300}
+      - FAKE_TTFT_MS=${FAKE_TTFT_MS:-200}
+      - FAKE_CHUNKS=${FAKE_CHUNKS:-20}
+      - FAKE_CHUNK_INTERVAL_MS=${FAKE_CHUNK_INTERVAL_MS:-20}
+      # Model 1's provider quota, as Vertex would enforce it.
+      - FAKE_M1_QUOTA_RPM=${FAKE_M1_QUOTA_RPM:-100}
+    ports:
+      - "127.0.0.1:${LOADTEST_FAKE_PORT:-19000}:9000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/healthz')"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Started first and alone: startup runs the migrations, which take no lock, so
+  # two replicas migrating one fresh database at once would race.
+  otari-1:
+    <<: *otari
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      fakeprovider:
+        condition: service_healthy
+    healthcheck: &otari-health
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+
+  otari-2:
+    <<: *otari
+    image: otari:loadtest
+    pull_policy: never
+    build: !reset null
+    depends_on:
+      otari-1:
+        condition: service_healthy
+    healthcheck: *otari-health
+
+  lb:
+    image: nginx:1.29-alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "127.0.0.1:${LOADTEST_LB_PORT:-18080}:80"
+    depends_on:
+      otari-1:
+        condition: service_healthy
+      otari-2:
+        condition: service_healthy
+
+  # The load generator, setup and checks run inside the network, so latency is
+  # not measured through Docker Desktop's port forwarding. `./run.sh` calls it.
+  tools:
+    profiles: ["tools"]
+    image: ghcr.io/astral-sh/uv:python3.14-bookworm-slim
+    working_dir: /work
+    volumes:
+      - ./:/work
+      - uv-cache:/root/.cache/uv
+    environment:
+      - UV_LINK_MODE=copy
+    entrypoint: ["uv", "run", "--quiet"]
+
+  # CPU profilers for the replicas (run.sh's PROFILE=1). Each shares its
+  # replica's PID namespace, where the gateway is PID 1.
+  pyspy-1: &pyspy
+    profiles: ["profile"]
+    image: python:3.14-slim
+    pid: "service:otari-1"
+    cap_add: [SYS_PTRACE]
+    volumes:
+      - ./:/work
+      - pip-cache:/root/.cache/pip
+    entrypoint: ["sh", "-c", "pip install --quiet --root-user-action=ignore py-spy && exec py-spy \"$$@\"", "py-spy"]
+
+  pyspy-2:
+    <<: *pyspy
+    pid: "service:otari-2"
+
+volumes:
+  uv-cache:
+  pip-cache:

@@ -1,0 +1,91 @@
+# Gateway config for the load test, shared by both replicas.
+#
+# Model 1 is capped at 100 requests a minute in the gateway (`per: model`,
+# counted in Redis across both replicas), and the policy spills to Model 2 with
+# `router: priority` before calling a full model. The fake provider still
+# enforces the same 100 RPM quota on Model 1, as Vertex would, so check.py can
+# tell whether the gateway's cap held: a provider that never had to refuse.
+
+database_url: "postgresql://otari:otari@postgres:5432/otari"
+master_key: loadtest-master-key
+
+require_pricing: true
+default_pricing: false
+
+# Counted in Redis, so both replicas share one count.
+rate_limit_store: redis
+rate_limit_redis_url: redis://redis:6379/0
+rate_limits:
+  - name: model1-cap
+    per: model
+    models: ["vertexsim:gemini-2.5-flash"]
+    rpm: 100
+  - name: end-users
+    per: user
+    rpm: 120
+  - name: in-flight
+    per: deployment
+    max_concurrent: 400
+    # Short, so a replica killed mid-request gives its slots back within the run.
+    lease_sec: 120
+
+# Short, for the same reason: a killed replica's holds expire and are swept
+# within the run rather than after 15 minutes.
+budget_reservation_ttl_sec: 120
+budget_reservation_sweep_interval_sec: 30
+budget_estimate_default_output_tokens: 256
+
+# Prometheus metrics at /metrics on each replica, read by profile.py.
+enable_metrics: true
+
+db_pool_size: 20
+db_max_overflow: 20
+
+providers:
+  vertexsim:            # Model 1 (stands in for vertex:gemini-2.5-flash)
+    provider_type: openai-compatible
+    api_base: "http://fakeprovider:9000/m1/v1"
+    api_key: fake
+    models: [gemini-2.5-flash]
+    # The OpenAI client retries a 429 twice with backoff before the gateway
+    # sees it, which would add seconds before every spill.
+    client_args:
+      max_retries: 0
+  togethersim:          # Model 2 (stands in for together:llama-3.3-70b)
+    provider_type: openai-compatible
+    api_base: "http://fakeprovider:9000/m2/v1"
+    api_key: fake
+    models: [llama-3.3-70b]
+    client_args:
+      max_retries: 0
+  mistralsim:           # last resort for real errors
+    provider_type: openai-compatible
+    api_base: "http://fakeprovider:9000/m3/v1"
+    api_key: fake
+    models: [mistral-small]
+    client_args:
+      max_retries: 0
+
+pricing:
+  vertexsim:gemini-2.5-flash:
+    input_price_per_million: 0.30
+    output_price_per_million: 2.50
+  togethersim:llama-3.3-70b:
+    input_price_per_million: 0.88
+    output_price_per_million: 0.88
+  mistralsim:mistral-small:
+    input_price_per_million: 0.10
+    output_price_per_million: 0.30
+
+routing:
+  enabled: true
+  policies:
+    summarize:
+      select:
+        - router: priority
+          candidates:
+            - vertexsim:gemini-2.5-flash
+            - togethersim:llama-3.3-70b
+        - default: togethersim:llama-3.3-70b
+      on_failure:
+        - mistralsim:mistral-small
