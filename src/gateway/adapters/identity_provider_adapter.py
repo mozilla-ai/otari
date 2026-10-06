@@ -57,7 +57,7 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
 
         Raises:
             OAuthEmailNotVerifiedError: If the provider returned no address, or one it did not verify.
-            OAuthIdentityUnknownError: If the account for the address is deactivated,
+            OAuthIdentityUnknownError: If the account for the address is deactivated or deleted,
                 or if no account exists and ``open_signup`` is disabled.
 
         """
@@ -73,13 +73,13 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         if identity is None and self._open_signup:
             registration = await self._organizations.provision_signup_tenancy(email=address, full_name=full_name)
             identity = registration.identity
-        # A deactivated account is refused as unknown, so the response does not confirm that the account exists.
-        if identity is None or not identity.is_active:
+        if identity is None:
             raise OAuthIdentityUnknownError(provider)
 
-        # The account is read again under a lock because a concurrent sign-in may have changed it since the first read.
+        # The account is read again under a lock, so a change since the first read is seen before anything is written.
         identity = await self._users.get_locked(identity.id)
-        if identity is None:
+        # A deactivated account is refused as unknown, so the response does not confirm that the account exists.
+        if identity is None or not identity.is_active:
             raise OAuthIdentityUnknownError(provider)
 
         if identity.oauth_provider is None:
