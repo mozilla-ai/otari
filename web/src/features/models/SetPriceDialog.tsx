@@ -4,6 +4,7 @@ import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
+import { isValidModelKey } from "@/features/models/modelKey"
 import { formatNumber } from "@/shared/helpers/format"
 
 // Per-1M rates entered by an operator to reprice imported usage rows. Input and
@@ -49,14 +50,6 @@ function parseRate(value: string): number | null {
   if (trimmed === "") return null
   const parsed = Number(trimmed)
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : Number.NaN
-}
-
-// A pricing row is only ever read back under a `prefix:model` selector, so a key
-// with no provider or instance prefix would store a price nothing bills against
-// (see normalize_pricing_key in services/provider_kwargs.py). Accept the legacy
-// slash form too; the backend collapses it onto the colon form.
-export function isValidModelKey(value: string): boolean {
-  return /^[^\s:/]+[:/][^\s]+$/.test(value.trim())
 }
 
 export interface SetPriceDialogProps {

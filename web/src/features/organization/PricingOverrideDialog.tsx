@@ -5,6 +5,7 @@ import type { OrganizationPricingOverride } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
+import { isValidModelKey } from "@/features/models/modelKey"
 import { useModels } from "@/shared/api/models"
 import { useDeploymentOperator } from "@/shared/api/organizations"
 import {
@@ -15,7 +16,6 @@ import {
 import {
   deploymentManagedPrefixes,
   findOverlapping,
-  isValidModelKey,
   managedModelReason,
   parseRate,
   periodBlockedReason,

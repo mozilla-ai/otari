@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest"
 
 import type { ModelObject, OrganizationPricingOverride } from "@/client"
+import { isValidModelKey } from "@/features/models/modelKey"
 
 import {
   deploymentManagedPrefixes,
   findOverlapping,
-  isValidModelKey,
   managedModelReason,
   overrideStatus,
   parseRate,

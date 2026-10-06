@@ -8,11 +8,8 @@
  * a cap that binds nothing.
  *
  * The same shape the two price forms validate what was typed against
- * (`isValidModelKey`, in `SetPriceDialog` and in `organization/pricingOverride`),
- * including the legacy slash form the gateway collapses onto the colon one.
- * Stated here rather than borrowed from either, because this asks a question
- * about a catalog entry and those ask one about a draft, and a control that
- * imported a dialog would close a cycle with the dialog that renders it.
+ * (`isValidModelKey`), including the legacy slash form the gateway collapses
+ * onto the colon one.
  */
 
 const PREFIXED_SELECTOR = /^([^\s:/]+)[:/][^\s]+$/
@@ -20,6 +17,17 @@ const PREFIXED_SELECTOR = /^([^\s:/]+)[:/][^\s]+$/
 /** Whether a catalog id names a model a provider serves, rather than standing for one. */
 export function isPrefixedSelector(modelId: string): boolean {
   return PREFIXED_SELECTOR.test(modelId)
+}
+
+/**
+ * Whether a typed price key could ever be read back.
+ *
+ * A pricing row is only resolved under a `prefix:model` selector (see
+ * `normalize_pricing_key` in `services/provider_kwargs.py`), so a key with no
+ * provider or instance prefix would store a rate nothing bills against.
+ */
+export function isValidModelKey(value: string): boolean {
+  return isPrefixedSelector(value.trim())
 }
 
 /**
