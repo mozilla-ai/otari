@@ -614,6 +614,156 @@
         "title": "ActiveOrganizationUpdateRequest",
         "type": "object"
       },
+      "AgentModelRecommendation": {
+        "description": "The model recommended for the subagent.",
+        "example": {
+          "model": "sonnet",
+          "probabilities": {
+            "haiku": 0.21,
+            "opus": 0.07,
+            "sonnet": 0.72
+          },
+          "reason": "jev-1.13.0 chose sonnet with 72%"
+        },
+        "properties": {
+          "model": {
+            "description": "A model alias or id the harness can start the subagent on.",
+            "title": "Model",
+            "type": "string"
+          },
+          "probabilities": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The decision model's probability for each candidate, when it reports them.",
+            "title": "Probabilities"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why, in one short sentence the harness may show.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "title": "AgentModelRecommendation",
+        "type": "object"
+      },
+      "AgentModelRecommendationRequest": {
+        "additionalProperties": false,
+        "description": "A coding agent about to start a subagent, asking which model it should run on.\n\nEvery field but ``user`` is a fact the harness already holds at spawn time.\nThe prompt is the task the subagent is given; it is read for the\nrecommendation and never stored or logged.",
+        "example": {
+          "agent_type": "Explore",
+          "description": "Find the budget reservation code",
+          "harness": "claude-code",
+          "parent_model": "claude-opus-5",
+          "prompt": "Find where budgets are reserved before dispatch and report the call chain.",
+          "session_id": "bf05abe2-5ff2-4eb0-8459-ab578d5c9468",
+          "tool_use_id": "toolu_01Ab3dEfGh"
+        },
+        "properties": {
+          "agent_type": {
+            "description": "The subagent type: a built-in such as `Explore` or `Plan`, or a custom agent's name.",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Agent Type",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "description": "The caller's short description of the task.",
+            "maxLength": 1024,
+            "title": "Description",
+            "type": "string"
+          },
+          "harness": {
+            "description": "The agent harness asking, such as `claude-code`.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Harness",
+            "type": "string"
+          },
+          "parent_model": {
+            "description": "The model the parent conversation runs on, as the harness names it.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Parent Model",
+            "type": "string"
+          },
+          "prompt": {
+            "description": "The task the subagent is given.",
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "requested_model": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The model the caller asked for, if any. Sent as a fact; the recommendation is the gateway's.",
+            "title": "Requested Model"
+          },
+          "session_id": {
+            "description": "The harness's own id for the session the spawn happens in.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Session Id",
+            "type": "string"
+          },
+          "tool_use_id": {
+            "description": "The harness's own id for the tool call that spawns the subagent.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Tool Use Id",
+            "type": "string"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "User ID the decision is billed to when asking with the master key; not sent upstream.",
+            "title": "User"
+          }
+        },
+        "required": [
+          "harness",
+          "session_id",
+          "tool_use_id",
+          "agent_type",
+          "prompt",
+          "parent_model"
+        ],
+        "title": "AgentModelRecommendationRequest",
+        "type": "object"
+      },
       "AgentTelemetryBehavior": {
         "description": "Counts from the behavioral events already captured on the logs signal.",
         "properties": {
@@ -34852,6 +35002,56 @@
           }
         ],
         "summary": "Rank Candidates",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/api/v1/routing/recommend": {
+      "post": {
+        "description": "Recommend the model a subagent about to start should run on.\n\nThe harness sends the facts it holds at spawn time: its own ids for the\nsession and the spawning tool call, the subagent type, the task, the\nparent's model and the model the caller asked for, if any. The gateway asks\nthe decision model named by `agent_recommender_model` to pick one of the\n`agent_recommender_candidates`, and answers with that candidate, the\nmodel's probability for each candidate, and a one-line reason.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names who the decision is billed to.\n- API key: the decision is billed to the key's own user.",
+        "operationId": "routing-recommend_model_for_agent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentModelRecommendationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentModelRecommendation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Recommend Model For Agent",
         "tags": [
           "routing"
         ]

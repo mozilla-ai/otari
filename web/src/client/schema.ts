@@ -4352,6 +4352,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/routing/recommend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Recommend Model For Agent
+         * @description Recommend the model a subagent about to start should run on.
+         *
+         *     The harness sends the facts it holds at spawn time: its own ids for the
+         *     session and the spawning tool call, the subagent type, the task, the
+         *     parent's model and the model the caller asked for, if any. The gateway asks
+         *     the decision model named by `agent_recommender_model` to pick one of the
+         *     `agent_recommender_candidates`, and answers with that candidate, the
+         *     model's probability for each candidate, and a one-line reason.
+         *
+         *     Authentication modes:
+         *     - Master key: the ``user`` field is required and names who the decision is billed to.
+         *     - API key: the decision is billed to the key's own user.
+         */
+        post: operations["routing-recommend_model_for_agent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/routing/status": {
         parameters: {
             query?: never;
@@ -6162,6 +6193,103 @@ export interface components {
         ActiveOrganizationUpdateRequest: {
             /** Name */
             name: string;
+        };
+        /**
+         * AgentModelRecommendation
+         * @description The model recommended for the subagent.
+         * @example {
+         *       "model": "sonnet",
+         *       "probabilities": {
+         *         "haiku": 0.21,
+         *         "opus": 0.07,
+         *         "sonnet": 0.72
+         *       },
+         *       "reason": "jev-1.13.0 chose sonnet with 72%"
+         *     }
+         */
+        AgentModelRecommendation: {
+            /**
+             * Model
+             * @description A model alias or id the harness can start the subagent on.
+             */
+            model: string;
+            /**
+             * Probabilities
+             * @description The decision model's probability for each candidate, when it reports them.
+             */
+            probabilities?: {
+                [key: string]: number;
+            } | null;
+            /**
+             * Reason
+             * @description Why, in one short sentence the harness may show.
+             */
+            reason?: string | null;
+        };
+        /**
+         * AgentModelRecommendationRequest
+         * @description A coding agent about to start a subagent, asking which model it should run on.
+         *
+         *     Every field but ``user`` is a fact the harness already holds at spawn time.
+         *     The prompt is the task the subagent is given; it is read for the
+         *     recommendation and never stored or logged.
+         * @example {
+         *       "agent_type": "Explore",
+         *       "description": "Find the budget reservation code",
+         *       "harness": "claude-code",
+         *       "parent_model": "claude-opus-5",
+         *       "prompt": "Find where budgets are reserved before dispatch and report the call chain.",
+         *       "session_id": "bf05abe2-5ff2-4eb0-8459-ab578d5c9468",
+         *       "tool_use_id": "toolu_01Ab3dEfGh"
+         *     }
+         */
+        AgentModelRecommendationRequest: {
+            /**
+             * Agent Type
+             * @description The subagent type: a built-in such as `Explore` or `Plan`, or a custom agent's name.
+             */
+            agent_type: string;
+            /**
+             * Description
+             * @description The caller's short description of the task.
+             * @default
+             */
+            description: string;
+            /**
+             * Harness
+             * @description The agent harness asking, such as `claude-code`.
+             */
+            harness: string;
+            /**
+             * Parent Model
+             * @description The model the parent conversation runs on, as the harness names it.
+             */
+            parent_model: string;
+            /**
+             * Prompt
+             * @description The task the subagent is given.
+             */
+            prompt: string;
+            /**
+             * Requested Model
+             * @description The model the caller asked for, if any. Sent as a fact; the recommendation is the gateway's.
+             */
+            requested_model?: string | null;
+            /**
+             * Session Id
+             * @description The harness's own id for the session the spawn happens in.
+             */
+            session_id: string;
+            /**
+             * Tool Use Id
+             * @description The harness's own id for the tool call that spawns the subagent.
+             */
+            tool_use_id: string;
+            /**
+             * User
+             * @description User ID the decision is billed to when asking with the master key; not sent upstream.
+             */
+            user?: string | null;
         };
         /**
          * AgentTelemetryBehavior
@@ -22583,6 +22711,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RankResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "routing-recommend_model_for_agent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentModelRecommendationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentModelRecommendation"];
                 };
             };
             /** @description Validation Error */

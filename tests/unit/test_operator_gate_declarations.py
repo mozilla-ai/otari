@@ -108,6 +108,7 @@ _DATA_PLANE = "data plane: an API key or the master key, checked per route or in
 _PUBLIC_AUTH = "public auth: reached before the caller holds any credential"
 
 _UNGATED_ROUTERS: dict[str, str] = {
+    "agent_routing.router": _DATA_PLANE,
     "audio.router": _DATA_PLANE,
     "batches.router": _DATA_PLANE,
     "chat.router": _DATA_PLANE,

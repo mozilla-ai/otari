@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, FastAPI
 from gateway.api.deps import require_capability
 from gateway.api.routes import (
     admin,
+    agent_routing,
     agent_telemetry,
     aliases,
     audio,
@@ -169,6 +170,10 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(files.router, Plane.DATA | Plane.CONTROL),
     RouterMount(rerank.router, Plane.DATA | Plane.CONTROL),
     RouterMount(decisions.router, Plane.DATA | Plane.CONTROL),
+    # One decision call, billed here like a decisions call, so it needs both
+    # planes too. Open to any key, since the harness dispatches the subagent
+    # to its own provider.
+    RouterMount(agent_routing.router, Plane.DATA | Plane.CONTROL),
     RouterMount(search.router, Plane.DATA | Plane.CONTROL),
     RouterMount(batches.router, Plane.DATA | Plane.CONTROL),
     RouterMount(moderations.router, Plane.DATA | Plane.CONTROL),

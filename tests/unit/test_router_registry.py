@@ -22,6 +22,7 @@ _DATA_PLANE_NEEDING_CONTROL = {
     "/images/generations",
     "/moderations",
     "/rerank",
+    "/routing/recommend",
     "/search",
     "/systemone",
 }
