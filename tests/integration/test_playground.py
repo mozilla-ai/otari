@@ -98,6 +98,14 @@ def world(
     db_session_factory: Callable[[], Session],
 ) -> _World:
     """Two tenants and the identities that act in them."""
+    return _build_world(client, master_key_header, db_session_factory)
+
+
+def _build_world(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> _World:
     # One master-key call provisions the tenancy root, so the organizations built
     # below sit beside a real default rather than replacing it.
     assert client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == status.HTTP_200_OK
