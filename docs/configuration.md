@@ -171,16 +171,20 @@ rate_limits:
 ```
 
 - `rpm`: requests per minute.
-- `tpm`: tokens per minute. A request is admitted on an estimate (its prompt
-  plus `max_tokens`, or `budget_estimate_default_output_tokens` when it sets
-  none) and charged what it used once it completes. A request that fails is
-  charged the tokens its provider reported before failing, usually none, and a
-  request refused after admission (by its budget, say) is charged nothing. A
-  request whose estimate alone exceeds the limit is always refused, with no
-  `Retry-After`, since waiting would not let it in. `tpm_admission: used`
-  instead admits a request while the minute's tokens are under the limit and
-  counts only what it used, as LiteLLM does; choose it when clients send a
-  `max_tokens` far above what they use.
+- `tpm`: tokens per minute, counted on what each request used. A request is
+  admitted while the minute's tokens are under the limit and charged what it
+  used once it completes, as LiteLLM does, so the last request admitted in a
+  minute can take the count past the limit. A request that fails is charged the
+  tokens its provider reported before failing, usually none, and a request
+  refused after admission (by its budget, say) is charged nothing.
+  `tpm_admission: estimate` counts the way providers count their own quotas
+  instead: a request holds an estimate (its prompt plus `max_tokens`, or
+  `budget_estimate_default_output_tokens` when it sets none) while it runs, and
+  is refused when that does not fit. Use it for a limit meant to stay under a
+  provider's quota, such as a `per: model` rule that should move traffic to the
+  next model before the provider refuses it. Under it, a request whose estimate
+  alone exceeds the limit is always refused, with no `Retry-After`, since
+  waiting would not let it in.
 - `max_concurrent`: requests in flight at once. A slot is given back when the
   response ends, streamed or not. `lease_sec` (15 minutes by default) bounds how
   long a slot outlives a process that dies holding it.

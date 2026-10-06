@@ -11993,16 +11993,16 @@ export interface components {
             rpm?: number | null;
             /**
              * Tpm
-             * @description Tokens per minute. A request is admitted on its estimate (prompt plus max output, or budget_estimate_default_output_tokens) and charged what it used once it completes.
+             * @description Tokens per minute, counted on what each request used; see tpm_admission for how a request is admitted.
              */
             tpm?: number | null;
             /**
              * Tpm Admission
-             * @description How a tpm limit admits a request. 'estimate' holds the request's estimate and refuses it when that does not fit. 'used' admits a request while the minute's tokens are under the limit, holding none, and counts what it used once it completes, as LiteLLM does: a client that always sends a large max_tokens is limited by its usage, not its ceiling.
-             * @default estimate
+             * @description How a tpm limit admits a request. 'used' (the default) admits a request while the minute's tokens are under the limit and counts what it used once it completes, as LiteLLM does. 'estimate' holds the request's estimate (prompt plus max output, or budget_estimate_default_output_tokens) while it runs and refuses it when that does not fit, which is how providers count their own quotas: use it for a limit meant to stay under one.
+             * @default used
              * @enum {string}
              */
-            tpm_admission: "estimate" | "used";
+            tpm_admission: "used" | "estimate";
         };
         /**
          * RateLimitRulePublic
@@ -12049,16 +12049,16 @@ export interface components {
             source: "config" | "dashboard";
             /**
              * Tpm
-             * @description Tokens per minute. A request is admitted on its estimate (prompt plus max output, or budget_estimate_default_output_tokens) and charged what it used once it completes.
+             * @description Tokens per minute, counted on what each request used; see tpm_admission for how a request is admitted.
              */
             tpm?: number | null;
             /**
              * Tpm Admission
-             * @description How a tpm limit admits a request. 'estimate' holds the request's estimate and refuses it when that does not fit. 'used' admits a request while the minute's tokens are under the limit, holding none, and counts what it used once it completes, as LiteLLM does: a client that always sends a large max_tokens is limited by its usage, not its ceiling.
-             * @default estimate
+             * @description How a tpm limit admits a request. 'used' (the default) admits a request while the minute's tokens are under the limit and counts what it used once it completes, as LiteLLM does. 'estimate' holds the request's estimate (prompt plus max output, or budget_estimate_default_output_tokens) while it runs and refuses it when that does not fit, which is how providers count their own quotas: use it for a limit meant to stay under one.
+             * @default used
              * @enum {string}
              */
-            tpm_admission: "estimate" | "used";
+            tpm_admission: "used" | "estimate";
             /**
              * Updated At
              * @description When a stored rule last changed.
@@ -12107,9 +12107,9 @@ export interface components {
             tpm?: number | null;
             /**
              * Tpm Admission
-             * @description 'estimate' holds a request's estimate; 'used' counts only what it used.
+             * @description 'used' counts only what a request used; 'estimate' holds its estimate.
              */
-            tpm_admission?: ("estimate" | "used") | null;
+            tpm_admission?: ("used" | "estimate") | null;
         };
         /**
          * RateLimitRulesPublic

@@ -44,6 +44,11 @@ def per_key_rpm_client(postgres_url: str) -> Generator[TestClient]:
 
 @pytest.fixture
 def tpm_client(postgres_url: str) -> Generator[TestClient]:
+    yield from _client(postgres_url, [{"name": "tpm", "per": "user", "tpm": 1000, "tpm_admission": "estimate"}])
+
+
+@pytest.fixture
+def used_tpm_client(postgres_url: str) -> Generator[TestClient]:
     yield from _client(postgres_url, [{"name": "tpm", "per": "user", "tpm": 1000}])
 
 
@@ -130,6 +135,19 @@ def test_a_request_too_large_for_the_limit_is_refused(tpm_client: TestClient) ->
     detail = response.json()["detail"]
     assert detail.startswith("Request needs an estimated 5,")
     assert detail.endswith("tokens; rate limit 'tpm' allows 1,000 per minute")
+
+
+def test_by_default_a_large_max_tokens_is_admitted_and_what_was_used_counts(used_tpm_client: TestClient) -> None:
+    """A client that always asks for far more than it uses is limited by its usage, not refused outright."""
+    headers = _key(used_tpm_client, "gina")
+
+    async def completion(**kwargs: Any) -> ChatCompletion:
+        return _completion(400)
+
+    with patch("gateway.api.routes.chat.acompletion", new=completion):
+        statuses = [_chat(used_tpm_client, headers, max_tokens=5000).status_code for _ in range(4)]
+
+    assert statuses == [200, 200, 200, 429]
 
 
 def test_a_concurrency_slot_is_given_back_when_the_response_ends(concurrency_client: TestClient) -> None:

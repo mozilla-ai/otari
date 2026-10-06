@@ -154,7 +154,7 @@ describe("RateLimitsCard", () => {
             tpm: null,
             max_concurrent: null,
             lease_sec: 900,
-            tpm_admission: "estimate",
+            tpm_admission: "used",
           },
         },
       ]),
@@ -190,7 +190,7 @@ describe("RateLimitsCard", () => {
         tpm: null,
         max_concurrent: null,
         lease_sec: 900,
-        tpm_admission: "estimate",
+        tpm_admission: "used",
       }),
     )
   })

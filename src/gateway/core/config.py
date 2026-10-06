@@ -379,17 +379,18 @@ class RateLimitRule(BaseModel):
         default=None,
         ge=1,
         description=(
-            "Tokens per minute. A request is admitted on its estimate (prompt plus max output, or "
-            "budget_estimate_default_output_tokens) and charged what it used once it completes."
+            "Tokens per minute, counted on what each request used; see tpm_admission for how a request is admitted."
         ),
     )
-    tpm_admission: Literal["estimate", "used"] = Field(
-        default="estimate",
+    tpm_admission: Literal["used", "estimate"] = Field(
+        default="used",
         description=(
-            "How a tpm limit admits a request. 'estimate' holds the request's estimate and refuses "
-            "it when that does not fit. 'used' admits a request while the minute's tokens are under "
-            "the limit, holding none, and counts what it used once it completes, as LiteLLM does: "
-            "a client that always sends a large max_tokens is limited by its usage, not its ceiling."
+            "How a tpm limit admits a request. 'used' (the default) admits a request while the "
+            "minute's tokens are under the limit and counts what it used once it completes, as "
+            "LiteLLM does. 'estimate' holds the request's estimate (prompt plus max output, or "
+            "budget_estimate_default_output_tokens) while it runs and refuses it when that does not "
+            "fit, which is how providers count their own quotas: use it for a limit meant to stay "
+            "under one."
         ),
     )
     max_concurrent: int | None = Field(default=None, ge=1, description="Requests in flight at once.")

@@ -109,7 +109,7 @@ async def test_a_refused_request_is_counted_by_no_rule() -> None:
 
 @pytest.mark.asyncio
 async def test_tokens_are_admitted_on_the_estimate_and_charged_what_was_used() -> None:
-    rules = _rules(InMemoryRateLimitStore(), {"name": "tpm", "per": "key", "tpm": 1000})
+    rules = _rules(InMemoryRateLimitStore(), {"name": "tpm", "per": "key", "tpm": 1000, "tpm_admission": "estimate"})
 
     grant = await _admit(rules, tokens=600)
     with pytest.raises(HTTPException, match="'tpm' exceeded: 1,000 tokens per minute"):
@@ -121,7 +121,7 @@ async def test_tokens_are_admitted_on_the_estimate_and_charged_what_was_used() -
 
 @pytest.mark.asyncio
 async def test_a_request_larger_than_the_limit_is_not_told_to_retry() -> None:
-    rules = _rules(InMemoryRateLimitStore(), {"name": "tpm", "per": "key", "tpm": 1000})
+    rules = _rules(InMemoryRateLimitStore(), {"name": "tpm", "per": "key", "tpm": 1000, "tpm_admission": "estimate"})
 
     with pytest.raises(HTTPException) as exc_info:
         await _admit(rules, tokens=1001)
@@ -134,7 +134,7 @@ async def test_a_request_larger_than_the_limit_is_not_told_to_retry() -> None:
 @pytest.mark.asyncio
 async def test_only_the_first_settlement_counts() -> None:
     """A request settled on success and again on a failure path is charged once."""
-    rules = _rules(InMemoryRateLimitStore(), {"name": "tpm", "per": "key", "tpm": 1000})
+    rules = _rules(InMemoryRateLimitStore(), {"name": "tpm", "per": "key", "tpm": 1000, "tpm_admission": "estimate"})
 
     grant = await _admit(rules, tokens=600)
     await grant.settle(900)
@@ -210,7 +210,9 @@ async def test_the_middleware_gives_slots_back_however_the_request_ends(fails: b
 @pytest.mark.parametrize("handed_over", [False, True])
 async def test_the_middleware_charges_no_tokens_to_a_request_refused_before_dispatch(handed_over: bool) -> None:
     """A budget refusal after admission frees its estimate; a dispatched request settles its own."""
-    rules = _rules(InMemoryRateLimitStore(), {"name": "tpm", "per": "deployment", "tpm": 1000})
+    rules = _rules(
+        InMemoryRateLimitStore(), {"name": "tpm", "per": "deployment", "tpm": 1000, "tpm_admission": "estimate"}
+    )
 
     async def app(scope: Scope, receive: Receive, send: Send) -> None:
         grant = await rules.admit(Request(scope), key_id=None, user_id=None, estimated_tokens=600)
@@ -349,7 +351,14 @@ async def test_an_attempt_whose_admission_breaks_gives_back_what_it_took() -> No
 async def test_a_served_attempt_is_settled_and_released_with_its_request() -> None:
     rules = _rules(
         InMemoryRateLimitStore(),
-        {"name": "cap", "per": "model", "models": ["openai:gpt-4o"], "tpm": 1000, "max_concurrent": 1},
+        {
+            "name": "cap",
+            "per": "model",
+            "models": ["openai:gpt-4o"],
+            "tpm": 1000,
+            "tpm_admission": "estimate",
+            "max_concurrent": 1,
+        },
     )
     grant = await _admit(rules, tokens=600)
     await grant.admit_model("openai", "gpt-4o")
@@ -384,7 +393,7 @@ async def test_a_refused_attempt_is_counted_by_no_model_rule() -> None:
 @pytest.mark.asyncio
 async def test_used_admission_admits_past_an_estimate_and_counts_what_was_used() -> None:
     """MLPA sends max_tokens 8192 against a 2,000 tpm: only what a request used may count."""
-    rules = _rules(InMemoryRateLimitStore(), {"name": "tpm", "per": "user", "tpm": 2000, "tpm_admission": "used"})
+    rules = _rules(InMemoryRateLimitStore(), {"name": "tpm", "per": "user", "tpm": 2000})
 
     first = await _admit(rules, tokens=8192)
     await first.settle(1500)
@@ -394,3 +403,8 @@ async def test_used_admission_admits_past_an_estimate_and_counts_what_was_used()
         await _admit(rules, tokens=8192)
 
     assert exc_info.value.detail == "Rate limit 'tpm' exceeded: 2,000 tokens per minute"
+
+
+def test_a_rule_counts_what_was_used_unless_it_asks_for_the_estimate() -> None:
+    assert RateLimitRule(name="t", per="user", tpm=1).tpm_admission == "used"
+    assert RateLimitRule(name="t", per="user", tpm=1, tpm_admission="estimate").tpm_admission == "estimate"
