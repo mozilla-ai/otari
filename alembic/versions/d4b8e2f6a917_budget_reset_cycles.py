@@ -134,14 +134,26 @@ def _budgets_table(*, old_period: bool, new_period: bool) -> sa.Table:
     columns: list[sa.Column] = [
         sa.Column("budget_id", sa.String(), primary_key=True),
         sa.Column("name", sa.String(), nullable=True),
-        sa.Column("organization_id", sa.Uuid(), sa.ForeignKey("organization.id", ondelete="CASCADE"), nullable=True),
+        # Named, because `copy_from` is what SQLite's rebuild recreates the table
+        # from: an unnamed FK here is one the batch cannot find by name and the
+        # rebuild drops, which the schema chain tests catch.
+        sa.Column(
+            "organization_id",
+            sa.Uuid(),
+            sa.ForeignKey("organization.id", name="fk_budgets_organization_id", ondelete="CASCADE"),
+            nullable=True,
+        ),
         sa.Column("max_budget", sa.Numeric(18, 6), nullable=True),
         sa.Column("token_limit", sa.BigInteger(), nullable=True),
         sa.Column("request_limit", sa.BigInteger(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     ]
-    constraints: list[sa.schema.SchemaItem] = []
+    # The index on the FK, declared for the same reason the FK is named: SQLite
+    # rebuilds the table from this definition, and what is not here is dropped.
+    constraints: list[sa.schema.SchemaItem] = [
+        sa.Index("ix_budgets_organization_id", "organization_id"),
+    ]
     if old_period:
         columns.append(sa.Column("budget_duration_sec", sa.Integer(), nullable=True))
         columns.append(sa.Column("reset_alignment", sa.String(), nullable=True))

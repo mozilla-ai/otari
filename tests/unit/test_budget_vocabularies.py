@@ -10,15 +10,19 @@ from pydantic import BaseModel, ValidationError
 
 from gateway.api.routes.scoped_budgets import _SCOPE_SUBJECTS
 from gateway.models.budgets import (
-    ALIGN_DAY,
-    ALIGN_MONTH,
-    ALIGN_WEEK,
+    CYCLE_DAILY,
+    CYCLE_DAYS,
+    CYCLE_HOURS,
+    CYCLE_MONTHLY,
+    CYCLE_WEEKLY,
+    CYCLE_YEARLY,
+    INTERVAL_CYCLES,
     RESERVATION_ACTIVE,
     RESERVATION_EXPIRED,
     RESERVATION_RELEASED,
     RESERVATION_SETTLED,
     RESERVATION_STATUSES,
-    RESET_ALIGNMENTS,
+    RESET_CYCLES,
     SCOPE_API_TOKEN,
     SCOPE_ORG_MEMBER,
     SCOPE_ORGANIZATION,
@@ -29,8 +33,17 @@ from gateway.models.budgets import (
 from gateway.schemas.budgets import CreateScopedBudgetRequest, OrganizationScopedBudgetCreate
 
 
-def test_the_alignment_constants_cover_the_literal() -> None:
-    assert {ALIGN_DAY, ALIGN_WEEK, ALIGN_MONTH} == set(RESET_ALIGNMENTS)
+def test_the_cycle_constants_cover_the_literal() -> None:
+    named = {CYCLE_HOURS, CYCLE_DAYS, CYCLE_DAILY, CYCLE_WEEKLY, CYCLE_MONTHLY, CYCLE_YEARLY}
+    assert named == set(RESET_CYCLES)
+
+
+def test_the_interval_cycles_are_cycles() -> None:
+    # They are the two that carry an interval and an anchor, and the periods
+    # module branches on membership rather than on the names, so a cycle added
+    # to the tuple and not to the Literal would branch on nothing.
+    assert set(INTERVAL_CYCLES) <= set(RESET_CYCLES)
+    assert set(INTERVAL_CYCLES) == {CYCLE_HOURS, CYCLE_DAYS}
 
 
 def test_the_scope_constants_cover_the_literal() -> None:
