@@ -2,8 +2,6 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from gateway.exceptions.identity_exceptions import (
     InvalidEmailError,
     OAuthEmailNotVerifiedError,
@@ -12,7 +10,6 @@ from gateway.exceptions.identity_exceptions import (
 from gateway.models.tenancy import User
 from gateway.ports.identity_provider_port import IdentityProviderPort
 from gateway.repositories.tenancy import UserRepository
-from gateway.services.budgets import WorkspaceBudgetDefaultService
 from gateway.services.tenancy.email_address import validated_email
 from gateway.services.tenancy.organization_service import OrganizationService
 
@@ -20,12 +17,12 @@ from gateway.services.tenancy.organization_service import OrganizationService
 class DeploymentIdentityProviderAdapter(IdentityProviderPort):
     """Applies this deployment's ``open_signup`` setting to an OAuth sign-in.
 
-    The adapter stages its writes on the request's session and does not commit them.
-    The session is ``None`` where the deployment has no database, and ``resolve`` needs one.
+    The adapter leaves its changes for the caller to commit.
     """
 
-    def __init__(self, session: AsyncSession | None, *, open_signup: bool) -> None:
-        self._session = session
+    def __init__(self, users: UserRepository, organizations: OrganizationService, *, open_signup: bool) -> None:
+        self._users = users
+        self._organizations = organizations
         self._open_signup = open_signup
 
     async def resolve(
@@ -64,7 +61,6 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
                 or if no account exists and ``open_signup`` is disabled.
 
         """
-        assert self._session is not None, "resolving an identity needs a database session"
         if not email_verified or not email:
             raise OAuthEmailNotVerifiedError(provider)
         # An address this gateway would never store names no account, so it is refused as unknown.
@@ -73,20 +69,16 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         except InvalidEmailError as error:
             raise OAuthIdentityUnknownError(provider) from error
 
-        users = UserRepository(self._session)
-        identity = await users.get_by_email(address)
+        identity = await self._users.get_by_email(address)
         if identity is None and self._open_signup:
-            registration = await OrganizationService(
-                self._session,
-                membership_listener=WorkspaceBudgetDefaultService(self._session),
-            ).provision_signup_tenancy(email=address, full_name=full_name)
+            registration = await self._organizations.provision_signup_tenancy(email=address, full_name=full_name)
             identity = registration.identity
         # A deactivated account is refused as unknown, so the response does not confirm that the account exists.
         if identity is None or not identity.is_active:
             raise OAuthIdentityUnknownError(provider)
 
         # The account is read again under a lock because a concurrent sign-in may have changed it since the first read.
-        identity = await users.get_locked(identity.id)
+        identity = await self._users.get_locked(identity.id)
         if identity is None:
             raise OAuthIdentityUnknownError(provider)
 
@@ -100,7 +92,7 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
             identity.email_verification_token_expires_at = None
         if not identity.full_name and full_name:
             identity.full_name = full_name
-        users.stage(identity)
+        self._users.stage(identity)
         return identity
 
 

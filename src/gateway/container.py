@@ -60,6 +60,9 @@ from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
+from gateway.repositories.tenancy import UserRepository
+from gateway.services.budgets import WorkspaceBudgetDefaultService
+from gateway.services.tenancy.organization_service import OrganizationService
 
 T = TypeVar("T")
 
@@ -236,10 +239,14 @@ def _growth_signal_adapter(session: AsyncSession | None) -> GrowthSignalPort:
 def _identity_provider_adapter_factory(config: GatewayConfig | None) -> PortFactory[IdentityProviderPort]:
     """Build the core ``IdentityProviderPort`` factory, bound to this app's ``open_signup`` setting."""
 
-    def factory(session: AsyncSession | None) -> IdentityProviderPort:
-        return DeploymentIdentityProviderAdapter(session, open_signup=bool(config and config.open_signup))
+    def build(session: AsyncSession) -> IdentityProviderPort:
+        return DeploymentIdentityProviderAdapter(
+            UserRepository(session),
+            OrganizationService(session, membership_listener=WorkspaceBudgetDefaultService(session)),
+            open_signup=bool(config and config.open_signup),
+        )
 
-    return factory
+    return _with_session(IdentityProviderPort, build)
 
 
 def _provider_file_adapter(session: AsyncSession | None) -> ProviderFilePort:

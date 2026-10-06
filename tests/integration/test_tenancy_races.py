@@ -1082,7 +1082,11 @@ async def test_concurrent_first_oauth_sign_ins_of_one_address_share_one_identity
     organizations_before = await _organization_count(async_db)
 
     async def sign_in(session: AsyncSession) -> uuid.UUID:
-        identity = await DeploymentIdentityProviderAdapter(session, open_signup=True).resolve(
+        identity = await DeploymentIdentityProviderAdapter(
+            UserRepository(session),
+            OrganizationService(session, membership_listener=WorkspaceBudgetDefaultService(session)),
+            open_signup=True,
+        ).resolve(
             provider="google",
             email="nova@example.com",
             full_name=None,
