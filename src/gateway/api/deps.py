@@ -289,6 +289,7 @@ async def _bump_last_used_at(api_key_id: str, now: datetime) -> None:
         # Widened past SQLAlchemyError for the same reason as the arms above:
         # this one promises never to fail the request, and a connect timeout
         # raises a bare TimeoutError.
+        # codeql[py/clear-text-logging-sensitive-data]
         logger.warning("Failed to update last_used_at for API key %s", api_key_id, exc_info=True)
 
 

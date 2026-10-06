@@ -281,6 +281,7 @@ def _resolve_genai_price_uncached(
             # must degrade to "unpriced"/"unknown" rather than turn into a request
             # error for that model. Signal a transient failure so the caller does
             # not memoize it (the next request retries).
+            # codeql[py/clear-text-logging-sensitive-data]
             logger.warning("genai-prices lookup failed for model_ref=%r provider_id=%r", model_ref, provider_id)
             return _TRANSIENT_FAILURE
 
@@ -350,6 +351,7 @@ def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> 
     model_key = f"{provider}:{model}" if provider else model
     logger.debug(
         "Using genai-prices default pricing for '%s' (matched %s/%s)",
+        # codeql[py/clear-text-logging-sensitive-data]
         model_key,
         getattr(calc.provider, "id", None),
         getattr(calc.model, "id", None),

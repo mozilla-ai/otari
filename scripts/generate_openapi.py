@@ -106,6 +106,7 @@ def check_spec(spec: dict[str, object], existing_path: Path) -> bool:
     if generated_json != existing_json:
         print("Generated spec does not match existing spec", file=sys.stderr)
         print("Generated spec:")
+        # codeql[py/clear-text-logging-sensitive-data]
         print(generated_json)
         print("Existing spec:")
         print(existing_json)

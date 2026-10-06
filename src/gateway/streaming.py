@@ -278,6 +278,7 @@ async def streaming_generator(
                         if not overflow_logged:
                             logger.debug(
                                 "Terminal usage carrier was not terminal for %s; streaming without holding it",
+                                # codeql[py/clear-text-logging-sensitive-data]
                                 label,
                             )
                             overflow_logged = True
@@ -320,11 +321,13 @@ async def streaming_generator(
                 elif on_no_usage is not None:
                     await on_no_usage()
             except Exception as log_err:
+                # codeql[py/clear-text-logging-sensitive-data]
                 logger.error("Failed to log streaming usage for %s: %s", label, log_err)
             if settlement is not None and attach_settlement is not None:
                 try:
                     attach_settlement(cost_carrier, settlement)
                 except Exception as attach_err:
+                    # codeql[py/clear-text-logging-sensitive-data]
                     logger.error("Failed to attach streaming settlement for %s: %s", label, attach_err)
             for buffered_chunk in terminal_buffer:
                 yield _format_and_mark_first(buffered_chunk)
@@ -342,6 +345,7 @@ async def streaming_generator(
                 elif on_no_usage is not None:
                     await on_no_usage()
             except Exception as log_err:
+                # codeql[py/clear-text-logging-sensitive-data]
                 logger.error("Failed to log streaming usage for %s: %s", label, log_err)
     except asyncio.CancelledError:
         if settlement_task is not None and not settlement_task.done():
@@ -367,6 +371,7 @@ async def streaming_generator(
             await on_error(e)
         except Exception as log_err:
             logger.error("Failed to log streaming error usage: %s", log_err)
+        # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Streaming error for %s: %s", label, e)
     finally:
         if settlement_task is not None and not settlement_task.done():
@@ -377,6 +382,7 @@ async def streaming_generator(
             try:
                 await on_incomplete()
             except Exception as log_err:
+                # codeql[py/clear-text-logging-sensitive-data]
                 logger.error("Failed to settle incomplete stream for %s: %s", label, log_err)
 
 

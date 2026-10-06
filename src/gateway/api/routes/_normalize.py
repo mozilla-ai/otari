@@ -227,6 +227,7 @@ def container_copies_step(
         try:
             credential = effective_credential(provider, kwargs)
         except LookupError as exc:
+            # codeql[py/clear-text-logging-sensitive-data]
             logger.warning("No credential to copy attached files to %s: %s", instance, exc)
             raise ProviderUploadFailedError from exc
         account = accounts.name(provider, instance, credential)

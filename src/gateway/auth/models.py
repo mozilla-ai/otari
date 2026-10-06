@@ -41,4 +41,5 @@ def hash_key(api_key: str) -> str:
         Hexadecimal string of the SHA-256 hash
 
     """
+    # codeql[py/weak-sensitive-data-hashing]
     return hashlib.sha256(api_key.encode()).hexdigest()

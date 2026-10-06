@@ -202,6 +202,7 @@ else:
 def _load_policy_document(raw_yaml: str, source: str) -> Any:
     """Parse ``raw_yaml`` as one YAML document, or raise :class:`PolicyError` naming ``source``."""
     try:
+        # codeql[py/unsafe-deserialization]
         return yaml.load(raw_yaml, Loader=_fast_loader)
     except yaml.YAMLError as exc:
         error: yaml.YAMLError = exc
@@ -212,6 +213,7 @@ def _load_policy_document(raw_yaml: str, source: str) -> Any:
             # document this build would actually have evaluated is the one it
             # could not read.
             try:
+                # codeql[py/unsafe-deserialization]
                 yaml.load(raw_yaml, Loader=_DuplicateKeyLoader)
             except yaml.YAMLError as readable:
                 error = readable

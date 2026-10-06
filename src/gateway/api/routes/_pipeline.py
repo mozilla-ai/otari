@@ -3255,6 +3255,7 @@ def _warn_unpriced_model(model_ref: str) -> None:
     logger.warning(
         "No pricing configured for '%s'. Its tokens are recorded without cost and responses carry no inline cost; "
         "set a price for this model. Repeats for it are suppressed for %d minutes.",
+        # codeql[py/clear-text-logging-sensitive-data]
         model_ref,
         int(UNPRICED_WARNING_INTERVAL_S // 60),
     )
@@ -4614,12 +4615,14 @@ async def run_single_attempt_stream(
         await release_reservation(ctx)
         raise
     except SandboxNotReachableError as exc:
+        # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Sandbox unreachable for %s:%s: %s", provider, model, exc)
         await release_reservation(ctx)
         if isinstance(exc, SandboxSessionGoneError):
             await tool_ctx.forget_container()
         raise _sandbox_error(adapter, exc, tool_ctx=tool_ctx) from exc
     except WebSearchNotReachableError as exc:
+        # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Web search backend unreachable for %s:%s: %s", provider, model, exc)
         await release_reservation(ctx)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
@@ -4627,6 +4630,7 @@ async def run_single_attempt_stream(
         await _log_failure_and_refund(
             ctx, adapter, provider, model, str(exc), failure_status_code(exc), attribution=_failure_attribution(ctx)
         )
+        # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Stream creation failed for %s:%s: %s", provider, model, exc)
         raise adapter.provider_error(exc) from exc
 
@@ -5397,12 +5401,14 @@ async def run_standalone_non_stream(
         # Sandbox is gateway-side infra, not an LLM provider. Clearer detail
         # so operators don't chase a provider outage that's really the
         # sandbox container being down.
+        # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Sandbox unreachable for %s:%s: %s", provider, model, e)
         await release_reservation(ctx)
         if isinstance(e, SandboxSessionGoneError):
             await tool_ctx.forget_container()
         raise _sandbox_error(adapter, e, tool_ctx=tool_ctx) from e
     except WebSearchNotReachableError as e:
+        # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Web search backend unreachable for %s:%s: %s", provider, model, e)
         await release_reservation(ctx)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from e
@@ -5417,5 +5423,6 @@ async def run_standalone_non_stream(
             attribution=_failure_attribution(ctx),
             tool_tally=tool_ctx.tally,
         )
+        # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Provider call failed for %s:%s: %s", provider, model, e)
         raise adapter.provider_error(e) from e

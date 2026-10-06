@@ -143,8 +143,10 @@ def _warn_undeclared_env_provider(config: GatewayConfig, provider: LLMProvider) 
         "not listed meanwhile. Declare it in config.yml (providers: {%s: {api_key: ${%s}}}) or on the "
         "dashboard's Providers page.",
         provider.value,
+        # codeql[py/clear-text-logging-sensitive-data]
         env_name,
         provider.value,
+        # codeql[py/clear-text-logging-sensitive-data]
         env_name,
     )
 
@@ -327,6 +329,7 @@ class ProviderAccounts:
             provider=provider,
             instance=instance,
             workspace_id=self._workspace_id,
+            # codeql[py/weak-sensitive-data-hashing]
             identity=hmac.new(self._pepper, canonical.encode(), hashlib.sha256).hexdigest(),
         )
 

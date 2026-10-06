@@ -2080,6 +2080,7 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             "A keyless local backend (ollama, llamacpp, llamafile) is configured this way on purpose; otherwise "
             "this looks like a truncated config entry, and requests to it will fail.",
             instance,
+            # codeql[py/clear-text-logging-sensitive-data]
             ", ".join(env_names),
         )
 
@@ -2646,9 +2647,12 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
                 logger.warning(
                     "%s sign-in is configured but will not be offered: %s %s not set. "
                     "The sign-in screen shows no %s button until it is.",
+                    # codeql[py/clear-text-logging-sensitive-data]
                     provider,
+                    # codeql[py/clear-text-logging-sensitive-data]
                     ", ".join(missing),
                     "is" if len(missing) == 1 else "are",
+                    # codeql[py/clear-text-logging-sensitive-data]
                     provider,
                 )
 
