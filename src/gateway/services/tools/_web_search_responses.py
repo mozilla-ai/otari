@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from openai.types.responses import ResponseFunctionWebSearch
@@ -12,6 +13,11 @@ if TYPE_CHECKING:
 
     from gateway.services._tool_loop import ToolBackend
     from gateway.services.tools._native import NativeCall
+
+# The gateway's own ``web_search_call`` item ids. OpenAI issues ``ws_`` ids, so a
+# reserved prefix is what lets an echoed item be told apart from one describing a
+# search OpenAI's own tool ran (see ``routes/responses.py``).
+WEB_SEARCH_CALL_ID_PREFIX = "otari_ws_"
 
 
 class ResponsesWebSearchRendering:
@@ -37,7 +43,7 @@ class ResponsesWebSearchRendering:
         """
         return [
             ResponseFunctionWebSearch(
-                id=call.id,
+                id=f"{WEB_SEARCH_CALL_ID_PREFIX}{uuid.uuid4().hex}",
                 action=ActionSearch(type="search", query=str(call.arguments.get("query") or "")),
                 status="failed" if call.failed else "completed",
                 type="web_search_call",

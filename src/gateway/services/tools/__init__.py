@@ -53,6 +53,7 @@ from gateway.services.tools._web_declarations import (
     web_search_declaration_forms,
     web_search_intercept_enabled,
 )
+from gateway.services.tools._web_search_responses import WEB_SEARCH_CALL_ID_PREFIX
 from gateway.services.tools._web_search_results import web_search_max_results_baseline
 
 __all__ = [
@@ -62,6 +63,7 @@ __all__ = [
     "CONTAINER_GONE_DETAIL_TEMPLATE",
     "MAX_USES_EXCEEDED_ERROR",
     "SERVER_TOOL_USE_ID_PREFIX",
+    "WEB_SEARCH_CALL_ID_PREFIX",
     "WEB_SEARCH_HEADER",
     "AdmittedCodeExecution",
     "BuiltinTool",

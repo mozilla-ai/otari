@@ -38,7 +38,7 @@ from gateway.services.tool_format import (
     inject_purpose_hints_responses,
     openai_to_responses_tools,
 )
-from gateway.services.tools import CODE_INTERPRETER_CALL_ID_PREFIX, ToolUseBudget
+from gateway.services.tools import CODE_INTERPRETER_CALL_ID_PREFIX, WEB_SEARCH_CALL_ID_PREFIX, ToolUseBudget
 from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
 from gateway.types.code_execution import ResultBlock
 
@@ -294,7 +294,9 @@ async def test_max_uses_stops_further_searches_and_announces_only_the_one_that_r
     assert refused["output"] == "[tool error] max_uses_exceeded"
     announced = [item for item in (out.output or []) if getattr(item, "type", None) == "web_search_call"]
     assert len(announced) == 1, "a refused search must not be announced as a completed one"
-    assert announced[0].id == "c1"
+    item = cast(Any, announced[0])
+    assert item.action.query == "first"
+    assert item.id.startswith(WEB_SEARCH_CALL_ID_PREFIX)
 
 
 @pytest.mark.asyncio
@@ -760,7 +762,9 @@ async def test_stream_max_uses_announces_only_the_search_that_ran(
         if event.type == "response.output_item.added" and getattr(event.item, "type", None) == "web_search_call"
     ]
     assert len(announced) == 1, "a refused search must not be announced as a completed one"
-    assert announced[0].item.id == "c1"
+    item = cast(Any, announced[0].item)
+    assert item.action.query == "first"
+    assert item.id.startswith(WEB_SEARCH_CALL_ID_PREFIX)
 
 
 @pytest.mark.asyncio

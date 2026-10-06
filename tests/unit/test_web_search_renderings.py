@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from gateway.services.tools import Dialect, NativeCall, native_rendering
+from gateway.services.tools import WEB_SEARCH_CALL_ID_PREFIX, Dialect, NativeCall, native_rendering
 from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
 
 
@@ -90,11 +90,12 @@ def test_a_refused_search_is_reported_in_the_anthropic_error_shape() -> None:
     assert result.content.error_code == "max_uses_exceeded"
 
 
-def test_the_responses_item_carries_the_query_and_the_caller_s_call_id() -> None:
+def test_the_responses_item_carries_the_query_and_an_id_the_gateway_minted() -> None:
+    """The prefix is what lets an echoed item be told apart from a search the provider ran."""
     (item,) = _rendering(Dialect.RESPONSES).ran(_call(), _SearchBackendLike())
 
     assert item.type == "web_search_call"
-    assert item.id == "toolu_1"
+    assert item.id.startswith(WEB_SEARCH_CALL_ID_PREFIX)
     assert item.action.query == "what is the latest python?"
     assert item.status == "completed"
 
