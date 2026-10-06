@@ -851,6 +851,80 @@ def test_renaming_the_unit_of_work_on_a_relative_import_is_flagged(tmp_path: Pat
     ]
 
 
+_MODE_READ_REMEDY = "a service gets the behavior for each mode from a binding, not from a branch on the mode"
+
+
+@pytest.mark.parametrize(
+    ("source", "name"),
+    [
+        ("def pick(config):\n    return config.is_hybrid_mode\n", "is_hybrid_mode"),
+        ("def pick(self):\n    return self._config.is_hosted_mode\n", "is_hosted_mode"),
+        ("def pick(config):\n    return config.effective_mode\n", "effective_mode"),
+        ("def pick(config):\n    return config.configured_mode\n", "configured_mode"),
+        ('def pick(config):\n    return getattr(config, "is_hybrid_mode")\n', "is_hybrid_mode"),
+        ("def pick(config):\n    return deployment_for(config).supports(Plane.DATA)\n", "deployment_for"),
+        ("def pick(config):\n    return deployment.deployment_for(config)\n", "deployment_for"),
+    ],
+)
+@pytest.mark.parametrize("relative_path", ["gateway/services/thing_service.py", "gateway/services/things/_store.py"])
+def test_a_service_that_reads_the_mode_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_path: str, source: str, name: str
+) -> None:
+    monkeypatch.setattr(check, "SERVICE_MODE_READ_BASELINE", ())
+    _write(tmp_path, relative_path, source)
+    assert check.check_service_mode_reads(tmp_path) == [f"{relative_path}:2 reads {name}; {_MODE_READ_REMEDY}"]
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "source"),
+    [
+        ("gateway/api/main.py", "def mount(config):\n    return config.is_hybrid_mode\n"),
+        ("gateway/container.py", "def bind(config):\n    return config.is_hosted_mode\n"),
+        ("gateway/services/thing_service.py", "def pick(is_hybrid_mode: bool) -> bool:\n    return is_hybrid_mode\n"),
+        ("gateway/services/thing_service.py", "def pick(state):\n    state.is_hybrid_mode = True\n"),
+        (
+            "gateway/services/thing_service.py",
+            'def pick(helpers, config):\n    return helpers.getattr(config, "is_hybrid_mode")\n',
+        ),
+    ],
+)
+def test_a_mode_read_outside_services_or_a_mode_passed_in_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_path: str, source: str
+) -> None:
+    monkeypatch.setattr(check, "SERVICE_MODE_READ_BASELINE", ())
+    _write(tmp_path, relative_path, source)
+    assert check.check_service_mode_reads(tmp_path) == []
+
+
+def test_a_service_on_the_mode_read_baseline_may_read_the_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "SERVICE_MODE_READ_BASELINE", ("gateway/services/thing_service.py",))
+    _write(tmp_path, "gateway/services/thing_service.py", "def pick(config):\n    return config.is_hybrid_mode\n")
+    assert check.check_service_mode_reads(tmp_path) == []
+
+
+@pytest.mark.parametrize("source", ["def pick(config):\n    return config.port\n", None])
+def test_a_mode_read_baseline_entry_that_reads_no_mode_must_leave_the_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str | None
+) -> None:
+    monkeypatch.setattr(check, "SERVICE_MODE_READ_BASELINE", ("gateway/services/thing_service.py",))
+    _write(tmp_path, "gateway/services/other.py", "")
+    if source is not None:
+        _write(tmp_path, "gateway/services/thing_service.py", source)
+    assert check.check_service_mode_reads(tmp_path) == [
+        "gateway/services/thing_service.py is on the mode read baseline but reads no mode; remove it from the baseline"
+    ]
+
+
+def test_main_fails_on_a_service_that_reads_the_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(tmp_path, "src/gateway/services/__init__.py", "")
+    _write(tmp_path, "src/gateway/services/things/__init__.py", "")
+    _write(tmp_path, "tests/__init__.py", "")
+    _point_main_at(tmp_path, monkeypatch)
+    assert check.main() == 0
+    _write(tmp_path, "src/gateway/services/things/_store.py", "def pick(config):\n    return config.is_hybrid_mode\n")
+    assert check.main() == 1
+
+
 _DOMAINS_PAGE = """# Backend domains
 
 ## The target shape

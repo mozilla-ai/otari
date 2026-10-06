@@ -59,6 +59,11 @@ Enforces:
 21. Service package imports: code outside a domain's service package
     imports only its root, so the root's exports are the domain's whole
     public API.
+22. Mode branches: nothing under services/ reads the deployment's mode,
+    so the behavior for each mode is chosen by a binding, not by a branch in a service.
+    A read is any use of is_hosted_mode, is_hybrid_mode, effective_mode or configured_mode, or a call to deployment_for.
+    The raw mode field and the platform token stay with review, because their names do not say that a mode is read.
+    The modules that still read one are named on a baseline, and the baseline only shrinks.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -712,6 +717,58 @@ def check_unit_of_work_construction(src_root: Path) -> list[str]:
     return violations
 
 
+MODE_READS = ("configured_mode", "effective_mode", "is_hosted_mode", "is_hybrid_mode")
+MODE_FUNCTION = "deployment_for"
+# The services that still read the deployment's mode.
+# An entry that stops reading it fails the check until it is removed, so the list only shrinks.
+SERVICE_MODE_READ_BASELINE = (
+    "gateway/services/playground_service.py",
+    "gateway/services/provider_kwargs.py",
+)
+
+
+def _mode_reads(tree: ast.Module) -> list[tuple[int, str]]:
+    """Return the line and name of each read of the deployment's mode in a module, including one through getattr."""
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load) and node.attr in MODE_READS:
+            found.append((node.lineno, node.attr))
+        elif isinstance(node, ast.Call) and _called_name(node.func) == MODE_FUNCTION:
+            found.append((node.lineno, MODE_FUNCTION))
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and len(node.args) > 1
+        ):
+            name = node.args[1]
+            if isinstance(name, ast.Constant) and isinstance(name.value, str) and name.value in MODE_READS:
+                found.append((node.lineno, name.value))
+    return sorted(found)
+
+
+def check_service_mode_reads(src_root: Path) -> list[str]:
+    """Check that no service off the baseline reads the deployment's mode, and that every baseline entry still does."""
+    violations: list[str] = []
+    reading: set[str] = set()
+    for relative_path, tree in _parsed_modules(src_root, SERVICE_SCOPE):
+        reads = _mode_reads(tree)
+        if not reads:
+            continue
+        reading.add(relative_path)
+        if relative_path not in SERVICE_MODE_READ_BASELINE:
+            violations.extend(
+                f"{relative_path}:{line} reads {name}; a service gets the behavior for each mode from a binding, "
+                "not from a branch on the mode"
+                for line, name in reads
+            )
+    violations.extend(
+        f"{relative_path} is on the mode read baseline but reads no mode; remove it from the baseline"
+        for relative_path in sorted(set(SERVICE_MODE_READ_BASELINE) - reading)
+    )
+    return violations
+
+
 # Service modules are purpose-named (guardrails.py, url_safety.py, ...), so
 # there is no *_service.py naming rule to enforce.
 def check_naming_conventions(src_root: Path) -> list[str]:
@@ -1185,6 +1242,7 @@ def main() -> int:
     database_violations = check_database_imports(SRC_ROOT)
     transaction_violations = check_transaction_control(SRC_ROOT)
     unit_of_work_violations = check_unit_of_work_construction(SRC_ROOT)
+    mode_read_violations = check_service_mode_reads(SRC_ROOT)
     # NOTE: A page with no domains fails here, so a rule that reads them cannot pass by checking nothing.
     domains, domains_page_violations = read_domains_page(REPO_ROOT / DOMAINS_DOC)
     domain_name_violations = domains_page_violations + (check_domain_names(SRC_ROOT, domains) if domains else [])
@@ -1228,6 +1286,12 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal Unit of Work construction violations: {len(unit_of_work_violations)}")
 
+    if mode_read_violations:
+        print("\n❌ Mode read violations:\n")
+        for violation in mode_read_violations:
+            print(f"  {violation}")
+        print(f"\nTotal mode read violations: {len(mode_read_violations)}")
+
     if flat_module_violations:
         print("\n❌ Flat module violations:\n")
         for violation in flat_module_violations:
@@ -1259,6 +1323,7 @@ def main() -> int:
         or database_violations
         or transaction_violations
         or unit_of_work_violations
+        or mode_read_violations
         or flat_module_violations
         or domain_name_violations
         or repository_import_violations
