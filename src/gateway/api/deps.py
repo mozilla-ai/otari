@@ -17,6 +17,7 @@ from gateway.core.config import API_KEY_HEADER, API_ROOT, X_API_KEY_HEADER, Gate
 from gateway.core.database import DATABASE_ERRORS, create_session, get_db, release_session
 from gateway.core.feature import CoreFeature
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.identity_exceptions import DeploymentAdministrationUnavailableError
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.api_keys import APIKey
@@ -42,7 +43,13 @@ from gateway.repositories.files import FileRepositories
 from gateway.repositories.identity import IdentityRepositories
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
-from gateway.repositories.providers import OrgProviderKeyModelRepository, ProviderEndpointRepository
+from gateway.repositories.pricing import ModelPricingRepository
+from gateway.repositories.providers import (
+    HostedProviderModelRepository,
+    HostedProviderRepository,
+    OrgProviderKeyModelRepository,
+    ProviderEndpointRepository,
+)
 from gateway.repositories.rate_limits import RateLimitRuleRepository
 from gateway.repositories.tenancy import (
     OrganizationDomainRepository,
@@ -76,7 +83,13 @@ from gateway.services.organization_pricing_service import OrganizationPricingSer
 from gateway.services.organizations import InvitationMailLimit
 from gateway.services.overview import OverviewService
 from gateway.services.playground_service import ForwardedToolOffer, LocalToolOffer, PlaygroundToolOffer
-from gateway.services.providers import OrgProviderModelService, ProviderEndpointService, refresh_provider_endpoint_cache
+from gateway.services.pricing import DeploymentPricingService
+from gateway.services.providers import (
+    HostedProviderService,
+    OrgProviderModelService,
+    ProviderEndpointService,
+    refresh_provider_endpoint_cache,
+)
 from gateway.services.rate_limits import RateLimitService
 from gateway.services.routing import RoutingService, clear_router_backend_cache
 from gateway.services.tenancy import (
@@ -1066,6 +1079,25 @@ async def get_current_identity(
 CurrentIdentity = Annotated[TenancyUser, Depends(get_current_identity)]
 
 
+async def require_deployment_operator_or_absent(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    identity: Annotated[TenancyUser, Depends(get_current_identity)],
+) -> None:
+    """Refuse a non-operator with the 404 ``/api/v1/admin`` answers, so the surface does not confirm it exists.
+
+    The same predicate as :func:`require_deployment_operator`, with the other
+    status: a deployment-wide surface that holds the deployment's own
+    credentials is one worth not confirming to a signed-in member, who gets
+    the answer an unentitled deployment gets. A header master key is the
+    deployment credential itself, resolved to the bootstrap operator, so it
+    passes. Declared on a router rather than per route, for the reason the 403
+    gate gives.
+    """
+    if not await DeploymentUserService(db).has_administration_access(identity):
+        record_auth_failure("not_deployment_operator")
+        raise DeploymentAdministrationUnavailableError
+
+
 # =============================================================================
 # Composition root
 # =============================================================================
@@ -1510,6 +1542,28 @@ def get_workspace_search_keys(db: Annotated[AsyncSession, Depends(get_db)]) -> W
     )
 
 
+def get_hosted_provider_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> HostedProviderService:
+    """Build the hosted-providers service on the request's unit of work.
+
+    The deployment price list is reached through the pricing domain's own
+    service, built on the same unit of work, so a rate written while offering a
+    model lands in the same transaction as the offer.
+    """
+    return HostedProviderService(
+        uow,
+        config=config,
+        providers=HostedProviderRepository(uow),
+        models=HostedProviderModelRepository(uow),
+        pricing=DeploymentPricingService(uow, pricing=ModelPricingRepository(uow)),
+    )
+
+
+HostedProviderServiceDep = Annotated[HostedProviderService, Depends(get_hosted_provider_service)]
+
+
 def get_rate_limit_service(
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -1771,6 +1825,7 @@ __all__ = [
     "IdentityServiceDep",
     "McpServerPortDep",
     "ModelProviderPortDep",
+    "HostedProviderServiceDep",
     "OrgProviderModelServiceDep",
     "RateLimitServiceDep",
     "RequestSessionModelProviderPortDep",
