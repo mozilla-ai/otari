@@ -24,6 +24,7 @@ INVALID_MODEL = "invalid_model"
 MODEL_NOT_ALLOWED = "model_not_allowed"
 CONTEXT_LENGTH_EXCEEDED = "context_length_exceeded"
 PRICING_REQUIRED = "pricing_required"
+END_USER_BUDGET_NOT_ALLOWED = "end_user_budget_not_allowed"
 
 
 def error_headers(code: str, *, budget_scope: str | None = None, rule: str | None = None) -> dict[str, str]:

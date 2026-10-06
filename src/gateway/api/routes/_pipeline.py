@@ -99,7 +99,7 @@ from gateway.api.routes._platform import (
     default_attempt_kwargs as default_attempt_kwargs,  # explicit re-export for the route modules
 )
 from gateway.api.routes._tools import _build_web_retrieval_backend, _resolve_sandbox_purpose_hint
-from gateway.core.config import ATTEMPT_ID_HEADER, REQUEST_ID_HEADER, GatewayConfig
+from gateway.core.config import ATTEMPT_ID_HEADER, END_USER_BUDGET_HEADER, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS, release_session
 from gateway.core.env import otari_env
 from gateway.core.error_codes import (
@@ -906,7 +906,10 @@ def domain_error(adapter: FormatAdapter[Any, Any], exc: TenancyError) -> HTTPExc
         logger.error("Request failed: %s", exc.message)
         return adapter.error(exc.status_code, "Internal server error", ErrorKind.API)
     return adapter.error(
-        exc.status_code, exc.message, _DOMAIN_ERROR_KINDS.get(exc.status_code, ErrorKind.INVALID_REQUEST)
+        exc.status_code,
+        exc.message,
+        _DOMAIN_ERROR_KINDS.get(exc.status_code, ErrorKind.INVALID_REQUEST),
+        headers=error_headers(exc.error_code) if exc.error_code is not None else None,
     )
 
 
@@ -943,6 +946,7 @@ class RequestContext:
         code_execution_policy_loaded: bool = False,
         request_id: str | None = None,
         rate_limit_grant: RateLimitGrant | None = None,
+        end_user_budget_id: str | None = None,
     ) -> None:
         self.config = config
         # Sent to the client as ``Otari-Request-ID``: the platform's id in hybrid
@@ -1020,6 +1024,14 @@ class RequestContext:
         # Equal to `request_id` when routed; `None` for an unrouted request, whose
         # rows take `request_id` directly because no attribution carries it.
         self.request_group_id = request_group_id
+        # The budget of the end user a service key named, which a streamed
+        # response has to carry itself (see ``build_streaming_response``).
+        self.end_user_budget_id = end_user_budget_id
+
+
+def _end_user_headers(ctx: RequestContext) -> dict[str, str]:
+    """``Otari-End-User-Budget`` for a request that billed an end user on a budget."""
+    return {END_USER_BUDGET_HEADER: ctx.end_user_budget_id} if ctx.end_user_budget_id else {}
 
 
 def scope_prompt_cache_key(request_fields: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
@@ -1705,8 +1717,8 @@ async def _resolve_keyed_user_id(
     user_forbidden_detail: str,
     started_at: float,
     request_id: str | None = None,
-) -> str:
-    """The billed user for a key- or master-key-authenticated request.
+) -> tuple[str, str | None]:
+    """The billed user for a key- or master-key-authenticated request, and the budget of an end user it named.
 
     :func:`resolve_user_id` with this endpoint's error shapes, plus the one
     rejection row it owes. Split out of :func:`resolve_request_context` so the
@@ -1714,17 +1726,23 @@ async def _resolve_keyed_user_id(
     wrapped around thirty lines of logging.
 
     A service key naming anyone but its own user names one of its owner's end
-    users, which is found or created here rather than checked as a mismatch.
+    users, which is found or created here rather than checked as a mismatch, on
+    the budget ``Otari-End-User-Budget`` names when it is new.
     """
     if api_key is not None and user_id_from_request and _names_end_user(api_key, user_id_from_request):
         if uow is None:
             raise adapter.error(500, DB_UNAVAILABLE_DETAIL, ErrorKind.API)
         try:
-            return await get_budget_service(uow, db).resolve_end_user(api_key=api_key, external_id=user_id_from_request)
+            end_user = await get_budget_service(uow, db).resolve_end_user(
+                api_key=api_key,
+                external_id=user_id_from_request,
+                requested_budget_id=raw_request.headers.get(END_USER_BUDGET_HEADER) or None,
+            )
         except TenancyError as exc:
             raise domain_error(adapter, exc) from exc
+        return end_user.user_id, end_user.budget_id
     try:
-        return resolve_user_id(
+        user_id = resolve_user_id(
             user_id_from_request=user_id_from_request,
             api_key=api_key,
             is_master_key=is_master_key,
@@ -1766,6 +1784,7 @@ async def _resolve_keyed_user_id(
                 request_id=request_id,
             )
         raise
+    return user_id, None
 
 
 async def _admit_idempotent(
@@ -1877,6 +1896,8 @@ async def resolve_request_context(
     # ``organization_model_pricing``.
     organization_id: uuid.UUID | None = None
     user_id: str | None = None
+    # The budget of the end user a service key named, echoed in ``Otari-End-User-Budget``.
+    end_user_budget_id: str | None = None
     workspace_id: uuid.UUID | None = None
     code_execution_policy: ResolvedCodeExecutionPolicy | None = None
     code_execution_policy_loaded = False
@@ -1959,7 +1980,7 @@ async def resolve_request_context(
             names_end_user = _names_end_user(api_key, user_id_from_request)
             if names_end_user and api_key is not None:
                 rate_limit_info = await check_rate_limit(raw_request, str(api_key.user_id))
-            user_id = await _resolve_keyed_user_id(
+            user_id, end_user_budget_id = await _resolve_keyed_user_id(
                 adapter=adapter,
                 db=db,
                 uow=uow,
@@ -1976,6 +1997,8 @@ async def resolve_request_context(
                 started_at=started_at,
                 request_id=request_id,
             )
+            if end_user_budget_id is not None:
+                response.headers[END_USER_BUDGET_HEADER] = end_user_budget_id
             # Resolved before the plan rather than with the gate below, because the
             # compiler must drop candidates this caller may not use: a chain that fell
             # over to a forbidden model would be an access-control bypass. The gate
@@ -2389,6 +2412,7 @@ async def resolve_request_context(
         request_group_id=request_id if plan is not None else None,
         organization_id=organization_id,
         request_id=request_id,
+        end_user_budget_id=end_user_budget_id,
     )
 
 
@@ -4723,7 +4747,7 @@ async def run_single_attempt_stream(
         model=model,
         config=ctx.config,
         db=ctx.db,
-        extra_headers=_container_headers(tool_ctx.container_lease),
+        extra_headers=_container_headers(tool_ctx.container_lease) | _end_user_headers(ctx),
         log_writer=ctx.log_writer,
         api_key_id=ctx.api_key_id,
         user_id=ctx.user_id,

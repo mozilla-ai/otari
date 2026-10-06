@@ -80,6 +80,9 @@ REQUEST_ID_HEADER = "Otari-Request-ID"
 # attempt ids, so this is the finer grained of the two. Hybrid mode only: a
 # standalone gateway resolves no attempts to name.
 ATTEMPT_ID_HEADER = "Otari-Attempt-ID"
+# Request header naming the budget a service key's new end user starts on, and
+# response header naming the budget that end user is on.
+END_USER_BUDGET_HEADER = "Otari-End-User-Budget"
 # The version this deployment's API is served under. The root is built from it
 # rather than parsed back out of it, so nothing has to guess where the version
 # segment sits in a path.

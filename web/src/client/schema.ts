@@ -916,7 +916,16 @@ export interface paths {
          * @description Get details of a specific budget.
          */
         get: operations["budgets-get_budget"];
-        put?: never;
+        /**
+         * Put Budget
+         * @description Create a budget under an id you choose, or replace the one with that id.
+         *
+         *     Every field takes the value in the body, and a field left out is cleared, so
+         *     the same request always leaves the same budget. Answers 201 when it created
+         *     the budget. Users on a budget it replaces stay on it, and its ceilings follow
+         *     a change of reset period. A budget an organization owns is not replaced.
+         */
+        put: operations["budgets-put_budget"];
         post?: never;
         /**
          * Delete Budget
@@ -931,7 +940,8 @@ export interface paths {
          *     which, and where.
          *
          *     Gateway users assigned to the budget are left uncapped, as the dashboard's
-         *     confirmation says, and its reset history is deleted with it.
+         *     confirmation says, its reset history is deleted with it, and it is taken off
+         *     every service key's ``end_user_budget_ids``.
          */
         delete: operations["budgets-delete_budget"];
         options?: never;
@@ -1473,6 +1483,42 @@ export interface paths {
          *     Requires master key authentication.
          */
         patch: operations["keys-update_key"];
+        trace?: never;
+    };
+    "/api/v1/keys/{key_id}/end-users/{external_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get End User
+         * @description Get an end user of a service key by the id the service names it by.
+         *
+         *     End users belong to the key's user, so every service key of one user reaches the same end users.
+         */
+        get: operations["keys-get_end_user"];
+        /**
+         * Put End User
+         * @description Put an end user of a service key on a budget from the key's list, creating it if it does not exist yet.
+         *
+         *     Answers 201 when the end user was created, so one can be placed on a budget before its first request. An end
+         *     user already on the budget keeps its current period, so repeating the call changes nothing. A budget that is
+         *     not on the key's ``end_user_budget_ids`` is refused with 403 and ``end_user_budget_not_allowed``.
+         */
+        put: operations["keys-put_end_user"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update End User
+         * @description Block, unblock or move an end user of a service key.
+         *
+         *     A move starts a new period on the new budget, and the budget must be on the key's ``end_user_budget_ids``.
+         */
+        patch: operations["keys-update_end_user"];
         trace?: never;
     };
     "/api/v1/keys/{key_id}/rotate": {
@@ -4311,8 +4357,9 @@ export interface paths {
          *       disabled and the key does not override it); it is never billed to that
          *       user.
          *     - Service key: a ``user`` field names one of the key owner's end users,
-         *       created on first use with the key's end-user budget, and is billed and
-         *       rate limited as that end user, as on chat completions.
+         *       created on first use on the budget ``Otari-End-User-Budget`` names (or
+         *       the key's default), and is billed and rate limited as that end user, as
+         *       on chat completions.
          */
         post: operations["search-create_search"];
         delete?: never;
@@ -4454,8 +4501,9 @@ export interface paths {
          *       disabled and the key does not override it); it is never billed to that
          *       user.
          *     - Service key: a ``user`` field names one of the key owner's end users,
-         *       created on first use with the key's end-user budget, and is billed and
-         *       rate limited as that end user, as on chat completions.
+         *       created on first use on the budget ``Otari-End-User-Budget`` names (or
+         *       the key's default), and is billed and rate limited as that end user, as
+         *       on chat completions.
          */
         post: operations["search-create_search_for_tool"];
         delete?: never;
@@ -7642,9 +7690,14 @@ export interface components {
             capture_agent_telemetry?: boolean | null;
             /**
              * End User Budget Id
-             * @description Budget each end user this key creates is capped at. Null leaves end users capped only by this key's own ceiling.
+             * @description Budget each end user this key creates is capped at, unless the request names another with Otari-End-User-Budget. Null leaves end users capped only by this key's own ceiling.
              */
             end_user_budget_id?: string | null;
+            /**
+             * End User Budget Ids
+             * @description Budgets a request may start a new end user on by naming one in Otari-End-User-Budget. Null allows end_user_budget_id alone. When both are set, end_user_budget_id must be on the list.
+             */
+            end_user_budget_ids?: string[] | null;
             /**
              * Exclude From Budget
              * @description When true, requests on this key are logged with cost but never reserved, reconciled into the user's spend, or gated by budget.
@@ -7703,6 +7756,8 @@ export interface components {
             created_at: string;
             /** End User Budget Id */
             end_user_budget_id: string | null;
+            /** End User Budget Ids */
+            end_user_budget_ids: string[];
             /** Exclude From Budget */
             exclude_from_budget: boolean;
             /** Expires At */
@@ -8384,6 +8439,63 @@ export interface components {
             user?: string | null;
         };
         /**
+         * EndUserPublic
+         * @description An end user of a service key, addressed by the id the service named it by.
+         */
+        EndUserPublic: {
+            /** Blocked */
+            blocked: boolean;
+            /** Budget Id */
+            budget_id: string | null;
+            /** Budget Started At */
+            budget_started_at: string | null;
+            /** Created At */
+            created_at: string;
+            /** Current Requests */
+            current_requests: number;
+            /** Current Tokens */
+            current_tokens: number;
+            /** External Id */
+            external_id: string;
+            /** Next Budget Reset At */
+            next_budget_reset_at: string | null;
+            /** Owner User Id */
+            owner_user_id: string;
+            /** Reserved */
+            reserved: number;
+            /** Spend */
+            spend: number;
+            /** User Id */
+            user_id: string;
+        };
+        /**
+         * EndUserPut
+         * @description Create an end user ahead of its first request, or move one, onto a budget on the key's list.
+         */
+        EndUserPut: {
+            /**
+             * Budget Id
+             * @description A budget on the key's end_user_budget_ids
+             */
+            budget_id: string;
+        };
+        /**
+         * EndUserUpdate
+         * @description Block, unblock or move an end user. An omitted field is left as it is.
+         */
+        EndUserUpdate: {
+            /**
+             * Blocked
+             * @description Whether the end user is refused
+             */
+            blocked?: boolean | null;
+            /**
+             * Budget Id
+             * @description A budget on the key's end_user_budget_ids to move the end user to
+             */
+            budget_id?: string | null;
+        };
+        /**
          * ExecutionState
          * @description Whether the remote tool may have run.
          *
@@ -9030,6 +9142,8 @@ export interface components {
             created_at: string;
             /** End User Budget Id */
             end_user_budget_id: string | null;
+            /** End User Budget Ids */
+            end_user_budget_ids: string[];
             /** Exclude From Budget */
             exclude_from_budget: boolean;
             /** Expires At */
@@ -13485,6 +13599,8 @@ export interface components {
             capture_agent_telemetry?: boolean | null;
             /** End User Budget Id */
             end_user_budget_id?: string | null;
+            /** End User Budget Ids */
+            end_user_budget_ids?: string[] | null;
             /** Exclude From Budget */
             exclude_from_budget?: boolean | null;
             /** Expires At */
@@ -16219,6 +16335,42 @@ export interface operations {
             };
         };
     };
+    "budgets-put_budget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description An id you choose: up to 128 letters, digits, '.', '_' and '-', starting with a letter or digit */
+                budget_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateBudgetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BudgetResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "budgets-delete_budget": {
         parameters: {
             query?: never;
@@ -17108,6 +17260,113 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KeyInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "keys-get_end_user": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+                /** @description The id the service names the end user by in a request's user field */
+                external_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "keys-put_end_user": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+                /** @description The id the service names the end user by in a request's user field */
+                external_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EndUserPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "keys-update_end_user": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+                /** @description The id the service names the end user by in a request's user field */
+                external_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EndUserUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserPublic"];
                 };
             };
             /** @description Validation Error */

@@ -24,3 +24,14 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         """Return the IDs of the keys in these workspaces, in no particular order."""
         result = await self.db.execute(select(APIKey.id).where(APIKey.workspace_id.in_(workspace_ids)))
         return list(result.scalars().all())
+
+    async def remove_end_user_budget(self, budget_id: str) -> None:
+        """Take ``budget_id`` off every key's ``end_user_budget_ids``.
+
+        Filtered here rather than in SQL, which has no portable JSON containment
+        test; only service keys carry a list, and there are few of them.
+        """
+        result = await self.db.execute(select(APIKey).where(APIKey.end_user_budget_ids.is_not(None)))
+        for key in result.scalars():
+            if key.end_user_budget_ids and budget_id in key.end_user_budget_ids:
+                key.end_user_budget_ids = [listed for listed in key.end_user_budget_ids if listed != budget_id]

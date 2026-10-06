@@ -20,3 +20,7 @@ class ApiKeyService:
     async def get_key_ids_in_workspaces(self, workspace_ids: Sequence[uuid.UUID]) -> list[str]:
         """Return the IDs of the keys in these workspaces, in no particular order."""
         return await self._keys.get_key_ids_in_workspaces(workspace_ids)
+
+    async def forget_end_user_budget(self, budget_id: str) -> None:
+        """Take a budget off every key's list of end-user budgets."""
+        await self._keys.remove_end_user_budget(budget_id)

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -24,6 +24,8 @@ from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
+from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate
+from gateway.services.budgets import BudgetService
 from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
 from gateway.services.workspace_scope import organization_default_workspace_id
 
@@ -97,6 +99,37 @@ async def _load_key_in_organization(
     return key
 
 
+# How many budgets one key may list for its end users.
+MAX_END_USER_BUDGETS = 100
+
+_DEFAULT_NOT_LISTED_DETAIL = "end_user_budget_id must be one of end_user_budget_ids"
+
+
+async def _checked_end_user_budgets(
+    budgets: BudgetService,
+    budget_ids: list[str] | None,
+    default_id: str | None,
+    *,
+    check_default: bool,
+    check_list: bool = True,
+) -> list[str] | None:
+    """The key's end-user budget list, deduplicated, once the pair holds together.
+
+    Refuses a default that is not on a list, and a budget an end user could not
+    be assigned (unknown, or a tenant's). Only what the request changed is looked
+    up again.
+    """
+    listed = list(dict.fromkeys(budget_ids)) if budget_ids is not None else None
+    if listed is not None and default_id is not None and default_id not in listed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_DEFAULT_NOT_LISTED_DETAIL)
+    to_check = list(listed or []) if check_list else []
+    if check_default and default_id is not None and default_id not in to_check:
+        to_check.append(default_id)
+    if to_check:
+        await budgets.require_end_user_budgets(to_check)
+    return listed
+
+
 class CreateKeyRequest(BaseModel):
     """Request model for creating a new API key."""
 
@@ -136,8 +169,14 @@ class CreateKeyRequest(BaseModel):
     )
     end_user_budget_id: str | None = Field(
         default=None,
-        description="Budget each end user this key creates is capped at. Null leaves end users capped "
-        "only by this key's own ceiling.",
+        description="Budget each end user this key creates is capped at, unless the request names another "
+        "with Otari-End-User-Budget. Null leaves end users capped only by this key's own ceiling.",
+    )
+    end_user_budget_ids: list[str] | None = Field(
+        default=None,
+        max_length=MAX_END_USER_BUDGETS,
+        description="Budgets a request may start a new end user on by naming one in Otari-End-User-Budget. "
+        "Null allows end_user_budget_id alone. When both are set, end_user_budget_id must be on the list.",
     )
     workspace_id: uuid.UUID | None = Field(
         default=None,
@@ -169,6 +208,7 @@ class CreateKeyResponse(BaseModel):
     capture_agent_telemetry: bool | None
     is_service_key: bool
     end_user_budget_id: str | None
+    end_user_budget_ids: list[str]
     metadata: dict[str, Any]
 
 
@@ -193,6 +233,8 @@ class KeyInfo(BaseModel):
     capture_agent_telemetry: bool | None
     is_service_key: bool
     end_user_budget_id: str | None
+    # The budgets a request may start an end user on: the key's list, or its default alone.
+    end_user_budget_ids: list[str]
     workspace_id: uuid.UUID
     metadata: dict[str, Any]
 
@@ -217,6 +259,7 @@ class KeyInfo(BaseModel):
             ),
             is_service_key=bool(key.is_service_key),
             end_user_budget_id=key.end_user_budget_id,
+            end_user_budget_ids=key.assignable_end_user_budgets(),
             metadata=dict(key.metadata_) if key.metadata_ else {},
         )
 
@@ -244,6 +287,8 @@ class UpdateKeyRequest(BaseModel):
     # Tri-state via model_fields_set: absent = unchanged, null = end users this
     # key creates from now on are uncapped. End users already created keep theirs.
     end_user_budget_id: str | None = None
+    # Tri-state via model_fields_set: absent = unchanged, null = the default alone.
+    end_user_budget_ids: list[str] | None = Field(default=None, max_length=MAX_END_USER_BUDGETS)
     metadata: dict[str, Any] | None = None
 
 
@@ -276,8 +321,9 @@ async def create_key(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     # Before anything is staged: the check runs in a Unit of Work block, and the
     # block's commit would store whatever this route had added by then.
-    if request.end_user_budget_id is not None:
-        await budgets.require_end_user_budget(request.end_user_budget_id)
+    end_user_budget_ids = await _checked_end_user_budgets(
+        budgets, request.end_user_budget_ids, request.end_user_budget_id, check_default=True
+    )
 
     api_key = key_format.mint()
     key_hash = hash_key(api_key)
@@ -365,6 +411,7 @@ async def create_key(
         capture_agent_telemetry=request.capture_agent_telemetry,
         is_service_key=request.is_service_key,
         end_user_budget_id=request.end_user_budget_id,
+        end_user_budget_ids=end_user_budget_ids,
         metadata_=request.metadata,
     )
 
@@ -442,9 +489,16 @@ async def update_key(
     Requires master key authentication.
     """
     key = await _load_key_in_organization(db, key_id, organization_id)
-    # Before the key is changed, for the reason create_key gives.
-    if request.end_user_budget_id is not None:
-        await budgets.require_end_user_budget(request.end_user_budget_id)
+    # Before the key is changed, for the reason create_key gives. The pair is
+    # checked as the key will hold it, so a field left out keeps its stored value.
+    fields = request.model_fields_set
+    end_user_budget_ids = await _checked_end_user_budgets(
+        budgets,
+        request.end_user_budget_ids if "end_user_budget_ids" in fields else key.end_user_budget_ids,
+        request.end_user_budget_id if "end_user_budget_id" in fields else key.end_user_budget_id,
+        check_default="end_user_budget_id" in fields,
+        check_list="end_user_budget_ids" in fields,
+    )
 
     # Tri-state via model_fields_set, like allowed_models below: both columns
     # are nullable and the dashboard's edit form sends null to clear them
@@ -482,6 +536,8 @@ async def update_key(
         key.is_service_key = request.is_service_key
     if "end_user_budget_id" in request.model_fields_set:
         key.end_user_budget_id = request.end_user_budget_id
+    if "end_user_budget_ids" in request.model_fields_set:
+        key.end_user_budget_ids = end_user_budget_ids
     if request.metadata is not None:
         key.metadata_ = request.metadata
 
@@ -560,3 +616,64 @@ async def delete_key(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error",
         ) from None
+
+
+ExternalId = Annotated[str, Path(description="The id the service names the end user by in a request's user field")]
+
+
+@router.get("/{key_id}/end-users/{external_id}")
+async def get_end_user(
+    key_id: str,
+    external_id: ExternalId,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    budgets: BudgetServiceDep,
+) -> EndUserPublic:
+    """Get an end user of a service key by the id the service names it by.
+
+    End users belong to the key's user, so every service key of one user reaches the same end users.
+    """
+    key = await _load_key_in_organization(db, key_id, organization_id)
+    return await budgets.get_end_user(api_key=key, external_id=external_id)
+
+
+@router.put("/{key_id}/end-users/{external_id}")
+async def put_end_user(
+    key_id: str,
+    external_id: ExternalId,
+    request: EndUserPut,
+    response: Response,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    budgets: BudgetServiceDep,
+) -> EndUserPublic:
+    """Put an end user of a service key on a budget from the key's list, creating it if it does not exist yet.
+
+    Answers 201 when the end user was created, so one can be placed on a budget before its first request. An end
+    user already on the budget keeps its current period, so repeating the call changes nothing. A budget that is
+    not on the key's ``end_user_budget_ids`` is refused with 403 and ``end_user_budget_not_allowed``.
+    """
+    key = await _load_key_in_organization(db, key_id, organization_id)
+    end_user, created = await budgets.put_end_user(api_key=key, external_id=external_id, budget_id=request.budget_id)
+    if created:
+        response.status_code = status.HTTP_201_CREATED
+    return end_user
+
+
+@router.patch("/{key_id}/end-users/{external_id}")
+async def update_end_user(
+    key_id: str,
+    external_id: ExternalId,
+    request: EndUserUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
+    budgets: BudgetServiceDep,
+) -> EndUserPublic:
+    """Block, unblock or move an end user of a service key.
+
+    A move starts a new period on the new budget, and the budget must be on the key's ``end_user_budget_ids``.
+    """
+    key = await _load_key_in_organization(db, key_id, organization_id)
+    return await budgets.update_end_user(
+        api_key=key, external_id=external_id, blocked=request.blocked, budget_id=request.budget_id
+    )

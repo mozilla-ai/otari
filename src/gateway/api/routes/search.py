@@ -61,7 +61,7 @@ from gateway.api.routes._pipeline import (
     log_gateway_rejection,
     rate_limit_headers,
 )
-from gateway.core.config import GatewayConfig
+from gateway.core.config import END_USER_BUDGET_HEADER, GatewayConfig
 from gateway.core.metered_pricing import quantize_cost
 from gateway.exceptions.tools_exceptions import WebSearchNotEnabledError, WebSearchPolicyResolutionFailure
 from gateway.inflight import track_request
@@ -184,8 +184,9 @@ async def create_search(
       disabled and the key does not override it); it is never billed to that
       user.
     - Service key: a ``user`` field names one of the key owner's end users,
-      created on first use with the key's end-user budget, and is billed and
-      rate limited as that end user, as on chat completions.
+      created on first use on the budget ``Otari-End-User-Budget`` names (or
+      the key's default), and is billed and rate limited as that end user, as
+      on chat completions.
     """
     return await _dispatch_search(
         raw_request=raw_request,
@@ -226,8 +227,9 @@ async def create_search_for_tool(
       disabled and the key does not override it); it is never billed to that
       user.
     - Service key: a ``user`` field names one of the key owner's end users,
-      created on first use with the key's end-user budget, and is billed and
-      rate limited as that end user, as on chat completions.
+      created on first use on the budget ``Otari-End-User-Budget`` names (or
+      the key's default), and is billed and rate limited as that end user, as
+      on chat completions.
     """
     return await _dispatch_search(
         raw_request=raw_request,
@@ -271,7 +273,14 @@ async def _dispatch_search(
     if api_key is not None and request.user and _names_end_user(api_key, request.user):
         # As on chat: the owner's own rpm is checked before an end user is created for it.
         rate_limit_info = await check_rate_limit(raw_request, str(api_key.user_id))
-        user_id = await budget_service.resolve_end_user(api_key=api_key, external_id=request.user)
+        end_user = await budget_service.resolve_end_user(
+            api_key=api_key,
+            external_id=request.user,
+            requested_budget_id=raw_request.headers.get(END_USER_BUDGET_HEADER) or None,
+        )
+        user_id = end_user.user_id
+        if end_user.budget_id is not None:
+            response.headers[END_USER_BUDGET_HEADER] = end_user.budget_id
     else:
         user_id = resolve_passthrough_user_id(auth_result, request.user, reject_mismatch=config.reject_user_mismatch)
         rate_limit_info = await check_rate_limit(raw_request, user_id)

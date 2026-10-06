@@ -4341,8 +4341,24 @@
                 "type": "null"
               }
             ],
-            "description": "Budget each end user this key creates is capped at. Null leaves end users capped only by this key's own ceiling.",
+            "description": "Budget each end user this key creates is capped at, unless the request names another with Otari-End-User-Budget. Null leaves end users capped only by this key's own ceiling.",
             "title": "End User Budget Id"
+          },
+          "end_user_budget_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Budgets a request may start a new end user on by naming one in Otari-End-User-Budget. Null allows end_user_budget_id alone. When both are set, end_user_budget_id must be on the list.",
+            "title": "End User Budget Ids"
           },
           "exclude_from_budget": {
             "default": false,
@@ -4471,6 +4487,13 @@
             ],
             "title": "End User Budget Id"
           },
+          "end_user_budget_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "End User Budget Ids",
+            "type": "array"
+          },
           "exclude_from_budget": {
             "title": "Exclude From Budget",
             "type": "boolean"
@@ -4579,6 +4602,7 @@
           "capture_agent_telemetry",
           "is_service_key",
           "end_user_budget_id",
+          "end_user_budget_ids",
           "metadata"
         ],
         "title": "CreateKeyResponse",
@@ -5862,6 +5886,144 @@
           "input"
         ],
         "title": "EmbeddingRequest",
+        "type": "object"
+      },
+      "EndUserPublic": {
+        "description": "An end user of a service key, addressed by the id the service named it by.",
+        "properties": {
+          "blocked": {
+            "title": "Blocked",
+            "type": "boolean"
+          },
+          "budget_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Id"
+          },
+          "budget_started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Started At"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_requests": {
+            "title": "Current Requests",
+            "type": "integer"
+          },
+          "current_tokens": {
+            "title": "Current Tokens",
+            "type": "integer"
+          },
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "next_budget_reset_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Budget Reset At"
+          },
+          "owner_user_id": {
+            "title": "Owner User Id",
+            "type": "string"
+          },
+          "reserved": {
+            "title": "Reserved",
+            "type": "number"
+          },
+          "spend": {
+            "title": "Spend",
+            "type": "number"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "external_id",
+          "owner_user_id",
+          "budget_id",
+          "blocked",
+          "spend",
+          "reserved",
+          "current_tokens",
+          "current_requests",
+          "budget_started_at",
+          "next_budget_reset_at",
+          "created_at"
+        ],
+        "title": "EndUserPublic",
+        "type": "object"
+      },
+      "EndUserPut": {
+        "description": "Create an end user ahead of its first request, or move one, onto a budget on the key's list.",
+        "properties": {
+          "budget_id": {
+            "description": "A budget on the key's end_user_budget_ids",
+            "minLength": 1,
+            "title": "Budget Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "budget_id"
+        ],
+        "title": "EndUserPut",
+        "type": "object"
+      },
+      "EndUserUpdate": {
+        "description": "Block, unblock or move an end user. An omitted field is left as it is.",
+        "properties": {
+          "blocked": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the end user is refused",
+            "title": "Blocked"
+          },
+          "budget_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A budget on the key's end_user_budget_ids to move the end user to",
+            "title": "Budget Id"
+          }
+        },
+        "title": "EndUserUpdate",
         "type": "object"
       },
       "ExecutionState": {
@@ -7149,6 +7311,13 @@
             ],
             "title": "End User Budget Id"
           },
+          "end_user_budget_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "End User Budget Ids",
+            "type": "array"
+          },
           "exclude_from_budget": {
             "title": "Exclude From Budget",
             "type": "boolean"
@@ -7269,6 +7438,7 @@
           "capture_agent_telemetry",
           "is_service_key",
           "end_user_budget_id",
+          "end_user_budget_ids",
           "workspace_id",
           "metadata"
         ],
@@ -16430,6 +16600,21 @@
             ],
             "title": "End User Budget Id"
           },
+          "end_user_budget_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End User Budget Ids"
+          },
           "exclude_from_budget": {
             "anyOf": [
               {
@@ -22706,7 +22891,7 @@
     },
     "/api/v1/budgets/{budget_id}": {
       "delete": {
-        "description": "Delete a budget the deployment owns.\n\nRefused with 409 for an organization's budget: the operator may edit one\n(``PATCH`` retimes its ceilings) but deleting it would take a budget the\ntenant defined out from under them.\n\nRefused with 409, too, while anything still names this budget: a workspace\nhanding it to its members, or a scoped ceiling enforcing it. The refusal says\nwhich, and where.\n\nGateway users assigned to the budget are left uncapped, as the dashboard's\nconfirmation says, and its reset history is deleted with it.",
+        "description": "Delete a budget the deployment owns.\n\nRefused with 409 for an organization's budget: the operator may edit one\n(``PATCH`` retimes its ceilings) but deleting it would take a budget the\ntenant defined out from under them.\n\nRefused with 409, too, while anything still names this budget: a workspace\nhanding it to its members, or a scoped ceiling enforcing it. The refusal says\nwhich, and where.\n\nGateway users assigned to the budget are left uncapped, as the dashboard's\nconfirmation says, its reset history is deleted with it, and it is taken off\nevery service key's ``end_user_budget_ids``.",
         "operationId": "budgets-delete_budget",
         "parameters": [
           {
@@ -22851,6 +23036,68 @@
           }
         ],
         "summary": "Update Budget",
+        "tags": [
+          "budgets"
+        ]
+      },
+      "put": {
+        "description": "Create a budget under an id you choose, or replace the one with that id.\n\nEvery field takes the value in the body, and a field left out is cleared, so\nthe same request always leaves the same budget. Answers 201 when it created\nthe budget. Users on a budget it replaces stay on it, and its ceilings follow\na change of reset period. A budget an organization owns is not replaced.",
+        "operationId": "budgets-put_budget",
+        "parameters": [
+          {
+            "description": "An id you choose: up to 128 letters, digits, '.', '_' and '-', starting with a letter or digit",
+            "in": "path",
+            "name": "budget_id",
+            "required": true,
+            "schema": {
+              "description": "An id you choose: up to 128 letters, digits, '.', '_' and '-', starting with a letter or digit",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "title": "Budget Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBudgetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Put Budget",
         "tags": [
           "budgets"
         ]
@@ -24546,6 +24793,208 @@
           }
         ],
         "summary": "Update Key",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys/{key_id}/end-users/{external_id}": {
+      "get": {
+        "description": "Get an end user of a service key by the id the service names it by.\n\nEnd users belong to the key's user, so every service key of one user reaches the same end users.",
+        "operationId": "keys-get_end_user",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The id the service names the end user by in a request's user field",
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field",
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get End User",
+        "tags": [
+          "keys"
+        ]
+      },
+      "patch": {
+        "description": "Block, unblock or move an end user of a service key.\n\nA move starts a new period on the new budget, and the budget must be on the key's ``end_user_budget_ids``.",
+        "operationId": "keys-update_end_user",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The id the service names the end user by in a request's user field",
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field",
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update End User",
+        "tags": [
+          "keys"
+        ]
+      },
+      "put": {
+        "description": "Put an end user of a service key on a budget from the key's list, creating it if it does not exist yet.\n\nAnswers 201 when the end user was created, so one can be placed on a budget before its first request. An end\nuser already on the budget keeps its current period, so repeating the call changes nothing. A budget that is\nnot on the key's ``end_user_budget_ids`` is refused with 403 and ``end_user_budget_not_allowed``.",
+        "operationId": "keys-put_end_user",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The id the service names the end user by in a request's user field",
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field",
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserPut"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Put End User",
         "tags": [
           "keys"
         ]
@@ -33946,7 +34395,7 @@
     },
     "/api/v1/search": {
       "post": {
-        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use with the key's end-user budget, and is billed and\n  rate limited as that end user, as on chat completions.",
+        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use on the budget ``Otari-End-User-Budget`` names (or\n  the key's default), and is billed and rate limited as that end user, as\n  on chat completions.",
         "operationId": "search-create_search",
         "requestBody": {
           "content": {
@@ -34241,7 +34690,7 @@
     },
     "/api/v1/search/{search_tool_name}": {
       "post": {
-        "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /api/v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use with the key's end-user budget, and is billed and\n  rate limited as that end user, as on chat completions.",
+        "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /api/v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use on the budget ``Otari-End-User-Budget`` names (or\n  the key's default), and is billed and rate limited as that end user, as\n  on chat completions.",
         "operationId": "search-create_search_for_tool",
         "parameters": [
           {

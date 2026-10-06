@@ -6,6 +6,7 @@ from gateway.models.tenancy import User
 from gateway.rate_limit import BudgetMinuteLimits
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.schemas.budgets import (
+    EndUserPublic,
     OrganizationBudgetCreate,
     OrganizationBudgetPublic,
     OrganizationBudgetsPublic,
@@ -21,7 +22,7 @@ from gateway.schemas.budgets import (
 )
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets._deployment_surface import _DeploymentSurface
-from gateway.services.budgets._end_users import _EndUsers
+from gateway.services.budgets._end_users import ResolvedEndUser, _EndUsers
 from gateway.services.budgets._member_policies import _MemberPolicies
 from gateway.services.budgets._organization_surface import _OrganizationSurface
 from gateway.services.budgets._reservations import _normalize_strategy
@@ -46,6 +47,7 @@ class BudgetService:
     ) -> None:
         self._uow = uow
         self._budgets = repositories.budgets
+        self._api_keys = api_keys
         self._organization = _OrganizationSurface(repositories, ScopeOwnership(organizations, api_keys), organizations)
         self._end_users = _EndUsers(repositories)
         self._deployment = _DeploymentSurface(repositories)
@@ -76,6 +78,7 @@ class BudgetService:
         """Delete a budget the deployment owns, with its reset history, unless something still names it."""
         async with self._uow:
             await self._deployment.delete_budget(budget_id)
+            await self._api_keys.forget_end_user_budget(budget_id)
 
     async def delete_member_policy(self, *, user: User, workspace_id: uuid.UUID, policy_id: str) -> None:
         """Stop handing a workspace's new members a ceiling. The ceilings already handed out stay."""
@@ -118,10 +121,11 @@ class BudgetService:
         async with self._uow:
             return await self._organization.list_ceilings(user=user, skip=skip, limit=limit)
 
-    async def require_end_user_budget(self, budget_id: str) -> None:
-        """Refuse a budget a service key may not cap its end users at: an unknown one, or a tenant's."""
+    async def require_end_user_budgets(self, budget_ids: list[str]) -> None:
+        """Refuse end-user budgets a service key may not cap its end users at: an unknown one, or a tenant's."""
         async with self._uow:
-            await self._end_users.require_assignable_budget(budget_id)
+            for budget_id in budget_ids:
+                await self._end_users.require_assignable_budget(budget_id)
 
     async def minute_limits(self, user_id: str, *, strategy: str | None) -> BudgetMinuteLimits | None:
         """The per-minute limits of the user's own budget, or None when it sets neither or budgets are disabled."""
@@ -131,13 +135,33 @@ class BudgetService:
             found = await self._budgets.minute_limits_for_user(user_id)
         return BudgetMinuteLimits(*found) if found is not None else None
 
-    async def resolve_end_user(self, *, api_key: APIKey, external_id: str) -> str:
-        """Return the end user a service key named, creating it under the key's end-user budget on first use.
+    async def resolve_end_user(
+        self, *, api_key: APIKey, external_id: str, requested_budget_id: str | None = None
+    ) -> ResolvedEndUser:
+        """Return the end user a service key named, creating it on first use.
 
-        End users belong to the key's own user, so a key can only bill end users in its owner's scope.
+        A new end user starts on ``requested_budget_id``, which must be on the key's list, or else on the key's
+        default. End users belong to the key's own user, so a key can only bill end users in its owner's scope.
         """
         async with self._uow:
-            return await self._end_users.resolve(api_key, external_id)
+            return await self._end_users.resolve(api_key, external_id, requested_budget_id)
+
+    async def get_end_user(self, *, api_key: APIKey, external_id: str) -> EndUserPublic:
+        """Return the end user of the key's owner that the service named ``external_id``."""
+        async with self._uow:
+            return await self._end_users.get(api_key, external_id)
+
+    async def put_end_user(self, *, api_key: APIKey, external_id: str, budget_id: str) -> tuple[EndUserPublic, bool]:
+        """Put an end user on a budget from the key's list, creating it first if needed; True when created."""
+        async with self._uow:
+            return await self._end_users.put(api_key, external_id, budget_id)
+
+    async def update_end_user(
+        self, *, api_key: APIKey, external_id: str, blocked: bool | None, budget_id: str | None
+    ) -> EndUserPublic:
+        """Block, unblock or move an end user of the key's owner."""
+        async with self._uow:
+            return await self._end_users.update(api_key, external_id, blocked=blocked, budget_id=budget_id)
 
     async def update_member_policy(
         self,

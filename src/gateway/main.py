@@ -31,7 +31,7 @@ from gateway.container import Container, build_container
 from gateway.context_propagation import TraceContextPropagationMiddleware
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, dispose_db, init_db
-from gateway.core.error_codes import error_code_of
+from gateway.core.error_codes import error_code_of, error_headers
 from gateway.core.feature import Worker
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.exceptions import TenancyError
@@ -796,7 +796,13 @@ async def _tenancy_error_handler(_: Request, exc: Exception) -> Response:
             status_code=exc.status_code,
             content={"detail": "Internal server error"},
         )
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+    if exc.error_code is None:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.message, "code": exc.error_code},
+        headers=error_headers(exc.error_code),
+    )
 
 
 async def _control_plane_error_handler(_: Request, exc: Exception) -> Response:

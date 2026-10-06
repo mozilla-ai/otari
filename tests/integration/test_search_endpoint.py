@@ -603,3 +603,40 @@ def test_a_per_model_rule_limits_the_search_tool_it_names(
     assert second.status_code == 429, second.text
     assert "exa-cap" in second.json()["detail"]
     assert other.status_code == 200, other.text
+
+
+def test_a_service_key_starts_a_search_end_user_on_the_budget_it_names(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """``Otari-End-User-Budget`` picks the new end user's budget on search as it does on chat."""
+    for budget_id in ("search-default", "search-memories"):
+        put = client.put(f"{API_ROOT}/budgets/{budget_id}", json={"request_limit": 5}, headers=master_key_header)
+        assert put.status_code == 201, put.text
+    key = client.post(
+        f"{API_ROOT}/keys",
+        json={
+            "user_id": "mlpa-multi",
+            "is_service_key": True,
+            "end_user_budget_ids": ["search-default", "search-memories"],
+            "end_user_budget_id": "search-default",
+        },
+        headers=master_key_header,
+    ).json()
+    headers = {API_KEY_HEADER: f"Bearer {key['key']}", "Otari-End-User-Budget": "search-memories"}
+
+    with _mock_search():
+        named = client.post(
+            f"{API_ROOT}/search/exa-search", json={**SEARCH_PAYLOAD, "user": "fxa-1:memories"}, headers=headers
+        )
+        refused = client.post(
+            f"{API_ROOT}/search/exa-search",
+            json={**SEARCH_PAYLOAD, "user": "fxa-2:memories"},
+            headers={**headers, "Otari-End-User-Budget": "not-listed"},
+        )
+
+    assert named.status_code == 200, named.text
+    assert named.headers["Otari-End-User-Budget"] == "search-memories"
+    assert refused.status_code == 403
+    assert refused.json()["code"] == "end_user_budget_not_allowed"
+    assert refused.headers["Otari-Error-Code"] == "end_user_budget_not_allowed"

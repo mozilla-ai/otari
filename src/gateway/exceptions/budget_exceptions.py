@@ -4,6 +4,7 @@ The surface errors carry the HTTP status each renders as.
 The repository errors are internal: a service translates each into a surface error and never renders it.
 """
 
+from gateway.core.error_codes import END_USER_BUDGET_NOT_ALLOWED
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyForbiddenError,
@@ -190,6 +191,29 @@ class EndUserBudgetNotFoundError(TenancyNotFoundError):
         super().__init__(f"Budget with id '{budget_id}' not found")
 
 
+class EndUserBudgetNotAllowedError(TenancyForbiddenError):
+    """A service key named a budget that is not on its list of end-user budgets."""
+
+    error_code = END_USER_BUDGET_NOT_ALLOWED
+
+    def __init__(self, budget_id: str):
+        super().__init__(f"This key may not assign budget '{budget_id}' to its end users")
+
+
+class EndUserNotFoundError(TenancyNotFoundError):
+    """No end user of the key's owner goes by this id."""
+
+    def __init__(self, external_id: str):
+        super().__init__(f"End user '{external_id}' not found")
+
+
+class NotAServiceKeyError(TenancyValidationError):
+    """End users were addressed through a key that cannot have any."""
+
+    def __init__(self, key_id: str):
+        super().__init__(f"API key '{key_id}' is not a service key")
+
+
 class EndUserIdInvalidError(TenancyValidationError):
     """A service key named an end user by an id it cannot be stored under."""
 
@@ -206,10 +230,13 @@ class EndUserOwnerUnavailableError(TenancyForbiddenError):
 
 __all__ = [
     "BudgetStillReferencedError",
+    "EndUserBudgetNotAllowedError",
     "EndUserBudgetNotFoundError",
     "EndUserIdInvalidError",
+    "EndUserNotFoundError",
     "EndUserOwnerUnavailableError",
     "MemberBudgetPolicyAlreadyExistsError",
+    "NotAServiceKeyError",
     "OrganizationBudgetHeldElsewhereError",
     "OrganizationBudgetInUseError",
     "OrganizationBudgetNotFoundError",
