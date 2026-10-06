@@ -15,13 +15,14 @@ from typing import NamedTuple
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
+from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
 from gateway.api.routes.scoped_budgets import create_scoped_budget
 from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
@@ -141,6 +142,28 @@ async def _race(
                 return exc
 
     return list(await asyncio.gather(*(run_one() for _ in range(_RACERS))))
+
+
+async def _identities_with_email(db: AsyncSession, email: str) -> list[User]:
+    db.expire_all()
+    return list((await db.execute(select(User).where(col(User.email) == email))).scalars().all())
+
+
+async def _organization_count(db: AsyncSession) -> int:
+    return (await db.execute(select(func.count()).select_from(Organization))).scalar_one()
+
+
+def _register_together(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hold each registration until every racer has found the address free."""
+    real = OrganizationService.provision_signup_tenancy
+    all_looked_up = asyncio.Barrier(_RACERS)
+
+    async def register_after_all_look_up(self: OrganizationService, *, email: str, full_name: str | None) -> User:
+        async with asyncio.timeout(_CHECKPOINT_TIMEOUT):
+            await all_looked_up.wait()
+        return await real(self, email=email, full_name=full_name)
+
+    monkeypatch.setattr(OrganizationService, "provision_signup_tenancy", register_after_all_look_up)
 
 
 @pytest.fixture
@@ -999,6 +1022,67 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
         assert row.email_verified_at is not None
         assert await verify_password_async("accepted-password", row.hashed_password)
         assert membership.status == "active"
+
+
+async def test_concurrent_open_signups_of_one_address_register_one_identity(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One signup of an address registers it, and every concurrent loser is refused like any other."""
+    _register_together(monkeypatch)
+    config = GatewayConfig(mail_transport="console", public_base_url="https://gw.example.com", open_signup=True)
+    organizations_before = await _organization_count(async_db)
+
+    async def signup(session: AsyncSession) -> User | None:
+        return await user_service.create_user_for_signup(
+            session,
+            config,
+            background_tasks=BackgroundTasks(),
+            email="nova@example.com",
+            password="signup-password",
+            membership_listener=WorkspaceBudgetDefaultService(session),
+        )
+
+    outcomes = await _race(sessions, signup)
+
+    registered = [outcome for outcome in outcomes if isinstance(outcome, User)]
+    assert len(registered) == 1, outcomes
+    assert all(outcome is None for outcome in outcomes if outcome is not registered[0]), outcomes
+    assert [identity.id for identity in await _identities_with_email(async_db, "nova@example.com")] == [
+        registered[0].id
+    ]
+    assert await _organization_count(async_db) == organizations_before + 1
+
+
+async def test_concurrent_first_oauth_sign_ins_of_one_address_share_one_identity(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concurrent first sign-ins of one address resolve to one identity.
+
+    Every racer commits, so an organization a lost registration left behind would show in the count.
+    """
+    _register_together(monkeypatch)
+    organizations_before = await _organization_count(async_db)
+
+    async def sign_in(session: AsyncSession) -> uuid.UUID:
+        identity = await DeploymentIdentityProviderAdapter(session, open_signup=True).resolve(
+            provider="google",
+            email="nova@example.com",
+            full_name=None,
+            email_verified=True,
+        )
+        await session.commit()
+        return identity.id
+
+    outcomes = await _race(sessions, sign_in)
+
+    identities = await _identities_with_email(async_db, "nova@example.com")
+    assert len(identities) == 1
+    assert outcomes == [identities[0].id] * _RACERS
+    assert await _organization_count(async_db) == organizations_before + 1
 
 
 async def test_concurrent_accept_and_revoke_of_one_invitation_produce_one_consistent_outcome(
