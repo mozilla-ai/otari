@@ -12707,6 +12707,14 @@ export interface components {
             workspace_id: string;
         };
         /**
+         * SandboxProvider
+         * @description What runs the code a code-execution tool call asks for, chosen per deployment.
+         *
+         *     Values are read without regard to case or surrounding whitespace.
+         * @enum {string}
+         */
+        SandboxProvider: "protocol" | "e2b";
+        /**
          * ScopedBudgetResponse
          * @description One scoped ceiling and its live counters.
          *
@@ -13389,11 +13397,8 @@ export interface components {
         ToolSettingsResponse: {
             /** Fields */
             fields: components["schemas"]["ToolSettingField"][];
-            /**
-             * Sandbox Provider
-             * @description What runs generated code: 'protocol' (a sandbox at sandbox_url) or 'e2b'. Set at startup, not editable here. Null for a reader who does not operate the deployment.
-             */
-            sandbox_provider?: ("protocol" | "e2b") | null;
+            /** @description What runs generated code: 'protocol' (a sandbox at sandbox_url) or 'e2b'. Set at startup, not editable here. Null for a reader who does not operate the deployment. */
+            sandbox_provider?: components["schemas"]["SandboxProvider"] | null;
         };
         /**
          * ToolsResponse

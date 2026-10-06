@@ -28,8 +28,15 @@ from gateway.services.tools._code_execution_declarations import (
     provider_runs_code_natively,
     resolve_code_executor_preference,
 )
+from gateway.services.tools._code_execution_policy import (
+    WorkspaceCodeExecutionPolicyPublic,
+    WorkspaceCodeExecutionPolicyService,
+    WorkspaceCodeExecutionPolicyUpdate,
+    read_code_execution_policy,
+)
 from gateway.services.tools._code_execution_responses import CODE_INTERPRETER_CALL_ID_PREFIX
 from gateway.services.tools._declarations import Tool, extract_first_matching_tool
+from gateway.services.tools._loop_limits import MAX_TOOL_ITERATIONS_CAP
 from gateway.services.tools._mcp_admission import admit_mcp_servers
 from gateway.services.tools._native import (
     SERVER_TOOL_USE_ID_PREFIX,
@@ -55,8 +62,15 @@ from gateway.services.tools._web_declarations import (
 )
 from gateway.services.tools._web_search_responses import WEB_SEARCH_CALL_ID_PREFIX
 from gateway.services.tools._web_search_results import web_search_max_results_baseline
+from gateway.services.tools._workspace_defaults import CodeExecutionWorkspaceDefaults
 
 __all__ = [
+    "MAX_TOOL_ITERATIONS_CAP",
+    "CodeExecutionWorkspaceDefaults",
+    "WorkspaceCodeExecutionPolicyPublic",
+    "WorkspaceCodeExecutionPolicyService",
+    "WorkspaceCodeExecutionPolicyUpdate",
+    "read_code_execution_policy",
     "BUILTIN_TOOLS",
     "CODE_EXECUTION_HEADER",
     "CODE_INTERPRETER_CALL_ID_PREFIX",

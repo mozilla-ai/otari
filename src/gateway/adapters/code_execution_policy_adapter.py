@@ -16,10 +16,8 @@ from gateway.exceptions.tools_exceptions import (
 from gateway.models.tools import ResolvedCodeExecutionPolicy
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort, CodeExecutionPolicyScope
 from gateway.services.control_plane import ResolveEndpoint, resolve
-from gateway.services.tenancy.workspace_code_execution_policy_service import (
-    read_code_execution_policy,
-    resolve_workspace_code_execution_policy,
-)
+from gateway.services.tenancy.workspace_code_execution_policy_service import resolve_workspace_code_execution_policy
+from gateway.services.tools import read_code_execution_policy
 
 
 class LocalCodeExecutionPolicy(CodeExecutionPolicyPort):

@@ -18,9 +18,9 @@ from sqlmodel import col
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.tenancy import Workspace, WorkspaceMember
 from gateway.models.tools import WorkspaceCodeExecutionPolicy
-from gateway.repositories.code_execution import WorkspaceCodeExecutionPolicyRepository
-from gateway.services.code_execution import CodeExecutionWorkspaceDefaults
+from gateway.repositories.tools import WorkspaceCodeExecutionPolicyRepository
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
+from gateway.services.tools import CodeExecutionWorkspaceDefaults
 
 from .tenancy_helpers import membership_writes
 

@@ -25,13 +25,12 @@ from gateway.core.settings.pricing import PricingSettings
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
 from gateway.models.routing import RoutingConfig
-from gateway.models.tools import CodeExecutor
+from gateway.models.tools import CodeExecutor, SandboxProvider
 
 API_KEY_HEADER = "Otari-Key"
 # What may run a code-execution tool call. ``protocol`` is a backend of the
 # operator's own, reached over the published contract; the rest are hosted
 # providers this process drives itself (``adapters/code_execution_adapter.py``).
-SANDBOX_PROVIDERS = frozenset({"protocol", "e2b"})
 # Aliases accepted for a provider instance's ``provider_type`` that map onto a
 # real any-llm implementation. The "openai-compatible" spelling mirrors the
 # naming opencode / pi use for self-hosted OpenAI-compatible backends.
@@ -1375,8 +1374,8 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             "provider names its workspaces its own way and ignores this."
         ),
     )
-    sandbox_provider: Annotated[str, Shown(SettingsGroup.TOOLS)] = Field(
-        default="protocol",
+    sandbox_provider: Annotated[SandboxProvider, Shown(SettingsGroup.TOOLS)] = Field(
+        default=SandboxProvider.PROTOCOL,
         description=(
             "What runs the code a code-execution tool call asks for: 'protocol' (the default) speaks the "
             "published code-execution protocol to the backend at sandbox_url, which is a container the "
@@ -2201,9 +2200,9 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
         configured = (self.code_execution_executor or "").strip() or otari_env("CODE_EXECUTION_EXECUTOR")
         return CodeExecutor.parse(configured) or CodeExecutor.AUTO
 
-    def effective_sandbox_provider(self) -> str:
-        """The deployment's ``sandbox_provider``, normalized: ``protocol`` when unset."""
-        return (self.sandbox_provider or "").strip().lower() or "protocol"
+    def effective_sandbox_provider(self) -> SandboxProvider:
+        """The deployment's ``sandbox_provider``: ``protocol`` when unset."""
+        return SandboxProvider.parse(self.sandbox_provider) or SandboxProvider.PROTOCOL
 
     def sandbox_configured(self) -> bool:
         """Whether this deployment can run ``otari_code_execution`` at all.
@@ -2213,7 +2212,7 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
 
         Gotcha: a cleared dashboard override leaves ``sandbox_url`` as ``None``, so the environment value still counts.
         """
-        if self.effective_sandbox_provider() != "protocol":
+        if self.effective_sandbox_provider() is not SandboxProvider.PROTOCOL:
             return True
         return bool(self.sandbox_url or otari_env("SANDBOX_URL"))
 
@@ -2513,14 +2512,15 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             raise ValueError(msg)
         return normalized
 
-    @field_validator("sandbox_provider")
+    @field_validator("sandbox_provider", mode="before")
     @classmethod
-    def _validate_sandbox_provider(cls, value: str) -> str:
-        normalized = (value or "protocol").strip().lower() or "protocol"
-        if normalized not in SANDBOX_PROVIDERS:
-            msg = f"sandbox_provider must be one of {sorted(SANDBOX_PROVIDERS)}, got '{value}'"
+    def _validate_sandbox_provider(cls, value: object) -> SandboxProvider:
+        provider = SandboxProvider.parse(value)
+        if provider is None:
+            allowed = sorted(member.value for member in SandboxProvider)
+            msg = f"sandbox_provider must be one of {allowed}, got '{value}'"
             raise ValueError(msg)
-        return normalized
+        return provider
 
     @field_validator("code_execution_executor")
     @classmethod

@@ -17,13 +17,11 @@ from pydantic import ValidationError
 from gateway.api.routes._normalize import provider_container_requested, sandbox_requested
 from gateway.core.config import GatewayConfig
 from gateway.models.tools import CodeExecutor
-from gateway.services.tenancy.workspace_code_execution_policy_service import (
-    WorkspaceCodeExecutionPolicyUpdate,
-)
 from gateway.services.tool_settings_service import get_field_options, validate_value
 from gateway.services.tools import (
     CODE_EXECUTION_HEADER,
     Dialect,
+    WorkspaceCodeExecutionPolicyUpdate,
     code_execution_declaration_forms,
     decide_code_executor,
     extract_code_execution_tool,

@@ -156,6 +156,35 @@ class CodeExecutor(StrEnum):
             return None
 
 
+class SandboxProvider(StrEnum):
+    """What runs the code a code-execution tool call asks for, chosen per deployment.
+
+    Values are read without regard to case or surrounding whitespace.
+    """
+
+    PROTOCOL = "protocol"
+    """A backend at ``sandbox_url`` that speaks the published code-execution protocol."""
+    E2B = "e2b"
+    """E2B's hosted sandboxes, driven from this process."""
+
+    @classmethod
+    def parse(cls, value: object) -> "SandboxProvider | None":
+        """The member for a configured value, ``PROTOCOL`` for a blank one, or ``None`` for anything else."""
+        if isinstance(value, cls):
+            return value
+        if value is None:
+            return cls.PROTOCOL
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip().lower()
+        if not normalized:
+            return cls.PROTOCOL
+        try:
+            return cls(normalized)
+        except ValueError:
+            return None
+
+
 class WorkspaceCodeExecutionPolicy(Base):
     """A workspace's policy over the deployment-wide code-execution sandbox.
 

@@ -244,9 +244,7 @@ from gateway.services.tenancy.organization_guardrail_service import (
     ResolvedOrganizationGuardrail,
     resolve_organization_guardrails,
 )
-from gateway.services.tenancy.workspace_code_execution_policy_service import (
-    resolve_workspace_code_execution_policy,
-)
+from gateway.services.tenancy.workspace_code_execution_policy_service import resolve_workspace_code_execution_policy
 from gateway.services.tool_usage import (
     MAX_TOOL_NAMES,
     OVERFLOW_TOOL_NAME,

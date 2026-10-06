@@ -14770,6 +14770,15 @@
         "title": "RouterStatus",
         "type": "object"
       },
+      "SandboxProvider": {
+        "description": "What runs the code a code-execution tool call asks for, chosen per deployment.\n\nValues are read without regard to case or surrounding whitespace.",
+        "enum": [
+          "protocol",
+          "e2b"
+        ],
+        "title": "SandboxProvider",
+        "type": "string"
+      },
       "ScopedBudgetResponse": {
         "description": "One scoped ceiling and its live counters.\n\nUnlike ``/api/v1/budgets``, the counters are the row's own: a scoped ceiling is\nenforced against ``current_spend + reserved_spend``, so there is no rollup\nover users to compute.\n\nEvery limit, along with ``budget_duration_sec`` and ``reset_alignment``, is\nread off the budget rather than stored here, and carried on the wire so a\ncaller can render a ceiling without fetching every budget to resolve one id.",
         "properties": {
@@ -16192,18 +16201,13 @@
           "sandbox_provider": {
             "anyOf": [
               {
-                "enum": [
-                  "protocol",
-                  "e2b"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/SandboxProvider"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "What runs generated code: 'protocol' (a sandbox at sandbox_url) or 'e2b'. Set at startup, not editable here. Null for a reader who does not operate the deployment.",
-            "title": "Sandbox Provider"
+            "description": "What runs generated code: 'protocol' (a sandbox at sandbox_url) or 'e2b'. Set at startup, not editable here. Null for a reader who does not operate the deployment."
           }
         },
         "required": [

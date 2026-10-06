@@ -46,11 +46,12 @@ from gateway.models.playground import (
     PlaygroundMessagePublic,
 )
 from gateway.models.tenancy import User as TenancyUser
-from gateway.models.tools import WorkspaceCodeExecutionPolicy, WorkspaceMcpServer, WorkspaceWebSearchConfig
+from gateway.models.tools import WorkspaceMcpServer, WorkspaceWebSearchConfig
 from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import resolve_workspace_in_organization
+from gateway.services.tenancy.workspace_code_execution_policy_service import resolve_workspace_code_execution_policy
 from gateway.services.workspace_scope import organization_default_workspace_id
 from gateway.types.session_principal import SessionPrincipal
 
@@ -246,13 +247,8 @@ async def resolve_tool_availability(
             select(WorkspaceWebSearchConfig.enabled).where(WorkspaceWebSearchConfig.workspace_id == workspace_id)
         )
     ).scalar_one_or_none()
-    code_execution_row = (
-        await db.execute(
-            select(WorkspaceCodeExecutionPolicy.enabled).where(
-                WorkspaceCodeExecutionPolicy.workspace_id == workspace_id
-            )
-        )
-    ).scalar_one_or_none()
+    code_execution_policy = await resolve_workspace_code_execution_policy(db, workspace_id)
+    code_execution_row = code_execution_policy.enabled if code_execution_policy is not None else None
     servers = (
         (
             await db.execute(

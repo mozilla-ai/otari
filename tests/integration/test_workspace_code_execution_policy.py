@@ -16,6 +16,7 @@ import pytest_asyncio
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.exceptions.tools_exceptions import SandboxImageNotAllowedError, SandboxToolsUnrunnableError
 from gateway.models.tenancy import Organization, User, Workspace
@@ -27,11 +28,14 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
+from gateway.repositories.tools import WorkspaceCodeExecutionPolicyRepository
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAMES, SERVED_TOOL_NAMES
-from gateway.services.tenancy.workspace_code_execution_policy_service import (
+from gateway.services.tenancy.authorization import WorkspaceAccess
+from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_code_execution_policy_service import resolve_workspace_code_execution_policy
+from gateway.services.tools import (
     WorkspaceCodeExecutionPolicyService,
     WorkspaceCodeExecutionPolicyUpdate,
-    resolve_workspace_code_execution_policy,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -70,7 +74,14 @@ def _service(
     sandbox_configured: bool = True,
     allowed_images: tuple[str, ...] = (),
 ) -> WorkspaceCodeExecutionPolicyService:
-    return WorkspaceCodeExecutionPolicyService(db, sandbox_configured=sandbox_configured, allowed_images=allowed_images)
+    uow = UnitOfWork(db)
+    return WorkspaceCodeExecutionPolicyService(
+        uow,
+        WorkspaceCodeExecutionPolicyRepository(uow),
+        WorkspaceAccess(db, OrganizationService(db, membership_listener=None)),
+        sandbox_configured=sandbox_configured,
+        allowed_images=allowed_images,
+    )
 
 
 async def test_a_workspace_with_no_policy_reads_as_unconfigured_and_narrows_nothing(

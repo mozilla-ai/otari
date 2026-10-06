@@ -35,7 +35,6 @@ from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.api_keys import ApiKeyRepository
 from gateway.repositories.budgets import BudgetRepositories
-from gateway.repositories.code_execution import WorkspaceCodeExecutionPolicyRepository
 from gateway.repositories.files import FileRepositories
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
@@ -46,10 +45,11 @@ from gateway.repositories.tenancy import (
     OrgProviderKeyRepository,
     WorkspaceRepository,
 )
+from gateway.repositories.tools import WorkspaceCodeExecutionPolicyRepository
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetMembershipListener, BudgetService
-from gateway.services.code_execution import CodeExecutionWorkspaceDefaults, SandboxContainerRegistry
+from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
@@ -72,6 +72,7 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.workspace_listener import WorkspaceListener
 from gateway.services.tenancy.workspace_service import WorkspaceService
+from gateway.services.tools import CodeExecutionWorkspaceDefaults, WorkspaceCodeExecutionPolicyService
 from gateway.services.workspace_scope import default_workspace_id
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
@@ -819,6 +820,31 @@ def get_workspace_listener(
 
 
 WorkspaceListenerDep = Annotated[WorkspaceListener, Depends(get_workspace_listener)]
+
+
+def get_workspace_code_execution_policy_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> WorkspaceCodeExecutionPolicyService:
+    """Build the workspace code execution policy service on the request's Unit of Work.
+
+    ``sandbox_configured`` is the check ``GET /api/v1/tools`` makes before it advertises code
+    execution, so the page and discovery agree. ``allowed_images`` is the operator's curated list.
+    Both are properties of the running gateway, handed in rather than read by the service.
+    """
+    return WorkspaceCodeExecutionPolicyService(
+        uow,
+        WorkspaceCodeExecutionPolicyRepository(uow),
+        WorkspaceAccess(db, OrganizationService(db, membership_listener=None)),
+        sandbox_configured=config.sandbox_configured(),
+        allowed_images=config.pinnable_sandbox_images(),
+    )
+
+
+WorkspaceCodeExecutionPolicyServiceDep = Annotated[
+    WorkspaceCodeExecutionPolicyService, Depends(get_workspace_code_execution_policy_service)
+]
 
 
 async def get_current_identity(

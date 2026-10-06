@@ -25,6 +25,7 @@ import httpx
 from pydantic import ValidationError
 
 from gateway.core.env import otari_env
+from gateway.models.tools import SandboxProvider
 from gateway.ports.code_execution_port import (
     CodeExecutionPort,
     CodeExecutionSession,
@@ -294,7 +295,7 @@ def build_code_execution_port(config: GatewayConfig) -> CodeExecutionPort:
     every deployment that existed before the port. Anything else is a hosted
     provider driven in this process and needs no URL.
     """
-    if config.effective_sandbox_provider() == "e2b":
+    if config.effective_sandbox_provider() is SandboxProvider.E2B:
         from gateway.adapters.e2b_code_execution_adapter import E2BCodeExecutionAdapter
 
         return E2BCodeExecutionAdapter()
@@ -320,7 +321,7 @@ def verify_code_execution_ready(config: GatewayConfig) -> None:
         return
     try:
         build_code_execution_port(config)
-        if config.effective_sandbox_provider() == "e2b":
+        if config.effective_sandbox_provider() is SandboxProvider.E2B:
             from gateway.adapters.e2b_code_execution_adapter import verify_ready
 
             verify_ready()

@@ -52,7 +52,7 @@ def test_get_reports_the_sandbox_provider(tmp_path: Path) -> None:
 
 
 def test_the_sandbox_provider_is_withheld_with_the_endpoints() -> None:
-    config = GatewayConfig(sandbox_provider="E2B ")
+    config = GatewayConfig.model_validate({"sandbox_provider": "E2B "})
     assert tool_settings._current_fields(config).sandbox_provider == "e2b"
     assert tool_settings._current_fields(config, include_urls=False).sandbox_provider is None
 

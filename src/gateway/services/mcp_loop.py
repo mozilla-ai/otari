@@ -37,12 +37,11 @@ from gateway.services._tool_loop import (
     run_tool_loop_stream,
     tool_failure_detail,
 )
-from gateway.services.tools import MAX_USES_EXCEEDED_ERROR, ToolUseBudget, is_capped_call
+from gateway.services.tools import MAX_TOOL_ITERATIONS_CAP, MAX_USES_EXCEEDED_ERROR, ToolUseBudget, is_capped_call
 
 if TYPE_CHECKING:
     from any_llm.types.completion import ChatCompletion, ChatCompletionChunk, CompletionUsage
 
-MAX_TOOL_ITERATIONS_CAP = 25
 DEFAULT_MAX_TOOL_ITERATIONS = 10
 
 

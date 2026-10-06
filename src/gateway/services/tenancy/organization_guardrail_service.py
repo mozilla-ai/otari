@@ -17,7 +17,7 @@ mandate already is, with the stricter setting winning on every axis.
 **Why this stays inside the #655/#678 rule** even though it is a layer adding
 configuration rather than narrowing one: a mandated guardrail can only make
 fewer requests succeed, never more. That is also why an entry may carry a URL
-and a credential where `workspace_code_execution_policy_service` may not. A
+and a credential where a workspace code execution policy may not. A
 sandbox is a capability the tenant would be acquiring; a guardrail is a
 restriction the tenant is accepting, and a caller can already point a
 request-body guardrail at an endpoint of their own
@@ -958,11 +958,10 @@ class OrganizationGuardrailService:
     async def _commit(self) -> None:
         """Commit, rolling back before any failure escapes.
 
-        Required rather than tidy, the same as
-        `workspace_code_execution_policy_service._commit`: SQLAlchemy leaves a
-        session with a failed flush unusable, so a caller that skips the
-        rollback gets ``PendingRollbackError`` from the next statement instead
-        of the error that actually happened. Everything is re-raised after the
+        Required rather than tidy: SQLAlchemy leaves a session with a failed
+        flush unusable, so a caller that skips the rollback gets
+        ``PendingRollbackError`` from the next statement instead of the error
+        that actually happened. Everything is re-raised after the
         rollback, ``IntegrityError`` included, which is what the unique-profile
         handling above catches.
         """

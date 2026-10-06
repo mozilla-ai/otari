@@ -2,7 +2,7 @@
 
 import uuid
 
-from gateway.repositories.code_execution import WorkspaceCodeExecutionPolicyRepository
+from gateway.repositories.tools import WorkspaceCodeExecutionPolicyRepository
 
 
 class CodeExecutionWorkspaceDefaults:
