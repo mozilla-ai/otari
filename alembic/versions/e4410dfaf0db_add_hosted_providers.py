@@ -11,7 +11,7 @@ hosted provider may also be declared in ``config.yml`` or the environment, with
 no row of its own, and its roster still has to live somewhere.
 
 Revision ID: e4410dfaf0db
-Revises: c2e5a8d1f4b7
+Revises: d4f7a2b9e6c1
 Create Date: 2026-10-06
 """
 
@@ -21,7 +21,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "e4410dfaf0db"
-down_revision: str | Sequence[str] | None = "c2e5a8d1f4b7"
+down_revision: str | Sequence[str] | None = "d4f7a2b9e6c1"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
