@@ -76,6 +76,7 @@ from gateway.models.tenancy import (
     WorkspaceMember,
     WorkspaceMemberUpdate,
 )
+from gateway.models.tools import WorkspaceCodeExecutionPolicy
 from gateway.repositories.tenancy import (
     InvitationRepository,
     OrganizationMemberRepository,
@@ -233,13 +234,17 @@ class OrganizationService:
         *,
         membership_listener: MembershipListener | None,
         uow: UnitOfWork | None = None,
+        code_execution_on_by_default: bool = False,
     ):
         """Build the service on a session.
 
         A service that changes workspace membership needs a listener and a Unit of Work over the same session,
         because the listener writes through that Unit of Work's open block. A read-only service needs neither.
+        ``code_execution_on_by_default`` starts each workspace this service creates with code execution on,
+        which a hosted control plane needs because it reads a workspace with no policy as off.
         """
         self.db = db
+        self._code_execution_on_by_default = code_execution_on_by_default
         self._membership_listener = membership_listener
         self._uow = uow
         self.organizations = OrganizationRepository(db)
@@ -248,6 +253,11 @@ class OrganizationService:
         self.workspaces = WorkspaceMemberRepository(db)
         self.workspace_rows = WorkspaceRepository(db)
         self.invitations = InvitationRepository(db)
+
+    def stage_new_workspace_defaults(self, workspace_id: uuid.UUID) -> None:
+        """Stage what a workspace this service just created starts with, inside the caller's transaction."""
+        if self._code_execution_on_by_default:
+            self.db.add(WorkspaceCodeExecutionPolicy(workspace_id=workspace_id, enabled=True))
 
     # ------------------------------------------------------------------
     # Context resolution and authorization
@@ -504,6 +514,7 @@ class OrganizationService:
                     organization_id=organization.id,
                     created_by_user_id=user.id,
                 )
+                self.stage_new_workspace_defaults(workspace.id)
                 # Through the assignment path rather than a bare
                 # ``WorkspaceMemberRepository.create``, so this is the same
                 # create-member-then-materialize-defaults step every other
@@ -567,6 +578,7 @@ class OrganizationService:
                 organization_id=organization.id,
                 created_by_user_id=identity.id,
             )
+            self.stage_new_workspace_defaults(workspace.id)
             await self._apply_workspace_assignments(
                 user_id=identity.id,
                 assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="owner")],

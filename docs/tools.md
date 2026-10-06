@@ -336,8 +336,8 @@ Workspace-selected images must come from
 
 The authenticating API key determines the workspace. With no policy, deployment
 defaults apply. In hybrid mode, the control plane resolves the policy instead. A hosted
-control plane reads a workspace with no policy as off: code execution is
-something a workspace's owner or admin turns on.
+control plane reads a workspace with no policy as off, and gives each workspace
+it creates an enabled one, so a new workspace starts with code execution on.
 
 ## Web retrieval
 

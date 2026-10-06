@@ -89,9 +89,15 @@ def get_organization_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> OrganizationService:
     """Build the organization service on the request's session."""
-    return OrganizationService(db, membership_listener=membership_listener, uow=uow)
+    return OrganizationService(
+        db,
+        membership_listener=membership_listener,
+        uow=uow,
+        code_execution_on_by_default=config.is_hosted_mode,
+    )
 
 
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]

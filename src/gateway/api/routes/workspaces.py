@@ -11,8 +11,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, MembershipListenerDep, UnitOfWorkDep, get_db, verify_master_key
+from gateway.api.deps import (
+    CurrentIdentity,
+    MembershipListenerDep,
+    UnitOfWorkDep,
+    get_config,
+    get_db,
+    verify_master_key,
+)
 from gateway.api.routes.organizations import Message
+from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.models.tenancy import (
     WorkspaceCreate,
@@ -43,9 +51,15 @@ def get_workspace_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> WorkspaceService:
     """Build the workspace service on the request's session."""
-    return WorkspaceService(db, uow=uow, membership_listener=membership_listener)
+    return WorkspaceService(
+        db,
+        uow=uow,
+        membership_listener=membership_listener,
+        code_execution_on_by_default=config.is_hosted_mode,
+    )
 
 
 WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]

@@ -333,7 +333,10 @@ async def create_user_for_signup(
                     return None
                 # The registration, the password and the verification token below are committed together.
                 registration = await OrganizationService(
-                    db, membership_listener=membership_listener, uow=uow
+                    db,
+                    membership_listener=membership_listener,
+                    uow=uow,
+                    code_execution_on_by_default=config.is_hosted_mode,
                 ).provision_signup_tenancy(email=address, full_name=full_name)
                 if not registration.created:
                     # This answers like every other enumeration-safe refusal.

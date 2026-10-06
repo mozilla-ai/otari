@@ -232,7 +232,13 @@ export function WorkspaceCodeExecutionPolicyCard({
               <Button
                 size="sm"
                 isPending={save.isSaving}
-                onPress={() => void save.run(clearStale)}
+                isDisabled={isUnreadable}
+                onPress={() => {
+                  // Never queued behind the switch's own write, whose
+                  // `enabled` this one would otherwise overwrite.
+                  if (save.isSaving || isUnreadable) return
+                  void save.run(clearStale)
+                }}
               >
                 Clear it
               </Button>
