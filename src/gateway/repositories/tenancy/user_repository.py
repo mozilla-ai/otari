@@ -216,6 +216,20 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         """
         await self.db.execute(select(col(User.id)).where(col(User.id) == user_id).with_for_update())
 
+    async def get_locked(self, user_id: uuid.UUID) -> User | None:
+        """Return the identity read fresh under a row lock, or None.
+
+        NOTE: The lock applies on PostgreSQL only, because SQLite has no row locks.
+        """
+        result = await self.db.execute(
+            select(User).where(col(User.id) == user_id).with_for_update().execution_options(populate_existing=True)
+        )
+        return result.scalar_one_or_none()
+
+    def stage(self, identity: User) -> None:
+        """Stage the identity's changes for the caller's transaction to write."""
+        self.db.add(identity)
+
     async def claim_first_password(
         self,
         user_id: uuid.UUID,

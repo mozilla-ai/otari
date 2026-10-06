@@ -13,6 +13,7 @@ nothing here can stand in for it.
 
 import logging
 import re
+import uuid
 from base64 import urlsafe_b64encode
 from hashlib import sha256
 from http.cookies import SimpleCookie
@@ -27,12 +28,13 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-from sqlmodel import col, select
+from sqlmodel import col, delete, select
 
 from gateway.api.routes import auth_oauth
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.models.tenancy import Organization, User
+from gateway.repositories.tenancy import UserRepository
 from gateway.services import oauth_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 from gateway.services.oauth_service import FLOW_COOKIE_NAME, FLOW_COOKIE_PATH, OAuthIdentity
@@ -452,6 +454,31 @@ def test_open_signup_does_not_register_a_deactivated_identity_afresh(
     identities = db_session.execute(select(User).where(col(User.email) == "ada@example.com")).scalars().all()
     assert len(identities) == 1
     assert not identities[0].is_active
+
+
+def test_an_account_deleted_during_its_sign_in_is_refused(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    """An account deleted while its sign-in is in progress is refused."""
+    add_member(client, master_key_header, email="ada@example.com")
+    stub_exchange(monkeypatch)
+    original = UserRepository.get_locked
+
+    async def _delete_first(self: UserRepository, user_id: uuid.UUID) -> User | None:
+        db_session.execute(delete(User).where(col(User.id) == user_id))
+        db_session.commit()
+        return await original(self, user_id)
+
+    monkeypatch.setattr(UserRepository, "get_locked", _delete_first)
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+
+    assert response.status_code == 401
+    assert SESSION_COOKIE_NAME not in response.cookies
 
 
 def test_a_lost_registration_race_signs_in_to_the_winner_rather_than_failing(

@@ -85,9 +85,10 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         if identity is None or not identity.is_active:
             raise OAuthIdentityUnknownError(provider)
 
-        # The row is locked and re-read because a concurrent sign-in may have changed it since the first read.
-        await users.lock(identity.id)
-        await self._session.refresh(identity)
+        # The account is read again under a lock because a concurrent sign-in may have changed it since the first read.
+        identity = await users.get_locked(identity.id)
+        if identity is None:
+            raise OAuthIdentityUnknownError(provider)
 
         if identity.oauth_provider is None:
             identity.oauth_provider = provider
@@ -99,7 +100,7 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
             identity.email_verification_token_expires_at = None
         if not identity.full_name and full_name:
             identity.full_name = full_name
-        self._session.add(identity)
+        users.stage(identity)
         return identity
 
 

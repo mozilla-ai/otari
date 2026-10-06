@@ -11,8 +11,10 @@ import uuid
 from datetime import datetime
 
 import pytest
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.models.tenancy import (
     Organization,
@@ -239,6 +241,41 @@ async def test_a_taken_address_creates_nothing_and_leaves_the_transaction_usable
     found = await users.get_by_email("nova@example.com")
     assert found is not None
     assert found.id == holder.id
+
+
+async def test_a_locked_identity_is_read_fresh(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    identity = await _identity(async_db, organization, full_name="Before", email="nova@example.com")
+    await async_db.execute(
+        update(User)
+        .where(col(User.id) == identity.id)
+        .values(full_name="After")
+        .execution_options(synchronize_session=False)
+    )
+    assert identity.full_name == "Before"
+
+    locked = await UserRepository(async_db).get_locked(identity.id)
+
+    assert locked is not None
+    assert locked.full_name == "After"
+
+
+async def test_staged_changes_are_written_with_the_transaction(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    identity = await _identity(async_db, organization, email="nova@example.com")
+    users = UserRepository(async_db)
+
+    identity_id = identity.id
+
+    identity.full_name = "Nova"
+    identity.oauth_provider = "google"
+    users.stage(identity)
+    await async_db.commit()
+
+    written = await users.get_locked(identity_id)
+    assert written is not None
+    assert written.full_name == "Nova"
+    assert written.oauth_provider == "google"
 
 
 async def test_get_by_slug(async_db: AsyncSession) -> None:
