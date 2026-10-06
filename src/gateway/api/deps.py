@@ -46,6 +46,7 @@ from gateway.repositories.tenancy import (
     OrgProviderKeyRepository,
     WorkspaceRepository,
 )
+from gateway.repositories.tools import OrgWebSearchKeyRepository, WorkspaceWebSearchKeyOverrideRepository
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetMembershipListener, BudgetService
@@ -72,6 +73,7 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.workspace_listener import WorkspaceListener
 from gateway.services.tenancy.workspace_service import WorkspaceService
+from gateway.services.tools import WebSearchKeyService
 from gateway.services.workspace_scope import default_workspace_id
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
@@ -1154,6 +1156,25 @@ def get_provider_endpoint_service(
 
 
 ProviderEndpointServiceDep = Annotated[ProviderEndpointService, Depends(get_provider_endpoint_service)]
+
+
+def get_web_search_key_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WebSearchKeyService:
+    """Build the organization web search key service on the request's Unit of Work."""
+    organizations = OrganizationService(db, membership_listener=None)
+    return WebSearchKeyService(
+        uow,
+        keys=OrgWebSearchKeyRepository(uow),
+        overrides=WorkspaceWebSearchKeyOverrideRepository(uow),
+        organizations=organizations,
+        workspaces=WorkspaceAccess(db, organizations),
+        lock_workspace=WorkspaceRepository(db).lock,
+    )
+
+
+WebSearchKeyServiceDep = Annotated[WebSearchKeyService, Depends(get_web_search_key_service)]
 
 
 def get_rate_limit_service(

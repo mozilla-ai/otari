@@ -137,6 +137,8 @@ def test_hosted_mode_still_serves_the_management_plane(hosted_client: TestClient
         f"{API_ROOT}/keys",
         f"{API_ROOT}/usage",
         f"{API_ROOT}/organizations/me/provider-keys",
+        # An organization's own web search keys, which its hybrid gateways search with.
+        f"{API_ROOT}/organizations/me/web-search-keys",
         # Discovery, not dispatch, and a surface bootstrap publishes for a
         # hosted deployment, so it stays mounted.
         f"{API_ROOT}/models",

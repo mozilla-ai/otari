@@ -19,8 +19,8 @@ Two callers, and the difference between them is where the credential may sit:
   :mod:`gateway.api.routes.web_search_backend` over the same SearXNG shape, calls
   this module on the gateway's behalf, and the key stays where it was configured.
 
-The key is the deployment's, never a workspace's: nothing here reads tenancy,
-and no response carries a credential. ``options`` is the opaque
+The key is the caller's to pass: the deployment's, or the workspace's own organization
+key chosen at admission. Nothing here reads tenancy, and no response carries a credential. ``options`` is the opaque
 ``provider_options`` bag a workspace or a request may set, and each provider
 whitelists the keys it understands rather than forwarding the bag upstream, so
 an unrecognized key is dropped instead of becoming a provider request field

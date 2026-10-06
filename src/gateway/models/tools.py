@@ -1,7 +1,7 @@
 """ORM tables for gateway-run tools, the executor column's vocabulary, and the web search policy a request reads."""
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -11,11 +11,15 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
+    Index,
     String,
     Text,
     UniqueConstraint,
     Uuid,
+    false,
     func,
+    text,
     true,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -322,6 +326,113 @@ class WorkspaceWebSearchConfig(Base):
     )
 
 
+class OrgWebSearchKey(Base):
+    """One web search provider key an organization brings, for its workspaces' searches.
+
+    The search counterpart of ``OrgProviderKey`` (``models/provider_keys.py``), decided
+    at otari-ai#1748 and mozilla-ai/otari#1724: archival, one default per organization
+    and provider, and per-workspace pin or turn-off overrides
+    (:class:`WorkspaceWebSearchKeyOverride`). A workspace with a usable key searches
+    with it; any other workspace uses the deployment's own search, which this table
+    never changes. The two never merge.
+
+    ``provider`` is one of ``WEB_SEARCH_PROVIDERS``, the services the managed search
+    tool can call with a key. ``encrypted_api_key`` is Fernet-encrypted with
+    ``OTARI_SECRET_KEY`` (``services/secret_box.py``) and never serialized; ``last4``
+    is what an operator tells two keys apart by.
+
+    CASCADE: an organization-owned credential means nothing once its organization is gone.
+    """
+
+    __tablename__ = "org_web_search_keys"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "provider", "name", name="uq_org_web_search_keys_org_provider_name"),
+        # One live default per (organization, provider), arbitrated by the database
+        # so two concurrent "set default" calls cannot both win.
+        Index(
+            "uq_org_web_search_keys_org_default",
+            "organization_id",
+            "provider",
+            unique=True,
+            postgresql_where=text("is_org_default AND archived_at IS NULL"),
+            sqlite_where=text("is_org_default AND archived_at IS NULL"),
+        ),
+        # The target of the override table's composite FK, which pins an override
+        # to a key of its own organization.
+        UniqueConstraint("organization_id", "id", name="uq_org_web_search_keys_org_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    encrypted_api_key: Mapped[str] = mapped_column(Text, nullable=False)
+    last4: Mapped[str | None] = mapped_column(String(8), default=None)
+    archived_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    is_org_default: Mapped[bool] = mapped_column(default=False, nullable=False, server_default=false())
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        server_default=func.now(),
+    )
+
+
+class WorkspaceWebSearchKeyOverride(Base):
+    """A workspace's departure from its organization's web search keys for one key.
+
+    No row means the workspace inherits. A row pins the key as the workspace's own
+    (``is_default``) or turns it off for the workspace (``disabled``); a row with
+    neither is deleted rather than stored.
+    """
+
+    __tablename__ = "workspace_web_search_key_overrides"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "org_web_search_key_id", name="uq_workspace_web_search_key_overrides_ws_key"),
+        # Composite, so an override can only name a key of the workspace's own organization.
+        ForeignKeyConstraint(
+            ["organization_id", "org_web_search_key_id"],
+            ["org_web_search_keys.organization_id", "org_web_search_keys.id"],
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    org_web_search_key_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    is_default: Mapped[bool] = mapped_column(default=False, nullable=False, server_default=false())
+    disabled: Mapped[bool] = mapped_column(default=False, nullable=False, server_default=false())
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        server_default=func.now(),
+    )
+
+
+@dataclass(frozen=True)
+class WebSearchCredential:
+    """The search provider and key a workspace's searches use in place of the deployment's.
+
+    ``api_key`` is left out of the ``repr``, so a log line or an error that prints the
+    record never prints the key.
+    """
+
+    provider: str
+    api_key: str = field(repr=False)
+
+
 @dataclass(frozen=True)
 class ResolvedCodeExecutionPolicy:
     """A workspace's code execution policy, as the request path reads it.
@@ -361,6 +472,8 @@ class ResolvedWebSearchConfig:
     blocked_domains: tuple[str, ...] | None
     provider_options: dict[str, Any] | None
     authorized_tools: frozenset[str] | None
+    # The workspace's own search key, which its searches use in place of the deployment's.
+    credential: WebSearchCredential | None = None
 
 
 class SandboxContainer(Base):

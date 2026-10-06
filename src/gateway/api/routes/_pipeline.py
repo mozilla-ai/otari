@@ -151,7 +151,7 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
 from gateway.models.pricing import ModelPricing, PriceSource
-from gateway.models.tools import CodeExecutor, ResolvedCodeExecutionPolicy
+from gateway.models.tools import CodeExecutor, ResolvedCodeExecutionPolicy, WebSearchCredential
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH, UsageLog
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort, CodeExecutionPolicyScope
 from gateway.ports.code_execution_port import CodeExecutionPort
@@ -2441,6 +2441,7 @@ class ToolContext:
         web_search_tool_entry: dict[str, Any] | None,
         web_search_url: str | None,
         web_search_auth_token: str | None,
+        web_search_credential: WebSearchCredential | None = None,
         remaining_user_tools: list[dict[str, Any]] | None,
         max_tool_iterations: int,
         tools_header: str | None,
@@ -2486,6 +2487,8 @@ class ToolContext:
         self.web_search_tool_entry = web_search_tool_entry
         self.web_search_url = web_search_url
         self.web_search_auth_token = web_search_auth_token
+        # The workspace's own search key, which its searches use in place of the deployment's.
+        self.web_search_credential = web_search_credential
         self.use_web_fetch = use_web_fetch
         self.web_fetch_tool_entry = web_fetch_tool_entry
         self.web_fetch_policy = web_fetch_policy or DomainPolicy()
@@ -2638,6 +2641,7 @@ class ToolContext:
             fetch_policy=self.web_fetch_policy,
             counter=self.web_retrieval_counter,
             auth_token=self.web_search_auth_token,
+            credential=self.web_search_credential,
             config=self.config,
             tally=self.tally,
         )
@@ -2939,6 +2943,7 @@ async def prepare_gateway_tools(
         web_search_tool_entry=web_access.search_tool_entry,
         web_search_url=web_access.search_url,
         web_search_auth_token=web_access.search_auth_token,
+        web_search_credential=web_access.search_credential,
         use_web_fetch=web.fetch_tool_entry is not None,
         web_fetch_tool_entry=web.fetch_tool_entry,
         web_fetch_policy=web_access.fetch_policy,
@@ -3052,6 +3057,7 @@ class _AdmittedWebAccess:
     search_auth_token: str | None
     search_tool_entry: dict[str, Any] | None
     search_url: str | None
+    search_credential: WebSearchCredential | None = None
 
 
 async def _admit_web_access(
@@ -3085,6 +3091,7 @@ async def _admit_web_access(
         search_auth_token=search_auth_token,
         search_tool_entry=grant.search_tool_entry,
         search_url=search_url,
+        search_credential=grant.search_credential,
     )
 
 

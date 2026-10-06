@@ -53,6 +53,7 @@ from gateway.services.tools._web_declarations import (
     web_search_declaration_forms,
     web_search_intercept_enabled,
 )
+from gateway.services.tools._web_search_keys import WebSearchKeyService, search_key_credential
 from gateway.services.tools._web_search_responses import WEB_SEARCH_CALL_ID_PREFIX
 from gateway.services.tools._web_search_results import web_search_max_results_baseline
 
@@ -74,6 +75,7 @@ __all__ = [
     "Tool",
     "ToolUseBudget",
     "WebAccessGrant",
+    "WebSearchKeyService",
     "admit_code_execution",
     "admit_mcp_servers",
     "admit_web_access",
@@ -94,6 +96,7 @@ __all__ = [
     "provider_runs_code_natively",
     "read_web_search_max_uses",
     "resolve_code_executor_preference",
+    "search_key_credential",
     "web_search_declaration_forms",
     "web_search_intercept_enabled",
     "web_search_max_results_baseline",

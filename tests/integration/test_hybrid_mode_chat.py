@@ -2028,6 +2028,7 @@ class _FakeWebSearchBackend:
 
     last_tool_entry: dict[str, Any] | None = None
     last_auth_token: str | None = None
+    last_credential: Any = None
 
     def __init__(
         self,
@@ -2041,6 +2042,7 @@ class _FakeWebSearchBackend:
     ) -> None:
         type(self).last_tool_entry = dict(search_tool_entry or {})
         type(self).last_auth_token = auth_token
+        type(self).last_credential = _kwargs.get("credential")
         # The real backend records each call on the request's tally; accept it so
         # the constructor contract matches, even though this double runs no search.
         self._tally = tally
@@ -2438,6 +2440,103 @@ def test_hybrid_mode_web_search_forwards_token_to_platform_backend(
 
     assert response.status_code == 200
     assert _FakeWebSearchBackend.last_auth_token == "gw_test_token"
+
+
+def _search_with_web_search_answer(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+    answer: dict[str, Any],
+) -> Any:
+    """One chat completion declaring web search, with the control plane answering its resolve with ``answer``."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://searxng:8080")
+    _FakeWebSearchBackend.last_credential = None
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="ws-req-credential")
+        if url.endswith("/gateway/web-search/resolve"):
+            return httpx.Response(200, json=answer)
+        return httpx.Response(204)
+
+    async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
+        return ChatCompletion(
+            id="cmpl-ws-cred",
+            object="chat.completion",
+            created=0,
+            model="openai:gpt-4o-mini",
+            choices=[
+                Choice(finish_reason="stop", index=0, message=ChatCompletionMessage(role="assistant", content="ok"))
+            ],
+            usage=CompletionUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
+        )
+
+    control_plane_transport(fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_retrieval_backend", _FakeWebSearchBackend)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+    return platform_client.post(
+        f"{API_ROOT}/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "otari_web_search"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+
+def test_hybrid_mode_searches_with_the_workspace_key_the_control_plane_returns(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    response = _search_with_web_search_answer(
+        platform_client,
+        monkeypatch,
+        control_plane_transport,
+        {"enabled": True, "credential": {"provider": "tavily", "api_key": "tvly-workspace"}},
+    )
+
+    assert response.status_code == 200, response.text
+    credential = _FakeWebSearchBackend.last_credential
+    assert (credential.provider, credential.api_key) == ("tavily", "tvly-workspace")
+    assert "tvly-workspace" not in repr(credential)
+
+
+def test_hybrid_mode_refuses_a_malformed_workspace_key(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    """Read strictly, like the rest of the answer, so a malformed one fails closed."""
+    response = _search_with_web_search_answer(
+        platform_client,
+        monkeypatch,
+        control_plane_transport,
+        {"enabled": True, "credential": {"provider": "tavily"}},
+    )
+
+    assert response.status_code == 502, response.text
+    assert _FakeWebSearchBackend.last_credential is None
+
+
+def test_hybrid_mode_ignores_a_key_for_a_provider_it_cannot_call(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    """A newer peer may name a provider this gateway does not know; it searches with its own instead."""
+    response = _search_with_web_search_answer(
+        platform_client,
+        monkeypatch,
+        control_plane_transport,
+        {"enabled": True, "credential": {"provider": "exa", "api_key": "exa-key"}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert _FakeWebSearchBackend.last_credential is None
 
 
 def test_hybrid_mode_web_search_empty_request_list_keeps_workspace_policy(
