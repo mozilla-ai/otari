@@ -93,9 +93,12 @@ plane.
 
 ## Managed models and BYO credentials
 
-A request is served on the first credential the ladder finds: an organization's
-own provider key, then a provider instance stored through the Providers page,
-then one from `config.yml`, then one of the deployment's **hosted providers**. A hosted provider is a credential the
+A request is served on the first credential the ladder finds. A provider
+instance configured on the deployment, in `config.yml` or through the Providers
+page, serves every request that names it, including a bare `provider:model`
+request whose provider spells that instance's name. Where no instance answers,
+the organization's own provider key serves the request. Where that is missing
+too, one of the deployment's **hosted providers** does. A hosted provider is a credential the
 deployment's operator configures for the deployment to serve requests on, one
 per provider, with a roster of the models offered on it and the rate each is
 charged at on the deployment price list. A standalone deployment configures them
