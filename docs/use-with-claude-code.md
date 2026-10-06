@@ -60,6 +60,59 @@ Non-Claude models may lose Anthropic-specific behavior such as extended thinking
 prompt caching, or tool semantics. Test the actual agent workflow before making
 one a default.
 
+## Let Otari choose a subagent's model
+
+Switching the model inside a running Claude Code conversation cold-starts its
+prompt cache. A new subagent has no cache yet, so the moment it is spawned is
+where a cheaper model is free. Claude Code can ask Otari at that moment, even
+when its own requests go to Anthropic directly.
+
+`POST /api/v1/routing/recommend` takes the facts a harness holds at spawn
+time and recommends the model to start the subagent on. Otari puts one choice
+question to a decision model, TypeSafe's Jev by default: given the subagent
+type, the task and the parent's model, which is the cheapest candidate that
+would do the task well? The candidate Jev picks is the recommendation. Any
+active API key may ask. The decision call is billed to the caller and recorded
+in usage like a `POST /api/v1/decisions` call; nothing else is dispatched, and
+the harness acts on the answer with its own provider credentials. Like
+decisions, the route is standalone only: a hybrid gateway does not serve it.
+
+This needs a [decision provider](configuration.md#decision-providers) the
+`agent_recommender_model` selector resolves to, `typesafe` with an API key by
+default. Without one, the route answers 400 and a mod falls back to the model
+the subagent would have had anyway.
+
+```bash
+curl "$OTARI_URL/api/v1/routing/recommend" \
+  -H "Authorization: Bearer $OTARI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "harness": "claude-code",
+    "session_id": "bf05abe2-5ff2-4eb0-8459-ab578d5c9468",
+    "tool_use_id": "toolu_01Ab3dEfGh",
+    "agent_type": "Explore",
+    "description": "Find the budget reservation code",
+    "prompt": "Find where budgets are reserved before dispatch.",
+    "parent_model": "claude-opus-5",
+    "requested_model": null
+  }'
+```
+
+```json
+{
+  "model": "haiku",
+  "reason": "jev-1.13.0 chose haiku with 81%",
+  "probabilities": { "haiku": 0.81, "sonnet": 0.16, "opus": 0.03 }
+}
+```
+
+`model` is one of the `agent_recommender_candidates`, Claude Code's `haiku`,
+`sonnet` and `opus` aliases by default, because Claude Code sends the
+subagent's requests to Anthropic itself and resolves the alias on its side.
+The caller's own `requested_model` is received as a fact but kept out of the
+question, so the orchestrator's guess cannot pull the answer toward itself.
+The task reaches the decision model shortened to its first 32,000 characters.
+
 ## Import Claude Code usage without routing
 
 Claude Code can send subscription usage to Otari over OpenTelemetry. This is for

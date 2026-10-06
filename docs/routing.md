@@ -221,6 +221,15 @@ The command shows ordered candidates, filtered candidates and their reasons,
 effective weighted shares, and mandatory guardrails. The API equivalent is
 `POST /api/v1/routing/policies/explain`; it can also validate an unsaved draft.
 
+## Agent model recommendations
+
+A policy decides the model of a request that reaches Otari. A coding agent that
+talks to its provider directly can still ask Otari which model a new subagent
+should run on, through `POST /api/v1/routing/recommend`. Otari puts one choice
+question to a decision model and recommends the candidate it picks. That
+decision is billed to the caller; nothing else is dispatched. See
+[Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model).
+
 ## Managing policies at runtime
 
 Config-file policies apply to every workspace. Standalone operators can also

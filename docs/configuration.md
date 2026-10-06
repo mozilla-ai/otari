@@ -464,6 +464,29 @@ chat: they never appear in `/api/v1/models` or provider health. Price a decision
 model like any other, as `<provider>:<model>` in `pricing`. Decisions are
 standalone-mode only.
 
+### Agent model recommendations
+
+`POST /api/v1/routing/recommend` asks a decision model which of a few
+candidate models a coding agent's subagent should run on (see
+[Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model)).
+Two settings shape the question:
+
+```yaml
+agent_recommender_model: typesafe:jev-latest
+agent_recommender_candidates:
+  haiku: Simple, well-specified, mechanical work. Little judgment needed.
+  sonnet: Moderate reasoning across a few files, contained code changes.
+  opus: Hard reasoning, ambiguous goals, large or security-sensitive changes.
+```
+
+`agent_recommender_model` is a `decision_providers` selector, resolved per
+request, so a deployment that never asks need not configure the provider.
+`agent_recommender_candidates` maps each model name, as the asking harness
+spells it, to what it is for; `null` is allowed when the name says enough. At
+least two are required, and at most 255, the limit a choice question has. The
+defaults are Claude Code's `haiku`, `sonnet` and `opus` aliases with
+descriptions along the lines above.
+
 ## Mail
 
 Mail is optional. Invitations always return an accept link, and an invitee who
