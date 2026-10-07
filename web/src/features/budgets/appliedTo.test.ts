@@ -40,7 +40,7 @@ describe("appliedToLabel", () => {
     expect(label).toBe("Acme (organization)")
   })
 
-  it("names a lone workspace and counts several", () => {
+  it("names every workspace", () => {
     expect(appliedToLabel([ceiling({ scope_id: "ws-2" })], CONTEXT)).toBe(
       "Research",
     )
@@ -49,13 +49,19 @@ describe("appliedToLabel", () => {
         [ceiling({ scope_id: "ws-1" }), ceiling({ scope_id: "ws-2" })],
         CONTEXT,
       ),
-    ).toBe("2 workspaces")
+    ).toBe("Platform, Research")
   })
 
-  it("falls back to a count for a workspace the page has not read", () => {
+  it("counts a workspace the page has not read", () => {
     expect(appliedToLabel([ceiling({ scope_id: "ws-gone" })], CONTEXT)).toBe(
       "1 workspace",
     )
+    expect(
+      appliedToLabel(
+        [ceiling({ scope_id: "ws-1" }), ceiling({ scope_id: "ws-gone" })],
+        CONTEXT,
+      ),
+    ).toBe("Platform, 1 other workspace")
   })
 
   it("reads a narrowed ceiling as its provider, not as its scope", () => {
@@ -149,7 +155,7 @@ describe("appliedToLabel", () => {
     // Three phrases shown, covering four entities; the three behind the two
     // hidden phrases are what the overflow counts.
     expect(label).toBe(
-      "Acme (organization), 2 workspaces, 1 organization member, +3",
+      "Acme (organization), Platform, Research, 1 organization member, +3",
     )
   })
 })

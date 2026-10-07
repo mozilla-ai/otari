@@ -56,10 +56,10 @@ function counted(count: number, singular: string, plural: string): string {
 /**
  * One group's phrase.
  *
- * A group of one is named where a name is reachable, because "Acme" is what an
- * admin is looking for and "1 workspace" is what makes them open the row to find
- * out which. A membership has no name on this page (the ceiling carries an id
- * and the roster is a different read), so it stays a count at every size.
+ * Workspaces are named, every one of them, because a name is what an admin is
+ * looking for and a count is what makes them open the row to find out which. A
+ * membership has no name on this page (the ceiling carries an id and the roster
+ * is a different read), so it stays a count at every size.
  */
 function groupPhrase(
   group: GroupKey,
@@ -71,11 +71,20 @@ function groupPhrase(
     case "organization":
       return `${context.organizationName} (organization)`
     case "workspace": {
-      if (count > 1) return counted(count, "workspace", "workspaces")
-      const workspace = context.workspaces.find(
-        (candidate) => candidate.id === ceilings[0].scope_id,
-      )
-      return workspace ? workspace.name : "1 workspace"
+      const names = ceilings.flatMap((ceiling) => {
+        const workspace = context.workspaces.find(
+          (candidate) => candidate.id === ceiling.scope_id,
+        )
+        return workspace ? [workspace.name] : []
+      })
+      // A workspace the page has not read is counted rather than dropped.
+      const unnamed = count - names.length
+      if (unnamed === 0) return names.join(", ")
+      if (names.length === 0) return counted(unnamed, "workspace", "workspaces")
+      return [
+        ...names,
+        counted(unnamed, "other workspace", "other workspaces"),
+      ].join(", ")
     }
     case "provider": {
       if (count > 1) return counted(count, "provider", "providers")
