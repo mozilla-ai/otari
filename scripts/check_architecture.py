@@ -323,7 +323,14 @@ def _matches(module: str, prefix: str) -> bool:
 
 
 def _resolve_relative(node: ast.ImportFrom, file_path: Path, src_root: Path) -> str | None:
-    """Resolve a relative import to an absolute module path, or None if it escapes src_root."""
+    """Resolve a relative import to an absolute module path, or None if it escapes src_root.
+
+    A library's root is its directory (LIBRARY_ROOTS), so a relative import inside it resolves
+    with that directory's layout in front, ``src.any_search.x`` rather than ``any_search.x``. No
+    rule names a library's own modules, and a relative import cannot reach the modules the
+    libraries' rule forbids, so the check is unaffected; a rule that names them would have to
+    resolve against the package's own root instead.
+    """
     package_parts = file_path.parent.relative_to(src_root).parts
     drop = node.level - 1
     if drop >= len(package_parts):

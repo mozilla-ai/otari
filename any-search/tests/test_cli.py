@@ -60,6 +60,15 @@ def test_a_usage_error_exits_2(argv: list[str]) -> None:
     assert exited.value.code == 2
 
 
+def test_a_count_that_is_not_a_number_names_the_problem(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exited:
+        main(["fake", "q", "--max-results", "five"])
+    assert exited.value.code == 2
+    err = capsys.readouterr().err
+    assert "must be a whole number" in err
+    assert "_positive" not in err
+
+
 def _log_filter_installed() -> bool:
     return any(isinstance(existing, RedactProviderUrls) for existing in logging.getLogger("httpx").filters)
 
