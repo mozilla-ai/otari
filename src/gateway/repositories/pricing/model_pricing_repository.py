@@ -1,4 +1,4 @@
-"""Data access for the deployment price list, and the organization overrides above it.
+"""Data access for the deployment price list.
 
 Built on the Unit of Work. Flushes, never commits. Every statement is
 dialect-neutral, because the chain and the OSS edition run on SQLite as well as
@@ -6,15 +6,15 @@ PostgreSQL: a newest-version read is a ``MAX`` subquery rather than
 ``DISTINCT ON``.
 """
 
-import uuid
 from collections.abc import Collection, Sequence
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Never, cast
 
 from sqlalchemy import ColumnElement, CursorResult, and_, delete, func, select
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.models.pricing import ModelPricing, OrganizationModelPricing
+from gateway.models.pricing import ModelPricing
 from gateway.repositories.base_repository import BaseRepository
 
 # A key list long enough to exceed SQLite's default limit on bind parameters in
@@ -82,10 +82,35 @@ class ModelPricingRepository(BaseRepository[ModelPricing, Never, Never]):
                 latest[row.model_key] = row
         return latest
 
-    def add_all(self, rows: Sequence[ModelPricing]) -> None:
-        """Stage new versions."""
-        if rows:
-            self.db.add_all(rows)
+    def add_version(
+        self,
+        model_key: str,
+        effective_at: datetime,
+        *,
+        input_price_per_million: Decimal,
+        output_price_per_million: Decimal,
+        cache_read_price_per_million: Decimal | None,
+        cache_write_price_per_million: Decimal | None,
+        cache_write_1h_price_per_million: Decimal | None,
+        pricing_tiers: Sequence[dict[str, Any]],
+        unit: str,
+        origin: str,
+    ) -> ModelPricing:
+        """Stage one new version."""
+        version = ModelPricing(
+            model_key=model_key,
+            effective_at=effective_at,
+            input_price_per_million=input_price_per_million,
+            output_price_per_million=output_price_per_million,
+            cache_read_price_per_million=cache_read_price_per_million,
+            cache_write_price_per_million=cache_write_price_per_million,
+            cache_write_1h_price_per_million=cache_write_1h_price_per_million,
+            pricing_tiers=list(pricing_tiers),
+            unit=unit,
+            origin=origin,
+        )
+        self.db.add(version)
+        return version
 
     async def flush(self) -> None:
         """Flush staged versions so a read in the same block sees them."""
@@ -105,47 +130,14 @@ class ModelPricingRepository(BaseRepository[ModelPricing, Never, Never]):
         )
         return [(model_key, versions) for model_key, versions in result.all()]
 
-    async def overrides_for_keys(self, model_keys: Sequence[str]) -> list[tuple[uuid.UUID, uuid.UUID, str]]:
-        """Every organization override above ``model_keys``, as ``(id, organization_id, model_key)``.
-
-        Bounded by the overrides tenants hold on the keys given, which is what
-        a caller then decides about one by one.
-        """
-        found: list[tuple[uuid.UUID, uuid.UUID, str]] = []
+    async def delete_keys(self, model_keys: Sequence[str]) -> int:
+        """Delete every version of each key, returning how many rows went."""
+        deleted = 0
         for start in range(0, len(model_keys), _KEY_CHUNK):
             chunk = list(model_keys[start : start + _KEY_CHUNK])
-            result = await self.db.execute(
-                select(
-                    OrganizationModelPricing.id,
-                    OrganizationModelPricing.organization_id,
-                    OrganizationModelPricing.model_key,
-                ).where(OrganizationModelPricing.model_key.in_(chunk))
+            result = cast(
+                CursorResult[Any], await self.db.execute(delete(ModelPricing).where(ModelPricing.model_key.in_(chunk)))
             )
-            found.extend((row_id, organization_id, key) for row_id, organization_id, key in result.all())
-        return found
-
-    async def delete_keys(self, model_keys: Sequence[str], override_ids: Sequence[uuid.UUID]) -> tuple[int, int]:
-        """Delete every version of each key, and the overrides named by id.
-
-        The overrides go first: an override is a commitment over a price-list
-        entry, so a moment where the entry is gone and the override is not
-        would price a model the deployment no longer lists. Returns the rows
-        removed from each table.
-        """
-        prices = 0
-        overrides = 0
-        for start in range(0, len(override_ids), _KEY_CHUNK):
-            ids = list(override_ids[start : start + _KEY_CHUNK])
-            deleted_overrides = cast(
-                CursorResult[Any],
-                await self.db.execute(delete(OrganizationModelPricing).where(OrganizationModelPricing.id.in_(ids))),
-            )
-            overrides += deleted_overrides.rowcount
-        for start in range(0, len(model_keys), _KEY_CHUNK):
-            keys = list(model_keys[start : start + _KEY_CHUNK])
-            deleted_prices = cast(
-                CursorResult[Any], await self.db.execute(delete(ModelPricing).where(ModelPricing.model_key.in_(keys)))
-            )
-            prices += deleted_prices.rowcount
+            deleted += result.rowcount
         await self.db.flush()
-        return prices, overrides
+        return deleted

@@ -27,7 +27,7 @@ from gateway.core.metered_pricing import quantize_rate
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.money import to_usd, to_usd_or_none
 from gateway.models.pricing import API_ORIGIN, SEED_ORIGIN, ModelPricing
-from gateway.repositories.pricing import ModelPricingRepository
+from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
 from gateway.services.pricing_service import default_model_pricing, normalize_effective_at
 
 _CACHE_RATE_FIELDS = (
@@ -48,26 +48,6 @@ def _resolve_defaults(provider: str, models: Sequence[str], as_of: datetime) -> 
     return resolved
 
 
-def _stored_default(model_key: str, default: ModelPricing, effective_at: datetime) -> ModelPricing:
-    """The version that stores a community default on a hosted model's behalf.
-
-    ``SEED_ORIGIN`` is what lets a refresh move it with the dataset, where a
-    version somebody chose is left alone.
-    """
-    return ModelPricing(
-        model_key=model_key,
-        effective_at=effective_at,
-        input_price_per_million=default.input_price_per_million,
-        output_price_per_million=default.output_price_per_million,
-        cache_read_price_per_million=default.cache_read_price_per_million,
-        cache_write_price_per_million=default.cache_write_price_per_million,
-        cache_write_1h_price_per_million=default.cache_write_1h_price_per_million,
-        pricing_tiers=list(default.pricing_tiers or []),
-        unit=default.unit or "tokens",
-        origin=SEED_ORIGIN,
-    )
-
-
 def _quantized(value: Decimal | None) -> Decimal | None:
     return None if value is None else quantize_rate(to_usd(value))
 
@@ -75,9 +55,12 @@ def _quantized(value: Decimal | None) -> Decimal | None:
 class DeploymentPricingService:
     """Read and write the deployment price list."""
 
-    def __init__(self, uow: UnitOfWork, *, pricing: ModelPricingRepository) -> None:
+    def __init__(
+        self, uow: UnitOfWork, *, pricing: ModelPricingRepository, overrides: OrganizationModelPricingRepository
+    ) -> None:
         self.uow = uow
         self.pricing = pricing
+        self.overrides = overrides
 
     async def keys_with_a_price(self, model_keys: Collection[str]) -> set[str]:
         """The keys among ``model_keys`` the list holds a version for."""
@@ -107,16 +90,28 @@ class DeploymentPricingService:
         return await asyncio.to_thread(_resolve_defaults, provider, wanted, normalize_effective_at(None))
 
     async def store_defaults(self, defaults: Mapping[str, ModelPricing], effective_at: datetime) -> None:
-        """Store community defaults as the deployment's own versions, one per ``model_key``.
+        """Store community defaults as versions carrying ``SEED_ORIGIN``, one per ``model_key``.
 
-        ``defaults`` maps each ``provider:model`` key to the transient row
-        :meth:`defaults_for` resolved. Flushed so a read in the same block sees
-        them.
+        ``SEED_ORIGIN`` is what lets a refresh move such a version with the
+        dataset, where a version somebody chose is left alone. Flushed so a
+        read in the same block sees them.
         """
         if not defaults:
             return
         async with self.uow:
-            self.pricing.add_all([_stored_default(key, default, effective_at) for key, default in defaults.items()])
+            for model_key, default in defaults.items():
+                self.pricing.add_version(
+                    model_key,
+                    effective_at,
+                    input_price_per_million=default.input_price_per_million,
+                    output_price_per_million=default.output_price_per_million,
+                    cache_read_price_per_million=default.cache_read_price_per_million,
+                    cache_write_price_per_million=default.cache_write_price_per_million,
+                    cache_write_1h_price_per_million=default.cache_write_1h_price_per_million,
+                    pricing_tiers=default.pricing_tiers or [],
+                    unit=default.unit or "tokens",
+                    origin=SEED_ORIGIN,
+                )
             await self.pricing.flush()
 
     @staticmethod
@@ -164,19 +159,25 @@ class DeploymentPricingService:
 
             version = latest if latest is not None and latest.effective_at == effective_at else None
             if version is None:
-                version = ModelPricing(
-                    model_key=model_key,
-                    effective_at=effective_at,
-                    pricing_tiers=list(latest.pricing_tiers or []) if latest is not None else [],
+                version = self.pricing.add_version(
+                    model_key,
+                    effective_at,
+                    input_price_per_million=to_usd(input_price_per_million),
+                    output_price_per_million=to_usd(output_price_per_million),
+                    cache_read_price_per_million=cache_rate("cache_read_price_per_million"),
+                    cache_write_price_per_million=cache_rate("cache_write_price_per_million"),
+                    cache_write_1h_price_per_million=cache_rate("cache_write_1h_price_per_million"),
+                    pricing_tiers=latest.pricing_tiers or [] if latest is not None else [],
                     unit=latest.unit if latest is not None else "tokens",
+                    origin=API_ORIGIN,
                 )
-                self.pricing.add_all([version])
-            version.input_price_per_million = to_usd(input_price_per_million)
-            version.output_price_per_million = to_usd(output_price_per_million)
-            version.cache_read_price_per_million = cache_rate("cache_read_price_per_million")
-            version.cache_write_price_per_million = cache_rate("cache_write_price_per_million")
-            version.cache_write_1h_price_per_million = cache_rate("cache_write_1h_price_per_million")
-            version.origin = API_ORIGIN
+            else:
+                version.input_price_per_million = to_usd(input_price_per_million)
+                version.output_price_per_million = to_usd(output_price_per_million)
+                version.cache_read_price_per_million = cache_rate("cache_read_price_per_million")
+                version.cache_write_price_per_million = cache_rate("cache_write_price_per_million")
+                version.cache_write_1h_price_per_million = cache_rate("cache_write_1h_price_per_million")
+                version.origin = API_ORIGIN
             await self.pricing.flush()
             return version
 
@@ -194,14 +195,21 @@ class DeploymentPricingService:
         if not canonical_keys:
             return []
         async with self.uow:
-            return await self.pricing.overrides_for_keys(canonical_keys)
+            return await self.overrides.ids_for_keys(canonical_keys)
 
     async def delete_keys(self, model_keys: Sequence[str], override_ids: Sequence[uuid.UUID]) -> tuple[int, int]:
-        """Take every version of ``model_keys`` off the list, with the overrides named by id."""
+        """Take every version of ``model_keys`` off the list, with the overrides named by id.
+
+        The overrides go first: an override is a commitment over a price-list
+        entry, so a moment where the entry is gone and the override is not
+        would price a model the deployment no longer lists.
+        """
         if not model_keys and not override_ids:
             return 0, 0
         async with self.uow:
-            return await self.pricing.delete_keys(model_keys, override_ids)
+            overrides = await self.overrides.delete_ids(override_ids)
+            prices = await self.pricing.delete_keys(model_keys)
+            return prices, overrides
 
 
 __all__ = ["DeploymentPricingService"]

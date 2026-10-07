@@ -248,7 +248,7 @@ class HostedProviderService:
             await self._provider_or_raise(provider)
             if priced:
                 try:
-                    [model] = await self.models.create_many([HostedProviderModel(provider=provider, model=name)])
+                    [model] = await self.models.create_many(provider, [name], enabled={name: True})
                 except HostedModelConflict as conflict:
                     raise HostedModelAlreadyOfferedError(provider, conflict.model) from conflict
                 await self.offers.write_rate(provider, name, request)
