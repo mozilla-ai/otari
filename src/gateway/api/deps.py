@@ -61,7 +61,7 @@ from gateway.services.overview import OverviewService
 from gateway.services.providers import OrgProviderModelService, ProviderEndpointService, refresh_provider_endpoint_cache
 from gateway.services.rate_limits import RateLimitService
 from gateway.services.routing import clear_router_backend_cache
-from gateway.services.tenancy import OrganizationService, organization_guardrail_runner
+from gateway.services.tenancy import OrganizationDomainService, OrganizationService, organization_guardrail_runner
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.membership_listener import MembershipListener
@@ -1036,6 +1036,41 @@ def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Or
 
 
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
+
+
+def get_organization_membership_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
+    membership_listener: MembershipListenerDep,
+) -> OrganizationService:
+    """Build an organization service that can write memberships, for the public invitation routes."""
+    return OrganizationService(db, membership_listener=membership_listener, uow=uow)
+
+
+OrganizationMembershipServiceDep = Annotated[OrganizationService, Depends(get_organization_membership_service)]
+
+
+def get_organization_management_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
+    membership_listener: MembershipListenerDep,
+    workspace_listener: WorkspaceListenerDep,
+) -> OrganizationService:
+    """Build an organization service that can write memberships and create workspaces."""
+    return OrganizationService(
+        db, membership_listener=membership_listener, uow=uow, workspace_listener=workspace_listener
+    )
+
+
+OrganizationManagementServiceDep = Annotated[OrganizationService, Depends(get_organization_management_service)]
+
+
+def get_organization_domain_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganizationDomainService:
+    """Build the email-domain service on the request's session."""
+    return OrganizationDomainService(db)
+
+
+OrganizationDomainServiceDep = Annotated[OrganizationDomainService, Depends(get_organization_domain_service)]
 
 
 def get_budget_service(

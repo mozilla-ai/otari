@@ -13,39 +13,17 @@ the identity stays password-less until ``POST /api/v1/auth/signup`` or a
 provider sign-in claims it.
 """
 
-from typing import Annotated
+from fastapi import APIRouter, Request
 
-from fastapi import APIRouter, Depends, Request
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from gateway.api.deps import MembershipListenerDep, UnitOfWorkDep, get_db
+from gateway.api.deps import OrganizationMembershipServiceDep
 from gateway.models.tenancy import (
     AcceptInvitationRequest,
     AcceptInvitationResultPublic,
     InvitationPreviewPublic,
     ValidateInvitationRequest,
 )
-from gateway.services.tenancy import OrganizationService
 
 router = APIRouter(prefix="/invitations", tags=["invitations"])
-
-
-def get_organization_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    uow: UnitOfWorkDep,
-    membership_listener: MembershipListenerDep,
-) -> OrganizationService:
-    """Build the organization service on the request's session.
-
-    A separate copy of the same tiny factory `organizations.py` declares: the
-    two route modules deliberately don't import from each other (one is
-    public, one is master-key gated), and importing the dependency alone
-    across that boundary is not worth it for one function.
-    """
-    return OrganizationService(db, membership_listener=membership_listener, uow=uow)
-
-
-OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
 
 
 def _throttle(request: Request) -> None:
@@ -75,7 +53,7 @@ def _throttle(request: Request) -> None:
 @router.post("/validate")
 async def validate_invitation(
     request: Request,
-    service: OrganizationServiceDep,
+    service: OrganizationMembershipServiceDep,
     body: ValidateInvitationRequest,
 ) -> InvitationPreviewPublic:
     """Look up a pending invitation by its token, for the accept page to render before committing.
@@ -91,7 +69,7 @@ async def validate_invitation(
 @router.post("/accept")
 async def accept_invitation(
     request: Request,
-    service: OrganizationServiceDep,
+    service: OrganizationMembershipServiceDep,
     body: AcceptInvitationRequest,
 ) -> AcceptInvitationResultPublic:
     """Accept a pending invitation, resolving it to an active membership and optionally setting a first password."""
