@@ -41,6 +41,11 @@ function loadBootstrap(): Promise<WireBootstrap | null> {
 // Settled before the bootstrap is asked for, because the answer can change
 // where that request goes; a preparation that fails lands on the same screen
 // as a bootstrap that never arrived (see `app/boot.ts`).
+if (import.meta.env.VITE_MOCK_GATEWAY) {
+  const { installMockGateway } = await import("@/dev/mockGateway")
+  installMockGateway()
+}
+
 void loadDeployment(prepareRequests, loadBootstrap).then((bootstrap) => {
   createRoot(container).render(
     <StrictMode>
