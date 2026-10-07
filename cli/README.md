@@ -39,7 +39,7 @@ commands (`serve`, `migrate`, ...) to the same `otari` group through
 `gateway.cli.register`. On its own, `otari --help` lists only the commands
 above.
 
-Dependencies are click, httpx, python-dotenv and pyyaml, all pure Python.
+Dependencies are click, httpx and pyyaml, all pure Python.
 `scripts/check_architecture.py` refuses an import of the gateway or of the
 server stack from here, and `tests/unit/test_otari_agent_cli.py` checks that
 importing the CLI loads none of it.
