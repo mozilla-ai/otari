@@ -46,6 +46,7 @@ from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
+from gateway.ports.trace_storage_port import TraceStoragePort
 from gateway.rate_limit import RateLimiter, RateLimitGrantMiddleware, RateLimitRules, UserRateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
@@ -117,6 +118,8 @@ from gateway.services.tenancy.organization_guardrail_runner import (
     run_guardrail_runner_refresher,
 )
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
+from gateway.services.traces import RequestTraces, TraceWriter, TracingLogWriter, run_trace_retention
+from gateway.trace_capture import TraceCaptureMiddleware
 from gateway.version import __version__
 
 # Every path here must be mounted; a contract test checks.
@@ -243,6 +246,33 @@ def _start_idempotency_sweeper(config: GatewayConfig, _container: Container) -> 
     )
 
 
+# Traces expire on the scale of days, so an hourly pass is soon enough.
+_TRACE_RETENTION_INTERVAL_S = 3600.0
+
+
+def _start_trace_retention(config: GatewayConfig, container: Container) -> Coroutine[Any, Any, None] | None:
+    """Return the trace retention sweep, or None when the gateway records no traces."""
+    if not config.trace_capture_enabled:
+        return None
+    return run_trace_retention(
+        lambda: container.resolve(TraceStoragePort, None),
+        retention_days=config.trace_retention_days,
+        interval=_TRACE_RETENTION_INTERVAL_S,
+    )
+
+
+def _build_trace_writer(config: GatewayConfig, container: Container) -> TraceWriter:
+    """The writer every request's trace is handed to, over whichever store this build bound."""
+    return TraceWriter(
+        container.resolve(TraceStoragePort, None),
+        max_queued_spans=config.trace_queue_max_spans,
+        batch_spans=config.trace_flush_max_spans,
+        interval_s=config.trace_flush_interval_s,
+        write_timeout_s=config.trace_write_timeout_s,
+        shutdown_s=config.trace_shutdown_flush_s,
+    )
+
+
 def _start_container_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None] | None:
     """Return the sandbox container sweep, or None when no sandbox is held past its request."""
     if not config.sandbox_configured() or config.sandbox_container_idle_ttl_sec <= 0:
@@ -318,6 +348,8 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker("sandbox container sweep", _start_container_sweeper),
     # Stored responses hold generated content, so they go once their retention passes.
     _LifespanWorker("idempotency sweep", _start_idempotency_sweeper),
+    # A trace is kept for its retention and no longer.
+    _LifespanWorker("trace retention sweep", _start_trace_retention),
 )
 
 
@@ -712,10 +744,23 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # Start the writer inside the try so a failure here still runs the cleanup
         # below; the refresher tasks are already created and would otherwise leak.
         log_writer_started = False
+        trace_writer: TraceWriter | None = None
+        trace_writer_started = False
         try:
+            # Inside the try, so a failure here still stops the workers started above.
+            # Wired only where create_app set up trace capture, which a bare app has not.
+            request_traces: RequestTraces | None = getattr(app.state, "request_traces", None)
+            if request_traces is not None and config.trace_capture_enabled:
+                # Each usage row a request settles also becomes an LLM span on its trace.
+                log_writer = TracingLogWriter(log_writer, request_traces)
+                trace_writer = _build_trace_writer(config, app.state.container)
             await log_writer.start()
             log_writer_started = True
             app.state.log_writer = log_writer
+            if trace_writer is not None:
+                await trace_writer.start()
+                trace_writer_started = True
+                app.state.trace_writer = trace_writer
             yield
         finally:
             await _stop_refreshers([(task, f"{worker.name} refresher") for task, worker in workers] + feature_workers)
@@ -726,6 +771,11 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # nothing to stop, but the refreshers above still needed cancelling.
             if log_writer_started:
                 await log_writer.stop()
+            # After the log writer, whose last rows may still add LLM spans, and before
+            # the engines close. Bounded by its own shutdown limit.
+            if trace_writer is not None and trace_writer_started:
+                app.state.trace_writer = None
+                await trace_writer.stop()
             # POST /api/v1/search and /api/v1/decisions each dispatch on one pooled
             # client for the process, so shutdown owns closing them. Each is a no-op
             # when that endpoint was never served.
@@ -1066,6 +1116,11 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # an entry never outlives its response (see gateway.inflight).
     app.state.inflight = InFlightRegistry()
     app.add_middleware(InFlightMiddleware, registry=app.state.inflight)
+    # Closes each request's trace once its response is sent, for the same reason the
+    # in-flight entry is dropped there: it is the one place every request passes once.
+    app.state.request_traces = RequestTraces()
+    app.state.trace_writer = None
+    app.add_middleware(TraceCaptureMiddleware, traces=app.state.request_traces)
     if not config.is_hybrid_mode:
         app.add_middleware(RateLimitGrantMiddleware)
 

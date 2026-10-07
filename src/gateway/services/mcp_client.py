@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -30,6 +31,7 @@ from gateway.exceptions.tools_exceptions import McpSessionsInterruptedError
 from gateway.log_config import logger
 from gateway.services.mcp_stateless import failure_class
 from gateway.services.tool_usage import ToolUsageTally
+from gateway.services.traces import RequestTrace
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -123,7 +125,13 @@ class MCPClientPool:
     The owned task belongs to no task group, and it runs in a copy of the opening task's context.
     """
 
-    def __init__(self, configs: list[McpServerConfig], *, tally: ToolUsageTally | None = None):
+    def __init__(
+        self,
+        configs: list[McpServerConfig],
+        *,
+        tally: ToolUsageTally | None = None,
+        trace: RequestTrace | None = None,
+    ):
         self._configs = configs
         self._stack = AsyncExitStack()
         self._servers: dict[str, _ConnectedServer] = {}
@@ -131,8 +139,15 @@ class MCPClientPool:
         # Per-request accounting, owned by the route and passed in. None when the
         # pool runs outside a billed request (tests, direct use).
         self._tally = tally
+        # The request's trace, which records each connection and call. None outside a request.
+        self._trace = trace
         self._owner: asyncio.Task[None] | None = None
         self._release = asyncio.Event()
+
+    @property
+    def trace(self) -> RequestTrace | None:
+        """The request's trace, which the tool loop also records each model round on."""
+        return self._trace
 
     async def __aenter__(self) -> MCPClientPool:
         if self._owner is not None:
@@ -195,7 +210,18 @@ class MCPClientPool:
             for cfg in self._configs:
                 if cfg.name in self._servers:
                     raise ValueError(f"Duplicate MCP server name {cfg.name!r}")
-                self._servers[cfg.name] = await self._connect(cfg)
+                started = datetime.now(UTC)
+                try:
+                    server = await self._connect(cfg)
+                except Exception:
+                    if self._trace is not None:
+                        self._trace.record_mcp_connect(server=cfg.name, tool_count=None, started=started, ok=False)
+                    raise
+                if self._trace is not None:
+                    self._trace.record_mcp_connect(
+                        server=cfg.name, tool_count=len(server.tools), started=started, ok=True
+                    )
+                self._servers[cfg.name] = server
             opened.set_result(None)
             await self._release.wait()
 
@@ -259,12 +285,18 @@ class MCPClientPool:
         owner = self._tool_owner.get(name)
         if owner is None:
             raise KeyError(f"No MCP server owns tool {name!r}")
+        started = datetime.now(UTC)
         try:
-            return await self._servers[owner].session.call_tool(name, arguments)
+            result = await self._servers[owner].session.call_tool(name, arguments)
         except Exception:
             if self._tally is not None:
                 self._tally.record_failure(name)
+            if self._trace is not None:
+                self._trace.record_tool_call(tool_name=name, tool_type="mcp", started=started, ok=False)
             raise
+        if self._trace is not None:
+            self._trace.record_tool_call(tool_name=name, tool_type="mcp", started=started, ok=not result.isError)
+        return result
 
     async def call_tool_outcome(self, name: str, arguments: dict[str, Any]) -> MCPToolCallOutcome:
         """Execute an MCP call and preserve its explicit ``isError`` status.

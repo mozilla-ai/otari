@@ -32,6 +32,7 @@ if "gateway" in sys.modules:
 
 from gateway.api.deps import (
     get_membership_listener,
+    get_trace_tables,
     get_workspace_code_execution_policies,
     get_workspace_listener,
     get_workspace_search_keys,
@@ -345,6 +346,7 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
     ``create_app`` built and finishes entries on it.
     """
     app.state.inflight.clear()
+    app.state.request_traces.clear()
     app.state.login_rate_limiter = (
         RateLimiter(config.dashboard_login_rate_limit_per_minute)
         if config.dashboard_login_rate_limit_per_minute is not None
@@ -358,6 +360,7 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
         workspace_listener=functools.partial(get_workspace_listener, config=config),
         search_keys=get_workspace_search_keys,
         code_execution_policies=get_workspace_code_execution_policies,
+        trace_tables=get_trace_tables,
     )
     install_rate_limits(app, config)
 

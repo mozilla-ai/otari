@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import AsyncExitStack
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -18,7 +19,8 @@ from opentelemetry import trace
 
 from gateway.models.tools import WebTool
 from gateway.services._tool_loop import MaxToolIterationsExceeded
-from gateway.services.tool_usage import ToolUsageTally
+from gateway.services.tool_usage import ToolUsageTally, is_tool_error
+from gateway.services.traces import RequestTrace
 from gateway.services.web_extraction import ExtractionError
 from gateway.services.web_fetch_service import (
     UnsupportedContentTypeError,
@@ -204,6 +206,7 @@ class WebRetrievalBackend:
         provider_options: dict[str, Any] | None = None,
         auth_token: str | None = None,
         tally: ToolUsageTally | None = None,
+        trace: RequestTrace | None = None,
         retrieval_service: WebFetchService | None = None,
         trust_env_proxy: bool = False,
         enable_search: bool = True,
@@ -231,6 +234,8 @@ class WebRetrievalBackend:
         # Per-request accounting, owned by the route and passed in. None when the
         # backend runs outside a billed request (tests, direct use).
         self._tally = tally
+        # The request's trace, which records each search and fetch. None outside a request.
+        self._trace = trace
         self._engines = engines
         # Clamp to [1, MAX_RESULTS_CAP]. Sub-1 values (e.g. ``0`` or ``-1``
         # from a misconfigured env var) would otherwise reach
@@ -268,6 +273,11 @@ class WebRetrievalBackend:
         # already flattened them. Safe as single-slot state because every tool loop
         # awaits its calls one at a time.
         self._last_results: list[dict[str, Any]] = []
+
+    @property
+    def trace(self) -> RequestTrace | None:
+        """The request's trace, which the tool loop also records each model round on."""
+        return self._trace
 
     async def __aenter__(self) -> WebRetrievalBackend:
         try:
@@ -344,17 +354,26 @@ class WebRetrievalBackend:
             raise KeyError(f"WebRetrievalBackend does not own tool {name!r}")
         if self._counter is not None:
             self._counter.claim()
+        started = datetime.now(UTC)
         if name == WEB_FETCH_TOOL_NAME:
-            return await self._call_fetch(arguments)
+            fetched = await self._call_fetch(arguments)
+            self._record_span(WEB_FETCH_TOOL_NAME, "otari_web_fetch", started, ok=not is_tool_error(fetched))
+            return fetched
         try:
             result = await self._search_tool(arguments)
         except Exception:
             if self._tally is not None:
                 self._tally.record_failure(WEB_SEARCH_TOOL_NAME)
+            self._record_span(WEB_SEARCH_TOOL_NAME, "otari_web_search", started, ok=False)
             raise
         if self._tally is not None:
             self._tally.record_result(WEB_SEARCH_TOOL_NAME, result)
+        self._record_span(WEB_SEARCH_TOOL_NAME, "otari_web_search", started, ok=not is_tool_error(result))
         return result
+
+    def _record_span(self, tool_name: str, tool_type: str, started: datetime, *, ok: bool) -> None:
+        if self._trace is not None:
+            self._trace.record_tool_call(tool_name=tool_name, tool_type=tool_type, started=started, ok=ok)
 
     async def _call_fetch(self, arguments: dict[str, Any]) -> str:
         try:

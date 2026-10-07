@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Collection, Mapping, Sequence
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request, Response, status
@@ -17,6 +18,7 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.models.tenancy import Workspace
 from gateway.services.guardrails import GuardrailsNotReachableError, InProcessGuardrail, run_input_guardrails
 from gateway.services.routing import RoutingSignal
+from gateway.services.traces import RequestTrace
 from gateway.services.url_safety import UnsafeURLError
 from gateway.services.workspace_scope import default_workspace_id
 
@@ -270,6 +272,7 @@ async def apply_input_guardrails(
     credentials: Mapping[str, str] | None = None,
     mandated: Collection[str] | None = None,
     in_process: Mapping[str, InProcessGuardrail | None] | None = None,
+    trace: RequestTrace | None = None,
 ) -> None:
     """Enforce the input guardrails for a request before the provider call.
 
@@ -324,6 +327,7 @@ async def apply_input_guardrails(
     # the env var when no config is threaded in (e.g. unit tests). A dashboard
     # override mutates config, so it hot-applies on the next request.
     default_url = (config.guardrails_url if config is not None else None) or otari_env("GUARDRAILS_URL") or None
+    started = datetime.now(UTC)
     try:
         verdict = await run_input_guardrails(
             guardrails,
@@ -336,12 +340,26 @@ async def apply_input_guardrails(
     except UnsafeURLError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except GuardrailsNotReachableError as exc:
+        if trace is not None:
+            ended = datetime.now(UTC)
+            for guardrail in guardrails:
+                trace.record_guardrail(
+                    profile=guardrail.profile, mode=guardrail.mode, valid=None, started=started, ended=ended
+                )
         # The full reason, endpoint included, goes to the log; the caller gets
         # the error's `public_detail`, which names the profile and nothing else.
         # An organization's guardrail endpoint is not the caller's to see
         # (otari#654), and it is not theirs to fix either.
         logger.warning("guardrail check could not be evaluated: %s", exc)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.public_detail) from exc
+
+    if trace is not None:
+        # The checks run concurrently, so each span covers the whole evaluation.
+        ended = datetime.now(UTC)
+        for result in verdict.results:
+            trace.record_guardrail(
+                profile=result.profile, mode=result.mode, valid=result.valid, started=started, ended=ended
+            )
 
     if verdict.blocked:
         raise HTTPException(
