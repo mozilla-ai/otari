@@ -3472,15 +3472,17 @@ def _guardrails_repo_relative(repo_root: Path, path: str) -> tuple[str, str]:
     return _guardrails_relative_to(resolved, root_resolved) or working_tree, working_tree
 
 
-def _guardrails_dry_run(
-    spec: PolicySpec,
-    *,
-    heading: str,
-    paths: list[str],
-    path_source: RunsAt | None,
-    commands: list[str],
-    command_scope: EvidenceScope,
-) -> None:
+class _DryRunMoment(NamedTuple):
+    """One hypothetical moment of a session: a heading to print it under, and the evidence it offers."""
+
+    heading: str
+    paths: list[str]
+    path_source: RunsAt | None
+    commands: list[str]
+    command_scope: EvidenceScope
+
+
+def _guardrails_dry_run(spec: PolicySpec, moment: _DryRunMoment) -> None:
     """Evaluate one hypothetical moment and print what each gate does there.
 
     The evidence shape mirrors, field for field, what the matching branch of
@@ -3501,17 +3503,17 @@ def _guardrails_dry_run(
     try:
         check = check_policy(
             spec,
-            paths=paths,
-            commands=commands,
-            path_source=path_source,
-            command_scope=command_scope,
+            paths=moment.paths,
+            commands=moment.commands,
+            path_source=moment.path_source,
+            command_scope=moment.command_scope,
         )
     except PolicyCheckError as exc:
         raise click.ClickException(str(exc)) from exc
 
     click.echo()
-    click.echo(heading)
-    changed = tuple(paths)
+    click.echo(moment.heading)
+    changed = tuple(moment.paths)
 
     # Which gates survive each cap, resolved up front so the loop below can
     # report a gate `when_changed` selected but the cap then dropped. Mirrors
@@ -3528,7 +3530,7 @@ def _guardrails_dry_run(
 
     elsewhere = 0
     for gate, result in zip(spec.gates, check.results, strict=True):
-        if isinstance(gate, JudgeGate | VerifierGate) and command_scope == "session":
+        if isinstance(gate, JudgeGate | VerifierGate) and moment.command_scope == "session":
             kind = "judge" if isinstance(gate, JudgeGate) else "verifier"
             limit = _HOOK_JUDGE_MAX_GATES_PER_RUN if kind == "judge" else _HOOK_CHECK_MAX_GATES_PER_RUN
             if gate.when_changed and not matched_changed_paths(gate.when_changed, changed):
@@ -3685,22 +3687,26 @@ def guardrails_validate(
     for command in dry_run_commands:
         _guardrails_dry_run(
             spec,
-            heading=f"PreToolUse, Bash: {command}",
-            paths=[],
-            path_source="pre_tool_use.command",
-            commands=[command],
-            command_scope="call",
+            _DryRunMoment(
+                heading=f"PreToolUse, Bash: {command}",
+                paths=[],
+                path_source="pre_tool_use.command",
+                commands=[command],
+                command_scope="call",
+            ),
         )
     checks_reads = _policy_checks_reads(spec)
     dry_run_targets = [_guardrails_repo_relative(root, path) for path in dry_run_paths]
     for edit_target, working_tree in dry_run_targets:
         _guardrails_dry_run(
             spec,
-            heading=f"PreToolUse, Edit/Write: {edit_target}",
-            paths=[edit_target],
-            path_source="pre_tool_use.edit_target",
-            commands=[],
-            command_scope="call",
+            _DryRunMoment(
+                heading=f"PreToolUse, Edit/Write: {edit_target}",
+                paths=[edit_target],
+                path_source="pre_tool_use.edit_target",
+                commands=[],
+                command_scope="call",
+            ),
         )
         # Conditional, unlike the Edit/Write moment above, so a guardrail with
         # no read gate prints exactly what it printed before this moment
@@ -3710,22 +3716,27 @@ def guardrails_validate(
         if checks_reads:
             _guardrails_dry_run(
                 spec,
-                heading=f"PreToolUse, Read: {edit_target}",
-                paths=[edit_target],
-                path_source="pre_tool_use.read_target",
-                commands=[],
-                command_scope="call",
+                _DryRunMoment(
+                    heading=f"PreToolUse, Read: {edit_target}",
+                    paths=[edit_target],
+                    path_source="pre_tool_use.read_target",
+                    commands=[],
+                    command_scope="call",
+                ),
             )
     if dry_run_commands or dry_run_paths:
         _guardrails_dry_run(
             spec,
-            heading=(
-                f"Stop, the finished turn: {len(dry_run_targets)} changed path(s), {len(dry_run_commands)} command(s)"
+            _DryRunMoment(
+                heading=(
+                    f"Stop, the finished turn: {len(dry_run_targets)} changed path(s), "
+                    f"{len(dry_run_commands)} command(s)"
+                ),
+                paths=[working_tree for _edit_target, working_tree in dry_run_targets],
+                path_source="stop.working_tree",
+                commands=list(dry_run_commands),
+                command_scope="session",
             ),
-            paths=[working_tree for _edit_target, working_tree in dry_run_targets],
-            path_source="stop.working_tree",
-            commands=list(dry_run_commands),
-            command_scope="session",
         )
 
     if errors or (strict and warnings):
