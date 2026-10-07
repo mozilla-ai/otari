@@ -1989,6 +1989,22 @@
         "title": "Body_playground-upload_playground_file",
         "type": "object"
       },
+      "BreakGlassRequest": {
+        "properties": {
+          "reason": {
+            "description": "Why a platform operator is reading this content, such as a legal request. Recorded with the read.",
+            "maxLength": 500,
+            "minLength": 10,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "BreakGlassRequest",
+        "type": "object"
+      },
       "BudgetResetLogResponse": {
         "description": "Response model for one budget reset event (per user).",
         "properties": {
@@ -4146,6 +4162,89 @@
           "has_api_key"
         ],
         "title": "ConfigSearchToolSchema",
+        "type": "object"
+      },
+      "ContentAccessListPublic": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ContentAccessPublic"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ContentAccessListPublic",
+        "type": "object"
+      },
+      "ContentAccessPublic": {
+        "description": "One recorded read of captured content.",
+        "properties": {
+          "accessed_at": {
+            "format": "date-time",
+            "title": "Accessed At",
+            "type": "string"
+          },
+          "reader": {
+            "description": "`user:<id>` for a signed-in reader, or `master_key`.",
+            "title": "Reader",
+            "type": "string"
+          },
+          "reader_kind": {
+            "description": "The session's own user, an organization admin, or a platform operator breaking glass.",
+            "enum": [
+              "owner",
+              "admin",
+              "break_glass"
+            ],
+            "title": "Reader Kind",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The stated reason, for a break-glass read.",
+            "title": "Reason"
+          },
+          "span_id": {
+            "title": "Span Id",
+            "type": "string"
+          },
+          "trace_id": {
+            "title": "Trace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "accessed_at",
+          "trace_id",
+          "span_id",
+          "reader_kind",
+          "reader"
+        ],
+        "title": "ContentAccessPublic",
+        "type": "object"
+      },
+      "ContentPurgePublic": {
+        "properties": {
+          "removed": {
+            "title": "Removed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "removed"
+        ],
+        "title": "ContentPurgePublic",
         "type": "object"
       },
       "CountTokensRequest": {
@@ -16123,6 +16222,23 @@
         "title": "SignupResponse",
         "type": "object"
       },
+      "SpanContentPublic": {
+        "description": "A span's captured content. Which fields are present depends on the span: a request's\n``input`` and ``prior_output``, a tool call's ``arguments`` and ``result``.",
+        "properties": {
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "object"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "title": "SpanContentPublic",
+        "type": "object"
+      },
       "SpanPublic": {
         "description": "One span of a session. Content is never part of a span.",
         "properties": {
@@ -16195,6 +16311,11 @@
               }
             ],
             "title": "Error Class"
+          },
+          "has_content": {
+            "description": "True when this span's content was captured and can be read.",
+            "title": "Has Content",
+            "type": "boolean"
           },
           "input_tokens": {
             "anyOf": [
@@ -16380,7 +16501,8 @@
           "tool_type",
           "tool_call_id",
           "request_id",
-          "attributes"
+          "attributes",
+          "has_content"
         ],
         "title": "SpanPublic",
         "type": "object"
@@ -17133,6 +17255,86 @@
           "points"
         ],
         "title": "TraceSeriesPublic",
+        "type": "object"
+      },
+      "TraceSettingsPublic": {
+        "properties": {
+          "admin_content_access": {
+            "description": "Whether the organization's owners and admins may read this workspace's content. Every read is recorded. Off by default: content is readable by its session's own user.",
+            "title": "Admin Content Access",
+            "type": "boolean"
+          },
+          "ceiling": {
+            "description": "The most the deployment permits.",
+            "enum": [
+              "off",
+              "tool_io",
+              "full"
+            ],
+            "title": "Ceiling",
+            "type": "string"
+          },
+          "content_capture": {
+            "description": "What this workspace asked to keep.",
+            "enum": [
+              "off",
+              "tool_io",
+              "full"
+            ],
+            "title": "Content Capture",
+            "type": "string"
+          },
+          "effective": {
+            "description": "What it keeps, after the deployment's limit.",
+            "enum": [
+              "off",
+              "tool_io",
+              "full"
+            ],
+            "title": "Effective",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content_capture",
+          "effective",
+          "ceiling",
+          "admin_content_access"
+        ],
+        "title": "TraceSettingsPublic",
+        "type": "object"
+      },
+      "TraceSettingsUpdate": {
+        "properties": {
+          "admin_content_access": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admin Content Access"
+          },
+          "content_capture": {
+            "anyOf": [
+              {
+                "enum": [
+                  "off",
+                  "tool_io",
+                  "full"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Capture"
+          }
+        },
+        "title": "TraceSettingsUpdate",
         "type": "object"
       },
       "TraceSummaryPublic": {
@@ -30701,6 +30903,25 @@
             }
           },
           {
+            "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+              "title": "Workspace Id"
+            }
+          },
+          {
             "description": "Last activity at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
@@ -30911,6 +31132,25 @@
         "description": "Count the agent sessions that match.",
         "operationId": "organization-traces-count_traces",
         "parameters": [
+          {
+            "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+              "title": "Workspace Id"
+            }
+          },
           {
             "description": "Last activity at or after this instant (ISO 8601).",
             "in": "query",
@@ -31134,6 +31374,25 @@
               ],
               "title": "Bucket",
               "type": "string"
+            }
+          },
+          {
+            "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+              "title": "Workspace Id"
             }
           },
           {
@@ -31388,6 +31647,66 @@
           }
         ],
         "summary": "Get Trace",
+        "tags": [
+          "organization-traces"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/traces/{trace_id}/spans/{span_id}/content": {
+      "get": {
+        "description": "One span's captured content: a request's input and output, or a tool's arguments and result.\n\nReadable by the session's own user, and by the organization's owners and admins where the workspace\nlets them. Every read is recorded. Anyone else who can see the session gets a 403.",
+        "operationId": "organization-traces-get_span_content",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "span_id",
+            "required": true,
+            "schema": {
+              "title": "Span Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpanContentPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Span Content",
         "tags": [
           "organization-traces"
         ]
@@ -37706,6 +38025,25 @@
             }
           },
           {
+            "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+              "title": "Workspace Id"
+            }
+          },
+          {
             "description": "Last activity at or after this instant (ISO 8601).",
             "in": "query",
             "name": "start",
@@ -37916,6 +38254,25 @@
         "description": "Count the agent sessions that match.",
         "operationId": "traces-count_traces",
         "parameters": [
+          {
+            "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+              "title": "Workspace Id"
+            }
+          },
           {
             "description": "Last activity at or after this instant (ISO 8601).",
             "in": "query",
@@ -38139,6 +38496,25 @@
               ],
               "title": "Bucket",
               "type": "string"
+            }
+          },
+          {
+            "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+              "title": "Workspace Id"
             }
           },
           {
@@ -38393,6 +38769,76 @@
           }
         ],
         "summary": "Get Trace",
+        "tags": [
+          "traces"
+        ]
+      }
+    },
+    "/api/v1/traces/{trace_id}/spans/{span_id}/content/break-glass": {
+      "post": {
+        "description": "Read one span's content as a platform operator, for a stated reason such as a legal request.\n\nThe only way an operator reads content. The read and its reason are recorded where the workspace's\nadmins see them, and logged.",
+        "operationId": "traces-break_glass_span_content",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "span_id",
+            "required": true,
+            "schema": {
+              "title": "Span Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BreakGlassRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpanContentPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Break Glass Span Content",
         "tags": [
           "traces"
         ]
@@ -42603,6 +43049,245 @@
         "summary": "Remove Workspace Provider Key Model Restriction",
         "tags": [
           "provider-keys"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/trace-settings": {
+      "get": {
+        "description": "How much of its requests' content the workspace keeps. Off until one of its admins turns it on.",
+        "operationId": "workspace-trace-settings-get_workspace_trace_settings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceSettingsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Workspace Trace Settings",
+        "tags": [
+          "workspace-trace-settings"
+        ]
+      },
+      "put": {
+        "description": "Set how much content the workspace keeps, up to what the deployment permits, and whether the organization's\nadmins may read it. Either field may be left out. Who changed it is recorded.",
+        "operationId": "workspace-trace-settings-set_workspace_trace_settings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraceSettingsUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceSettingsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Workspace Trace Settings",
+        "tags": [
+          "workspace-trace-settings"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/trace-settings/content-access": {
+      "get": {
+        "description": "Every recorded read of the workspace's captured content, newest first: who read it, as what, and why.",
+        "operationId": "workspace-trace-settings-list_workspace_content_reads",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentAccessListPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Workspace Content Reads",
+        "tags": [
+          "workspace-trace-settings"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/trace-settings/purge-content": {
+      "post": {
+        "description": "Delete every span's stored content in the workspace and destroy the keys that sealed it. Spans stay.",
+        "operationId": "workspace-trace-settings-purge_workspace_trace_content",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentPurgePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Purge Workspace Trace Content",
+        "tags": [
+          "workspace-trace-settings"
         ]
       }
     },

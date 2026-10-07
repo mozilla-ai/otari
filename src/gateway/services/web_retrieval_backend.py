@@ -10,6 +10,7 @@ Per-page failures remain best effort and fall back to provider snippets.
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -357,23 +358,43 @@ class WebRetrievalBackend:
         started = datetime.now(UTC)
         if name == WEB_FETCH_TOOL_NAME:
             fetched = await self._call_fetch(arguments)
-            self._record_span(WEB_FETCH_TOOL_NAME, "otari_web_fetch", started, ok=not is_tool_error(fetched))
+            self._record_span(
+                WEB_FETCH_TOOL_NAME, "otari_web_fetch", started, ok=not is_tool_error(fetched), io=(arguments, fetched)
+            )
             return fetched
         try:
             result = await self._search_tool(arguments)
         except Exception:
             if self._tally is not None:
                 self._tally.record_failure(WEB_SEARCH_TOOL_NAME)
-            self._record_span(WEB_SEARCH_TOOL_NAME, "otari_web_search", started, ok=False)
+            self._record_span(WEB_SEARCH_TOOL_NAME, "otari_web_search", started, ok=False, io=(arguments, None))
             raise
         if self._tally is not None:
             self._tally.record_result(WEB_SEARCH_TOOL_NAME, result)
-        self._record_span(WEB_SEARCH_TOOL_NAME, "otari_web_search", started, ok=not is_tool_error(result))
+        self._record_span(
+            WEB_SEARCH_TOOL_NAME, "otari_web_search", started, ok=not is_tool_error(result), io=(arguments, result)
+        )
         return result
 
-    def _record_span(self, tool_name: str, tool_type: str, started: datetime, *, ok: bool) -> None:
+    def _record_span(
+        self,
+        tool_name: str,
+        tool_type: str,
+        started: datetime,
+        *,
+        ok: bool,
+        io: tuple[dict[str, Any], str | None],
+    ) -> None:
         if self._trace is not None:
-            self._trace.record_tool_call(tool_name=tool_name, tool_type=tool_type, started=started, ok=ok)
+            arguments, result = io
+            self._trace.record_tool_call(
+                tool_name=tool_name,
+                tool_type=tool_type,
+                started=started,
+                ok=ok,
+                arguments=json.dumps(arguments, ensure_ascii=False, default=str),
+                result=result,
+            )
 
     async def _call_fetch(self, arguments: dict[str, Any]) -> str:
         try:

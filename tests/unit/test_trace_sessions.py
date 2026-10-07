@@ -9,8 +9,11 @@ from datetime import UTC, datetime
 
 import pytest
 
-from gateway.services.traces import AnsweredCall, RequestTrace, SessionRef, TurnFacts, harness_of, read_turn
+from gateway.services.traces import RequestTrace, TurnFacts, harness_of, read_turn
 from gateway.services.traces import resolve_session as resolve
+from gateway.services.traces._collector import client_tool_span_id
+from gateway.services.traces._identity import SessionRef
+from gateway.services.traces._turns import AnsweredCall
 
 _WORKSPACE = uuid.uuid4()
 _CLAUDE_CODE = {"user-agent": "claude-cli/2.1.291 (external, sdk-cli)", "x-claude-code-session-id": "b57732d4"}
@@ -185,7 +188,94 @@ def test_answered_calls_become_client_tool_spans_ending_when_this_request_arrive
 
     tools = [span for span in write.spans if span.kind == "tool"]
     assert [(span.span_id, span.tool_name, span.outcome, span.tool_type) for span in tools] == [
-        ("call-toolu_1", "Bash", "ok", "client"),
-        ("call-toolu_2", None, "error", "client"),
+        (client_tool_span_id("toolu_1"), "Bash", "ok", "client"),
+        (client_tool_span_id("toolu_2"), None, "error", "client"),
     ]
     assert all(span.start_time is None and span.end_time is not None for span in tools)
+
+
+# ---------------------------------------------------------------------------
+# A client's body is untrusted: malformed fields read as absent
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("dialect", "body"),
+    [
+        ("responses", [{"type": []}]),
+        ("responses", [{"type": "function_call", "call_id": "c", "name": 5}, {"type": "function_call_output"}]),
+        ("chat", [{"role": "assistant", "tool_calls": 5}, {"role": "tool", "tool_call_id": "c"}]),
+        ("chat", [{"role": "assistant", "tool_calls": [{"id": "c", "function": "x"}]}, {"role": "tool"}]),
+        ("chat", [{"role": "assistant", "tool_calls": [{"id": "c", "function": {"name": 5}}]}]),
+        (
+            "messages",
+            [
+                {"role": "assistant", "content": [{"type": "tool_use", "id": "c", "name": 5}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "c"}]},
+            ],
+        ),
+        ("messages", [{"role": "user", "content": {"type": "text"}}]),
+    ],
+)
+def test_a_malformed_body_reads_without_raising(dialect: str, body: object) -> None:
+    from gateway.services.traces import read_content
+
+    turn = read_turn(dialect, body)  # type: ignore[arg-type]
+    read_content(dialect, body)  # type: ignore[arg-type]
+    _trace(session=None, turn=turn).finish(status_code=200, completed=True)
+
+
+def test_a_client_tool_span_id_never_carries_the_call_id() -> None:
+    turn = TurnFacts(
+        opens_turn=False, answered=(AnsweredCall(call_id="my private\u0000note", name=None, is_error=False),)
+    )
+
+    write = _trace(session=None, turn=turn).finish(status_code=200, completed=True)
+
+    (tool,) = [span for span in write.spans if span.kind == "tool"]
+    assert tool.span_id == client_tool_span_id("my private\u0000note")
+    assert "private" not in tool.span_id and tool.tool_call_id is None
+
+
+def test_client_tool_spans_count_against_the_span_budget() -> None:
+    answered = tuple(AnsweredCall(call_id=f"c{i}", name="Bash", is_error=False) for i in range(20))
+    trace = _trace(session=None, turn=TurnFacts(opens_turn=False, answered=answered))
+    trace.max_spans = 2
+
+    write = trace.finish(status_code=200, completed=True)
+
+    assert len([span for span in write.spans if span.kind == "tool"]) == 2
+    assert trace.dropped == 18
+
+
+def test_a_stream_that_failed_after_its_200_is_a_failed_step() -> None:
+    from decimal import Decimal
+
+    from gateway.models.usage import UsageLog
+
+    trace = _trace(session=None, turn=TurnFacts(opens_turn=True))
+    trace.record_llm_call(
+        UsageLog(
+            id="row-1",
+            timestamp=datetime(2026, 10, 7, 12, 0, 1, tzinfo=UTC),
+            model="gpt-5",
+            provider="openai",
+            endpoint="/v1/messages",
+            status="error",
+            status_code=502,
+            latency_ms=900,
+            cost=Decimal(0),
+        )
+    )
+
+    step = trace.finish(status_code=200, completed=True).spans[0]
+
+    assert (step.outcome, step.error_class) == ("error", "status_502")
+
+
+def test_keys_without_a_user_never_share_a_session() -> None:
+    session = SessionRef(source="client", key="conv-1")
+
+    assert session.trace_id(_WORKSPACE, None, "key-a") != session.trace_id(_WORKSPACE, None, "key-b")
+    # A user's keys still share one: the session follows the person, not the key.
+    assert session.trace_id(_WORKSPACE, "alice", "key-a") == session.trace_id(_WORKSPACE, "alice", "key-b")

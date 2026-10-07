@@ -769,8 +769,9 @@ is trimmed and omitted when blank; Otari caps it at 255 characters at the reques
 boundary so the platform never has to truncate. All attempts of one request carry
 the same label.
 
-When the body sets no `session_label`, the label is the session id the request
-names elsewhere, from the first of these that is present and not blank:
+When the body sets no `session_label` and the data plane records traces
+(`OTARI_TRACE_CAPTURE_ENABLED`, on by default), the label is the session id the
+request names elsewhere, from the first of these that is present and not blank:
 
 1. the `Otari-Conversation-Id` header;
 2. a `session_id` tag in the request's `metadata`;

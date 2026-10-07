@@ -293,6 +293,30 @@ async def test_shutdown_flushes_within_its_limit_and_drops_the_rest() -> None:
     assert _dropped("shutdown") - before > 0
 
 
+@pytest.mark.asyncio
+async def test_one_bad_trace_is_dropped_alone_not_with_its_batch() -> None:
+    async def refuse_poison(traces: tuple[TraceWrite, ...]) -> WriteResult:
+        if any(trace.trace_id == "poison" for trace in traces):
+            raise RuntimeError("integer out of range")
+        return WriteResult(accepted=sum(len(trace.spans) for trace in traces))
+
+    store = AsyncMock()
+    store.write.side_effect = refuse_poison
+    writer = _writer(store, batch_spans=10)
+    before = _dropped("store_error")
+
+    writer.submit(_write(2, "a"))
+    writer.submit(_write(2, "poison"))
+    writer.submit(_write(2, "b"))
+    await writer.stop()
+
+    assert _dropped("store_error") - before == 2
+    retried = [
+        trace.trace_id for call in store.write.await_args_list if len(call.args[0]) == 1 for trace in call.args[0]
+    ]
+    assert retried == ["a", "poison", "b"], "the refused batch is retried a trace at a time"
+
+
 def test_submitting_never_waits_on_the_store() -> None:
     """``submit`` is a plain function: it cannot await anything a store does."""
     assert not asyncio.iscoroutinefunction(TraceWriter.submit)
@@ -356,6 +380,21 @@ async def test_a_response_that_breaks_off_is_an_incomplete_step() -> None:
         await _serve(traces, writer, more_body_last=True, raise_after_start=True)
 
     assert submitted[0].spans[0].error_class == "incomplete"
+
+
+@pytest.mark.asyncio
+async def test_a_trace_that_cannot_be_closed_never_raises_into_the_response() -> None:
+    traces = RequestTraces()
+    writer = AsyncMock()
+
+    def refuse(trace: TraceWrite, truncated: int = 0) -> None:
+        raise ValueError("not storable")
+
+    writer.submit = refuse
+
+    await _serve(traces, writer, more_body_last=False)
+
+    assert len(traces) == 0
 
 
 # ---------------------------------------------------------------------------

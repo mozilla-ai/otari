@@ -3147,6 +3147,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/traces/{trace_id}/spans/{span_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Span Content
+         * @description One span's captured content: a request's input and output, or a tool's arguments and result.
+         *
+         *     Readable by the session's own user, and by the organization's owners and admins where the workspace
+         *     lets them. Every read is recorded. Anyone else who can see the session gets a 403.
+         */
+        get: operations["organization-traces-get_span_content"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/usage": {
         parameters: {
             query?: never;
@@ -5148,6 +5171,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/traces/{trace_id}/spans/{span_id}/content/break-glass": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Break Glass Span Content
+         * @description Read one span's content as a platform operator, for a stated reason such as a legal request.
+         *
+         *     The only way an operator reads content. The read and its reason are recorded where the workspace's
+         *     admins see them, and logged.
+         */
+        post: operations["traces-break_glass_span_content"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/usage": {
         parameters: {
             query?: never;
@@ -5938,6 +5984,71 @@ export interface paths {
          * @description Remove one model from this workspace's allow-list for a key. Idempotent.
          */
         delete: operations["provider-keys-remove_workspace_provider_key_model_restriction"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/trace-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workspace Trace Settings
+         * @description How much of its requests' content the workspace keeps. Off until one of its admins turns it on.
+         */
+        get: operations["workspace-trace-settings-get_workspace_trace_settings"];
+        /**
+         * Set Workspace Trace Settings
+         * @description Set how much content the workspace keeps, up to what the deployment permits, and whether the organization's
+         *     admins may read it. Either field may be left out. Who changed it is recorded.
+         */
+        put: operations["workspace-trace-settings-set_workspace_trace_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/trace-settings/content-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workspace Content Reads
+         * @description Every recorded read of the workspace's captured content, newest first: who read it, as what, and why.
+         */
+        get: operations["workspace-trace-settings-list_workspace_content_reads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/trace-settings/purge-content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Purge Workspace Trace Content
+         * @description Delete every span's stored content in the workspace and destroy the keys that sealed it. Spans stay.
+         */
+        post: operations["workspace-trace-settings-purge_workspace_trace_content"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -7065,6 +7176,14 @@ export interface components {
             /** File */
             file: string;
         };
+        /** BreakGlassRequest */
+        BreakGlassRequest: {
+            /**
+             * Reason
+             * @description Why a platform operator is reading this content, such as a legal request. Recorded with the read.
+             */
+            reason: string;
+        };
         /**
          * BudgetResetLogResponse
          * @description Response model for one budget reset event (per user).
@@ -8009,6 +8128,47 @@ export interface components {
              * @default false
              */
             shadowed: boolean;
+        };
+        /** ContentAccessListPublic */
+        ContentAccessListPublic: {
+            /** Items */
+            items: components["schemas"]["ContentAccessPublic"][];
+        };
+        /**
+         * ContentAccessPublic
+         * @description One recorded read of captured content.
+         */
+        ContentAccessPublic: {
+            /**
+             * Accessed At
+             * Format: date-time
+             */
+            accessed_at: string;
+            /**
+             * Reader
+             * @description `user:<id>` for a signed-in reader, or `master_key`.
+             */
+            reader: string;
+            /**
+             * Reader Kind
+             * @description The session's own user, an organization admin, or a platform operator breaking glass.
+             * @enum {string}
+             */
+            reader_kind: "owner" | "admin" | "break_glass";
+            /**
+             * Reason
+             * @description The stated reason, for a break-glass read.
+             */
+            reason?: string | null;
+            /** Span Id */
+            span_id: string;
+            /** Trace Id */
+            trace_id: string;
+        };
+        /** ContentPurgePublic */
+        ContentPurgePublic: {
+            /** Removed */
+            removed: number;
         };
         /**
          * CountTokensRequest
@@ -13796,6 +13956,17 @@ export interface components {
             message: string;
         };
         /**
+         * SpanContentPublic
+         * @description A span's captured content. Which fields are present depends on the span: a request's
+         *     ``input`` and ``prior_output``, a tool call's ``arguments`` and ``result``.
+         */
+        SpanContentPublic: {
+            /** Fields */
+            fields: {
+                [key: string]: string;
+            };
+        };
+        /**
          * SpanPublic
          * @description One span of a session. Content is never part of a span.
          */
@@ -13817,6 +13988,11 @@ export interface components {
             end_time: string | null;
             /** Error Class */
             error_class: string | null;
+            /**
+             * Has Content
+             * @description True when this span's content was captured and can be read.
+             */
+            has_content: boolean;
             /** Input Tokens */
             input_tokens: number | null;
             /** Kind */
@@ -14191,6 +14367,39 @@ export interface components {
             bucket: "hour" | "day";
             /** Points */
             points: components["schemas"]["TraceBucketPublic"][];
+        };
+        /** TraceSettingsPublic */
+        TraceSettingsPublic: {
+            /**
+             * Admin Content Access
+             * @description Whether the organization's owners and admins may read this workspace's content. Every read is recorded. Off by default: content is readable by its session's own user.
+             */
+            admin_content_access: boolean;
+            /**
+             * Ceiling
+             * @description The most the deployment permits.
+             * @enum {string}
+             */
+            ceiling: "off" | "tool_io" | "full";
+            /**
+             * Content Capture
+             * @description What this workspace asked to keep.
+             * @enum {string}
+             */
+            content_capture: "off" | "tool_io" | "full";
+            /**
+             * Effective
+             * @description What it keeps, after the deployment's limit.
+             * @enum {string}
+             */
+            effective: "off" | "tool_io" | "full";
+        };
+        /** TraceSettingsUpdate */
+        TraceSettingsUpdate: {
+            /** Admin Content Access */
+            admin_content_access?: boolean | null;
+            /** Content Capture */
+            content_capture?: ("off" | "tool_io" | "full") | null;
         };
         /**
          * TraceSummaryPublic
@@ -20923,6 +21132,8 @@ export interface operations {
             query?: {
                 skip?: number;
                 limit?: number;
+                /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
+                workspace_id?: string | null;
                 /** @description Last activity at or after this instant (ISO 8601). */
                 start?: string | null;
                 /** @description Last activity before this instant (ISO 8601). */
@@ -20969,6 +21180,8 @@ export interface operations {
     "organization-traces-count_traces": {
         parameters: {
             query?: {
+                /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
+                workspace_id?: string | null;
                 /** @description Last activity at or after this instant (ISO 8601). */
                 start?: string | null;
                 /** @description Last activity before this instant (ISO 8601). */
@@ -21016,6 +21229,8 @@ export interface operations {
         parameters: {
             query?: {
                 bucket?: "hour" | "day";
+                /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
+                workspace_id?: string | null;
                 /** @description Last activity at or after this instant (ISO 8601). */
                 start?: string | null;
                 /** @description Last activity before this instant (ISO 8601). */
@@ -21077,6 +21292,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TraceDetailPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-traces-get_span_content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trace_id: string;
+                span_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpanContentPublic"];
                 };
             };
             /** @description Validation Error */
@@ -24098,6 +24345,8 @@ export interface operations {
             query?: {
                 skip?: number;
                 limit?: number;
+                /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
+                workspace_id?: string | null;
                 /** @description Last activity at or after this instant (ISO 8601). */
                 start?: string | null;
                 /** @description Last activity before this instant (ISO 8601). */
@@ -24144,6 +24393,8 @@ export interface operations {
     "traces-count_traces": {
         parameters: {
             query?: {
+                /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
+                workspace_id?: string | null;
                 /** @description Last activity at or after this instant (ISO 8601). */
                 start?: string | null;
                 /** @description Last activity before this instant (ISO 8601). */
@@ -24191,6 +24442,8 @@ export interface operations {
         parameters: {
             query?: {
                 bucket?: "hour" | "day";
+                /** @description Only sessions in this workspace. Narrows the caller's scope; never widens it. */
+                workspace_id?: string | null;
                 /** @description Last activity at or after this instant (ISO 8601). */
                 start?: string | null;
                 /** @description Last activity before this instant (ISO 8601). */
@@ -24252,6 +24505,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TraceDetailPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "traces-break_glass_span_content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trace_id: string;
+                span_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BreakGlassRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpanContentPublic"];
                 };
             };
             /** @description Validation Error */
@@ -25877,6 +26166,137 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "workspace-trace-settings-get_workspace_trace_settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceSettingsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "workspace-trace-settings-set_workspace_trace_settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TraceSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceSettingsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "workspace-trace-settings-list_workspace_content_reads": {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentAccessListPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "workspace-trace-settings-purge_workspace_trace_content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentPurgePublic"];
                 };
             };
             /** @description Validation Error */

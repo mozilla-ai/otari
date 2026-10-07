@@ -118,7 +118,9 @@ export function TraceDetailPanel({ detail }: { detail: TraceDetail }) {
           )}
         </div>
         <div className="min-w-0">
-          {selected ? <SpanDetails span={selected} /> : null}
+          {selected ? (
+            <SpanDetails traceId={summary.trace_id} span={selected} />
+          ) : null}
         </div>
       </div>
     </div>

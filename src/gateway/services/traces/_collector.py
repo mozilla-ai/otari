@@ -16,7 +16,9 @@ from decimal import Decimal
 
 from gateway.models.usage import UsageLog
 from gateway.ports.trace_storage_port import SpanRecord, TraceWrite, is_identifier
+from gateway.services.traces._content_reading import RequestContent, cap
 from gateway.services.traces._identity import SessionRef
+from gateway.services.traces._output_reading import MAX_OUTPUT_BYTES, dialect_of, read_output
 from gateway.services.traces._turns import TurnFacts
 
 # The ``usage_logs.status`` of an attempt a later candidate made up for.
@@ -68,6 +70,19 @@ class RequestTrace:
     turn: TurnFacts | None = None
     spans: list[SpanRecord] = field(default_factory=list)
     dropped: int = 0
+    # How much content this request's workspace keeps, and what this request
+    # carried. Plaintext lives here, in memory, only until the trace is sealed.
+    content_level: str = "off"
+    request_content: RequestContent | None = field(default=None, repr=False)
+    response_output: str = field(default="", repr=False)
+    _response_body: bytearray = field(default_factory=bytearray, repr=False)
+    content: dict[str, dict[str, str]] = field(default_factory=dict, repr=False)
+    # Model rounds a tool loop ran, waiting for the usage row that bills them all.
+    rounds: list[tuple[datetime, datetime]] = field(default_factory=list)
+
+    @property
+    def keeps_tool_io(self) -> bool:
+        return self.content_level in ("tool_io", "full")
 
     def _add(self, span: SpanRecord) -> None:
         if len(self.spans) >= self.max_spans:
@@ -116,14 +131,81 @@ class RequestTrace:
                 attributes=attributes,
             )
         )
+        self._flush_rounds(row.id[:64])
 
-    def record_tool_call(self, *, tool_name: str, tool_type: str, started: datetime, ok: bool) -> None:
-        """A tool the gateway ran itself (web search, web fetch, code execution, an MCP tool)."""
+    def keep_response_bytes(self, chunk: bytes) -> None:
+        """Keep the response as it is sent, bounded, where the workspace keeps everything."""
+        room = MAX_OUTPUT_BYTES - len(self._response_body)
+        if self.content_level == "full" and room > 0:
+            self._response_body.extend(chunk[:room])
+
+    def read_response(self, *, is_stream: bool) -> None:
+        """Turn the kept response into the step's output, and let the raw bytes go."""
+        if self._response_body:
+            self.response_output = read_output(
+                dialect_of(self.endpoint), bytes(self._response_body), is_stream=is_stream
+            )
+            self._response_body.clear()
+
+    def discard_content(self) -> None:
+        """Drop every plaintext this trace held, once it is sealed or abandoned."""
+        self.content.clear()
+        self.response_output = ""
+        self._response_body.clear()
+
+    def record_model_round(self, *, started: datetime, ended: datetime) -> None:
+        """One model call of a gateway tool loop, which bills all its rounds on one usage row."""
+        self.rounds.append((started, ended))
+
+    def _flush_rounds(self, billed_span_id: str) -> None:
+        """Hang a tool loop's rounds under the span of the row that billed them.
+
+        A loop of one round is that span already. A round carries no tokens or cost
+        of its own, so totals still come from the billing row alone.
+        """
+        rounds, self.rounds = self.rounds, []
+        if len(rounds) < 2:
+            return
+        for index, (started, ended) in enumerate(rounds, start=1):
+            self._add(
+                SpanRecord(
+                    span_id=_span_id(),
+                    parent_span_id=billed_span_id,
+                    kind="llm",
+                    origin="gateway",
+                    name="chat",
+                    operation="chat",
+                    outcome="ok",
+                    start_time=started,
+                    end_time=ended,
+                    duration_ms=_elapsed_ms(started, ended),
+                    request_id=self.request_id,
+                    attributes={"otari.tool_loop.round": index},
+                )
+            )
+
+    def record_tool_call(
+        self,
+        *,
+        tool_name: str,
+        tool_type: str,
+        started: datetime,
+        ok: bool,
+        arguments: str | None = None,
+        result: str | None = None,
+    ) -> None:
+        """A tool the gateway ran itself (web search, web fetch, code execution, an MCP tool).
+
+        ``arguments`` and ``result`` are kept only where the workspace captures tool content.
+        """
         ended = datetime.now(UTC)
         name = identifier_or_none(tool_name)
+        span_id = _span_id()
+        if self.keeps_tool_io and (arguments or result):
+            self.content[span_id] = {"arguments": cap(arguments or ""), "result": cap(result or "")}
         self._add(
             SpanRecord(
-                span_id=_span_id(),
+                span_id=span_id,
                 parent_span_id=self.request_id,
                 kind="tool",
                 origin="gateway",
@@ -228,9 +310,19 @@ class RequestTrace:
             request_id=self.request_id,
             attributes={"http.response.status_code": status_code} if status_code is not None else {},
         )
+        if self.content_level == "full" and self.request_content is not None:
+            step_content = {
+                "input": self.request_content.input,
+                "output": self.response_output,
+                "prior_output": self.request_content.prior_output,
+            }
+            if any(step_content.values()):
+                self.content[self.request_id] = step_content
         return TraceWrite(
             workspace_id=self.workspace_id,
-            trace_id=self.session.trace_id(self.workspace_id, self.user_id) if self.session else self.request_id,
+            trace_id=self.session.trace_id(self.workspace_id, self.user_id, self.api_key_id)
+            if self.session
+            else self.request_id,
             user_id=self.user_id,
             api_key_id=self.api_key_id,
             session_source=self.session.source if self.session else "none",
@@ -242,17 +334,26 @@ class RequestTrace:
         """The tools the client ran since its previous request, closed by the results this one carries.
 
         Their start is the end of the step that asked for them, which is not this
-        request, so it is left for the read model to fill. A span's id is its call
-        id, so a retried request answering the same calls adds nothing twice.
+        request, so it is left for the read model to fill. A span's id derives from
+        its call id, so a retried request answering the same calls adds nothing
+        twice. They count against the request's span budget like any other span.
         """
         if self.turn is None:
             return []
+        room = max(0, self.max_spans - len(self.spans))
+        answered = self.turn.answered[:room]
+        self.dropped += len(self.turn.answered) - len(answered)
+        tool_io = self.request_content.tool_calls if self.request_content and self.keeps_tool_io else {}
         spans: list[SpanRecord] = []
-        for call in self.turn.answered:
+        for call in answered:
             name = identifier_or_none(call.name)
+            span_id = client_tool_span_id(call.call_id)
+            io = tool_io.get(call.call_id)
+            if io is not None:
+                self.content[span_id] = {"arguments": io.arguments, "result": io.result}
             spans.append(
                 SpanRecord(
-                    span_id=f"call-{call.call_id}"[:64],
+                    span_id=span_id,
                     kind="tool",
                     origin="gateway",
                     name=f"execute_tool:{name}" if name and is_identifier(f"execute_tool:{name}") else "execute_tool",

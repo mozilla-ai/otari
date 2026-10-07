@@ -5824,6 +5824,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
                   "description": "Last activity at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
@@ -5872,7 +5878,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/traces?skip=&limit=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces?skip=&limit=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
             }
           }
         },
@@ -5896,6 +5902,12 @@
               ],
               "query": [
                 {
+                  "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
                   "description": "Last activity at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
@@ -5944,7 +5956,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/count?start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/count?workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
             }
           }
         },
@@ -5974,6 +5986,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
                   "description": "Last activity at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
@@ -6022,7 +6040,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/series?bucket=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/series?bucket=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
             }
           }
         },
@@ -6049,6 +6067,43 @@
                 {
                   "description": "path parameter",
                   "key": "trace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Span Content",
+          "request": {
+            "description": "One span's captured content: a request's input and output, or a tool's arguments and result.\n\nReadable by the session's own user, and by the organization's owners and admins where the workspace\nlets them. Every read is recorded. Anyone else who can see the session gets a 403.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "traces",
+                ":trace_id",
+                "spans",
+                ":span_id",
+                "content"
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/:trace_id/spans/:span_id/content",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "trace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "span_id",
                   "value": ""
                 }
               ]
@@ -9336,6 +9391,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
                   "description": "Last activity at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
@@ -9384,7 +9445,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/traces?skip=&limit=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/traces?skip=&limit=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
             }
           }
         },
@@ -9406,6 +9467,12 @@
               ],
               "query": [
                 {
+                  "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
                   "description": "Last activity at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
@@ -9454,7 +9521,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/traces/count?start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/traces/count?workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
             }
           }
         },
@@ -9482,6 +9549,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
                   "description": "Last activity at or after this instant (ISO 8601).",
                   "disabled": true,
                   "key": "start",
@@ -9530,7 +9603,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/traces/series?bucket=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+              "raw": "{{baseUrl}}/api/v1/traces/series?bucket=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
             }
           }
         },
@@ -9555,6 +9628,56 @@
                 {
                   "description": "path parameter",
                   "key": "trace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Break Glass Span Content",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"reason\": \"string\"\n}"
+            },
+            "description": "Read one span's content as a platform operator, for a stated reason such as a legal request.\n\nThe only way an operator reads content. The read and its reason are recorded where the workspace's\nadmins see them, and logged.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "traces",
+                ":trace_id",
+                "spans",
+                ":span_id",
+                "content",
+                "break-glass"
+              ],
+              "raw": "{{baseUrl}}/api/v1/traces/:trace_id/spans/:span_id/content/break-glass",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "trace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "span_id",
                   "value": ""
                 }
               ]
@@ -11390,6 +11513,153 @@
         }
       ],
       "name": "workspace-member-budget-policies"
+    },
+    {
+      "item": [
+        {
+          "name": "Get Workspace Trace Settings",
+          "request": {
+            "description": "How much of its requests' content the workspace keeps. Off until one of its admins turns it on.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "trace-settings"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/trace-settings",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Set Workspace Trace Settings",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"admin_content_access\": false,\n  \"content_capture\": \"off\"\n}"
+            },
+            "description": "Set how much content the workspace keeps, up to what the deployment permits, and whether the organization's\nadmins may read it. Either field may be left out. Who changed it is recorded.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "trace-settings"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/trace-settings",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Workspace Content Reads",
+          "request": {
+            "description": "Every recorded read of the workspace's captured content, newest first: who read it, as what, and why.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "trace-settings",
+                "content-access"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/trace-settings/content-access?skip=&limit=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Purge Workspace Trace Content",
+          "request": {
+            "description": "Delete every span's stored content in the workspace and destroy the keys that sealed it. Spans stay.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "trace-settings",
+                "purge-content"
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/trace-settings/purge-content",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "workspace-trace-settings"
     },
     {
       "item": [

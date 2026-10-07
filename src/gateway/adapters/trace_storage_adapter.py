@@ -1,8 +1,10 @@
 """The core TraceStoragePort adapters: this deployment's database, and none.
 
-``LocalTraceStorage`` keeps traces in the ``traces`` and ``trace_spans`` tables. It
-is bound wherever the deployment serves the control plane, and an overlay may
-rebind the port to a store built for many tenants. ``NullTraceStorage`` stands
+``LocalTraceStorage`` keeps traces in the ``traces`` and ``trace_spans`` tables,
+and captured content in the object store (``FileStoragePort``) with only a
+reference in the database. It is bound wherever the deployment serves the
+control plane, and an overlay may rebind the port to a store built for many
+tenants. ``NullTraceStorage`` stands
 where no store is reachable yet, and keeps nothing.
 
 The local adapter reaches its tables only through the traces repositories, which
@@ -21,8 +23,11 @@ from typing import Any
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import Trace, TraceSpan
+from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.trace_storage_port import (
+    SealedContent,
     SpanRecord,
+    StoredContent,
     TraceBucket,
     TraceBucketGrain,
     TraceDetail,
@@ -74,6 +79,19 @@ def _span_values(trace: TraceWrite, span: SpanRecord) -> dict[str, Any]:
         "otel_span_id": span.otel_span_id,
         "attributes": dict(span.attributes) or None,
     }
+
+
+_NONCE_BYTES = 12
+# Sessions an expiry or purge clears per transaction.
+_DELETE_BATCH = 500
+
+
+def _blob(sealed: SealedContent) -> bytes:
+    return sealed.nonce + sealed.ciphertext
+
+
+def _unblob(blob: bytes) -> SealedContent:
+    return SealedContent(nonce=blob[:_NONCE_BYTES], ciphertext=blob[_NONCE_BYTES:])
 
 
 def _span_record(row: TraceSpan) -> SpanRecord:
@@ -148,9 +166,64 @@ class LocalTraceStorage(TraceStoragePort):
     transaction with accounting and never waits on the request pool.
     """
 
-    def __init__(self, open_unit_of_work: UnitOfWorkOpener, tables: TraceTablesBuilder) -> None:
+    def __init__(
+        self,
+        open_unit_of_work: UnitOfWorkOpener,
+        tables: TraceTablesBuilder,
+        blobs: Callable[[], FileStoragePort] | None = None,
+    ) -> None:
         self._open = open_unit_of_work
         self._tables = tables
+        # Resolved on first use, so a deployment that never captures content never builds a store.
+        self._blobs = blobs
+
+    async def _put_content(self, trace: TraceWrite, spans: list[SpanRecord]) -> list[dict[str, Any]]:
+        """Write each sealed span to the object store, and return the references to keep.
+
+        Before the rows, so a reference never names a blob that is not there. A
+        transaction that then fails leaves its blobs behind, sealed and unreferenced.
+        """
+        sealed = [span for span in spans if span.sealed is not None]
+        if not sealed or self._blobs is None:
+            return []
+        blobs = self._blobs()
+        rows = []
+        for span in sealed:
+            assert span.sealed is not None
+            ref = await blobs.allocate(f"tcontent-{uuid.uuid4().hex}")
+            await blobs.put(ref, _blob(span.sealed))
+            rows.append(
+                {
+                    "workspace_id": trace.workspace_id,
+                    "trace_id": trace.trace_id,
+                    "span_id": span.span_id,
+                    "storage_ref": ref,
+                }
+            )
+        return rows
+
+    async def _drop_blobs(self, refs: list[tuple[uuid.UUID, str, str, str]]) -> None:
+        if not refs or self._blobs is None:
+            return
+        blobs = self._blobs()
+        for *_, ref in refs:
+            await blobs.delete(ref)
+
+    async def _delete_sessions(self, list_sessions: Callable[[TraceTables], Any]) -> int:
+        """Delete sessions a batch at a time: their content blobs first, then their rows and their keys."""
+        deleted = 0
+        while True:
+            async with self._open() as uow:
+                tables = self._tables(uow)
+                async with uow:
+                    sessions = await list_sessions(tables)
+                    if not sessions:
+                        return deleted
+                    refs = await tables.content.refs_for_traces(sessions, limit=_DELETE_BATCH * 64)
+                    await self._drop_blobs(refs)
+                    await tables.content.delete_refs(refs)
+                    await tables.keys.delete_sessions(sessions)
+                    deleted += await tables.traces.delete_sessions(sessions)
 
     async def write(self, traces: tuple[TraceWrite, ...]) -> WriteResult:
         accepted = duplicate = rejected = 0
@@ -175,6 +248,7 @@ class LocalTraceStorage(TraceStoragePort):
                             continue
                         inserted = await tables.spans.insert_new([_span_values(trace, span) for span in spans])
                         new_spans = [span for span in spans if span.span_id in inserted]
+                        await tables.content.insert_new(await self._put_content(trace, new_spans))
                         accepted += len(new_spans)
                         duplicate += len(spans) - len(new_spans)
                         if new_spans:
@@ -234,11 +308,59 @@ class LocalTraceStorage(TraceStoragePort):
                 if row is None:
                     return None
                 spans = await tables.spans.for_trace(row.workspace_id, row.trace_id, limit=span_limit + 1)
+                with_content = await tables.content.span_ids_with_content(row.workspace_id, row.trace_id)
                 return TraceDetail(
                     summary=_summary(row),
                     spans=tuple(_span_record(span) for span in spans[:span_limit]),
                     truncated=len(spans) > span_limit,
+                    content_span_ids=frozenset(with_content),
                 )
+
+    async def get_content(self, scope: TraceScope, trace_id: str, span_id: str) -> StoredContent | None:
+        async with self._open() as uow:
+            tables = self._tables(uow)
+            async with uow:
+                row = await tables.content.find(_workspace_ids(scope), trace_id, span_id)
+                if row is None:
+                    return None
+                session = await tables.traces.find(frozenset({row.workspace_id}), trace_id)
+                workspace_id, ref = row.workspace_id, row.storage_ref
+        if self._blobs is None:
+            return None
+        try:
+            blob = await self._blobs().get(ref)
+        except FileNotFoundError:
+            return None
+        return StoredContent(
+            workspace_id=workspace_id,
+            owner_user_id=session.user_id if session is not None else None,
+            sealed=_unblob(blob),
+        )
+
+    async def expire_content(self, before: datetime) -> int:
+        removed = 0
+        while True:
+            async with self._open() as uow:
+                tables = self._tables(uow)
+                async with uow:
+                    refs = await tables.content.refs_before(before, limit=_DELETE_BATCH)
+                    if not refs:
+                        return removed
+                    await self._drop_blobs(refs)
+                    removed += await tables.content.delete_refs(refs)
+
+    async def purge_content(self, workspace_id: uuid.UUID) -> int:
+        removed = 0
+        while True:
+            async with self._open() as uow:
+                tables = self._tables(uow)
+                async with uow:
+                    refs = await tables.content.refs_for_workspace(workspace_id, limit=_DELETE_BATCH)
+                    if not refs:
+                        await tables.keys.delete_for_workspace(workspace_id)
+                        return removed
+                    await self._drop_blobs(refs)
+                    removed += await tables.content.delete_refs(refs)
 
     async def series(
         self, scope: TraceScope, filters: TraceFilter, *, bucket: TraceBucketGrain
@@ -250,22 +372,16 @@ class LocalTraceStorage(TraceStoragePort):
                 return tuple(TraceBucket(bucket=key, succeeded=ok, failed=bad) for key, ok, bad in rows)
 
     async def purge(self, scope: TraceScope, filters: TraceFilter) -> int:
-        async with self._open() as uow:
-            tables = self._tables(uow)
-            async with uow:
-                return await tables.traces.delete_matching(_workspace_ids(scope), filters)
+        workspace_ids = _workspace_ids(scope)
+        return await self._delete_sessions(
+            lambda tables: tables.traces.matching_sessions(workspace_ids, filters, limit=_DELETE_BATCH)
+        )
 
     async def purge_user(self, user_id: str) -> int:
-        async with self._open() as uow:
-            tables = self._tables(uow)
-            async with uow:
-                return await tables.traces.delete_for_user(user_id)
+        return await self._delete_sessions(lambda tables: tables.traces.sessions_for_user(user_id, limit=_DELETE_BATCH))
 
     async def expire(self, before: datetime) -> int:
-        async with self._open() as uow:
-            tables = self._tables(uow)
-            async with uow:
-                return await tables.traces.delete_inactive_before(before)
+        return await self._delete_sessions(lambda tables: tables.traces.inactive_before(before, limit=_DELETE_BATCH))
 
 
 class NullTraceStorage(TraceStoragePort):
@@ -294,6 +410,15 @@ class NullTraceStorage(TraceStoragePort):
         return ()
 
     async def purge(self, scope: TraceScope, filters: TraceFilter) -> int:
+        return 0
+
+    async def get_content(self, scope: TraceScope, trace_id: str, span_id: str) -> StoredContent | None:
+        return None
+
+    async def expire_content(self, before: datetime) -> int:
+        return 0
+
+    async def purge_content(self, workspace_id: uuid.UUID) -> int:
         return 0
 
     async def purge_user(self, user_id: str) -> int:

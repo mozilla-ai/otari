@@ -11,10 +11,12 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 
 import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
@@ -206,3 +208,38 @@ def test_the_operator_routes_refuse_a_member(client: TestClient, world: dict[str
         client.cookies.clear()
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+def test_a_workspace_filter_narrows_the_scope_and_never_widens_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    world: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    with db_session_factory() as session:
+        ids = {workspace.name: str(workspace.id) for workspace in session.scalars(select(Workspace))}
+
+    def read(path: str, workspace: str, cookie: str | None = None) -> dict[str, Any]:
+        if cookie is not None:
+            client.cookies.set(SESSION_COOKIE_NAME, cookie)
+        try:
+            response = client.get(
+                f"{API_ROOT}{path}",
+                params={"workspace_id": ids[workspace]},
+                headers=master_key_header if cookie is None else {},
+            )
+        finally:
+            client.cookies.clear()
+        assert response.status_code == status.HTTP_200_OK, response.text
+        return dict(response.json())
+
+    assert [item["trace_id"] for item in read("/traces", "Two")["items"]] == ["s-two"]
+    assert read("/traces/count", "Theirs")["count"] == 1
+    assert read("/traces/series", "Two")["points"] == [{"bucket": "2026-10-07T12:00:00Z", "succeeded": 0, "failed": 1}]
+
+    admin = "/organizations/me/traces"
+    assert [item["trace_id"] for item in read(admin, "Two", world["admin"])["items"]] == ["s-two"]
+    # A workspace outside the caller's scope yields nothing rather than another tenant's sessions.
+    assert read(admin, "Theirs", world["admin"])["items"] == []
+    assert read(f"{admin}/count", "Two", world["member"])["count"] == 0
+    assert read(f"{admin}/series", "Theirs", world["member"])["points"] == []

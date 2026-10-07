@@ -106,6 +106,28 @@ def _check_identifier(name: str, value: str | None) -> None:
 
 
 @dataclass(frozen=True)
+class SealedContent:
+    """A span's captured content, encrypted with its session's data key before it reached the port.
+
+    There is no plaintext field, so no store can keep content in the clear. A
+    store keeps the two fields as they are, in an object store rather than its
+    database, and never needs the key.
+    """
+
+    nonce: bytes = field(repr=False)
+    ciphertext: bytes = field(repr=False)
+
+
+@dataclass(frozen=True)
+class StoredContent:
+    """Sealed content read back, with the session whose key opens it and the user who owns that session."""
+
+    workspace_id: uuid.UUID
+    owner_user_id: str | None
+    sealed: SealedContent
+
+
+@dataclass(frozen=True)
 class SpanRecord:
     """One span, projected and ready to store.
 
@@ -138,6 +160,8 @@ class SpanRecord:
     otel_trace_id: str | None = None
     otel_span_id: str | None = None
     attributes: Mapping[str, str | int | float | bool] = field(default_factory=dict)
+    # Present only where the span's workspace captures content.
+    sealed: SealedContent | None = None
 
     def __post_init__(self) -> None:
         _check_choice("kind", self.kind, SPAN_KINDS)
@@ -307,6 +331,8 @@ class TraceDetail:
     summary: TraceSummary
     spans: tuple[SpanRecord, ...]
     truncated: bool
+    # The spans whose content was captured; the content itself is read one span at a time.
+    content_span_ids: frozenset[str] = frozenset()
 
 
 class TraceStoragePort(Protocol):
@@ -342,7 +368,19 @@ class TraceStoragePort(Protocol):
         ...
 
     async def purge(self, scope: TraceScope, filters: TraceFilter) -> int:
-        """Delete the scope's matching traces and their spans. Settles; returns the traces deleted."""
+        """Delete the scope's matching traces, their spans and their content. Settles; returns the traces deleted."""
+        ...
+
+    async def get_content(self, scope: TraceScope, trace_id: str, span_id: str) -> StoredContent | None:
+        """One span's sealed content inside the scope, or None when it has none or the scope holds no such span."""
+        ...
+
+    async def expire_content(self, before: datetime) -> int:
+        """Delete content captured before ``before``, keeping the spans it belonged to. Settles; returns the count."""
+        ...
+
+    async def purge_content(self, workspace_id: uuid.UUID) -> int:
+        """Delete every span's content in one workspace, keeping the spans. Settles."""
         ...
 
     async def purge_user(self, user_id: str) -> int:

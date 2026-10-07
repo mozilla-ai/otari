@@ -10,6 +10,7 @@ import {
   FiHome,
   FiKey,
   FiLayers,
+  FiLock,
   FiMessageSquare,
   FiRepeat,
   FiServer,
@@ -174,6 +175,15 @@ const BASE_NAV_SECTIONS = [
             badge: "Beta",
           },
           { to: "/tools/mcp-servers", label: "MCP servers", icon: FiServer },
+          // A workspace setting rather than a tool; Tools is where this
+          // dashboard keeps workspace policy. Gated on its own surface, so a
+          // deployment that records no traces never shows it.
+          {
+            to: "/tools/trace-content",
+            label: "Trace content",
+            icon: FiLock,
+            surface: "traces",
+          },
         ],
       },
     ],

@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from gateway.models.money import as_float
 from gateway.ports.trace_storage_port import SpanRecord, TraceBucket, TracePage, TraceSummary
-from gateway.types.trace_views import TraceView, TurnView
+from gateway.types.trace_views import ContentAccessView, TraceSettingsView, TraceView, TurnView
 
 
 class TraceSummaryPublic(BaseModel):
@@ -81,6 +81,7 @@ class SpanPublic(BaseModel):
     tool_call_id: str | None
     request_id: str | None
     attributes: dict[str, str | int | float | bool]
+    has_content: bool = Field(description="True when this span's content was captured and can be read.")
 
 
 class TurnPublic(BaseModel):
@@ -139,7 +140,7 @@ def series_public(bucket: Literal["hour", "day"], points: tuple[TraceBucket, ...
     )
 
 
-def _span_public(span: SpanRecord, approximate: frozenset[str]) -> SpanPublic:
+def _span_public(span: SpanRecord, approximate: frozenset[str], with_content: frozenset[str]) -> SpanPublic:
     return SpanPublic(
         span_id=span.span_id,
         parent_span_id=span.parent_span_id,
@@ -165,6 +166,7 @@ def _span_public(span: SpanRecord, approximate: frozenset[str]) -> SpanPublic:
         tool_call_id=span.tool_call_id,
         request_id=span.request_id,
         attributes=dict(span.attributes),
+        has_content=span.span_id in with_content,
     )
 
 
@@ -190,6 +192,77 @@ def detail_public(view: TraceView) -> TraceDetailPublic:
         summary=summary_public(view.summary),
         state=view.state,
         turns=[_turn_public(turn) for turn in view.turns],
-        spans=[_span_public(span, view.approximate) for span in view.spans],
+        spans=[_span_public(span, view.approximate, view.content_span_ids) for span in view.spans],
         truncated=view.truncated,
+    )
+
+
+class SpanContentPublic(BaseModel):
+    """A span's captured content. Which fields are present depends on the span: a request's
+    ``input`` and ``prior_output``, a tool call's ``arguments`` and ``result``."""
+
+    fields: dict[str, str]
+
+
+class TraceSettingsPublic(BaseModel):
+    content_capture: Literal["off", "tool_io", "full"] = Field(description="What this workspace asked to keep.")
+    effective: Literal["off", "tool_io", "full"] = Field(description="What it keeps, after the deployment's limit.")
+    ceiling: Literal["off", "tool_io", "full"] = Field(description="The most the deployment permits.")
+    admin_content_access: bool = Field(
+        description="Whether the organization's owners and admins may read this workspace's content. Every read is "
+        "recorded. Off by default: content is readable by its session's own user."
+    )
+
+
+class TraceSettingsUpdate(BaseModel):
+    content_capture: Literal["off", "tool_io", "full"] | None = None
+    admin_content_access: bool | None = None
+
+
+class BreakGlassRequest(BaseModel):
+    reason: str = Field(
+        min_length=10,
+        max_length=500,
+        description="Why a platform operator is reading this content, such as a legal request. Recorded with the read.",
+    )
+
+
+class ContentAccessPublic(BaseModel):
+    """One recorded read of captured content."""
+
+    accessed_at: datetime
+    trace_id: str
+    span_id: str
+    reader_kind: Literal["owner", "admin", "break_glass"] = Field(
+        description="The session's own user, an organization admin, or a platform operator breaking glass."
+    )
+    reader: str = Field(description="`user:<id>` for a signed-in reader, or `master_key`.")
+    reason: str | None = Field(default=None, description="The stated reason, for a break-glass read.")
+
+
+class ContentAccessListPublic(BaseModel):
+    items: list[ContentAccessPublic]
+
+
+class ContentPurgePublic(BaseModel):
+    removed: int
+
+
+def settings_public(view: TraceSettingsView) -> TraceSettingsPublic:
+    return TraceSettingsPublic(
+        content_capture=view.content_capture,  # type: ignore[arg-type]
+        effective=view.effective,  # type: ignore[arg-type]
+        ceiling=view.ceiling,  # type: ignore[arg-type]
+        admin_content_access=view.admin_content_access,
+    )
+
+
+def content_access_public(view: ContentAccessView) -> ContentAccessPublic:
+    return ContentAccessPublic(
+        accessed_at=view.accessed_at,
+        trace_id=view.trace_id,
+        span_id=view.span_id,
+        reader_kind=view.reader_kind,  # type: ignore[arg-type]
+        reader=view.reader,
+        reason=view.reason,
     )

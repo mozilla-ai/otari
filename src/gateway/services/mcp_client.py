@@ -15,6 +15,7 @@ ends or the loop exits:
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -115,6 +116,10 @@ class _ConnectedServer:
     session: ClientSession
     tools: list[dict[str, Any]] = field(default_factory=list)
     purpose_hint: str | None = None
+
+
+def _arguments_text(arguments: dict[str, Any]) -> str:
+    return json.dumps(arguments, ensure_ascii=False, default=str)
 
 
 class MCPClientPool:
@@ -292,10 +297,19 @@ class MCPClientPool:
             if self._tally is not None:
                 self._tally.record_failure(name)
             if self._trace is not None:
-                self._trace.record_tool_call(tool_name=name, tool_type="mcp", started=started, ok=False)
+                self._trace.record_tool_call(
+                    tool_name=name, tool_type="mcp", started=started, ok=False, arguments=_arguments_text(arguments)
+                )
             raise
         if self._trace is not None:
-            self._trace.record_tool_call(tool_name=name, tool_type="mcp", started=started, ok=not result.isError)
+            self._trace.record_tool_call(
+                tool_name=name,
+                tool_type="mcp",
+                started=started,
+                ok=not result.isError,
+                arguments=_arguments_text(arguments),
+                result="\n".join(part for part in (_render_content_block(block) for block in result.content) if part),
+            )
         return result
 
     async def call_tool_outcome(self, name: str, arguments: dict[str, Any]) -> MCPToolCallOutcome:

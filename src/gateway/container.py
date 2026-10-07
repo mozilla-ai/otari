@@ -545,9 +545,18 @@ def _bind_workspace_ports(
         container.bind(WebSearchPolicyPort, _shared(RemoteWebSearchPolicy(config)))
 
 
-def _local_trace_storage(trace_tables: TraceTablesBuilder | None) -> PortFactory[TraceStoragePort]:
-    """Serve one database-backed store, which opens its own Unit of Work per call and so needs no session."""
-    store = LocalTraceStorage(create_log_unit_of_work, trace_tables) if trace_tables is not None else None
+def _local_trace_storage(
+    container: Container, trace_tables: TraceTablesBuilder | None
+) -> PortFactory[TraceStoragePort]:
+    """Serve one database-backed store, which opens its own Unit of Work per call and so needs no session.
+
+    Captured content goes to the deployment's file store, resolved only when content is first written or read.
+    """
+    store = (
+        LocalTraceStorage(create_log_unit_of_work, trace_tables, lambda: container.resolve(FileStoragePort, None))
+        if trace_tables is not None
+        else None
+    )
 
     def factory(session: AsyncSession | None) -> TraceStoragePort:
         del session
@@ -570,7 +579,7 @@ def _bind_trace_storage(
     if config is None:
         container.bind(TraceStoragePort, _requires_config(TraceStoragePort))
     elif deployment_for(config).supports(Plane.CONTROL):
-        container.bind(TraceStoragePort, _local_trace_storage(trace_tables))
+        container.bind(TraceStoragePort, _local_trace_storage(container, trace_tables))
     else:
         container.bind(TraceStoragePort, _shared(NullTraceStorage()))
 

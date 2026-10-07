@@ -45,3 +45,27 @@ class TraceView:
     # Span ids whose start was inferred rather than measured.
     approximate: frozenset[str]
     truncated: bool
+    # Span ids whose content was captured and may be read one at a time.
+    content_span_ids: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
+class TraceSettingsView:
+    """A workspace's content capture: what it asked for, what it gets, and the deployment's limit."""
+
+    content_capture: str
+    effective: str
+    ceiling: str
+    admin_content_access: bool = False
+
+
+@dataclass(frozen=True)
+class ContentAccessView:
+    """One recorded read of captured content."""
+
+    accessed_at: datetime
+    trace_id: str
+    span_id: str
+    reader_kind: str
+    reader: str
+    reason: str | None

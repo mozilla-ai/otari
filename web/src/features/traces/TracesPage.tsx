@@ -29,6 +29,7 @@ import {
   findPreset,
 } from "@/shared/helpers/timeRange"
 import { useUrlState } from "@/shared/helpers/urlState"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 const PAGE_SIZE = 50
 const STATUS_OPTIONS = [
@@ -61,7 +62,11 @@ export function TracesPage({ viewSwitch }: { viewSwitch: ReactNode }) {
   const preset =
     findPreset(ACTIVITY_PRESETS, url.get("range")) ??
     findPreset(ACTIVITY_PRESETS, ACTIVITY_DEFAULT_KEY)
+  const { selected: workspace } = useSelectedWorkspace()
   const filters: TraceFilters = {
+    // From the sidebar's switcher, as the request log scopes to it, so the two
+    // views of Activity show the same workspace.
+    workspaceId: workspace?.workspace_id ?? "",
     start: windowStart(preset?.seconds ?? null),
     q: url.get("q"),
     failedOnly: url.get("status") === "failed",
@@ -126,8 +131,8 @@ export function TracesPage({ viewSwitch }: { viewSwitch: ReactNode }) {
     <div className="flex min-w-0 flex-col gap-6">
       <PageIntro title="Activity" action={viewSwitch}>
         Every agent session the gateway recorded: the requests, LLM calls, tools
-        and routing attempts behind each one. No prompt, output or tool content
-        is stored.
+        and routing attempts behind each one. Prompt, output and tool content
+        are kept only in a workspace whose admins turned content capture on.
       </PageIntro>
       {traces.isError && !traces.data ? (
         <ErrorBanner error={traces.error} />

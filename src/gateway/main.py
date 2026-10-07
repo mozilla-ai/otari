@@ -34,14 +34,17 @@ from gateway.container import Container, build_container
 from gateway.context_propagation import TraceContextPropagationMiddleware
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, dispose_db, init_db
+from gateway.core.deployment import Plane, deployment_for
 from gateway.core.error_codes import error_code_of, error_headers
 from gateway.core.feature import Worker
+from gateway.core.unit_of_work import create_log_unit_of_work
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.exceptions import TenancyError
 from gateway.exceptions.control_plane_exceptions import ControlPlaneError
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
 from gateway.log_config import logger
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
+from gateway.ports.data_key_port import DataKey, DataKeyContext, DataKeyPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
@@ -118,9 +121,47 @@ from gateway.services.tenancy.organization_guardrail_runner import (
     run_guardrail_runner_refresher,
 )
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
-from gateway.services.traces import RequestTraces, TraceWriter, TracingLogWriter, run_trace_retention
+from gateway.services.traces import (
+    ContentCapturePolicy,
+    ContentKeys,
+    RequestTraces,
+    TraceWriter,
+    TracingLogWriter,
+    run_trace_retention,
+)
 from gateway.trace_capture import TraceCaptureMiddleware
 from gateway.version import __version__
+
+
+class _LazyDataKeys:
+    """The key port, resolved on first use: a deployment that never seals content never builds its backend.
+
+    An ``aws_kms`` binding needs the ``kms`` extra and AWS configuration, which a
+    deployment whose ceiling is ``off`` has no reason to carry.
+    """
+
+    def __init__(self, container: Any) -> None:
+        self._container = container
+        self._port: DataKeyPort | None = None
+
+    def _resolve(self) -> DataKeyPort:
+        if self._port is None:
+            self._port = self._container.resolve(DataKeyPort, None)
+        return self._port
+
+    async def available(self) -> bool:
+        try:
+            port = self._resolve()
+        except Exception:  # noqa: BLE001
+            return False
+        return await port.available()
+
+    async def generate(self, context: DataKeyContext) -> DataKey:
+        return await self._resolve().generate(context)
+
+    async def unwrap(self, wrapped: bytes, context: DataKeyContext) -> bytes:
+        return await self._resolve().unwrap(wrapped, context)
+
 
 # Every path here must be mounted; a contract test checks.
 _PUBLIC_PREFIXES = (f"{API_ROOT}/health",)
@@ -257,6 +298,8 @@ def _start_trace_retention(config: GatewayConfig, container: Container) -> Corou
     return run_trace_retention(
         lambda: container.resolve(TraceStoragePort, None),
         retention_days=config.trace_retention_days,
+        content_retention_days=config.trace_content_retention_days,
+        keys=lambda: ContentKeys(_LazyDataKeys(container), create_log_unit_of_work, get_trace_tables),
         interval=_TRACE_RETENTION_INTERVAL_S,
     )
 
@@ -1161,6 +1204,17 @@ def create_app(config: GatewayConfig) -> FastAPI:
         code_execution_policies=get_workspace_code_execution_policies,
         trace_tables=get_trace_tables,
     )
+    # Content capture needs this deployment's own database, for each workspace's
+    # level and for the keys that seal content, so only the control plane has it.
+    app.state.trace_content_keys = None
+    app.state.trace_content_policy = None
+    if config.trace_capture_enabled and deployment_for(config).supports(Plane.CONTROL):
+        app.state.trace_content_keys = ContentKeys(
+            _LazyDataKeys(app.state.container), create_log_unit_of_work, get_trace_tables
+        )
+        app.state.trace_content_policy = ContentCapturePolicy(
+            config.trace_content_capture_max, create_log_unit_of_work, get_trace_tables
+        )
     install_rate_limits(app, config)
 
     register_routers(app, config)

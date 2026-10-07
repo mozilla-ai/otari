@@ -88,7 +88,7 @@ from gateway.services.tools import (
     WorkspaceCodeExecutionPolicyService,
     WorkspaceSearchKeys,
 )
-from gateway.services.traces import TraceService
+from gateway.services.traces import ContentAccessService, TraceService, TraceSettingsService
 from gateway.services.workspace_scope import default_workspace_id
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
@@ -1318,6 +1318,18 @@ def get_trace_service(store: TraceStoragePortDep) -> TraceService:
 TraceServiceDep = Annotated[TraceService, Depends(get_trace_service)]
 
 
+def get_content_access_service(
+    uow: UnitOfWorkDep, store: TraceStoragePortDep, request: Request
+) -> ContentAccessService:
+    """Build the service that opens captured content for a reader the rules admit, on the request's Unit of Work."""
+    return ContentAccessService(
+        uow, TracesRepositories.on(uow), store=store, keys=getattr(request.app.state, "trace_content_keys", None)
+    )
+
+
+ContentAccessServiceDep = Annotated[ContentAccessService, Depends(get_content_access_service)]
+
+
 def get_deployment_trace_scope() -> TraceScope:
     """Every workspace: the scope of the deployment-operator trace routes, which their router gates."""
     return TraceScope.deployment()
@@ -1341,6 +1353,47 @@ async def get_organization_trace_scope(
     return TraceScope.workspaces(frozenset(scope.workspace_ids))
 
 
+async def get_organization_content_scope(
+    identity: CurrentIdentity, db: Annotated[AsyncSession, Depends(get_db)]
+) -> TraceScope:
+    """The workspaces this caller may read captured content in: all of their organization's for an owner
+    or admin, none for anyone else, who still reads every span's metadata."""
+    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    scope = await resolve_visible_workspace_scope(db, user=identity, organizations=organizations)
+    if scope.workspace_ids is not None:
+        return TraceScope.workspaces(frozenset())
+    return TraceScope.workspaces(
+        frozenset(await WorkspaceRepository(db).get_ids_by_organization(scope.organization.id))
+    )
+
+
+def get_trace_settings_service(
+    uow: UnitOfWorkDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    store: TraceStoragePortDep,
+    request: Request,
+) -> TraceSettingsService:
+    """Build the workspace trace settings service on the request's Unit of Work."""
+    keys = request.app.state.trace_content_keys
+    policy = request.app.state.trace_content_policy
+    if keys is None or policy is None:
+        msg = "trace content capture is not set up on this deployment"
+        raise RuntimeError(msg)
+    return TraceSettingsService(
+        uow,
+        TracesRepositories.on(uow),
+        WorkspaceAccess(
+            db, OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+        ),
+        store=store,
+        keys=keys,
+        policy=policy,
+        ceiling=config.trace_content_capture_max,
+    )
+
+
+TraceSettingsServiceDep = Annotated[TraceSettingsService, Depends(get_trace_settings_service)]
 DeploymentTraceScopeDep = Annotated[TraceScope, Depends(get_deployment_trace_scope)]
 OrganizationTraceScopeDep = Annotated[TraceScope, Depends(get_organization_trace_scope)]
 WebSearchPolicyPortDep = Annotated[WebSearchPolicyPort, Depends(get_web_search_policy_port)]

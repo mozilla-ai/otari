@@ -42,6 +42,7 @@ import { Route as ToolsIndexRouteImport } from './routes/tools.index'
 import { Route as ToolsCodeExecutionRouteImport } from './routes/tools.code-execution'
 import { Route as ToolsGuardrailsRouteImport } from './routes/tools.guardrails'
 import { Route as ToolsMcpServersRouteImport } from './routes/tools.mcp-servers'
+import { Route as ToolsTraceContentRouteImport } from './routes/tools.trace-content'
 import { Route as ToolsWebSearchRouteImport } from './routes/tools.web-search'
 
 const IndexRoute = IndexRouteImport.update({
@@ -210,6 +211,11 @@ const ToolsMcpServersRoute = ToolsMcpServersRouteImport.update({
   path: '/mcp-servers',
   getParentRoute: () => ToolsRoute,
 } as any)
+const ToolsTraceContentRoute = ToolsTraceContentRouteImport.update({
+  id: '/trace-content',
+  path: '/trace-content',
+  getParentRoute: () => ToolsRoute,
+} as any)
 const ToolsWebSearchRoute = ToolsWebSearchRouteImport.update({
   id: '/web-search',
   path: '/web-search',
@@ -247,6 +253,7 @@ export interface FileRoutesByFullPath {
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRoute
+  '/tools/trace-content': typeof ToolsTraceContentRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
@@ -280,6 +287,7 @@ export interface FileRoutesByTo {
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRoute
+  '/tools/trace-content': typeof ToolsTraceContentRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/models': typeof ModelsIndexRoute
   '/organization': typeof OrganizationIndexRoute
@@ -317,6 +325,7 @@ export interface FileRoutesById {
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRoute
+  '/tools/trace-content': typeof ToolsTraceContentRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
@@ -355,6 +364,7 @@ export interface FileRouteTypes {
     | '/tools/code-execution'
     | '/tools/guardrails'
     | '/tools/mcp-servers'
+    | '/tools/trace-content'
     | '/tools/web-search'
     | '/models/'
     | '/organization/'
@@ -388,6 +398,7 @@ export interface FileRouteTypes {
     | '/tools/code-execution'
     | '/tools/guardrails'
     | '/tools/mcp-servers'
+    | '/tools/trace-content'
     | '/tools/web-search'
     | '/models'
     | '/organization'
@@ -424,6 +435,7 @@ export interface FileRouteTypes {
     | '/tools/code-execution'
     | '/tools/guardrails'
     | '/tools/mcp-servers'
+    | '/tools/trace-content'
     | '/tools/web-search'
     | '/models/'
     | '/organization/'
@@ -686,6 +698,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ToolsMcpServersRouteImport
       parentRoute: typeof ToolsRoute
     }
+    '/tools/trace-content': {
+      id: '/tools/trace-content'
+      path: '/trace-content'
+      fullPath: '/tools/trace-content'
+      preLoaderRoute: typeof ToolsTraceContentRouteImport
+      parentRoute: typeof ToolsRoute
+    }
     '/tools/web-search': {
       id: '/tools/web-search'
       path: '/web-search'
@@ -737,6 +756,7 @@ interface ToolsRouteChildren {
   ToolsCodeExecutionRoute: typeof ToolsCodeExecutionRoute
   ToolsGuardrailsRoute: typeof ToolsGuardrailsRoute
   ToolsMcpServersRoute: typeof ToolsMcpServersRoute
+  ToolsTraceContentRoute: typeof ToolsTraceContentRoute
   ToolsWebSearchRoute: typeof ToolsWebSearchRoute
   ToolsIndexRoute: typeof ToolsIndexRoute
 }
@@ -745,6 +765,7 @@ const ToolsRouteChildren: ToolsRouteChildren = {
   ToolsCodeExecutionRoute: ToolsCodeExecutionRoute,
   ToolsGuardrailsRoute: ToolsGuardrailsRoute,
   ToolsMcpServersRoute: ToolsMcpServersRoute,
+  ToolsTraceContentRoute: ToolsTraceContentRoute,
   ToolsWebSearchRoute: ToolsWebSearchRoute,
   ToolsIndexRoute: ToolsIndexRoute,
 }

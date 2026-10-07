@@ -44,6 +44,19 @@ class TraceSettings(BaseModel):
     trace_max_spans_per_request: Annotated[int, OMITTED] = Field(
         default=256, gt=0, description="Spans one request may record; past it the rest are counted, not kept."
     )
+    trace_content_capture_max: Annotated[Literal["off", "tool_io", "full"], Shown(SettingsGroup.METERING)] = Field(
+        default="off",
+        description=(
+            "The most trace content any workspace may keep: off, tool arguments and results (tool_io), or also "
+            "prompts and model output (full). Off by default, so an operator opts the deployment in. Only limits: "
+            "content stays off in every workspace until one of its admins turns it on there. Requires restart."
+        ),
+    )
+    trace_content_retention_days: Annotated[int, Shown(SettingsGroup.METERING)] = Field(
+        default=7,
+        gt=0,
+        description="Delete captured trace content, and destroy the keys that sealed it, after this many days.",
+    )
     trace_content_key_backend: Annotated[Literal["secret_box", "aws_kms"], Shown(SettingsGroup.METERING)] = Field(
         default="secret_box",
         description=(

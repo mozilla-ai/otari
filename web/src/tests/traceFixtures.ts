@@ -49,6 +49,7 @@ export function traceSpan(overrides: Partial<TraceSpan> = {}): TraceSpan {
     tool_call_id: null,
     request_id: null,
     attributes: {},
+    has_content: false,
     ...overrides,
   }
 }

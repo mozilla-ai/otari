@@ -550,18 +550,23 @@ class SandboxBackend:
             self._executions.append(CodeExecution(code=code, result=None))
             if self._tally is not None:
                 self._tally.record_failure(CODE_EXECUTION_TOOL_NAME)
-            self._record_span(started, ok=False)
+            self._record_span(started, ok=False, code=code)
             raise
         self._executions.append(CodeExecution(code=code, result=block, file_ids=file_ids))
         if self._tally is not None:
             self._tally.record_result(CODE_EXECUTION_TOOL_NAME, result)
-        self._record_span(started, ok=not is_tool_error(result))
+        self._record_span(started, ok=not is_tool_error(result), code=code, result=result)
         return result
 
-    def _record_span(self, started: datetime, *, ok: bool) -> None:
+    def _record_span(self, started: datetime, *, ok: bool, code: str, result: str | None = None) -> None:
         if self._trace is not None:
             self._trace.record_tool_call(
-                tool_name=CODE_EXECUTION_TOOL_NAME, tool_type="otari_code_execution", started=started, ok=ok
+                tool_name=CODE_EXECUTION_TOOL_NAME,
+                tool_type="otari_code_execution",
+                started=started,
+                ok=ok,
+                arguments=code,
+                result=result,
             )
 
     async def _exec_tool(self, code: str) -> tuple[str, ResultBlock, dict[str, str]]:

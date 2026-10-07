@@ -13,8 +13,11 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal, Protocol
 
-from gateway.models.traces import Trace, TraceSpan
+from gateway.models.traces import Trace, TraceSpan, TraceSpanContent
 from gateway.ports.trace_storage_port import TraceFilter
+
+# One stored blob: its span's key, and where the object store keeps it.
+ContentRef = tuple[uuid.UUID, str, str, str]
 
 
 class TraceRows(Protocol):
@@ -76,6 +79,34 @@ class SpanRows(Protocol):
     async def for_trace(self, workspace_id: uuid.UUID, trace_id: str, *, limit: int) -> Sequence[TraceSpan]: ...
 
 
+class ContentRows(Protocol):
+    """The content-reference queries the local adapter runs."""
+
+    async def insert_new(self, rows: Sequence[dict[str, Any]]) -> set[str]: ...
+
+    async def find(
+        self, workspace_ids: Collection[uuid.UUID] | None, trace_id: str, span_id: str
+    ) -> TraceSpanContent | None: ...
+
+    async def span_ids_with_content(self, workspace_id: uuid.UUID, trace_id: str) -> set[str]: ...
+
+    async def refs_before(self, before: datetime, *, limit: int) -> list[ContentRef]: ...
+
+    async def refs_for_workspace(self, workspace_id: uuid.UUID, *, limit: int) -> list[ContentRef]: ...
+
+    async def refs_for_traces(self, keys: Collection[tuple[uuid.UUID, str]], *, limit: int) -> list[ContentRef]: ...
+
+    async def delete_refs(self, refs: Collection[ContentRef]) -> int: ...
+
+
+class KeyRows(Protocol):
+    """The session-key queries the local adapter runs, to destroy a key with its session."""
+
+    async def delete_sessions(self, keys: Collection[tuple[uuid.UUID, str]]) -> int: ...
+
+    async def delete_for_workspace(self, workspace_id: uuid.UUID) -> int: ...
+
+
 class TraceTables(Protocol):
     """The traces repositories, built on one Unit of Work."""
 
@@ -84,3 +115,9 @@ class TraceTables(Protocol):
 
     @property
     def spans(self) -> SpanRows: ...
+
+    @property
+    def content(self) -> ContentRows: ...
+
+    @property
+    def keys(self) -> KeyRows: ...

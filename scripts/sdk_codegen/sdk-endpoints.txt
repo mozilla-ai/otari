@@ -158,6 +158,12 @@ GET /api/v1/organizations/me/traces                 # not yet wrapped
 GET /api/v1/organizations/me/traces/count           # not yet wrapped
 GET /api/v1/organizations/me/traces/series          # not yet wrapped
 GET /api/v1/organizations/me/traces/{trace_id}      # not yet wrapped
+POST /api/v1/traces/{trace_id}/spans/{span_id}/content/break-glass       # not yet wrapped
+GET /api/v1/organizations/me/traces/{trace_id}/spans/{span_id}/content   # not yet wrapped
+GET /api/v1/workspaces/{workspace_id}/trace-settings                     # not yet wrapped
+PUT /api/v1/workspaces/{workspace_id}/trace-settings                     # not yet wrapped
+POST /api/v1/workspaces/{workspace_id}/trace-settings/purge-content      # not yet wrapped
+GET /api/v1/workspaces/{workspace_id}/trace-settings/content-access      # not yet wrapped
 # Other control-plane extensions of already-covered resources
 GET /api/v1/usage/count                             # not yet wrapped
 GET /api/v1/usage/requests/{request_id}            # not yet wrapped

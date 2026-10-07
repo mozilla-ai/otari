@@ -1757,6 +1757,22 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/traces/trace_repository.py",
         "baseline": (),
     },
+    "gateway.models.traces.TraceContentAccess": {
+        "repository": "gateway/repositories/traces/content_access_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.traces.TraceContentKey": {
+        "repository": "gateway/repositories/traces/content_key_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.traces.TraceSpanContent": {
+        "repository": "gateway/repositories/traces/content_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.traces.WorkspaceTraceSettings": {
+        "repository": "gateway/repositories/traces/trace_settings_repository.py",
+        "baseline": (),
+    },
     "gateway.models.traces.TraceSpan": {
         "repository": "gateway/repositories/traces/span_repository.py",
         "baseline": (),

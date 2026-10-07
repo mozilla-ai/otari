@@ -151,4 +151,5 @@ class TraceService:
             spans=tuple(spans),
             approximate=frozenset(approximate),
             truncated=detail.truncated,
+            content_span_ids=detail.content_span_ids,
         )

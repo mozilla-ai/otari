@@ -5,12 +5,14 @@ promise to try hard:
 
 - ``submit`` never waits. It is called as a response finishes, so nothing a
   store does (slow, down, full) can hold a response or a connection open.
-- The queue is bounded in spans. When a request's spans do not fit, they are
-  dropped whole, so a stored trace is never a fragment of what happened.
+- The queue is bounded in spans, and in the bytes of captured content they
+  carry. When a request's spans do not fit, they are dropped whole, so a
+  stored trace is never a fragment of what happened.
 - One task writes, one batch at a time, so tracing holds at most one
   connection of whichever pool its store uses.
 - Each batch has a time limit, and shutdown has one. Past either, the spans
-  are dropped rather than retried.
+  are dropped rather than retried. A batch the store refuses is retried one
+  trace at a time, so one request's bad row loses only that request's trace.
 
 Every drop is counted on ``gateway_trace_spans_dropped`` with its reason, so an
 operator can see what tracing lost. Nothing is logged per span.
@@ -44,6 +46,16 @@ QUEUED_SPANS = Gauge(
 )
 
 
+# Sealed content is the one part of a span whose size a client drives (up to two
+# capped fields per span), so it has a budget of its own beside the span count.
+_MAX_QUEUED_CONTENT_BYTES = 64 * 1024 * 1024
+_MAX_BATCH_CONTENT_BYTES = 8 * 1024 * 1024
+
+
+def _content_bytes(trace: TraceWrite) -> int:
+    return sum(len(span.sealed.ciphertext) for span in trace.spans if span.sealed is not None)
+
+
 class TraceWriter:
     """Queue traces and write them to a store in batches, dropping what does not fit."""
 
@@ -56,6 +68,7 @@ class TraceWriter:
         interval_s: float,
         write_timeout_s: float,
         shutdown_s: float,
+        max_queued_content_bytes: int = _MAX_QUEUED_CONTENT_BYTES,
     ) -> None:
         self._store = store
         self._max_queued = max_queued_spans
@@ -65,6 +78,8 @@ class TraceWriter:
         self._shutdown = shutdown_s
         self._queue: deque[TraceWrite] = deque()
         self._queued_spans = 0
+        self._max_queued_bytes = max_queued_content_bytes
+        self._queued_bytes = 0
         self._ready = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
 
@@ -75,11 +90,13 @@ class TraceWriter:
         size = len(trace.spans)
         if not size:
             return
-        if self._queued_spans + size > self._max_queued:
+        content = _content_bytes(trace)
+        if self._queued_spans + size > self._max_queued or self._queued_bytes + content > self._max_queued_bytes:
             SPANS_DROPPED.labels(reason="queue_full").inc(size)
             return
         self._queue.append(trace)
         self._queued_spans += size
+        self._queued_bytes += content
         QUEUED_SPANS.set(self._queued_spans)
         if self._queued_spans >= self._batch_spans:
             self._ready.set()
@@ -104,6 +121,7 @@ class TraceWriter:
             SPANS_DROPPED.labels(reason="shutdown").inc(self._queued_spans)
             self._queue.clear()
             self._queued_spans = 0
+            self._queued_bytes = 0
             QUEUED_SPANS.set(0)
 
     async def _run(self) -> None:
@@ -117,11 +135,20 @@ class TraceWriter:
     def _take_batch(self) -> tuple[TraceWrite, ...]:
         batch: list[TraceWrite] = []
         spans = 0
-        while self._queue and (not batch or spans + len(self._queue[0].spans) <= self._batch_spans):
+        content = 0
+        while self._queue and (
+            not batch
+            or (
+                spans + len(self._queue[0].spans) <= self._batch_spans
+                and content + _content_bytes(self._queue[0]) <= _MAX_BATCH_CONTENT_BYTES
+            )
+        ):
             trace = self._queue.popleft()
             batch.append(trace)
             spans += len(trace.spans)
+            content += _content_bytes(trace)
         self._queued_spans -= spans
+        self._queued_bytes -= content
         QUEUED_SPANS.set(self._queued_spans)
         return tuple(batch)
 
@@ -135,8 +162,13 @@ class TraceWriter:
         # Best-effort by contract: whatever a store raises, the batch is dropped and
         # counted, and the writer keeps serving the next one. A store is an adapter
         # this module cannot know the failure types of, an overlay's included.
-        except Exception:  # noqa: BLE001
-            logger.warning("Trace store refused a batch of %d spans", size, exc_info=True)
+        # Logged by type only: a database error's text carries the batch's bound values.
+        except Exception as exc:  # noqa: BLE001
+            if len(batch) > 1:
+                for trace in batch:
+                    await self._write((trace,), timeout=timeout, on_timeout=on_timeout)
+                return
+            logger.warning("Trace store refused a trace of %d spans (%s)", size, type(exc).__name__)
             SPANS_DROPPED.labels(reason="store_error").inc(size)
             return
         SPANS_WRITTEN.labels(result="accepted").inc(result.accepted)

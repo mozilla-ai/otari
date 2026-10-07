@@ -4,14 +4,17 @@ The middleware's ``finally`` is the one place every request passes exactly once:
 a streamed response outlives its route handler, and the settlement paths branch
 a dozen ways, which is why the in-flight registry drops its entries here too.
 The trace is closed with what the client actually got: the status line, and
-whether the body was sent in full.
+whether the body was sent in full. In a workspace that keeps everything, the
+body itself is kept too (bounded), so the step's content holds the model's
+output for this request and not only what the next request replays.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from gateway.services.traces import RequestTrace, RequestTraces, TraceWriter
+from gateway.log_config import logger
+from gateway.services.traces import ContentKeys, RequestTrace, RequestTraces, TraceWriter
 
 if TYPE_CHECKING:
     from collections.abc import MutableMapping
@@ -49,13 +52,22 @@ class TraceCaptureMiddleware:
             return
         status_code: int | None = None
         completed = False
+        is_stream = False
 
         async def observing_send(message: Message) -> None:
-            nonlocal status_code, completed
+            nonlocal status_code, completed, is_stream
             if message["type"] == "http.response.start":
                 status_code = message["status"]
-            elif message["type"] == "http.response.body" and not message.get("more_body", False):
-                completed = True
+                is_stream = any(
+                    name.lower() == b"content-type" and value.startswith(b"text/event-stream")
+                    for name, value in message.get("headers", [])
+                )
+            elif message["type"] == "http.response.body":
+                if not message.get("more_body", False):
+                    completed = True
+                trace = self.traces.get(scope.get(TRACE_SCOPE_KEY))
+                if trace is not None:
+                    trace.keep_response_bytes(message.get("body", b""))
             await send(message)
 
         try:
@@ -63,6 +75,33 @@ class TraceCaptureMiddleware:
         finally:
             mapping: MutableMapping[str, Any] = scope
             trace = self.traces.finish(mapping.get(TRACE_SCOPE_KEY))
-            writer: TraceWriter | None = getattr(_state(mapping), "trace_writer", None)
-            if trace is not None and writer is not None:
-                writer.submit(trace.finish(status_code=status_code, completed=completed), truncated=trace.dropped)
+            if trace is not None:
+                # After the response, so nothing here may raise into the app's own
+                # outcome: a trace that cannot be written is dropped, and logged
+                # without its payload.
+                try:
+                    trace.read_response(is_stream=is_stream)
+                    await _submit(mapping, trace, status_code=status_code, completed=completed)
+                except Exception:  # noqa: BLE001
+                    logger.warning("Trace for request %s dropped: %s", trace.request_id, "could not be closed")
+                finally:
+                    trace.discard_content()
+
+
+async def _submit(
+    scope: MutableMapping[str, Any], trace: RequestTrace, *, status_code: int | None, completed: bool
+) -> None:
+    writer: TraceWriter | None = getattr(_state(scope), "trace_writer", None)
+    if writer is None:
+        return
+    write = trace.finish(status_code=status_code, completed=completed)
+    keys: ContentKeys | None = getattr(_state(scope), "trace_content_keys", None)
+    if trace.content and keys is not None:
+        try:
+            write = await keys.seal(write, trace.content)
+        # Sealing reaches a key store this module cannot know the failures of. Whatever
+        # it raises, the content is dropped and the trace is still kept: content is the
+        # optional part, and plaintext never travels on.
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Trace content could not be sealed (%s); keeping the trace without it", type(exc).__name__)
+    writer.submit(write, truncated=trace.dropped)

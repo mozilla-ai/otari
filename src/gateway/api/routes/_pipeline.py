@@ -274,7 +274,7 @@ from gateway.services.tools import (
     read_web_search_max_uses,
     web_search_intercept_enabled,
 )
-from gateway.services.traces import RequestTrace, TurnFacts, harness_of, resolve_session
+from gateway.services.traces import RequestContent, RequestTrace, TurnFacts, harness_of, resolve_session
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.web_retrieval_backend import (
     WEB_FETCH_TOOL_NAME,
@@ -1912,8 +1912,9 @@ async def resolve_request_context(
     tools: list[dict[str, Any]] | None = None,
     idempotency: IdempotencyGuard | None = None,
     tags: dict[str, str] | None = None,
-    turn: TurnFacts | None = None,
+    turn: Callable[[], TurnFacts] | None = None,
     session_label: str | None = None,
+    content: Callable[[], RequestContent] | None = None,
 ) -> RequestContext:
     """Run the shared handler preamble up to (and including) budget pre-debit.
 
@@ -2467,19 +2468,27 @@ async def resolve_request_context(
     session = resolve_session(raw_request.headers, session_label=session_label, tags=tags)
     trace: RequestTrace | None = None
     if config.trace_capture_enabled and workspace_id is not None:
-        trace = RequestTrace(
-            session=session,
-            harness=harness_of(raw_request.headers),
-            turn=turn,
-            request_id=request_id,
-            workspace_id=workspace_id,
-            user_id=user_id,
-            api_key_id=api_key_id,
-            endpoint=adapter.endpoint,
-            started_at=datetime.now(UTC) - timedelta(seconds=time.monotonic() - started_at),
-            max_spans=config.trace_max_spans_per_request,
-        )
-        begin_request_trace(raw_request, trace)
+        # Budget is already reserved here, and only the code below hands it to the
+        # settlement paths, so a trace that cannot be opened means no trace rather
+        # than an error.
+        try:
+            trace = RequestTrace(
+                session=session,
+                harness=harness_of(raw_request.headers),
+                turn=turn() if turn is not None else None,
+                request_id=request_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                api_key_id=api_key_id,
+                endpoint=adapter.endpoint,
+                started_at=datetime.now(UTC) - timedelta(seconds=time.monotonic() - started_at),
+                max_spans=config.trace_max_spans_per_request,
+            )
+            await _apply_content_capture(raw_request, trace, workspace_id, content)
+            begin_request_trace(raw_request, trace)
+        except Exception:  # noqa: BLE001
+            trace = None
+            logger.warning("Trace could not be opened for request %s; serving it untraced", request_id)
 
     if rate_limit_grant is not None:
         rate_limit_grant.hand_over()
@@ -2509,8 +2518,38 @@ async def resolve_request_context(
         end_user_budget_id=end_user_budget_id,
         tags=tags,
         trace=trace,
-        session_label=session_label or (session.label() if session is not None else None),
+        # A header's session id reaches the usage report only where traces are on, so
+        # turning them off leaves that report exactly as it was.
+        session_label=session_label
+        or (session.label() if session is not None and config.trace_capture_enabled else None),
     )
+
+
+# A cache miss reads one row; past this the request goes on capturing nothing.
+_CONTENT_POLICY_TIMEOUT_S = 0.5
+
+
+async def _apply_content_capture(
+    raw_request: Request,
+    trace: RequestTrace,
+    workspace_id: uuid.UUID,
+    content: Callable[[], RequestContent] | None,
+) -> None:
+    """Set how much content the workspace keeps, and read the request's own only where it keeps some.
+
+    A level that cannot be read in time is "off": capture must never be what fails
+    or delays a request.
+    """
+    policy = getattr(getattr(raw_request.scope.get("app"), "state", None), "trace_content_policy", None)
+    if policy is None:
+        return
+    try:
+        trace.content_level = await asyncio.wait_for(policy.level(workspace_id), _CONTENT_POLICY_TIMEOUT_S)
+    except DATABASE_ERRORS:
+        logger.warning("Trace content level unreadable for workspace %s; capturing none", workspace_id)
+        return
+    if trace.content_level != "off" and content is not None:
+        trace.request_content = content()
 
 
 # ---------------------------------------------------------------------------

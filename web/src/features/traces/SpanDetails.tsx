@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 import type { TraceSpan } from "@/client"
-import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
+import { SpanContentSection } from "@/features/traces/SpanContentSection"
 import { spanLabel, spanOutcomeLabel } from "@/features/traces/traceModel"
 import {
   formatCost,
@@ -20,7 +20,13 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
 
 // What one span says about itself, and, where a person would look for the prompt
 // or the tool's output, why it is not there: no content is recorded.
-export function SpanDetails({ span }: { span: TraceSpan }) {
+export function SpanDetails({
+  traceId,
+  span,
+}: {
+  traceId: string
+  span: TraceSpan
+}) {
   const duration = formatLatency(span.duration_ms)
   return (
     <div className="flex flex-col gap-4">
@@ -62,11 +68,7 @@ export function SpanDetails({ span }: { span: TraceSpan }) {
       </dl>
       <div className="flex flex-col gap-2">
         <h5 className="text-overline">Input and output</h5>
-        <EmptyMessage>
-          Content is not captured. Traces record what ran, how long it took and
-          what it cost, never the prompt, the model's output or a tool's input
-          and output.
-        </EmptyMessage>
+        <SpanContentSection traceId={traceId} span={span} />
       </div>
     </div>
   )

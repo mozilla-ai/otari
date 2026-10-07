@@ -105,7 +105,7 @@ from gateway.services.tools import (
     Dialect,
     ToolUseBudget,
 )
-from gateway.services.traces import read_turn
+from gateway.services.traces import read_content, read_turn
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
@@ -865,7 +865,8 @@ async def create_message(
             code_execution_policies=tool_ports.code_execution_policy,
             idempotency=None if request.stream else idempotency,
             tags=request_tags(request.metadata, ignore=frozenset({ANTHROPIC_USER_KEY})),
-            turn=read_turn("messages", request.messages),
+            turn=lambda: read_turn("messages", request.messages),
+            content=lambda: read_content("messages", request.messages),
             session_label=request.session_label,
         )
     except IdempotentReplay as replay:

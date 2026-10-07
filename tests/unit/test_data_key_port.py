@@ -161,6 +161,10 @@ async def test_secret_box_refuses_a_payload_of_another_shape(monkeypatch: pytest
         await SecretBoxDataKeys().unwrap(Fernet(secret).encrypt(b'["not", "a", "key"]'), _CONTEXT)
 
 
+def test_content_capture_is_off_unless_the_operator_opts_in() -> None:
+    assert GatewayConfig().trace_content_capture_max == "off"
+
+
 class _RefusingKms:
     class AccessDeniedException(Exception):
         pass

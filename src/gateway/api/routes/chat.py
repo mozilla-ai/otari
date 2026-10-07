@@ -74,7 +74,7 @@ from gateway.services.mcp_loop import (
 )
 from gateway.services.provider_kwargs import apply_endpoint_defaults
 from gateway.services.tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, Dialect, ToolUseBudget
-from gateway.services.traces import read_turn
+from gateway.services.traces import read_content, read_turn
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
@@ -538,7 +538,8 @@ async def run_chat_completion(
             code_execution_policies=tool_ports.code_execution_policy,
             idempotency=None if request.stream else idempotency,
             tags=request_tags(request.metadata),
-            turn=read_turn("chat", request.messages),
+            turn=lambda: read_turn("chat", request.messages),
+            content=lambda: read_content("chat", request.messages),
             session_label=request.session_label,
         )
     except IdempotentReplay as replay:

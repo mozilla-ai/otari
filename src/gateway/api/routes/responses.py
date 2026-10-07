@@ -78,7 +78,7 @@ from gateway.services.tools import (
     Dialect,
     ToolUseBudget,
 )
-from gateway.services.traces import read_turn
+from gateway.services.traces import read_content, read_turn
 from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
@@ -594,7 +594,8 @@ async def create_response(
             code_execution_policies=tool_ports.code_execution_policy,
             idempotency=None if bool(request_body.stream) else idempotency,
             tags=request_tags(request_body.metadata),
-            turn=read_turn("responses", request_body.input),
+            turn=lambda: read_turn("responses", request_body.input),
+            content=lambda: read_content("responses", request_body.input),
             session_label=request_body.session_label,
         )
     except IdempotentReplay as replay:

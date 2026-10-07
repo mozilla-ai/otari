@@ -40,10 +40,13 @@ from gateway.api.deps import (
 )
 from gateway.container import build_container
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.core.unit_of_work import create_log_unit_of_work
 from gateway.db import get_db
 from gateway.main import create_app, install_rate_limits
+from gateway.ports.data_key_port import DataKeyPort
 from gateway.rate_limit import RateLimiter
 from gateway.services.feedback import new_feedback_rate_limiter
+from gateway.services.traces import ContentCapturePolicy, ContentKeys
 
 MODEL_NAME = "gemini:gemini-2.5-flash"
 
@@ -362,6 +365,15 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
         code_execution_policies=get_workspace_code_execution_policies,
         trace_tables=get_trace_tables,
     )
+    # Both cache per workspace, and the seeded workspace keeps its id across tests, so
+    # a sealing key or a capture level from one test would otherwise serve the next.
+    if app.state.trace_content_keys is not None:
+        app.state.trace_content_keys = ContentKeys(
+            app.state.container.resolve(DataKeyPort, None), create_log_unit_of_work, get_trace_tables
+        )
+        app.state.trace_content_policy = ContentCapturePolicy(
+            config.trace_content_capture_max, create_log_unit_of_work, get_trace_tables
+        )
     install_rate_limits(app, config)
 
 

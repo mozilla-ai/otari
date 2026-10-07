@@ -1,8 +1,20 @@
-import { render, screen, within } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { render as renderUi, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import type { ReactElement } from "react"
 import { describe, expect, it } from "vitest"
 import { TraceDetailPanel } from "@/features/traces/TraceDetailPanel"
 import { traceDetail } from "@/tests/traceFixtures"
+
+// The span details read captured content through a query, so the panel needs a client.
+function render(ui: ReactElement) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return renderUi(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+  )
+}
 
 describe("TraceDetailPanel", () => {
   it("shows the session's turn, its LLM calls and the tool the agent ran", () => {
@@ -27,7 +39,7 @@ describe("TraceDetailPanel", () => {
   it("says plainly that no content was captured", () => {
     render(<TraceDetailPanel detail={traceDetail()} />)
 
-    expect(screen.getByText(/Content is not captured/)).toBeInTheDocument()
+    expect(screen.getByText(/Content was not captured/)).toBeInTheDocument()
   })
 
   it("lists every span in order in the log view", async () => {

@@ -14,7 +14,19 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from sqlalchemy import JSON, BigInteger, ForeignKey, ForeignKeyConstraint, Index, String, Uuid, false, func
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    CheckConstraint,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    LargeBinary,
+    String,
+    Uuid,
+    false,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
@@ -49,6 +61,11 @@ SPAN_OUTCOMES: tuple[SpanOutcome, ...] = ("ok", "error", "unknown")
 # The signal that grouped a trace's requests into one session. ``none`` is a request
 # that named no session, which is a trace of its own: the gateway never infers that
 # two requests belong together.
+# How much of a request's content a workspace keeps, in increasing order: nothing,
+# tool arguments and results, or also the prompt and the model's output.
+ContentCapture = Literal["off", "tool_io", "full"]
+CONTENT_CAPTURE_LEVELS: tuple[ContentCapture, ...] = ("off", "tool_io", "full")
+
 SessionSource = Literal["client", "harness", "otlp", "none"]
 SESSION_SOURCES: tuple[SessionSource, ...] = ("client", "harness", "otlp", "none")
 
@@ -145,5 +162,105 @@ class TraceSpan(Base):
     # Allowlisted, typed attributes only (``ports.trace_storage_port.SPAN_ATTRIBUTES``).
     attributes: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
+
+
+class TraceSpanContent(Base):
+    """Where a span's captured content is kept: a reference into the object store.
+
+    The content itself is sealed with its session's data key and stored through
+    ``FileStoragePort`` at ``storage_ref``, so no content is held in the database.
+    """
+
+    __tablename__ = "trace_span_content"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "trace_id", "span_id"],
+            ["trace_spans.workspace_id", "trace_spans.trace_id", "trace_spans.span_id"],
+            ondelete="CASCADE",
+            name="fk_trace_span_content_span",
+        ),
+        Index("ix_trace_span_content_created", "created_at"),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    trace_id: Mapped[str] = mapped_column(String(TRACE_ID_MAX_LENGTH), primary_key=True)
+    span_id: Mapped[str] = mapped_column(String(TRACE_ID_MAX_LENGTH), primary_key=True)
+    storage_ref: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
+
+
+class TraceContentKey(Base):
+    """The data key that seals one session's content, stored only wrapped.
+
+    No foreign key to the session: the key is minted when its first content is
+    sealed, before the trace writer has stored the session itself.
+    """
+
+    __tablename__ = "trace_content_keys"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
+    )
+    trace_id: Mapped[str] = mapped_column(String(TRACE_ID_MAX_LENGTH), primary_key=True)
+    # Which key-encryption backend wrapped it (``secret_box``, ``aws_kms:<key id>``).
+    key_ref: Mapped[str] = mapped_column(String)
+    wrapped: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now(), index=True
+    )
+
+
+# Who read a span's content: the session's own user, an organization admin the
+# workspace lets read it, or a platform operator breaking glass.
+ContentReaderKind = Literal["owner", "admin", "break_glass"]
+CONTENT_READER_KINDS: tuple[ContentReaderKind, ...] = ("owner", "admin", "break_glass")
+
+
+class TraceContentAccess(Base):
+    """One read of captured content, kept as the record of who read what and why.
+
+    No foreign keys: the record outlives the session, the workspace and the
+    reader it names, because it exists to answer for them afterwards.
+    """
+
+    __tablename__ = "trace_content_access"
+    __table_args__ = (
+        CheckConstraint("reader_kind IN ('owner', 'admin', 'break_glass')", name="ck_trace_content_access_reader_kind"),
+        Index("ix_trace_content_access_workspace_at", "workspace_id", "accessed_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    trace_id: Mapped[str] = mapped_column(String(TRACE_ID_MAX_LENGTH))
+    span_id: Mapped[str] = mapped_column(String(TRACE_ID_MAX_LENGTH))
+    reader_kind: Mapped[str] = mapped_column(String(16))
+    # ``user:<dashboard identity>`` or ``master_key``.
+    reader: Mapped[str] = mapped_column(String(64))
+    # Required for a break-glass read, absent otherwise.
+    reason: Mapped[str | None] = mapped_column(String(500))
+    accessed_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
+
+
+class WorkspaceTraceSettings(Base):
+    """How much of its requests' content a workspace keeps. A workspace with no row keeps none."""
+
+    __tablename__ = "workspace_trace_settings"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
+    )
+    content_capture: Mapped[str] = mapped_column(String, default="off", server_default="off")
+    # Whether the organization's owners and admins may read this workspace's content.
+    # Off by default: content is its session's own user's, and every admin read is recorded.
+    admin_content_access: Mapped[bool] = mapped_column(default=False, server_default=false())
+    # The dashboard identity that last changed it, kept as a record of who opted in.
+    updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    updated_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
     )

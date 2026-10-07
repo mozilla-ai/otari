@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, aclosing, nullcontext
+from datetime import UTC, datetime
 from enum import Enum, auto
 from typing import Any, Generic, Protocol, TypeVar, cast
 
@@ -52,6 +53,13 @@ class ToolBackend(Protocol):
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str: ...
 
     def purpose_hints(self) -> list[tuple[str, str]]: ...
+
+
+def _record_round(pool: ToolBackend, started: datetime) -> None:
+    """Hand one model round's timing to the request's trace, where the backend carries one."""
+    trace = getattr(pool, "trace", None)
+    if trace is not None:
+        trace.record_model_round(started=started, ended=datetime.now(UTC))
 
 
 def tool_failure_detail(pool: ToolBackend, name: str) -> str:
@@ -261,7 +269,9 @@ async def run_tool_loop(
         if merged_tools:
             kwargs["tools"] = merged_tools
 
+        started = datetime.now(UTC)
         result = await strategy.call(kwargs)
+        _record_round(pool, started)
         if not first_response_signaled:
             first_response_signaled = True
             if on_first_response is not None:
@@ -335,6 +345,7 @@ async def run_tool_loop_stream(
         if merged_tools:
             kwargs["tools"] = merged_tools
 
+        started = datetime.now(UTC)
         stream = await strategy.open_stream(kwargs)
         state = strategy.new_stream_state()
 
@@ -345,6 +356,7 @@ async def run_tool_loop_stream(
                     break
                 if action is StreamAction.FORWARD:
                     yield visible
+        _record_round(pool, started)
 
         if strategy.stream_exiting(state, pool):
             # A mixed batch (the gateway's own tools plus the caller's) exits here so
