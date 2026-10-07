@@ -327,13 +327,6 @@ export function Login() {
   }
 
   /**
-   * The credential, or `null` with the missing box already named. Emptiness is
-   * checked here rather than by disabling the button: a disabled primary button
-   * is white on the brand tint at 1.95:1, and an empty form is this screen's
-   * resting state, so that unreadable pairing was the first thing an operator
-   * saw on every visit. Submitting says which box to fill instead.
-   */
-  /**
    * Which credential an attempt actually presented, read off the credential
    * itself rather than off what the deployment offers.
    *
@@ -351,6 +344,13 @@ export function Login() {
   // point is that nothing is typed, so the method is named rather than read.
   const PASSKEY_METHOD = "passkey"
 
+  /**
+   * The credential, or `null` with the missing box already named. Emptiness is
+   * checked here rather than by disabling the button: a disabled primary button
+   * is white on the brand tint at 1.95:1, and an empty form is this screen's
+   * resting state, so that unreadable pairing was the first thing an operator
+   * saw on every visit. Submitting says which box to fill instead.
+   */
   const readCredential = (): SignInCredential | null => {
     if (usesPassword) {
       if (!email.trim()) {
