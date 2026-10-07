@@ -55,11 +55,11 @@ from gateway.services.providers._hosted_credentials import (
     credential_of,
     encrypt_client_args,
     encrypt_key,
-    host_of,
     last4,
     lookup_name,
     normalize_api_base,
     normalize_provider,
+    origin_of,
 )
 from gateway.services.providers._hosted_offers import HostedOffers
 from gateway.services.providers._hosted_runtime import HostedProviderRuntime
@@ -163,7 +163,7 @@ class HostedProviderService:
         Raises:
             HostedProviderNotFoundError: no such provider.
             HostedProviderUnsafeApiBaseError: ``api_base`` is refused by the SSRF gate.
-            HostedProviderKeyRequiredError: the base moves to another host and no key came with it.
+            HostedProviderKeyRequiredError: the base moves to another origin and no key came with it.
             HostedProviderClientArgsUnreadableError: a masked entry has nothing stored to keep.
             SecretBoxUnavailableTenancyError: no usable ``OTARI_SECRET_KEY``.
         """
@@ -175,9 +175,9 @@ class HostedProviderService:
         async with self.uow:
             row = await self._provider_or_raise(provider)
             if request.api_base is not None:
-                new_host = host_of(api_base)
-                if new_host is not None and new_host != host_of(row.api_base) and encrypted is None:
-                    # The stored key would otherwise be sent to a host the
+                new_origin = origin_of(api_base)
+                if new_origin is not None and new_origin != origin_of(row.api_base) and encrypted is None:
+                    # The stored key would otherwise be sent to an endpoint the
                     # operator chose without ever having to know the key.
                     raise HostedProviderKeyRequiredError
                 row.api_base = api_base

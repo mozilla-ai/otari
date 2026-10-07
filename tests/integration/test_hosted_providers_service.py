@@ -327,17 +327,21 @@ async def test_rotating_the_key_replaces_it(async_db: AsyncSession, monkeypatch:
     assert resolved.api_key == "sk-live-rotated-9876"
 
 
-async def test_repointing_the_base_at_another_host_needs_the_key_again(
+async def test_repointing_the_base_at_another_origin_needs_the_key_again(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Without this, an operator who cannot read the key could have it sent to a host of their choosing."""
+    """Without this, an operator who cannot read the key could have it sent to an endpoint of their choosing.
+
+    The origin is the scheme, host and port: plain HTTP on the same host, or another port, is another endpoint.
+    """
     _discovery(monkeypatch)
     service = _service(async_db)
     await service.create_provider(HostedProviderCreateRequest(provider="openai", api_key=KEY, api_base="https://a/v1"))
 
-    with pytest.raises(HostedProviderKeyRequiredError):
-        await service.update_provider("openai", HostedProviderUpdateRequest(api_base="https://evil.example/v1"))
-    # The same host on another path, a cleared base, and a move that brings the key are all fine.
+    for elsewhere in ("https://evil.example/v1", "http://a/v1", "https://a:9999/v1"):
+        with pytest.raises(HostedProviderKeyRequiredError):
+            await service.update_provider("openai", HostedProviderUpdateRequest(api_base=elsewhere))
+    # The same origin on another path, a cleared base, and a move that brings the key are all fine.
     assert (await service.update_provider("openai", HostedProviderUpdateRequest(api_base="https://a/v2"))).api_base
     assert (await service.update_provider("openai", HostedProviderUpdateRequest(api_base="  "))).api_base is None
     moved = await service.update_provider(
@@ -632,6 +636,25 @@ async def test_refresh_prices_a_model_whose_rates_were_deleted_or_switches_it_of
     assert await _offered(async_db, "openai") == {"gpt-4o": True, "o3": False}
     [reseeded] = await _versions(async_db, "openai:gpt-4o")
     assert (reseeded.origin, reseeded.input_price_per_million) == (SEED_ORIGIN, Decimal("2"))
+
+
+async def test_a_model_the_operator_switched_off_stays_off_when_a_refresh_prices_it_again(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A row does not record why it is off, so a refresh only ever turns the switch off."""
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+    service = _service(async_db)
+    await _provider(service, monkeypatch, "gpt-4o")
+    [model] = (await service.list_models("openai")).data
+    await service.update_model("openai", model.id, HostedModelUpdateRequest(enabled=False))
+    await async_db.execute(delete(ModelPricing).where(ModelPricing.model_key == "openai:gpt-4o"))
+    await async_db.commit()
+
+    outcome = await service.refresh_models("openai")
+
+    assert outcome.repriced == ["gpt-4o"]
+    assert await _offered(async_db, "openai") == {"gpt-4o": False}
+    assert await service.resolve("openai", "gpt-4o") is None
 
 
 async def test_two_refreshes_racing_leave_the_loser_with_a_conflict_not_a_crash(

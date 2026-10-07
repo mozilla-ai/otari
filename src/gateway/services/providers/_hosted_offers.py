@@ -87,8 +87,10 @@ class HostedOffers:
         A version somebody chose is left alone. A model whose rates are gone,
         because they were deleted since the offer, is seeded again where the
         dataset prices it and switched off where it does not, so the offer rule
-        holds after the fact as well as at the offer. Returns the models whose
-        rate moved.
+        holds after the fact as well as at the offer. The switch is only ever
+        turned off here: a row does not record why it is off, and a model the
+        operator refused must not come back because a rate appeared. Returns
+        the models whose rate moved.
         """
         rows = await self.models.list_all_for_provider(provider)
         if not rows:
@@ -106,7 +108,6 @@ class HostedOffers:
                     row.enabled = False
                     continue
                 moved[keys[row.model]] = default
-                row.enabled = True
                 repriced.append(row.model)
                 continue
             if version.origin != SEED_ORIGIN or default is None or self.pricing.rates_match(version, default):

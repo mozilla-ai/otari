@@ -50,12 +50,22 @@ def normalize_api_base(api_base: str | None) -> str | None:
     return trimmed or None
 
 
-def host_of(api_base: str | None) -> str | None:
-    """The host an endpoint points at, lower-cased, or None for the provider's default."""
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def origin_of(api_base: str | None) -> tuple[str, str, int | None] | None:
+    """The origin an endpoint points at, as ``(scheme, host, port)``, or None for the provider's default.
+
+    The scheme and the effective port are part of it: a key sent to the same
+    host over plain HTTP, or to another port, is sent to another endpoint.
+    """
     if api_base is None:
         return None
-    host = urlsplit(api_base).hostname
-    return host.lower() if host else None
+    parts = urlsplit(api_base)
+    if not parts.hostname:
+        return None
+    scheme = parts.scheme.lower()
+    return scheme, parts.hostname.lower(), parts.port if parts.port is not None else _DEFAULT_PORTS.get(scheme)
 
 
 def lookup_name(provider: str) -> str:

@@ -340,6 +340,8 @@ class HostedProviderCreateRequest(SQLModel):
     key takes. Values under credential-shaped names come back masked.
     """
 
+    model_config = {"json_schema_extra": {"example": {"provider": "openai", "api_key": "sk-live-..."}}}
+
     provider: str = Field(min_length=1, max_length=64)
     api_key: str = Field(min_length=1, max_length=1024)
     api_base: str | None = Field(default=None, max_length=1024)
@@ -356,6 +358,9 @@ class HostedProviderUpdateRequest(SQLModel):
     the caller does not have. ``client_args`` omitted is left alone; an explicit
     null clears it, and an entry echoed back as the mask keeps the stored value.
     """
+
+    # A toggle alone, so a reader who edits the example never re-sends a key.
+    model_config = {"json_schema_extra": {"example": {"enabled": False}}}
 
     api_key: str | None = Field(default=None, min_length=1, max_length=1024)
     api_base: str | None = Field(default=None, max_length=1024)
@@ -434,6 +439,12 @@ class HostedModelCreateRequest(SQLModel):
     default, which the offer stores as the deployment's own rate.
     """
 
+    model_config = {
+        "json_schema_extra": {
+            "example": {"model": "gpt-4o", "input_price_per_million": 2.5, "output_price_per_million": 10}
+        }
+    }
+
     model: str = Field(min_length=1, max_length=255)
     input_price_per_million: float | None = Field(default=None, ge=0)
     output_price_per_million: float | None = Field(default=None, ge=0)
@@ -456,6 +467,10 @@ class HostedModelUpdateRequest(SQLModel):
     an explicit null clears it). ``enabled`` travels alone freely, so a toggle
     never re-sends rates it did not change.
     """
+
+    # A toggle alone: an example carrying zero rates would, edited for the
+    # switch, write a zero price as a new version.
+    model_config = {"json_schema_extra": {"example": {"enabled": False}}}
 
     input_price_per_million: float | None = Field(default=None, ge=0)
     output_price_per_million: float | None = Field(default=None, ge=0)

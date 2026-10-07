@@ -259,14 +259,16 @@ class HostedProviderClientArgsUnreadableError(TenancyValidationError):
 
 
 class HostedProviderKeyRequiredError(TenancyValidationError):
-    """The base was repointed at another host without the key being entered again.
+    """The base was repointed at another origin without the key being entered again.
 
-    Repointing alone would send the stored key to a host the caller chose
-    without the caller ever having to know the key.
+    Repointing alone would send the stored key to an endpoint the caller chose
+    without the caller ever having to know the key. The origin is the scheme,
+    the host and the port: the same host over plain HTTP or on another port is
+    another endpoint.
     """
 
     def __init__(self) -> None:
-        super().__init__("Pointing a hosted provider at another host requires entering its key again")
+        super().__init__("Pointing a hosted provider at another origin requires entering its key again")
 
 
 class HostedProviderNotFoundError(TenancyNotFoundError):
