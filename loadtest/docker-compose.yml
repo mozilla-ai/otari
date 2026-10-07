@@ -15,8 +15,9 @@ x-otari: &otari
   environment:
     - OTARI_PROVIDER_ACCOUNT_PEPPER=loadtest-pepper-not-a-secret-0123456789abcdef
     - OTARI_SECRET_KEY=${OTARI_SECRET_KEY:-}
-    # Unset unless ./run.sh ab sets it, so the config file's database applies.
-    - OTARI_DATABASE_URL
+    # The config file's database unless ./run.sh ab points a build at its own.
+    # A variable of the harness's own, so a host OTARI_DATABASE_URL never applies.
+    - OTARI_DATABASE_URL=${LOADTEST_DATABASE_URL:-postgresql://otari:otari@postgres:5432/otari}
   restart: "no"
   deploy:
     resources:
@@ -44,8 +45,6 @@ services:
       - POSTGRES_USER=otari
       - POSTGRES_PASSWORD=otari
       - POSTGRES_DB=otari
-    ports:
-      - "127.0.0.1:${LOADTEST_POSTGRES_PORT:-15432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U otari"]
       interval: 2s

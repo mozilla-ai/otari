@@ -7,38 +7,10 @@
     uv run ab.py cpu --out results/ab-.../runs/03-head-direct-idle.cpu-before.json
     uv run ab.py report results/ab-... [--enforce-latency] [--allow-regression]
 
-``cpu`` reads ``process_cpu_seconds_total`` from the replica under test.
-``report`` reads the runs ``./run.sh ab`` left in a directory, writes
-``perf.json`` (for agents and tooling) and ``report.md`` (rendered from it, for
-the job summary), prints the report, and exits non-zero on a regression.
-
-Each scenario (a route or hot path) runs in two modes: ``idle``, one request at a
-time, which is the gateway's own path; and ``loaded``, an open-loop rate, which
-adds the queueing a costlier path causes. The builds alternate (base head head
-base ...) so drift in the machine's speed lands on both.
-
-Latency is the overhead the gateway adds: the client's latency minus the fake
-provider's fixed latency (time to first token for a streamed scenario). For each
-scenario and mode, the difference in p50 and p90 between the builds gets a 95%
-confidence interval from a hierarchical bootstrap: resample each build's runs,
-then the requests within each run, so a run that went slow as a whole widens
-the interval instead of passing for a difference between builds. The verdict:
-
-- ``regression`` / ``improvement``: the whole interval is beyond the smallest
-  effect worth reporting, ``max(--min-effect-ms, --min-effect-pct of base)``;
-- ``unchanged``: the whole interval is within it;
-- ``inconclusive``: neither, usually because the runs disagreed;
-- ``noisy``: one build's own runs of the scenario disagree on their p50 by more
-  than ``--max-run-spread``, so something else loaded the machine during some of
-  them. No verdict is given; rerun on a quiet machine.
-
-Database statements per request are counted, not timed: a whole extra data
-statement (direct or spilled; transaction control is listed but not judged) is
-a regression, and the report lists which statements
-appeared or went. Head failing any request is a regression too.
-
-Statements and errors always fail the run; latency fails it with
-``--enforce-latency``. ``--allow-regression`` reports everything and exits 0.
+``cpu`` snapshots the replica's CPU counter. ``report`` writes ``perf.json`` and
+renders ``report.md`` from it, and exits non-zero on a regression. The method
+(the bootstrap interval, the verdicts, what is judged and what fails the run)
+is in README.md, "Comparing two builds".
 """
 
 from __future__ import annotations
@@ -282,6 +254,16 @@ def report(directory: Path, args: argparse.Namespace) -> int:
     statements = compare_statements(directory, args)
 
     failures: list[str] = []
+    # A run that crashed leaves no result, which would compare on less than was
+    # intended rather than fail; every scenario and mode must have run as often
+    # for each build.
+    planned = {(r["scenario"], r["mode"]) for r in runs}
+    for scenario, mode in sorted(planned):
+        counts = {
+            v: sum(1 for r in runs if (r["scenario"], r["mode"], r["variant"]) == (scenario, mode, v)) for v in VARIANTS
+        }
+        if counts["base"] != counts["head"] or not all(counts.values()):
+            failures.append(f"{scenario} {mode}: runs missing (base {counts['base']}, head {counts['head']})")
     for mode, figures in statements.items():
         if figures["verdict"] == "regression":
             failures.append(f"statements per request ({mode}) went from {figures['base']:.1f} to {figures['head']:.1f}")
@@ -380,20 +362,7 @@ def render(perf: dict) -> str:
             lines += ["", "<details><summary>Statements that changed, per request</summary>", ""]
             lines += [f"- {mode}: {c['base']} → {c['head']} `{c['query']}`" for mode, c in changed]
             lines += ["", "</details>"]
-    lines += [
-        "",
-        "<details><summary>Every run</summary>",
-        "",
-        "| run | n | p50 | p90 | CPU ms/req | failed |",
-        "|---|---:|---:|---:|---:|---:|",
-    ]
-    for cell in perf["scenarios"]:
-        for run in cell["runs"]:
-            cpu_ms = "n/a" if run["cpu_ms_per_request"] is None else run["cpu_ms_per_request"]
-            lines.append(
-                f"| {run['label']} | {run['n']} | {_ms(run['p50'])} | {_ms(run['p90'])} | {cpu_ms} | {run['errors']} |"
-            )
-    lines += ["", "</details>", ""]
+    lines.append("")
     t = perf["thresholds"]
     lines += [
         f"A change counts once its whole interval is beyond max({t['min_effect_ms']} ms, {t['min_effect_pct']}% of "

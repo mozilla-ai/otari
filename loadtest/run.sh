@@ -4,7 +4,6 @@
 # results/, tenants in state/.
 #
 #   ./run.sh up                 build the image from OTARI_BUILD_CONTEXT and start the stack
-#   ./run.sh baseline           the client and fake provider alone, no gateway
 #   ./run.sh steady             300 RPM, then 1,000 RPM
 #   ./run.sh spill              1,000 RPM at Model 1's 100 RPM cap
 #   ./run.sh shared-budget      many end users draining one small shared pool
@@ -14,8 +13,6 @@
 #   ./run.sh redis-down         Redis stopped for a minute mid-run
 #   ./run.sh kill-replica       otari-2 killed mid-run, restarted, holds expire
 #   ./run.sh all                every scenario above, in order (or those in SCENARIOS)
-#   ./run.sh bench LABEL        profiled 1,000 RPM, without and with a shared pool
-#   ./run.sh count [spill]      database statements per request, direct or spilled
 #   ./run.sh ab BASE HEAD       two images alternated on this machine, compared
 #   ./run.sh check NAME [RESULT]  re-run the checks for a tenant
 #   ./run.sh logs | down
@@ -65,12 +62,14 @@ fake() {
   local body=${2:-'{}'}
   curl -fsS -X POST "$FAKE/$1" -H 'Content-Type: application/json' -d "$body" >/dev/null
 }
+# fake_defaults [keep]: the fake's behavior back to its defaults, and its
+# counters zeroed unless "keep" (a scenario restoring it before its checks).
+# Every scenario starts from here, so one that failed partway (kill-replica
+# lengthens streams) leaves nothing behind for the next.
 fake_defaults() {
-  fake _control '{"*": {"error_429_rate": 0, "stream_fail_rate": 0}, "m1": {"quota_rpm": '"${FAKE_M1_QUOTA_RPM:-100}"'}}'
-  fake _reset
-}
-fake_defaults_keep_stats() {
-  fake _control '{"*": {"error_429_rate": 0, "stream_fail_rate": 0}}'
+  fake _control '{"*": {"error_429_rate": 0, "stream_fail_rate": 0, "chunks": '"${FAKE_CHUNKS:-20}"',
+    "chunk_interval_ms": '"${FAKE_CHUNK_INTERVAL_MS:-20}"'}, "m1": {"quota_rpm": '"${FAKE_M1_QUOTA_RPM:-100}"'}}'
+  [[ ${1:-} == keep ]] || fake _reset
 }
 
 latest_result() { ls -t results/"$1"-*.json 2>/dev/null | head -1 || true; }
@@ -132,15 +131,6 @@ settle() {
   tool check.py --name "$1" ${2:+--dsn "$2"} --drain-timeout 30 --skip-cap >/dev/null || true
 }
 
-scenario_baseline() {
-  fake_defaults
-  # Straight at the fake provider's Model 2 slot: the client, the network and the
-  # fake's fixed latency, with no gateway. Subtract this from a gateway run.
-  tool loadgen.py --base-url http://fakeprovider:9000 --path /m2/v1/chat/completions \
-    --model llama-3.3-70b --users 0 --label baseline --stream-share "$STREAM_SHARE" \
-    --provider-latency-ms "$LATENCY_MS" --phase "$RPM_HIGH:60"
-}
-
 scenario_steady() {
   fake_defaults
   setup --name steady
@@ -179,7 +169,7 @@ scenario_provider_429() {
   setup --name provider-429
   fake _control '{"m1": {"error_429_rate": 1.0}}'
   load provider-429 --phase "$RPM_LOW:$DURATION"
-  fake_defaults_keep_stats
+  fake_defaults keep
   # Every Model 1 call was refused by the provider here, not the gateway's cap.
   CHECK_FLAGS=--skip-cap check provider-429
 }
@@ -189,7 +179,7 @@ scenario_stream_fail() {
   setup --name stream-fail
   fake _control '{"*": {"stream_fail_rate": 0.2}}'
   STREAM_SHARE=1 load stream-fail --phase "$RPM_LOW:$DURATION"
-  fake_defaults_keep_stats
+  fake_defaults keep
   check stream-fail
 }
 
@@ -219,37 +209,16 @@ scenario_kill_replica() {
   sleep 20
   echo ">>> restarting otari-2"; dc start otari-2
   wait "$loader"
-  fake _control '{"*": {"chunks": '"${FAKE_CHUNKS:-20}"', "chunk_interval_ms": '"${FAKE_CHUNK_INTERVAL_MS:-20}"'}}'
+  fake_defaults keep
   # The killed replica's holds expire after budget_reservation_ttl_sec (120s)
   # and the sweeper runs every 30s. Its in-flight requests fail, as intended.
   DRAIN_TIMEOUT=300 CHECK_FLAGS=--allow-dropped check kill-replica
 }
 
-# bench LABEL: the before/after comparison. Profiled 1,000 RPM runs on a fresh
-# tenant without a shared pool, then with one, each checked afterwards.
-bench() {
-  local label=${1:?bench needs a label}
-  for variant in nopool pool; do
-    local name="$label-$variant"
-    fake_defaults
-    if [[ $variant == nopool ]]; then setup --name "$name" --no-pool; else setup --name "$name"; fi
-    PROFILE=1 load "$name" --phase "$RPM_HIGH:$DURATION" | grep '^{"label"' || true
-    check "$name"
-  done
-}
-
-# count [spill]: statements per request over 100 identical non-streamed
-# requests on end users that already exist. "spill" sends them at the policy
-# once Model 1 is full, so each spills to Model 2; otherwise straight to Model 2.
-count() {
-  local mode=${1:-direct}
-  local tenant="count-$mode"
-  [[ -f "state/$tenant.json" ]] || setup --name "$tenant" >/dev/null
-  count_statements otari "$tenant" "$mode" "results/statements-$mode-$(date +%Y%m%d-%H%M%S)"
-}
-
-# count_statements DB TENANT MODE OUT: count's measurement, on any database;
-# writes OUT.txt and OUT.json. COUNT_WARM_SECONDS shortens the warm-up for a
+# count_statements DB TENANT MODE OUT: database statements per request over 100
+# identical non-streamed requests on end users that already exist, direct to
+# Model 2 or (MODE spill) at the policy once Model 1 is full; writes OUT.txt and
+# OUT.json. COUNT_WARM_SECONDS shortens the warm-up for a
 # tenant whose end users already exist.
 count_statements() {
   local db=$1 tenant=$2 mode=$3 out=$4 model=togethersim:llama-3.3-70b
@@ -272,7 +241,7 @@ count_statements() {
 
 # use_build VARIANT IMAGE: run IMAGE on otari-1 against database ab_VARIANT.
 use_build() {
-  export OTARI_IMAGE=$2 OTARI_DATABASE_URL="postgresql://otari:otari@postgres:5432/ab_$1"
+  export OTARI_IMAGE=$2 LOADTEST_DATABASE_URL="postgresql://otari:otari@postgres:5432/ab_$1"
   echo ">>> $1: $2"
   dc up -d --no-deps --no-build --force-recreate --wait otari-1 >/dev/null 2>&1 \
     || { dc logs --tail 50 otari-1; return 1; }
@@ -304,8 +273,8 @@ ab_scenario() {
     tool ab.py cpu --out "$AB_DIR/runs/$label.cpu-before.json"
     tool loadgen.py --base-url "$AB_TARGET" --key-file "state/$tenant.json" --label "$label" --out "$AB_DIR/runs" \
       --users "$USERS" --stream-share "$share" --model "$model" --prompt-mix "$AB_PROMPT_MIX" --samples \
-      --provider-latency-ms "$LATENCY_MS" --provider-ttft-ms "$TTFT_MS" "${load[@]}" \
-      | grep '^{"label"' | cut -c1-200 || true
+      --provider-latency-ms "$LATENCY_MS" --provider-ttft-ms "$TTFT_MS" "${load[@]}" >"$AB_DIR/runs/$label.log" 2>&1 \
+      || { echo "!!! $label: the load generator failed"; tail -5 "$AB_DIR/runs/$label.log"; FAILED=$((FAILED + 1)); }
     tool ab.py cpu --out "$AB_DIR/runs/$label.cpu-after.json"
   done
 }
@@ -382,7 +351,7 @@ JSON
   # scenario run next checks the database its requests went to. AB_RESTORE=0
   # skips it where nothing runs next.
   if [[ "${AB_RESTORE:-1}" != 0 ]]; then
-    unset OTARI_DATABASE_URL
+    unset LOADTEST_DATABASE_URL
     export OTARI_IMAGE=$configured
     dc up -d --no-deps --no-build --force-recreate --wait otari-1 otari-2 >/dev/null 2>&1
     dc up -d --no-deps lb >/dev/null 2>&1
@@ -400,7 +369,6 @@ case "${1:-}" in
     ;;
   down) docker rm -f "$TOOLS_DAEMON" >/dev/null 2>&1 || true; dc --profile tools down -v ;;
   logs) dc logs -f otari-1 otari-2 ;;
-  baseline) scenario_baseline ;;
   steady) scenario_steady ;;
   spill) scenario_spill ;;
   shared-budget) scenario_shared_budget ;;
@@ -409,16 +377,14 @@ case "${1:-}" in
   stream-fail) scenario_stream_fail ;;
   redis-down) scenario_redis_down ;;
   kill-replica) scenario_kill_replica ;;
-  bench) shift; bench "$@" ;;
-  count) shift; count "$@" ;;
   ab) shift; ab "$@" ;;
   check) shift; check "$@" ;;
   all)
-    for s in ${SCENARIOS:-baseline steady spill shared-budget budget-reset provider-429 stream-fail redis-down kill-replica}; do
+    for s in ${SCENARIOS:-steady spill shared-budget budget-reset provider-429 stream-fail redis-down kill-replica}; do
       echo "===== $s ====="; "$SELF" "$s" || { echo "!!! $s failed"; FAILED=$((FAILED + 1)); }
     done
     ;;
-  *) sed -n '2,32p' "$SELF"; exit 1 ;;
+  *) sed -n '2,29p' "$SELF"; exit 1 ;;
 esac
 
 (( FAILED == 0 )) || { echo "$FAILED failure(s)"; exit 1; }

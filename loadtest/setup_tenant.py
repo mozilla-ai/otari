@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import secrets
 import time
 import urllib.error
 import urllib.request
@@ -52,7 +53,9 @@ def main() -> int:
     parser.add_argument("--state-dir", default="state")
     args = parser.parse_args()
 
-    suffix = time.strftime("%H%M%S")
+    # Random as well as timed: two runs in one second, or the same time on another
+    # day, would otherwise reuse a user id and fail on its 409.
+    suffix = f"{time.strftime('%H%M%S')}-{secrets.token_hex(3)}"
     service_user = f"loadtest-{args.name}-{suffix}"
     base, master = args.base_url, args.master_key
 

@@ -10,20 +10,7 @@ number of failures.
 
     uv run check.py --name steady [--loadgen-result results/steady-*.json]
 
-Checks:
-
-1. Every end user's ledger matches its usage rows: the spend each reset log
-   recorded plus the spend now equals the sum of its usage rows' cost.
-2. No end user holds anything any more (reserved, reserved tokens and requests).
-3. No end user was reset more often than its period allows.
-4. The shared pool (the scoped budget on the key) matches the key's usage, holds
-   nothing, and overspent its cap by at most what was in flight.
-5. No budget reservation of this tenant is still active.
-6. Model 1 at the fake provider never accepted more than its cap in any 60s
-   window (only meaningful once the gateway caps it, see README).
-7. The client saw no 429 while a candidate had room, and every failed stream
-   ended in an error event. ``--allow-dropped`` keeps only the 429 check, for a
-   scenario that kills a replica mid-request on purpose.
+What each check means is in README.md, "What the checks mean".
 """
 
 from __future__ import annotations
@@ -76,7 +63,7 @@ def main() -> int:
     parser.add_argument("--model1-cap", type=int, default=100)
     parser.add_argument("--cap-slack", type=int, default=5, help="requests over the cap still counted a pass")
     parser.add_argument("--loadgen-result", help="a loadgen JSON result to check client-side outcomes")
-    parser.add_argument("--skip-cap", action="store_true", help="skip check 6 (no per-model cap configured)")
+    parser.add_argument("--skip-cap", action="store_true", help="skip the Model 1 cap check")
     parser.add_argument(
         "--allow-dropped",
         action="store_true",
@@ -107,12 +94,10 @@ def main() -> int:
         cur.execute(
             """
             SELECT u.user_id, u.spend, u.reserved, u.reserved_tokens, u.reserved_requests,
-                   u.budget_started_at,
                    COALESCE((SELECT SUM(l.previous_spend) FROM budget_reset_logs l WHERE l.user_id = u.user_id), 0),
                    (SELECT COUNT(*) FROM budget_reset_logs l WHERE l.user_id = u.user_id),
                    COALESCE((SELECT SUM(g.cost) FROM usage_logs g
                              WHERE g.user_id = u.user_id AND g.counts_toward_budget), 0),
-                   (SELECT COUNT(*) FROM usage_logs g WHERE g.user_id = u.user_id),
                    u.created_at
             FROM users u WHERE u.parent_user_id = %s
             """,
@@ -129,11 +114,9 @@ def main() -> int:
             reserved,
             reserved_tokens,
             reserved_requests,
-            _started,
             reset_spend,
             resets,
             usage_cost,
-            _usage_rows,
             created_at,
         ) in rows:
             total_usage += usage_cost

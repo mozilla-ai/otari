@@ -21,9 +21,10 @@ behind a service key and a shared budget on the key.
 
 ## Run it
 
+From this directory (`cd loadtest`), with Docker running:
+
 ```bash
 ./run.sh up          # builds otari:loadtest from this checkout, starts the stack
-./run.sh baseline    # client + fake provider alone, the floor to subtract
 ./run.sh steady      # or any scenario below, or `all`
 ./run.sh down        # removes the stack and its database
 ```
@@ -79,27 +80,7 @@ Knobs: `DURATION` (seconds per phase, default 120), `RPM_LOW`/`RPM_HIGH`
 `SCENARIOS="steady spill" ./run.sh all` runs a subset.
 
 Overhead is the client's latency on a non-streamed call minus the fake
-provider's fixed latency. It includes nginx and the network hops, so compare
-it with the `baseline` run's figure (about 6 ms p50 and 14 ms p99 on an
-M-series Mac).
-
-## Measuring a change
-
-Two commands give the numbers a performance change is judged on. Build the
-image from the checkout before the change, run both, then rebuild from the
-checkout after it and run them again.
-
-```bash
-./run.sh bench before      # profiled 1,000 RPM, without and with a shared budget
-./run.sh count             # database statements per request, straight to Model 2
-./run.sh count spill       # the same for requests that spill past Model 1
-```
-
-`bench` runs `DURATION` seconds at `RPM_HIGH` on a fresh tenant with no shared
-budget and then on one with it, profiling both, and checks each afterwards.
-`count` sends 100 identical non-streamed requests on end users that already
-exist and reads `pg_stat_statements`, leaving out PostgreSQL's own foreign-key
-checks; the list says which statements a request runs and how often.
+provider's fixed latency, nginx and the network hops included.
 
 ## Comparing two builds
 
@@ -154,10 +135,16 @@ interval instead of reading as a difference between builds), and a verdict:
   builds have differed by up to 6% at p50)
   (`--min-effect-ms`, `--min-effect-pct`);
 - **unchanged**: the whole interval is within it;
-- **inconclusive**: neither, usually because the runs disagreed.
+- **inconclusive**: neither, usually because the runs disagreed;
+- **noisy**: one build's own runs of the scenario disagree on their p50 by more
+  than 25% (`--max-run-spread`), so something else loaded the machine during
+  some of them. No verdict; rerun on a quiet machine.
 
-The run fails on a whole extra statement per request, direct or spilled, and on
-any failed request on head. A latency regression fails it only with
+Statements are counted, not timed. The run fails on a whole extra data
+statement per request, direct or spilled (BEGIN, COMMIT and ROLLBACK are listed
+but not judged: background transactions land in their count as fractions), on
+a run missing for either build, and on any failed request on head. A latency
+regression fails it only with
 `AB_FLAGS=--enforce-latency`; `AB_FLAGS=--allow-regression` reports and passes.
 
 `perf.json` is the contract for tooling and agents: per scenario and mode, each
@@ -171,12 +158,15 @@ whose count per request changed. `report.md` adds nothing it does not hold.
 migrations, dependencies, the Dockerfile or this directory, as two jobs on
 separate runners:
 
-- **scenarios**: `steady`, `spill`, `shared-budget`, `provider-429` and
-  `stream-fail` at 20s phases, with every check, and a $0.15 shared pool
-  (`SHARED_POOL_USD`) so it runs dry within one.
 - **ab**: the PR's merge commit against its base, as above. The report is the
-  job summary. For a cost that is deliberate, add the `perf-accepted` label and
-  re-run the job.
+  job summary and `perf.json` is in the job's artifact. For a cost that is
+  deliberate, add the `perf-accepted` label, which re-runs the job.
+- **scenarios**, only on a PR labeled `loadtest`: `steady`, `spill`,
+  `shared-budget`, `provider-429` and `stream-fail` at 20s phases, with every
+  check, and a $0.15 shared pool (`SHARED_POOL_USD`) so it runs dry within one.
+  Unlabeled, they wait for the nightly run: they check ledgers under
+  concurrency, which a change rarely moves, and a busy shared runner can fail
+  them on 429s it caused itself.
 
 Nightly, `scenarios` runs every scenario at full length and `ab` compares main
 with itself. That A/A run should read unchanged or inconclusive, never a
@@ -186,26 +176,16 @@ rather than 300.
 
 ## Profiling
 
-`PROFILE=1 ./run.sh steady` (any scenario; `bench` always profiles) writes
+`PROFILE=1 ./run.sh steady` (any scenario) writes
 `results/profile-NAME-TIMESTAMP/`:
 
-- **`report.md`**, with
-  - **Gateway:** each replica's Prometheus counters and histograms over the
-    run (requests by status, CPU, memory, usage-log flushes, rate-limit and
-    budget counters, abandoned attempts).
-  - **Postgres:** the top statements by total time from `pg_stat_statements`,
-    and what the active backends were waiting on, sampled every 0.25s. A hot
-    row shows up as `Lock:transactionid` waits, with the query that was
-    blocked.
-  - **Redis:** per-command call counts and latency.
-  - **CPU:** where each replica spent its busy time, by component (request
-    handling, SQLAlchemy statements and cache keys, asyncpg, the provider SDK,
-    client construction, pydantic) and the top functions by their own time.
-- **`otari-1.txt`, `otari-2.txt`:** the py-spy recordings as collapsed stacks.
-  Open one in [speedscope](https://www.speedscope.app) for a flame graph, or
-  run `docker compose run --rm tools profile.py analyze results/.../otari-1.txt`
-  for the breakdown on its own. `PROFILE_FORMAT=flamegraph` records SVG flame
-  graphs instead.
+- **`report.md`**: the top statements by total time from `pg_stat_statements`,
+  deadlocks, the most-updated tables, and what the active backends were
+  waiting on, sampled every 0.25s. A hot row shows up as `Lock:transactionid`
+  waits, with the query that was blocked.
+- **`otari-1.txt`, `otari-2.txt`:** py-spy recordings as collapsed stacks.
+  Open one in [speedscope](https://www.speedscope.app) for a flame graph.
+  `PROFILE_FORMAT=flamegraph` records SVG flame graphs instead.
 
 py-spy runs as a sidecar sharing each replica's PID namespace and records with
 `--nonblocking`, so it does not pause the gateway it is measuring.
@@ -214,8 +194,7 @@ py-spy runs as a sidecar sharing each replica's PID namespace and records with
 
 - Both replicas, Postgres and the load generator share one machine, so absolute
   latency here is not a production number, and another workload on the machine
-  moves it. Compare against `baseline`, compare runs with each other, and rerun
-  a figure that looks off before trusting it.
+  moves it. Compare builds with `ab`, which alternates them on one machine.
 - The fake provider's latency is fixed, which keeps the overhead figure clean
   but tests none of a real provider's variance.
 - The request mix (prompt sizes, streaming share, user count) is an assumption.

@@ -30,6 +30,7 @@ import httpx
 
 # An assumed mix until a real sample replaces it: mostly short prompts with a
 # long tail. Each entry is (weight, approximate prompt tokens).
+PATH = "/api/v1/chat/completions"
 DEFAULT_PROMPT_MIX = [(60, 200), (30, 1_000), (9, 4_000), (1, 16_000)]
 WORDS = "the quick brown fox jumps over the lazy dog while summarizing a long article".split()
 
@@ -67,7 +68,6 @@ class Summary:
     client_errors: dict[str, int] = field(default_factory=dict)
     refusals_429: dict[str, int] = field(default_factory=dict)
     late_starts: int = 0
-    per_phase: list[dict] = field(default_factory=list)
     # --samples: every successful request's overhead, by the slot that served it,
     # so ab.py can compare distributions rather than one run's percentiles.
     samples: dict[str, dict[str, list[float]]] = field(default_factory=dict)
@@ -118,13 +118,13 @@ async def one_request(
         "max_tokens": args.max_tokens,
         "stream": stream,
     }
-    if args.users > 0:
+    if args.users:
         body["user"] = f"enduser-{random.randrange(args.users):05d}"
     started = time.perf_counter()
     wall = time.time()
     try:
         if not stream:
-            response = await client.post(args.path, json=body, headers=headers)
+            response = await client.post(PATH, json=body, headers=headers)
             latency = (time.perf_counter() - started) * 1000
             result = Result(wall, response.status_code, latency, False)
             if response.status_code == 200:
@@ -134,7 +134,7 @@ async def one_request(
                 result.detail = response.text[:300]
             return result
 
-        async with client.stream("POST", args.path, json=body, headers=headers) as response:
+        async with client.stream("POST", PATH, json=body, headers=headers) as response:
             result = Result(wall, response.status_code, 0.0, True)
             if response.status_code != 200:
                 result.detail = (await response.aread()).decode(errors="replace")[:300]
@@ -195,10 +195,6 @@ async def run_phase(
         task = asyncio.create_task(one_request(client, args, headers, prompts))
         task.add_done_callback(lambda t: results.append(t.result()))
         tasks.append(task)
-        if index and index % max(1, rpm) == 0:
-            done = [r for r in results if r.start >= time.time() - 60]
-            ok = sum(1 for r in done if r.status == 200)
-            print(f"[{args.label}]   {index}/{total} sent, last 60s: {ok}/{len(done)} ok", flush=True)
     await asyncio.gather(*tasks)
     return total, late
 
@@ -232,7 +228,7 @@ def summarize(label: str, results: list[Result], args: argparse.Namespace, sent:
     summary = Summary(
         label=label,
         phases=args.phase,
-        target=args.base_url + args.path,
+        target=args.base_url,
         model=args.model,
         started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(results[0].start if results else time.time())),
         sent=sent,
@@ -257,8 +253,7 @@ def summarize(label: str, results: list[Result], args: argparse.Namespace, sent:
     summary.ttft_ms = percentiles([r.ttft_ms for r in ok if r.stream and r.ttft_ms is not None])
     if args.provider_latency_ms is not None:
         # What the gateway adds on a non-streamed call: the client's latency minus
-        # the fake provider's fixed sleep. Includes the network hops and the
-        # load balancer, which the baseline run measures on their own.
+        # the fake provider's fixed sleep, network hops and load balancer included.
         summary.gateway_overhead_ms = percentiles(
             [r.latency_ms - args.provider_latency_ms for r in ok if not r.stream and r.served_by != "m3"]
         )
@@ -277,11 +272,8 @@ def summarize(label: str, results: list[Result], args: argparse.Namespace, sent:
 
 async def main_async(args: argparse.Namespace) -> Summary:
     headers = {"Content-Type": "application/json"}
-    if args.key_file:
-        state = json.loads(Path(args.key_file).read_text())
-        headers["Authorization"] = f"Bearer {state['key']}"
-    elif args.key:
-        headers["Authorization"] = f"Bearer {args.key}"
+    state = json.loads(Path(args.key_file).read_text())
+    headers["Authorization"] = f"Bearer {state['key']}"
     prompts = {tokens: make_prompt(tokens) for _, tokens in args.prompt_mix}
     limits = httpx.Limits(max_connections=args.max_connections, max_keepalive_connections=args.max_connections)
     results: list[Result] = []
@@ -299,24 +291,7 @@ async def main_async(args: argparse.Namespace) -> Summary:
             late += phase_late
             phase_summary = summarize(f"{args.label}@{rpm}", results[before:], args, phase_sent, phase_late)
             print(json.dumps(_brief(phase_summary)), flush=True)
-    summary = summarize(args.label, results, args, sent, late)
-    summary.per_phase = [
-        _brief(summarize(f"{args.label}@{phase}", chunk, args, len(chunk), 0))
-        for phase, chunk in _split(args.phase, results)
-    ]
-    return summary
-
-
-def _split(phases: list[str], results: list[Result]) -> list[tuple[str, list[Result]]]:
-    ordered = sorted(results, key=lambda r: r.start)
-    chunks = []
-    cursor = 0
-    for phase in phases:
-        rpm, seconds = (int(part) for part in phase.split(":"))
-        count = int(rpm * seconds / 60)
-        chunks.append((phase, ordered[cursor : cursor + count]))
-        cursor += count
-    return chunks
+    return summarize(args.label, results, args, sent, late)
 
 
 def _brief(summary: Summary) -> dict:
@@ -341,9 +316,7 @@ def parse_mix(text: str) -> list[tuple[int, int]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--base-url", default="http://lb")
-    parser.add_argument("--path", default="/api/v1/chat/completions")
-    parser.add_argument("--key-file", help="state file written by setup_tenant.py")
-    parser.add_argument("--key", help="API key, when there is no state file")
+    parser.add_argument("--key-file", required=True, help="state file written by setup_tenant.py")
     parser.add_argument("--model", default="summarize")
     parser.add_argument("--phase", action="append", default=[], help="RPM:SECONDS, repeatable")
     parser.add_argument("--stream-share", type=float, default=0.5)
@@ -369,7 +342,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{args.label}-{time.strftime('%Y%m%d-%H%M%S')}.json"
     path.write_text(json.dumps(asdict(summary), indent=2))
-    print(json.dumps({k: v for k, v in asdict(summary).items() if k != "samples"}, indent=2))
+    print(json.dumps(_brief(summary)))
     print(f"wrote {path}", file=sys.stderr)
     return 0
 
