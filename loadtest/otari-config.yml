@@ -1,18 +1,15 @@
-# Gateway config for the load test, shared by both replicas.
+# Gateway config for the load test.
 #
-# Model 1 is capped at 100 requests a minute in the gateway (`per: model`,
-# counted in Redis across both replicas), and the policy spills to Model 2 with
-# `router: priority` before calling a full model. The fake provider still
-# enforces the same 100 RPM quota on Model 1, as Vertex would, so check.py can
-# tell whether the gateway's cap held: a provider that never had to refuse.
+# Model 1 is capped at 100 requests a minute (`per: model`, counted in Redis as a
+# multi-replica deployment would), and the `summarize` policy spills to Model 2
+# with `router: priority` once it is full. The database URL comes from the
+# environment: each build compared gets a database of its own.
 
-database_url: "postgresql://otari:otari@postgres:5432/otari"
 master_key: loadtest-master-key
 
 require_pricing: true
 default_pricing: false
 
-# Counted in Redis, so both replicas share one count.
 rate_limit_store: redis
 rate_limit_redis_url: redis://redis:6379/0
 rate_limits:
@@ -26,16 +23,10 @@ rate_limits:
   - name: in-flight
     per: deployment
     max_concurrent: 400
-    # Short, so a replica killed mid-request gives its slots back within the run.
-    lease_sec: 120
 
-# Short, for the same reason: a killed replica's holds expire and are swept
-# within the run rather than after 15 minutes.
-budget_reservation_ttl_sec: 120
-budget_reservation_sweep_interval_sec: 30
 budget_estimate_default_output_tokens: 256
 
-# Prometheus metrics at /metrics on each replica, read by profile.py.
+# Prometheus metrics at /metrics, for the replica's CPU counter.
 enable_metrics: true
 
 db_pool_size: 20

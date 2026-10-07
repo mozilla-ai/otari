@@ -1,0 +1,5 @@
+# The tools container's environment: ab.py and comparison.py.
+httpx>=0.27
+psycopg[binary]>=3.2
+pytest>=8
+redis>=5

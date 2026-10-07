@@ -69,4 +69,4 @@ Calling the gateway from your own code.
 
 - [Architecture](../ARCHITECTURE.md): the two-plane model and the extension seam (ports, adapters, and capability lines) that mark what Otari's core ships versus what an overlay can add.
 - [Backend domains](domains.md): what each backend domain owns, and the layer shape each domain moves toward.
-- [Load test](../loadtest/README.md): a Docker Compose stack of two replicas, Postgres, Redis and a fake provider, with scenarios, ledger checks and profilers, for measuring a change under load. CI runs it on a PR and compares the PR with its base.
+- [Load test](../loadtest/README.md): compares two builds under load on one machine, route by route, and fails when the second got slower or runs more database statements per request. CI runs it on a PR against its base.

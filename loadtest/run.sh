@@ -1,392 +1,58 @@
 #!/usr/bin/env bash
-# Drive the load test. Each scenario creates its own tenant, runs the load, then
-# checks the ledgers once the tenant's requests have settled. Results land in
-# results/, tenants in state/.
+# Compare two Otari images under load on this machine (README.md):
 #
-#   ./run.sh up                 build the image from OTARI_BUILD_CONTEXT and start the stack
-#   ./run.sh steady             300 RPM, then 1,000 RPM
-#   ./run.sh spill              1,000 RPM at Model 1's 100 RPM cap
-#   ./run.sh shared-budget      many end users draining one small shared pool
-#   ./run.sh budget-reset       end-user budgets reset every 60s mid-run
-#   ./run.sh provider-429       Model 1 throttles every call
-#   ./run.sh stream-fail        a fifth of streams drop after the first chunk
-#   ./run.sh redis-down         Redis stopped for a minute mid-run
-#   ./run.sh kill-replica       otari-2 killed mid-run, restarted, holds expire
-#   ./run.sh all                every scenario above, in order (or those in SCENARIOS)
-#   ./run.sh ab BASE HEAD       two images alternated on this machine, compared
-#   ./run.sh check NAME [RESULT]  re-run the checks for a tenant
-#   ./run.sh logs | down
+#   ./run.sh BASE_IMAGE HEAD_IMAGE
 #
-# Exits non-zero when any check failed.
-#
-# Knobs (env): DURATION (seconds per phase, default 120), RPM_LOW, RPM_HIGH,
-# USERS, STREAM_SHARE, OTARI_BUILD_CONTEXT (the checkout to build, default the
-# one this is in), OTARI_IMAGE (the image to run; with LOADTEST_BUILD=0, `up`
-# uses it as built rather than building), OTARI_LOADTEST_CONFIG (default
-# ./otari-config.yml), PROFILE=1 to profile a scenario, PROFILE_FORMAT=flamegraph
-# for SVGs instead of collapsed stacks, LOADTEST_PIN=1 to pin otari-1 to cores
-# of its own. `ab` takes AB_ROUNDS, AB_SECONDS, AB_IDLE_SECONDS, AB_RPM,
-# AB_SCENARIOS, AB_PROMPT_MIX and AB_FLAGS (passed to ab.py report).
+# Starts the stack, lets the two images take turns, runs the checks in
+# comparison.py (pytest: one line per check), prints the report and removes the
+# stack. Exits non-zero when a check fails.
 set -euo pipefail
 cd "$(dirname "$0")"
-# What `all` re-runs; "$0" may be relative to the directory this just left.
-SELF="$PWD/$(basename "$0")"
+base=${1:?usage: ./run.sh BASE_IMAGE HEAD_IMAGE}
+head=${2:?usage: ./run.sh BASE_IMAGE HEAD_IMAGE}
+dir="results/ab-$(date +%Y%m%d-%H%M%S)"
 
-DURATION=${DURATION:-120}
-RPM_LOW=${RPM_LOW:-300}
-RPM_HIGH=${RPM_HIGH:-1000}
-USERS=${USERS:-200}
-STREAM_SHARE=${STREAM_SHARE:-0.5}
-LATENCY_MS=${FAKE_LATENCY_MS:-300}
-TTFT_MS=${FAKE_TTFT_MS:-200}
-FAKE="http://127.0.0.1:${LOADTEST_FAKE_PORT:-19000}"
-
-FAILED=0
-
-# LOADTEST_PIN=1 pins otari-1 to cores of its own (pin.yml); set it on every
-# call, since a recreated container takes the files of the call that made it.
-[[ "${LOADTEST_PIN:-0}" != 1 ]] || export COMPOSE_FILE=docker-compose.yml:pin.yml
 dc() { docker compose "$@"; }
-# `up` leaves a tools container running, so each call is an exec rather than a
-# fresh container and uv environment, which costs seconds a call on a CI runner.
-TOOLS_DAEMON="${COMPOSE_PROJECT_NAME:-otari-loadtest}-tools"
+# tool [NAME=VALUE ...] -- COMMAND ...: COMMAND in the tools container, on the stack's network.
 tool() {
-  if [[ $(docker inspect -f '{{.State.Running}}' "$TOOLS_DAEMON" 2>/dev/null) == true ]]; then
-    docker exec "$TOOLS_DAEMON" uv run --quiet "$@"
-  else
-    dc --progress quiet run --rm --no-deps tools "$@"
-  fi
+  local env=()
+  while [[ $1 != -- ]]; do env+=(-e "$1"); shift; done
+  shift
+  dc exec -T ${env[@]+"${env[@]}"} tools uv run --quiet --no-project --with-requirements requirements.txt "$@"
 }
-
-fake() {
-  local body=${2:-'{}'}
-  curl -fsS -X POST "$FAKE/$1" -H 'Content-Type: application/json' -d "$body" >/dev/null
-}
-# fake_defaults [keep]: the fake's behavior back to its defaults, and its
-# counters zeroed unless "keep" (a scenario restoring it before its checks).
-# Every scenario starts from here, so one that failed partway (kill-replica
-# lengthens streams) leaves nothing behind for the next.
-fake_defaults() {
-  fake _control '{"*": {"error_429_rate": 0, "stream_fail_rate": 0, "chunks": '"${FAKE_CHUNKS:-20}"',
-    "chunk_interval_ms": '"${FAKE_CHUNK_INTERVAL_MS:-20}"'}, "m1": {"quota_rpm": '"${FAKE_M1_QUOTA_RPM:-100}"'}}'
-  [[ ${1:-} == keep ]] || fake _reset
-}
-
-latest_result() { ls -t results/"$1"-*.json 2>/dev/null | head -1 || true; }
-
-setup() { tool setup_tenant.py "$@"; }
-
-load() {
-  local name=$1; shift
-  [[ "${PROFILE:-0}" == 1 ]] && profile_start "$name"
-  tool loadgen.py --key-file "state/$name.json" --label "$name" --users "$USERS" \
-    --stream-share "$STREAM_SHARE" --provider-latency-ms "$LATENCY_MS" "$@" \
-    || { echo "!!! $name: the load generator failed"; FAILED=$((FAILED + 1)); }
-  [[ "${PROFILE:-0}" == 1 ]] && profile_stop
-  return 0
-}
-
-# PROFILE=1: snapshot metrics, Postgres and Redis around the load, sample
-# Postgres's lock waits during it, and record each replica with py-spy.
-# Everything lands in results/profile-NAME-TIMESTAMP/, report.md first.
-PROFILE_SIDECARS=(lt-sampler lt-pyspy-1 lt-pyspy-2)
-profile_start() {
-  PROFILE_DIR="results/profile-$1-$(date +%Y%m%d-%H%M%S)"
-  local format=raw extension=txt
-  if [[ "${PROFILE_FORMAT:-raw}" == flamegraph ]]; then format=flamegraph extension=svg; fi
-  docker rm -f "${PROFILE_SIDECARS[@]}" >/dev/null 2>&1 || true
-  tool profile.py begin --out "$PROFILE_DIR"
-  dc run -d --no-deps --name lt-sampler tools profile.py sample --out "$PROFILE_DIR" --seconds 86400 >/dev/null
-  for i in 1 2; do
-    # --nonblocking reads the stacks without pausing the gateway, so the profile
-    # does not add to the latency it is explaining.
-    dc --profile profile run -d --no-deps --name "lt-pyspy-$i" "pyspy-$i" \
-      record --pid 1 --rate 100 --nonblocking --format "$format" -o "/work/$PROFILE_DIR/otari-$i.$extension" >/dev/null
-  done
-}
-profile_stop() {
-  # py-spy writes its recording when interrupted.
-  docker kill -s INT lt-pyspy-1 lt-pyspy-2 >/dev/null 2>&1 || true
-  for _ in $(seq 30); do
-    [[ -z "$(docker ps -q -f name=lt-pyspy)" ]] && break
-    sleep 2
-  done
-  docker rm -f "${PROFILE_SIDECARS[@]}" >/dev/null 2>&1 || true
-  tool profile.py end --out "$PROFILE_DIR" >/dev/null
-  echo "profile: $PROFILE_DIR/report.md"
-}
-
-# check NAME [RESULT]: RESULT defaults to the newest loadgen result for NAME.
-# CHECK_DSN points it at a database other than the config file's.
-check() {
-  local name=$1 result=${2:-}
-  [[ -n "$result" ]] || result=$(latest_result "$name")
-  tool check.py --name "$name" ${result:+--loadgen-result "$result"} ${CHECK_DSN:+--dsn "$CHECK_DSN"} \
-    --drain-timeout "${DRAIN_TIMEOUT:-120}" ${CHECK_FLAGS:-} \
-    || { echo "!!! $name: checks failed"; FAILED=$((FAILED + 1)); }
-}
-
-# settle TENANT [DSN]: wait for a tenant's requests to finish, checks unread.
-settle() {
-  tool check.py --name "$1" ${2:+--dsn "$2"} --drain-timeout 30 --skip-cap >/dev/null || true
-}
-
-scenario_steady() {
-  fake_defaults
-  setup --name steady
-  load steady --phase "$RPM_LOW:$DURATION" --phase "$RPM_HIGH:$DURATION"
-  check steady
-}
-
-scenario_spill() {
-  fake_defaults
-  setup --name spill
-  load spill --phase "$RPM_HIGH:$DURATION" --stream-share 0
-  check spill
-}
-
-scenario_shared_budget() {
-  fake_defaults
-  # About $0.60 a minute at 1,000 RPM, so a $0.50 pool runs dry inside the
-  # first minute and every later request must be refused, by the budget.
-  # SHARED_POOL_USD shrinks it for a shorter run.
-  setup --name shared-budget --pool-usd "${SHARED_POOL_USD:-0.50}"
-  USERS=${USERS_MANY:-2000} load shared-budget --phase "$RPM_HIGH:$DURATION"
-  check shared-budget
-}
-
-scenario_budget_reset() {
-  fake_defaults
-  # A small end-user budget that resets every 60s: users hit it, get refused,
-  # then are let in again at each boundary.
-  setup --name budget-reset --end-user-usd 0.002 --end-user-period 60
-  USERS=50 load budget-reset --phase "$RPM_LOW:$(( DURATION * 2 ))"
-  check budget-reset
-}
-
-scenario_provider_429() {
-  fake_defaults
-  setup --name provider-429
-  fake _control '{"m1": {"error_429_rate": 1.0}}'
-  load provider-429 --phase "$RPM_LOW:$DURATION"
-  fake_defaults keep
-  # Every Model 1 call was refused by the provider here, not the gateway's cap.
-  CHECK_FLAGS=--skip-cap check provider-429
-}
-
-scenario_stream_fail() {
-  fake_defaults
-  setup --name stream-fail
-  fake _control '{"*": {"stream_fail_rate": 0.2}}'
-  STREAM_SHARE=1 load stream-fail --phase "$RPM_LOW:$DURATION"
-  fake_defaults keep
-  check stream-fail
-}
-
-scenario_redis_down() {
-  fake_defaults
-  setup --name redis-down
-  load redis-down --phase "$RPM_HIGH:$(( DURATION + 120 ))" &
-  local loader=$!
-  sleep 60
-  echo ">>> stopping redis"; dc stop redis
-  sleep 60
-  echo ">>> starting redis"; dc start redis
-  wait "$loader"
-  # With Redis gone each replica counted Model 1's cap on its own.
-  CHECK_FLAGS=--skip-cap check redis-down
-}
-
-scenario_kill_replica() {
-  fake_defaults
-  setup --name kill-replica
-  # Long streams, so the kill lands on requests holding budget and slots.
-  fake _control '{"*": {"chunks": 200, "chunk_interval_ms": 50}}'
-  STREAM_SHARE=1 load kill-replica --phase "$RPM_LOW:$(( DURATION + 60 ))" &
-  local loader=$!
-  sleep 60
-  echo ">>> killing otari-2"; dc kill -s KILL otari-2
-  sleep 20
-  echo ">>> restarting otari-2"; dc start otari-2
-  wait "$loader"
-  fake_defaults keep
-  # The killed replica's holds expire after budget_reservation_ttl_sec (120s)
-  # and the sweeper runs every 30s. Its in-flight requests fail, as intended.
-  DRAIN_TIMEOUT=300 CHECK_FLAGS=--allow-dropped check kill-replica
-}
-
-# count_statements DB TENANT MODE OUT: database statements per request over 100
-# identical non-streamed requests on end users that already exist, direct to
-# Model 2 or (MODE spill) at the policy once Model 1 is full; writes OUT.txt and
-# OUT.json. COUNT_WARM_SECONDS shortens the warm-up for a
-# tenant whose end users already exist.
-count_statements() {
-  local db=$1 tenant=$2 mode=$3 out=$4 model=togethersim:llama-3.3-70b
-  local dsn="postgresql://otari:otari@postgres:5432/$db"
-  [[ $mode == spill ]] && model=summarize
-  fake_defaults
-  dc exec -T redis redis-cli FLUSHDB >/dev/null
-  # Warm: creates the end users and, for a spill, fills Model 1's minute.
-  tool loadgen.py --base-url "${TARGET:-http://lb}" --key-file "state/$tenant.json" --label warm --out results/warm \
-    --users 50 --stream-share 0 \
-    --model "$model" --phase "1200:${COUNT_WARM_SECONDS:-10}" >/dev/null
-  settle "$tenant" "$dsn"
-  tool profile.py reset-statements
-  tool loadgen.py --base-url "${TARGET:-http://lb}" --key-file "state/$tenant.json" --label "count-$mode" \
-    --out results/warm --users 50 \
-    --stream-share 0 --model "$model" --phase 1200:5 >/dev/null
-  settle "$tenant" "$dsn"
-  tool profile.py statements --requests 100 --db "$db" --out "$out.txt" --json-out "$out.json"
-}
-
-# use_build VARIANT IMAGE: run IMAGE on otari-1 against database ab_VARIANT.
-use_build() {
-  export OTARI_IMAGE=$2 LOADTEST_DATABASE_URL="postgresql://otari:otari@postgres:5432/ab_$1"
+# use VARIANT IMAGE: IMAGE as the replica under test, on database ab_VARIANT, freshly started.
+use() {
   echo ">>> $1: $2"
-  dc up -d --no-deps --no-build --force-recreate --wait otari-1 >/dev/null 2>&1 \
-    || { dc logs --tail 50 otari-1; return 1; }
+  OTARI_IMAGE=$2 LOADTEST_DATABASE_URL="postgresql://otari:otari@postgres:5432/ab_$1" \
+    dc up -d --no-deps --force-recreate --wait otari >/dev/null 2>&1 || { dc logs --tail 50 otari; return 1; }
 }
 
-# ab_scenario SEQ VARIANT SCENARIO: one scenario's idle and loaded runs.
-#   direct  non-streamed, straight to Model 2, no shared pool on the key
-#   pooled  the same with a shared pool on the key
-#   spill   non-streamed at the policy with Model 1's minute full, so it spills
-#   stream  streamed, straight to Model 2; time to first token
-ab_scenario() {
-  local seq=$1 variant=$2 scenario=$3 tenant="ab-$2" model=togethersim:llama-3.3-70b share=0 mode label
-  case $scenario in
-    pooled) tenant="ab-$variant-pool" ;;
-    spill) model=summarize ;;
-    stream) share=1 ;;
-  esac
-  for mode in idle loaded; do
-    label=$(printf '%02d-%s-%s-%s' "$seq" "$variant" "$scenario" "$mode")
-    fake _reset
-    dc exec -T redis redis-cli FLUSHDB >/dev/null
-    if [[ $scenario == spill ]]; then
-      # Model 1's 100 a minute, used up before the run starts.
-      tool loadgen.py --base-url "$AB_TARGET" --key-file "state/$tenant.json" --label warm --out results/warm \
-        --users 50 --stream-share 0 --model vertexsim:gemini-2.5-flash --phase 1200:5 >/dev/null
-    fi
-    local load=(--closed "1:$AB_IDLE_SECONDS")
-    [[ $mode == idle ]] || load=(--phase "$AB_RPM:$AB_SECONDS")
-    tool ab.py cpu --out "$AB_DIR/runs/$label.cpu-before.json"
-    tool loadgen.py --base-url "$AB_TARGET" --key-file "state/$tenant.json" --label "$label" --out "$AB_DIR/runs" \
-      --users "$USERS" --stream-share "$share" --model "$model" --prompt-mix "$AB_PROMPT_MIX" --samples \
-      --provider-latency-ms "$LATENCY_MS" --provider-ttft-ms "$TTFT_MS" "${load[@]}" >"$AB_DIR/runs/$label.log" 2>&1 \
-      || { echo "!!! $label: the load generator failed"; tail -5 "$AB_DIR/runs/$label.log"; FAILED=$((FAILED + 1)); }
-    tool ab.py cpu --out "$AB_DIR/runs/$label.cpu-after.json"
-  done
-}
+trap 'dc down -v >/dev/null 2>&1' EXIT
+dc up -d --wait postgres redis fakeprovider tools >/dev/null 2>&1
+# A database per build: a migration in head would break base on a shared one.
+for variant in base head; do
+  dc exec -T postgres psql -U otari -q -c "CREATE DATABASE ab_$variant" >/dev/null
+done
 
-# ab BASE HEAD: the two images in turn on one replica, scenario by scenario,
-# compared by ab.py. Each image gets a database of its own (a head migration
-# would break base on a shared one), and they alternate base head head base...,
-# so drift in the machine's speed lands on both. The load goes straight to
-# otari-1: a second replica and nginx would add noise that is not either build's.
-ab() {
-  local base=${1:?ab needs a base image} head=${2:?and a head image}
-  local rounds=${AB_ROUNDS:-4} configured=${OTARI_IMAGE:-otari:loadtest}
-  # What the replicas ran on before ab, restored when it finishes.
-  local configured_db=${LOADTEST_DATABASE_URL-} configured_db_set=${LOADTEST_DATABASE_URL+1}
-  local seq=0 variant scenario ready=" "
-  AB_SECONDS=${AB_SECONDS:-12} AB_IDLE_SECONDS=${AB_IDLE_SECONDS:-10} AB_RPM=${AB_RPM:-1000}
-  AB_PROMPT_MIX=${AB_PROMPT_MIX:-100:500} AB_TARGET=http://otari-1:8000
-  AB_DIR="results/ab-$(date +%Y%m%d-%H%M%S)"
-  mkdir -p "$AB_DIR/runs"
-  image_of() { if [[ $1 == base ]]; then echo "$base"; else echo "$head"; fi; }
-  cat >"$AB_DIR/meta.json" <<JSON
-{"base": {"image": "$base", "ref": "${AB_BASE_REF:-$base}", "id": "$(docker image inspect -f '{{.Id}}' "$base")"},
- "head": {"image": "$head", "ref": "${AB_HEAD_REF:-$head}", "id": "$(docker image inspect -f '{{.Id}}' "$head")"},
- "config": {"rounds": $rounds, "loaded_seconds": $AB_SECONDS, "idle_seconds": $AB_IDLE_SECONDS, "rpm": $AB_RPM,
-            "prompt_mix": "$AB_PROMPT_MIX", "provider_latency_ms": $LATENCY_MS, "provider_ttft_ms": $TTFT_MS,
-            "scenarios": "${AB_SCENARIOS:-direct pooled spill stream}"}}
-JSON
-  dc stop lb otari-2 >/dev/null 2>&1
-  for variant in base head; do
-    dc exec -T postgres psql -U otari -d otari -q \
-      -c "DROP DATABASE IF EXISTS ab_$variant WITH (FORCE)" -c "CREATE DATABASE ab_$variant" >/dev/null
-  done
-  local order=()
-  for (( round = 0; round < rounds; round++ )); do
-    if (( round % 2 == 0 )); then order+=(base head); else order+=(head base); fi
-  done
-  local current=""
-  for variant in "${order[@]}"; do
-    # A fresh process every block, even when the build is the one already
-    # running: a process gets slower as it ages, so a build that ran two blocks
-    # on one process would measure the second on an older one than the other got.
-    use_build "$variant" "$(image_of "$variant")"
-    current=$variant
-    if [[ $ready != *" $variant "* ]]; then
-      setup --base-url "$AB_TARGET" --name "ab-$variant" --no-pool >/dev/null
-      setup --base-url "$AB_TARGET" --name "ab-$variant-pool" >/dev/null
-      ready+="$variant "
-    fi
-    # Discarded: the first requests on a fresh process pay for its warm-up.
-    tool loadgen.py --base-url "$AB_TARGET" --key-file "state/ab-$variant.json" --label warm --out results/warm \
-      --users "$USERS" --stream-share 0.5 --model togethersim:llama-3.3-70b --phase "$AB_RPM:5" >/dev/null
-    for scenario in ${AB_SCENARIOS:-direct pooled spill stream}; do
-      seq=$((seq + 1))
-      ab_scenario "$seq" "$variant" "$scenario"
-    done
-  done
-  # Statements are counted, not timed, so their order does not matter: the build
-  # already running goes first, saving a swap.
-  for variant in "$current" $([[ $current == head ]] && echo base || echo head); do
-    [[ $variant == "$current" ]] || { use_build "$variant" "$(image_of "$variant")"; current=$variant; }
-    for mode in direct spill; do
-      TARGET=$AB_TARGET COUNT_WARM_SECONDS=6 \
-        count_statements "ab_$variant" "ab-$variant" "$mode" "$AB_DIR/statements-$variant-$mode" \
-        | grep '^Statements per request' | sed "s/^/$variant $mode: /" || true
-    done
-  done
-  echo ">>> checks on head's tenants"
-  for tenant in "ab-head" "ab-head-pool"; do
-    tool check.py --name "$tenant" --dsn "postgresql://otari:otari@postgres:5432/ab_head" --skip-cap \
-      --drain-timeout 30 || { echo "!!! $tenant: checks failed"; FAILED=$((FAILED + 1)); }
-  done
-  # shellcheck disable=SC2086
-  tool ab.py report "$AB_DIR" ${AB_FLAGS:-} || FAILED=$((FAILED + 1))
-  echo "report: $AB_DIR/report.md, data: $AB_DIR/perf.json"
-  # Back on the configured image and database, both replicas behind nginx, so a
-  # scenario run next checks the database its requests went to. AB_RESTORE=0
-  # skips it where nothing runs next.
-  if [[ "${AB_RESTORE:-1}" != 0 ]]; then
-    if [[ -n $configured_db_set ]]; then export LOADTEST_DATABASE_URL=$configured_db; else unset LOADTEST_DATABASE_URL; fi
-    export OTARI_IMAGE=$configured
-    dc up -d --no-deps --no-build --force-recreate --wait otari-1 otari-2 >/dev/null 2>&1
-    dc up -d --no-deps lb >/dev/null 2>&1
-    echo ">>> replicas back on $configured and the configured database"
-  fi
-}
+order=$(tool "BASE_REF=${BASE_REF:-$base}" "HEAD_REF=${HEAD_REF:-$head}" \
+  "BASE_ID=$(docker image inspect -f '{{.Id}}' "$base")" "HEAD_ID=$(docker image inspect -f '{{.Id}}' "$head")" \
+  -- python ab.py prepare --dir "$dir")
+image_of() { if [[ $1 == base ]]; then echo "$base"; else echo "$head"; fi; }
+# A turn that fails leaves its runs missing, which a check then reports.
+turn=0
+for variant in $order; do
+  turn=$((turn + 1))
+  use "$variant" "$(image_of "$variant")" \
+    && tool -- python ab.py turn --dir "$dir" --variant "$variant" --turn "$turn" || echo "!!! turn $turn failed"
+done
+for variant in base head; do
+  use "$variant" "$(image_of "$variant")" \
+    && tool -- python ab.py statements --dir "$dir" --variant "$variant" || echo "!!! statements for $variant failed"
+done
 
-case "${1:-}" in
-  up)
-    mkdir -p results state
-    if [[ "${LOADTEST_BUILD:-1}" == 0 ]]; then dc up -d --no-build --wait; else dc up -d --build --wait; fi
-    docker rm -f "$TOOLS_DAEMON" >/dev/null 2>&1 || true
-    dc --progress quiet run -d --no-deps --name "$TOOLS_DAEMON" --entrypoint sleep tools infinity >/dev/null
-    echo "stack up: load balancer on 127.0.0.1:${LOADTEST_LB_PORT:-18080}, fake provider on $FAKE"
-    ;;
-  down) docker rm -f "$TOOLS_DAEMON" >/dev/null 2>&1 || true; dc --profile tools down -v ;;
-  logs) dc logs -f otari-1 otari-2 ;;
-  steady) scenario_steady ;;
-  spill) scenario_spill ;;
-  shared-budget) scenario_shared_budget ;;
-  budget-reset) scenario_budget_reset ;;
-  provider-429) scenario_provider_429 ;;
-  stream-fail) scenario_stream_fail ;;
-  redis-down) scenario_redis_down ;;
-  kill-replica) scenario_kill_replica ;;
-  ab) shift; ab "$@" ;;
-  check) shift; check "$@" ;;
-  all)
-    for s in ${SCENARIOS:-steady spill shared-budget budget-reset provider-429 stream-fail redis-down kill-replica}; do
-      echo "===== $s ====="; "$SELF" "$s" || { echo "!!! $s failed"; FAILED=$((FAILED + 1)); }
-    done
-    ;;
-  *) sed -n '2,29p' "$SELF"; exit 1 ;;
-esac
-
-(( FAILED == 0 )) || { echo "$FAILED failure(s)"; exit 1; }
+status=0
+tool "LOADTEST_AB_DIR=$dir" "LOADTEST_ACCEPT_REGRESSION=${LOADTEST_ACCEPT_REGRESSION:-0}" -- \
+  pytest comparison.py || status=$?
+cat "$dir/report.md" 2>/dev/null || true
+echo "report: loadtest/$dir/report.md, figures: loadtest/$dir/perf.json"
+exit $status
