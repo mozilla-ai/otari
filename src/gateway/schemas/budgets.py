@@ -358,11 +358,46 @@ class OrganizationBudgetRates(BaseModel):
     reset_month: int | None = Field(default=None, ge=1, le=12, description=_MONTH_DESCRIPTION)
 
 
-class OrganizationBudgetCreate(OrganizationBudgetRates):
-    """Create one budget owned by the caller's organization."""
+# Bounded so one save cannot stage an unbounded number of rows; matches the list routes' page ceiling.
+MAX_APPLIED_ENTITIES = 1000
 
 
-class OrganizationBudgetUpdate(OrganizationBudgetRates):
+class AppliedEntity(_ModelNarrowing):
+    """One entity a budget applies to: a scope inside the organization, optionally narrowed to a provider or model."""
+
+    scope_type: ScopeType = Field(description="Which kind of identity the budget caps")
+    scope_id: str = Field(min_length=1, max_length=255, description="Id of the capped identity")
+
+    def key(self) -> tuple[str, str, str | None, str | None]:
+        """The entity's identity, which the unique index allows one budget per."""
+        return (self.scope_type, self.scope_id, self.provider_key_id, self.model)
+
+
+class _AppliedTo(BaseModel):
+    """The entity list a budget save carries, so the budget and where it applies are written in one step."""
+
+    applied_to: list[AppliedEntity] | None = Field(
+        default=None,
+        max_length=MAX_APPLIED_ENTITIES,
+        description=(
+            "Every entity the budget applies to, as a whole set: entities missing from it stop carrying the "
+            "budget, and entities already in it keep their spend. Omit to leave the entities as they are"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _no_repeated_entity(self) -> Self:
+        keys = [entity.key() for entity in self.applied_to or ()]
+        if len(keys) != len(set(keys)):
+            raise ValueError("applied_to names the same entity twice")
+        return self
+
+
+class OrganizationBudgetCreate(_AppliedTo, OrganizationBudgetRates):
+    """Create one budget owned by the caller's organization, and apply it to its entities in the same step."""
+
+
+class OrganizationBudgetUpdate(_AppliedTo, OrganizationBudgetRates):
     """Replace a budget's label, figure and period.
 
     Every field is optional and keyed on ``model_fields_set``, matching

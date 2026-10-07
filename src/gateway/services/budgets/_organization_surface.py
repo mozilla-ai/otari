@@ -30,6 +30,7 @@ from gateway.models.money import to_usd_or_none
 from gateway.models.tenancy import Organization, User
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.schemas.budgets import (
+    AppliedEntity,
     OrganizationBudgetCreate,
     OrganizationBudgetPublic,
     OrganizationBudgetsPublic,
@@ -133,6 +134,46 @@ class _OrganizationSurface:
         if owner != organization.id:
             raise OrganizationScopeNotFoundError(scope_type, scope_id)
 
+    async def _apply_to(self, *, organization: Organization, budget: Budget, entities: list[AppliedEntity]) -> int:
+        """Make these entities exactly the ones this budget applies to, and return how many that is.
+
+        An entity the budget already applied to keeps its ceiling, and with it the spend this window has recorded:
+        dropping and re-adding it would hand back a budget already spent.
+        Runs in the caller's block, so a refusal part-way through rolls back the budget write as well.
+        """
+        scopes = await self._scopes.get_scope_ids_in(organization.id)
+        held = {
+            (ceiling.scope_type, ceiling.scope_id, ceiling.provider_key_id, ceiling.model): ceiling
+            for ceiling in await self._repositories.ceilings.list_for_budget(budget.budget_id, scopes)
+        }
+        wanted = {entity.key() for entity in entities}
+        for key, ceiling in held.items():
+            if key not in wanted:
+                await self._repositories.ceilings.remove(ceiling)
+        period_start, period_end = _current_window(budget)
+        for entity in entities:
+            if entity.key() in held:
+                continue
+            await lock_workspace_for_scope(self._organizations, entity.scope_type, entity.scope_id)
+            await self._require_scope_in_organization(
+                organization=organization, scope_type=entity.scope_type, scope_id=entity.scope_id
+            )
+            try:
+                await self._repositories.ceilings.add(
+                    ScopedBudget(
+                        scope_type=entity.scope_type,
+                        scope_id=entity.scope_id,
+                        provider_key_id=entity.provider_key_id,
+                        model=entity.model,
+                        budget_id=budget.budget_id,
+                        period_start=period_start,
+                        period_end=period_end,
+                    )
+                )
+            except SpendCeilingAlreadyExistsError:
+                raise OrganizationScopedBudgetAlreadyExistsError(entity.scope_type, entity.scope_id) from None
+        return len(wanted)
+
     async def create_budget(self, *, user: User, request: OrganizationBudgetCreate) -> OrganizationBudgetPublic:
         organization = await self._get_managed_organization(user)
         _require_valid_cycle(CycleSettings(*(getattr(request, name) for name in CYCLE_FIELD_ORDER)))
@@ -151,7 +192,8 @@ class _OrganizationSurface:
                 reset_month=request.reset_month,
             )
         )
-        return OrganizationBudgetPublic.from_model(budget, organization_id=organization.id, ceiling_count=0)
+        applied = await self._apply_to(organization=organization, budget=budget, entities=request.applied_to or [])
+        return OrganizationBudgetPublic.from_model(budget, organization_id=organization.id, ceiling_count=applied)
 
     async def create_ceiling(
         self,
@@ -268,7 +310,7 @@ class _OrganizationSurface:
         organization = await self._get_managed_organization(user)
         budget = await self._require_own_budget(organization=organization, budget_id=budget_id)
         cadence_before = cadence_of(budget)
-        changes: dict[str, Any] = request.model_dump(exclude_unset=True)
+        changes: dict[str, Any] = request.model_dump(exclude_unset=True, exclude={"applied_to"})
         if "max_budget" in changes:
             changes["max_budget"] = to_usd_or_none(changes["max_budget"])
         # The resulting set is what the CHECK constraints refuse, and no submitted
@@ -287,6 +329,8 @@ class _OrganizationSurface:
             await self._repositories.ceilings.retime_for_budget(
                 budget.budget_id, period_start=period_start, period_end=period_end
             )
+        if request.applied_to is not None:
+            await self._apply_to(organization=organization, budget=budget, entities=request.applied_to)
         return OrganizationBudgetPublic.from_model(
             budget,
             organization_id=organization.id,

@@ -1478,6 +1478,65 @@
         "title": "AnthropicFileMetadata",
         "type": "object"
       },
+      "AppliedEntity": {
+        "description": "One entity a budget applies to: a scope inside the organization, optionally narrowed to a provider or model.",
+        "properties": {
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "pattern": "^\\S+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Narrow the cap to one model of the provider, by the id the provider gives it; omit or null to cap every model. Requires provider_key_id, because a model id is only unique within its provider",
+            "title": "Model"
+          },
+          "provider_key_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "pattern": "^\\S+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Key Id"
+          },
+          "scope_id": {
+            "description": "Id of the capped identity",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Scope Id",
+            "type": "string"
+          },
+          "scope_type": {
+            "description": "Which kind of identity the budget caps",
+            "enum": [
+              "organization",
+              "workspace",
+              "workspace_member",
+              "org_member",
+              "api_token"
+            ],
+            "title": "Scope Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope_type",
+          "scope_id"
+        ],
+        "title": "AppliedEntity",
+        "type": "object"
+      },
       "AudioContent": {
         "additionalProperties": true,
         "description": "Audio content for a message.",
@@ -9043,8 +9102,24 @@
         "type": "object"
       },
       "OrganizationBudgetCreate": {
-        "description": "Create one budget owned by the caller's organization.",
+        "description": "Create one budget owned by the caller's organization, and apply it to its entities in the same step.",
         "properties": {
+          "applied_to": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AppliedEntity"
+                },
+                "maxItems": 1000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every entity the budget applies to, as a whole set: entities missing from it stop carrying the budget, and entities already in it keep their spend. Omit to leave the entities as they are",
+            "title": "Applied To"
+          },
           "max_budget": {
             "anyOf": [
               {
@@ -9351,6 +9426,22 @@
       "OrganizationBudgetUpdate": {
         "description": "Replace a budget's label, figure and period.\n\nEvery field is optional and keyed on ``model_fields_set``, matching\nthe deployment-wide budget update's own: an *omitted* field is left alone, and an\nexplicit null clears it, so sending ``max_budget: null`` takes a budget back\nto uncapped, which is what the dashboard's dialog does. The period pair is\nstill mutually exclusive, and setting one does not clear the other, which is\nwhy :func:`_require_single_period_source` re-checks the *resulting* pair\nrather than the submitted one.",
         "properties": {
+          "applied_to": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AppliedEntity"
+                },
+                "maxItems": 1000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every entity the budget applies to, as a whole set: entities missing from it stop carrying the budget, and entities already in it keep their spend. Omit to leave the entities as they are",
+            "title": "Applied To"
+          },
           "max_budget": {
             "anyOf": [
               {
@@ -24434,7 +24525,7 @@
         ]
       },
       "post": {
-        "description": "Define a budget owned by this organization. Owners and admins only.",
+        "description": "Define a budget owned by this organization, and the entities it applies to, in one step.\n\nOwners and admins only. A refused entity (a scope outside this organization,\nor one that already carries a budget) refuses the whole save, so no budget is\nleft behind applying to part of what was asked.",
         "operationId": "organization-budgets-create_organization_budget",
         "requestBody": {
           "content": {
@@ -24533,7 +24624,7 @@
         ]
       },
       "patch": {
-        "description": "Change a budget's label, figure or period.\n\nEvery ceiling naming it is held to the new figure from here on, which is the\npoint of naming a budget rather than typing an amount per place it applies.",
+        "description": "Change a budget's label, figure, period or the entities it applies to, in one step.\n\nEvery ceiling naming it is held to the new figure from here on, which is the\npoint of naming a budget rather than typing an amount per place it applies.\n``applied_to`` replaces the entity set; an entity it keeps keeps its spend.",
         "operationId": "organization-budgets-update_organization_budget",
         "parameters": [
           {

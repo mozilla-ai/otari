@@ -58,7 +58,12 @@ async def create_organization_budget(
     current_identity: CurrentIdentity,
     body: OrganizationBudgetCreate,
 ) -> OrganizationBudgetPublic:
-    """Define a budget owned by this organization. Owners and admins only."""
+    """Define a budget owned by this organization, and the entities it applies to, in one step.
+
+    Owners and admins only. A refused entity (a scope outside this organization,
+    or one that already carries a budget) refuses the whole save, so no budget is
+    left behind applying to part of what was asked.
+    """
     return await service.create_organization_budget(user=current_identity, request=body)
 
 
@@ -69,10 +74,11 @@ async def update_organization_budget(
     budget_id: str,
     body: OrganizationBudgetUpdate,
 ) -> OrganizationBudgetPublic:
-    """Change a budget's label, figure or period.
+    """Change a budget's label, figure, period or the entities it applies to, in one step.
 
     Every ceiling naming it is held to the new figure from here on, which is the
     point of naming a budget rather than typing an amount per place it applies.
+    ``applied_to`` replaces the entity set; an entity it keeps keeps its spend.
     """
     return await service.update_organization_budget(user=current_identity, budget_id=budget_id, request=body)
 

@@ -108,6 +108,13 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
         )
         return dict(result.tuples().all())
 
+    async def list_for_budget(self, budget_id: str, scopes: ScopeIdSets) -> list[ScopedBudget]:
+        """Return the ceilings on these scopes that name this budget."""
+        result = await self.db.execute(
+            select(ScopedBudget).where(ScopedBudget.budget_id == budget_id, _in_scopes(scopes))
+        )
+        return list(result.scalars().all())
+
     async def count_in_scopes(self, scopes: ScopeIdSets) -> int:
         """Count the ceilings on these scopes."""
         result = await self.db.execute(select(func.count()).select_from(ScopedBudget).where(_in_scopes(scopes)))

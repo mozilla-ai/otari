@@ -1836,7 +1836,11 @@ export interface paths {
         put?: never;
         /**
          * Create Organization Budget
-         * @description Define a budget owned by this organization. Owners and admins only.
+         * @description Define a budget owned by this organization, and the entities it applies to, in one step.
+         *
+         *     Owners and admins only. A refused entity (a scope outside this organization,
+         *     or one that already carries a budget) refuses the whole save, so no budget is
+         *     left behind applying to part of what was asked.
          */
         post: operations["organization-budgets-create_organization_budget"];
         delete?: never;
@@ -1864,10 +1868,11 @@ export interface paths {
         head?: never;
         /**
          * Update Organization Budget
-         * @description Change a budget's label, figure or period.
+         * @description Change a budget's label, figure, period or the entities it applies to, in one step.
          *
          *     Every ceiling naming it is held to the new figure from here on, which is the
          *     point of naming a budget rather than typing an amount per place it applies.
+         *     ``applied_to`` replaces the entity set; an entity it keeps keeps its spend.
          */
         patch: operations["organization-budgets-update_organization_budget"];
         trace?: never;
@@ -6140,6 +6145,30 @@ export interface components {
             type: "file";
         };
         /**
+         * AppliedEntity
+         * @description One entity a budget applies to: a scope inside the organization, optionally narrowed to a provider or model.
+         */
+        AppliedEntity: {
+            /**
+             * Model
+             * @description Narrow the cap to one model of the provider, by the id the provider gives it; omit or null to cap every model. Requires provider_key_id, because a model id is only unique within its provider
+             */
+            model?: string | null;
+            /** Provider Key Id */
+            provider_key_id?: string | null;
+            /**
+             * Scope Id
+             * @description Id of the capped identity
+             */
+            scope_id: string;
+            /**
+             * Scope Type
+             * @description Which kind of identity the budget caps
+             * @enum {string}
+             */
+            scope_type: "organization" | "workspace" | "workspace_member" | "org_member" | "api_token";
+        };
+        /**
          * AudioContent
          * @description Audio content for a message.
          */
@@ -9672,9 +9701,14 @@ export interface components {
         };
         /**
          * OrganizationBudgetCreate
-         * @description Create one budget owned by the caller's organization.
+         * @description Create one budget owned by the caller's organization, and apply it to its entities in the same step.
          */
         OrganizationBudgetCreate: {
+            /**
+             * Applied To
+             * @description Every entity the budget applies to, as a whole set: entities missing from it stop carrying the budget, and entities already in it keep their spend. Omit to leave the entities as they are
+             */
+            applied_to?: components["schemas"]["AppliedEntity"][] | null;
             /**
              * Max Budget
              * @description Maximum spend in USD over one period; null caps nothing
@@ -9786,6 +9820,11 @@ export interface components {
          *     rather than the submitted one.
          */
         OrganizationBudgetUpdate: {
+            /**
+             * Applied To
+             * @description Every entity the budget applies to, as a whole set: entities missing from it stop carrying the budget, and entities already in it keep their spend. Omit to leave the entities as they are
+             */
+            applied_to?: components["schemas"]["AppliedEntity"][] | null;
             /**
              * Max Budget
              * @description Maximum spend in USD over one period; null caps nothing
