@@ -99,9 +99,10 @@ three surfaces:
 {"model": "openai:gpt-4o", "messages": [...], "metadata": {"purpose": "chat", "country": "DE"}}
 ```
 
-A standalone gateway records the tags on the usage rows the request writes:
-served, failed, streamed or not, and refused once the request's model has been
-resolved (a disallowed model, missing pricing, an exhausted budget). LiteLLM's
+A standalone gateway records the tags on every usage row the request writes:
+served, failed, streamed or not, refused by the gateway (a disallowed model,
+missing pricing, an exhausted budget), and the separate row billing an image
+description made for a text-only model. LiteLLM's
 nested form, `"metadata": {"spend_logs_metadata": {...}}`, is read as well, so a
 client moving off a LiteLLM proxy keeps its attribution unchanged; a nested key
 wins over a flat one of the same name. The limits are OpenAI's: up to 16 string

@@ -1419,6 +1419,7 @@ async def _bill_vision_side_call(
     usage: CompletionUsage,
     counts_toward_budget: bool = True,
     request_id: str | None = None,
+    tags: dict[str, str] | None = None,
 ) -> None:
     """Meter and bill a vision describe side-call made during normalization.
 
@@ -1455,6 +1456,7 @@ async def _bill_vision_side_call(
         usage_override=usage,
         counts_toward_budget=counts_toward_budget,
         request_id=request_id,
+        tags=tags,
     )
     # Commit the spend directly via an unreserved handle (no held estimate to
     # release): this just adds the actual cost to users.spend. When the request is
@@ -1624,6 +1626,7 @@ async def _compile_request_plan(
     routing_signal: Callable[[], RoutingSignal] | None = None,
     workspace_id: uuid.UUID | None = None,
     request_id: str | None = None,
+    tags: dict[str, str] | None = None,
 ) -> CompiledPlan | None:
     """Compile ``model`` into a plan when it names a routing policy, else ``None``.
 
@@ -1693,6 +1696,7 @@ async def _compile_request_plan(
             status_code=exc.status_code,
             started_at=started_at,
             request_id=request_id,
+            tags=tags,
         )
         raise adapter.error(exc.status_code, exc.caller_detail, ErrorKind.PERMISSION) from exc
 
@@ -1725,6 +1729,7 @@ async def _resolve_keyed_user_id(
     user_forbidden_detail: str,
     started_at: float,
     request_id: str | None = None,
+    tags: dict[str, str] | None = None,
 ) -> tuple[str, str | None]:
     """The billed user for a key- or master-key-authenticated request, and the budget of an end user it named.
 
@@ -1790,6 +1795,7 @@ async def _resolve_keyed_user_id(
                 status_code=exc.status_code,
                 started_at=started_at,
                 request_id=request_id,
+                tags=tags,
             )
         raise
     return user_id, None
@@ -2005,6 +2011,7 @@ async def resolve_request_context(
                 user_forbidden_detail=user_forbidden_detail,
                 started_at=started_at,
                 request_id=request_id,
+                tags=tags,
             )
             if end_user_budget_id is not None:
                 response.headers[END_USER_BUDGET_HEADER] = end_user_budget_id
@@ -2041,6 +2048,7 @@ async def resolve_request_context(
             routing_signal=routing_signal,
             workspace_id=workspace_id,
             request_id=request_id,
+            tags=tags,
         )
         if plan is not None:
             head = plan.head
@@ -2338,6 +2346,7 @@ async def resolve_request_context(
                         usage=vision_usage,
                         counts_toward_budget=not budget_exempt,
                         request_id=request_id,
+                        tags=tags,
                     )
                 # Attachments expanded the payload, so the stored inputs must
                 # follow or a later fallover would reprice against the pre-

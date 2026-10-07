@@ -156,6 +156,19 @@ def test_user_key_mismatch_rejection_is_recorded_against_the_keys_user(
     assert row["provider"] is None
 
 
+def test_user_key_mismatch_rejection_row_carries_the_request_tags(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The mismatch is refused before the request context exists, and its row is still tagged."""
+    _make_user(client, master_key_header, "owner")
+    _make_user(client, master_key_header, "someone-else")
+    key = _make_key(client, master_key_header, "owned", user_id="owner")
+
+    assert _chat(client, key, model="openai:gpt-4o", user="someone-else", metadata={"purpose": "chat"}) == 403
+
+    assert _one_error(client, master_key_header)["tags"] == {"purpose": "chat"}
+
+
 def test_unresolvable_selector_rejection_is_recorded(client: TestClient, master_key_header: dict[str, str]) -> None:
     """A selector that no longer resolves (400) leaves a row.
 
