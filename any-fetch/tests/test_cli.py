@@ -1,9 +1,11 @@
 """The any-fetch command."""
 
 import json
+import logging
 
 import pytest
 
+from any_fetch._logging import RedactProviderUrls
 from any_fetch.cli import main
 from any_fetch.providers.fake import CANNED_TEXT, CANNED_TITLE
 
@@ -66,3 +68,13 @@ def test_a_usage_error_exits_2(argv: list[str]) -> None:
     with pytest.raises(SystemExit) as exited:
         main(argv)
     assert exited.value.code == 2
+
+
+def _log_filter_installed() -> bool:
+    return any(isinstance(existing, RedactProviderUrls) for existing in logging.getLogger("httpx").filters)
+
+
+def test_the_command_installs_the_log_filter() -> None:
+    assert not _log_filter_installed()
+    assert main(["fake", "https://example.com/page"]) == 0
+    assert _log_filter_installed()

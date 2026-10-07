@@ -169,6 +169,7 @@ async def test_an_unknown_option_is_refused(provider: str) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("log_filter")
 @pytest.mark.parametrize("provider", PROVIDERS)
 @pytest.mark.parametrize("case", get_args(Case))
 async def test_no_exception_repr_or_log_record_carries_the_url_or_the_key(

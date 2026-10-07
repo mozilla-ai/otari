@@ -13,6 +13,7 @@ from typing import Any
 
 from any_fetch._api import AnyFetch, afetch
 from any_fetch._errors import AnyFetchError
+from any_fetch._logging import install as install_log_filter
 from any_fetch._types import FetchedPage
 
 
@@ -67,6 +68,7 @@ def _render(page: FetchedPage, *, as_json: bool, raw: bool) -> str:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command; return its exit status."""
+    install_log_filter()
     parser = _parser()
     args = parser.parse_args(argv)
     options = dict(args.option)

@@ -16,6 +16,7 @@ from any_fetch._errors import (
     UnsupportedParameterError,
     UnsupportedProviderError,
 )
+from any_fetch._logging import install as install_log_filter
 from any_fetch._types import (
     BuiltinFactory,
     BuiltinFetcher,
@@ -41,4 +42,5 @@ __all__ = [
     "UnsupportedParameterError",
     "UnsupportedProviderError",
     "afetch",
+    "install_log_filter",
 ]

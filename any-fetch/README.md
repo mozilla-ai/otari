@@ -74,9 +74,18 @@ otari will register one that wraps the gateway's hardened fetcher.
 ## Logging
 
 The URL a fetch is asked for is the user's content, and httpx logs every request's full URL at
-INFO. Every provider call, `builtin` included, runs with a context variable set, and a filter
-installed on the `httpx` logger when the package is imported replaces the URL with `<redacted>` in
-records emitted during one. Requests made by other code in the process are left alone.
+INFO. Every provider call, `builtin` included, runs with a context variable set, and a filter on the
+`httpx` logger replaces the URL with `<redacted>` in records emitted during one. Requests made by
+other code in the process are left alone.
+
+Importing the package does not install the filter, so it never changes a process's logging on its
+own. A host calls `install_log_filter()` once at startup; the command line installs it itself.
+
+```python
+from any_fetch import install_log_filter
+
+install_log_filter()
+```
 
 ## The command line
 
