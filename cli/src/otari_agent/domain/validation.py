@@ -12,7 +12,7 @@ clean result.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -23,6 +23,7 @@ from otari_agent.domain.evaluators import (
     tokenize_phrase_with_separators,
 )
 from otari_agent.domain.types import (
+    CappedGate,
     CommandGate,
     CommandIfChangedGate,
     GateSpec,
@@ -50,18 +51,27 @@ class Finding:
     ``gate_id`` is ``None`` for a finding about the guardrail as a whole
     rather than any one gate.
     ``code`` names the kind of a warning, and an error has none.
+    ``accepted`` marks a warning that the gates it is about accept as their intended design.
     """
 
     severity: Severity
     gate_id: str | None
     message: str
     code: WarningCode | None = None
+    accepted: bool = False
 
     def __post_init__(self) -> None:
         if self.severity == "warning" and self.code is None:
             raise ValueError("A warning finding needs a code.")
         if self.severity == "error" and self.code is not None:
             raise ValueError(f"An error finding cannot have the code {self.code.value!r}.")
+        if self.accepted and self.severity == "error":
+            raise ValueError("An error finding cannot be accepted.")
+
+
+def _gate_warning(gate: GateSpec, code: WarningCode, message: str) -> Finding:
+    """Build a warning about one gate, accepted when that gate names its code."""
+    return Finding("warning", gate.id, message, code=code, accepted=code in gate.accept_warnings)
 
 
 def _glob_fields(gate: GateSpec) -> Iterator[tuple[str, tuple[str, ...]]]:
@@ -226,24 +236,41 @@ def _path_gate_blind_spots(gate: PathGate, spec: PolicySpec) -> Iterator[Finding
     """
     sources = frozenset(gate.runs)
     if "pre_tool_use.edit_target" in sources and "stop.working_tree" not in sources:
-        yield Finding(
-            "warning",
-            gate.id,
-            code=WarningCode.SHELL_WRITE_UNSEEN,
-            message="runs at pre_tool_use.edit_target with no stop.working_tree beside it, so it sees the "
+        yield _gate_warning(
+            gate,
+            WarningCode.SHELL_WRITE_UNSEEN,
+            "runs at pre_tool_use.edit_target with no stop.working_tree beside it, so it sees the "
             "path an edit tool declares and nothing a shell command writes (a redirect, `sed -i`, a "
             "heredoc, `cp`, a script). Add stop.working_tree for a backstop over the finished tree.",
         )
     if "pre_tool_use.read_target" in sources and not _mentioned_by_a_command_gate(gate.forbidden, spec):
-        yield Finding(
-            "warning",
-            gate.id,
-            code=WarningCode.SHELL_READ_UNSEEN,
-            message="runs at pre_tool_use.read_target, which sees the Read tool and nothing a shell command "
+        yield _gate_warning(
+            gate,
+            WarningCode.SHELL_READ_UNSEEN,
+            "runs at pre_tool_use.read_target, which sees the Read tool and nothing a shell command "
             "reads (`cat`, `less`, `head`). Unlike a write, nothing catches that afterwards: a read "
             "changes nothing, so no stop source can see one, and no command gate here names any of "
             "these paths. Add one if a shell read of them matters too.",
         )
+
+
+def _cap_warning(label: str, code: WarningCode, limit: int, gates: Sequence[CappedGate]) -> Finding | None:
+    """Return the warning for more gates of one capped type than one Stop event runs, or ``None`` within the cap."""
+    if len(gates) <= limit:
+        return None
+    skipped = gates[limit:]
+    message = (
+        f"{len(gates)} {label} gates, over the {limit} one Stop event evaluates. On a "
+        f"session where every one applies, these are skipped: {', '.join(gate.id for gate in skipped)}. "
+        "Scope them with when_changed so fewer apply at once, or raise the priority of "
+        "the ones that must run."
+    )
+    # A gate inside the cap always runs, so only a skipped gate has this warning to accept.
+    unaccepted = [gate.id for gate in skipped if code not in gate.accept_warnings]
+    if unaccepted and len(unaccepted) < len(skipped):
+        verb = "does" if len(unaccepted) == 1 else "do"
+        message += f" Of those, {', '.join(unaccepted)} {verb} not accept {code.value}."
+    return Finding("warning", None, message, code=code, accepted=not unaccepted)
 
 
 def validate_policy(
@@ -278,11 +305,10 @@ def validate_policy(
                     continue
                 if "\\" in glob:
                     findings.append(
-                        Finding(
-                            "warning",
-                            gate.id,
-                            code=WarningCode.BACKSLASH_IN_GLOB,
-                            message=f"{field} glob {glob!r} contains a backslash, and a glob is matched "
+                        _gate_warning(
+                            gate,
+                            WarningCode.BACKSLASH_IN_GLOB,
+                            f"{field} glob {glob!r} contains a backslash, and a glob is matched "
                             "against repo-relative POSIX paths split on '/'. If that was meant as "
                             "a path separator, spell it with '/'.",
                         )
@@ -293,11 +319,10 @@ def validate_policy(
                 # literal twin there would advise adding a redundant entry.
                 if twin is not None and not matched_changed_paths(globs, (twin,)):
                     findings.append(
-                        Finding(
-                            "warning",
-                            gate.id,
-                            code=WarningCode.GLOB_MISSES_SHALLOWER_DEPTH,
-                            message=f"{field} glob {glob!r} can never match {twin!r}, and no other {field} "
+                        _gate_warning(
+                            gate,
+                            WarningCode.GLOB_MISSES_SHALLOWER_DEPTH,
+                            f"{field} glob {glob!r} can never match {twin!r}, and no other {field} "
                             "glob covers it either: '**' must consume at least one path segment. "
                             f"Add {twin!r} beside it to cover that depth too.",
                         )
@@ -322,11 +347,10 @@ def validate_policy(
             # refuses real work; over-matching a `require` phrase only accepts
             # a session sooner.
             findings.extend(
-                Finding(
-                    "warning",
-                    gate.id,
-                    code=WarningCode.SINGLE_TOKEN_PHRASE,
-                    message=f"forbidden phrase {phrase!r} is a single token, so it matches that word "
+                _gate_warning(
+                    gate,
+                    WarningCode.SINGLE_TOKEN_PHRASE,
+                    f"forbidden phrase {phrase!r} is a single token, so it matches that word "
                     "anywhere in a command, including one that only mentions it "
                     f"(`grep -rn {phrase} .`). Prefer a phrase naming a real invocation.",
                 )
@@ -354,23 +378,12 @@ def validate_policy(
     # Named in the order the cap itself keeps them (`by_priority`), not in
     # declaration order, so the gates reported as skipped are the ones that
     # really would be.
-    judge_ids = [gate.id for gate in by_priority([g for g in spec.gates if isinstance(g, JudgeGate)])]
-    verifier_ids = [gate.id for gate in by_priority([g for g in spec.gates if isinstance(g, VerifierGate)])]
-    for label, code, limit, ids in (
-        ("judge", WarningCode.JUDGE_GATE_CAP, judge_gate_limit, judge_ids),
-        ("verifier", WarningCode.VERIFIER_GATE_CAP, verifier_gate_limit, verifier_ids),
-    ):
-        if len(ids) > limit:
-            findings.append(
-                Finding(
-                    "warning",
-                    None,
-                    code=code,
-                    message=f"{len(ids)} {label} gates, over the {limit} one Stop event evaluates. On a "
-                    f"session where every one applies, these are skipped: {', '.join(ids[limit:])}. "
-                    "Scope them with when_changed so fewer apply at once, or raise the priority of "
-                    "the ones that must run.",
-                )
-            )
+    judges = by_priority([gate for gate in spec.gates if isinstance(gate, JudgeGate)])
+    verifiers = by_priority([gate for gate in spec.gates if isinstance(gate, VerifierGate)])
+    caps = (
+        _cap_warning("judge", WarningCode.JUDGE_GATE_CAP, judge_gate_limit, judges),
+        _cap_warning("verifier", WarningCode.VERIFIER_GATE_CAP, verifier_gate_limit, verifiers),
+    )
+    findings.extend(cap for cap in caps if cap is not None)
 
     return tuple(findings)

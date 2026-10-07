@@ -142,6 +142,35 @@ def test_a_warning_is_printed_with_its_code(repo: Path) -> None:
     assert "warning[shell-write-unseen]: no-hand-edited-claude-md:" in result.output
 
 
+def test_an_accepted_warning_is_printed_as_accepted_and_does_not_fail_strict(repo: Path) -> None:
+    """The issue's own case: a path gate that runs only before an edit tool, by design."""
+    _write(
+        repo,
+        _HEADER + "  - id: no-agent-edited-policy\n"
+        "    type: path\n"
+        "    runs: [pre_tool_use.edit_target]\n"
+        "    enforcement: required\n"
+        '    forbidden: [".otari/x.yml"]\n'
+        "    accept_warnings: [shell-write-unseen]\n",
+    )
+    result = _invoke("--strict")
+    assert result.exit_code == 0, result.output
+    assert "  accepted[shell-write-unseen]: no-agent-edited-policy: runs at" in result.output
+    assert "0 error(s), 0 warning(s), 1 accepted." in result.output
+
+
+def test_an_unaccepted_warning_beside_an_accepted_one_still_fails_strict(repo: Path) -> None:
+    _write(repo, _FOOTGUNS.replace("    message:", "    accept_warnings: [shell-write-unseen]\n    message:"))
+    result = _invoke("--strict")
+    assert result.exit_code == 1
+    assert "0 error(s), 1 warning(s), 1 accepted." in result.output
+
+
+def test_the_help_says_how_to_accept_a_warning() -> None:
+    result = CliRunner().invoke(hook_cli.guardrails, ["validate", "--help"])
+    assert "accept_warnings" in result.output
+
+
 def test_a_missing_verifier_script_is_an_error(repo: Path) -> None:
     _write(
         repo,

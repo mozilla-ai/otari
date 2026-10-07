@@ -338,7 +338,7 @@ not mean what its author intended: a `**` glob that skips the shallow case, a
 one-token `forbidden` phrase, a `path` gate naming only
 `pre_tool_use.edit_target`, more `judge` or `verifier` gates than one `Stop`
 event evaluates. `--strict` exits non-zero on a warning as well, which is what a
-CI invocation wants.
+CI invocation wants. A gate whose design a warning describes names that warning's code in its `accept_warnings`, and `--strict` then does not count it.
 
 `--path` and `--command` dry-run the guardrail against evidence supplied on the
 command line, at every moment a real session would offer it:
@@ -478,9 +478,7 @@ Run `otari guardrails validate --strict` in CI. A gate that has stopped matching
 reports the same as a gate that passed. A guardrail with more judge gates than
 one Stop event evaluates always carries the judge cap warning. `validate` reads
 the same `--max-judges` and `OTARI_HOOK_MAX_JUDGES` the hook does, so
-give it the value the hook runs with. A guardrail with more judge gates than
-even that value runs `validate` without `--strict`, because `validate` has no
-way to accept a warning.
+give it the value the hook runs with. When a guardrail has more judge gates than even that value by design, name `judge-gate-cap` in the `accept_warnings` of every judge gate, and `--strict` then passes. See [`accept_warnings`](agent-guardrails-reference.md#accept_warnings-on-any-gate).
 
 Run `otari guardrails check` on every pull request, with the gates and verifiers taken from the base commit, so a change made without the hook still meets them. See [Checking a pull request in CI](#checking-a-pull-request-in-ci).
 

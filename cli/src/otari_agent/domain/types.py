@@ -8,7 +8,7 @@ either pulling in YAML parsing.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
 from typing import Literal, TypeVar, get_args
@@ -99,7 +99,10 @@ class Outcome(str, Enum):
 
 
 class WarningCode(str, Enum):
-    """The stable name of one kind of `otari guardrails validate` warning."""
+    """The stable name of one kind of `otari guardrails validate` warning.
+
+    A gate names the codes it accepts in its own ``accept_warnings``, for a warning that describes its intended design.
+    """
 
     gate_types: frozenset[GateType]
 
@@ -172,6 +175,7 @@ class PathGate:
     runs: tuple[RunsAt, ...]
     forbidden: tuple[str, ...]
     message: str = ""
+    accept_warnings: tuple[WarningCode, ...] = field(default=(), kw_only=True)
     type: Literal["path"] = "path"
 
     @property
@@ -209,6 +213,7 @@ class CommandGate:
     runs: tuple[RunsAt, ...]
     forbidden: tuple[str, ...]
     message: str = ""
+    accept_warnings: tuple[WarningCode, ...] = field(default=(), kw_only=True)
     type: Literal["command"] = "command"
 
     @property
@@ -243,6 +248,7 @@ class CommandIfChangedGate:
     when_changed: tuple[str, ...]
     require: tuple[str, ...]
     message: str = ""
+    accept_warnings: tuple[WarningCode, ...] = field(default=(), kw_only=True)
     type: Literal["command_if_changed"] = "command_if_changed"
 
     @property
@@ -314,6 +320,7 @@ class JudgeGate:
     when_changed: tuple[str, ...] = ()
     judge_cli: tuple[str, ...] | None = None
     priority: int = 0
+    accept_warnings: tuple[WarningCode, ...] = field(default=(), kw_only=True)
     type: Literal["judge"] = "judge"
 
     @property
@@ -374,6 +381,7 @@ class VerifierGate:
     message: str = ""
     when_changed: tuple[str, ...] = ()
     priority: int = 0
+    accept_warnings: tuple[WarningCode, ...] = field(default=(), kw_only=True)
     type: Literal["verifier"] = "verifier"
 
     @property

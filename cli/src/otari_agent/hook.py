@@ -3681,6 +3681,8 @@ def guardrails_validate(
     judge gates than one Stop event evaluates. A warning never fails on its
     own, since each has a legitimate exception; `--strict` is what makes one
     non-zero, for CI.
+    A gate whose design a warning describes names that warning's code in its own `accept_warnings`.
+    The warning is then printed as accepted, and `--strict` does not count it.
 
     `--command` and `--path` answer the other question, "does it say
     what I think it says", by evaluating the guardrail against evidence you
@@ -3742,13 +3744,18 @@ def guardrails_validate(
         in_file = spec.gate_sources.get(finding.gate_id or "")
         where = f"{finding.gate_id}{f' ({in_file})' if in_file else ''}: " if finding.gate_id is not None else ""
         code = f"[{finding.code.value}]" if finding.code is not None else ""
-        click.secho(
-            f"  {finding.severity}{code}: {where}{finding.message}",
-            fg="red" if finding.severity == "error" else "yellow",
-        )
+        if finding.accepted:
+            click.echo(f"  accepted{code}: {where}{finding.message}")
+        else:
+            click.secho(
+                f"  {finding.severity}{code}: {where}{finding.message}",
+                fg="red" if finding.severity == "error" else "yellow",
+            )
     errors = sum(1 for finding in findings if finding.severity == "error")
-    warnings = len(findings) - errors
-    click.echo(f"{errors} error(s), {warnings} warning(s).")
+    accepted = sum(1 for finding in findings if finding.accepted)
+    warnings = len(findings) - errors - accepted
+    accepted_count = f", {accepted} accepted" if accepted else ""
+    click.echo(f"{errors} error(s), {warnings} warning(s){accepted_count}.")
 
     for command in dry_run_commands:
         _guardrails_dry_run(

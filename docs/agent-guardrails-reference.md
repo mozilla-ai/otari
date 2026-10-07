@@ -80,6 +80,21 @@ and declaring `priority` on one is an error rather than a no-op.
     message: Narration belongs in the commit message.
 ```
 
+### `accept_warnings`, on any gate
+
+Some `otari guardrails validate` warnings describe a design that is intended. A gate may name the codes of those warnings in an optional `accept_warnings` list. `validate` then prints each such warning as `accepted`, and `--strict` does not count it. See [Checking a guardrail before it runs](#checking-a-guardrail-before-it-runs) for the codes.
+
+```yaml
+  - id: no-agent-edited-policy
+    type: path
+    runs: [pre_tool_use.edit_target]   # a verifier covers the Stop half
+    enforcement: required
+    forbidden: [".otari/**"]
+    accept_warnings: [shell-write-unseen]
+```
+
+An acceptance covers every warning of that kind on the gate, not one glob or phrase. An unknown code is an error, and so is a code that the gate's type can never draw. A code that this gate does not draw now is not reported. The `judge-gate-cap` and `verifier-gate-cap` warnings are about the guardrail as a whole: each is accepted only when every gate it names as skipped accepts it. Which gates are skipped follows the cap, `priority` and then declaration order, so a lower `--max-judges`, a new gate or a changed priority can skip a gate that does not accept the warning. Name the cap code on every gate of that type to keep the acceptance stable. A gate inside the cap runs, so the code has no effect there.
+
 ## Composing several files
 
 These are about a guardrail made of several files. A single `guardrails.yml`
@@ -1219,6 +1234,7 @@ intended. Each kind has a stable code, which `validate` prints beside it:
 
 None of these blocks on its own, because each has a legitimate exception.
 `--strict` makes a warning non-zero too, which is what a CI invocation wants.
+A gate whose design a warning describes accepts it with [`accept_warnings`](#accept_warnings-on-any-gate), and `--strict` then does not count it.
 
 `--command` and `--path` (both repeatable) answer the other question,
 "does it say what I think it says". Each is evaluated at every moment a real

@@ -555,3 +555,55 @@ def test_a_warning_finding_needs_a_code() -> None:
 def test_an_error_finding_cannot_have_a_code() -> None:
     with pytest.raises(ValueError, match="An error finding cannot have the code 'single-token-phrase'"):
         Finding("error", "g", "m", code=WarningCode.SINGLE_TOKEN_PHRASE)
+
+
+def _accepted(gates: str, **options: Any) -> list[tuple[WarningCode | None, bool]]:
+    return [(finding.code, finding.accepted) for finding in _validate(gates, **options)]
+
+
+_EDIT_ONLY_GATE = (
+    "  - id: g\n    type: path\n    runs: [pre_tool_use.edit_target]\n"
+    '    enforcement: required\n    forbidden: ["**/CLAUDE.md"]\n'
+    "    accept_warnings: [{accepted}]\n"
+)
+
+
+def test_a_gate_accepts_the_warning_it_names_and_no_other() -> None:
+    assert _accepted(_EDIT_ONLY_GATE.format(accepted="shell-write-unseen")) == [
+        (WarningCode.GLOB_MISSES_SHALLOWER_DEPTH, False),
+        (WarningCode.SHELL_WRITE_UNSEEN, True),
+    ]
+
+
+def _judge_gates_accepting(count: int, accepting: set[int]) -> str:
+    return "".join(
+        f"  - id: j{index}\n    type: judge\n    runs: [stop.session]\n"
+        "    enforcement: advisory\n    rubric: r\n"
+        + ("    accept_warnings: [judge-gate-cap]\n" if index in accepting else "")
+        for index in range(count)
+    )
+
+
+def test_the_cap_warning_is_accepted_when_every_gate_past_the_cap_accepts_it() -> None:
+    """A gate inside the cap always runs, so only the skipped ones have anything to accept."""
+    assert _accepted(_judge_gates_accepting(4, {2, 3}), judge_gate_limit=2) == [(WarningCode.JUDGE_GATE_CAP, True)]
+
+
+def test_the_cap_warning_names_the_skipped_gates_that_do_not_accept_it() -> None:
+    (finding,) = _validate(_judge_gates_accepting(4, {2}), judge_gate_limit=2)
+    assert not finding.accepted
+    assert finding.message.endswith("Of those, j3 does not accept judge-gate-cap.")
+
+
+def test_the_verifier_cap_warning_is_accepted_the_same_way() -> None:
+    gates = "".join(
+        f"  - id: v{index}\n    type: verifier\n    runs: [stop.verifier]\n"
+        "    enforcement: required\n    verifier: v.sh\n    accept_warnings: [verifier-gate-cap]\n"
+        for index in range(3)
+    )
+    assert _accepted(gates, verifier_gate_limit=2) == [(WarningCode.VERIFIER_GATE_CAP, True)]
+
+
+def test_only_a_warning_can_be_accepted() -> None:
+    with pytest.raises(ValueError, match="error finding cannot be accepted"):
+        Finding("error", "g", "m", accepted=True)
