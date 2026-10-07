@@ -3741,8 +3741,9 @@ def guardrails_validate(
     for finding in findings:
         in_file = spec.gate_sources.get(finding.gate_id or "")
         where = f"{finding.gate_id}{f' ({in_file})' if in_file else ''}: " if finding.gate_id is not None else ""
+        code = f"[{finding.code.value}]" if finding.code is not None else ""
         click.secho(
-            f"  {finding.severity}: {where}{finding.message}",
+            f"  {finding.severity}{code}: {where}{finding.message}",
             fg="red" if finding.severity == "error" else "yellow",
         )
     errors = sum(1 for finding in findings if finding.severity == "error")

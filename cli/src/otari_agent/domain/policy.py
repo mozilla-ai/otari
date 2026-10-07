@@ -18,6 +18,7 @@ import yaml
 
 from otari_agent.domain.evaluators import tokenize_phrase
 from otari_agent.domain.types import (
+    GATE_TYPES,
     PATH_EVIDENCE_SOURCES,
     CommandGate,
     CommandIfChangedGate,
@@ -72,7 +73,7 @@ _LEGAL_RUNS_BY_GATE_TYPE = {
     "judge": ("stop.session",),
     "verifier": ("stop.verifier",),
 }
-_SUPPORTED_GATE_TYPES = {"path", "command", "command_if_changed", "judge", "verifier"}
+_SUPPORTED_GATE_TYPES = frozenset(GATE_TYPES)
 _SUPPORTED_ENFORCEMENTS = {"required", "advisory"}
 
 # A model's verdict is not reproducible the way a glob or phrase match is, so

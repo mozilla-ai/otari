@@ -66,6 +66,10 @@ RunsAt = Literal[
 PathEvidenceSource = Literal["pre_tool_use.edit_target", "pre_tool_use.read_target", "stop.working_tree"]
 PATH_EVIDENCE_SOURCES: tuple[PathEvidenceSource, ...] = get_args(PathEvidenceSource)
 
+# The ``type`` of each gate dataclass below, spelled as a policy file spells it.
+GateType = Literal["command", "command_if_changed", "judge", "path", "verifier"]
+GATE_TYPES: tuple[GateType, ...] = get_args(GateType)
+
 # Gate results that mean "no objection". Every other outcome blocks a required
 # gate: unknown and error are deliberately on the blocking side, not the
 # passing one, so a check that could not run is never mistaken for one that
@@ -92,6 +96,26 @@ class Outcome(str, Enum):
         the gate's ``enforcement`` to decide whether to block.
         """
         return self.value not in _NON_BLOCKING
+
+
+class WarningCode(str, Enum):
+    """The stable name of one kind of `otari guardrails validate` warning."""
+
+    gate_types: frozenset[GateType]
+
+    def __new__(cls, value: str, *gate_types: GateType) -> WarningCode:
+        member = str.__new__(cls, value)
+        member._value_ = value
+        member.gate_types = frozenset(gate_types)
+        return member
+
+    BACKSLASH_IN_GLOB = "backslash-in-glob", "command_if_changed", "judge", "path", "verifier"
+    GLOB_MISSES_SHALLOWER_DEPTH = "glob-misses-shallower-depth", "command_if_changed", "judge", "path", "verifier"
+    JUDGE_GATE_CAP = "judge-gate-cap", "judge"
+    SHELL_READ_UNSEEN = "shell-read-unseen", "path"
+    SHELL_WRITE_UNSEEN = "shell-write-unseen", "path"
+    SINGLE_TOKEN_PHRASE = "single-token-phrase", "command"
+    VERIFIER_GATE_CAP = "verifier-gate-cap", "verifier"
 
 
 @dataclass(frozen=True, slots=True)

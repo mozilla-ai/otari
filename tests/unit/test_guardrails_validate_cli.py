@@ -134,6 +134,14 @@ def test_warnings_alone_exit_zero_and_strict_makes_them_non_zero(repo: Path) -> 
     assert _invoke("--strict").exit_code == 1
 
 
+def test_a_warning_is_printed_with_its_code(repo: Path) -> None:
+    """The code is what a gate names to accept the warning, so the reader must see it."""
+    _write(repo, _FOOTGUNS)
+    result = _invoke()
+    assert "warning[glob-misses-shallower-depth]: no-hand-edited-claude-md:" in result.output
+    assert "warning[shell-write-unseen]: no-hand-edited-claude-md:" in result.output
+
+
 def test_a_missing_verifier_script_is_an_error(repo: Path) -> None:
     _write(
         repo,

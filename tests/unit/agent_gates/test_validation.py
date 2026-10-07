@@ -9,6 +9,10 @@ grammar, so both are checkable before the gate ever runs.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import fields
+from typing import Any, get_args
+
 import pytest
 
 from otari_agent.domain.evaluators import (
@@ -18,21 +22,38 @@ from otari_agent.domain.evaluators import (
     tokenize_phrase,
 )
 from otari_agent.domain.policy import parse_policy
-from otari_agent.domain.validation import shallower_twin, unmatchable_phrase, unreachable_glob, validate_policy
+from otari_agent.domain.types import GATE_TYPES, GateSpec, GateType, VerifierGate, WarningCode
+from otari_agent.domain.validation import (
+    Finding,
+    shallower_twin,
+    unmatchable_phrase,
+    unreachable_glob,
+    validate_policy,
+)
 
 
 def _policy(gates: str) -> str:
     return 'schema_version: "1.0"\npolicy:\n  id: test\ngates:\n' + gates
 
 
-def _findings(gates: str, **kwargs: object) -> tuple[tuple[str, str | None, str], ...]:
+def _validate(
+    gates: str,
+    *,
+    judge_gate_limit: int = 5,
+    verifier_gate_limit: int = 20,
+    probe_verifier: Callable[[VerifierGate], str | None] | None = None,
+) -> tuple[Finding, ...]:
     spec = parse_policy(_policy(gates), source="test")
-    limit = kwargs.pop("judge_gate_limit", 5)
-    verifier_limit = kwargs.pop("verifier_gate_limit", 20)
-    assert isinstance(limit, int)
-    assert isinstance(verifier_limit, int)
-    findings = validate_policy(spec, judge_gate_limit=limit, verifier_gate_limit=verifier_limit, **kwargs)  # type: ignore[arg-type]
-    return tuple((finding.severity, finding.gate_id, finding.message) for finding in findings)
+    return validate_policy(
+        spec,
+        judge_gate_limit=judge_gate_limit,
+        verifier_gate_limit=verifier_gate_limit,
+        probe_verifier=probe_verifier,
+    )
+
+
+def _findings(gates: str, **options: Any) -> tuple[tuple[str, str | None, str], ...]:
+    return tuple((finding.severity, finding.gate_id, finding.message) for finding in _validate(gates, **options))
 
 
 _PATH_GATE = (
@@ -455,3 +476,82 @@ def test_an_unmatchable_phrase_does_not_also_draw_the_single_token_warning() -> 
     )
     assert [severity for severity, _gate, _message in findings] == ["error"]
     assert "single token" not in findings[0][2]
+
+
+def _codes(gates: str, **options: Any) -> list[WarningCode | None]:
+    return [finding.code for finding in _validate(gates, **options)]
+
+
+# A glob field of each gate type that has one, holding `{glob}`, with every other field clean.
+_GLOB_GATE_FIELDS: dict[GateType, str] = {
+    "command_if_changed": (
+        '    runs: [stop.session]\n    enforcement: required\n    require: ["make x"]\n    when_changed: [{glob}]\n'
+    ),
+    "judge": "    runs: [stop.session]\n    enforcement: advisory\n    rubric: r\n    when_changed: [{glob}]\n",
+    "path": "    runs: [stop.working_tree]\n    enforcement: required\n    forbidden: [{glob}]\n",
+    "verifier": (
+        "    runs: [stop.verifier]\n    enforcement: required\n    verifier: v.sh\n    when_changed: [{glob}]\n"
+    ),
+}
+
+_PROVOKING_GLOBS = {
+    WarningCode.BACKSLASH_IN_GLOB: '"docs\\\\x.md"',
+    WarningCode.GLOB_MISSES_SHALLOWER_DEPTH: '"**/CLAUDE.md"',
+}
+
+_PROVOKING_POLICIES: dict[WarningCode, tuple[str, dict[str, int]]] = {
+    WarningCode.JUDGE_GATE_CAP: (_judge_gates(2), {"judge_gate_limit": 1}),
+    WarningCode.SHELL_READ_UNSEEN: (
+        "  - id: g\n    type: path\n    runs: [pre_tool_use.read_target]\n"
+        '    enforcement: required\n    forbidden: [".env"]\n',
+        {},
+    ),
+    WarningCode.SHELL_WRITE_UNSEEN: (
+        "  - id: g\n    type: path\n    runs: [pre_tool_use.edit_target]\n"
+        '    enforcement: required\n    forbidden: ["CHANGELOG.md"]\n',
+        {},
+    ),
+    WarningCode.SINGLE_TOKEN_PHRASE: (
+        "  - id: g\n    type: command\n    runs: [pre_tool_use.command]\n"
+        '    enforcement: required\n    forbidden: ["npm"]\n',
+        {},
+    ),
+    WarningCode.VERIFIER_GATE_CAP: (_verifier_gates(2), {"verifier_gate_limit": 1}),
+}
+
+
+@pytest.mark.parametrize(
+    ("code", "gate_type"),
+    [(code, gate_type) for code in WarningCode for gate_type in sorted(code.gate_types)],
+)
+def test_every_gate_type_a_code_names_draws_that_code(code: WarningCode, gate_type: GateType) -> None:
+    """A gate accepts a warning by its code, so each code must arrive on every gate type it names."""
+    if code in _PROVOKING_GLOBS:
+        gates = f"  - id: g\n    type: {gate_type}\n" + _GLOB_GATE_FIELDS[gate_type].format(glob=_PROVOKING_GLOBS[code])
+        limits: dict[str, int] = {}
+    else:
+        gates, limits = _PROVOKING_POLICIES[code]
+    assert _codes(gates, **limits) == [code]
+
+
+def test_gate_types_are_the_type_of_each_gate_dataclass() -> None:
+    """A type missing from either side would parse as unsupported or be named by no warning code."""
+    declared = {
+        field.default for gate_class in get_args(GateSpec) for field in fields(gate_class) if field.name == "type"
+    }
+    assert declared == set(GATE_TYPES)
+
+
+def test_an_error_carries_no_code() -> None:
+    """Only a warning can be accepted, so only a warning is named by a code."""
+    assert _codes(_PATH_GATE.format(forbidden='["/CHANGELOG.md"]')) == [None]
+
+
+def test_a_warning_finding_needs_a_code() -> None:
+    with pytest.raises(ValueError, match="A warning finding needs a code"):
+        Finding("warning", "g", "m")
+
+
+def test_an_error_finding_cannot_have_a_code() -> None:
+    with pytest.raises(ValueError, match="An error finding cannot have the code 'single-token-phrase'"):
+        Finding("error", "g", "m", code=WarningCode.SINGLE_TOKEN_PHRASE)

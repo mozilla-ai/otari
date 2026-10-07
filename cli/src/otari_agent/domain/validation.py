@@ -30,6 +30,7 @@ from otari_agent.domain.types import (
     PathGate,
     PolicySpec,
     VerifierGate,
+    WarningCode,
     by_priority,
 )
 
@@ -48,11 +49,19 @@ class Finding:
 
     ``gate_id`` is ``None`` for a finding about the guardrail as a whole
     rather than any one gate.
+    ``code`` names the kind of a warning, and an error has none.
     """
 
     severity: Severity
     gate_id: str | None
     message: str
+    code: WarningCode | None = None
+
+    def __post_init__(self) -> None:
+        if self.severity == "warning" and self.code is None:
+            raise ValueError("A warning finding needs a code.")
+        if self.severity == "error" and self.code is not None:
+            raise ValueError(f"An error finding cannot have the code {self.code.value!r}.")
 
 
 def _glob_fields(gate: GateSpec) -> Iterator[tuple[str, tuple[str, ...]]]:
@@ -220,7 +229,8 @@ def _path_gate_blind_spots(gate: PathGate, spec: PolicySpec) -> Iterator[Finding
         yield Finding(
             "warning",
             gate.id,
-            "runs at pre_tool_use.edit_target with no stop.working_tree beside it, so it sees the "
+            code=WarningCode.SHELL_WRITE_UNSEEN,
+            message="runs at pre_tool_use.edit_target with no stop.working_tree beside it, so it sees the "
             "path an edit tool declares and nothing a shell command writes (a redirect, `sed -i`, a "
             "heredoc, `cp`, a script). Add stop.working_tree for a backstop over the finished tree.",
         )
@@ -228,7 +238,8 @@ def _path_gate_blind_spots(gate: PathGate, spec: PolicySpec) -> Iterator[Finding
         yield Finding(
             "warning",
             gate.id,
-            "runs at pre_tool_use.read_target, which sees the Read tool and nothing a shell command "
+            code=WarningCode.SHELL_READ_UNSEEN,
+            message="runs at pre_tool_use.read_target, which sees the Read tool and nothing a shell command "
             "reads (`cat`, `less`, `head`). Unlike a write, nothing catches that afterwards: a read "
             "changes nothing, so no stop source can see one, and no command gate here names any of "
             "these paths. Add one if a shell read of them matters too.",
@@ -270,7 +281,8 @@ def validate_policy(
                         Finding(
                             "warning",
                             gate.id,
-                            f"{field} glob {glob!r} contains a backslash, and a glob is matched "
+                            code=WarningCode.BACKSLASH_IN_GLOB,
+                            message=f"{field} glob {glob!r} contains a backslash, and a glob is matched "
                             "against repo-relative POSIX paths split on '/'. If that was meant as "
                             "a path separator, spell it with '/'.",
                         )
@@ -284,7 +296,8 @@ def validate_policy(
                         Finding(
                             "warning",
                             gate.id,
-                            f"{field} glob {glob!r} can never match {twin!r}, and no other {field} "
+                            code=WarningCode.GLOB_MISSES_SHALLOWER_DEPTH,
+                            message=f"{field} glob {glob!r} can never match {twin!r}, and no other {field} "
                             "glob covers it either: '**' must consume at least one path segment. "
                             f"Add {twin!r} beside it to cover that depth too.",
                         )
@@ -312,7 +325,8 @@ def validate_policy(
                 Finding(
                     "warning",
                     gate.id,
-                    f"forbidden phrase {phrase!r} is a single token, so it matches that word "
+                    code=WarningCode.SINGLE_TOKEN_PHRASE,
+                    message=f"forbidden phrase {phrase!r} is a single token, so it matches that word "
                     "anywhere in a command, including one that only mentions it "
                     f"(`grep -rn {phrase} .`). Prefer a phrase naming a real invocation.",
                 )
@@ -342,13 +356,17 @@ def validate_policy(
     # really would be.
     judge_ids = [gate.id for gate in by_priority([g for g in spec.gates if isinstance(g, JudgeGate)])]
     verifier_ids = [gate.id for gate in by_priority([g for g in spec.gates if isinstance(g, VerifierGate)])]
-    for label, limit, ids in (("judge", judge_gate_limit, judge_ids), ("verifier", verifier_gate_limit, verifier_ids)):
+    for label, code, limit, ids in (
+        ("judge", WarningCode.JUDGE_GATE_CAP, judge_gate_limit, judge_ids),
+        ("verifier", WarningCode.VERIFIER_GATE_CAP, verifier_gate_limit, verifier_ids),
+    ):
         if len(ids) > limit:
             findings.append(
                 Finding(
                     "warning",
                     None,
-                    f"{len(ids)} {label} gates, over the {limit} one Stop event evaluates. On a "
+                    code=code,
+                    message=f"{len(ids)} {label} gates, over the {limit} one Stop event evaluates. On a "
                     f"session where every one applies, these are skipped: {', '.join(ids[limit:])}. "
                     "Scope them with when_changed so fewer apply at once, or raise the priority of "
                     "the ones that must run.",
