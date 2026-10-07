@@ -119,10 +119,10 @@ jobs:
           TREE_ENTRIES="[]"
           while IFS= read -r -d '' file; do
             REL_PATH="${file#./}"
-            BLOB_SHA=$(gh api "repos/${REPO}/git/blobs" \
-              -f content="$(base64 -w 0 < "$file")" \
-              -f encoding="base64" \
-              --jq '.sha') || { echo "::error::Failed to create a blob for $REL_PATH"; exit 1; }
+            # NOTE: The content goes through stdin because Linux caps one argument at 128 KiB.
+            BLOB_SHA=$(base64 -w 0 < "$file" | jq -Rs '{content: ., encoding: "base64"}' | \
+              gh api "repos/${REPO}/git/blobs" --input - --jq '.sha') \
+              || { echo "::error::Failed to create a blob for $REL_PATH"; exit 1; }
             TREE_ENTRIES=$(echo "$TREE_ENTRIES" | jq \
               --arg path "$REL_PATH" \
               --arg sha "$BLOB_SHA" \
