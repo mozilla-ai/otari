@@ -650,7 +650,7 @@ export function Login() {
           {oauthProviders.length > 0 ? (
             <AuthProviderRows
               providers={oauthProviders}
-              layout={isFormOpen ? "two-up" : "stacked"}
+              layout="stacked"
               verb="Sign in"
               pendingProvider={pendingProvider}
               isDisabled={isSubmitting || isSigningOut || isPasskeyPending}
@@ -677,7 +677,9 @@ export function Login() {
               <ErrorBanner error={methodError} />
             </div>
           ) : null}
-          {oauthProviders.length > 0 || offersPasskey ? <AuthOrRule /> : null}
+          {oauthProviders.length > 0 || offersPasskey ? (
+            <AuthOrRule className="pt-4 pb-3" />
+          ) : null}
           {isFormOpen ? (
             <form
               className={`flex flex-col ${usesPassword ? "gap-4" : "gap-3"}`}

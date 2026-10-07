@@ -22,11 +22,17 @@ import {
 const ROW =
   "relative h-11 w-full min-w-0 justify-center border border-border-strong px-[15px]"
 
-/** A rule with the word on it: these are alternatives, not a second step. */
-export function AuthOrRule() {
+/**
+ * A rule with the word on it: these are alternatives, not a second step.
+ *
+ * 12px of air on each side by default. The sign-in card draws it with 16 above
+ * and 12 below, because the rows above it are a fixed block there and do not
+ * change when the form opens.
+ */
+export function AuthOrRule({ className = "py-3" }: { className?: string }) {
   return (
     <div
-      className="flex items-center gap-3 py-3 text-xs leading-[18px] text-muted"
+      className={`flex items-center gap-3 text-xs leading-[18px] text-muted ${className}`}
       aria-hidden
     >
       <span className="h-px flex-1 bg-border" />

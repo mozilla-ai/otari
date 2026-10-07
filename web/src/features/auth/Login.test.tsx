@@ -1500,9 +1500,11 @@ describe("Login, provider first", () => {
     expect(
       screen.queryByRole("button", { name: "Sign in with email" }),
     ).toBeNull()
+    // Stacked, with the full label, as the card draws it: unlike sign-up, the
+    // sign-in card does not shrink its provider rows when the form opens.
     expect(
       screen.getByRole("button", { name: "Sign in with Google" }),
-    ).toHaveTextContent(/^Google$/)
+    ).toHaveTextContent(/^Sign in with Google$/)
   })
 
   it("shows the form straight away, unfocused, when there is no other way in", () => {
