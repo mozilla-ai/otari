@@ -125,7 +125,7 @@ describe("AccountMenu", () => {
     const row = await screen.findByRole("button", { name: /^Appearance:/ })
     const slot = row.lastElementChild
     expect(slot).toHaveAttribute("aria-hidden", "true")
-    expect(slot).toHaveClass("size-4", "shrink-0")
+    expect(slot).toHaveClass("size-4", "shrink-0", "-ml-0.5")
     expect(slot).toBeEmptyDOMElement()
     expect(row).toHaveTextContent(/Light|Dark/)
   })

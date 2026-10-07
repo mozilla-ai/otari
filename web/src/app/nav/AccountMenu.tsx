@@ -198,7 +198,9 @@ function MenuItem({
         <span aria-hidden="true" className="h-0 w-11 shrink-0" />
       )}
       {hasTrailingGutter ? (
-        <span aria-hidden="true" className="size-4 shrink-0" />
+        // 8px from the value, not the row's 10: the chevron it stands in for sits
+        // 8px from its own row's value.
+        <span aria-hidden="true" className="-ml-0.5 size-4 shrink-0" />
       ) : null}
     </button>
   )
