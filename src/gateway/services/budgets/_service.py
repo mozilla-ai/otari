@@ -1,6 +1,7 @@
 import uuid
 
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.budget_exceptions import DeploymentBudgetIsEndUserDefaultError
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User
 from gateway.rate_limit import BudgetMinuteLimits
@@ -77,8 +78,13 @@ class BudgetService:
             return await self._organization.create_ceiling(user=user, request=request)
 
     async def delete_deployment_budget(self, budget_id: str) -> None:
-        """Delete a budget the deployment owns, with its reset history, unless something still names it."""
+        """Delete a budget the deployment owns, with its reset history, unless something still names it.
+
+        A key's default end-user budget counts as naming it; a key that only lists it loses it from the list.
+        """
         async with self._uow:
+            if keys := await self._api_keys.keys_defaulting_end_users_to(budget_id):
+                raise DeploymentBudgetIsEndUserDefaultError(keys)
             await self._deployment.delete_budget(budget_id)
             await self._api_keys.forget_end_user_budget(budget_id)
 
@@ -128,11 +134,17 @@ class BudgetService:
         async with self._uow:
             return await self._deployment.put_budget(budget_id, request)
 
-    async def require_end_user_budgets(self, budget_ids: list[str]) -> None:
-        """Refuse end-user budgets a service key may not cap its end users at: an unknown one, or a tenant's."""
+    async def check_end_user_budgets(
+        self, budget_ids: list[str] | None, default_id: str | None, *, check_default: bool, check_list: bool = True
+    ) -> list[str] | None:
+        """Return a key's end-user budget list, deduplicated, once it holds together with the default.
+
+        Refuses a default off the list, and a budget an end user may not be capped at: an unknown one, or a tenant's.
+        """
         async with self._uow:
-            for budget_id in budget_ids:
-                await self._end_users.require_assignable_budget(budget_id)
+            return await self._end_users.checked_budget_list(
+                budget_ids, default_id, check_default=check_default, check_list=check_list
+            )
 
     async def minute_limits(self, user_id: str, *, strategy: str | None) -> BudgetMinuteLimits | None:
         """The per-minute limits of the user's own budget, or None when it sets neither or budgets are disabled."""

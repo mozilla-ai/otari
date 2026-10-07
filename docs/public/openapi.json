@@ -22891,7 +22891,7 @@
     },
     "/api/v1/budgets/{budget_id}": {
       "delete": {
-        "description": "Delete a budget the deployment owns.\n\nRefused with 409 for an organization's budget: the operator may edit one\n(``PATCH`` retimes its ceilings) but deleting it would take a budget the\ntenant defined out from under them.\n\nRefused with 409, too, while anything still names this budget: a workspace\nhanding it to its members, or a scoped ceiling enforcing it. The refusal says\nwhich, and where.\n\nGateway users assigned to the budget are left uncapped, as the dashboard's\nconfirmation says, its reset history is deleted with it, and it is taken off\nevery service key's ``end_user_budget_ids``.",
+        "description": "Delete a budget the deployment owns.\n\nRefused with 409 for an organization's budget: the operator may edit one\n(``PATCH`` retimes its ceilings) but deleting it would take a budget the\ntenant defined out from under them.\n\nRefused with 409, too, while anything still names this budget: a workspace\nhanding it to its members, or a scoped ceiling enforcing it. The refusal says\nwhich, and where.\n\nGateway users assigned to the budget are left uncapped, as the dashboard's\nconfirmation says, its reset history is deleted with it, and it is taken off\nevery service key's ``end_user_budget_ids``. A budget that is a key's\n``end_user_budget_id`` is refused (409) until that key's default changes.",
         "operationId": "budgets-delete_budget",
         "parameters": [
           {
@@ -23077,6 +23077,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetResponse"
+                }
+              }
+            },
+            "description": "The budget was created"
           },
           "422": {
             "content": {
@@ -24974,6 +24984,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "The end user was created"
           },
           "422": {
             "content": {

@@ -114,6 +114,20 @@ class DeploymentBudgetIsMemberDefaultError(TenancyConflictError):
         )
 
 
+class DeploymentBudgetIsEndUserDefaultError(TenancyConflictError):
+    """Service keys start their end users on the budget, so the delete is refused by key name.
+
+    Deleting it would leave every end user those keys create from then on uncapped.
+    """
+
+    def __init__(self, keys: list[str]):
+        shown = ", ".join(keys[:5]) + (f" and {len(keys) - 5} more" if len(keys) > 5 else "")
+        super().__init__(
+            f"This budget is the default end-user budget of {shown}. Change that default on the key "
+            "(Keys > Edit > Service key) before deleting it."
+        )
+
+
 class DeploymentBudgetEnforcedError(TenancyConflictError):
     """Ceilings still enforce the budget.
 
@@ -207,6 +221,13 @@ class EndUserBudgetNotAllowedError(TenancyForbiddenError):
         super().__init__(f"This key may not assign budget '{budget_id}' to its end users")
 
 
+class EndUserDefaultNotListedError(TenancyValidationError):
+    """A key's default end-user budget is not on its list of end-user budgets."""
+
+    def __init__(self) -> None:
+        super().__init__("end_user_budget_id must be one of end_user_budget_ids")
+
+
 class EndUserNotFoundError(TenancyNotFoundError):
     """No end user of the key's owner goes by this id."""
 
@@ -239,6 +260,7 @@ __all__ = [
     "BudgetStillReferencedError",
     "EndUserBudgetNotAllowedError",
     "EndUserBudgetNotFoundError",
+    "EndUserDefaultNotListedError",
     "EndUserIdInvalidError",
     "EndUserNotFoundError",
     "EndUserOwnerUnavailableError",

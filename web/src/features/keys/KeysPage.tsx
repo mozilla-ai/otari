@@ -74,6 +74,7 @@ import {
   ServiceKeyFields,
   serviceKeyBody,
   serviceKeyChoice,
+  useServiceKeyReady,
 } from "./ServiceKeyFields"
 import { isVirtualUser, keyFingerprint, secretCaption } from "./secretCaption"
 
@@ -476,7 +477,9 @@ function CreateKeyDialog({
   // caller belongs to that default, which is the answer this form surfaces
   // rather than pre-empting.
   const workspaceUnresolved = workspaceLoading
-  const isBlocked = !scopeValid || ownerMissing || workspaceUnresolved
+  const serviceKeyReady = useServiceKeyReady(serviceKey)
+  const isBlocked =
+    !scopeValid || !serviceKeyReady || ownerMissing || workspaceUnresolved
 
   // What the form owns, handed to the guard whole rather than compared field by
   // field: the two drifted apart once already, with the guard armed for three
@@ -769,6 +772,10 @@ function EditKeyForm({
       userMismatchChoice(apiKey.reject_user_mismatch),
     )
   const [scopeValid, setScopeValid] = useState(true)
+  // Only the deployment-wide form shows the service key fields, so only it waits on the budgets.
+  const serviceKeyReady = useServiceKeyReady(
+    isDeploymentWide ? serviceKey : NO_SERVICE_KEY,
+  )
   const { isDirty } = useDirtySnapshot({
     keyName,
     expiresAt,
@@ -780,7 +787,7 @@ function EditKeyForm({
   })
 
   const submit = () => {
-    if (update.isPending || !scopeValid) return
+    if (update.isPending || !scopeValid || !serviceKeyReady) return
     const shared = {
       key_name: keyName.trim() || null,
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
@@ -811,7 +818,7 @@ function EditKeyForm({
       submitLabel="Save"
       onSubmit={submit}
       isPending={update.isPending}
-      isSubmitDisabled={!scopeValid}
+      isSubmitDisabled={!scopeValid || !serviceKeyReady}
       isDirty={isDirty}
       error={update.error}
     >

@@ -165,6 +165,23 @@ def test_deleting_a_budget_takes_it_off_every_list(client: TestClient, master_ke
     assert fetched["end_user_budget_ids"] == ["eu-ai", "eu-memories"]
 
 
+def test_a_keys_default_end_user_budget_cannot_be_deleted(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Deleting it would leave the key's new end users uncapped, so the key's default has to move first."""
+    key_id, headers = _mlpa(client, master_key_header)
+
+    refused = client.delete(f"{API_ROOT}/budgets/eu-ai", headers=master_key_header)
+    served = _chat(client, headers, "after-refusal")
+    client.patch(f"{API_ROOT}/keys/{key_id}", json={"end_user_budget_id": "eu-memories"}, headers=master_key_header)
+    deleted = client.delete(f"{API_ROOT}/budgets/eu-ai", headers=master_key_header)
+
+    assert refused.status_code == 409, refused.text
+    assert "mlpa" in refused.json()["detail"]
+    assert served.headers[BUDGET_HEADER] == "eu-ai"
+    assert deleted.status_code == 204, deleted.text
+
+
 # --- the request names the budget -------------------------------------------
 
 

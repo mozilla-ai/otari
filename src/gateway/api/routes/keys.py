@@ -25,7 +25,6 @@ from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
 from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate
-from gateway.services.budgets import BudgetService
 from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
 from gateway.services.workspace_scope import organization_default_workspace_id
 
@@ -101,33 +100,6 @@ async def _load_key_in_organization(
 
 # How many budgets one key may list for its end users.
 MAX_END_USER_BUDGETS = 100
-
-_DEFAULT_NOT_LISTED_DETAIL = "end_user_budget_id must be one of end_user_budget_ids"
-
-
-async def _checked_end_user_budgets(
-    budgets: BudgetService,
-    budget_ids: list[str] | None,
-    default_id: str | None,
-    *,
-    check_default: bool,
-    check_list: bool = True,
-) -> list[str] | None:
-    """The key's end-user budget list, deduplicated, once the pair holds together.
-
-    Refuses a default that is not on a list, and a budget an end user could not
-    be assigned (unknown, or a tenant's). Only what the request changed is looked
-    up again.
-    """
-    listed = list(dict.fromkeys(budget_ids)) if budget_ids is not None else None
-    if listed is not None and default_id is not None and default_id not in listed:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_DEFAULT_NOT_LISTED_DETAIL)
-    to_check = list(listed or []) if check_list else []
-    if check_default and default_id is not None and default_id not in to_check:
-        to_check.append(default_id)
-    if to_check:
-        await budgets.require_end_user_budgets(to_check)
-    return listed
 
 
 class CreateKeyRequest(BaseModel):
@@ -321,8 +293,8 @@ async def create_key(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     # Before anything is staged: the check runs in a Unit of Work block, and the
     # block's commit would store whatever this route had added by then.
-    end_user_budget_ids = await _checked_end_user_budgets(
-        budgets, request.end_user_budget_ids, request.end_user_budget_id, check_default=True
+    end_user_budget_ids = await budgets.check_end_user_budgets(
+        request.end_user_budget_ids, request.end_user_budget_id, check_default=True
     )
 
     api_key = key_format.mint()
@@ -492,8 +464,7 @@ async def update_key(
     # Before the key is changed, for the reason create_key gives. The pair is
     # checked as the key will hold it, so a field left out keeps its stored value.
     fields = request.model_fields_set
-    end_user_budget_ids = await _checked_end_user_budgets(
-        budgets,
+    end_user_budget_ids = await budgets.check_end_user_budgets(
         request.end_user_budget_ids if "end_user_budget_ids" in fields else key.end_user_budget_ids,
         request.end_user_budget_id if "end_user_budget_id" in fields else key.end_user_budget_id,
         check_default="end_user_budget_id" in fields,
@@ -637,7 +608,10 @@ async def get_end_user(
     return await budgets.get_end_user(api_key=key, external_id=external_id)
 
 
-@router.put("/{key_id}/end-users/{external_id:path}")
+@router.put(
+    "/{key_id}/end-users/{external_id:path}",
+    responses={status.HTTP_201_CREATED: {"model": EndUserPublic, "description": "The end user was created"}},
+)
 async def put_end_user(
     key_id: str,
     external_id: ExternalId,

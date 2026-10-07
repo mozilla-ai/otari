@@ -25,6 +25,13 @@ class ApiKeyRepository(BaseRepository[APIKey, Never, Never]):
         result = await self.db.execute(select(APIKey.id).where(APIKey.workspace_id.in_(workspace_ids)))
         return list(result.scalars().all())
 
+    async def names_defaulting_end_users_to(self, budget_id: str) -> list[str]:
+        """Name each key that starts its end users on ``budget_id`` by default, by its name or else its id."""
+        result = await self.db.execute(
+            select(APIKey.key_name, APIKey.id).where(APIKey.end_user_budget_id == budget_id).order_by(APIKey.id)
+        )
+        return [name or key_id for name, key_id in result.all()]
+
     async def remove_end_user_budget(self, budget_id: str) -> None:
         """Take ``budget_id`` off every key's ``end_user_budget_ids``.
 

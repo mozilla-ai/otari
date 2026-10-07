@@ -136,8 +136,10 @@ POST /api/v1/keys
 
 A key with a default and no list may assign the default alone, which is how
 every key behaves until it is given a list. When both are set, the default must
-be on the list. Each entry must be a deployment budget, not an organization's,
-and deleting a budget takes it off every list.
+be on the list. Each entry must be a deployment budget, not an organization's.
+Deleting a budget takes it off every list, but a budget that is some key's
+default cannot be deleted until that key's default changes: without one, the
+key's new end users would start uncapped.
 
 A request then names the budget for a new end user in a header:
 
@@ -157,7 +159,8 @@ the end user is on, so a caller can see when it differs from the one it named.
 
 Give budgets ids of your own with `PUT /api/v1/budgets/{budget_id}`, which
 creates the budget under that id or replaces it, so the same request can run
-at every deploy. An id is up to 128 letters, digits, `.`, `_` and `-`.
+at every deploy. An id is up to 128 letters, digits, `.`, `_` and `-`, and
+starts with a letter or digit.
 `POST /api/v1/budgets` still generates an id, and `GET /api/v1/budgets`
 reports how many users are on each budget in `user_count`.
 

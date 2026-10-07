@@ -941,7 +941,8 @@ export interface paths {
          *
          *     Gateway users assigned to the budget are left uncapped, as the dashboard's
          *     confirmation says, its reset history is deleted with it, and it is taken off
-         *     every service key's ``end_user_budget_ids``.
+         *     every service key's ``end_user_budget_ids``. A budget that is a key's
+         *     ``end_user_budget_id`` is refused (409) until that key's default changes.
          */
         delete: operations["budgets-delete_budget"];
         options?: never;
@@ -16361,6 +16362,15 @@ export interface operations {
                     "application/json": components["schemas"]["BudgetResponse"];
                 };
             };
+            /** @description The budget was created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BudgetResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -17326,6 +17336,15 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserPublic"];
+                };
+            };
+            /** @description The end user was created */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from gateway.exceptions.budget_exceptions import (
     EndUserBudgetNotAllowedError,
     EndUserBudgetNotFoundError,
+    EndUserDefaultNotListedError,
     EndUserIdInvalidError,
     EndUserNotFoundError,
     EndUserOwnerUnavailableError,
@@ -43,9 +44,23 @@ class _EndUsers:
     def __init__(self, repositories: BudgetRepositories) -> None:
         self._repositories = repositories
 
-    async def require_assignable_budget(self, budget_id: str) -> None:
-        """Refuse an end-user budget that does not exist or that a tenant owns."""
-        await self._assignable_budget(budget_id)
+    async def checked_budget_list(
+        self, budget_ids: list[str] | None, default_id: str | None, *, check_default: bool, check_list: bool
+    ) -> list[str] | None:
+        """A key's end-user budget list, deduplicated, once it holds together with the key's default.
+
+        Refuses a default that is not on a list, and a budget an end user could not be assigned (unknown, or a
+        tenant's). Only the half the caller is changing is looked up again.
+        """
+        listed = list(dict.fromkeys(budget_ids)) if budget_ids is not None else None
+        if listed is not None and default_id is not None and default_id not in listed:
+            raise EndUserDefaultNotListedError()
+        to_check = list(listed or []) if check_list else []
+        if check_default and default_id is not None and default_id not in to_check:
+            to_check.append(default_id)
+        for budget_id in to_check:
+            await self._assignable_budget(budget_id)
+        return listed
 
     async def resolve(self, api_key: APIKey, external_id: str, requested_budget_id: str | None) -> ResolvedEndUser:
         """The end user that ``external_id`` names under this key's owner.

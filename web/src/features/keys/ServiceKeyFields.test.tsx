@@ -74,6 +74,29 @@ describe("ServiceKeyFields", () => {
     expect(screen.queryByText("Tenant's")).not.toBeInTheDocument()
   })
 
+  it("says the budgets failed to load, rather than that there are none, and retries", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: "Database error" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+    const user = userEvent.setup()
+    renderFields({ ...NO_SERVICE_KEY, isServiceKey: true })
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument()
+    expect(
+      screen.queryByText(/No deployment budgets yet/),
+    ).not.toBeInTheDocument()
+
+    fetchSpy.mockRestore()
+    stubBudgets()
+    await user.click(screen.getByRole("button", { name: "Retry" }))
+
+    expect(await screen.findByText("AI")).toBeInTheDocument()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  })
+
   it("picks the list and a default from it", async () => {
     stubBudgets()
     const user = userEvent.setup()

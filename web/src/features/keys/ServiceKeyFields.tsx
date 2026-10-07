@@ -1,4 +1,6 @@
 import type { ApiKey, Budget } from "@/client"
+import { Button } from "@/design-system/actions/Button"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { Checkbox } from "@/design-system/forms/Checkbox"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { budgetLabeler } from "@/features/budgets/budgetLabel"
@@ -40,6 +42,15 @@ export const serviceKeyBody = (choice: ServiceKeyChoice) =>
       }
     : { is_service_key: false }
 
+/**
+ * Whether a form holding this choice may be saved: a service key's budgets have
+ * to have loaded, or a failed load would read as a deployment with none.
+ */
+export function useServiceKeyReady(choice: ServiceKeyChoice): boolean {
+  const budgets = useBudgets(choice.isServiceKey)
+  return !choice.isServiceKey || budgets.data !== undefined
+}
+
 /** Only a deployment budget can cap an end user, so a tenant's is not offered. */
 const assignable = (budgets: readonly Budget[]) =>
   budgets.filter((budget) => budget.organization_id === null)
@@ -76,6 +87,7 @@ export function ServiceKeyFields({
         <Checkbox
           isSelected={value.isServiceKey}
           onChange={(isServiceKey) => onChange({ ...value, isServiceKey })}
+          hasTouchTarget
         >
           <span className="font-medium text-foreground">Service key</span>
         </Checkbox>
@@ -93,7 +105,12 @@ export function ServiceKeyFields({
               The budgets a request may start a new end user on, named in the{" "}
               <code>Otari-End-User-Budget</code> header.
             </p>
-            {budgets.isPending && !budgets.data ? (
+            {budgets.isError && !budgets.data ? (
+              <div className="flex flex-col items-start gap-2">
+                <ErrorBanner error={budgets.error} />
+                <Button onPress={() => budgets.refetch()}>Retry</Button>
+              </div>
+            ) : budgets.isPending && !budgets.data ? (
               <p className="text-caption">Loading budgets…</p>
             ) : offered.length === 0 ? (
               <p className="text-caption">

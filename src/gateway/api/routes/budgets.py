@@ -246,7 +246,10 @@ async def update_budget(
     )
 
 
-@router.put("/{budget_id}")
+@router.put(
+    "/{budget_id}",
+    responses={status.HTTP_201_CREATED: {"model": BudgetResponse, "description": "The budget was created"}},
+)
 async def put_budget(
     budget_id: Annotated[
         str,
@@ -288,7 +291,8 @@ async def delete_budget(budget_id: str, service: BudgetServiceDep) -> None:
 
     Gateway users assigned to the budget are left uncapped, as the dashboard's
     confirmation says, its reset history is deleted with it, and it is taken off
-    every service key's ``end_user_budget_ids``.
+    every service key's ``end_user_budget_ids``. A budget that is a key's
+    ``end_user_budget_id`` is refused (409) until that key's default changes.
     """
     await service.delete_deployment_budget(budget_id)
 
