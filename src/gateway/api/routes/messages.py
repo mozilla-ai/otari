@@ -105,6 +105,7 @@ from gateway.services.tools import (
     Dialect,
     ToolUseBudget,
 )
+from gateway.services.traces import read_turn
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
@@ -864,6 +865,8 @@ async def create_message(
             code_execution_policies=tool_ports.code_execution_policy,
             idempotency=None if request.stream else idempotency,
             tags=request_tags(request.metadata, ignore=frozenset({ANTHROPIC_USER_KEY})),
+            turn=read_turn("messages", request.messages),
+            session_label=request.session_label,
         )
     except IdempotentReplay as replay:
         return replay.response()
@@ -986,7 +989,7 @@ async def create_message(
                     background_tasks=background_tasks,
                     rate_limit_info=ctx.rate_limit_info,
                     tool_ctx=tool_ctx,
-                    session_label=request.session_label,
+                    session_label=ctx.session_label,
                     started_at=ctx.started_at,
                 )
             except HTTPException as exc:
@@ -1014,7 +1017,7 @@ async def create_message(
             call_kwargs=call_kwargs,
             provider=resolved.instance,
             model=resolved.model,
-            session_label=request.session_label,
+            session_label=ctx.session_label,
             display_model=resolved.alias,
             base_request_fields=request_fields,
             prepare_kwargs=prepare_kwargs,
@@ -1036,7 +1039,7 @@ async def create_message(
                 background_tasks=background_tasks,
                 config=config,
                 rate_limit_info=ctx.rate_limit_info,
-                session_label=request.session_label,
+                session_label=ctx.session_label,
             )
         except HTTPException as exc:
             # Hybrid terminal failures arrive as format-agnostic plain-string

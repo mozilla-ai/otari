@@ -74,6 +74,7 @@ from gateway.services.mcp_loop import (
 )
 from gateway.services.provider_kwargs import apply_endpoint_defaults
 from gateway.services.tools import CODE_EXECUTION_HEADER, WEB_SEARCH_HEADER, Dialect, ToolUseBudget
+from gateway.services.traces import read_turn
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
@@ -537,6 +538,8 @@ async def run_chat_completion(
             code_execution_policies=tool_ports.code_execution_policy,
             idempotency=None if request.stream else idempotency,
             tags=request_tags(request.metadata),
+            turn=read_turn("chat", request.messages),
+            session_label=request.session_label,
         )
     except IdempotentReplay as replay:
         return replay.response()
@@ -621,7 +624,7 @@ async def run_chat_completion(
                     background_tasks=background_tasks,
                     rate_limit_info=ctx.rate_limit_info,
                     tool_ctx=tool_ctx,
-                    session_label=request.session_label,
+                    session_label=ctx.session_label,
                     started_at=ctx.started_at,
                 )
             except HTTPException:
@@ -672,7 +675,7 @@ async def run_chat_completion(
             background_tasks=background_tasks,
             config=config,
             rate_limit_info=ctx.rate_limit_info,
-            session_label=request.session_label,
+            session_label=ctx.session_label,
         )
         return surface_provider_fields(platform_result)
 

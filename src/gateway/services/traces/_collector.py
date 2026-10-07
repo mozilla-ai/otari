@@ -16,6 +16,8 @@ from decimal import Decimal
 
 from gateway.models.usage import UsageLog
 from gateway.ports.trace_storage_port import SpanRecord, TraceWrite, is_identifier
+from gateway.services.traces._identity import SessionRef
+from gateway.services.traces._turns import TurnFacts
 
 # The ``usage_logs.status`` of an attempt a later candidate made up for.
 _ABSORBED = "absorbed"
@@ -50,7 +52,8 @@ class RequestTrace:
 
     The step's id is the request's ``Otari-Request-ID``, so it is unique per
     request: two retries with the same history are two steps, each with its cost.
-    Until a request names its session, it is a trace of its own.
+    A request that names its session joins that session's trace; one that names
+    none is a trace of its own.
     """
 
     request_id: str
@@ -60,6 +63,9 @@ class RequestTrace:
     endpoint: str
     started_at: datetime
     max_spans: int
+    session: SessionRef | None = None
+    harness: str | None = None
+    turn: TurnFacts | None = None
     spans: list[SpanRecord] = field(default_factory=list)
     dropped: int = 0
 
@@ -213,6 +219,7 @@ class RequestTrace:
             kind="step",
             origin="gateway",
             name=identifier_or_none(self.endpoint) or "request",
+            opens_turn=self.turn.opens_turn if self.turn is not None else False,
             outcome="ok" if ok else "error",
             error_class=error_class,
             start_time=self.started_at,
@@ -223,12 +230,43 @@ class RequestTrace:
         )
         return TraceWrite(
             workspace_id=self.workspace_id,
-            trace_id=self.request_id,
+            trace_id=self.session.trace_id(self.workspace_id, self.user_id) if self.session else self.request_id,
             user_id=self.user_id,
             api_key_id=self.api_key_id,
-            session_source="none",
-            spans=(step, *self.spans),
+            session_source=self.session.source if self.session else "none",
+            harness=self.harness,
+            spans=(step, *self._client_tool_spans(), *self.spans),
         )
+
+    def _client_tool_spans(self) -> list[SpanRecord]:
+        """The tools the client ran since its previous request, closed by the results this one carries.
+
+        Their start is the end of the step that asked for them, which is not this
+        request, so it is left for the read model to fill. A span's id is its call
+        id, so a retried request answering the same calls adds nothing twice.
+        """
+        if self.turn is None:
+            return []
+        spans: list[SpanRecord] = []
+        for call in self.turn.answered:
+            name = identifier_or_none(call.name)
+            spans.append(
+                SpanRecord(
+                    span_id=f"call-{call.call_id}"[:64],
+                    kind="tool",
+                    origin="gateway",
+                    name=f"execute_tool:{name}" if name and is_identifier(f"execute_tool:{name}") else "execute_tool",
+                    operation="execute_tool",
+                    outcome="error" if call.is_error else "ok",
+                    error_class="tool_error" if call.is_error else None,
+                    end_time=self.started_at,
+                    tool_name=name,
+                    tool_type="client",
+                    tool_call_id=identifier_or_none(call.call_id),
+                    request_id=self.request_id,
+                )
+            )
+        return spans
 
 
 def _elapsed_ms(started: datetime, ended: datetime) -> int:

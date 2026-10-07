@@ -769,6 +769,19 @@ is trimmed and omitted when blank; Otari caps it at 255 characters at the reques
 boundary so the platform never has to truncate. All attempts of one request carry
 the same label.
 
+When the body sets no `session_label`, the label is the session id the request
+names elsewhere, from the first of these that is present and not blank:
+
+1. the `Otari-Conversation-Id` header;
+2. a `session_id` tag in the request's `metadata`;
+3. the agent harness's own session header (Claude Code's `x-claude-code-session-id`).
+
+That value is trimmed, and sent only when it is identifier-shaped: 1 to 128
+characters from `A-Z a-z 0-9 _ . : / @ + -`. Anything else (prose, a longer
+value) is not truncated or replaced by a later source; the report omits
+`session_label`. A label set in the body is sent as described above and is not
+subject to this rule.
+
 > **`user` is not used for cost attribution in hybrid mode.** The OpenAI-standard
 > `user` field is stripped before the upstream call and is not forwarded on the
 > usage report, so it does not segment spend here. Callers who want per-run cost

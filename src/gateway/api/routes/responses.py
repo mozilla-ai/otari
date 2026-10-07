@@ -78,6 +78,7 @@ from gateway.services.tools import (
     Dialect,
     ToolUseBudget,
 )
+from gateway.services.traces import read_turn
 from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat, openai_error_event
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
@@ -593,6 +594,8 @@ async def create_response(
             code_execution_policies=tool_ports.code_execution_policy,
             idempotency=None if bool(request_body.stream) else idempotency,
             tags=request_tags(request_body.metadata),
+            turn=read_turn("responses", request_body.input),
+            session_label=request_body.session_label,
         )
     except IdempotentReplay as replay:
         return replay.response()
@@ -626,7 +629,7 @@ async def create_response(
                         )
                     ],
                     route.request_id,
-                    request_body.session_label,
+                    ctx.session_label,
                 )
             raise
     else:
@@ -740,7 +743,7 @@ async def create_response(
                     background_tasks=background_tasks,
                     rate_limit_info=ctx.rate_limit_info,
                     tool_ctx=tool_ctx,
-                    session_label=request_body.session_label,
+                    session_label=ctx.session_label,
                     started_at=ctx.started_at,
                 )
             except HTTPException:
@@ -759,7 +762,7 @@ async def create_response(
             call_kwargs=call_kwargs,
             provider=billing_instance,
             model=model,
-            session_label=request_body.session_label,
+            session_label=ctx.session_label,
             display_model=resolved.alias,
             base_request_fields=base_request_fields,
         )
@@ -779,7 +782,7 @@ async def create_response(
             background_tasks=background_tasks,
             config=config,
             rate_limit_info=ctx.rate_limit_info,
-            session_label=request_body.session_label,
+            session_label=ctx.session_label,
         )
         return result.model_dump(exclude_none=True)
 
