@@ -234,7 +234,7 @@ class OrganizationService:
         *,
         membership_listener: MembershipListener | None,
         uow: UnitOfWork | None = None,
-        workspace_listener: WorkspaceListener | None = None,
+        workspace_listener: WorkspaceListener | None,
     ):
         """Build the service on a session.
 

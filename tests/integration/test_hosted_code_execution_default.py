@@ -125,8 +125,8 @@ async def test_first_sign_in_provisioning_starts_its_workspace_with_code_executi
     await async_db.commit()
 
     writes = membership_writes(async_db)
-    defaults = CodeExecutionWorkspaceDefaults(WorkspaceCodeExecutionPolicyRepository(writes["uow"]), on_by_default=True)
-    operator = await ensure_bootstrap_identity(async_db, **writes, workspace_listener=defaults)
+    writes["workspace_listener"] = CodeExecutionWorkspaceDefaults(WorkspaceCodeExecutionPolicyRepository(writes["uow"]))
+    operator = await ensure_bootstrap_identity(async_db, **writes)
 
     workspace_ids = (
         (

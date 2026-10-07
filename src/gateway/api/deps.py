@@ -62,6 +62,7 @@ from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.organization_pricing_service import OrganizationPricingService
 from gateway.services.overview import OverviewService
+from gateway.services.playground_service import ForwardedToolOffer, LocalToolOffer, PlaygroundToolOffer
 from gateway.services.providers import OrgProviderModelService, ProviderEndpointService, refresh_provider_endpoint_cache
 from gateway.services.rate_limits import RateLimitService
 from gateway.services.routing import clear_router_backend_cache
@@ -74,11 +75,12 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
 )
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
-from gateway.services.tenancy.workspace_listener import WorkspaceListener
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener, WorkspaceListener
 from gateway.services.tenancy.workspace_service import WorkspaceService
 from gateway.services.tools import (
     CodeExecutionWorkspaceDefaults,
     WebSearchKeyService,
+    WorkspaceCodeExecutionPolicies,
     WorkspaceCodeExecutionPolicyService,
     WorkspaceSearchKeys,
 )
@@ -819,13 +821,15 @@ MembershipListenerDep = Annotated[MembershipListener, Depends(get_membership_lis
 def get_workspace_listener(
     uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]
 ) -> WorkspaceListener:
-    """Return what sets up a workspace this request creates: code execution on, where no policy reads as off.
+    """Return what sets up a workspace this request creates, bound per mode.
 
+    A hosted control plane reads a workspace with no code execution policy as off, so there each new workspace
+    starts with one that turns it on. Elsewhere no policy already means on, so nothing is staged.
     It writes through the request's Unit of Work, so a service that creates workspaces must be built on the same one.
     """
-    return CodeExecutionWorkspaceDefaults(
-        WorkspaceCodeExecutionPolicyRepository(uow), on_by_default=config.is_hosted_mode
-    )
+    if config.is_hosted_mode:
+        return CodeExecutionWorkspaceDefaults(WorkspaceCodeExecutionPolicyRepository(uow))
+    return NullWorkspaceListener()
 
 
 WorkspaceListenerDep = Annotated[WorkspaceListener, Depends(get_workspace_listener)]
@@ -845,7 +849,7 @@ def get_workspace_code_execution_policy_service(
     return WorkspaceCodeExecutionPolicyService(
         uow,
         WorkspaceCodeExecutionPolicyRepository(uow),
-        WorkspaceAccess(db, OrganizationService(db, membership_listener=None)),
+        WorkspaceAccess(db, OrganizationService(db, membership_listener=None, workspace_listener=None)),
         sandbox_configured=config.sandbox_configured(),
         allowed_images=config.pinnable_sandbox_images(),
     )
@@ -854,6 +858,34 @@ def get_workspace_code_execution_policy_service(
 WorkspaceCodeExecutionPolicyServiceDep = Annotated[
     WorkspaceCodeExecutionPolicyService, Depends(get_workspace_code_execution_policy_service)
 ]
+
+
+def get_workspace_code_execution_policies(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WorkspaceCodeExecutionPolicies:
+    """Build the request path's reader of a workspace's code execution policy, on the request's session.
+
+    Also the builder the container's stored code execution policy takes, which is why it takes a bare session.
+    """
+    return WorkspaceCodeExecutionPolicies(WorkspaceCodeExecutionPolicyRepository(db))
+
+
+WorkspaceCodeExecutionPoliciesDep = Annotated[
+    WorkspaceCodeExecutionPolicies, Depends(get_workspace_code_execution_policies)
+]
+
+
+def get_playground_tool_offer(config: Annotated[GatewayConfig, Depends(get_config)]) -> PlaygroundToolOffer:
+    """Return what this deployment offers a Playground message, bound per mode.
+
+    A hosted control plane forwards each completion to its data plane, whose sandbox and file store serve it.
+    """
+    if config.is_hosted_mode:
+        return ForwardedToolOffer(config)
+    return LocalToolOffer(config)
+
+
+PlaygroundToolOfferDep = Annotated[PlaygroundToolOffer, Depends(get_playground_tool_offer)]
 
 
 async def get_current_identity(
@@ -1043,6 +1075,7 @@ def get_overview_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
+    workspace_listener: WorkspaceListenerDep,
 ) -> OverviewService:
     """Build the dashboard overview's summary service on the request's session.
 
@@ -1051,11 +1084,11 @@ def get_overview_service(
     """
     return OverviewService(
         OverviewRepository(db),
-        OrganizationService(db, membership_listener=None),
+        OrganizationService(db, membership_listener=None, workspace_listener=None),
         DeploymentUserService(db),
         # The listener is for writes; this service only reads, and the same
         # pairing is what `routes/workspaces.py` builds.
-        WorkspaceService(db, uow=uow, membership_listener=membership_listener),
+        WorkspaceService(db, uow=uow, membership_listener=membership_listener, workspace_listener=workspace_listener),
     )
 
 
@@ -1067,7 +1100,7 @@ def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Or
 
     It reads only. A membership write needs the listener this pairing leaves unset.
     """
-    return OrganizationService(db, membership_listener=None)
+    return OrganizationService(db, membership_listener=None, workspace_listener=None)
 
 
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
@@ -1078,7 +1111,7 @@ def get_budget_service(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> BudgetService:
     """Build the request's budget service on the request's Unit of Work."""
-    organizations = OrganizationService(db, membership_listener=None)
+    organizations = OrganizationService(db, membership_listener=None, workspace_listener=None)
     return BudgetService(
         uow,
         BudgetRepositories.on(uow),
@@ -1113,7 +1146,7 @@ def get_organization_guardrail_definition_service(
     """
     return OrganizationGuardrailDefinitionService(
         definitions=OrganizationGuardrailDefinitionRepository(uow),
-        organizations=OrganizationService(db, membership_listener=None),
+        organizations=OrganizationService(db, membership_listener=None, workspace_listener=None),
         uow=uow,
         build_state=organization_guardrail_runner.build_state,
         rebuild=organization_guardrail_runner.rebuild_definition,
@@ -1151,7 +1184,7 @@ def get_org_provider_model_service(
     return OrgProviderModelService(
         uow,
         config=config,
-        organizations=OrganizationService(db, membership_listener=None),
+        organizations=OrganizationService(db, membership_listener=None, workspace_listener=None),
         provider_keys=OrgProviderKeyService(db),
         org_pricing=OrganizationPricingService(db, config, model_provider=model_provider),
         models=OrgProviderKeyModelRepository(uow),
@@ -1196,7 +1229,7 @@ def get_web_search_key_service(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WebSearchKeyService:
     """Build the organization web search key service on the request's Unit of Work."""
-    organizations = OrganizationService(db, membership_listener=None)
+    organizations = OrganizationService(db, membership_listener=None, workspace_listener=None)
     return WebSearchKeyService(
         uow,
         keys=OrgWebSearchKeyRepository(uow),
@@ -1352,7 +1385,11 @@ async def _caller_organization_id(
     so an operator running several organizations behind one gateway works in the
     one they are currently in rather than across all of them (otari#817).
     """
-    return (await OrganizationService(db, membership_listener=None).get_active_organization_for_user(identity)).id
+    return (
+        await OrganizationService(
+            db, membership_listener=None, workspace_listener=None
+        ).get_active_organization_for_user(identity)
+    ).id
 
 
 CallerOrganization = Annotated[uuid.UUID, Depends(_caller_organization_id)]

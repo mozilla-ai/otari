@@ -50,7 +50,7 @@ async def _member(
 
 
 def _service(db: AsyncSession) -> OrganizationService:
-    return OrganizationService(db, membership_listener=None)
+    return OrganizationService(db, membership_listener=None, workspace_listener=None)
 
 
 @pytest.mark.asyncio

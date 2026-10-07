@@ -65,7 +65,7 @@ async def _workspace(db: AsyncSession, organization: Organization, *, name: str,
 
 
 def _service(db: AsyncSession) -> OrganizationService:
-    return OrganizationService(db, membership_listener=None)
+    return OrganizationService(db, membership_listener=None, workspace_listener=None)
 
 
 async def _roster(db: AsyncSession, caller: User) -> ActiveOrganizationMembersPublic:

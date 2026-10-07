@@ -13,7 +13,7 @@ no sandbox the deployment has not configured.
 No row means no narrowing.
 Reads and writes both require an owner or admin of the organization or of the workspace.
 The request path's read, with no identity and the workspace from the key, is
-``services/tenancy/workspace_code_execution_policy_service.resolve_workspace_code_execution_policy``.
+:class:`WorkspaceCodeExecutionPolicies`.
 """
 
 from __future__ import annotations
@@ -266,6 +266,34 @@ def read_code_execution_policy(answer: Mapping[str, Any]) -> ResolvedCodeExecuti
         tools=frozenset(tools) if tools is not None else None,
         executor=CodeExecutor.parse(executor),
     )
+
+
+class WorkspaceCodeExecutionPolicies:
+    """The policy each workspace's requests run under, read on the request path with no identity."""
+
+    def __init__(self, policies: WorkspaceCodeExecutionPolicyRepository) -> None:
+        self._policies = policies
+
+    async def resolve(self, workspace_id: uuid.UUID) -> ResolvedCodeExecutionPolicy | None:
+        """The workspace's stored policy, or ``None`` when it has none.
+
+        ``None`` and "a row that narrows nothing" are deliberately the same outcome
+        for the caller; the distinction only matters to the management surface,
+        which reports it as ``configured``.
+        """
+        policy = await self._policies.get(workspace_id)
+        if policy is None:
+            return None
+        return ResolvedCodeExecutionPolicy(
+            enabled=policy.enabled,
+            default_purpose_hint=policy.default_purpose_hint,
+            max_iterations=policy.max_iterations,
+            exec_timeout_s=policy.exec_timeout_s,
+            image=policy.image,
+            tools=frozenset(policy.tools) if policy.tools is not None else None,
+            # NOTE: a stored executor outside the vocabulary reads as no pin, so an old row does not fail every request.
+            executor=CodeExecutor.parse(policy.executor),
+        )
 
 
 class WorkspaceCodeExecutionPolicyService:

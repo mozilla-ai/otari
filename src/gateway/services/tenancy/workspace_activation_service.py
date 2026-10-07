@@ -224,7 +224,7 @@ class WorkspaceActivationService:
         self.db = db
         self.config = config
         self.key_format = key_format
-        self.organizations = OrganizationService(db, membership_listener=None)
+        self.organizations = OrganizationService(db, membership_listener=None, workspace_listener=None)
 
     # ------------------------------------------------------------------
     # Reads

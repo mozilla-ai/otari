@@ -77,7 +77,9 @@ from gateway.api.deps import (
     CurrentIdentity,
     FileServiceDep,
     ModelProviderPortDep,
+    PlaygroundToolOfferDep,
     ToolPortsDep,
+    WorkspaceCodeExecutionPoliciesDep,
     get_config,
     get_db,
     get_log_writer,
@@ -330,6 +332,8 @@ async def read_playground_tools(
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    offer: PlaygroundToolOfferDep,
+    code_execution_policies: WorkspaceCodeExecutionPoliciesDep,
     workspace_id: Annotated[uuid.UUID | None, _WORKSPACE_QUERY] = None,
 ) -> PlaygroundToolsResponse:
     """The gateway-run tools the caller's workspace may attach to a message.
@@ -342,7 +346,13 @@ async def read_playground_tools(
     something the request path would refuse.
     """
     resolved = await playground_service.resolve_playground_workspace(db, identity=identity, workspace_id=workspace_id)
-    availability = await playground_service.resolve_tool_availability(db, config=config, workspace_id=resolved)
+    availability = await playground_service.resolve_tool_availability(
+        db,
+        config=config,
+        offer=offer,
+        code_execution_policies=code_execution_policies,
+        workspace_id=resolved,
+    )
     return PlaygroundToolsResponse(
         web_search=_tool_status(availability.web_search),
         code_execution=_tool_status(availability.code_execution),
@@ -364,9 +374,9 @@ async def read_playground_tools(
 # ==============================================================================
 
 
-async def _require_playground_files(config: Annotated[GatewayConfig, Depends(get_config)]) -> None:
+async def _require_playground_files(offer: PlaygroundToolOfferDep) -> None:
     """Answer as the unmounted ``/files`` routes do wherever the composer offers no attachments."""
-    if not playground_service.file_availability(config).enabled:
+    if not offer.files().enabled:
         raise FilesDisabledError
 
 

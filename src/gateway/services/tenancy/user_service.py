@@ -269,7 +269,7 @@ async def create_user_for_signup(
     password: str,
     uow: UnitOfWork,
     membership_listener: MembershipListener,
-    workspace_listener: WorkspaceListener | None = None,
+    workspace_listener: WorkspaceListener,
     full_name: str | None = None,
     terms_accepted: bool = False,
 ) -> User | None:

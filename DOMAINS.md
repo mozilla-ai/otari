@@ -91,7 +91,13 @@ provisioning, the setup guide, and the gateway's billing users.
 It defines `MembershipListener`, the interface budgets implements to react to a
 membership change without organizations importing budgets. The listener writes
 through the caller's Unit of Work, so a service that changes membership is built
-with one and makes the change inside its block. It also owns
+with one and makes the change inside its block.
+
+It also defines `WorkspaceListener`, the interface another domain implements to
+set up a workspace in the transaction that creates it. Every service that
+creates a workspace takes one, with no default, and the binding is chosen per
+mode: a hosted control plane gets tools' `CodeExecutionWorkspaceDefaults`, and
+every other deployment `NullWorkspaceListener`. It also owns
 `models/users.py`, `repositories/users_repository.py` and
 `services/workspace_scope.py`.
 
@@ -183,7 +189,9 @@ among them (`org_web_search_keys`, `workspace_web_search_key_overrides`).
 
 `code_execution_policy_port.py` names where a workspace's code execution
 policy comes from, in the same two ways. The policy says who may run code and
-within which limits, and neither implementation runs code.
+within which limits, and neither implementation runs code. The local one reads
+the row through `WorkspaceCodeExecutionPolicies`, the same read the request
+path and the Playground make.
 
 **The tool test.** A tool is something the model calls during a request. The
 domain holds the registry, the loop and each tool's settings. A capability the

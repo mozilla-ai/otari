@@ -74,7 +74,7 @@ async def ensure_bootstrap_identity(
     *,
     uow: UnitOfWork,
     membership_listener: MembershipListener,
-    workspace_listener: WorkspaceListener | None = None,
+    workspace_listener: WorkspaceListener,
 ) -> User:
     """Return the operator identity, provisioning the tenancy root on first call.
 
@@ -221,7 +221,7 @@ async def _provision(
     *,
     uow: UnitOfWork,
     membership_listener: MembershipListener,
-    workspace_listener: WorkspaceListener | None,
+    workspace_listener: WorkspaceListener,
 ) -> User:
     """Create the default organization, workspace, operator identity, and memberships.
 
@@ -262,8 +262,7 @@ async def _provision(
                 organization_id=organization.id,
                 created_by_user_id=operator.id,
             )
-            if workspace_listener is not None:
-                await workspace_listener.workspace_created(workspace.id)
+            await workspace_listener.workspace_created(workspace.id)
         # Serialized against a concurrent ``create_default`` on this workspace, via
         # the same lock ``WorkspaceService.add_member`` takes and for the reason
         # ``WorkspaceRepository.lock`` gives: this path reads the workspace's

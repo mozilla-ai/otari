@@ -26,25 +26,31 @@ from gateway.services.budgets import BudgetMembershipListener, BudgetService
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener, WorkspaceListener
 
 
 class MembershipWrites(TypedDict):
-    """What a service that changes membership is built with: a Unit of Work and the listener writing through it."""
+    """What a service that changes membership is built with: a Unit of Work and the listeners writing through it."""
 
     uow: UnitOfWork
     membership_listener: MembershipListener
+    workspace_listener: WorkspaceListener
 
 
 def membership_writes(db: AsyncSession) -> MembershipWrites:
-    """Build a Unit of Work over ``db`` and the budget listener on it, as the request path does."""
+    """Build a Unit of Work over ``db`` and the listeners on it, as a standalone deployment's request path does."""
     uow = UnitOfWork(db)
-    return {"uow": uow, "membership_listener": BudgetMembershipListener(BudgetRepositories.on(uow))}
+    return {
+        "uow": uow,
+        "membership_listener": BudgetMembershipListener(BudgetRepositories.on(uow)),
+        "workspace_listener": NullWorkspaceListener(),
+    }
 
 
 def budget_service(db: AsyncSession) -> BudgetService:
     """Build the budget service over ``db``, as ``get_budget_service`` does."""
     uow = UnitOfWork(db)
-    organizations = OrganizationService(db, membership_listener=None)
+    organizations = OrganizationService(db, membership_listener=None, workspace_listener=None)
     return BudgetService(
         uow,
         BudgetRepositories.on(uow),

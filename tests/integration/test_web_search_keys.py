@@ -313,7 +313,7 @@ def test_an_archived_key_is_not_searched_with(
 
 
 def _service(db: AsyncSession) -> WebSearchKeyService:
-    organizations = OrganizationService(db, membership_listener=None)
+    organizations = OrganizationService(db, membership_listener=None, workspace_listener=None)
     uow = UnitOfWork(db)
     return WebSearchKeyService(
         uow,

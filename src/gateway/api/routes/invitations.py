@@ -42,7 +42,7 @@ def get_organization_service(
     public, one is master-key gated), and importing the dependency alone
     across that boundary is not worth it for one function.
     """
-    return OrganizationService(db, membership_listener=membership_listener, uow=uow)
+    return OrganizationService(db, membership_listener=membership_listener, uow=uow, workspace_listener=None)
 
 
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]

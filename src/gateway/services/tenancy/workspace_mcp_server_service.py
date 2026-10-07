@@ -343,7 +343,7 @@ class WorkspaceMcpServerService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.organizations = OrganizationService(db, membership_listener=None)
+        self.organizations = OrganizationService(db, membership_listener=None, workspace_listener=None)
 
     async def _require_management(self, user: User, workspace_id: uuid.UUID) -> uuid.UUID:
         """Resolve the workspace and confirm the caller may manage it.

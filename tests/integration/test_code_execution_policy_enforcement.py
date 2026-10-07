@@ -27,6 +27,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.core.config import API_ROOT
+from gateway.services.tools import WorkspaceCodeExecutionPolicies
 
 _SANDBOX_URL = "http://127.0.0.1:9999/sandbox"
 _REQUEST = {
@@ -416,10 +417,7 @@ def test_a_policy_read_that_fails_releases_the_budget_reservation(
     async def failing_resolve(*_args: Any, **_kwargs: Any) -> None:
         raise SQLAlchemyError("connection lost mid-admission")
 
-    monkeypatch.setattr(
-        "gateway.api.routes._pipeline.resolve_workspace_code_execution_policy",
-        failing_resolve,
-    )
+    monkeypatch.setattr(WorkspaceCodeExecutionPolicies, "resolve", failing_resolve)
     # TestClient re-raises a server exception rather than rendering a 500, so the
     # failure arrives here; what matters is the state it left behind.
     with pytest.raises(SQLAlchemyError):

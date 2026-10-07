@@ -85,7 +85,7 @@ def _service(db: AsyncSession) -> OrganizationGuardrailDefinitionService:
     uow = UnitOfWork(db)
     return OrganizationGuardrailDefinitionService(
         definitions=OrganizationGuardrailDefinitionRepository(uow),
-        organizations=OrganizationService(db, membership_listener=None),
+        organizations=OrganizationService(db, membership_listener=None, workspace_listener=None),
         uow=uow,
         build_state=runner.build_state,
         rebuild=runner.rebuild_definition,

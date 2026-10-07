@@ -29,6 +29,7 @@ from gateway.services.tools._code_execution_declarations import (
     resolve_code_executor_preference,
 )
 from gateway.services.tools._code_execution_policy import (
+    WorkspaceCodeExecutionPolicies,
     WorkspaceCodeExecutionPolicyPublic,
     WorkspaceCodeExecutionPolicyService,
     WorkspaceCodeExecutionPolicyUpdate,
@@ -68,6 +69,7 @@ from gateway.services.tools._workspace_defaults import CodeExecutionWorkspaceDef
 __all__ = [
     "MAX_TOOL_ITERATIONS_CAP",
     "CodeExecutionWorkspaceDefaults",
+    "WorkspaceCodeExecutionPolicies",
     "WorkspaceCodeExecutionPolicyPublic",
     "WorkspaceCodeExecutionPolicyService",
     "WorkspaceCodeExecutionPolicyUpdate",

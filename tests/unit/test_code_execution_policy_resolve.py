@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -187,17 +187,16 @@ async def test_a_local_scope_without_a_workspace_is_a_resolution_failure() -> No
 
 @pytest.mark.asyncio
 async def test_a_local_scope_reads_the_workspace_row() -> None:
-    session = MagicMock()
     workspace_id = uuid.uuid4()
     stored = ResolvedCodeExecutionPolicy(
         enabled=False, default_purpose_hint=None, max_iterations=None, exec_timeout_s=None, image=None, tools=None
     )
-    read = AsyncMock(return_value=stored)
+    policies = MagicMock()
+    policies.resolve = AsyncMock(return_value=stored)
 
-    with patch("gateway.adapters.code_execution_policy_adapter.resolve_workspace_code_execution_policy", read):
-        policy = await LocalCodeExecutionPolicy(session).resolve(
-            CodeExecutionPolicyScope(workspace_id=workspace_id, user_token="tk_ignored")
-        )
+    policy = await LocalCodeExecutionPolicy(policies).resolve(
+        CodeExecutionPolicyScope(workspace_id=workspace_id, user_token="tk_ignored")
+    )
 
     assert policy is stored
-    read.assert_awaited_once_with(session, workspace_id)
+    policies.resolve.assert_awaited_once_with(workspace_id)

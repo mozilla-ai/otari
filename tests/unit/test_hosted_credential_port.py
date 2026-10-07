@@ -98,7 +98,7 @@ class RecordingPort:
 
 def _plain_build_port() -> ModelProviderPort:
     """The adapter a build with no overlay actually runs, via the composition root."""
-    return build_container().resolve(ModelProviderPort, None)
+    return build_container(workspace_listener=None).resolve(ModelProviderPort, None)
 
 
 def _ctx(

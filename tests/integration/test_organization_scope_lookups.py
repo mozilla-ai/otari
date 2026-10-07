@@ -45,7 +45,7 @@ async def _identity(db: AsyncSession, organization: Organization) -> User:
 
 
 def _service(db: AsyncSession) -> OrganizationService:
-    return OrganizationService(db, membership_listener=None)
+    return OrganizationService(db, membership_listener=None, workspace_listener=None)
 
 
 async def test_a_workspace_resolves_to_its_organization(async_db: AsyncSession) -> None:

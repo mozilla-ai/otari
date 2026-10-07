@@ -23,6 +23,7 @@ from gateway.api.deps import (
     build_file_service,
     build_idempotency_service,
     get_membership_listener,
+    get_workspace_code_execution_policies,
     get_workspace_listener,
     get_workspace_search_keys,
     set_config,
@@ -1117,6 +1118,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         membership_listener=get_membership_listener,
         workspace_listener=functools.partial(get_workspace_listener, config=config),
         search_keys=get_workspace_search_keys,
+        code_execution_policies=get_workspace_code_execution_policies,
     )
     install_rate_limits(app, config)
 

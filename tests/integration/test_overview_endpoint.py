@@ -305,7 +305,7 @@ async def _workspace_in(db: AsyncSession, organization_id: uuid.UUID, *, name: s
 def _service(db: AsyncSession) -> OverviewService:
     return OverviewService(
         OverviewRepository(db),
-        OrganizationService(db, membership_listener=None),
+        OrganizationService(db, membership_listener=None, workspace_listener=None),
         DeploymentUserService(db),
         WorkspaceService(db, **membership_writes(db)),
     )

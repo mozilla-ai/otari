@@ -28,6 +28,7 @@ from gateway.services.budgets import BudgetMembershipListener
 from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 from .tenancy_helpers import create_budget, create_member, create_organization, create_workspace, membership_writes
 
@@ -142,9 +143,9 @@ async def test_add_member_announces_the_new_member(async_db: AsyncSession) -> No
     workspace = await create_workspace(async_db, organization, name="Engineering", owner=owner)
     listener = RecordingListener()
 
-    added = await WorkspaceService(async_db, uow=UnitOfWork(async_db), membership_listener=listener).add_member(
-        user=owner, workspace_id=workspace.id, user_id=joiner.id
-    )
+    added = await WorkspaceService(
+        async_db, uow=UnitOfWork(async_db), membership_listener=listener, workspace_listener=NullWorkspaceListener()
+    ).add_member(user=owner, workspace_id=workspace.id, user_id=joiner.id)
 
     assert listener.joined == [added.id]
 
@@ -154,9 +155,9 @@ async def test_create_workspace_announces_the_creator(async_db: AsyncSession) ->
     owner = await create_member(async_db, organization, role="owner", full_name="Owner")
     listener = RecordingListener()
 
-    created = await WorkspaceService(async_db, uow=UnitOfWork(async_db), membership_listener=listener).create_workspace(
-        user=owner, workspace_create=WorkspaceCreate(name="Engineering")
-    )
+    created = await WorkspaceService(
+        async_db, uow=UnitOfWork(async_db), membership_listener=listener, workspace_listener=NullWorkspaceListener()
+    ).create_workspace(user=owner, workspace_create=WorkspaceCreate(name="Engineering"))
 
     assert listener.joined == [await _membership_id(async_db, created.id, owner.id)]
 
@@ -167,7 +168,9 @@ async def test_remove_member_announces_the_removal_before_the_row_goes(async_db:
     leaver = await create_member(async_db, organization, role="member", full_name="Leaver")
     workspace = await create_workspace(async_db, organization, name="Engineering", owner=owner)
     listener = RecordingListener()
-    service = WorkspaceService(async_db, uow=UnitOfWork(async_db), membership_listener=listener)
+    service = WorkspaceService(
+        async_db, uow=UnitOfWork(async_db), membership_listener=listener, workspace_listener=NullWorkspaceListener()
+    )
     added = await service.add_member(user=owner, workspace_id=workspace.id, user_id=leaver.id)
 
     await service.remove_member(user=owner, workspace_id=workspace.id, user_id=leaver.id)
@@ -183,9 +186,9 @@ async def test_delete_workspace_announces_the_workspace_and_its_members(async_db
     doomed_membership = await _membership_id(async_db, doomed.id, owner.id)
     listener = RecordingListener()
 
-    await WorkspaceService(async_db, uow=UnitOfWork(async_db), membership_listener=listener).delete_workspace(
-        user=owner, workspace_id=doomed.id
-    )
+    await WorkspaceService(
+        async_db, uow=UnitOfWork(async_db), membership_listener=listener, workspace_listener=NullWorkspaceListener()
+    ).delete_workspace(user=owner, workspace_id=doomed.id)
 
     assert listener.deleted == [(doomed.id, [doomed_membership])]
 
@@ -209,7 +212,7 @@ async def test_workspace_assignment_announces_new_and_revived_members_only(async
     listener = RecordingListener()
 
     await OrganizationService(
-        async_db, uow=UnitOfWork(async_db), membership_listener=listener
+        async_db, uow=UnitOfWork(async_db), membership_listener=listener, workspace_listener=None
     ).create_active_organization_member_for_user(
         user=owner,
         request=ActiveOrganizationMemberCreateRequest(
@@ -234,7 +237,9 @@ async def test_an_organization_service_without_a_listener_refuses_membership_cha
     workspace = await create_workspace(async_db, organization, name="Engineering", owner=owner)
 
     with pytest.raises(RuntimeError):
-        await OrganizationService(async_db, membership_listener=None).create_active_organization_member_for_user(
+        await OrganizationService(
+            async_db, membership_listener=None, workspace_listener=None
+        ).create_active_organization_member_for_user(
             user=owner,
             request=ActiveOrganizationMemberCreateRequest(
                 email="new-hire@example.test",
@@ -247,7 +252,9 @@ async def test_an_organization_service_without_a_listener_refuses_membership_cha
 async def test_bootstrap_provisioning_announces_the_operator_membership(async_db: AsyncSession) -> None:
     listener = RecordingListener()
 
-    operator = await ensure_bootstrap_identity(async_db, uow=UnitOfWork(async_db), membership_listener=listener)
+    operator = await ensure_bootstrap_identity(
+        async_db, uow=UnitOfWork(async_db), membership_listener=listener, workspace_listener=NullWorkspaceListener()
+    )
 
     memberships = (
         (await async_db.execute(select(WorkspaceMember).where(col(WorkspaceMember.user_id) == operator.id)))

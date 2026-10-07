@@ -426,7 +426,6 @@ SERVICE_DATABASE_IMPORT_BASELINE = (
     "gateway/services/tenancy/user_service.py",
     "gateway/services/tenancy/webauthn_service.py",
     "gateway/services/tenancy/workspace_activation_service.py",
-    "gateway/services/tenancy/workspace_code_execution_policy_service.py",
     "gateway/services/tenancy/workspace_mcp_server_service.py",
     "gateway/services/tenancy/workspace_service.py",
     "gateway/services/tenancy/workspace_web_search_service.py",
@@ -732,10 +731,7 @@ MODE_READS = ("configured_mode", "effective_mode", "is_hosted_mode", "is_hybrid_
 MODE_FUNCTION = "deployment_for"
 # The services that still read the deployment's mode.
 # An entry that stops reading it fails the check until it is removed, so the list only shrinks.
-SERVICE_MODE_READ_BASELINE = (
-    "gateway/services/playground_service.py",
-    "gateway/services/provider_kwargs.py",
-)
+SERVICE_MODE_READ_BASELINE = ("gateway/services/provider_kwargs.py",)
 
 
 def _mode_reads(tree: ast.Module) -> list[tuple[int, str]]:
@@ -1140,7 +1136,6 @@ DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
         "verification_email.py",
         "webauthn_service.py",
         "workspace_activation_service.py",
-        "workspace_code_execution_policy_service.py",
         "workspace_listener.py",
         "workspace_mcp_server_service.py",
         "workspace_service.py",
