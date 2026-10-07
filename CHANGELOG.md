@@ -4,6 +4,28 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.17.0](https://github.com/mozilla-ai/otari/releases/tag/v0.17.0) - 2026-10-07
+
+
+
+### Bug Fixes
+
+- **cli:** Run a user-level verifier that links to a script the user owns in [#2052](https://github.com/mozilla-ai/otari/pull/2052) by [@peteski22](https://github.com/peteski22) ([`afcc10f`](https://github.com/mozilla-ai/otari/commit/afcc10f50a2ad4a72a8e2b144f42fd425cbfab74))
+- **catalog:** Read any known vendor from a dotted model id in [#2060](https://github.com/mozilla-ai/otari/pull/2060) by [@peteski22](https://github.com/peteski22) ([`a7b23d0`](https://github.com/mozilla-ai/otari/commit/a7b23d0f4abcd4ebd4deb38d7459ef51c82a9599))
+
+
+### Features
+
+- **usage:** Record request tags from metadata and query spend by them in [#2055](https://github.com/mozilla-ai/otari/pull/2055) by [@daavoo](https://github.com/daavoo) ([`93ad5f9`](https://github.com/mozilla-ai/otari/commit/93ad5f9a3738a05b1d59092aaf38233f78bf1754))
+- **scripts:** Refuse listener defaults and add CodeRabbit review rules in [#2050](https://github.com/mozilla-ai/otari/pull/2050) by [@peteski22](https://github.com/peteski22) ([`b05d4f9`](https://github.com/mozilla-ai/otari/commit/b05d4f962cf23ca51da99a93024d1f39edcbc8fd))
+- **routing:** Build the question that picks a subagent's model by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`2fc8e58`](https://github.com/mozilla-ai/otari/commit/2fc8e582952b00007aa1dc7a8932aa10cc344be3))
+- **routing:** Serve subagent model recommendations by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`7c86682`](https://github.com/mozilla-ai/otari/commit/7c866825285e6eb69089649c00d9b240fd121e22))
+- **plugins:** Ship otari-router as a claude code plugin by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`630cd72`](https://github.com/mozilla-ai/otari/commit/630cd724109f224ba6e9764d181f3605f5e6dc83))
+- **cli:** Let the judge cap be set, and report a judge it skips in [#2069](https://github.com/mozilla-ai/otari/pull/2069) by [@peteski22](https://github.com/peteski22) ([`e101fb4`](https://github.com/mozilla-ai/otari/commit/e101fb41ef2870949ea79055aceea63ea492e2c0))
+- **cli:** Let a gate accept a guardrail warning it intends in [#2068](https://github.com/mozilla-ai/otari/pull/2068) by [@peteski22](https://github.com/peteski22) ([`b9c1b93`](https://github.com/mozilla-ai/otari/commit/b9c1b930db4c3408589f87949c452f296760e710))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.16.0...v0.17.0
 ## [0.16.0](https://github.com/mozilla-ai/otari/releases/tag/v0.16.0) - 2026-10-07
 
 
