@@ -60,7 +60,10 @@ export function LoginPageShell({ children }: { children: ReactNode }) {
           <ThemeIcon aria-hidden />
         </IconButton>
       </header>
-      <main className="relative isolate flex flex-1 flex-col items-center justify-center px-4 py-4">
+      {/* Pinned to the top rather than centered: the card changes height when a
+            folded form opens or an error appears, and a centered card would
+            move its heading with every change. */}
+      <main className="relative isolate flex flex-1 flex-col items-center px-4 py-4 md:pt-15">
         <LoginBackground panelRef={panelRef} config={savedBackground} />
         <div
           ref={panelRef}

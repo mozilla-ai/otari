@@ -1161,6 +1161,10 @@ describe("content text wears a type role", () => {
     // it. The auth pages' centered text was ruled this explicitly.
     ["features/auth/Login.tsx", "the divider row and the page's footer prose"],
     [
+      "features/auth/AuthProviderButtons.tsx",
+      "the divider row between the provider rows and the address form",
+    ],
+    [
       "features/invitations/AcceptInvitationPage.tsx",
       "the centered next-step prose, page-referent",
     ],
