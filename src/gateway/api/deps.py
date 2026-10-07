@@ -43,7 +43,7 @@ from gateway.repositories.files import FileRepositories
 from gateway.repositories.identity import IdentityRepositories
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
-from gateway.repositories.pricing import ModelPricingRepository
+from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
 from gateway.repositories.providers import (
     HostedProviderModelRepository,
     HostedProviderRepository,
@@ -1557,7 +1557,9 @@ def get_hosted_provider_service(
         config=config,
         providers=HostedProviderRepository(uow),
         models=HostedProviderModelRepository(uow),
-        pricing=DeploymentPricingService(uow, pricing=ModelPricingRepository(uow)),
+        pricing=DeploymentPricingService(
+            uow, pricing=ModelPricingRepository(uow), overrides=OrganizationModelPricingRepository(uow)
+        ),
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
     )
 
