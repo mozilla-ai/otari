@@ -13,6 +13,7 @@ from typing import Any, get_args
 
 from any_search._api import AnySearch, asearch
 from any_search._errors import AnySearchError
+from any_search._logging import install as install_log_filter
 from any_search._types import SearchResult, TimeRange
 
 
@@ -75,6 +76,7 @@ def _render(result: SearchResult, *, as_json: bool, raw: bool) -> str:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command; return its exit status."""
+    install_log_filter()
     parser = _parser()
     args = parser.parse_args(argv)
     options = dict(args.option)

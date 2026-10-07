@@ -1,6 +1,8 @@
 """The filter that keeps provider URLs out of httpx's log."""
 
 import logging
+import subprocess
+import sys
 from typing import Any
 
 import httpx
@@ -34,6 +36,7 @@ class _Calling(AnySearch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("log_filter")
 async def test_a_request_made_during_a_provider_call_is_logged_without_its_url(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -47,6 +50,7 @@ async def test_a_request_made_during_a_provider_call_is_logged_without_its_url(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("log_filter")
 async def test_a_request_made_outside_one_keeps_its_url(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG, logger="httpx")
     async with _client() as client:
@@ -55,6 +59,7 @@ async def test_a_request_made_outside_one_keeps_its_url(caplog: pytest.LogCaptur
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("log_filter")
 async def test_search_runs_inside_a_provider_call(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG, logger="httpx")
     async with _client() as client, _Calling(client=client) as provider:
@@ -63,6 +68,26 @@ async def test_search_runs_inside_a_provider_call(caplog: pytest.LogCaptureFixtu
     assert "sentinel-query" not in message
 
 
+def test_importing_the_package_installs_no_filter() -> None:
+    code = (
+        "import logging, any_search, any_search.cli; "
+        "from any_search._logging import RedactProviderUrls; "
+        "print(any(isinstance(f, RedactProviderUrls) for f in logging.getLogger('httpx').filters))"
+    )
+    answer = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert answer.stdout.strip() == "False"
+
+
+@pytest.mark.asyncio
+async def test_without_the_filter_a_provider_call_keeps_its_url(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.DEBUG, logger="httpx")
+    async with _client() as client:
+        with provider_call("p"):
+            await client.get(URL)
+    assert URL in _httpx_messages(caplog)[0]
+
+
+@pytest.mark.usefixtures("log_filter")
 def test_the_filter_is_installed_once() -> None:
     install()
     filters = logging.getLogger("httpx").filters

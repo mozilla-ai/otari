@@ -1,9 +1,11 @@
 """The any-search command."""
 
 import json
+import logging
 
 import pytest
 
+from any_search._logging import RedactProviderUrls
 from any_search.cli import main
 from any_search.providers.fake import CANNED_HITS
 
@@ -56,3 +58,13 @@ def test_a_usage_error_exits_2(argv: list[str]) -> None:
     with pytest.raises(SystemExit) as exited:
         main(argv)
     assert exited.value.code == 2
+
+
+def _log_filter_installed() -> bool:
+    return any(isinstance(existing, RedactProviderUrls) for existing in logging.getLogger("httpx").filters)
+
+
+def test_the_command_installs_the_log_filter() -> None:
+    assert not _log_filter_installed()
+    assert main(["fake", "query"]) == 0
+    assert _log_filter_installed()

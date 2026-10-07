@@ -15,6 +15,7 @@ from any_search._errors import (
     UnsupportedParameterError,
     UnsupportedProviderError,
 )
+from any_search._logging import install as install_log_filter
 from any_search._types import OptionSpec, ProviderMetadata, SearchError, SearchHit, SearchResult, TimeRange
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "UnsupportedParameterError",
     "UnsupportedProviderError",
     "asearch",
+    "install_log_filter",
 ]

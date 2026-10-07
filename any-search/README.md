@@ -59,9 +59,18 @@ library accepts it from anyone, and enforcing that is the host's job).
 ## Logging
 
 The query is the user's content, and some providers put it, or the key, in the request URL, which
-httpx logs at INFO. Every provider call runs with a context variable set, and a filter installed on
-the `httpx` logger when the package is imported replaces the URL with `<redacted>` in records
-emitted during one. Requests made by other code in the process are left alone.
+httpx logs at INFO. Every provider call runs with a context variable set, and a filter on the
+`httpx` logger replaces the URL with `<redacted>` in records emitted during one. Requests made by
+other code in the process are left alone.
+
+Importing the package does not install the filter, so it never changes a process's logging on its
+own. A host calls `install_log_filter()` once at startup; the command line installs it itself.
+
+```python
+from any_search import install_log_filter
+
+install_log_filter()
+```
 
 ## The command line
 
