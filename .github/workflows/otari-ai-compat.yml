@@ -1,0 +1,134 @@
+name: otari-ai Compatibility
+
+# Asks mozilla-ai/otari-ai to run its backend unit suite against an otari
+# commit, so a change that breaks the overlay is seen before the release pin
+# bump. otari-ai reports back as the `otari-ai compatibility` commit status;
+# the run it links to is private, so anyone else sees only the state.
+#
+# Runs on every push to main, and on a pull request when someone with write
+# access comments `/otari-ai`. The suite runs the PR's code inside the private
+# repository, so the comment is the decision that the code is safe to run
+# there: read a fork's diff before giving it.
+#
+# issue_comment runs this file from main with secrets available, even on a PR
+# from a fork. No job here checks out the PR, and the commenter's access is
+# checked before the dispatch secret is reachable.
+on:
+  push:
+    branches: [main]
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  resolve:
+    # A cheap pre-filter so ordinary comments do not start a runner.
+    # author_association is not a permission check, so the step below is the
+    # real gate.
+    if: >-
+      github.event_name == 'push' || (
+        github.event.issue.pull_request &&
+        github.event.issue.state == 'open' &&
+        startsWith(github.event.comment.body, '/otari-ai') &&
+        (
+          github.event.comment.author_association == 'OWNER' ||
+          github.event.comment.author_association == 'MEMBER' ||
+          github.event.comment.author_association == 'COLLABORATOR'
+        )
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      sha: ${{ steps.target.outputs.sha }}
+      ref: ${{ steps.target.outputs.ref }}
+    steps:
+      - name: Require write access
+        if: github.event_name == 'issue_comment'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+        run: |
+          permission=$(gh api "repos/$REPO/collaborators/$COMMENTER/permission" --jq .permission)
+          case "$permission" in
+            admin|write) echo "$COMMENTER has $permission access" ;;
+            *) echo "::error::$COMMENTER has '$permission' access; /otari-ai needs write"; exit 1 ;;
+          esac
+
+      # The PR head is resolved now, so the check covers the commit that
+      # existed when the command was given, not whatever is pushed while it
+      # runs. otari-ai fetches it by ref, which reaches a fork's commit too.
+      - name: Resolve the commit
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.issue.number }}
+          PUSHED: ${{ github.sha }}
+        run: |
+          if [ "$EVENT" = "push" ]; then
+            echo "sha=$PUSHED" >> "$GITHUB_OUTPUT"
+            echo "ref=refs/heads/main" >> "$GITHUB_OUTPUT"
+          else
+            sha=$(gh pr view "$PR" -R "$REPO" --json headRefOid --jq .headRefOid)
+            echo "sha=$sha" >> "$GITHUB_OUTPUT"
+            echo "ref=refs/pull/$PR/head" >> "$GITHUB_OUTPUT"
+          fi
+
+  dispatch:
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      statuses: write
+    steps:
+      - name: Mark the check pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+        run: |
+          gh api -X POST "repos/$REPO/statuses/$SHA" \
+            -f state=pending \
+            -f context="otari-ai compatibility" \
+            -f description="Queued in otari-ai"
+
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.PLATFORM_DISPATCH_APP_CLIENT_ID }}
+          private-key: ${{ secrets.PLATFORM_DISPATCH_APP_PRIVATE_KEY }}
+          owner: mozilla-ai
+          repositories: otari-ai
+          # A repository dispatch needs write access to contents.
+          permission-contents: write
+
+      - name: Dispatch the check to otari-ai
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+          REF: ${{ needs.resolve.outputs.ref }}
+        run: |
+          jq -nc --arg sha "$SHA" --arg ref "$REF" \
+            '{event_type:"otari-compat-check",client_payload:{sha:$sha,ref:$ref}}' \
+            | gh api -X POST /repos/mozilla-ai/otari-ai/dispatches --input -
+
+      # Without this, a failed dispatch leaves the status pending forever.
+      - name: Mark the check errored
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+        run: |
+          gh api -X POST "repos/$REPO/statuses/$SHA" \
+            -f state=error \
+            -f context="otari-ai compatibility" \
+            -f description="Could not reach otari-ai"

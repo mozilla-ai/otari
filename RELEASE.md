@@ -146,6 +146,11 @@ release PR body. It does not stop the release.
   dispatch needs. `otari-docker.yml` identifies the App with the secret
   `PLATFORM_DISPATCH_APP_ID`. `otari-tag-release.yml` identifies it with
   `PLATFORM_DISPATCH_APP_CLIENT_ID` (a repository variable, not a secret).
+  `otari-ai-compat.yml` uses the same App and variable to ask otari-ai to run
+  its backend suite against a commit here, on every push to `main` and when
+  someone with write access comments `/otari-ai` on a pull request. otari-ai
+  posts the result back as the `otari-ai compatibility` commit status; it
+  holds the App that can write that status, and its `RELEASE.md` names it.
 - `RELEASE_APP_CLIENT_ID` (a repository variable, not a secret) and
   `RELEASE_APP_PRIVATE_KEY`, used by `otari-release.yml` and
   `otari-tag-release.yml`. They identify the `otari-bot` GitHub App, org-owned
