@@ -6,7 +6,7 @@ lands in a column, so the service hands these repositories encrypted payloads.
 """
 
 import uuid
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any, Never, cast
 
 from sqlalchemy import CursorResult, delete, func, select
@@ -178,19 +178,22 @@ class HostedProviderModelRepository(BaseRepository[HostedProviderModel, Never, N
             served.setdefault(provider, set()).add(model)
         return served
 
-    async def create_many(self, rows: Sequence[HostedProviderModel]) -> Sequence[HostedProviderModel]:
-        """Stage several offered rows at once.
+    async def create_many(
+        self, provider: str, names: Sequence[str], *, enabled: Mapping[str, bool]
+    ) -> Sequence[HostedProviderModel]:
+        """Stage one offered row per name, switched on where ``enabled`` says so.
 
         Raises:
             HostedModelConflict: one of these models is already offered here.
         """
-        if not rows:
+        if not names:
             return []
+        rows = [HostedProviderModel(provider=provider, model=name, enabled=enabled.get(name, True)) for name in names]
         self.db.add_all(rows)
         try:
             await self.db.flush()
         except IntegrityError as exc:
-            raise HostedModelConflict(rows[0].model) from exc
+            raise HostedModelConflict(names[0]) from exc
         return rows
 
     async def save(self, row: HostedProviderModel) -> HostedProviderModel:

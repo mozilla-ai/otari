@@ -75,12 +75,9 @@ class HostedOffers:
             keys[name]: default for name, default in defaults.items() if name in keys and keys[name] not in stored
         }
         await self.pricing.store_defaults(seeded, now)
-        rows = [
-            HostedProviderModel(provider=provider, model=name, enabled=keys[name] in stored or keys[name] in seeded)
-            for name in names
-        ]
+        enabled = {name: keys[name] in stored or keys[name] in seeded for name in names}
         try:
-            return await self.models.create_many(rows)
+            return await self.models.create_many(provider, names, enabled=enabled)
         except HostedModelConflict as conflict:
             raise HostedModelAlreadyOfferedError(provider, conflict.model) from conflict
 

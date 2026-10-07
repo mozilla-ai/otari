@@ -12,7 +12,7 @@ and its roster still has to live somewhere. A seeded rate is told from a chosen
 one by the price version's ``origin``, so the roster carries no timestamp.
 
 Revision ID: e4410dfaf0db
-Revises: d4f7a2b9e6c1
+Revises: b7d9f1a3c5e8
 Create Date: 2026-10-06
 """
 
@@ -22,7 +22,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "e4410dfaf0db"
-down_revision: str | Sequence[str] | None = "d4f7a2b9e6c1"
+down_revision: str | Sequence[str] | None = "b7d9f1a3c5e8"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

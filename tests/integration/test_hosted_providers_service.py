@@ -33,7 +33,7 @@ from gateway.models.pricing import API_ORIGIN, SEED_ORIGIN, ModelPricing, Organi
 from gateway.models.providers import HostedProvider, HostedProviderModel
 from gateway.models.secret_fields import REDACTED_VALUE
 from gateway.models.tenancy import Organization
-from gateway.repositories.pricing import ModelPricingRepository
+from gateway.repositories.pricing import ModelPricingRepository, OrganizationModelPricingRepository
 from gateway.repositories.providers import HostedProviderModelRepository, HostedProviderRepository
 from gateway.repositories.tenancy import OrganizationRepository, OrgProviderKeyRepository
 from gateway.schemas.providers import (
@@ -71,7 +71,9 @@ def _service(db: AsyncSession, config: GatewayConfig | None = None) -> HostedPro
         config=config or GatewayConfig(),
         providers=HostedProviderRepository(uow),
         models=HostedProviderModelRepository(uow),
-        pricing=DeploymentPricingService(uow, pricing=ModelPricingRepository(uow)),
+        pricing=DeploymentPricingService(
+            uow, pricing=ModelPricingRepository(uow), overrides=OrganizationModelPricingRepository(uow)
+        ),
         live_byo_pairs=OrgProviderKeyRepository(uow).live_provider_pairs,
     )
 
