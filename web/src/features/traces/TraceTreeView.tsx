@@ -2,13 +2,13 @@ import { useMemo, useState } from "react"
 import { FiChevronRight } from "react-icons/fi"
 
 import { IconButton } from "@/design-system/actions/IconButton"
-import { Chip } from "@/design-system/indicators/Chip"
 import { formatCost, formatNumber } from "@/shared/helpers/format"
 
 import { formatDuration } from "./format"
+import { LevelChip } from "./LevelChip"
 import { TypeMark } from "./observationTypes"
 import { buildTree, flattenTreeOrder } from "./tree"
-import { summarizeTrace, type Observation, type Trace } from "./types"
+import { summarizeTrace, type Trace } from "./types"
 
 function Metrics({
   durationMs,
@@ -33,15 +33,8 @@ function Metrics({
   )
 }
 
-function LevelChip({ level }: { level: Observation["level"] }) {
-  if (level === "WARNING") return <Chip tone="warning">Warning</Chip>
-  if (level === "ERROR") return <Chip tone="danger">Error</Chip>
-  if (level === "DEBUG") return <Chip>Debug</Chip>
-  return null
-}
-
 const ROW =
-  "flex min-w-0 flex-1 flex-col gap-0.5 py-1 pr-2 pl-1 text-left outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground"
+  "flex min-w-0 flex-1 flex-col py-0.5 pr-1 pl-1 text-left outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground"
 
 export function TraceTreeView({
   trace,
@@ -73,9 +66,9 @@ export function TraceTreeView({
         role="treeitem"
         aria-selected={selectedId === null}
         aria-level={1}
-        className={`flex items-start gap-1 pl-3 ${selectedId === null ? "bg-surface-subtle" : "hover:bg-surface-alt"}`}
+        className={`flex min-h-11 items-center gap-1 pl-3 ${selectedId === null ? "bg-surface-subtle" : "hover:bg-surface-alt"}`}
       >
-        <span className="grid size-6 shrink-0 place-items-center pt-1">
+        <span className="grid size-6 shrink-0 place-items-center">
           <TypeMark type="TRACE" />
         </span>
         <button
@@ -91,6 +84,7 @@ export function TraceTreeView({
             tokens={summary.totalTokens}
           />
         </button>
+        <span className="ml-auto size-11 shrink-0 md:size-6" />
       </div>
 
       {items.map(({ node, treeLines, isLast }) => {
@@ -106,7 +100,7 @@ export function TraceTreeView({
             aria-level={node.depth + 2}
             aria-selected={selected}
             aria-expanded={hasChildren ? isOpen : undefined}
-            className={`flex items-stretch pl-3 ${selected ? "bg-surface-subtle" : "hover:bg-surface-alt"}`}
+            className={`flex min-h-11 items-stretch pl-3 ${selected ? "bg-surface-subtle" : "hover:bg-surface-alt"}`}
           >
             {treeLines.map((continues, level) => (
               <span
@@ -114,39 +108,15 @@ export function TraceTreeView({
                 key={level}
                 aria-hidden="true"
                 className={`w-4 shrink-0 ${continues ? "border-l border-border" : ""}`}
-                style={{ marginLeft: level === 0 ? "0.75rem" : 0 }}
               />
             ))}
-            <span
-              aria-hidden="true"
-              className="relative w-3 shrink-0"
-              style={{ marginLeft: treeLines.length === 0 ? "0.75rem" : 0 }}
-            >
-              <span
-                className={`absolute top-0 left-0 h-3.5 w-3 border-b border-l border-border ${isLast ? "" : ""}`}
-              />
+            <span aria-hidden="true" className="relative w-3 shrink-0">
+              <span className="absolute top-0 left-0 h-3.5 w-3 border-b border-l border-border" />
               {!isLast ? (
                 <span className="absolute top-3.5 bottom-0 left-0 border-l border-border" />
               ) : null}
             </span>
-            {hasChildren ? (
-              <span className="otari-toolbar contents">
-                <IconButton
-                  label={isOpen ? "Collapse" : "Expand"}
-                  size="sm"
-                  className="shrink-0 md:min-h-6 md:min-w-6"
-                  onPress={() => toggle(obs.id)}
-                >
-                  <FiChevronRight
-                    aria-hidden="true"
-                    className={`size-3.5 transition-transform duration-150 ease-smooth motion-reduce:transition-none ${isOpen ? "rotate-90" : ""}`}
-                  />
-                </IconButton>
-              </span>
-            ) : (
-              <span className="w-11 shrink-0 md:w-6" />
-            )}
-            <span className="grid size-6 shrink-0 place-items-center pt-1">
+            <span className="grid size-6 shrink-0 place-items-center self-center">
               <TypeMark type={obs.type} />
             </span>
             <button
@@ -165,6 +135,23 @@ export function TraceTreeView({
                 tokens={tokens}
               />
             </button>
+            {hasChildren ? (
+              <span className="otari-toolbar contents">
+                <IconButton
+                  label={isOpen ? "Collapse" : "Expand"}
+                  size="sm"
+                  className="ml-auto size-11 shrink-0 self-center md:size-6 md:min-h-6 md:min-w-6"
+                  onPress={() => toggle(obs.id)}
+                >
+                  <FiChevronRight
+                    aria-hidden="true"
+                    className={`size-3.5 transition-transform duration-150 ease-smooth motion-reduce:transition-none ${isOpen ? "rotate-90" : ""}`}
+                  />
+                </IconButton>
+              </span>
+            ) : (
+              <span className="ml-auto size-11 shrink-0 md:size-6" />
+            )}
           </div>
         )
       })}

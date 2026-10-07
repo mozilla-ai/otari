@@ -1,7 +1,5 @@
-import { Link } from "@tanstack/react-router"
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
-  FiArrowUpRight,
   FiChevronDown,
   FiChevronUp,
   FiMaximize2,
@@ -69,11 +67,17 @@ function ResizeHandle({
   className,
   onDrag,
   onStep,
+  valueNow,
+  valueMin,
+  valueMax,
 }: {
   label: string
   className: string
   onDrag: (clientX: number) => void
   onStep: (direction: -1 | 1) => void
+  valueNow?: number
+  valueMin?: number
+  valueMax?: number
 }) {
   const [dragging, setDragging] = useState(false)
   return (
@@ -82,6 +86,9 @@ function ResizeHandle({
       role="separator"
       aria-orientation="vertical"
       aria-label={label}
+      aria-valuenow={valueNow}
+      aria-valuemin={valueMin}
+      aria-valuemax={valueMax}
       tabIndex={0}
       className={`group absolute inset-y-0 z-10 w-3 cursor-ew-resize touch-none outline-none ${className}`}
       onPointerDown={(event) => {
@@ -94,8 +101,10 @@ function ResizeHandle({
       onPointerUp={() => setDragging(false)}
       onPointerCancel={() => setDragging(false)}
       onKeyDown={(event) => {
-        if (event.key === "ArrowLeft") onStep(-1)
-        if (event.key === "ArrowRight") onStep(1)
+        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+          event.preventDefault()
+          onStep(event.key === "ArrowLeft" ? -1 : 1)
+        }
       }}
     >
       <span
@@ -169,7 +178,7 @@ function Attributes({
         .map(([key, value]) => (
           <div key={key} className="contents">
             <dt className="text-muted">{key}</dt>
-            <dd className="break-all text-body">{value}</dd>
+            <dd className="break-words text-body">{value}</dd>
           </div>
         ))}
     </dl>
@@ -198,7 +207,15 @@ export function TracePeek({
   const [navView, setNavView] = useState<"tree" | "timeline">("tree")
   const bodyRef = useRef<HTMLDivElement>(null)
   const summary = summarizeTrace(trace)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selection, setSelection] = useState<{
+    traceId: string
+    id: string | null
+  } | null>(null)
+  // Cleared whenever the peeked trace changes, so every trace opens on its root.
+  if (selection && selection.traceId !== trace.id) setSelection(null)
+  const selectedId = selection?.id ?? null
+  const setSelectedId = (id: string | null) =>
+    setSelection({ traceId: trace.id, id })
   const observation =
     trace.observations.find((o) => o.id === selectedId) ?? null
   const tabs = observation
@@ -284,9 +301,15 @@ export function TracePeek({
           setExpanded(false)
           setWidth(clampWidth(window.innerWidth - clientX))
         }}
-        onStep={(direction) =>
-          setWidth(clampWidth(shownWidth - direction * 48))
-        }
+        onStep={(direction) => {
+          setExpanded(false)
+          setWidth(
+            clampWidth(shownWidth - direction * window.innerWidth * 0.05),
+          )
+        }}
+        valueNow={Math.round(shownWidth)}
+        valueMin={MIN_PX}
+        valueMax={Math.round(window.innerWidth * MAX_FRACTION)}
       />
 
       <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
@@ -404,15 +427,7 @@ export function TracePeek({
               )}
             </Tooltip>
           ) : null}
-          {model ? (
-            <Link
-              to="/models"
-              className="inline-flex items-center gap-0.5 text-link"
-            >
-              {model}
-              <FiArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" />
-            </Link>
-          ) : null}
+          {model ? <span>{model}</span> : null}
         </div>
       </div>
 
@@ -443,8 +458,10 @@ export function TracePeek({
         ) : (
           <>
             <div
-              style={{ width: `${navFraction * 100}%` }}
-              className="relative flex min-w-[260px] shrink-0 flex-col border-r border-border max-md:hidden"
+              style={{
+                width: `min(max(${navFraction * 100}%, 280px), calc(100% - 360px))`,
+              }}
+              className="relative flex shrink-0 flex-col border-r border-border max-md:hidden"
             >
               <div className="shrink-0 border-b border-border p-2">
                 <Segmented

@@ -15,13 +15,15 @@ import { Tooltip } from "@/design-system/overlays/Tooltip"
 
 import { formatDuration, formatRelativeTime } from "./format"
 import { type Format, IOBlock } from "./IOBlock"
+import { LevelChip } from "./LevelChip"
 import { TypeMark } from "./observationTypes"
 import { buildTree, flattenTreeOrder } from "./tree"
 import type { Trace } from "./types"
 
-const GRID =
-  "grid grid-cols-[1rem_minmax(0,1fr)_3rem_5rem_5rem] items-center gap-3"
 const INDENT_PX = 12
+
+const gridClass = (showMs: boolean) =>
+  `grid ${showMs ? "grid-cols-[1rem_minmax(0,1fr)_3rem_5rem_4.5rem]" : "grid-cols-[1rem_minmax(0,1fr)_3rem_3rem_4.5rem]"} items-center gap-2 px-3`
 
 function ToolbarButton({
   label,
@@ -92,7 +94,7 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <div className="otari-toolbar flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
+      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
         <SearchField
           label="Search observations"
           placeholder="Search observations..."
@@ -141,7 +143,7 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
 
       <div className="min-h-0 flex-1 overflow-auto">
         <div
-          className={`${GRID} sticky top-0 z-10 border-b border-border bg-surface px-4 py-2 text-overline text-muted`}
+          className={`${gridClass(showMs)} sticky top-0 z-10 min-h-6 border-b border-border bg-surface py-0.5 text-overline text-muted`}
         >
           <span />
           <span>Observation</span>
@@ -159,7 +161,7 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
                 type="button"
                 aria-expanded={isOpen}
                 onClick={() => toggleRow(obs.id)}
-                className={`${GRID} min-h-11 w-full px-4 text-left hover:bg-surface-alt md:min-h-6`}
+                className={`${gridClass(showMs)} min-h-11 w-full text-left hover:bg-surface-alt md:min-h-6`}
               >
                 <FiChevronRight
                   aria-hidden="true"
@@ -173,6 +175,7 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
                   <span className="truncate text-body">
                     {obs.name} ({obs.id.slice(0, 8)})
                   </span>
+                  <LevelChip level={obs.level} />
                   {items > 0 ? (
                     <span className="shrink-0 text-caption text-subtle">
                       {items} {items === 1 ? "item" : "items"}
@@ -191,8 +194,21 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
               </button>
               {isOpen ? (
                 <div className="flex flex-col gap-4 border-t border-border bg-surface-alt px-4 py-3">
-                  <IOBlock label="Input" value={obs.input} format={format} />
-                  <IOBlock label="Output" value={obs.output} format={format} />
+                  {obs.input == null && obs.output == null ? (
+                    <span className="text-caption text-muted">
+                      No input or output
+                    </span>
+                  ) : null}
+                  {obs.input != null ? (
+                    <IOBlock label="Input" value={obs.input} format={format} />
+                  ) : null}
+                  {obs.output != null ? (
+                    <IOBlock
+                      label="Output"
+                      value={obs.output}
+                      format={format}
+                    />
+                  ) : null}
                 </div>
               ) : null}
             </div>

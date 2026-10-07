@@ -2489,7 +2489,8 @@ main {
   max-width: 18rem;
 }
 .otari-activity-table .table__column[data-key="levels"] {
-  min-width: 11rem;
+  width: 12rem;
+  min-width: 12rem;
 }
 .otari-activity-table .table__column[data-key="latency"] {
   width: 6.5rem;

@@ -33,9 +33,32 @@ const IDLE_MIN_MS = 250
 const IDLE_LABEL_MIN_PX = 56
 const MIN_CLIPPED_LABEL_PX = 72
 
-// Rough text widths at the label sizes (13px caption, 12px mono caption).
-const NAME_PX = 7
-const METRIC_PX = 7.2
+// Fira Code is monospace, so the metrics line is a constant per glyph (13px).
+const METRIC_PX = 7.8
+const NAME_METRIC_GAP = 6
+
+// Names are proportional: measured once each, in the label's computed font.
+const nameWidths = new Map<string, number>()
+let nameContext: CanvasRenderingContext2D | null = null
+function measureName(text: string): number {
+  const cached = nameWidths.get(text)
+  if (cached !== undefined) return cached
+  if (!nameContext) {
+    const probe = document.createElement("span")
+    probe.className = "text-caption"
+    probe.style.cssText = "position:absolute;visibility:hidden"
+    document.body.append(probe)
+    const style = getComputedStyle(probe)
+    nameContext = document.createElement("canvas").getContext("2d")
+    if (nameContext) {
+      nameContext.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+    }
+    probe.remove()
+  }
+  const width = nameContext?.measureText(text).width ?? text.length * 7
+  nameWidths.set(text, width)
+  return width
+}
 
 function niceStep(totalMs: number, lanePx: number): number {
   const targetCount = Math.max(2, Math.floor(lanePx / 90))
@@ -164,7 +187,7 @@ export function TraceTimelineView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="otari-toolbar flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
+      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
         <ToolbarButton
           label="Zoom out"
           isDisabled={fitted}
@@ -267,7 +290,9 @@ export function TraceTimelineView({
                 .filter(Boolean)
                 .join(" ")
               const labelPx =
-                obs.name.length * NAME_PX + metric.length * METRIC_PX + 8
+                measureName(obs.name) +
+                NAME_METRIC_GAP +
+                metric.length * METRIC_PX
               const spaceAfter = lanePx - (left + width + LABEL_GAP)
               const spaceBefore = left - LABEL_GAP
               const side: "after" | "before" | null =
