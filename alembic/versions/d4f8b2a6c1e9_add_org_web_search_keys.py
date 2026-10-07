@@ -13,7 +13,7 @@ organization. Both tables cascade: a credential and its overrides mean nothing
 once their organization or workspace is gone.
 
 Revision ID: d4f8b2a6c1e9
-Revises: d4f7a2b9e6c1
+Revises: e8b2d5f1a7c3
 Create Date: 2026-10-06
 """
 
@@ -23,7 +23,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "d4f8b2a6c1e9"
-down_revision: str | Sequence[str] | None = "d4f7a2b9e6c1"
+down_revision: str | Sequence[str] | None = "e8b2d5f1a7c3"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

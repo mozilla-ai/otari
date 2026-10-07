@@ -6318,7 +6318,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"provider\": \"string\",\n  \"name\": \"string\",\n  \"api_key\": \"string\"\n}"
+              "raw": "{\n  \"api_key\": \"<your Tavily API key>\",\n  \"name\": \"production\",\n  \"provider\": \"tavily\"\n}"
             },
             "description": "Add a web search key to the caller's organization. Organization owners and admins only.\n\nA workspace with a usable key searches with it rather than with the deployment's search.",
             "header": [
@@ -6557,7 +6557,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"disabled\": false,\n  \"is_default\": false\n}"
+              "raw": "{\n  \"is_default\": true\n}"
             },
             "description": "Pin a web search key as this workspace's own, or turn it off for this workspace.\n\nOrganization owners and admins, or this workspace's owners and admins. Answers with the list's first page.",
             "header": [

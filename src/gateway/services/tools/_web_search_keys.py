@@ -234,8 +234,9 @@ class WebSearchKeyService:
         organization_id = await self._managed_organization(user)
         async with self.uow:
             key = await self._key(key_id, organization_id)
-            # Not a default again: another key may have become the default while it was archived.
-            key = await self.keys.update_key(key, {"archived_at": None, "is_org_default": False})
+            if key.archived_at is not None:
+                # Not a default again: another key may have become the default while it was archived.
+                key = await self.keys.update_key(key, {"archived_at": None, "is_org_default": False})
         return _public(key)
 
     async def delete_key(self, *, user: User, key_id: uuid.UUID) -> None:

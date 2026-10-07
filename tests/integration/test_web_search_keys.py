@@ -173,6 +173,16 @@ def test_a_restored_key_is_not_a_default_again(client: TestClient, master_key_he
     assert restored.json()["is_org_default"] is False
 
 
+def test_restoring_a_live_key_changes_nothing(client: TestClient, master_key_header: dict[str, str]) -> None:
+    key = _add_key(client, master_key_header, api_key="tvly-1")
+    client.post(f"{_KEYS}/{key['id']}/default", headers=master_key_header)
+
+    restored = client.post(f"{_KEYS}/{key['id']}/restore", headers=master_key_header)
+
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["is_org_default"] is True
+
+
 def test_one_default_per_provider_and_a_live_key_cannot_be_deleted(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:

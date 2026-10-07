@@ -9694,6 +9694,11 @@
       },
       "OrgWebSearchKeyCreateRequest": {
         "description": "What a caller sends to add a key. The service keeps only its ciphertext and ``last4``.",
+        "example": {
+          "api_key": "<your Tavily API key>",
+          "name": "production",
+          "provider": "tavily"
+        },
         "properties": {
           "api_key": {
             "minLength": 1,
@@ -20747,6 +20752,9 @@
       },
       "WorkspaceWebSearchKeyOverrideRequest": {
         "description": "Tri-state: an omitted flag keeps its value.\n\nPinning a key re-enables it and unpins any other key of the workspace, and turning a\nkey off unpins it. Sending both flags true is refused. Both false deletes the override.",
+        "example": {
+          "is_default": true
+        },
         "properties": {
           "disabled": {
             "anyOf": [

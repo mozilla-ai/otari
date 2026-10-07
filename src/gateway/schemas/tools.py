@@ -13,6 +13,12 @@ from gateway.models.tools import OrgWebSearchKey
 class OrgWebSearchKeyCreateRequest(SQLModel):
     """What a caller sends to add a key. The service keeps only its ciphertext and ``last4``."""
 
+    model_config = {
+        "json_schema_extra": {
+            "example": {"provider": "tavily", "name": "production", "api_key": "<your Tavily API key>"}
+        }
+    }
+
     provider: str = Field(max_length=255, description="The search provider the key is for: tavily or brave.")
     name: str = Field(max_length=255, description="How the organization tells this key apart from its others.")
     api_key: str = Field(min_length=1)
@@ -72,6 +78,8 @@ class WorkspaceWebSearchKeyOverrideRequest(SQLModel):
     Pinning a key re-enables it and unpins any other key of the workspace, and turning a
     key off unpins it. Sending both flags true is refused. Both false deletes the override.
     """
+
+    model_config = {"json_schema_extra": {"example": {"is_default": True}}}
 
     is_default: bool | None = None
     disabled: bool | None = None

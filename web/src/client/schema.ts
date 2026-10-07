@@ -10424,6 +10424,11 @@ export interface components {
         /**
          * OrgWebSearchKeyCreateRequest
          * @description What a caller sends to add a key. The service keeps only its ciphertext and ``last4``.
+         * @example {
+         *       "api_key": "<your Tavily API key>",
+         *       "name": "production",
+         *       "provider": "tavily"
+         *     }
          */
         OrgWebSearchKeyCreateRequest: {
             /** Api Key */
@@ -15279,6 +15284,9 @@ export interface components {
          *
          *     Pinning a key re-enables it and unpins any other key of the workspace, and turning a
          *     key off unpins it. Sending both flags true is refused. Both false deletes the override.
+         * @example {
+         *       "is_default": true
+         *     }
          */
         WorkspaceWebSearchKeyOverrideRequest: {
             /** Disabled */
