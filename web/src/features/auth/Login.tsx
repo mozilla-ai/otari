@@ -1,9 +1,16 @@
 import { Button, Input, Label, TextField } from "@heroui/react"
 import { useState } from "react"
-import { FiAlertCircle, FiChevronRight, FiEye, FiEyeOff } from "react-icons/fi"
+import {
+  FiAlertCircle,
+  FiChevronRight,
+  FiEye,
+  FiEyeOff,
+  FiKey,
+  FiMail,
+} from "react-icons/fi"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { errorMessage } from "@/design-system/feedback/errorMessage"
 import { useAuth } from "@/features/auth/AuthContext"
-import { PublicAuthFields } from "@/features/auth/overlayPublicAuthFields"
 import type { SignInCredential } from "@/shared/api/client"
 import {
   ApiError,
@@ -23,10 +30,15 @@ import {
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 import { AuthHelp } from "./AuthHelp"
+import {
+  AuthMethodRow,
+  AuthOrRule,
+  AuthProviderRows,
+} from "./AuthProviderButtons"
 import { LoginPageShell } from "./LoginPageShell"
 import { rememberOAuthState } from "./OAuthCallbackPage"
 import {
-  OAUTH_PROVIDER_ICONS,
+  type OAuthProvider,
   oauthProviderLabel,
   renderableOAuthProviders,
 } from "./oauthProviders"
@@ -262,6 +274,17 @@ export function Login() {
   // The navigation that follows leaves this page, so this is never cleared on
   // success; it clears on the refusal path, where the person stays here.
   const [pendingProvider, setPendingProvider] = useState<string>()
+  // The typed credential is folded behind a row while another way in is offered
+  // above it, and open straight away when it is the only one. Opened by the
+  // visitor, it takes focus; open on arrival, it must not, or the soft keyboard
+  // covers the page before anyone asked to type.
+  const [isFormOpen, setIsFormOpen] = useState(
+    () => oauthProviders.length === 0 && !offersPasskey,
+  )
+  const [didOpenForm, setDidOpenForm] = useState(false)
+  // A refusal from a provider or a passkey, which belongs under the rows it came
+  // from and not beside the typed credential's own fields.
+  const [methodError, setMethodError] = useState<unknown>(null)
 
   // The unverified refusal tells the reader to request a new verification
   // email, so the request is offered beside it rather than left as a sentence
@@ -376,6 +399,7 @@ export function Login() {
     if (isSubmitting || isSigningOut || isPasskeyPending || pendingProvider) {
       return
     }
+    setMethodError(null)
     setError(null)
     setErrorField(undefined)
     const credential = readCredential()
@@ -454,6 +478,7 @@ export function Login() {
     }
     setError(null)
     setErrorField(undefined)
+    setMethodError(null)
     setIsPasskeyPending(true)
     try {
       const result = await signInWithPasskey()
@@ -467,9 +492,8 @@ export function Login() {
           authentication_method: PASSKEY_METHOD,
           error_code: analyticsStatusCode(result.status),
         })
-        fail(
-          usesPassword ? "password" : "masterKey",
-          result.message ?? "That passkey did not sign you in.",
+        setMethodError(
+          new Error(result.message ?? "That passkey did not sign you in."),
         )
       }
     } catch (caught) {
@@ -489,8 +513,7 @@ export function Login() {
         error_code: analyticsErrorCode(caught),
         status: caught instanceof ApiError ? caught.status : undefined,
       })
-      setErrorField(usesPassword ? "password" : "masterKey")
-      setError(caught)
+      setMethodError(caught)
     } finally {
       setIsPasskeyPending(false)
     }
@@ -515,6 +538,7 @@ export function Login() {
     }
     setError(null)
     setErrorField(undefined)
+    setMethodError(null)
     setPendingProvider(provider)
     try {
       const started = await startOAuthSignIn(provider)
@@ -523,10 +547,11 @@ export function Login() {
           authentication_method: provider,
           error_code: analyticsStatusCode(started.status),
         })
-        fail(
-          usesPassword ? "password" : "masterKey",
-          started.message ??
-            `${oauthProviderLabel(provider)} sign-in is not available on this gateway.`,
+        setMethodError(
+          new Error(
+            started.message ??
+              `${oauthProviderLabel(provider)} sign-in is not available on this gateway.`,
+          ),
         )
         setPendingProvider(undefined)
         return
@@ -539,8 +564,7 @@ export function Login() {
         error_code: analyticsErrorCode(caught),
         status: caught instanceof ApiError ? caught.status : undefined,
       })
-      setErrorField(usesPassword ? "password" : "masterKey")
-      setError(caught)
+      setMethodError(caught)
       setPendingProvider(undefined)
     }
   }
@@ -615,209 +639,194 @@ export function Login() {
           </p>
         </div>
 
-        <form
-          className={`flex flex-col ${usesPassword ? "gap-4" : "gap-3"}`}
-          noValidate
-          onSubmit={(event) => {
-            event.preventDefault()
-            void submit()
-          }}
-        >
-          <PublicAuthFields
-            page="login"
-            isBusy={
-              isSubmitting ||
-              isSigningOut ||
-              isPasskeyPending ||
-              pendingProvider !== undefined
-            }
-          />
-          {usesPassword ? (
-            <>
-              <TextField
-                value={email}
-                onChange={(next) => {
-                  setEmail(next)
-                  clearError()
-                }}
-                type="email"
-                isRequired
-                validationBehavior={VALIDATION}
-                isInvalid={errorField === "email"}
-                className="flex flex-col gap-2"
+        <div className="flex flex-col">
+          {oauthProviders.length > 0 ? (
+            <AuthProviderRows
+              providers={oauthProviders}
+              layout={isFormOpen ? "two-up" : "stacked"}
+              verb="Sign in"
+              pendingProvider={pendingProvider}
+              isDisabled={isSubmitting || isSigningOut || isPasskeyPending}
+              onSelect={(provider: OAuthProvider) => void submitOAuth(provider)}
+            />
+          ) : null}
+          {offersPasskey ? (
+            <div className={oauthProviders.length > 0 ? "pt-3" : undefined}>
+              <AuthMethodRow
+                icon={FiKey}
+                isDisabled={
+                  isSubmitting || isSigningOut || pendingProvider !== undefined
+                }
+                onPress={() => void submitPasskey()}
               >
-                <LabelRow
-                  label="Email"
-                  error={errorField === "email" ? error : null}
-                  errorId={ERROR_IDS.email}
-                />
-                {/* 16px, not the 14px HeroUI drops to from `sm:` up: under
-                      16px iOS Safari zooms the page on focus. No autoFocus,
-                      which on a page load raises the soft keyboard over half a
-                      phone screen and makes a focus ring the resting state. */}
-                <Input
-                  placeholder="you@example.com"
-                  autoComplete="username"
-                  aria-describedby={
-                    errorField === "email" ? ERROR_IDS.email : undefined
-                  }
-                  className="h-10 text-base"
-                />
-              </TextField>
-              <TextField
-                value={password}
-                onChange={(next) => {
-                  setPassword(next)
-                  clearError()
-                }}
-                type="password"
-                isRequired
-                validationBehavior={VALIDATION}
-                isInvalid={errorField === "password"}
-                className="flex flex-col gap-2"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-x-2">
-                  <LabelRow
-                    label="Password"
-                    error={errorField === "password" ? error : null}
-                    errorId={ERROR_IDS.password}
-                  />
-                  {offersRecovery ? (
-                    <PublicAuthLink to="#/recover-password">
-                      Forgot your password?
+                {isPasskeyPending
+                  ? "Waiting for your passkey…"
+                  : "Use a passkey"}
+              </AuthMethodRow>
+            </div>
+          ) : null}
+          {methodError ? (
+            <div className="pt-3">
+              <ErrorBanner error={methodError} />
+            </div>
+          ) : null}
+          {oauthProviders.length > 0 || offersPasskey ? <AuthOrRule /> : null}
+          {isFormOpen ? (
+            <form
+              className={`flex flex-col ${usesPassword ? "gap-4" : "gap-3"}`}
+              noValidate
+              onSubmit={(event) => {
+                event.preventDefault()
+                void submit()
+              }}
+            >
+              {usesPassword ? (
+                <>
+                  <TextField
+                    value={email}
+                    onChange={(next) => {
+                      setEmail(next)
+                      clearError()
+                    }}
+                    type="email"
+                    isRequired
+                    validationBehavior={VALIDATION}
+                    isInvalid={errorField === "email"}
+                    className="flex flex-col gap-2"
+                  >
+                    <LabelRow
+                      label="Email"
+                      error={errorField === "email" ? error : null}
+                      errorId={ERROR_IDS.email}
+                    />
+                    {/* 16px, not the 14px HeroUI drops to from `sm:` up: under
+                        16px iOS Safari zooms the page on focus. No autoFocus,
+                        which on a page load raises the soft keyboard over half a
+                        phone screen and makes a focus ring the resting state. */}
+                    <Input
+                      placeholder="you@example.com"
+                      autoFocus={didOpenForm}
+                      autoComplete="username"
+                      aria-describedby={
+                        errorField === "email" ? ERROR_IDS.email : undefined
+                      }
+                      className="h-10 text-base"
+                    />
+                  </TextField>
+                  <TextField
+                    value={password}
+                    onChange={(next) => {
+                      setPassword(next)
+                      clearError()
+                    }}
+                    type="password"
+                    isRequired
+                    validationBehavior={VALIDATION}
+                    isInvalid={errorField === "password"}
+                    className="flex flex-col gap-2"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-x-2">
+                      <LabelRow
+                        label="Password"
+                        error={errorField === "password" ? error : null}
+                        errorId={ERROR_IDS.password}
+                      />
+                      {offersRecovery ? (
+                        <PublicAuthLink isInline to="#/recover-password">
+                          Forgot your password?
+                        </PublicAuthLink>
+                      ) : null}
+                    </div>
+                    <Input
+                      autoComplete="current-password"
+                      aria-describedby={
+                        errorField === "password"
+                          ? ERROR_IDS.password
+                          : undefined
+                      }
+                      className="h-10 text-base"
+                    />
+                  </TextField>
+                  {offersResendVerification ? (
+                    <PublicAuthLink to="#/resend-verification">
+                      Send a new verification link
                     </PublicAuthLink>
                   ) : null}
-                </div>
-                <Input
-                  autoComplete="current-password"
-                  aria-describedby={
-                    errorField === "password" ? ERROR_IDS.password : undefined
-                  }
-                  className="h-10 text-base"
-                />
-              </TextField>
-              {offersResendVerification ? (
-                <PublicAuthLink to="#/resend-verification">
-                  Send a new verification link
-                </PublicAuthLink>
-              ) : null}
-            </>
-          ) : (
-            <>
-              <TextField
-                value={masterKey}
-                onChange={(next) => {
-                  setMasterKey(next)
-                  clearError()
-                }}
-                type={isKeyVisible ? "text" : "password"}
-                isRequired
-                validationBehavior={VALIDATION}
-                isInvalid={errorField === "masterKey"}
-                className="flex flex-col gap-2"
-              >
-                <LabelRow
-                  label="Master key"
-                  error={errorField === "masterKey" ? error : null}
-                  errorId={ERROR_IDS.masterKey}
-                />
-                <div className="relative">
-                  <Input
-                    placeholder="otari-mk-…"
-                    autoComplete="off"
-                    aria-describedby={
-                      errorField === "masterKey"
-                        ? ERROR_IDS.masterKey
-                        : undefined
-                    }
-                    fullWidth
-                    className="h-10 pr-14 font-mono text-base"
-                  />
-                  {/* Center on the field even when the mobile touch target grows. */}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    isIconOnly
-                    size="sm"
-                    aria-label={
-                      isKeyVisible ? "Hide master key" : "Show master key"
-                    }
-                    onPress={() => setIsKeyVisible((shown) => !shown)}
-                    className="absolute top-1/2 right-1 h-9 w-9 -translate-y-1/2 text-muted before:absolute before:-inset-1"
+                </>
+              ) : (
+                <>
+                  <TextField
+                    value={masterKey}
+                    onChange={(next) => {
+                      setMasterKey(next)
+                      clearError()
+                    }}
+                    type={isKeyVisible ? "text" : "password"}
+                    isRequired
+                    validationBehavior={VALIDATION}
+                    isInvalid={errorField === "masterKey"}
+                    className="flex flex-col gap-2"
                   >
-                    <EyeIcon isCrossedOut={isKeyVisible} />
-                  </Button>
-                </div>
-              </TextField>
-              <details className="group">
-                <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm font-medium text-link hover:text-link-hover [&::-webkit-details-marker]:hidden">
-                  <DisclosureCaret />
-                  First run? Where to find your key
-                </summary>
-                {/* The 12px tail is what keeps the gap to the button reading
-                      24px once this is open, since the 12px it sits at closed
-                      is the summary row's invisible padding doing that job. */}
-                <p className="pb-3 text-caption">
-                  No <code className={CODE_CHIP}>OTARI_MASTER_KEY</code> set?
-                  Otari printed one to the server logs on startup. Find it with{" "}
-                  <code className={CODE_CHIP}>
-                    docker logs &lt;container&gt;
-                  </code>
-                  .
-                </p>
-              </details>
-            </>
-          )}
-          {/* Disabled only while a prior sign-out is still revoking (#557),
-                or while another credential is already mid-flight. Never for an
-                empty box: see readCredential. */}
-          <Button
-            type="submit"
-            variant="primary"
-            fullWidth
-            isDisabled={
-              isSubmitting ||
-              isSigningOut ||
-              isPasskeyPending ||
-              pendingProvider !== undefined
-            }
-            className="h-11"
-          >
-            {isSigningOut
-              ? "Finishing sign-out…"
-              : isSubmitting
-                ? "Signing in…"
-                : "Sign in"}
-          </Button>
-        </form>
-
-        {offersCredentialSwitch ||
-        offersPasskey ||
-        oauthProviders.length > 0 ? (
-          <div className="flex flex-col gap-3">
-            {/* A rule with the word on it, rather than a bare divider: these
-                  are alternatives to the form above, not a second step of it,
-                  and an unlabeled line reads as the latter. One rule for both
-                  groups, however many buttons follow it, because they are all
-                  the same alternative: another way to prove the same thing. */}
-            <div
-              className="flex items-center gap-3 text-xs text-muted"
-              aria-hidden
-            >
-              <span className="h-px flex-1 bg-border" />
-              or
-              <span className="h-px flex-1 bg-border" />
-            </div>
-            {/* The other typed credential, under the same rule as the passkey
-                and the provider buttons because it is the same kind of thing:
-                another way to prove who you are, not a second step of the form
-                above. Swapping the box clears whatever was typed into the one
-                being put away, so a refusal from the credential nobody is
-                looking at any more cannot stay on screen. */}
-            {offersCredentialSwitch ? (
+                    <LabelRow
+                      label="Master key"
+                      error={errorField === "masterKey" ? error : null}
+                      errorId={ERROR_IDS.masterKey}
+                    />
+                    <div className="relative">
+                      <Input
+                        placeholder="otari-mk-…"
+                        autoFocus={didOpenForm}
+                        autoComplete="off"
+                        aria-describedby={
+                          errorField === "masterKey"
+                            ? ERROR_IDS.masterKey
+                            : undefined
+                        }
+                        fullWidth
+                        className="h-10 pr-14 font-mono text-base"
+                      />
+                      {/* Center on the field even when the mobile touch target grows. */}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        isIconOnly
+                        size="sm"
+                        aria-label={
+                          isKeyVisible ? "Hide master key" : "Show master key"
+                        }
+                        onPress={() => setIsKeyVisible((shown) => !shown)}
+                        className="absolute top-1/2 right-1 h-9 w-9 -translate-y-1/2 text-muted before:absolute before:-inset-1"
+                      >
+                        <EyeIcon isCrossedOut={isKeyVisible} />
+                      </Button>
+                    </div>
+                  </TextField>
+                  <details className="group">
+                    <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm font-medium text-link hover:text-link-hover [&::-webkit-details-marker]:hidden">
+                      <DisclosureCaret />
+                      First run? Where to find your key
+                    </summary>
+                    {/* The 12px tail is what keeps the gap to the button reading
+                        24px once this is open, since the 12px it sits at closed
+                        is the summary row's invisible padding doing that job. */}
+                    <p className="pb-3 text-caption">
+                      No <code className={CODE_CHIP}>OTARI_MASTER_KEY</code>{" "}
+                      set? Otari printed one to the server logs on startup. Find
+                      it with{" "}
+                      <code className={CODE_CHIP}>
+                        docker logs &lt;container&gt;
+                      </code>
+                      .
+                    </p>
+                  </details>
+                </>
+              )}
+              {/* Disabled only while a prior sign-out is still revoking (#557),
+                  or while another credential is already mid-flight. Never for an
+                  empty box: see readCredential. */}
               <Button
-                type="button"
-                variant="ghost"
+                type="submit"
+                variant="primary"
                 fullWidth
                 isDisabled={
                   isSubmitting ||
@@ -825,79 +834,59 @@ export function Login() {
                   isPasskeyPending ||
                   pendingProvider !== undefined
                 }
-                onPress={() => {
-                  setTypedCredential(usesPassword ? "masterKey" : "password")
-                  setEmail("")
-                  setPassword("")
-                  setMasterKey("")
-                  setError(null)
-                  setErrorField(undefined)
-                }}
                 className="h-11"
               >
-                {usesPassword
-                  ? "Use your master key"
-                  : "Use your email and password"}
+                {isSigningOut
+                  ? "Finishing sign-out…"
+                  : isSubmitting
+                    ? "Signing in…"
+                    : "Sign in"}
               </Button>
-            ) : null}
-            {offersPasskey ? (
-              <Button
-                type="button"
-                variant="ghost"
-                fullWidth
-                isDisabled={
-                  isSubmitting || isSigningOut || pendingProvider !== undefined
-                }
-                onPress={() => void submitPasskey()}
-                className="h-11"
-              >
-                {isPasskeyPending
-                  ? "Waiting for your passkey…"
-                  : "Use a passkey"}
-              </Button>
-            ) : null}
-            <div className="flex gap-3">
-              {oauthProviders.map((provider) => {
-                const Mark = OAUTH_PROVIDER_ICONS[provider]
-                const isRedirecting = pendingProvider === provider
-                return (
-                  <Button
-                    key={provider}
-                    type="button"
-                    variant="ghost"
-                    fullWidth
-                    isDisabled={
-                      isSubmitting ||
-                      isSigningOut ||
-                      isPasskeyPending ||
-                      pendingProvider !== undefined
-                    }
-                    onPress={() => void submitOAuth(provider)}
-                    aria-label={
-                      isRedirecting
-                        ? "Redirecting…"
-                        : `Sign in with ${oauthProviderLabel(provider)}`
-                    }
-                    className="h-11 min-w-0 flex-1"
-                  >
-                    {/* The mark is decorative: the label beside it already
-                        names the provider, so announcing it again would read
-                        the button's own text twice. Dropped while redirecting,
-                        so the row does not keep a logo beside a label that no
-                        longer names a provider to press. */}
-                    {isRedirecting ? null : (
-                      <Mark className="text-xl" aria-hidden />
-                    )}
-                    {isRedirecting
-                      ? "Redirecting…"
-                      : oauthProviderLabel(provider)}
-                  </Button>
-                )
-              })}
-            </div>
-          </div>
-        ) : null}
-
+              {offersCredentialSwitch ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  fullWidth
+                  isDisabled={
+                    isSubmitting ||
+                    isSigningOut ||
+                    isPasskeyPending ||
+                    pendingProvider !== undefined
+                  }
+                  onPress={() => {
+                    setTypedCredential(usesPassword ? "masterKey" : "password")
+                    setEmail("")
+                    setPassword("")
+                    setMasterKey("")
+                    setError(null)
+                    setErrorField(undefined)
+                  }}
+                  className="h-11"
+                >
+                  {usesPassword
+                    ? "Use your master key"
+                    : "Use your email and password"}
+                </Button>
+              ) : null}
+            </form>
+          ) : (
+            <AuthMethodRow
+              icon={usesPassword ? FiMail : FiKey}
+              isDisabled={
+                isSubmitting ||
+                isSigningOut ||
+                isPasskeyPending ||
+                pendingProvider !== undefined
+              }
+              onPress={() => {
+                setDidOpenForm(true)
+                setIsFormOpen(true)
+              }}
+            >
+              {usesPassword ? "Sign in with email" : "Sign in with master key"}
+            </AuthMethodRow>
+          )}
+        </div>
         <div className="otari-auth-actions flex flex-wrap items-center justify-between gap-x-4 border-t border-border pt-2">
           {offersSignup ? (
             <PublicAuthLink to="#/signup">

@@ -239,6 +239,11 @@ export function SignupPage({ hash }: { hash: string }) {
               isDisabled={signup.isPending}
               onSelect={(provider) => void startProvider(provider)}
             />
+            {providerError ? (
+              <div className="pt-3">
+                <ErrorBanner error={providerError} />
+              </div>
+            ) : null}
             <AuthOrRule />
           </>
         ) : null}
@@ -246,6 +251,7 @@ export function SignupPage({ hash }: { hash: string }) {
         {isFormOpen ? (
           <form
             className="flex flex-col gap-3"
+            aria-busy={signup.isPending}
             onSubmit={(event) => {
               event.preventDefault()
               submit()
@@ -304,10 +310,16 @@ export function SignupPage({ hash }: { hash: string }) {
                 visible label no longer holds in full. */}
             {terms_url !== null ? (
               <div className="flex flex-wrap items-center gap-x-1 text-caption">
+                {/* 44px target from a pseudo-element bleed of 13 above and 12
+                    below the 19px row, so the box is easy to hit on a phone
+                    without `hasTouchTarget`, which would add 25px of height to
+                    the card. The bleed is inside the form's own 12px gaps, so
+                    it overlaps no neighbour. */}
                 <Checkbox
                   isSelected={isTermsAccepted}
                   onChange={setIsTermsAccepted}
                   ariaLabel="I accept the terms of service"
+                  className="relative before:absolute before:inset-x-0 before:-top-[13px] before:-bottom-[12px]"
                 >
                   <span className="text-caption">I accept the</span>
                 </Checkbox>
@@ -325,33 +337,41 @@ export function SignupPage({ hash }: { hash: string }) {
               </div>
             ) : null}
 
-            <ErrorBanner error={signup.error ?? providerError} />
+            <ErrorBanner error={signup.error} />
 
+            {/* Not `isPending`, and not `isDisabled`: both land on the product's
+                one disabled treatment, which reads as refused. A submit in
+                flight is working, so the fill stays, the press is blocked by
+                hand (`pointer-events`, plus the guard in `submit` for the
+                keyboard) and the form's `aria-busy` says what is happening,
+                the way `FormDialog` does it. */}
             <Button
               type="submit"
               variant="primary"
               fullWidth
-              isPending={signup.isPending}
               isDisabled={!canSubmit || pendingProvider !== undefined}
-              className="h-11"
+              className={`h-11 ${signup.isPending ? "pointer-events-none" : ""}`}
             >
-              {open_signup ? "Create account" : "Claim account"}
+              {signup.isPending
+                ? open_signup
+                  ? "Creating account…"
+                  : "Claiming account…"
+                : open_signup
+                  ? "Create account"
+                  : "Claim account"}
             </Button>
           </form>
         ) : (
-          <div className="flex flex-col gap-3">
-            <ErrorBanner error={providerError} />
-            <AuthMethodRow
-              icon={FiMail}
-              isDisabled={isBusy}
-              onPress={() => {
-                setDidOpenForm(true)
-                setIsFormOpen(true)
-              }}
-            >
-              Sign up with email
-            </AuthMethodRow>
-          </div>
+          <AuthMethodRow
+            icon={FiMail}
+            isDisabled={isBusy}
+            onPress={() => {
+              setDidOpenForm(true)
+              setIsFormOpen(true)
+            }}
+          >
+            Sign up with email
+          </AuthMethodRow>
         )}
       </div>
     </PublicAuthLayout>

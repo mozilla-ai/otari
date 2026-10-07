@@ -115,7 +115,7 @@ export function AuthPasswordField({
   const input = (
     <Input
       autoComplete={autoComplete}
-      className={canReveal ? "w-full pr-11 md:pr-10" : undefined}
+      className={canReveal ? "w-full pr-10" : undefined}
     />
   )
   return (
@@ -132,8 +132,9 @@ export function AuthPasswordField({
         <div className="relative">
           {input}
           {/* Centered on the field and inset 2px from its edge, so the glyph
-              reads as inside the input while the target keeps 32px on desktop
-              and the 44px touch floor on a phone. */}
+              reads as inside the input. 32px to the eye at every width; the
+              44px touch floor is the pseudo-element bleed, which a 36px field
+              can hold without the target overlapping anything. */}
           <Button
             type="button"
             variant="ghost"
@@ -142,7 +143,7 @@ export function AuthPasswordField({
             aria-label={isRevealed ? "Hide password" : "Show password"}
             aria-pressed={isRevealed}
             onPress={() => setIsRevealed((shown) => !shown)}
-            className="absolute inset-y-0 right-0.5 my-auto size-11 min-h-11 min-w-11 text-muted md:size-8 md:min-h-8 md:min-w-8"
+            className="absolute inset-y-0 right-0.5 my-auto size-8 min-h-8 min-w-8 text-muted before:absolute before:-inset-1.5"
           >
             {isRevealed ? (
               <FiEyeOff aria-hidden className="size-4" />

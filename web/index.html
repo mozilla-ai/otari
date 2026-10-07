@@ -28,7 +28,9 @@
          which is after the boot screen below has already been painted light: a
          dark-mode operator saw a white flash on every load. Keep this in sync
          with the effect in src/shared/hooks/useTheme.tsx; the storage key and
-         the three-state "system" resolution are the same on both sides. -->
+         the resolution are the same on both sides: a stored "light" or "dark"
+         wins, and anything else, including the "system" an earlier version
+         wrote, follows the operating system. -->
     <script>
       (function () {
         try {

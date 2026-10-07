@@ -1843,6 +1843,10 @@ main {
 .otari-auth-actions .button--ghost:not(.button--sm):not(.button--icon-only) {
   min-height: 2.75rem;
   padding-inline: 0.75rem;
+  /* The 12px of padding is the target, not the look: pulled out by it plus the
+     row's own 1px so the label's right edge lines up with the card's content
+     edge instead of sitting 13px inside it. The target keeps its width. */
+  margin-inline-end: -13px;
   --button-fg: var(--color-link);
   --button-bg-hover: transparent;
   --button-bg-pressed: transparent;

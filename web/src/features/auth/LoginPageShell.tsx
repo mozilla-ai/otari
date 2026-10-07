@@ -1,9 +1,9 @@
 import { type ReactNode, useRef } from "react"
-import { FiMonitor, FiMoon, FiSun } from "react-icons/fi"
+import { FiMoon, FiSun } from "react-icons/fi"
 import { IconButton } from "@/design-system/actions/IconButton"
 import { siteHomeHref } from "@/features/models/publicCatalog"
 import { useDeployment } from "@/shared/hooks/useDeployment"
-import { THEME_PREFERENCES, useTheme } from "@/shared/hooks/useTheme"
+import { useTheme } from "@/shared/hooks/useTheme"
 import { LoginBackground } from "./background/LoginBackground"
 import savedBackground from "./background/login-background.json"
 
@@ -37,13 +37,9 @@ function BrandMark() {
 
 export function LoginPageShell({ children }: { children: ReactNode }) {
   const panelRef = useRef<HTMLDivElement>(null)
-  const { preference, setPreference } = useTheme()
-  const next =
-    THEME_PREFERENCES[
-      (THEME_PREFERENCES.indexOf(preference) + 1) % THEME_PREFERENCES.length
-    ]
-  const ThemeIcon =
-    preference === "system" ? FiMonitor : preference === "dark" ? FiMoon : FiSun
+  const { resolved, toggle } = useTheme()
+  const isDark = resolved === "dark"
+  const ThemeIcon = isDark ? FiMoon : FiSun
 
   return (
     <div className="relative isolate flex min-h-svh flex-col bg-background">
@@ -54,8 +50,8 @@ export function LoginPageShell({ children }: { children: ReactNode }) {
         <IconButton
           variant="ghost"
           isIconOnly
-          label={`Appearance: ${preference}. Switch to ${next}.`}
-          onPress={() => setPreference(next)}
+          label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+          onPress={toggle}
         >
           <ThemeIcon aria-hidden />
         </IconButton>

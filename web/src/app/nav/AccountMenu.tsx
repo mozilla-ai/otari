@@ -26,11 +26,7 @@ import type { OrganizationContext } from "@/client"
 import { useAuth } from "@/features/auth/AuthContext"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import { useDeployment } from "@/shared/hooks/useDeployment"
-import {
-  THEME_PREFERENCES,
-  type ThemePreference,
-  useTheme,
-} from "@/shared/hooks/useTheme"
+import { useTheme } from "@/shared/hooks/useTheme"
 import {
   NAV_ICON_CLASS,
   NAV_TRANSITION,
@@ -54,12 +50,6 @@ import {
 // Data & Privacy stays a disabled row when unset rather than vanishing: the
 // settings surface it will become is coming, and a menu that silently lacks it
 // reads as a menu that never will.
-
-const THEME_LABELS: Record<ThemePreference, string> = {
-  system: "System",
-  light: "Light",
-  dark: "Dark",
-}
 
 // 36px rows at 13.5px, which is the menu's own scale: a step down from the
 // rail's 44px/14px, because a menu row is read once on the way to a decision
@@ -269,38 +259,29 @@ function MenuExternalLink({
 }
 
 /**
- * Appearance: one row that names the current preference and cycles through the
- * three, system → light → dark → system.
+ * Appearance: one row that names the current theme and flips to the other.
  *
- * The design draws only the closed state, a row with "System" on the right,
- * which is what a menu wants: the setting is one line, not three. It was
- * previously a radio group, which spent three rows of the menu on a setting
- * nobody opened the menu for, and then a segmented control, which spent one row
- * on three targets 40px wide. A cycling row is the same one line the design
- * draws and needs no second surface to open into.
- *
- * `System` stays in the cycle rather than being the off state of a light/dark
- * pair: it is a preference in its own right, and the only value that keeps
- * following the OS after the fact.
+ * The design draws only the closed state, a row with the theme on the right,
+ * which is what a menu wants: the setting is one line, not two. Light and dark
+ * are the whole choice. Until one is chosen the dashboard follows the operating
+ * system, and the row names what that resolved to.
  *
  * The trailing value is the visible state, and `aria-label` is the same fact
  * for a screen reader plus what activating will do, because a button whose
  * meaning changes on every press cannot say it in a static name.
  */
 function AppearanceControl() {
-  const { preference, setPreference } = useTheme()
-  const next =
-    THEME_PREFERENCES[
-      (THEME_PREFERENCES.indexOf(preference) + 1) % THEME_PREFERENCES.length
-    ]
+  const { resolved, toggle } = useTheme()
+  const current = resolved === "dark" ? "Dark" : "Light"
+  const next = resolved === "dark" ? "Light" : "Dark"
 
   return (
     <MenuItem
       label="Appearance"
       icon={FiMoon}
-      trailing={THEME_LABELS[preference]}
-      ariaLabel={`Appearance: ${THEME_LABELS[preference]}. Switch to ${THEME_LABELS[next]}.`}
-      onPress={() => setPreference(next)}
+      trailing={current}
+      ariaLabel={`Appearance: ${current}. Switch to ${next}.`}
+      onPress={toggle}
     />
   )
 }

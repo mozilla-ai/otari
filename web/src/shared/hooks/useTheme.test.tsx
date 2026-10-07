@@ -8,7 +8,6 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   DARK_QUERY,
   STORAGE_KEY,
-  THEME_PREFERENCES,
   ThemeProvider,
   useTheme,
 } from "@/shared/hooks/useTheme"
@@ -25,16 +24,15 @@ function mockPrefersDark(dark: boolean) {
 }
 
 function Probe() {
-  const { preference, resolved, setPreference } = useTheme()
+  const { resolved, setPreference, toggle } = useTheme()
   return (
     <div>
-      <span data-testid="pref">{preference}</span>
       <span data-testid="resolved">{resolved}</span>
       <button type="button" onClick={() => setPreference("dark")}>
         dark
       </button>
-      <button type="button" onClick={() => setPreference("system")}>
-        system
+      <button type="button" onClick={toggle}>
+        toggle
       </button>
     </div>
   )
@@ -48,7 +46,7 @@ describe("useTheme", () => {
     document.documentElement.classList.remove("dark")
   })
 
-  it("follows the system preference by default", () => {
+  it("follows the system preference until a choice is made", () => {
     mockPrefersDark(true)
     render(
       <ThemeProvider>
@@ -56,8 +54,24 @@ describe("useTheme", () => {
       </ThemeProvider>,
     )
 
-    expect(screen.getByTestId("pref")).toHaveTextContent("system")
     expect(screen.getByTestId("resolved")).toHaveTextContent("dark")
+    // Following the system is not a stored choice.
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBeNull()
+  })
+
+  it("treats a stored 'system' as nothing stored, and keeps following the system", () => {
+    // An earlier version wrote it for a visitor who had picked "System". Such a
+    // browser was following the OS, so it keeps doing so until its first click.
+    window.localStorage.setItem(STORAGE_KEY, "system")
+    mockPrefersDark(true)
+    render(
+      <ThemeProvider>
+        <Probe />
+      </ThemeProvider>,
+    )
+
+    expect(screen.getByTestId("resolved")).toHaveTextContent("dark")
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe("system")
   })
 
   it("puts the resolved theme on the document, which is what the tokens key off", async () => {
@@ -76,7 +90,7 @@ describe("useTheme", () => {
     expect(document.documentElement.classList.contains("dark")).toBe(true)
   })
 
-  it("keeps an explicit choice apart from the system one", async () => {
+  it("flips to the other theme and remembers it", async () => {
     mockPrefersDark(true)
     render(
       <ThemeProvider>
@@ -84,11 +98,13 @@ describe("useTheme", () => {
       </ThemeProvider>,
     )
 
-    await userEvent.click(screen.getByRole("button", { name: "system" }))
-    // "system" is a preference of its own, not a resolved light/dark: it has to
-    // survive so the theme keeps following the OS afterwards.
-    expect(screen.getByTestId("pref")).toHaveTextContent("system")
+    await userEvent.click(screen.getByRole("button", { name: "toggle" }))
+    expect(screen.getByTestId("resolved")).toHaveTextContent("light")
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe("light")
+
+    await userEvent.click(screen.getByRole("button", { name: "toggle" }))
     expect(screen.getByTestId("resolved")).toHaveTextContent("dark")
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe("dark")
   })
 })
 
@@ -106,10 +122,9 @@ describe("the pre-paint script in index.html", () => {
     expect(html).toContain(`"${STORAGE_KEY}"`)
   })
 
-  it("resolves the same three states", () => {
+  it("resolves the same states: a stored light or dark, else the system's", () => {
     expect(html).toContain(DARK_QUERY)
-    for (const preference of THEME_PREFERENCES) {
-      if (preference === "system") continue
+    for (const preference of ["light", "dark"]) {
       expect(html).toContain(`"${preference}"`)
     }
   })

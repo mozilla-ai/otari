@@ -57,14 +57,25 @@ export function PublicAuthLayout({
 export function PublicAuthLink({
   to,
   children,
+  isInline = false,
 }: {
   to: string
   children: ReactNode
+  /**
+   * For a link that shares a row with a label, where a 44px box would make the
+   * row 44 tall. The row keeps the line's own 20px and the target is a bleed of
+   * 16px above and 8px below, which stays clear of the field under it.
+   */
+  isInline?: boolean
 }) {
   return (
     <Link
       href={to}
-      className="inline-flex min-h-11 items-center text-sm font-medium text-link hover:text-link-hover"
+      className={`inline-flex items-center text-sm font-medium text-link hover:text-link-hover ${
+        isInline
+          ? "relative before:absolute before:inset-x-0 before:-top-4 before:-bottom-2"
+          : "min-h-11"
+      }`}
     >
       {children}
     </Link>

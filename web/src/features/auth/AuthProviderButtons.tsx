@@ -82,7 +82,10 @@ export function AuthProviderRows({
 }) {
   const isTwoUp = layout === "two-up"
   return (
-    <div className={isTwoUp ? "flex gap-2" : "flex flex-col gap-3"}>
+    <div
+      className={isTwoUp ? "flex gap-3" : "flex flex-col gap-3"}
+      aria-busy={pendingProvider !== undefined}
+    >
       {providers.map((provider) => {
         const Mark = OAUTH_PROVIDER_ICONS[provider]
         const label = OAUTH_PROVIDER_LABELS[provider]
@@ -92,23 +95,23 @@ export function AuthProviderRows({
             key={provider}
             type="button"
             variant="ghost"
-            isDisabled={isDisabled || pendingProvider !== undefined}
+            isDisabled={isDisabled}
             onPress={() => onSelect(provider)}
             aria-label={
               isRedirecting ? "Redirecting…" : `${verb} with ${label}`
             }
-            className={
+            className={`${
               isTwoUp
                 ? "h-11 min-w-0 flex-1 justify-center gap-2 border border-border-strong"
                 : ROW
-            }
+            }${pendingProvider !== undefined ? " pointer-events-none" : ""}`}
           >
             {isRedirecting ? null : (
               <Mark
                 aria-hidden
                 className={
                   isTwoUp
-                    ? "size-5 shrink-0"
+                    ? "size-4 shrink-0"
                     : "absolute inset-y-0 left-[15px] my-auto size-4"
                 }
               />
