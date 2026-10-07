@@ -1049,7 +1049,16 @@ def create_app(config: GatewayConfig) -> FastAPI:
             CORSMiddleware,
             allow_origins=config.cors_allow_origins,
             allow_credentials=allow_credentials,
-            allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+            # A hybrid deployment mounts the platform's own routes behind this
+            # same app (see the platform's OTARI_CORS_ALLOW_ORIGINS, enabled
+            # wherever a shared dashboard needs its session cookie honored
+            # cross-origin), so this list has to cover every method the
+            # platform's own routes use too, not just the gateway's. A
+            # workspace's web-search config is PUT, and was rejected with
+            # "Disallowed CORS method" everywhere this middleware was enabled
+            # (mozilla-ai/infrastructure -- reported from both EU stacks,
+            # which are the only ones that set cors_allow_origins at all).
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
             allow_headers=[
                 "Content-Type",
                 "Authorization",
