@@ -44,23 +44,10 @@ class _EndUsers:
     def __init__(self, repositories: BudgetRepositories) -> None:
         self._repositories = repositories
 
-    async def checked_budget_list(
-        self, budget_ids: list[str] | None, default_id: str | None, *, check_default: bool, check_list: bool
-    ) -> list[str] | None:
-        """A key's end-user budget list, deduplicated, once it holds together with the key's default.
-
-        Refuses a default that is not on a list, and a budget an end user could not be assigned (unknown, or a
-        tenant's). Only the half the caller is changing is looked up again.
-        """
-        listed = list(dict.fromkeys(budget_ids)) if budget_ids is not None else None
-        if listed is not None and default_id is not None and default_id not in listed:
-            raise EndUserDefaultNotListedError()
-        to_check = list(listed or []) if check_list else []
-        if check_default and default_id is not None and default_id not in to_check:
-            to_check.append(default_id)
-        for budget_id in to_check:
+    async def require_assignable_budgets(self, budget_ids: list[str]) -> None:
+        """Refuse an end-user budget that does not exist or that a tenant owns."""
+        for budget_id in budget_ids:
             await self._assignable_budget(budget_id)
-        return listed
 
     async def resolve(self, api_key: APIKey, external_id: str, requested_budget_id: str | None) -> ResolvedEndUser:
         """The end user that ``external_id`` names under this key's owner.
@@ -162,6 +149,22 @@ class _EndUsers:
         if winner is None:
             raise RuntimeError("An end user's insert conflicted with a row that is not there")
         return winner
+
+
+def end_user_budget_list(
+    budget_ids: list[str] | None, default_id: str | None, *, check_default: bool, check_list: bool
+) -> tuple[list[str] | None, list[str]]:
+    """A key's end-user budget list, deduplicated, and the budgets in it that still have to be looked up.
+
+    Refuses a default that is not on a list. Only the half the caller is changing is looked up again.
+    """
+    listed = list(dict.fromkeys(budget_ids)) if budget_ids is not None else None
+    if listed is not None and default_id is not None and default_id not in listed:
+        raise EndUserDefaultNotListedError()
+    to_check = list(listed or []) if check_list else []
+    if check_default and default_id is not None and default_id not in to_check:
+        to_check.append(default_id)
+    return listed, to_check
 
 
 def _check_external_id(external_id: str) -> None:

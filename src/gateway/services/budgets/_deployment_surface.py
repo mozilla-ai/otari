@@ -9,7 +9,6 @@ from gateway.exceptions.budget_exceptions import (
     DeploymentBudgetOwnedByOrganizationError,
     DeploymentBudgetStillReferencedError,
 )
-from gateway.models.budgets import Budget
 from gateway.models.money import to_usd_or_none
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.schemas.budgets import BudgetResponse, CreateBudgetRequest
@@ -55,7 +54,7 @@ class _DeploymentSurface:
         budget = await budgets.get(budget_id)
         created = False
         if budget is None:
-            created = await budgets.add_if_absent(Budget(budget_id=budget_id))
+            created = await budgets.add_if_absent(budget_id)
             budget = await budgets.get(budget_id)
             if budget is None:
                 raise RuntimeError("A budget's insert conflicted with a row that is not there")

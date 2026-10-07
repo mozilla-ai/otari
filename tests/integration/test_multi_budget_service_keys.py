@@ -426,10 +426,10 @@ def test_put_replaces_a_budget_a_concurrent_put_created_first(
     """Two provisioning runs racing on a new id both succeed, and the later body wins."""
     original = BudgetRepository.add_if_absent
 
-    async def create_first(self: BudgetRepository, budget: Budget) -> bool:
+    async def create_first(self: BudgetRepository, budget_id: str) -> bool:
         db_session.add(Budget(budget_id="raced", request_limit=1))
         db_session.commit()
-        return await original(self, budget)
+        return await original(self, budget_id)
 
     with patch.object(BudgetRepository, "add_if_absent", create_first):
         response = _put_budget(client, master_key_header, "raced", request_limit=7)

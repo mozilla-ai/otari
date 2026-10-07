@@ -25,7 +25,7 @@ from gateway.schemas.budgets import (
 )
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets._deployment_surface import _DeploymentSurface
-from gateway.services.budgets._end_users import ResolvedEndUser, _EndUsers
+from gateway.services.budgets._end_users import ResolvedEndUser, _EndUsers, end_user_budget_list
 from gateway.services.budgets._member_policies import _MemberPolicies
 from gateway.services.budgets._organization_surface import _OrganizationSurface
 from gateway.services.budgets._reservations import _normalize_strategy
@@ -141,10 +141,13 @@ class BudgetService:
 
         Refuses a default off the list, and a budget an end user may not be capped at: an unknown one, or a tenant's.
         """
-        async with self._uow:
-            return await self._end_users.checked_budget_list(
-                budget_ids, default_id, check_default=check_default, check_list=check_list
-            )
+        listed, to_check = end_user_budget_list(
+            budget_ids, default_id, check_default=check_default, check_list=check_list
+        )
+        if to_check:
+            async with self._uow:
+                await self._end_users.require_assignable_budgets(to_check)
+        return listed
 
     async def minute_limits(self, user_id: str, *, strategy: str | None) -> BudgetMinuteLimits | None:
         """The per-minute limits of the user's own budget, or None when it sets neither or budgets are disabled."""

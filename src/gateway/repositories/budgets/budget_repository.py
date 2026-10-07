@@ -26,14 +26,14 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         await self.db.refresh(budget)
         return budget
 
-    async def add_if_absent(self, budget: Budget) -> bool:
-        """Stage a budget under the id it carries, returning False when a concurrent request created that id first.
+    async def add_if_absent(self, budget_id: str) -> bool:
+        """Stage an empty budget under ``budget_id``, returning False when a concurrent request created it first.
 
         The insert runs in a SAVEPOINT, so losing that race rolls back this row alone.
         """
         try:
             async with self.db.begin_nested():
-                self.db.add(budget)
+                self.db.add(Budget(budget_id=budget_id))
         except IntegrityError:
             return False
         return True
