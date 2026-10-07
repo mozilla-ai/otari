@@ -90,6 +90,43 @@ A field a provider adds to a chat completion's message beyond the OpenAI schema
 under `message.provider_specific_fields` (`delta.provider_specific_fields` on a
 stream), where clients written against LiteLLM look for it.
 
+### Request tags
+
+A request can tag its spend through `metadata`, OpenAI's field for this, on all
+three surfaces:
+
+```json
+{"model": "openai:gpt-4o", "messages": [...], "metadata": {"purpose": "chat", "country": "DE"}}
+```
+
+A standalone gateway records the tags on the usage rows the request writes:
+served, failed, streamed or not, and refused once the request's model has been
+resolved (a disallowed model, missing pricing, an exhausted budget). LiteLLM's
+nested form, `"metadata": {"spend_logs_metadata": {...}}`, is read as well, so a
+client moving off a LiteLLM proxy keeps its attribution unchanged; a nested key
+wins over a flat one of the same name. The limits are OpenAI's: up to 16 string
+pairs, keys up to 64 characters and values up to 512. A null value is ignored,
+and anything else is refused with a 422.
+
+What reaches the provider depends on the surface. Chat Completions never
+forwards `metadata`. Messages and Responses forward it as before, minus
+`spend_logs_metadata`, because those providers take `metadata` themselves. On
+Messages, `metadata.user_id` names the billed user, as it always has, and is not
+a tag.
+
+The usage endpoints (`GET /api/v1/usage`, `/count`, `/summary`, `/series`, and
+their `/api/v1/organizations/me/usage` counterparts) filter by tag with a
+repeatable `tag=key:value`. Values for the same key match any of them, and
+different keys must all match. `/summary` also takes `group_by_tag=<key>` and
+returns spend by that tag's values as `by_tag`, with untagged rows under a null
+key:
+
+```
+GET /api/v1/usage/summary?group_by_tag=purpose&dimensions=none
+```
+
+Tags are recorded in standalone mode only.
+
 ### Cost of a failed or interrupted request
 
 A stream that fails mid-response ends in an error event, and one the client

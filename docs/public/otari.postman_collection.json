@@ -5838,6 +5838,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+                  "disabled": true,
+                  "key": "tag",
+                  "value": ""
+                },
+                {
                   "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "api_key_id",
@@ -5886,7 +5892,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/usage?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&workspace_id=&skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/usage?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&tag=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&workspace_id=&skip=&limit="
             }
           }
         },
@@ -5970,6 +5976,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+                  "disabled": true,
+                  "key": "tag",
+                  "value": ""
+                },
+                {
                   "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "api_key_id",
@@ -6006,7 +6018,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/usage/count?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&workspace_id="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/usage/count?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&tag=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&workspace_id="
             }
           }
         },
@@ -6096,6 +6108,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+                  "disabled": true,
+                  "key": "tag",
+                  "value": ""
+                },
+                {
                   "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "api_key_id",
@@ -6132,7 +6150,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/usage/series?group_by=model&start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/usage/series?group_by=model&start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&tag=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket="
             }
           }
         },
@@ -6216,6 +6234,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+                  "disabled": true,
+                  "key": "tag",
+                  "value": ""
+                },
+                {
                   "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "api_key_id",
@@ -6256,9 +6280,15 @@
                   "disabled": true,
                   "key": "dimensions",
                   "value": ""
+                },
+                {
+                  "description": "A tag key to break spend down by, returned as `by_tag`. Rows that do not carry the tag group under a null key.",
+                  "disabled": true,
+                  "key": "group_by_tag",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/organizations/me/usage/summary?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket=&dimensions="
+              "raw": "{{baseUrl}}/api/v1/organizations/me/usage/summary?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&tag=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket=&dimensions=&group_by_tag="
             }
           }
         }
@@ -9053,6 +9083,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+                  "disabled": true,
+                  "key": "tag",
+                  "value": ""
+                },
+                {
                   "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "api_key_id",
@@ -9101,7 +9137,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/usage?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&workspace_id=&skip=&limit="
+              "raw": "{{baseUrl}}/api/v1/usage?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&tag=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&workspace_id=&skip=&limit="
             }
           }
         },
@@ -9202,6 +9238,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+                  "disabled": true,
+                  "key": "tag",
+                  "value": ""
+                },
+                {
                   "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "api_key_id",
@@ -9238,7 +9280,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/usage/count?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&workspace_id="
+              "raw": "{{baseUrl}}/api/v1/usage/count?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&tag=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&workspace_id="
             }
           }
         },
@@ -9408,6 +9450,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+                  "disabled": true,
+                  "key": "tag",
+                  "value": ""
+                },
+                {
                   "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "api_key_id",
@@ -9444,7 +9492,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/usage/series?group_by=model&start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket="
+              "raw": "{{baseUrl}}/api/v1/usage/series?group_by=model&start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&tag=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket="
             }
           }
         },
@@ -9560,6 +9608,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+                  "disabled": true,
+                  "key": "tag",
+                  "value": ""
+                },
+                {
                   "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "api_key_id",
@@ -9600,9 +9654,15 @@
                   "disabled": true,
                   "key": "dimensions",
                   "value": ""
+                },
+                {
+                  "description": "A tag key to break spend down by, returned as `by_tag`. Rows that do not carry the tag group under a null key.",
+                  "disabled": true,
+                  "key": "group_by_tag",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/api/v1/usage/summary?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket=&dimensions="
+              "raw": "{{baseUrl}}/api/v1/usage/summary?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&tag=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket=&dimensions=&group_by_tag="
             }
           }
         }

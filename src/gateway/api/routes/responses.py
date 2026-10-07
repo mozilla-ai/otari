@@ -50,6 +50,7 @@ from gateway.api.routes._pipeline import (
     scope_prompt_cache_key,
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost, build_attempt_client_args
+from gateway.api.routes._request_tags import RequestMetadata, forwarded_metadata, request_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
@@ -125,6 +126,7 @@ class ResponsesRequest(derive_request_base(ResponsesParams)):  # type: ignore[mi
     tools_header: str | None = None
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
     session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
+    metadata: RequestMetadata = None
 
 
 def _responses_input_text(value: Any) -> str:
@@ -589,6 +591,7 @@ async def create_response(
             normalize_messages=_normalize,
             tools=request_body.tools,
             idempotency=None if bool(request_body.stream) else idempotency,
+            tags=request_tags(request_body.metadata),
         )
     except IdempotentReplay as replay:
         return replay.response()
@@ -685,6 +688,7 @@ async def create_response(
         remaining_user_tools=tool_ctx.remaining_user_tools,
         web_search_declared_name=tool_ctx.web_search_declared_name,
     )
+    forwarded_metadata(request_fields)
     scope_prompt_cache_key(request_fields, ctx)
     # This is an internal handoff populated below, never a client request field.
     # ``ResponsesRequest`` permits extra fields for OpenAI compatibility, so

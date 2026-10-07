@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_api_key_or_master_key
 from gateway.api.routes._billing_schemas import ChargeLine, MeterMap
+from gateway.api.routes._request_tags import MAX_TAG_KEY_LENGTH
 from gateway.core.config import GatewayConfig
 from gateway.core.metered_pricing import quantize_cost
 from gateway.core.sql import (
@@ -211,6 +212,8 @@ class UsageEntry(BaseModel):
     provider_latency_ms: int | None
     source: str
     source_label: str | None
+    # The request's tags (from its ``metadata``); null when it sent none.
+    tags: dict[str, str] | None = None
     counts_toward_budget: bool
     # Whether the bulk operator mutations can reach this row: the fixed scope
     # ``_selection_conditions`` pins them to, which is provenance *and* budget
@@ -249,6 +252,7 @@ class UsageEntry(BaseModel):
             endpoint=log.endpoint,
             source=log.source,
             source_label=log.source_label,
+            tags=log.tags,
             counts_toward_budget=log.counts_toward_budget,
             bulk_editable=log.source != SERVED_HERE_SLUG and not log.counts_toward_budget,
             prompt_tokens=log.prompt_tokens,
@@ -322,6 +326,16 @@ _ENDPOINT_DESC = "Filter to a single endpoint (e.g. '/v1/chat/completions')"
 _PROVIDER_DESC = "Filter to a single provider (e.g. 'openai')"
 _SOURCE_DESC = "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')"
 _SOURCE_LABEL_DESC = "Filter to a single session/project label (the source_label carried by imported usage)"
+_TAG_DESC = (
+    "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: "
+    "values for the same key match any of them, and different keys must all match. "
+    f"At most {MAX_FILTER_VALUES} per call."
+)
+TagFilter = Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_TAG_DESC)]
+_GROUP_BY_TAG_DESC = (
+    "A tag key to break spend down by, returned as `by_tag`. Rows that do not carry the tag group under a null key."
+)
+GroupByTag = Annotated[str | None, Query(min_length=1, max_length=MAX_TAG_KEY_LENGTH, description=_GROUP_BY_TAG_DESC)]
 _REQUEST_GROUP_DESC = (
     "Filter to the rows of one or more request groups; repeatable "
     "(request_group_id=a&request_group_id=b). A routed request writes one row per "
@@ -391,6 +405,7 @@ def _usage_filters(
     provider: str | None = None,
     source: str | None = None,
     source_label: str | None = None,
+    tag: list[str] | None = None,
     api_key_id: str | list[str] | None = None,
     priced: bool | None = None,
     tool: str | None = None,
@@ -460,6 +475,8 @@ def _usage_filters(
         conditions.append(UsageLog.source == source)
     if source_label is not None:
         conditions.append(UsageLog.source_label == source_label)
+    if tag:
+        conditions.extend(_tag_conditions(tag))
     if api_key_id is not None and api_key_id != []:
         conditions.append(match_any(UsageLog.api_key_id, api_key_id))
     if request_group_id:
@@ -478,6 +495,22 @@ def _usage_filters(
     return conditions
 
 
+def _tag_expr(key: str) -> Any:
+    """The value of tag ``key`` on a row, or null when the row does not carry it."""
+    return UsageLog.tags[key].as_string()
+
+
+def _tag_conditions(tag: list[str]) -> list[ColumnElement[bool]]:
+    """Parse ``key:value`` tag filters into one condition per key."""
+    by_key: dict[str, list[str]] = {}
+    for item in tag:
+        key, sep, value = item.partition(":")
+        if not sep or not key:
+            raise HTTPException(status_code=422, detail="A tag filter must be written key:value")
+        by_key.setdefault(key, []).append(value)
+    return [match_any(_tag_expr(key), values) for key, values in by_key.items()]
+
+
 @operator_router.get("")
 async def list_usage(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -491,6 +524,7 @@ async def list_usage(
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
+    tag: TagFilter = None,
     api_key_id: Annotated[
         list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
     ] = None,
@@ -526,6 +560,7 @@ async def list_usage(
         provider=provider,
         source=source,
         source_label=source_label,
+        tag=tag,
         api_key_id=api_key_id,
         priced=priced,
         tool=tool,
@@ -667,6 +702,7 @@ async def count_usage(
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
+    tag: TagFilter = None,
     api_key_id: Annotated[
         list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
     ] = None,
@@ -702,6 +738,7 @@ async def count_usage(
         provider=provider,
         source=source,
         source_label=source_label,
+        tag=tag,
         api_key_id=api_key_id,
         priced=priced,
         tool=tool,
@@ -939,6 +976,8 @@ class UsageSummary(BaseModel):
     # Gateway-run tool spend. Empty when the window has none, and MCP tools are
     # excluded by design (their names are unbounded, see GATEWAY_TOOL_NAMES).
     by_tool: list[UsageToolRow] = []
+    # Spend by the values of the tag ``group_by_tag`` named; empty when it named none.
+    by_tag: list[UsageGroupRow] = []
     # Failures only, so the taxonomy is not swamped by the successes that carry
     # no status code. Counts sum to ``totals.error_count``, unless a window
     # somehow held more than ``_BREAKDOWN_TOP_N`` distinct codes, in which case
@@ -1392,6 +1431,7 @@ async def _summary_context(
     provider: str | None = None,
     source: str | None = None,
     source_label: str | None = None,
+    tag: list[str] | None = None,
     api_key_id: list[str] | None = None,
     priced: bool | None = None,
     tool: str | None = None,
@@ -1416,6 +1456,7 @@ async def _summary_context(
         provider=provider,
         source=source,
         source_label=source_label,
+        tag=tag,
         api_key_id=api_key_id,
         priced=priced,
         tool=tool,
@@ -1485,6 +1526,7 @@ async def _summary_response(
     status: str | None,
     bucket: Bucket,
     dimensions: list[SummaryDimension] | None,
+    group_by_tag: str | None = None,
 ) -> UsageSummary:
     """Assemble the summary from an already-resolved window and condition set.
 
@@ -1508,6 +1550,11 @@ async def _summary_response(
         await _errors_by_status_code(db, conditions) if _ERROR_TAXONOMY_DIMENSION in requested else []
     )
     by_tool = await _tool_breakdown(db, conditions) if _TOOL_DIMENSION in requested else []
+    by_tag = (
+        await _breakdown(db, _tag_expr(group_by_tag), conditions, totals, limit=_BREAKDOWN_TOP_N, status_filter=status)
+        if group_by_tag
+        else []
+    )
 
     expr = _bucket_expr(dialect_name(db), bucket)
     series_rows = (
@@ -1557,6 +1604,7 @@ async def _summary_response(
         by_endpoint=breakdowns.get("endpoint", []),
         by_provider=breakdowns.get("provider", []),
         by_tool=by_tool,
+        by_tag=by_tag,
         errors_by_status_code=errors_by_status_code,
         series=series,
     )
@@ -1575,6 +1623,7 @@ async def usage_summary(
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
+    tag: TagFilter = None,
     api_key_id: Annotated[
         list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
     ] = None,
@@ -1584,6 +1633,7 @@ async def usage_summary(
     workspace_id: Annotated[uuid.UUID | None, Query(description=_WORKSPACE_DESC)] = None,
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
     dimensions: list[SummaryDimension] | None = Query(default=None, description=_DIMENSIONS_DESC),
+    group_by_tag: GroupByTag = None,
 ) -> UsageSummary:
     """Aggregate spend, tokens, and request volume for the dashboard Usage page.
 
@@ -1616,6 +1666,7 @@ async def usage_summary(
         provider=provider,
         source=source,
         source_label=source_label,
+        tag=tag,
         api_key_id=api_key_id,
         priced=priced,
         tool=tool,
@@ -1632,6 +1683,7 @@ async def usage_summary(
         status=status,
         bucket=bucket,
         dimensions=dimensions,
+        group_by_tag=group_by_tag,
     )
 
 
@@ -1738,6 +1790,7 @@ async def usage_series(
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
+    tag: TagFilter = None,
     api_key_id: Annotated[
         list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
     ] = None,
@@ -1771,6 +1824,7 @@ async def usage_series(
         provider=provider,
         source=source,
         source_label=source_label,
+        tag=tag,
         api_key_id=api_key_id,
         priced=priced,
         tool=tool,

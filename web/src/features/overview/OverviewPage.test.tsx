@@ -64,6 +64,7 @@ function summary(
     by_endpoint: [],
     by_provider: [],
     by_tool: [],
+    by_tag: [],
     errors_by_status_code: [],
     series,
   }

@@ -7543,6 +7543,13 @@ export interface components {
             messages: {
                 [key: string]: unknown;
             }[];
+            /**
+             * Metadata
+             * @description Tags for cost attribution, recorded on the request's usage rows and filterable in the usage API: up to 16 string pairs, keys up to 64 characters and values up to 512. A null value is ignored. LiteLLM's nested `spend_logs_metadata` object is also read, and wins over a flat key of the same name; it is never forwarded to the provider.
+             */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
             /** Model */
             model: string;
             /** N */
@@ -9771,7 +9778,10 @@ export interface components {
             messages: {
                 [key: string]: unknown;
             }[];
-            /** Metadata */
+            /**
+             * Metadata
+             * @description Tags for cost attribution, recorded on the request's usage rows and filterable in the usage API: up to 16 string pairs, keys up to 64 characters and values up to 512. A null value is ignored. LiteLLM's nested `spend_logs_metadata` object is also read, and wins over a flat key of the same name; it is never forwarded to the provider. `user_id` names the billed user and is not a tag.
+             */
             metadata?: {
                 [key: string]: unknown;
             } | null;
@@ -12942,9 +12952,12 @@ export interface components {
             mcp_server_ids?: string[] | null;
             /** Mcp Servers */
             mcp_servers?: components["schemas"]["McpServerConfig"][] | null;
-            /** Metadata */
+            /**
+             * Metadata
+             * @description Tags for cost attribution, recorded on the request's usage rows and filterable in the usage API: up to 16 string pairs, keys up to 64 characters and values up to 512. A null value is ignored. LiteLLM's nested `spend_logs_metadata` object is also read, and wins over a flat key of the same name; it is never forwarded to the provider.
+             */
             metadata?: {
-                [key: string]: string;
+                [key: string]: unknown;
             } | null;
             /** Model */
             model: string;
@@ -14187,6 +14200,10 @@ export interface components {
             status: string;
             /** Status Code */
             status_code: number | null;
+            /** Tags */
+            tags?: {
+                [key: string]: string;
+            } | null;
             /** Timestamp */
             timestamp: string;
             /** Total Tokens */
@@ -14483,6 +14500,11 @@ export interface components {
             by_source: components["schemas"]["UsageGroupRow"][];
             /** By Source Label */
             by_source_label: components["schemas"]["UsageGroupRow"][];
+            /**
+             * By Tag
+             * @default []
+             */
+            by_tag: components["schemas"]["UsageGroupRow"][];
             /**
              * By Tool
              * @default []
@@ -20404,6 +20426,8 @@ export interface operations {
                 source?: string | null;
                 /** @description Filter to a single session/project label (the source_label carried by imported usage) */
                 source_label?: string | null;
+                /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
+                tag?: string[] | null;
                 /** @description Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call. */
                 api_key_id?: string[] | null;
                 /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
@@ -20468,6 +20492,8 @@ export interface operations {
                 source?: string | null;
                 /** @description Filter to a single session/project label (the source_label carried by imported usage) */
                 source_label?: string | null;
+                /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
+                tag?: string[] | null;
                 /** @description Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call. */
                 api_key_id?: string[] | null;
                 /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
@@ -20532,6 +20558,8 @@ export interface operations {
                 source?: string | null;
                 /** @description Filter to a single session/project label (the source_label carried by imported usage) */
                 source_label?: string | null;
+                /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
+                tag?: string[] | null;
                 /** @description Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call. */
                 api_key_id?: string[] | null;
                 /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
@@ -20594,6 +20622,8 @@ export interface operations {
                 source?: string | null;
                 /** @description Filter to a single session/project label (the source_label carried by imported usage) */
                 source_label?: string | null;
+                /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
+                tag?: string[] | null;
                 /** @description Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call. */
                 api_key_id?: string[] | null;
                 /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
@@ -20608,6 +20638,8 @@ export interface operations {
                 bucket?: "hour" | "day";
                 /** @description Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty. */
                 dimensions?: ("model" | "user" | "api_key" | "source" | "source_label" | "endpoint" | "provider" | "status_code" | "tool" | "none")[] | null;
+                /** @description A tag key to break spend down by, returned as `by_tag`. Rows that do not carry the tag group under a null key. */
+                group_by_tag?: string | null;
             };
             header?: never;
             path?: never;
@@ -23364,6 +23396,8 @@ export interface operations {
                 source?: string | null;
                 /** @description Filter to a single session/project label (the source_label carried by imported usage) */
                 source_label?: string | null;
+                /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
+                tag?: string[] | null;
                 /** @description Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call. */
                 api_key_id?: string[] | null;
                 /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
@@ -23461,6 +23495,8 @@ export interface operations {
                 source?: string | null;
                 /** @description Filter to a single session/project label (the source_label carried by imported usage) */
                 source_label?: string | null;
+                /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
+                tag?: string[] | null;
                 /** @description Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call. */
                 api_key_id?: string[] | null;
                 /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
@@ -23609,6 +23645,8 @@ export interface operations {
                 source?: string | null;
                 /** @description Filter to a single session/project label (the source_label carried by imported usage) */
                 source_label?: string | null;
+                /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
+                tag?: string[] | null;
                 /** @description Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call. */
                 api_key_id?: string[] | null;
                 /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
@@ -23704,6 +23742,8 @@ export interface operations {
                 source?: string | null;
                 /** @description Filter to a single session/project label (the source_label carried by imported usage) */
                 source_label?: string | null;
+                /** @description Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call. */
+                tag?: string[] | null;
                 /** @description Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call. */
                 api_key_id?: string[] | null;
                 /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
@@ -23718,6 +23758,8 @@ export interface operations {
                 bucket?: "hour" | "day";
                 /** @description Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty. */
                 dimensions?: ("model" | "user" | "api_key" | "source" | "source_label" | "endpoint" | "provider" | "status_code" | "tool" | "none")[] | null;
+                /** @description A tag key to break spend down by, returned as `by_tag`. Rows that do not carry the tag group under a null key. */
+                group_by_tag?: string | null;
             };
             header?: never;
             path?: never;

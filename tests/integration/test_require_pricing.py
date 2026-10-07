@@ -212,3 +212,18 @@ def test_blocked_user_takes_precedence_over_missing_pricing(strict_pricing_clien
 def test_missing_user_takes_precedence_over_missing_pricing(strict_pricing_client: TestClient) -> None:
     """A nonexistent user gets 404, not 402 — user existence is checked before pricing."""
     assert _chat(strict_pricing_client, model="openai:gpt-4o", user="ghost-user") == 404
+
+
+def test_missing_pricing_rejection_row_carries_the_request_tags(strict_pricing_client: TestClient) -> None:
+    """A refused request's row is tagged, so spend reports by tag also count what was refused."""
+    c = strict_pricing_client
+    c.post(f"{API_ROOT}/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
+    resp = c.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "openai:gpt-4o", "messages": _MESSAGES, "user": "priced-user", "metadata": {"purpose": "chat"}},
+        headers=_MASTER_HEADER,
+    )
+    assert resp.status_code == 402
+
+    rows = c.get(f"{API_ROOT}/usage", params={"tag": "purpose:chat"}, headers=_MASTER_HEADER).json()
+    assert [row["status_code"] for row in rows] == [402]

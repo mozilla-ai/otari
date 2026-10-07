@@ -69,8 +69,10 @@ from gateway.api.routes.usage import (
     _USER_MULTI_DESC,
     _WORKSPACE_DESC,
     Bucket,
+    GroupByTag,
     SeriesGroupBy,
     SummaryDimension,
+    TagFilter,
     ToolFilter,
     UsageCount,
     UsageEntry,
@@ -176,6 +178,7 @@ async def list_organization_usage(
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
+    tag: TagFilter = None,
     api_key_id: Annotated[
         list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
     ] = None,
@@ -206,6 +209,7 @@ async def list_organization_usage(
         provider=provider,
         source=source,
         source_label=source_label,
+        tag=tag,
         api_key_id=api_key_id,
         priced=priced,
         tool=tool,
@@ -243,6 +247,7 @@ async def count_organization_usage(
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
+    tag: TagFilter = None,
     api_key_id: Annotated[
         list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
     ] = None,
@@ -274,6 +279,7 @@ async def count_organization_usage(
         provider=provider,
         source=source,
         source_label=source_label,
+        tag=tag,
         api_key_id=api_key_id,
         priced=priced,
         tool=tool,
@@ -300,6 +306,7 @@ async def organization_usage_summary(
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
+    tag: TagFilter = None,
     api_key_id: Annotated[
         list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
     ] = None,
@@ -309,6 +316,7 @@ async def organization_usage_summary(
     workspace_id: Annotated[uuid.UUID | None, Query(description=_WORKSPACE_DESC)] = None,
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
     dimensions: list[SummaryDimension] | None = Query(default=None, description=_DIMENSIONS_DESC),
+    group_by_tag: GroupByTag = None,
 ) -> UsageSummary:
     """Aggregate spend, tokens and request volume for the caller's organization.
 
@@ -330,6 +338,7 @@ async def organization_usage_summary(
         provider=provider,
         source=source,
         source_label=source_label,
+        tag=tag,
         api_key_id=api_key_id,
         priced=priced,
         tool=tool,
@@ -346,6 +355,7 @@ async def organization_usage_summary(
         status=status,
         bucket=bucket,
         dimensions=dimensions,
+        group_by_tag=group_by_tag,
     )
 
 
@@ -364,6 +374,7 @@ async def organization_usage_series(
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
+    tag: TagFilter = None,
     api_key_id: Annotated[
         list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
     ] = None,
@@ -392,6 +403,7 @@ async def organization_usage_series(
         provider=provider,
         source=source,
         source_label=source_label,
+        tag=tag,
         api_key_id=api_key_id,
         priced=priced,
         tool=tool,

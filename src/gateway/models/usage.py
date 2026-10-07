@@ -78,6 +78,10 @@ class UsageLog(Base):
     source: Mapped[str] = mapped_column(default=SERVED_HERE_SLUG, index=True)
     source_event_id: Mapped[str | None] = mapped_column()
     source_label: Mapped[str | None] = mapped_column()
+    # Caller-supplied tags from the request's ``metadata`` (``purpose``, ``country``,
+    # ...), bounded at intake; see ``api/routes/_request_tags.py``. Null when the
+    # request sent none, and on every row written before the column existed.
+    tags: Mapped[dict[str, str] | None] = mapped_column(JSON)
     # Whether this row's cost participates in budget enforcement. True for normal
     # gateway rows; false for imported usage and for rows from keys flagged
     # exclude_from_budget. False rows are recorded (and appear in cost analytics)
@@ -221,6 +225,7 @@ class UsageLog(Base):
             "endpoint": self.endpoint,
             "source": self.source,
             "source_label": self.source_label,
+            "tags": self.tags,
             "counts_toward_budget": self.counts_toward_budget,
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
