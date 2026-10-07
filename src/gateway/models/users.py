@@ -8,10 +8,11 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey
+from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, case
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.sql.elements import ColumnElement
 
-from gateway.models.base import Base
+from gateway.models.base import Base, has_passed
 from gateway.models.money import UsdCost
 
 
@@ -57,6 +58,20 @@ class User(Base):
         onupdate=lambda: datetime.now(UTC),
     )
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+
+    # The counters roll when the user's next request arrives, not when the period
+    # ends, so an idle user's ``spend`` still holds the period that is over. Every
+    # read reports this period's figure through these two, which read zero once the
+    # stored period has ended; ``reserved`` is never masked, since a roll keeps holds.
+    @property
+    def period_has_ended(self) -> bool:
+        """Whether the stored period is over and the counters are last period's."""
+        return has_passed(self.next_budget_reset_at)
+
+    @staticmethod
+    def spend_this_period() -> ColumnElement[Decimal]:
+        """``spend`` in SQL, or zero once the stored period has ended."""
+        return case((User.next_budget_reset_at <= datetime.now(UTC), Decimal(0)), else_=User.spend)
 
     budget = relationship("Budget", back_populates="users")
     api_keys = relationship("APIKey", back_populates="user", passive_deletes=True)

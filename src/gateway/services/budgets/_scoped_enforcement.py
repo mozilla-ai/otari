@@ -79,11 +79,16 @@ class BudgetScopeRequest:
     is about to go to (``openai``, or a named instance), which is what a
     provider-narrowed ceiling matches on, and ``model`` is the model id as that
     provider names it, which a model-narrowed ceiling matches on.
+
+    ``workspace_id`` is the workspace a request with no key runs in, such as a
+    Playground request from a dashboard session; a keyed request bills to its
+    key's workspace and leaves it unset.
     """
 
     api_key: APIKey | None
     provider_instance: str | None = None
     model: str | None = None
+    workspace_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -146,7 +151,7 @@ async def _resolve_identities(
     scope: BudgetScopeRequest,
 ) -> list[tuple[str, str]]:
     """The ``(scope_type, scope_id)`` pairs a request bills to."""
-    workspace_id = await resolve_workspace_id(db, scope.api_key)
+    workspace_id = scope.workspace_id or await resolve_workspace_id(db, scope.api_key)
     identity = _identity_uuid(user_id)
     workspace_member_id: uuid.UUID | None = None
     org_member_id: uuid.UUID | None = None

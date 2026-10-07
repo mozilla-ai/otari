@@ -4,7 +4,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -14,6 +14,7 @@ from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
 from gateway.models.api_keys import APIKey
+from gateway.models.budgets import SCOPE_API_TOKEN, ScopedBudget
 from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
@@ -44,6 +45,14 @@ SURFACE = Surface("keys")
 # for the same reason a write is, because the id a read hands back is what a write
 # is aimed with, and a 404 is the answer a route with no business in a row gives.
 NOT_INTERNAL = col(APIKey.internal_secret).is_(None)
+
+
+async def _delete_key(db: AsyncSession, key: APIKey) -> None:
+    """Stage a key's deletion and the budgets applied to it, which nothing cascades to."""
+    await db.execute(
+        delete(ScopedBudget).where(ScopedBudget.scope_type == SCOPE_API_TOKEN, ScopedBudget.scope_id == key.id)
+    )
+    await db.delete(key)
 
 
 async def _load_key_in_organization(
@@ -508,7 +517,7 @@ async def delete_key(
     """
     key = await _load_key_in_organization(db, key_id, organization_id)
 
-    await db.delete(key)
+    await _delete_key(db, key)
     try:
         await db.commit()
     except SQLAlchemyError:

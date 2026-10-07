@@ -120,3 +120,15 @@ class UpdatedAtMixin:
     """
 
     updated_at: datetime | None = _timestamp_field(default=None, column_kwargs={"onupdate": func.now()})
+
+
+def has_passed(moment: datetime | None) -> bool:
+    """Whether a stored timestamp is now or earlier.
+
+    SQLite hands a timestamp back naive; it was written as UTC, so it is read as UTC.
+    """
+    if moment is None:
+        return False
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment <= datetime.now(UTC)

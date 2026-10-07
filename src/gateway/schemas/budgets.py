@@ -278,6 +278,7 @@ class ScopedBudgetFigures(BaseModel):
     @staticmethod
     def _figures_of(ceiling: ScopedBudget, budget: Budget) -> dict[str, Any]:
         """Return the value of every field here, read from a ceiling and the budget it names."""
+        ended = ceiling.period_has_ended
         return {
             "id": ceiling.id,
             "scope_type": ceiling.scope_type,
@@ -287,13 +288,14 @@ class ScopedBudgetFigures(BaseModel):
             "budget_id": ceiling.budget_id,
             "name": ceiling.name,
             "max_budget": as_float(budget.max_budget),
-            "current_spend": float(ceiling.current_spend),
+            # Last period's figures until the next request rolls the window.
+            "current_spend": 0.0 if ended else float(ceiling.current_spend),
             "reserved_spend": float(ceiling.reserved_spend),
             "token_limit": budget.token_limit,
-            "current_tokens": ceiling.current_tokens,
+            "current_tokens": 0 if ended else ceiling.current_tokens,
             "reserved_tokens": ceiling.reserved_tokens,
             "request_limit": budget.request_limit,
-            "current_requests": ceiling.current_requests,
+            "current_requests": 0 if ended else ceiling.current_requests,
             "reserved_requests": ceiling.reserved_requests,
             "reset_cycle": budget.reset_cycle,
             "reset_every_n": budget.reset_every_n,

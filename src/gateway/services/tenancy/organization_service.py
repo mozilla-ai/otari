@@ -915,6 +915,23 @@ class OrganizationService:
         }
         return [assignment for assignment in assignments if assignment.workspace_id in found]
 
+    async def _release_membership(self, membership: OrganizationMember) -> None:
+        """Take back what a membership granted, ahead of suspending it.
+
+        Suspension keeps the row for attribution, but its workspace memberships
+        stayed active and every budget keyed on either went on binding, and came
+        back with a re-invite. The workspace rows go the way a workspace removal
+        takes them, so their budgets go with them. API keys stay, and so do
+        their budgets: a key belongs to its workspace and keeps working, and
+        dropping its budget would uncap it.
+        """
+        listener = self._require_membership_listener()
+        workspace_ids = await self.get_workspace_ids_in_organization(membership.organization_id)
+        for row in await self.workspaces.get_by_workspaces_and_user(workspace_ids, membership.user_id):
+            await listener.member_removed(row)
+            await self.workspaces.delete(row)
+        await listener.organization_member_removed(membership)
+
     def _require_membership_listener(self) -> MembershipListener:
         if self._membership_listener is None:
             msg = "This organization service cannot change workspace membership"
@@ -1636,6 +1653,7 @@ class OrganizationService:
         await self.organizations.lock(organization.id)
         _, membership, _ = await self._resolve_own_pending_invitation(user, organization_member_id)
 
+        await self._release_membership(membership)
         await self.members.update_membership(membership, {"status": "suspended"})
         # Every pending row for this membership, not just the one the resolve
         # picked. At most one is pending by the invite path's invariant, but it
@@ -1695,6 +1713,7 @@ class OrganizationService:
                 update_data={"status": "suspended"},
                 organization_id=organization.id,
             )
+            await self._release_membership(membership)
             await self.members.update_membership(membership, {"status": "suspended"})
         await self.invitations.update_status(invitation, {"status": "cancelled"})
         await self.db.commit()
@@ -1747,6 +1766,8 @@ class OrganizationService:
         # place (SQLModel `sqlmodel_update` + `refresh`), so `target.status`
         # itself would already read the new value afterwards.
         was_invited = target.status == "invited"
+        if update_data.get("status") == "suspended" and target.status != "suspended":
+            await self._release_membership(target)
         updated = await self.members.update_membership(target, update_data)
         # Any transition away from `invited` through this generic path, not
         # only to `suspended`: `OrganizationMemberSettableStatus` also lets a
@@ -1803,6 +1824,7 @@ class OrganizationService:
         )
 
         was_invited = target.status == "invited"
+        await self._release_membership(target)
         await self.members.update_membership(target, {"status": "suspended"})
         if was_invited:
             await self._cancel_pending_invitation_for_membership(target.id)

@@ -257,7 +257,7 @@ async def test_a_declined_address_can_be_invited_again(
     invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
 
     first = await _invite(service, admin, email="invitee@example.com")
     await service.decline_pending_membership_for_user(
@@ -288,7 +288,7 @@ async def test_declining_an_owner_invitation_is_the_invitees_own_to_do(
     invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=None)
+    service = OrganizationService(async_db, membership_listener=WorkspaceBudgetDefaultService(async_db))
 
     issued = await _invite(service, admin, email="invitee@example.com", role="owner")
     await service.decline_pending_membership_for_user(

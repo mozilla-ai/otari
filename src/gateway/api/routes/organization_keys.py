@@ -56,6 +56,7 @@ from gateway.api.routes.keys import (
     NOT_INTERNAL,
     CreateKeyResponse,
     KeyInfo,
+    _delete_key,
     _load_key_in_organization,
 )
 from gateway.auth.models import hash_key, key_suffix
@@ -436,7 +437,7 @@ async def delete_own_key(
     organization_id, owner_user_id = await _caller_context(db, identity)
     key = await _load_key_in_organization(db, key_id, organization_id, owner_user_id=owner_user_id)
 
-    await db.delete(key)
+    await _delete_key(db, key)
     try:
         await db.commit()
     except SQLAlchemyError:

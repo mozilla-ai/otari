@@ -279,6 +279,38 @@ def test_deleting_a_budget_a_ceiling_enforces_is_refused(
     assert client.delete(f"{API_ROOT}/budgets/{budget_id}", headers=master_key_header).status_code == 204
 
 
+def test_a_cadence_change_retimes_the_users_holding_the_budget(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """A user's reset only fires once their stored date passes, so the date has to follow the budget.
+
+    From "no reset" the user has no date at all and would never reset; between two
+    cadences they would stay on the old one until its date came round.
+    """
+    budget_id = _make_budget(client, master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "held", "budget_id": budget_id}, headers=master_key_header)
+    assert client.get(f"{API_ROOT}/users/held", headers=master_key_header).json()["next_budget_reset_at"] is None
+
+    client.patch(
+        f"{API_ROOT}/budgets/{budget_id}",
+        json={"reset_cycle": "monthly", "reset_month_day": 15},
+        headers=master_key_header,
+    )
+    monthly = client.get(f"{API_ROOT}/users/held", headers=master_key_header).json()
+    assert datetime.fromisoformat(monthly["next_budget_reset_at"]).day == 15
+
+    client.patch(f"{API_ROOT}/budgets/{budget_id}", json={"reset_month_day": 3}, headers=master_key_header)
+    moved = client.get(f"{API_ROOT}/users/held", headers=master_key_header).json()
+    assert datetime.fromisoformat(moved["next_budget_reset_at"]).day == 3
+
+    # A rename is not a cadence change, so it does not restart the period.
+    client.patch(f"{API_ROOT}/budgets/{budget_id}", json={"name": "renamed"}, headers=master_key_header)
+    renamed = client.get(f"{API_ROOT}/users/held", headers=master_key_header).json()
+    assert renamed["next_budget_reset_at"] == moved["next_budget_reset_at"]
+    assert renamed["budget_started_at"] == moved["budget_started_at"]
+
+
 def test_a_cadence_change_retimes_the_ceilings_naming_the_budget(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -384,3 +416,100 @@ def test_a_rename_does_not_restart_a_ceiling_period(
     assert untouched is not None
     assert untouched.period_start == start
     assert untouched.period_end == end
+
+
+# The counters roll when the next request arrives, not when the period ends, so
+# an idle row still holds the period that is over. Every read reports it as zero.
+
+
+def test_a_ceiling_whose_period_ended_reads_as_nothing_spent_yet(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    budget_id = _make_budget(client, master_key_header)
+    ceiling = ScopedBudget(
+        scope_type="workspace",
+        scope_id=str(uuid4()),
+        budget_id=budget_id,
+        current_spend=Decimal("9.5"),
+        reserved_spend=Decimal("1.25"),
+        current_requests=4,
+        period_end=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    db_session.add(ceiling)
+    db_session.commit()
+
+    read = client.get(f"{API_ROOT}/scoped-budgets/{ceiling.id}", headers=master_key_header).json()
+    assert read["current_spend"] == 0.0
+    assert read["current_requests"] == 0
+    # A hold is still held: the roll that will come leaves it too.
+    assert read["reserved_spend"] == 1.25
+
+
+def test_a_user_whose_period_ended_reads_as_nothing_spent_yet(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    budget_id = _make_budget(client, master_key_header)
+    client.post(f"{API_ROOT}/users", json={"user_id": "idle", "budget_id": budget_id}, headers=master_key_header)
+    user = db_session.get(User, "idle")
+    assert user is not None
+    user.spend = Decimal("7")
+    user.next_budget_reset_at = datetime(2026, 1, 1, tzinfo=UTC)
+    db_session.commit()
+
+    assert client.get(f"{API_ROOT}/users/idle", headers=master_key_header).json()["spend"] == 0.0
+    assert client.get(f"{API_ROOT}/budgets/{budget_id}", headers=master_key_header).json()["total_spend"] == 0.0
+    listed = client.get(f"{API_ROOT}/budgets", headers=master_key_header).json()
+    assert next(row for row in listed if row["budget_id"] == budget_id)["total_spend"] == 0.0
+
+
+def test_a_cadence_change_rolls_a_period_that_had_ended_rather_than_carrying_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """Moving the window forward without rolling would put last period's spend in the new one for good."""
+    budget_id = _make_budget(client, master_key_header)
+    ended = ScopedBudget(
+        scope_type="workspace",
+        scope_id=str(uuid4()),
+        budget_id=budget_id,
+        current_spend=Decimal("9.5"),
+        period_end=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    db_session.add(ended)
+    db_session.commit()
+
+    client.patch(
+        f"{API_ROOT}/budgets/{budget_id}",
+        json={"reset_cycle": "monthly", "reset_month_day": 1},
+        headers=master_key_header,
+    )
+
+    db_session.expire_all()
+    rolled = db_session.get(ScopedBudget, ended.id)
+    assert rolled is not None
+    assert rolled.current_spend == 0
+
+
+def test_deleting_a_key_deletes_the_budgets_applied_to_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """Nothing cascades to a ceiling, so a deleted key's budget would otherwise linger as "An API key"."""
+    created = client.post(f"{API_ROOT}/keys", json={"key_name": "doomed"}, headers=master_key_header)
+    assert created.status_code == 200, created.text
+    key_id = created.json()["id"]
+    ceiling = ScopedBudget(scope_type="api_token", scope_id=key_id, budget_id=_make_budget(client, master_key_header))
+    db_session.add(ceiling)
+    db_session.commit()
+    ceiling_id = ceiling.id
+
+    assert client.delete(f"{API_ROOT}/keys/{key_id}", headers=master_key_header).status_code == 204
+
+    db_session.expire_all()
+    assert db_session.get(ScopedBudget, ceiling_id) is None

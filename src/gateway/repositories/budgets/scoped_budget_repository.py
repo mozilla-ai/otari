@@ -1,7 +1,7 @@
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Never
 
 from sqlalchemy import delete, func, or_, select, update
@@ -19,6 +19,7 @@ from gateway.models.budgets import (
     Budget,
     ScopedBudget,
     ScopeType,
+    ceiling_counters_rolled_if_ended,
 )
 from gateway.repositories.base_repository import BaseRepository
 
@@ -246,10 +247,14 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
     async def retime_for_budget(
         self, budget_id: str, *, period_start: datetime | None, period_end: datetime | None
     ) -> None:
-        """Set this window on every ceiling naming the budget, leaving each ceiling's counters as they are."""
+        """Set this window on every ceiling naming the budget, rolling only counters whose window had ended."""
         await self.db.execute(
             update(ScopedBudget)
             .where(ScopedBudget.budget_id == budget_id)
-            .values(period_start=period_start, period_end=period_end)
+            .values(
+                period_start=period_start,
+                period_end=period_end,
+                **ceiling_counters_rolled_if_ended(datetime.now(UTC)),
+            )
             .execution_options(synchronize_session=False)
         )

@@ -24,13 +24,14 @@ from gateway.exceptions.budget_exceptions import (
     WorkspaceBudgetDefaultNotFoundError,
 )
 from gateway.models.budgets import (
+    SCOPE_ORG_MEMBER,
     SCOPE_WORKSPACE,
     SCOPE_WORKSPACE_MEMBER,
     Budget,
     ScopedBudget,
     WorkspaceBudgetDefault,
 )
-from gateway.models.tenancy import User, Workspace, WorkspaceMember
+from gateway.models.tenancy import OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
 from gateway.schemas.budgets import (
     WorkspaceMemberBudgetPoliciesPublic,
@@ -68,6 +69,19 @@ class WorkspaceBudgetDefaultService:
         await self.db.execute(
             delete(ScopedBudget).where(
                 ScopedBudget.scope_type == SCOPE_WORKSPACE_MEMBER,
+                ScopedBudget.scope_id == str(member.id),
+            )
+        )
+
+    async def organization_member_removed(self, member: OrganizationMember) -> None:
+        """Delete the ceilings keyed on this organization membership, in the caller's transaction.
+
+        Suspension keeps the row, and a re-invite revives it, so a ceiling left
+        here would bind again on the person's return.
+        """
+        await self.db.execute(
+            delete(ScopedBudget).where(
+                ScopedBudget.scope_type == SCOPE_ORG_MEMBER,
                 ScopedBudget.scope_id == str(member.id),
             )
         )
