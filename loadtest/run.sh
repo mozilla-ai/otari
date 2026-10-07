@@ -287,6 +287,8 @@ ab_scenario() {
 ab() {
   local base=${1:?ab needs a base image} head=${2:?and a head image}
   local rounds=${AB_ROUNDS:-4} configured=${OTARI_IMAGE:-otari:loadtest}
+  # What the replicas ran on before ab, restored when it finishes.
+  local configured_db=${LOADTEST_DATABASE_URL-} configured_db_set=${LOADTEST_DATABASE_URL+1}
   local seq=0 variant scenario ready=" "
   AB_SECONDS=${AB_SECONDS:-12} AB_IDLE_SECONDS=${AB_IDLE_SECONDS:-10} AB_RPM=${AB_RPM:-1000}
   AB_PROMPT_MIX=${AB_PROMPT_MIX:-100:500} AB_TARGET=http://otari-1:8000
@@ -351,7 +353,7 @@ JSON
   # scenario run next checks the database its requests went to. AB_RESTORE=0
   # skips it where nothing runs next.
   if [[ "${AB_RESTORE:-1}" != 0 ]]; then
-    unset LOADTEST_DATABASE_URL
+    if [[ -n $configured_db_set ]]; then export LOADTEST_DATABASE_URL=$configured_db; else unset LOADTEST_DATABASE_URL; fi
     export OTARI_IMAGE=$configured
     dc up -d --no-deps --no-build --force-recreate --wait otari-1 otari-2 >/dev/null 2>&1
     dc up -d --no-deps lb >/dev/null 2>&1

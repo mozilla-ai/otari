@@ -256,20 +256,32 @@ def report(directory: Path, args: argparse.Namespace) -> int:
     statements = compare_statements(directory, args)
 
     failures: list[str] = []
-    # A run that crashed leaves no result, which would compare on less than was
-    # intended rather than fail; every scenario and mode must have run as often
-    # for each build.
-    planned = {(r["scenario"], r["mode"]) for r in runs}
-    for scenario, mode in sorted(planned):
-        counts = {
-            v: sum(1 for r in runs if (r["scenario"], r["mode"], r["variant"]) == (scenario, mode, v)) for v in VARIANTS
-        }
-        if counts["base"] != counts["head"] or not all(counts.values()):
-            failures.append(f"{scenario} {mode}: runs missing (base {counts['base']}, head {counts['head']})")
+    # A run that crashed, or served nothing, would otherwise shrink the comparison
+    # instead of failing it: check what ran against the plan run.sh recorded.
+    config = meta.get("config", {})
+    rounds = config.get("rounds")
+    scenarios = config.get("scenarios", "").split() or sorted({r["scenario"] for r in runs}, key=_scenario_order)
+    for scenario in scenarios:
+        for mode in MODES:
+            cell = [r for r in runs if (r["scenario"], r["mode"]) == (scenario, mode)]
+            usable = {v: sum(1 for r in cell if r["variant"] == v and len(r["samples"])) for v in VARIANTS}
+            expected = rounds or max(usable.values())
+            if any(n != expected for n in usable.values()) or not expected:
+                failures.append(
+                    f"{scenario} {mode}: {expected} usable runs per build planned, "
+                    f"base has {usable['base']}, head {usable['head']}"
+                )
+    failures += [
+        f"statements per request ({mode}): not counted for both builds"
+        for mode in ("direct", "spill")
+        if mode not in statements
+    ]
     for mode, figures in statements.items():
         if figures["verdict"] == "regression":
             failures.append(f"statements per request ({mode}) went from {figures['base']:.1f} to {figures['head']:.1f}")
-    head_errors = sum(cell["errors"]["head"] for cell in latency)
+    # From every head run, not the compared cells: a run that served nothing has
+    # no samples and drops out of the comparison, but its failures still count.
+    head_errors = sum(r["errors"] for r in runs if r["variant"] == "head")
     if head_errors:
         failures.append(f"the head build failed {head_errors} requests (not a 200, or a stream cut short)")
     if args.enforce_latency:
