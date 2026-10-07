@@ -131,9 +131,9 @@ describe("AuthProvider", () => {
     })
   })
 
-  it("resolves logout's promise only once the server has been told", async () => {
-    // A caller about to send its next request somewhere else (a switch to
-    // another region) waits for this, or the revocation would follow it there.
+  it("resolves logout's promise only once the revocation has been attempted", async () => {
+    // A caller about to send its next request somewhere else waits for this, or
+    // the revocation would follow it there.
     let resolveDelete!: () => void
     vi.spyOn(globalThis, "fetch").mockReturnValue(
       new Promise<Response>((resolve) => {
@@ -173,6 +173,34 @@ describe("AuthProvider", () => {
 
     resolveDelete()
     await waitFor(() => expect(settled).toBe(true))
+  })
+
+  it("resolves logout's promise when the revocation request fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("offline"))
+    let logoutResult: Promise<void> | undefined
+    function Capture() {
+      const { logout } = useAuth()
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            logoutResult = logout()
+          }}
+        >
+          capture
+        </button>
+      )
+    }
+    const user = userEvent.setup()
+    render(
+      <AppProviders>
+        <Capture />
+      </AppProviders>,
+    )
+
+    await user.click(screen.getByRole("button", { name: "capture" }))
+
+    await expect(logoutResult).resolves.toBeUndefined()
   })
 
   it("keeps isSigningOut true until every concurrent logout's revocation settles", async () => {

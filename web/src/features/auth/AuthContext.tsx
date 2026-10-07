@@ -31,10 +31,11 @@ interface AuthContextValue {
   isSigningOut: boolean
   login: () => void
   /**
-   * Ends the session, resolving once the server has been told. The page is
-   * signed out at once whatever the answer, so most callers ignore the promise;
-   * one that is about to send its next request somewhere else waits for it, or
-   * the revocation could follow it there.
+   * Ends the session, resolving once the revocation has been attempted. A
+   * failed request still resolves it: this is not proof the server was told.
+   * The page is signed out at once whatever the answer, so most callers ignore
+   * the promise; one that is about to send its next request somewhere else
+   * waits for it, so the revocation cannot follow it there.
    */
   logout: () => Promise<void>
 }
