@@ -53,9 +53,11 @@ is the source of truth for custom-provider keys and supported options.
 Codex sends the configured model string unchanged. Use a model or named instance
 served by the Otari deployment.
 
-The upstream provider must implement the Responses API. Otari rejects unsupported
-providers before dispatch. A hybrid attempt plan is rejected if any candidate
-cannot serve Responses.
+A provider with its own Responses API is called natively. Any other provider is
+served by translating each request into a chat completion, which refuses a few
+Responses features Codex may use, such as tool types other than `function`; see
+[Responses on providers without a Responses API](api-reference.md#responses-on-providers-without-a-responses-api).
+Codex works best on a provider with a native Responses API.
 
 In standalone mode, inspect `GET /api/v1/models`. Hybrid model IDs come from the
 connected control plane.
@@ -78,7 +80,9 @@ documentation. See the official configuration reference above.
 - Include `/api/v1` in `base_url`.
 - Start a new Codex session after changing provider configuration.
 - Configure provider credentials and pricing in Otari, not in Codex.
-- Verify the selected provider supports the Responses API.
+- If a request fails with a `400` naming a Responses field, the selected
+  provider is being served through Chat Completions; choose a provider with a
+  native Responses API.
 
 ## Import Codex usage without routing
 

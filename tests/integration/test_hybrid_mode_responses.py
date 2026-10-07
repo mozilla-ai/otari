@@ -13,6 +13,8 @@ from typing import Any, cast
 
 import httpx
 import pytest
+from any_llm import AnyLLM, LLMProvider
+from any_llm.types.completion import ChatCompletion
 from any_llm.types.responses import Response
 from fastapi.testclient import TestClient
 from openai.types.responses import ResponseUsage
@@ -75,6 +77,21 @@ def _attempt(
     if extra_params is not None:
         attempt["extra_params"] = extra_params
     return attempt
+
+
+class _NoTextGeneration:
+    SUPPORTS_RESPONSES = False
+    SUPPORTS_COMPLETION = False
+
+
+def _anthropic_serves_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ``anthropic`` a provider that can serve neither Responses nor chat completions."""
+    real = AnyLLM.get_provider_class
+
+    def get_provider_class(provider: Any) -> Any:
+        return _NoTextGeneration if LLMProvider(provider) == LLMProvider.ANTHROPIC else real(provider)
+
+    monkeypatch.setattr(AnyLLM, "get_provider_class", get_provider_class)
 
 
 def _response_object() -> Response:
@@ -505,10 +522,12 @@ def test_hybrid_mode_returns_502_when_all_attempts_fail(
 def test_hybrid_mode_provider_without_responses_support_returns_400(
     platform_client: TestClient,
     control_plane_transport: InstallControlPlane,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The ``SUPPORTS_RESPONSES`` guard rejects an unsupported fallback before
+    """The provider-support guard rejects an unsupported fallback before
     any upstream call and marks the first planned attempt as terminal.
     """
+    _anthropic_serves_nothing(monkeypatch)
     usage_reports: list[dict[str, Any]] = []
 
     async def fake_post_platform(
@@ -810,11 +829,13 @@ def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
 def test_hybrid_mode_supports_responses_guard_checks_every_attempt(
     platform_client: TestClient,
     control_plane_transport: InstallControlPlane,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Regression test for the SUPPORTS_RESPONSES guard. Previously only the
+    """Regression test for the provider-support guard. Previously only the
     primary attempt was checked; a fallback to an unsupported provider would
     crash the runner mid-fallback instead of failing fast.
     """
+    _anthropic_serves_nothing(monkeypatch)
 
     async def fake_post_platform(
         url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
@@ -948,3 +969,64 @@ def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     error_reports = [r for r in usage_reports if r.get("status") == "error"]
     assert len(error_reports) == 1
     assert error_reports[0]["correlation_id"] == "tool-att-primary"
+
+
+def test_hybrid_mode_bridges_a_provider_without_responses_api_and_reports_usage(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    control_plane_transport: InstallControlPlane,
+) -> None:
+    usage_reports: list[dict[str, Any]] = []
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json=_resolve_payload([_attempt(0, "att-1", "mistral-small-latest", "sk-mistral", provider="mistral")]),
+            )
+        usage_reports.append(body)
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        assert kwargs["api_key"] == "sk-mistral"
+        assert kwargs["messages"] == [{"role": "user", "content": "hi"}]
+        return ChatCompletion.model_validate(
+            {
+                "id": "cmpl-1",
+                "object": "chat.completion",
+                "created": 1700000000,
+                "model": "mistral-small-latest",
+                "choices": [
+                    {"index": 0, "message": {"role": "assistant", "content": "salut"}, "finish_reason": "stop"}
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 7, "total_tokens": 17},
+            }
+        )
+
+    control_plane_transport(fake_post_platform)
+    monkeypatch.setattr("gateway.services.inference._responses_bridge.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        f"{API_ROOT}/responses",
+        json={"model": "mistral-small-latest", "input": "hi"},
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["output"][0]["content"][0]["text"] == "salut"
+    assert usage_reports == [
+        {
+            "correlation_id": "att-1",
+            "status": "success",
+            "is_final_attempt": True,
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 7,
+                "total_tokens": 17,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+            },
+        }
+    ]

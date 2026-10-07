@@ -63,6 +63,36 @@ Standalone mode also serves embeddings, images, audio, files, batches,
 moderations, rerank, search, and decisions. Provider support differs by endpoint, so use
 `GET /api/v1/models` and the OpenAPI document for the deployment you are calling.
 
+### Responses on providers without a Responses API
+
+`/api/v1/responses` also serves providers that only implement Chat Completions
+(Mistral, Anthropic, Bedrock, and most others). Otari translates the request into
+a chat completion and translates the answer back, streamed or not, so the client
+sees an ordinary Responses object or event stream. A provider with its own
+Responses API (OpenAI, Azure OpenAI, Gemini, Groq, and others) is called
+natively, as before.
+
+The translation covers text, image and file input, `instructions`, function
+tools and `tool_choice`, `max_output_tokens`, `reasoning.effort`, JSON output
+through `text.format`, and reasoning text a provider returns. Gateway-run tools
+(MCP, web search, code execution) work on top of it.
+
+Some requests have no chat equivalent and are refused with a `400` that names
+the field:
+
+- `previous_response_id`, `conversation`, `background`, `context_management`
+  and `prompt`, which need the provider to keep state. Send the full
+  conversation in `input` instead.
+- Hosted tools such as `file_search` or `computer_use`, and any tool type other
+  than `function`.
+- Input items other than messages, function calls and their outputs, such as
+  `item_reference`.
+
+Fields that only control what a provider stores or adds to its answer
+(`store`, `metadata`, `include`, `truncation` and similar) are ignored, and
+reasoning items on an inbound `input` are dropped, because Chat Completions has
+no way to send them back.
+
 ### Request ID and inline cost
 
 Every Chat, Messages, and Responses response carries an `Otari-Request-ID`

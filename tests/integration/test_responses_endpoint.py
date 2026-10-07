@@ -119,12 +119,13 @@ def test_responses_endpoint_rejects_unsupported_provider(
     master_key_header: dict[str, str],
     responses_request_body: dict[str, Any],
 ) -> None:
-    """Requests to providers without Responses support are rejected."""
+    """Requests to providers that support neither Responses nor chat completions are rejected."""
 
     responses_request_body["model"] = "anthropic:claude-3-5"
 
     class _UnsupportedProvider:
         SUPPORTS_RESPONSES = False
+        SUPPORTS_COMPLETION = False
 
     with (
         patch("gateway.api.routes.responses.aresponses", new_callable=AsyncMock) as mock_call,
