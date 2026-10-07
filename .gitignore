@@ -59,3 +59,6 @@ node_modules
 # stay tracked.
 .claude/settings.local.json
 .codex/hooks.json
+
+# GitBook site built by scripts/prepare_gitbook_site.py
+/site/
