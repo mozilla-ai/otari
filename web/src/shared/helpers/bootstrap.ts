@@ -76,6 +76,11 @@ export function normalizeBootstrap(wire: WireBootstrap): DeploymentBootstrap {
     privacy_url: wire.privacy_url ?? null,
     site_url: wire.site_url ?? null,
     maintenance_mode: wire.maintenance_mode ?? false,
+    // On, because a gateway old enough to omit this had no way to turn passkeys
+    // off, and the page it gates already answers "not set up" when they are not
+    // ready. Hiding it on a guess would take the page away from a deployment
+    // that has them.
+    passkeys_enabled: wire.passkeys_enabled ?? true,
     passkeys_ready: wire.passkeys_ready ?? false,
     mail_ready: wire.mail_ready ?? false,
     feedback_enabled: wire.feedback_enabled ?? false,

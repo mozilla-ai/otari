@@ -5547,6 +5547,11 @@
             "title": "Open Signup",
             "type": "boolean"
           },
+          "passkeys_enabled": {
+            "description": "Whether this deployment offers passkeys at all (the passkeys_enabled setting). False means the passkey routes are not mounted and the dashboard hides its passkey page, which is a different answer from passkeys_ready: a deployment that merely has not configured a relying party is ready for nobody yet but still shows the page that says so. False for a hybrid gateway, which issues no session of its own.",
+            "title": "Passkeys Enabled",
+            "type": "boolean"
+          },
           "passkeys_ready": {
             "description": "Whether this deployment can run a passkey ceremony at all: it has a relying-party ID (webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a registered passkey could sign somebody in *right now*: an operator with none yet needs this one, or the page that registers the first would be hidden from them. False for a hybrid gateway, which issues no session of its own.",
             "title": "Passkeys Ready",
@@ -5638,6 +5643,7 @@
           "site_url",
           "sign_in_methods",
           "maintenance_mode",
+          "passkeys_enabled",
           "passkeys_ready",
           "oauth_providers",
           "open_signup",

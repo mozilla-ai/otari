@@ -239,6 +239,15 @@ class DeploymentBootstrap(BaseModel):
             "the data plane are unaffected. False for a hybrid gateway, which issues no session."
         )
     )
+    passkeys_enabled: bool = Field(
+        description=(
+            "Whether this deployment offers passkeys at all (the passkeys_enabled setting). False "
+            "means the passkey routes are not mounted and the dashboard hides its passkey page, "
+            "which is a different answer from passkeys_ready: a deployment that merely has not "
+            "configured a relying party is ready for nobody yet but still shows the page that says "
+            "so. False for a hybrid gateway, which issues no session of its own."
+        )
+    )
     passkeys_ready: bool = Field(
         description=(
             "Whether this deployment can run a passkey ceremony at all: it has a relying-party ID "
@@ -325,6 +334,7 @@ async def get_bootstrap(
             privacy_url=config.privacy_url,
             site_url=config.site_url,
             maintenance_mode=False,
+            passkeys_enabled=False,
             passkeys_ready=False,
             oauth_providers=[],
             feedback_enabled=False,
@@ -354,6 +364,7 @@ async def get_bootstrap(
         site_url=config.site_url,
         maintenance_mode=await _maintenance_mode(db),
         public_catalog=bool(config.public_catalog) and not config.is_hybrid_mode,
+        passkeys_enabled=config.passkeys_enabled,
         passkeys_ready=config.webauthn_enabled,
         oauth_providers=list(config.oauth_providers),
         feedback_enabled=any(feature.name == "feedback" for feature in enabled_features),

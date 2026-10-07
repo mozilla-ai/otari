@@ -846,6 +846,17 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             "is being created, and files it under afterwards. Cosmetic: nothing verifies it."
         ),
     )
+    passkeys_enabled: Annotated[bool, OMITTED] = Field(
+        default=True,
+        description=(
+            "Whether this deployment offers passkeys at all. False takes every passkey route out of "
+            "the API (they answer 404, not 503), publishes no 'passkey' sign-in method, reports "
+            "passkeys_ready and passkeys_enabled as false so the dashboard hides its passkey page, "
+            "and skips the relying-party checks at startup, so leftover webauthn_* settings are "
+            "inert. Passkeys already registered stay in the database untouched and work again if "
+            "this is turned back on."
+        ),
+    )
     webauthn_allowed_origins: Annotated[list[str], OMITTED] = Field(
         default_factory=list,
         description=(
@@ -1867,6 +1878,8 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
         the ID came from, so the common deployment configures one setting and
         gets a consistent pair rather than two settings it can put out of step.
         """
+        if not self.passkeys_enabled:
+            return None
         # Lowercased to match ``_host_of``, which returns what ``urlsplit``
         # already normalized. Without it a configured "Otari.Example.com" passes
         # validation (which compares against its own lowercased form) and then
@@ -2760,6 +2773,9 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
         'https://otari.example.net' is a plausible pair of settings that can
         never complete a ceremony.
         """
+        if not self.passkeys_enabled:
+            return
+
         configured_id = (self.webauthn_rp_id or "").strip()
         if configured_id and _host_of(f"//{configured_id}") != configured_id.lower():
             # Two spellings reach here and neither parses under one form. A value

@@ -159,7 +159,9 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(auth_profile.router, Plane.CONTROL),
     RouterMount(auth_signup.router, Plane.CONTROL),
     RouterMount(auth_password_reset.router, Plane.CONTROL),
-    RouterMount(auth_webauthn.router, Plane.CONTROL),
+    # Absent rather than refusing where the deployment turned passkeys off: a
+    # ceremony route that answers 503 still says passkeys exist here.
+    RouterMount(auth_webauthn.router, Plane.CONTROL, when=lambda config: config.passkeys_enabled),
     RouterMount(auth_oauth.router, Plane.CONTROL),
     # Data-plane routes that also read a local control plane, because none of
     # them has hybrid handling. ``files`` is among them because an upload exists
