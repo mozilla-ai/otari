@@ -2,7 +2,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
-from any_llm import AnyLLM, LLMProvider, aresponses
+from any_llm import LLMProvider, aresponses
 from any_llm.types.completion import CompletionUsage
 from any_llm.types.responses import Response as ResponsesResponse
 from any_llm.types.responses import ResponsesParams, ResponseStreamEvent
@@ -59,7 +59,7 @@ from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.services.files import StagedFile
-from gateway.services.inference import aresponses_via_chat_completions, uses_chat_completions_bridge
+from gateway.services.inference import call_responses, serves_responses
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_responses import (
@@ -294,11 +294,7 @@ def _usage_to_completion_usage(
 
 
 def _ensure_provider_supports_responses(provider: LLMProvider) -> None:
-    """Refuse a provider that can serve a Responses request neither natively nor as a chat completion."""
-    provider_class = AnyLLM.get_provider_class(provider)
-    if not getattr(provider_class, "SUPPORTS_RESPONSES", False) and not getattr(
-        provider_class, "SUPPORTS_COMPLETION", False
-    ):
+    if not serves_responses(provider):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Provider '{provider.value}' does not support the Responses API",
@@ -382,14 +378,10 @@ class _ResponsesAdapter:
         )
 
     async def call_provider(self, kwargs: dict[str, Any]) -> ResponsesResponse:
-        if uses_chat_completions_bridge(kwargs.get("provider")):
-            return await aresponses_via_chat_completions(**kwargs)  # type: ignore[return-value]
-        return await aresponses(**kwargs)  # type: ignore[return-value]
+        return await call_responses(aresponses, kwargs)  # type: ignore[no-any-return]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[ResponseStreamEvent]:
-        if uses_chat_completions_bridge(kwargs.get("provider")):
-            return await aresponses_via_chat_completions(**kwargs)  # type: ignore[return-value]
-        return await aresponses(**kwargs)  # type: ignore[return-value]
+        return await call_responses(aresponses, kwargs)  # type: ignore[no-any-return]
 
     def prepare_stream_kwargs(
         self,

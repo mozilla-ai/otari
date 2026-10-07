@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from any_llm import AnyLLM, LLMProvider, acompletion
@@ -123,6 +123,25 @@ def uses_chat_completions_bridge(provider: str | LLMProvider | None) -> bool:
     return not getattr(provider_class, "SUPPORTS_RESPONSES", False) and bool(
         getattr(provider_class, "SUPPORTS_COMPLETION", False)
     )
+
+
+def serves_responses(provider: str | LLMProvider) -> bool:
+    """Whether ``provider`` can answer a Responses request, natively or as a chat completion."""
+    provider_class = AnyLLM.get_provider_class(LLMProvider(provider))
+    return bool(
+        getattr(provider_class, "SUPPORTS_RESPONSES", False) or getattr(provider_class, "SUPPORTS_COMPLETION", False)
+    )
+
+
+async def call_responses(native: Callable[..., Awaitable[Any]], kwargs: dict[str, Any]) -> Any:
+    """Run ``aresponses`` keyword arguments natively, or through the bridge for a provider without the API.
+
+    ``native`` is the caller's ``aresponses``, taken as an argument so the
+    caller's module global stays the one place a test replaces it.
+    """
+    if uses_chat_completions_bridge(kwargs.get("provider")):
+        return await aresponses_via_chat_completions(**kwargs)
+    return await native(**kwargs)
 
 
 async def aresponses_via_chat_completions(**kwargs: Any) -> Response | AsyncIterator[ResponseStreamEvent]:

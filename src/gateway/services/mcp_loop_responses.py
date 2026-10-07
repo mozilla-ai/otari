@@ -40,7 +40,7 @@ from gateway.services._tool_loop import (
     run_tool_loop_stream,
     tool_failure_detail,
 )
-from gateway.services.inference import aresponses_via_chat_completions, uses_chat_completions_bridge
+from gateway.services.inference import call_responses
 from gateway.services.mcp_loop import (
     DEFAULT_MAX_TOOL_ITERATIONS,
     MAX_TOOL_ITERATIONS_CAP,
@@ -380,8 +380,7 @@ class _ResponsesToolLoopStrategy:
     # ---- non-streaming hooks ----
 
     async def call(self, kwargs: dict[str, Any]) -> Response:
-        call = aresponses_via_chat_completions if uses_chat_completions_bridge(kwargs.get("provider")) else aresponses
-        result: Response = await call(**kwargs)  # type: ignore[assignment]
+        result: Response = await call_responses(aresponses, kwargs)
         return result
 
     def new_usage_accumulator(self) -> dict[str, Any]:
@@ -480,8 +479,7 @@ class _ResponsesToolLoopStrategy:
     # ---- streaming hooks ----
 
     async def open_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[ResponseStreamEvent]:
-        call = aresponses_via_chat_completions if uses_chat_completions_bridge(kwargs.get("provider")) else aresponses
-        stream: AsyncIterator[ResponseStreamEvent] = await call(**kwargs)  # type: ignore[assignment]
+        stream: AsyncIterator[ResponseStreamEvent] = await call_responses(aresponses, kwargs)
         return stream
 
     def new_stream_state(self) -> _ResponsesStreamState:

@@ -129,7 +129,7 @@ def test_responses_endpoint_rejects_unsupported_provider(
 
     with (
         patch("gateway.api.routes.responses.aresponses", new_callable=AsyncMock) as mock_call,
-        patch("gateway.api.routes.responses.AnyLLM.get_provider_class", return_value=_UnsupportedProvider),
+        patch("any_llm.AnyLLM.get_provider_class", return_value=_UnsupportedProvider),
     ):
         result = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
 
