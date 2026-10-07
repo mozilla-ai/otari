@@ -108,8 +108,14 @@ The endpoint is the Otari origin plus `/otlp`; the exporter appends the signal
 path itself.
 
 Otari reads the OpenTelemetry GenAI provider, model, response ID, input-token,
-output-token, and cache-token attributes. It ignores non-LLM spans and never
-stores prompt or response content.
+output-token, and cache-token attributes, and records usage from the spans that
+carry tokens. Every span, including an agent's own (`invoke_agent`,
+`execute_tool`), is also kept on the exporting key's agent trace, grouped into a
+session by `gen_ai.conversation.id`, else `otari.session_label`, else the OTel
+trace,
+while `trace_capture_enabled` is on. Span names and attribute values are kept
+only when they are identifier-shaped; prompt, response, and tool content is
+never stored.
 
 Claude Code and Codex emit recognizable usage events on the logs signal. Their
 tool behavior and outcome counters can also populate content-free agent
