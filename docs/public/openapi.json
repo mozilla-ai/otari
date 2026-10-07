@@ -16123,6 +16123,268 @@
         "title": "SignupResponse",
         "type": "object"
       },
+      "SpanPublic": {
+        "description": "One span of a session. Content is never part of a span.",
+        "properties": {
+          "approximate": {
+            "description": "True when the start was inferred rather than measured.",
+            "title": "Approximate",
+            "type": "boolean"
+          },
+          "attributes": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Attributes",
+            "type": "object"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "end_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Time"
+          },
+          "error_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Class"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "opens_turn": {
+            "title": "Opens Turn",
+            "type": "boolean"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation"
+          },
+          "origin": {
+            "enum": [
+              "gateway",
+              "otlp"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "ok",
+              "error",
+              "unknown"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "parent_span_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Span Id"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "recovered": {
+            "title": "Recovered",
+            "type": "boolean"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "span_id": {
+            "title": "Span Id",
+            "type": "string"
+          },
+          "start_time": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Time"
+          },
+          "tool_call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Call Id"
+          },
+          "tool_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Name"
+          },
+          "tool_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Type"
+          }
+        },
+        "required": [
+          "span_id",
+          "parent_span_id",
+          "kind",
+          "origin",
+          "name",
+          "operation",
+          "start_time",
+          "end_time",
+          "duration_ms",
+          "approximate",
+          "outcome",
+          "recovered",
+          "error_class",
+          "opens_turn",
+          "model",
+          "provider",
+          "input_tokens",
+          "output_tokens",
+          "cost",
+          "tool_name",
+          "tool_type",
+          "tool_call_id",
+          "request_id",
+          "attributes"
+        ],
+        "title": "SpanPublic",
+        "type": "object"
+      },
       "StoredProviderResponse": {
         "description": "A runtime-stored provider. The API key is never returned, only ``last4``.",
         "properties": {
@@ -16745,6 +17007,353 @@
           "data"
         ],
         "title": "ToolsResponse",
+        "type": "object"
+      },
+      "TraceBucketPublic": {
+        "properties": {
+          "bucket": {
+            "description": "Bucket start, ISO 8601 UTC.",
+            "title": "Bucket",
+            "type": "string"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "succeeded": {
+            "title": "Succeeded",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bucket",
+          "succeeded",
+          "failed"
+        ],
+        "title": "TraceBucketPublic",
+        "type": "object"
+      },
+      "TraceCountPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "TraceCountPublic",
+        "type": "object"
+      },
+      "TraceDetailPublic": {
+        "properties": {
+          "spans": {
+            "items": {
+              "$ref": "#/components/schemas/SpanPublic"
+            },
+            "title": "Spans",
+            "type": "array"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "idle"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/TraceSummaryPublic"
+          },
+          "truncated": {
+            "description": "True when the session holds more spans than one read returns.",
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "turns": {
+            "items": {
+              "$ref": "#/components/schemas/TurnPublic"
+            },
+            "title": "Turns",
+            "type": "array"
+          }
+        },
+        "required": [
+          "summary",
+          "state",
+          "turns",
+          "spans",
+          "truncated"
+        ],
+        "title": "TraceDetailPublic",
+        "type": "object"
+      },
+      "TraceListPublic": {
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TraceSummaryPublic"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "has_more"
+        ],
+        "title": "TraceListPublic",
+        "type": "object"
+      },
+      "TraceSeriesPublic": {
+        "properties": {
+          "bucket": {
+            "enum": [
+              "hour",
+              "day"
+            ],
+            "title": "Bucket",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/TraceBucketPublic"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "bucket",
+          "points"
+        ],
+        "title": "TraceSeriesPublic",
+        "type": "object"
+      },
+      "TraceSummaryPublic": {
+        "description": "One agent session as the session list shows it.",
+        "properties": {
+          "api_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Id"
+          },
+          "cost": {
+            "description": "USD, a snapshot of the usage rows' cost. Usage stays the billing record.",
+            "title": "Cost",
+            "type": "number"
+          },
+          "error_count": {
+            "description": "Spans that ended in an error no fallback recovered.",
+            "title": "Error Count",
+            "type": "integer"
+          },
+          "harness": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The agent or client that sent the requests, from its User-Agent.",
+            "title": "Harness"
+          },
+          "input_tokens": {
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "last_activity_at": {
+            "format": "date-time",
+            "title": "Last Activity At",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "output_tokens": {
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "session_source": {
+            "description": "What grouped the session's requests: the client's own id, its agent harness's id, an OTLP conversation id, or nothing (a single request).",
+            "enum": [
+              "client",
+              "harness",
+              "otlp",
+              "none"
+            ],
+            "title": "Session Source",
+            "type": "string"
+          },
+          "span_count": {
+            "title": "Span Count",
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "step_count": {
+            "description": "Requests the gateway served in the session.",
+            "title": "Step Count",
+            "type": "integer"
+          },
+          "trace_id": {
+            "title": "Trace Id",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trace_id",
+          "workspace_id",
+          "user_id",
+          "api_key_id",
+          "session_source",
+          "harness",
+          "name",
+          "started_at",
+          "last_activity_at",
+          "step_count",
+          "span_count",
+          "error_count",
+          "input_tokens",
+          "output_tokens",
+          "cost"
+        ],
+        "title": "TraceSummaryPublic",
+        "type": "object"
+      },
+      "TurnPublic": {
+        "description": "One user prompt and the steps it caused.",
+        "properties": {
+          "continued": {
+            "description": "True for steps a session started with before any prompt was seen.",
+            "title": "Continued",
+            "type": "boolean"
+          },
+          "cost": {
+            "title": "Cost",
+            "type": "number"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "errors": {
+            "title": "Errors",
+            "type": "integer"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "input_tokens": {
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "llm_calls": {
+            "title": "Llm Calls",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "completed",
+              "failed",
+              "incomplete"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "step_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Step Ids",
+            "type": "array"
+          },
+          "tool_calls": {
+            "title": "Tool Calls",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "index",
+          "state",
+          "continued",
+          "started_at",
+          "ended_at",
+          "step_ids",
+          "tool_calls",
+          "llm_calls",
+          "errors",
+          "input_tokens",
+          "output_tokens",
+          "cost"
+        ],
+        "title": "TurnPublic",
         "type": "object"
       },
       "UnitChargeLine": {
@@ -30063,6 +30672,727 @@
         ]
       }
     },
+    "/api/v1/organizations/me/traces": {
+      "get": {
+        "description": "List agent sessions, most recently active first.",
+        "operationId": "organization-traces-list_traces",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Last activity at or after this instant (ISO 8601).",
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last activity at or after this instant (ISO 8601).",
+              "title": "Start"
+            }
+          },
+          {
+            "description": "Last activity before this instant (ISO 8601).",
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last activity before this instant (ISO 8601).",
+              "title": "End"
+            }
+          },
+          {
+            "description": "Owning users.",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Owning users.",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "API keys.",
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "API keys.",
+              "title": "Api Key Id"
+            }
+          },
+          {
+            "description": "Agent harnesses.",
+            "in": "query",
+            "name": "harness",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Agent harnesses.",
+              "title": "Harness"
+            }
+          },
+          {
+            "description": "What grouped the session.",
+            "in": "query",
+            "name": "session_source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "client",
+                      "harness",
+                      "otlp",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "maxItems": 4,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What grouped the session.",
+              "title": "Session Source"
+            }
+          },
+          {
+            "description": "Only sessions with, or without, an unrecovered error.",
+            "in": "query",
+            "name": "has_error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only sessions with, or without, an unrecovered error.",
+              "title": "Has Error"
+            }
+          },
+          {
+            "description": "A trace id, or the start of one.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A trace id, or the start of one.",
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceListPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Traces",
+        "tags": [
+          "organization-traces"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/traces/count": {
+      "get": {
+        "description": "Count the agent sessions that match.",
+        "operationId": "organization-traces-count_traces",
+        "parameters": [
+          {
+            "description": "Last activity at or after this instant (ISO 8601).",
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last activity at or after this instant (ISO 8601).",
+              "title": "Start"
+            }
+          },
+          {
+            "description": "Last activity before this instant (ISO 8601).",
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last activity before this instant (ISO 8601).",
+              "title": "End"
+            }
+          },
+          {
+            "description": "Owning users.",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Owning users.",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "API keys.",
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "API keys.",
+              "title": "Api Key Id"
+            }
+          },
+          {
+            "description": "Agent harnesses.",
+            "in": "query",
+            "name": "harness",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Agent harnesses.",
+              "title": "Harness"
+            }
+          },
+          {
+            "description": "What grouped the session.",
+            "in": "query",
+            "name": "session_source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "client",
+                      "harness",
+                      "otlp",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "maxItems": 4,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What grouped the session.",
+              "title": "Session Source"
+            }
+          },
+          {
+            "description": "Only sessions with, or without, an unrecovered error.",
+            "in": "query",
+            "name": "has_error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only sessions with, or without, an unrecovered error.",
+              "title": "Has Error"
+            }
+          },
+          {
+            "description": "A trace id, or the start of one.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A trace id, or the start of one.",
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceCountPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Count Traces",
+        "tags": [
+          "organization-traces"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/traces/series": {
+      "get": {
+        "description": "Count sessions per bucket of their start, split by whether any span failed unrecovered.",
+        "operationId": "organization-traces-trace_series",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "bucket",
+            "required": false,
+            "schema": {
+              "default": "hour",
+              "enum": [
+                "hour",
+                "day"
+              ],
+              "title": "Bucket",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last activity at or after this instant (ISO 8601).",
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last activity at or after this instant (ISO 8601).",
+              "title": "Start"
+            }
+          },
+          {
+            "description": "Last activity before this instant (ISO 8601).",
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last activity before this instant (ISO 8601).",
+              "title": "End"
+            }
+          },
+          {
+            "description": "Owning users.",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Owning users.",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "API keys.",
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "API keys.",
+              "title": "Api Key Id"
+            }
+          },
+          {
+            "description": "Agent harnesses.",
+            "in": "query",
+            "name": "harness",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Agent harnesses.",
+              "title": "Harness"
+            }
+          },
+          {
+            "description": "What grouped the session.",
+            "in": "query",
+            "name": "session_source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "client",
+                      "harness",
+                      "otlp",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "maxItems": 4,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What grouped the session.",
+              "title": "Session Source"
+            }
+          },
+          {
+            "description": "Only sessions with, or without, an unrecovered error.",
+            "in": "query",
+            "name": "has_error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only sessions with, or without, an unrecovered error.",
+              "title": "Has Error"
+            }
+          },
+          {
+            "description": "A trace id, or the start of one.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A trace id, or the start of one.",
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceSeriesPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Trace Series",
+        "tags": [
+          "organization-traces"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/traces/{trace_id}": {
+      "get": {
+        "description": "One agent session: its turns, and every span inside them. A trace outside the scope is a 404.",
+        "operationId": "organization-traces-get_trace",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceDetailPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Trace",
+        "tags": [
+          "organization-traces"
+        ]
+      }
+    },
     "/api/v1/organizations/me/usage": {
       "get": {
         "description": "List the caller's organization's usage logs, most recent first.\n\nThe tenant-scoped counterpart of ``GET /api/v1/usage``: same filters, same bare\nJSON array, same separate ``/count`` for a paginator's total, confined to\nwhat the caller's membership lets them see. Scope is never a parameter here.",
@@ -36344,6 +37674,727 @@
         "summary": "List Tools",
         "tags": [
           "tools"
+        ]
+      }
+    },
+    "/api/v1/traces": {
+      "get": {
+        "description": "List agent sessions, most recently active first.",
+        "operationId": "traces-list_traces",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Last activity at or after this instant (ISO 8601).",
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last activity at or after this instant (ISO 8601).",
+              "title": "Start"
+            }
+          },
+          {
+            "description": "Last activity before this instant (ISO 8601).",
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last activity before this instant (ISO 8601).",
+              "title": "End"
+            }
+          },
+          {
+            "description": "Owning users.",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Owning users.",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "API keys.",
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "API keys.",
+              "title": "Api Key Id"
+            }
+          },
+          {
+            "description": "Agent harnesses.",
+            "in": "query",
+            "name": "harness",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Agent harnesses.",
+              "title": "Harness"
+            }
+          },
+          {
+            "description": "What grouped the session.",
+            "in": "query",
+            "name": "session_source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "client",
+                      "harness",
+                      "otlp",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "maxItems": 4,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What grouped the session.",
+              "title": "Session Source"
+            }
+          },
+          {
+            "description": "Only sessions with, or without, an unrecovered error.",
+            "in": "query",
+            "name": "has_error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only sessions with, or without, an unrecovered error.",
+              "title": "Has Error"
+            }
+          },
+          {
+            "description": "A trace id, or the start of one.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A trace id, or the start of one.",
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceListPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Traces",
+        "tags": [
+          "traces"
+        ]
+      }
+    },
+    "/api/v1/traces/count": {
+      "get": {
+        "description": "Count the agent sessions that match.",
+        "operationId": "traces-count_traces",
+        "parameters": [
+          {
+            "description": "Last activity at or after this instant (ISO 8601).",
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last activity at or after this instant (ISO 8601).",
+              "title": "Start"
+            }
+          },
+          {
+            "description": "Last activity before this instant (ISO 8601).",
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last activity before this instant (ISO 8601).",
+              "title": "End"
+            }
+          },
+          {
+            "description": "Owning users.",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Owning users.",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "API keys.",
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "API keys.",
+              "title": "Api Key Id"
+            }
+          },
+          {
+            "description": "Agent harnesses.",
+            "in": "query",
+            "name": "harness",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Agent harnesses.",
+              "title": "Harness"
+            }
+          },
+          {
+            "description": "What grouped the session.",
+            "in": "query",
+            "name": "session_source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "client",
+                      "harness",
+                      "otlp",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "maxItems": 4,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What grouped the session.",
+              "title": "Session Source"
+            }
+          },
+          {
+            "description": "Only sessions with, or without, an unrecovered error.",
+            "in": "query",
+            "name": "has_error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only sessions with, or without, an unrecovered error.",
+              "title": "Has Error"
+            }
+          },
+          {
+            "description": "A trace id, or the start of one.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A trace id, or the start of one.",
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceCountPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Count Traces",
+        "tags": [
+          "traces"
+        ]
+      }
+    },
+    "/api/v1/traces/series": {
+      "get": {
+        "description": "Count sessions per bucket of their start, split by whether any span failed unrecovered.",
+        "operationId": "traces-trace_series",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "bucket",
+            "required": false,
+            "schema": {
+              "default": "hour",
+              "enum": [
+                "hour",
+                "day"
+              ],
+              "title": "Bucket",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last activity at or after this instant (ISO 8601).",
+            "in": "query",
+            "name": "start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last activity at or after this instant (ISO 8601).",
+              "title": "Start"
+            }
+          },
+          {
+            "description": "Last activity before this instant (ISO 8601).",
+            "in": "query",
+            "name": "end",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Last activity before this instant (ISO 8601).",
+              "title": "End"
+            }
+          },
+          {
+            "description": "Owning users.",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Owning users.",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "API keys.",
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "API keys.",
+              "title": "Api Key Id"
+            }
+          },
+          {
+            "description": "Agent harnesses.",
+            "in": "query",
+            "name": "harness",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Agent harnesses.",
+              "title": "Harness"
+            }
+          },
+          {
+            "description": "What grouped the session.",
+            "in": "query",
+            "name": "session_source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "client",
+                      "harness",
+                      "otlp",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "maxItems": 4,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What grouped the session.",
+              "title": "Session Source"
+            }
+          },
+          {
+            "description": "Only sessions with, or without, an unrecovered error.",
+            "in": "query",
+            "name": "has_error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only sessions with, or without, an unrecovered error.",
+              "title": "Has Error"
+            }
+          },
+          {
+            "description": "A trace id, or the start of one.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A trace id, or the start of one.",
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceSeriesPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Trace Series",
+        "tags": [
+          "traces"
+        ]
+      }
+    },
+    "/api/v1/traces/{trace_id}": {
+      "get": {
+        "description": "One agent session: its turns, and every span inside them. A trace outside the scope is a 404.",
+        "operationId": "traces-get_trace",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraceDetailPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Trace",
+        "tags": [
+          "traces"
         ]
       }
     },

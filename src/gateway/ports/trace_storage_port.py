@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from types import MappingProxyType
-from typing import Protocol
+from typing import Literal, Protocol
 
 from gateway.models.traces import (
     SESSION_SOURCES,
@@ -274,6 +274,20 @@ class TraceSummary:
     cost_snapshot: Decimal
 
 
+# The grain a series is bucketed by. Bucket starts cross the seam as canonical UTC
+# strings (``YYYY-MM-DDTHH:00:00Z``), so two adapters cannot disagree about a bucket.
+TraceBucketGrain = Literal["hour", "day"]
+
+
+@dataclass(frozen=True)
+class TraceBucket:
+    """How many traces started in one bucket, split by whether any of their spans failed unrecovered."""
+
+    bucket: str
+    succeeded: int
+    failed: int
+
+
 @dataclass(frozen=True)
 class TracePage:
     """One page of traces, newest activity first."""
@@ -319,6 +333,12 @@ class TraceStoragePort(Protocol):
 
         A trace in another tenant's workspace reads as absent, never as forbidden.
         """
+        ...
+
+    async def series(
+        self, scope: TraceScope, filters: TraceFilter, *, bucket: TraceBucketGrain
+    ) -> tuple[TraceBucket, ...]:
+        """Count the scope's matching traces per bucket of their start, oldest first, populated buckets only."""
         ...
 
     async def purge(self, scope: TraceScope, filters: TraceFilter) -> int:

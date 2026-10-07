@@ -149,6 +149,15 @@ PATCH /api/v1/settings/maintenance-mode             # not yet wrapped
 # Model discovery / metadata
 GET /api/v1/models/discoverable                     # not yet wrapped
 GET /api/v1/models/metadata                         # not yet wrapped
+# Agent traces (the dashboard's trace explorer reads these)
+GET /api/v1/traces                                  # not yet wrapped
+GET /api/v1/traces/count                            # not yet wrapped
+GET /api/v1/traces/series                           # not yet wrapped
+GET /api/v1/traces/{trace_id}                       # not yet wrapped
+GET /api/v1/organizations/me/traces                 # not yet wrapped
+GET /api/v1/organizations/me/traces/count           # not yet wrapped
+GET /api/v1/organizations/me/traces/series          # not yet wrapped
+GET /api/v1/organizations/me/traces/{trace_id}      # not yet wrapped
 # Other control-plane extensions of already-covered resources
 GET /api/v1/usage/count                             # not yet wrapped
 GET /api/v1/usage/requests/{request_id}            # not yet wrapped

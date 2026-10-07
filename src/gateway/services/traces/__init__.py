@@ -9,6 +9,7 @@ from gateway.services.traces._capture import RequestTraces, TracingLogWriter
 from gateway.services.traces._collector import RequestTrace, identifier_or_none
 from gateway.services.traces._identity import SessionRef, harness_of, resolve_session
 from gateway.services.traces._otlp import OtlpSpan, project_otlp_spans
+from gateway.services.traces._reading import TraceService
 from gateway.services.traces._retention import run_trace_retention
 from gateway.services.traces._turns import AnsweredCall, TurnFacts, read_turn
 from gateway.services.traces._writer import TraceWriter
@@ -19,6 +20,7 @@ __all__ = [
     "RequestTrace",
     "RequestTraces",
     "SessionRef",
+    "TraceService",
     "TraceWriter",
     "TracingLogWriter",
     "TurnFacts",

@@ -11,7 +11,7 @@ import uuid
 from collections.abc import Collection, Sequence
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from gateway.models.traces import Trace, TraceSpan
 from gateway.ports.trace_storage_port import TraceFilter
@@ -44,6 +44,10 @@ class TraceRows(Protocol):
     ) -> Sequence[Trace]: ...
 
     async def count_matching(self, workspace_ids: Collection[uuid.UUID] | None, query: TraceFilter) -> int: ...
+
+    async def bucket_counts(
+        self, workspace_ids: Collection[uuid.UUID] | None, query: TraceFilter, *, bucket: Literal["hour", "day"]
+    ) -> list[tuple[str, int, int]]: ...
 
     async def find(self, workspace_ids: Collection[uuid.UUID] | None, trace_id: str) -> Trace | None: ...
 

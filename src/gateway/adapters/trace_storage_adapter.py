@@ -23,6 +23,8 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import Trace, TraceSpan
 from gateway.ports.trace_storage_port import (
     SpanRecord,
+    TraceBucket,
+    TraceBucketGrain,
     TraceDetail,
     TraceFilter,
     TracePage,
@@ -238,6 +240,15 @@ class LocalTraceStorage(TraceStoragePort):
                     truncated=len(spans) > span_limit,
                 )
 
+    async def series(
+        self, scope: TraceScope, filters: TraceFilter, *, bucket: TraceBucketGrain
+    ) -> tuple[TraceBucket, ...]:
+        async with self._open() as uow:
+            tables = self._tables(uow)
+            async with uow:
+                rows = await tables.traces.bucket_counts(_workspace_ids(scope), filters, bucket=bucket)
+                return tuple(TraceBucket(bucket=key, succeeded=ok, failed=bad) for key, ok, bad in rows)
+
     async def purge(self, scope: TraceScope, filters: TraceFilter) -> int:
         async with self._open() as uow:
             tables = self._tables(uow)
@@ -276,6 +287,11 @@ class NullTraceStorage(TraceStoragePort):
 
     async def get(self, scope: TraceScope, trace_id: str, *, span_limit: int) -> TraceDetail | None:
         return None
+
+    async def series(
+        self, scope: TraceScope, filters: TraceFilter, *, bucket: TraceBucketGrain
+    ) -> tuple[TraceBucket, ...]:
+        return ()
 
     async def purge(self, scope: TraceScope, filters: TraceFilter) -> int:
         return 0

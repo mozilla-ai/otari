@@ -3067,6 +3067,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/organizations/me/traces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Traces
+         * @description List agent sessions, most recently active first.
+         */
+        get: operations["organization-traces-list_traces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/traces/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count Traces
+         * @description Count the agent sessions that match.
+         */
+        get: operations["organization-traces-count_traces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/traces/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Trace Series
+         * @description Count sessions per bucket of their start, split by whether any span failed unrecovered.
+         */
+        get: operations["organization-traces-trace_series"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/organizations/me/traces/{trace_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Trace
+         * @description One agent session: its turns, and every span inside them. A trace outside the scope is a 404.
+         */
+        get: operations["organization-traces-get_trace"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/organizations/me/usage": {
         parameters: {
             query?: never;
@@ -4980,6 +5060,86 @@ export interface paths {
          *     here, is forwarded to the upstream provider untouched.
          */
         get: operations["tools-list_tools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/traces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Traces
+         * @description List agent sessions, most recently active first.
+         */
+        get: operations["traces-list_traces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/traces/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count Traces
+         * @description Count the agent sessions that match.
+         */
+        get: operations["traces-count_traces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/traces/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Trace Series
+         * @description Count sessions per bucket of their start, split by whether any span failed unrecovered.
+         */
+        get: operations["traces-trace_series"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/traces/{trace_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Trace
+         * @description One agent session: its turns, and every span inside them. A trace outside the scope is a 404.
+         */
+        get: operations["traces-get_trace"];
         put?: never;
         post?: never;
         delete?: never;
@@ -13636,6 +13796,71 @@ export interface components {
             message: string;
         };
         /**
+         * SpanPublic
+         * @description One span of a session. Content is never part of a span.
+         */
+        SpanPublic: {
+            /**
+             * Approximate
+             * @description True when the start was inferred rather than measured.
+             */
+            approximate: boolean;
+            /** Attributes */
+            attributes: {
+                [key: string]: string | number | boolean;
+            };
+            /** Cost */
+            cost: number | null;
+            /** Duration Ms */
+            duration_ms: number | null;
+            /** End Time */
+            end_time: string | null;
+            /** Error Class */
+            error_class: string | null;
+            /** Input Tokens */
+            input_tokens: number | null;
+            /** Kind */
+            kind: string;
+            /** Model */
+            model: string | null;
+            /** Name */
+            name: string;
+            /** Opens Turn */
+            opens_turn: boolean;
+            /** Operation */
+            operation: string | null;
+            /**
+             * Origin
+             * @enum {string}
+             */
+            origin: "gateway" | "otlp";
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "ok" | "error" | "unknown";
+            /** Output Tokens */
+            output_tokens: number | null;
+            /** Parent Span Id */
+            parent_span_id: string | null;
+            /** Provider */
+            provider: string | null;
+            /** Recovered */
+            recovered: boolean;
+            /** Request Id */
+            request_id: string | null;
+            /** Span Id */
+            span_id: string;
+            /** Start Time */
+            start_time: string | null;
+            /** Tool Call Id */
+            tool_call_id: string | null;
+            /** Tool Name */
+            tool_name: string | null;
+            /** Tool Type */
+            tool_type: string | null;
+        };
+        /**
          * StoredProviderResponse
          * @description A runtime-stored provider. The API key is never returned, only ``last4``.
          */
@@ -13914,6 +14139,155 @@ export interface components {
              * @constant
              */
             object: "list";
+        };
+        /** TraceBucketPublic */
+        TraceBucketPublic: {
+            /**
+             * Bucket
+             * @description Bucket start, ISO 8601 UTC.
+             */
+            bucket: string;
+            /** Failed */
+            failed: number;
+            /** Succeeded */
+            succeeded: number;
+        };
+        /** TraceCountPublic */
+        TraceCountPublic: {
+            /** Count */
+            count: number;
+        };
+        /** TraceDetailPublic */
+        TraceDetailPublic: {
+            /** Spans */
+            spans: components["schemas"]["SpanPublic"][];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "active" | "idle";
+            summary: components["schemas"]["TraceSummaryPublic"];
+            /**
+             * Truncated
+             * @description True when the session holds more spans than one read returns.
+             */
+            truncated: boolean;
+            /** Turns */
+            turns: components["schemas"]["TurnPublic"][];
+        };
+        /** TraceListPublic */
+        TraceListPublic: {
+            /** Has More */
+            has_more: boolean;
+            /** Items */
+            items: components["schemas"]["TraceSummaryPublic"][];
+        };
+        /** TraceSeriesPublic */
+        TraceSeriesPublic: {
+            /**
+             * Bucket
+             * @enum {string}
+             */
+            bucket: "hour" | "day";
+            /** Points */
+            points: components["schemas"]["TraceBucketPublic"][];
+        };
+        /**
+         * TraceSummaryPublic
+         * @description One agent session as the session list shows it.
+         */
+        TraceSummaryPublic: {
+            /** Api Key Id */
+            api_key_id: string | null;
+            /**
+             * Cost
+             * @description USD, a snapshot of the usage rows' cost. Usage stays the billing record.
+             */
+            cost: number;
+            /**
+             * Error Count
+             * @description Spans that ended in an error no fallback recovered.
+             */
+            error_count: number;
+            /**
+             * Harness
+             * @description The agent or client that sent the requests, from its User-Agent.
+             */
+            harness: string | null;
+            /** Input Tokens */
+            input_tokens: number;
+            /**
+             * Last Activity At
+             * Format: date-time
+             */
+            last_activity_at: string;
+            /** Name */
+            name: string | null;
+            /** Output Tokens */
+            output_tokens: number;
+            /**
+             * Session Source
+             * @description What grouped the session's requests: the client's own id, its agent harness's id, an OTLP conversation id, or nothing (a single request).
+             * @enum {string}
+             */
+            session_source: "client" | "harness" | "otlp" | "none";
+            /** Span Count */
+            span_count: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Step Count
+             * @description Requests the gateway served in the session.
+             */
+            step_count: number;
+            /** Trace Id */
+            trace_id: string;
+            /** User Id */
+            user_id: string | null;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
+         * TurnPublic
+         * @description One user prompt and the steps it caused.
+         */
+        TurnPublic: {
+            /**
+             * Continued
+             * @description True for steps a session started with before any prompt was seen.
+             */
+            continued: boolean;
+            /** Cost */
+            cost: number;
+            /** Ended At */
+            ended_at: string | null;
+            /** Errors */
+            errors: number;
+            /** Index */
+            index: number;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Llm Calls */
+            llm_calls: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Started At */
+            started_at: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "active" | "completed" | "failed" | "incomplete";
+            /** Step Ids */
+            step_ids: string[];
+            /** Tool Calls */
+            tool_calls: number;
         };
         /**
          * UnitChargeLine
@@ -20544,6 +20918,178 @@ export interface operations {
             };
         };
     };
+    "organization-traces-list_traces": {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+                /** @description Last activity at or after this instant (ISO 8601). */
+                start?: string | null;
+                /** @description Last activity before this instant (ISO 8601). */
+                end?: string | null;
+                /** @description Owning users. */
+                user_id?: string[] | null;
+                /** @description API keys. */
+                api_key_id?: string[] | null;
+                /** @description Agent harnesses. */
+                harness?: string[] | null;
+                /** @description What grouped the session. */
+                session_source?: ("client" | "harness" | "otlp" | "none")[] | null;
+                /** @description Only sessions with, or without, an unrecovered error. */
+                has_error?: boolean | null;
+                /** @description A trace id, or the start of one. */
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceListPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-traces-count_traces": {
+        parameters: {
+            query?: {
+                /** @description Last activity at or after this instant (ISO 8601). */
+                start?: string | null;
+                /** @description Last activity before this instant (ISO 8601). */
+                end?: string | null;
+                /** @description Owning users. */
+                user_id?: string[] | null;
+                /** @description API keys. */
+                api_key_id?: string[] | null;
+                /** @description Agent harnesses. */
+                harness?: string[] | null;
+                /** @description What grouped the session. */
+                session_source?: ("client" | "harness" | "otlp" | "none")[] | null;
+                /** @description Only sessions with, or without, an unrecovered error. */
+                has_error?: boolean | null;
+                /** @description A trace id, or the start of one. */
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceCountPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-traces-trace_series": {
+        parameters: {
+            query?: {
+                bucket?: "hour" | "day";
+                /** @description Last activity at or after this instant (ISO 8601). */
+                start?: string | null;
+                /** @description Last activity before this instant (ISO 8601). */
+                end?: string | null;
+                /** @description Owning users. */
+                user_id?: string[] | null;
+                /** @description API keys. */
+                api_key_id?: string[] | null;
+                /** @description Agent harnesses. */
+                harness?: string[] | null;
+                /** @description What grouped the session. */
+                session_source?: ("client" | "harness" | "otlp" | "none")[] | null;
+                /** @description Only sessions with, or without, an unrecovered error. */
+                has_error?: boolean | null;
+                /** @description A trace id, or the start of one. */
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceSeriesPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "organization-traces-get_trace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceDetailPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "organization-usage-list_organization_usage": {
         parameters: {
             query?: {
@@ -23543,6 +24089,178 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ToolsResponse"];
+                };
+            };
+        };
+    };
+    "traces-list_traces": {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+                /** @description Last activity at or after this instant (ISO 8601). */
+                start?: string | null;
+                /** @description Last activity before this instant (ISO 8601). */
+                end?: string | null;
+                /** @description Owning users. */
+                user_id?: string[] | null;
+                /** @description API keys. */
+                api_key_id?: string[] | null;
+                /** @description Agent harnesses. */
+                harness?: string[] | null;
+                /** @description What grouped the session. */
+                session_source?: ("client" | "harness" | "otlp" | "none")[] | null;
+                /** @description Only sessions with, or without, an unrecovered error. */
+                has_error?: boolean | null;
+                /** @description A trace id, or the start of one. */
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceListPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "traces-count_traces": {
+        parameters: {
+            query?: {
+                /** @description Last activity at or after this instant (ISO 8601). */
+                start?: string | null;
+                /** @description Last activity before this instant (ISO 8601). */
+                end?: string | null;
+                /** @description Owning users. */
+                user_id?: string[] | null;
+                /** @description API keys. */
+                api_key_id?: string[] | null;
+                /** @description Agent harnesses. */
+                harness?: string[] | null;
+                /** @description What grouped the session. */
+                session_source?: ("client" | "harness" | "otlp" | "none")[] | null;
+                /** @description Only sessions with, or without, an unrecovered error. */
+                has_error?: boolean | null;
+                /** @description A trace id, or the start of one. */
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceCountPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "traces-trace_series": {
+        parameters: {
+            query?: {
+                bucket?: "hour" | "day";
+                /** @description Last activity at or after this instant (ISO 8601). */
+                start?: string | null;
+                /** @description Last activity before this instant (ISO 8601). */
+                end?: string | null;
+                /** @description Owning users. */
+                user_id?: string[] | null;
+                /** @description API keys. */
+                api_key_id?: string[] | null;
+                /** @description Agent harnesses. */
+                harness?: string[] | null;
+                /** @description What grouped the session. */
+                session_source?: ("client" | "harness" | "otlp" | "none")[] | null;
+                /** @description Only sessions with, or without, an unrecovered error. */
+                has_error?: boolean | null;
+                /** @description A trace id, or the start of one. */
+                q?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceSeriesPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "traces-get_trace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                trace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TraceDetailPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

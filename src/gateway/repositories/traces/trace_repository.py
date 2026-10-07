@@ -4,14 +4,14 @@ import uuid
 from collections.abc import Collection, Sequence
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Never, Protocol, cast
+from typing import Any, Literal, Never, Protocol, cast
 
 from sqlalchemy import ColumnElement, case, delete, false, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
 
-from gateway.core.sql import dialect_name, utc_bound
+from gateway.core.sql import bucket_expr, canonical_bucket, dialect_name, utc_bound
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import Trace
 from gateway.repositories.base_repository import BaseRepository
@@ -118,6 +118,22 @@ class TraceRepository(BaseRepository[Trace, Never, Never]):
             select(func.count()).select_from(Trace).where(*_scoped(workspace_ids, _conditions(query)))
         )
         return result.scalar_one()
+
+    async def bucket_counts(
+        self, workspace_ids: Collection[uuid.UUID] | None, query: TraceQuery, *, bucket: Literal["hour", "day"]
+    ) -> list[tuple[str, int, int]]:
+        """Return ``(bucket, succeeded, failed)`` per populated bucket of trace start, oldest first."""
+        key = bucket_expr(dialect_name(self.db), bucket, Trace.started_at).label("bucket")
+        failed = func.sum(case((Trace.error_count > 0, 1), else_=0))
+        result = await self.db.execute(
+            select(key, func.count(), failed)
+            .where(*_scoped(workspace_ids, _conditions(query)))
+            .group_by(key)
+            .order_by(key)
+        )
+        return [
+            (canonical_bucket(row[0], bucket), int(row[1]) - int(row[2] or 0), int(row[2] or 0)) for row in result.all()
+        ]
 
     async def find(self, workspace_ids: Collection[uuid.UUID] | None, trace_id: str) -> Trace | None:
         """Return one trace inside the scope, or None."""
