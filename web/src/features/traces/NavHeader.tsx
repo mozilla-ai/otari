@@ -6,17 +6,13 @@ import {
 } from "react-icons/fi"
 
 import { IconButton } from "@/design-system/actions/IconButton"
-import { Segmented } from "@/design-system/navigation/Segmented"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
+
+import { TraceViewSwitch } from "./TraceViewSwitch"
 
 export type NavView = "tree" | "timeline"
 
-const NAV_OPTIONS = [
-  { value: "tree", label: "Tree" },
-  { value: "timeline", label: "Timeline" },
-]
-
-const BUTTON = "md:min-h-7 md:min-w-7"
+const BUTTON = "md:h-7 md:w-7 md:min-h-0 md:min-w-0"
 
 // One row: panel toggle, search, collapse all, Tree / Timeline. After
 // Langfuse's TracePanelNavigationHeader (MIT, Copyright (c) 2023-2026
@@ -46,6 +42,7 @@ export function NavHeader({
       <IconButton
         label={panelLabel}
         size="sm"
+        isIconOnly
         className={BUTTON}
         onPress={onToggleCollapsed}
       >
@@ -85,6 +82,7 @@ export function NavHeader({
           <IconButton
             label={allLabel}
             size="sm"
+            isIconOnly
             className={BUTTON}
             onPress={onToggleAll}
           >
@@ -96,13 +94,7 @@ export function NavHeader({
           </IconButton>
         </Tooltip>
         <span className="ml-2">
-          <Segmented
-            size="sm"
-            label="Trace view"
-            options={NAV_OPTIONS}
-            value={view}
-            onChange={(next) => onViewChange(next as NavView)}
-          />
+          <TraceViewSwitch value={view} onChange={onViewChange} />
         </span>
       </div>
     </div>

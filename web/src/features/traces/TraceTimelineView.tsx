@@ -39,6 +39,7 @@ const ZOOM_STEP = 1.6
 const TICK_MIN_PX = 56
 const IDLE_MIN_MS = 250
 const IDLE_LABEL_MIN_PX = 56
+const IDLE_MIN_PX = 14
 // Fira Code is monospace: 0.6em, so 11px text is 6.6px a glyph.
 const MICRO_GLYPH_PX = 6.6
 const LABEL_ITEM_GAP = 8
@@ -89,8 +90,9 @@ function ZoomButton({
       <IconButton
         label={label}
         size="sm"
+        isIconOnly
         isDisabled={isDisabled}
-        className="md:min-h-5 md:min-w-5"
+        className="md:h-5 md:w-5 md:min-h-0 md:min-w-0"
         onPress={onPress}
       >
         {children}
@@ -257,16 +259,18 @@ export function TraceTimelineView({
                 className="pointer-events-none absolute inset-y-0 border-l border-border"
               />
             ))}
-            {gaps.map((gap) => (
-              <span
-                key={gap.start}
-                style={{
-                  left: x(gap.start),
-                  width: Math.max(2, x(gap.end) - x(gap.start)),
-                }}
-                className="absolute inset-y-0 border-x border-dashed border-border-strong"
-              />
-            ))}
+            {gaps
+              .filter((gap) => x(gap.end) - x(gap.start) >= IDLE_MIN_PX)
+              .map((gap) => (
+                <span
+                  key={gap.start}
+                  style={{
+                    left: x(gap.start),
+                    width: Math.max(2, x(gap.end) - x(gap.start)),
+                  }}
+                  className="absolute inset-y-0 border-x border-dashed border-border-strong"
+                />
+              ))}
           </div>
 
           <div role="listbox" aria-label="Timeline" className="relative">

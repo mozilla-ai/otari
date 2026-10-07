@@ -111,6 +111,8 @@
   --trace-bar-generation: #c77595;
   --trace-bar-span: #5b97d3;
   --trace-bar-ink: #08090a;
+  --trace-switch-track: var(--color-surface-subtle);
+  --trace-switch-thumb: var(--color-surface);
   /* ── Surfaces — four levels, two families, staggered ──────────────────
      Four neutral levels, with the surface family sitting one rung ABOVE
      the background family rather than sharing rungs with it. Two pairs
@@ -486,6 +488,12 @@
   --trace-bar-generation: #ea8db1;
   --trace-bar-span: #70b3f7;
   --trace-bar-ink: #08090a;
+  --trace-switch-track: var(--color-surface-alt);
+  --trace-switch-thumb: color-mix(
+    in oklab,
+    var(--color-foreground) 20%,
+    var(--color-surface)
+  );
   /* ── Surfaces — the light block's stagger, mirrored ─────────────────────
      The same four levels and the same one-rung offset between the two
      families, read the other way up:
