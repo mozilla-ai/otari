@@ -29,7 +29,7 @@ from gateway.services.tools._code_execution_declarations import (
     resolve_code_executor_preference,
 )
 from gateway.services.tools._code_execution_responses import CODE_INTERPRETER_CALL_ID_PREFIX
-from gateway.services.tools._declarations import Tool, extract_first_matching_tool
+from gateway.services.tools._declarations import Tool
 from gateway.services.tools._mcp_admission import admit_mcp_servers
 from gateway.services.tools._native import (
     SERVER_TOOL_USE_ID_PREFIX,
@@ -87,7 +87,6 @@ __all__ = [
     "decide_code_executor",
     "declares_code_execution",
     "extract_code_execution_tool",
-    "extract_first_matching_tool",
     "extract_web_tools",
     "first_provider_code_execution_tool",
     "is_capped_call",
