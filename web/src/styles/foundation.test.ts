@@ -394,6 +394,21 @@ describe("the type scale's two halves", () => {
   })
 })
 
+describe("the keyboard focus ring on a text field", () => {
+  // A guard rather than a check: a cascade is not something jsdom computes, so
+  // this can only pin where the rule lives. The behavior was measured in a real
+  // browser (Tab into the input, read `outline-style`): `none` without the rule,
+  // `solid` 2px in `--color-focus` with it, and `none` again after a mouse click.
+  it("is drawn from the utilities layer, because HeroUI's `.input` is outline-none in the components layer", () => {
+    const rule = CSS.match(
+      /@layer utilities\s*\{\s*\.input\[data-focus-visible="true"\],\s*\.textarea\[data-focus-visible="true"\]\s*\{([^}]*)\}/,
+    )
+    expect(rule, "the field ring is not in `@layer utilities`").not.toBeNull()
+    expect(rule?.[1]).toContain("outline: 2px solid")
+    expect(rule?.[1]).toContain("var(--color-focus)")
+  })
+})
+
 describe("the flat surface: no corners, no elevation", () => {
   // Both halves of the divided-surface direction are one-line token changes
   // that reach the whole app, and both fail silently if they land in the wrong
