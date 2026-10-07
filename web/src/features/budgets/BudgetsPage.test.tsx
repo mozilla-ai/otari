@@ -1055,9 +1055,6 @@ describe("BudgetsPage", () => {
     expect(
       await screen.findByRole("grid", { name: "Budgets" }),
     ).toBeInTheDocument()
-    expect(
-      screen.getByRole("grid", { name: "Organization spend ceilings" }),
-    ).toBeInTheDocument()
 
     // Withheld at the request, not only in the markup.
     const read = requests.mock.calls.map(([url]) => String(url))

@@ -115,6 +115,28 @@ export const Open: Story = {
 }
 
 /**
+ * Two options spoken for elsewhere. Listed rather than left out, so the list
+ * still answers why they are missing from the pick, and the hint says where.
+ */
+export const DisabledOptions: Story = {
+  render: (args) => (
+    <Live
+      {...args}
+      autoFocus
+      options={PEOPLE.map((person, index) =>
+        index < 2
+          ? {
+              ...person,
+              hint: "Already on Engineering monthly",
+              isDisabled: true,
+            }
+          : person,
+      )}
+    />
+  ),
+}
+
+/**
  * A refusal, on the same rung a `Field`'s sits on, and in the description's
  * place rather than under it: the error replaces that line, so going invalid
  * moves nothing.

@@ -72,7 +72,7 @@ ComboBoxField: { label, value, onChange, onQueryChange?, options: ComboBoxOption
   reserveMessage?, className?, allowsCustomValue?, autoFocus?, menuTrigger = "focus",
   shouldSelectOnFocus?, isSourceEmpty?, emptyMessage?, noMatchesMessage? }
 MultiSelect: { label, value: readonly string[], onChange: (next: string[]) => void,
-  options: readonly MultiSelectOption[] ({ id, label, hint? }), description?,
+  options: readonly MultiSelectOption[] ({ id, label, hint?, isDisabled? }), description?,
   isInvalid?, errorMessage?, reserveMessage?, searchPlaceholder?, emptyMessage?,
   noMatchesMessage?, countNoun?: { one, other }, maxVisible = 50, autoFocus? }
 RadioGroup: { label, value, onChange, options: RadioOption[], description?,
@@ -187,6 +187,10 @@ never re-sorts on a pick.
 counts is how "1 people assigned" ships. `maxVisible` caps what is rendered,
 never what is searched: the filter runs over every option and the footer says
 when it is showing fewer.
+
+An option marked `isDisabled` is listed but cannot be picked: it exists and
+is spoken for elsewhere, so leaving it out would make the list lie about what
+there is, and its `hint` is where to say why. Its chip still removes it.
 
 An option's `hint` is the same thing it is on `ComboBoxField`: a second, muted
 line inside the row, folded into the row's accessible name because it is what
