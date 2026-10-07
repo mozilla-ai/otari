@@ -56,3 +56,17 @@ export function flattenTreeOrder(
   walk(roots, [])
   return out
 }
+
+// Own cost plus every descendant's, bottom-up, as Langfuse's tree building does
+// for the timeline's bar labels.
+export function rolledUpCosts(roots: TreeNode[]): Map<string, number> {
+  const totals = new Map<string, number>()
+  const walk = (node: TreeNode): number => {
+    const own = (node.obs.inputCost ?? 0) + (node.obs.outputCost ?? 0)
+    const total = node.children.reduce((sum, child) => sum + walk(child), own)
+    totals.set(node.obs.id, total)
+    return total
+  }
+  for (const root of roots) walk(root)
+  return totals
+}

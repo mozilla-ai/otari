@@ -14,7 +14,7 @@ import { formatCost, formatLatency } from "@/shared/helpers/format"
 
 import { OBSERVATION_TYPES, TypeMark } from "./observationTypes"
 import { matchesSearch } from "./search"
-import { buildTree, flattenTreeOrder } from "./tree"
+import { buildTree, flattenTreeOrder, rolledUpCosts } from "./tree"
 import type { Trace } from "./types"
 
 // Structure after Langfuse's TraceTimelineDense (MIT, Copyright (c) 2023-2026
@@ -126,10 +126,12 @@ export function TraceTimelineView({
     return () => observer.disconnect()
   }, [])
 
+  const roots = useMemo(() => buildTree(trace.observations), [trace])
   const items = useMemo(
-    () => flattenTreeOrder(buildTree(trace.observations), collapsed),
-    [trace, collapsed],
+    () => flattenTreeOrder(roots, collapsed),
+    [roots, collapsed],
   )
+  const costs = useMemo(() => rolledUpCosts(roots), [roots])
   const totalMs = Math.max(1, ...trace.observations.map((o) => o.endMs))
 
   // The gutter is 42% of the pane between 112 and 200px, and gives way to the
@@ -276,7 +278,7 @@ export function TraceTimelineView({
               const left = x(obs.startMs)
               const isPoint = vocab.barClass === null
               const width = isPoint ? 0 : Math.max(2, x(duration))
-              const cost = (obs.inputCost ?? 0) + (obs.outputCost ?? 0)
+              const cost = costs.get(obs.id) ?? 0
               const durationText = formatLatency(duration) ?? ""
               const costText = cost ? formatCost(cost) : ""
               const labelPx =
