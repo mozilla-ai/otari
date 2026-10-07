@@ -20,6 +20,13 @@ const handlers: Record<string, () => unknown> = {
 }
 
 export function installMockGateway(): void {
+  // AuthContext reads this marker to decide the session exists; the stubbed
+  // gateway answers as signed in, so a clean profile lands in the app.
+  try {
+    window.localStorage.setItem("otari.dashboard.hasSession", "1")
+  } catch {
+    // Storage blocked: the sign-in screen is the honest fallback.
+  }
   const realFetch = window.fetch.bind(window)
   window.fetch = async (input, init) => {
     const url = new URL(

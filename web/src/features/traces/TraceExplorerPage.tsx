@@ -49,7 +49,7 @@ function snippet(value: unknown): string | null {
 function TextCell({ value }: { value: unknown }) {
   const text = snippet(value)
   return text ? (
-    <span className="block truncate text-mono-caption text-muted">{text}</span>
+    <span className="block w-72 truncate text-mono-caption text-muted">{text}</span>
   ) : (
     EMPTY
   )
@@ -275,6 +275,7 @@ export function TraceExplorerPage() {
           windowStart={new Date(win.start).toISOString()}
           windowEnd={new Date(win.end).toISOString()}
           ariaLabel="Trace volume over the selected window"
+          unitLabel="Traces"
         />
         <FilterChips
           chips={[]}
@@ -315,9 +316,7 @@ export function TraceExplorerPage() {
             selectedKeys={selection}
             onSelectionChange={setSelection}
             onRowAction={openPeek}
-            rowClassName={(t) =>
-              t.id === peekId ? "bg-surface-subtle" : undefined
-            }
+            rowClassName={(t) => (t.id === peekId ? "is-peeked" : undefined)}
           />
         </TableScrollFrame>
         <TablePagination

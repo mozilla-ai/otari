@@ -11,27 +11,30 @@ import {
 
 import { CopyableValue } from "@/design-system/actions/CopyField"
 import { IconButton } from "@/design-system/actions/IconButton"
-import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { Kbd } from "@/design-system/indicators/Kbd"
 import { Segmented } from "@/design-system/navigation/Segmented"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
+import { formatCost, formatNumber } from "@/shared/helpers/format"
+
 import {
-  formatCost,
-  formatNumber,
-} from "@/shared/helpers/format"
-
-import { formatDuration, formatTraceTimestamp } from "./format"
+  formatDuration,
+  formatRelativeTime,
+  formatTraceTimestamp,
+} from "./format"
+import { type Format, IOBlock } from "./IOBlock"
+import { LogView } from "./LogView"
 import { TypeMark } from "./observationTypes"
-import { summarizeTrace, type Trace } from "./types"
+import { TraceTreeView } from "./TraceTreeView"
+import { type Observation, summarizeTrace, type Trace } from "./types"
 
-type PeekTab = "preview" | "log"
-type Format = "formatted" | "raw"
+type PeekTab = "preview" | "attributes" | "log"
 
 // Langfuse shows Attributes only while an observation is selected
-// (TraceDetailView.tsx). P1 selects the trace root only, so it has two tabs.
-const TABS: { id: PeekTab; label: string }[] = [
+// (TraceDetailView.tsx).
+const ALL_TABS: { id: PeekTab; label: string }[] = [
   { id: "preview", label: "Preview" },
+  { id: "attributes", label: "Attributes" },
   { id: "log", label: "Log View" },
 ]
 
@@ -40,14 +43,17 @@ const FORMAT_OPTIONS = [
   { value: "raw", label: "Raw" },
 ]
 
-const MIN_FRACTION = 0.4
+const MIN_PX = 640 // 40rem
 const MAX_FRACTION = 0.9
 const DEFAULT_FRACTION = 0.5
 const DEFAULT_CAP_PX = 1400 // 87.5rem
 const EXIT_MS = 250
 
 function defaultWidth(): number {
-  return Math.min(window.innerWidth * DEFAULT_FRACTION, DEFAULT_CAP_PX)
+  return Math.max(
+    MIN_PX,
+    Math.min(window.innerWidth * DEFAULT_FRACTION, DEFAULT_CAP_PX),
+  )
 }
 
 // A 4px bar in a 12px strip straddling an edge: transparent at rest, drawn on
@@ -95,50 +101,6 @@ function ResizeHandle({
   )
 }
 
-function ConversationBlock({
-  label,
-  value,
-  format,
-}: {
-  label: string
-  value: unknown
-  format: Format
-}) {
-  const messages = Array.isArray(value) ? value : null
-  return (
-    <section className="flex flex-col gap-1.5">
-      <h3 className="text-overline text-muted">{label}</h3>
-      {value == null ? (
-        <span className="text-subtle">—</span>
-      ) : format === "formatted" && messages ? (
-        <div className="flex flex-col gap-2">
-          {messages.map((message, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: static mock content
-            <div key={index} className="flex flex-col gap-0.5">
-              <span className="text-mono-caption text-muted">
-                {String((message as { role?: string }).role ?? "message")}
-              </span>
-              <p className="text-body whitespace-pre-wrap">
-                {String((message as { content?: string }).content ?? "")}
-              </p>
-            </div>
-          ))}
-        </div>
-      ) : format === "formatted" &&
-        typeof value === "object" &&
-        "message" in (value as object) ? (
-        <p className="text-body whitespace-pre-wrap">
-          {String((value as { message: unknown }).message)}
-        </p>
-      ) : (
-        <pre className="overflow-x-auto border border-border bg-surface-subtle p-3 text-mono-caption whitespace-pre-wrap">
-          {JSON.stringify(value, null, 2)}
-        </pre>
-      )}
-    </section>
-  )
-}
-
 function Breakdown({ rows }: { rows: [string, string][] }) {
   return (
     <dl className="grid grid-cols-[auto_auto] gap-x-4 gap-y-0.5 text-mono-caption">
@@ -154,6 +116,59 @@ function Breakdown({ rows }: { rows: [string, string][] }) {
 
 const DOTTED =
   "underline decoration-dotted decoration-control-border underline-offset-4"
+
+function Attributes({
+  trace,
+  observation,
+}: {
+  trace: Trace
+  observation: Observation
+}) {
+  const rows: [string, string | undefined][] = [
+    ["Type", observation.type],
+    ["Level", observation.level],
+    ["Status message", observation.statusMessage],
+    ["Model", observation.model],
+    ["Provider", observation.provider],
+    [
+      "Prompt tokens",
+      observation.promptTokens != null
+        ? formatNumber(observation.promptTokens)
+        : undefined,
+    ],
+    [
+      "Completion tokens",
+      observation.completionTokens != null
+        ? formatNumber(observation.completionTokens)
+        : undefined,
+    ],
+    [
+      "Total cost",
+      observation.inputCost != null
+        ? formatCost(
+            (observation.inputCost ?? 0) + (observation.outputCost ?? 0),
+          )
+        : undefined,
+    ],
+    ["Start", formatRelativeTime(observation.startMs, true)],
+    ["Duration", formatDuration(observation.endMs - observation.startMs)],
+    ["ID", observation.id],
+    ["Trace ID", trace.id],
+    ...Object.entries(observation.metadata ?? {}),
+  ]
+  return (
+    <dl className="grid grid-cols-[9rem_1fr] gap-x-4 gap-y-2">
+      {rows
+        .filter(([, value]) => value)
+        .map(([key, value]) => (
+          <div key={key} className="contents">
+            <dt className="text-muted">{key}</dt>
+            <dd className="break-all text-body">{value}</dd>
+          </div>
+        ))}
+    </dl>
+  )
+}
 
 export function TracePeek({
   trace,
@@ -176,6 +191,43 @@ export function TracePeek({
   const [navFraction, setNavFraction] = useState(0.4)
   const bodyRef = useRef<HTMLDivElement>(null)
   const summary = summarizeTrace(trace)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const observation =
+    trace.observations.find((o) => o.id === selectedId) ?? null
+  const tabs = observation
+    ? ALL_TABS
+    : ALL_TABS.filter((t) => t.id !== "attributes")
+  const activeTab = tabs.some((t) => t.id === tab) ? tab : "preview"
+  const shown = observation
+    ? {
+        name: observation.name,
+        type: observation.type,
+        timestamp: new Date(
+          Date.parse(trace.timestamp) + observation.startMs,
+        ).toISOString(),
+        latencyMs: observation.endMs - observation.startMs,
+        inputCost: observation.inputCost ?? 0,
+        outputCost: observation.outputCost ?? 0,
+        totalCost: (observation.inputCost ?? 0) + (observation.outputCost ?? 0),
+        promptTokens: observation.promptTokens ?? 0,
+        completionTokens: observation.completionTokens ?? 0,
+        totalTokens:
+          (observation.promptTokens ?? 0) + (observation.completionTokens ?? 0),
+        model: observation.model,
+      }
+    : {
+        name: trace.name,
+        type: "TRACE" as const,
+        timestamp: trace.timestamp,
+        latencyMs: summary.latencyMs,
+        inputCost: summary.inputCost,
+        outputCost: summary.outputCost,
+        totalCost: summary.totalCost,
+        promptTokens: summary.promptTokens,
+        completionTokens: summary.completionTokens,
+        totalTokens: summary.totalTokens,
+        model: summary.models[0],
+      }
 
   // setTimeout rather than requestAnimationFrame: a hidden tab never fires rAF.
   useEffect(() => {
@@ -205,13 +257,10 @@ export function TracePeek({
   }, [close, onPrevious, onNext])
 
   const clampWidth = (px: number) =>
-    Math.min(
-      window.innerWidth * MAX_FRACTION,
-      Math.max(window.innerWidth * MIN_FRACTION, px),
-    )
+    Math.min(window.innerWidth * MAX_FRACTION, Math.max(MIN_PX, px))
 
   const shownWidth = expanded ? window.innerWidth * MAX_FRACTION : width
-  const model = summary.models[0]
+  const model = shown.model
 
   return (
     <aside
@@ -234,15 +283,17 @@ export function TracePeek({
       />
 
       <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="text-overline text-muted">Trace</span>
-          <CopyableValue
-            value={trace.id}
-            label="Copy trace ID"
-            className="truncate text-mono-caption"
-          />
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="shrink-0 text-overline text-muted">Trace</span>
+          <span className="flex min-w-0 [&>span]:min-w-0 [&>span>span:first-child]:min-w-0 [&>span>span:first-child]:truncate">
+            <CopyableValue
+              value={trace.id}
+              label="Copy trace ID"
+              className="text-mono-caption"
+            />
+          </span>
         </div>
-        <div className="otari-toolbar flex items-center gap-1">
+        <div className="otari-toolbar flex shrink-0 items-center gap-1">
           <Tooltip
             content={
               <span className="flex items-center gap-2">
@@ -301,47 +352,47 @@ export function TracePeek({
       <div className="flex shrink-0 flex-col gap-2 px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="grid size-6 shrink-0 place-items-center">
-            <TypeMark type="TRACE" className="size-5" />
+            <TypeMark type={shown.type} className="size-5" />
           </span>
-          <h2 className="truncate text-title">{trace.name}</h2>
+          <h2 className="truncate text-title">{shown.name}</h2>
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-mono-caption text-muted">
-          <span>{formatTraceTimestamp(trace.timestamp, true)}</span>
-          {formatDuration(summary.latencyMs) ? (
-            <span>{formatDuration(summary.latencyMs)}</span>
+          <span>{formatTraceTimestamp(shown.timestamp, true)}</span>
+          {formatDuration(shown.latencyMs) ? (
+            <span>{formatDuration(shown.latencyMs)}</span>
           ) : null}
-          {summary.totalCost > 0 ? (
+          {shown.totalCost > 0 ? (
             <Tooltip
               content={
                 <Breakdown
                   rows={[
-                    ["Input", formatCost(summary.inputCost)],
-                    ["Output", formatCost(summary.outputCost)],
+                    ["Input", formatCost(shown.inputCost)],
+                    ["Output", formatCost(shown.outputCost)],
                   ]}
                 />
               }
             >
               {(props) => (
                 <button type="button" {...props} className={DOTTED}>
-                  {formatCost(summary.totalCost)}
+                  {formatCost(shown.totalCost)}
                 </button>
               )}
             </Tooltip>
           ) : null}
-          {summary.totalTokens > 0 ? (
+          {shown.totalTokens > 0 ? (
             <Tooltip
               content={
                 <Breakdown
                   rows={[
-                    ["Input", formatNumber(summary.promptTokens)],
-                    ["Output", formatNumber(summary.completionTokens)],
+                    ["Input", formatNumber(shown.promptTokens)],
+                    ["Output", formatNumber(shown.completionTokens)],
                   ]}
                 />
               }
             >
               {(props) => (
                 <button type="button" {...props} className={DOTTED}>
-                  {formatNumber(summary.totalTokens)} tokens
+                  {formatNumber(shown.totalTokens)} tokens
                 </button>
               )}
             </Tooltip>
@@ -360,8 +411,12 @@ export function TracePeek({
 
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2">
         <TabRow>
-          {TABS.map(({ id, label }) => (
-            <Tab key={id} isActive={tab === id} onPress={() => setTab(id)}>
+          {tabs.map(({ id, label }) => (
+            <Tab
+              key={id}
+              isActive={activeTab === id}
+              onPress={() => setTab(id)}
+            >
               {label}
             </Tab>
           ))}
@@ -376,56 +431,59 @@ export function TracePeek({
       </div>
 
       <div ref={bodyRef} className="relative flex min-h-0 flex-1 overflow-auto">
-        <>
-          <div
-            style={{ width: `${navFraction * 100}%` }}
-            className="relative flex min-w-[260px] shrink-0 flex-col border-r border-border"
-          >
-            <div className="p-4">
-              <EmptyMessage>
-                {summary.observationCount} observations. The tree and timeline
-                land here.
-              </EmptyMessage>
+        {activeTab === "log" ? (
+          <LogView trace={trace} format={format} />
+        ) : (
+          <>
+            <div
+              style={{ width: `${navFraction * 100}%` }}
+              className="relative flex min-w-[260px] shrink-0 flex-col overflow-auto border-r border-border max-md:hidden"
+            >
+              <TraceTreeView
+                trace={trace}
+                selectedId={observation?.id ?? null}
+                onSelect={setSelectedId}
+              />
+              <ResizeHandle
+                label="Resize navigation pane"
+                className="-right-1.5"
+                onDrag={(clientX) => {
+                  const box = bodyRef.current?.getBoundingClientRect()
+                  if (!box) return
+                  setNavFraction(
+                    Math.min(
+                      0.7,
+                      Math.max(0.2, (clientX - box.left) / box.width),
+                    ),
+                  )
+                }}
+                onStep={(direction) =>
+                  setNavFraction((value) =>
+                    Math.min(0.7, Math.max(0.2, value + direction * 0.04)),
+                  )
+                }
+              />
             </div>
-            <ResizeHandle
-              label="Resize navigation pane"
-              className="-right-1.5"
-              onDrag={(clientX) => {
-                const box = bodyRef.current?.getBoundingClientRect()
-                if (!box) return
-                setNavFraction(
-                  Math.min(
-                    0.7,
-                    Math.max(0.2, (clientX - box.left) / box.width),
-                  ),
-                )
-              }}
-              onStep={(direction) =>
-                setNavFraction((value) =>
-                  Math.min(0.7, Math.max(0.2, value + direction * 0.04)),
-                )
-              }
-            />
-          </div>
-          <div className="flex min-w-[360px] flex-1 flex-col gap-4 overflow-auto p-4">
-            {tab === "preview" ? (
-              <>
-                <ConversationBlock
-                  label="Input"
-                  value={trace.input}
-                  format={format}
-                />
-                <ConversationBlock
-                  label="Output"
-                  value={trace.output}
-                  format={format}
-                />
-              </>
-            ) : (
-              <EmptyMessage>The log view is not built yet.</EmptyMessage>
-            )}
-          </div>
-        </>
+            <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-auto p-4 md:min-w-[360px]">
+              {activeTab === "attributes" && observation ? (
+                <Attributes trace={trace} observation={observation} />
+              ) : (
+                <>
+                  <IOBlock
+                    label="Input"
+                    value={observation ? observation.input : trace.input}
+                    format={format}
+                  />
+                  <IOBlock
+                    label="Output"
+                    value={observation ? observation.output : trace.output}
+                    format={format}
+                  />
+                </>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </aside>
   )

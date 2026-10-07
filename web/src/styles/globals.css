@@ -2467,23 +2467,26 @@ main {
   border-bottom: 1px solid var(--color-border);
 }
 .otari-activity-table .table__row .table__cell {
-  min-height: 2.75rem;
+  height: 2.75rem;
+  padding-block: 0;
 }
 @media (min-width: 48rem) {
   .otari-activity-table .table__row .table__cell {
-    min-height: 1.75rem;
+    height: 1.75rem;
   }
 }
 .otari-activity-table .table__column[data-key="timestamp"] {
-  width: 10.5rem;
-  min-width: 10.5rem;
+  width: 11.375rem;
+  min-width: 11.375rem;
 }
 .otari-activity-table .table__column[data-key="name"] {
   min-width: 10rem;
 }
 .otari-activity-table .table__column[data-key="input"],
 .otari-activity-table .table__column[data-key="output"] {
+  width: 18rem;
   min-width: 18rem;
+  max-width: 18rem;
 }
 .otari-activity-table .table__column[data-key="levels"] {
   min-width: 11rem;
@@ -2519,24 +2522,29 @@ main {
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="timestamp"],
-.otari-activity-table .table__cell[data-key="timestamp"] {
+.otari-activity-table .table__row .table__cell:nth-child(2) {
   position: sticky;
   left: var(--activity-pin-start);
   z-index: 1;
   background-color: var(--color-background);
 }
 .otari-activity-table .table__column[data-key="name"],
-.otari-activity-table .table__cell[data-key="name"] {
+.otari-activity-table .table__row .table__cell:nth-child(3) {
   position: sticky;
-  left: calc(var(--activity-pin-start) + 10.5rem);
+  left: calc(var(--activity-pin-start) + 11.375rem);
   z-index: 1;
   background-color: var(--color-background);
 }
 /* One boundary, at the edge of the held region, and only while it is holding
    something back. */
 .otari-activity-table[data-scrolled="true"] .table__column[data-key="name"],
-.otari-activity-table[data-scrolled="true"] .table__cell[data-key="name"] {
+.otari-activity-table[data-scrolled="true"] .table__row .table__cell:nth-child(3) {
   border-right: 1px solid var(--color-control-border);
+}
+/* The row open in the peek. On the cells, pinned ones included: every cell
+   paints its own background over the row's. */
+.otari-activity-table .table__row.is-peeked .table__cell {
+  background-color: var(--color-surface-subtle);
 }
 .otari-mcp-table .table__row .table__cell {
   height: 3.25rem;

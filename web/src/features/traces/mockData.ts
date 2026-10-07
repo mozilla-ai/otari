@@ -1,3 +1,4 @@
+import { pickText } from "./mockText"
 import type {
   Observation,
   ObservationLevel,
@@ -39,6 +40,7 @@ function id(r: () => number, n = 8) {
 
 interface Draft {
   key: string
+  id?: string
   parent?: string
   type: ObservationType
   name: string
@@ -58,7 +60,7 @@ function build(
   drafts: Draft[],
   r: () => number,
 ): Observation[] {
-  const ids = new Map(drafts.map((d) => [d.key, id(r)]))
+  const ids = new Map(drafts.map((d) => [d.key, d.id ?? id(r)]))
   return drafts.map((d) => {
     const rate = d.model ? RATES[d.model] : undefined
     const [pt, ct] = d.tokens ?? [0, 0]
@@ -104,151 +106,128 @@ function chatbotTrace(): Trace {
   const traceId = "7f660c74a1b24e0d9c3b5f2e8d1a4c66"
   const question =
     "Why did our p95 latency double after the routing change, and which models are affected?"
+  const answer =
+    "Latency doubled because requests to gpt-5 now fall back to claude-sonnet-4-5 on 429s."
+  const chat = (
+    key: string,
+    parent: string,
+    start: number,
+    end: number,
+    model: string,
+    tokens: [number, number],
+    content: string,
+  ): Draft => ({
+    key,
+    parent,
+    type: "GENERATION",
+    name: "chat",
+    start,
+    end,
+    model,
+    tokens,
+    input: [{ role: "user", content: question }],
+    output: { role: "assistant", content },
+  })
   const drafts: Draft[] = [
     {
       key: "root",
+      id: traceId,
       type: "AGENT",
       name: "handle-chatbot-message",
       start: 0,
       end: 37000,
       input: { message: question },
-      output: {
-        message:
-          "Latency doubled because requests to gpt-5 now fall back to claude-sonnet-4-5 on 429s...",
-      },
+      output: { message: answer },
     },
     {
-      key: "guard",
+      key: "policy",
       parent: "root",
       type: "SPAN",
-      name: "check-input-policy",
-      start: 20,
-      end: 410,
-      metadata: { policy: "pii-redact", verdict: "pass" },
+      name: "get-routing-policy",
+      start: 0,
+      end: 293,
     },
     {
-      key: "chain",
+      key: "mcp",
       parent: "root",
       type: "SPAN",
-      name: "plan-and-answer",
-      start: 420,
-      end: 36600,
+      name: "create-mcp-client",
+      start: 0,
+      end: 77,
     },
     {
-      key: "plan",
-      parent: "chain",
-      type: "GENERATION",
-      name: "chat",
-      start: 430,
-      end: 3100,
-      model: "gpt-5",
-      tokens: [1180, 342],
-      input: [
-        { role: "system", content: "You are an SRE assistant." },
-        { role: "user", content: question },
-      ],
-      output: {
-        role: "assistant",
-        content:
-          "Plan: 1) search recent incidents 2) pull routing config 3) compare latency by model.",
-      },
-    },
-    {
-      key: "search",
-      parent: "chain",
-      type: "TOOL",
-      name: "web_search",
-      start: 3200,
-      end: 6800,
-      input: { query: "gateway fallback latency 429 retry" },
-      output: { results: 6 },
-      metadata: { server: "web-search" },
-    },
-    {
-      key: "vec",
-      parent: "chain",
-      type: "SPAN",
-      name: "runbook-lookup",
-      start: 6900,
-      end: 7300,
-      input: { query: "routing fallback policy" },
-      output: { documents: 4 },
-    },
-    {
-      key: "agent",
-      parent: "chain",
+      key: "qa",
+      parent: "root",
       type: "AGENT",
-      name: "research-subagent",
-      start: 7400,
-      end: 30200,
+      name: "qa-chatbot",
+      start: 0,
+      end: 36500,
     },
     {
-      key: "g1",
-      parent: "agent",
-      type: "GENERATION",
-      name: "chat",
-      start: 7450,
-      end: 12200,
-      model: "claude-sonnet-4-5",
-      tokens: [3920, 611],
-      input: [
-        { role: "user", content: "List the routing changes since Monday." },
-      ],
-      output: {
-        role: "assistant",
-        tool_calls: [{ name: "mcp:github.search_issues" }],
-      },
+      key: "s1",
+      parent: "qa",
+      type: "SPAN",
+      name: "step",
+      start: 0,
+      end: 3000,
     },
+    chat(
+      "c1",
+      "s1",
+      0,
+      2900,
+      "gpt-5",
+      [1180, 342],
+      "Plan: compare latency by model, then check the routing config.",
+    ),
     {
       key: "t1",
-      parent: "agent",
+      parent: "s1",
       type: "TOOL",
-      name: "mcp:github.search_issues",
-      start: 12300,
-      end: 15900,
-      input: { repo: "acme/gateway", q: "routing fallback" },
-      output: { total: 3 },
-      metadata: { server: "github" },
+      name: "getGatewayOverview",
+      start: 3000,
+      end: 3116,
+      input: { window: "7d" },
+      output: { p95_ms: 4210, fallback_rate: 0.31 },
+      metadata: { server: "otari-mcp" },
     },
     {
-      key: "g2",
-      parent: "agent",
-      type: "GENERATION",
-      name: "chat",
-      start: 16000,
-      end: 30100,
-      model: "claude-sonnet-4-5",
-      tokens: [6410, 1822],
-      input: [{ role: "tool", content: "3 issues" }],
-      output: {
-        role: "assistant",
-        content: "Fallback to claude-sonnet-4-5 was enabled on Tuesday.",
-      },
+      key: "s2",
+      parent: "qa",
+      type: "SPAN",
+      name: "step",
+      start: 3000,
+      end: 27900,
+    },
+    chat(
+      "c2",
+      "s2",
+      3000,
+      5600,
+      "claude-sonnet-4-5",
+      [3920, 611],
+      "Searching the docs for the fallback policy.",
+    ),
+    {
+      key: "t2",
+      parent: "s2",
+      type: "TOOL",
+      name: "searchGatewayDocs",
+      start: 6000,
+      end: 28300,
+      input: { query: "routing fallback policy 429 retry" },
+      output: { results: 6 },
+      metadata: { server: "otari-mcp" },
     },
     {
-      key: "final",
-      parent: "chain",
-      type: "GENERATION",
-      name: "chat",
-      start: 30300,
-      end: 36500,
-      model: "gpt-5",
-      tokens: [8120, 904],
-      input: [{ role: "user", content: question }],
-      output: {
-        role: "assistant",
-        content:
-          "Latency doubled because requests to gpt-5 now fall back to claude-sonnet-4-5 on 429s.",
-      },
+      key: "s3",
+      parent: "qa",
+      type: "SPAN",
+      name: "step",
+      start: 28000,
+      end: 36600,
     },
-    {
-      key: "sent",
-      parent: "root",
-      type: "EVENT",
-      name: "response-sent",
-      start: 36900,
-      end: 36900,
-    },
+    chat("c3", "s3", 28000, 36600, "gpt-5", [8120, 904], answer),
   ]
   return {
     id: traceId,
@@ -305,7 +284,8 @@ function generated(i: number): Trace {
           : "simple"
   const p = 400 + Math.floor(r() * 3000)
   const c = 80 + Math.floor(r() * 900)
-  const prompt = `Request ${i + 1}: ${name.replace(/-/g, " ")}`
+  const text = pickText(name, i)
+  const prompt = text.input
   if (kind === "simple") {
     const d = 600 + Math.floor(r() * 4200)
     drafts.push({
@@ -317,7 +297,7 @@ function generated(i: number): Trace {
       model,
       tokens: [p, c],
       input: [{ role: "user", content: prompt }],
-      output: { role: "assistant", content: "Done." },
+      output: { role: "assistant", content: text.output },
     })
   } else if (kind === "fallback") {
     const alt = model === "claude-sonnet-4-5" ? "gpt-5" : "claude-sonnet-4-5"
@@ -357,7 +337,7 @@ function generated(i: number): Trace {
         model: alt,
         tokens: [p, c],
         input: [{ role: "user", content: prompt }],
-        output: { role: "assistant", content: "Done." },
+        output: { role: "assistant", content: text.output },
       },
     )
   } else if (kind === "error") {
@@ -411,7 +391,7 @@ function generated(i: number): Trace {
         model,
         tokens: [p + k * 300, c],
         input: [{ role: "user", content: prompt }],
-        output: { role: "assistant", content: "Step done." },
+        output: { role: "assistant", content: text.output },
       })
       cur += gd + 20
       const td = 300 + Math.floor(r() * 2200)
@@ -422,7 +402,7 @@ function generated(i: number): Trace {
         name: k % 2 ? "web_search" : "mcp:docs.search",
         start: cur,
         end: cur + td,
-        input: { query: "..." },
+        input: { query: text.input.slice(0, 48) },
         output: { hits: 3 },
       })
       cur += td + 20
@@ -438,7 +418,7 @@ function generated(i: number): Trace {
     environment: r() < 0.85 ? "production" : "staging",
     tags: [TAGS[Math.floor(r() * TAGS.length)]],
     input: { message: prompt },
-    output: kind === "error" ? null : { message: "Done." },
+    output: kind === "error" ? null : { message: text.output },
     metadata: { release: "2026.10.3" },
     observations: build(traceId, drafts, r),
   }

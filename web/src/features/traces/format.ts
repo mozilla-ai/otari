@@ -18,3 +18,10 @@ export function formatDuration(ms: number): string | undefined {
   }
   return formatLatency(ms)
 }
+
+// Log View's Start column: `m:ss`, or `m:ss.mmm`, relative to the trace start.
+export function formatRelativeTime(ms: number, showMs = false): string {
+  const total = Math.floor(ms / 1000)
+  const base = `${Math.floor(total / 60)}:${pad(total % 60)}`
+  return showMs ? `${base}.${pad(Math.floor(ms % 1000), 3)}` : base
+}

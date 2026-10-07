@@ -1,0 +1,204 @@
+import { useMemo, useState } from "react"
+import {
+  FiAlignLeft,
+  FiCheck,
+  FiChevronRight,
+  FiChevronsDown,
+  FiChevronsUp,
+  FiClock,
+  FiCopy,
+} from "react-icons/fi"
+
+import { IconButton } from "@/design-system/actions/IconButton"
+import { SearchField } from "@/design-system/forms/SearchField"
+import { Tooltip } from "@/design-system/overlays/Tooltip"
+
+import { formatDuration, formatRelativeTime } from "./format"
+import { type Format, IOBlock } from "./IOBlock"
+import { TypeMark } from "./observationTypes"
+import { buildTree, flattenTreeOrder } from "./tree"
+import type { Trace } from "./types"
+
+const GRID =
+  "grid grid-cols-[1rem_minmax(0,1fr)_3rem_5rem_5rem] items-center gap-3"
+const INDENT_PX = 12
+
+function ToolbarButton({
+  label,
+  pressed,
+  onPress,
+  children,
+}: {
+  label: string
+  pressed?: boolean
+  onPress: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <Tooltip content={label}>
+      <IconButton
+        label={label}
+        size="sm"
+        aria-pressed={pressed}
+        className={`md:min-h-7 md:min-w-7 ${pressed ? "bg-surface-subtle" : ""}`}
+        onPress={onPress}
+      >
+        {children}
+      </IconButton>
+    </Tooltip>
+  )
+}
+
+export function LogView({ trace, format }: { trace: Trace; format: Format }) {
+  const [query, setQuery] = useState("")
+  const [indent, setIndent] = useState(false)
+  const [showMs, setShowMs] = useState(false)
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  const [copied, setCopied] = useState(false)
+
+  const items = useMemo(
+    () => flattenTreeOrder(buildTree(trace.observations)),
+    [trace],
+  )
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return items
+    return items.filter(({ node: { obs } }) =>
+      [obs.name, obs.type, obs.id].some((v) => v.toLowerCase().includes(q)),
+    )
+  }, [items, query])
+
+  const allExpanded =
+    visible.length > 0 && visible.every(({ node }) => expanded.has(node.obs.id))
+
+  const toggleRow = (id: string) =>
+    setExpanded((current) => {
+      const next = new Set(current)
+      if (!next.delete(id)) next.add(id)
+      return next
+    })
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(
+        JSON.stringify(trace.observations, null, 2),
+      )
+    } catch {
+      return
+    }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1000)
+  }
+
+  return (
+    <div className="flex min-w-0 flex-1 flex-col">
+      <div className="otari-toolbar flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
+        <SearchField
+          label="Search observations"
+          placeholder="Search observations..."
+          value={query}
+          onChange={setQuery}
+          className="min-w-0 flex-1"
+        />
+        <ToolbarButton
+          label={indent ? "Hide indentation" : "Show indentation"}
+          pressed={indent}
+          onPress={() => setIndent((v) => !v)}
+        >
+          <FiAlignLeft aria-hidden="true" className="size-4" />
+        </ToolbarButton>
+        <ToolbarButton
+          label={showMs ? "Hide milliseconds" : "Show milliseconds"}
+          pressed={showMs}
+          onPress={() => setShowMs((v) => !v)}
+        >
+          <FiClock aria-hidden="true" className="size-4" />
+        </ToolbarButton>
+        <ToolbarButton
+          label={allExpanded ? "Collapse all" : "Expand all"}
+          onPress={() =>
+            setExpanded(
+              allExpanded
+                ? new Set()
+                : new Set(visible.map(({ node }) => node.obs.id)),
+            )
+          }
+        >
+          {allExpanded ? (
+            <FiChevronsUp aria-hidden="true" className="size-4" />
+          ) : (
+            <FiChevronsDown aria-hidden="true" className="size-4" />
+          )}
+        </ToolbarButton>
+        <ToolbarButton label="Copy as JSON" onPress={copy}>
+          {copied ? (
+            <FiCheck aria-hidden="true" className="size-4" />
+          ) : (
+            <FiCopy aria-hidden="true" className="size-4" />
+          )}
+        </ToolbarButton>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto">
+        <div
+          className={`${GRID} sticky top-0 z-10 border-b border-border bg-surface px-4 py-2 text-overline text-muted`}
+        >
+          <span />
+          <span>Observation</span>
+          <span className="text-right">Depth</span>
+          <span className="text-right">Start</span>
+          <span className="text-right">Duration</span>
+        </div>
+        {visible.map(({ node }) => {
+          const { obs } = node
+          const isOpen = expanded.has(obs.id)
+          const items = node.children.length
+          return (
+            <div key={obs.id} className="border-b border-border">
+              <button
+                type="button"
+                aria-expanded={isOpen}
+                onClick={() => toggleRow(obs.id)}
+                className={`${GRID} min-h-11 w-full px-4 text-left hover:bg-surface-alt md:min-h-6`}
+              >
+                <FiChevronRight
+                  aria-hidden="true"
+                  className={`size-3.5 text-muted transition-transform duration-150 ease-smooth motion-reduce:transition-none ${isOpen ? "rotate-90" : ""}`}
+                />
+                <span
+                  className="flex min-w-0 items-center gap-2"
+                  style={{ paddingLeft: indent ? node.depth * INDENT_PX : 0 }}
+                >
+                  <TypeMark type={obs.type} />
+                  <span className="truncate text-body">
+                    {obs.name} ({obs.id.slice(0, 8)})
+                  </span>
+                  {items > 0 ? (
+                    <span className="shrink-0 text-caption text-subtle">
+                      {items} {items === 1 ? "item" : "items"}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="text-right text-mono-caption text-muted">
+                  L{node.depth}
+                </span>
+                <span className="text-right text-mono-caption text-muted">
+                  {formatRelativeTime(obs.startMs, showMs)}
+                </span>
+                <span className="text-right text-mono-caption text-muted">
+                  {formatDuration(obs.endMs - obs.startMs) ?? "-"}
+                </span>
+              </button>
+              {isOpen ? (
+                <div className="flex flex-col gap-4 border-t border-border bg-surface-alt px-4 py-3">
+                  <IOBlock label="Input" value={obs.input} format={format} />
+                  <IOBlock label="Output" value={obs.output} format={format} />
+                </div>
+              ) : null}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
