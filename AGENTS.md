@@ -171,6 +171,12 @@ Read the page covering the area you are changing before you change it, and updat
 page in the same PR when behavior moves. Nothing fails when a docs page goes stale,
 unlike the artifacts above, so a reader finds the drift rather than CI.
 
+The GitBook site publishes only the pages [docs/SUMMARY.md](docs/SUMMARY.md) lists, on each
+release (`otari-docs.yml`, see [RELEASE.md](RELEASE.md)). A new page therefore owes either a
+`SUMMARY.md` entry or an entry in `UNPUBLISHED_PAGES` in `scripts/prepare_gitbook_site.py`, and
+`tests/unit/test_gitbook_site.py` fails until it has one. A page for contributors rather than
+users goes in the second.
+
 Some pages bind code rather than describe it:
 
 - [docs/domains.md](docs/domains.md) is the backend's target shape: what each layer
