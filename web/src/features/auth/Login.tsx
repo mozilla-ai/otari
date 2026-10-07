@@ -194,9 +194,9 @@ function LabelRow({
  * recovers through the master key against `PUT /v1/auth/password` instead (see
  * docs/access-control.md) rather than through a mailed link.
  *
- * A passkey signs in beside the form rather than instead of it (otari#652),
- * offered only when the gateway publishes `passkey` *and* this browser can run
- * the ceremony. OAuth sits beside both (otari#651), one button per provider in
+ * A passkey signs in as a row above the typed credential rather than instead
+ * of it (otari#652), offered only when the gateway publishes `passkey` *and*
+ * this browser can run the ceremony. OAuth rows sit with it (otari#651), one per provider in
  * the bootstrap's `oauth_providers`, which lists only the providers an operator
  * configured: a provider nobody set up is absent rather than rendered disabled,
  * and a deployment that configured none carries no OAuth affordance at all.
@@ -283,7 +283,7 @@ export function Login() {
   )
   const [didOpenForm, setDidOpenForm] = useState(false)
   // A refusal from a provider or a passkey, which belongs under the rows it came
-  // from and not beside the typed credential's own fields.
+  // from and not under the typed credential's own fields.
   const [methodError, setMethodError] = useState<unknown>(null)
 
   // The unverified refusal tells the reader to request a new verification

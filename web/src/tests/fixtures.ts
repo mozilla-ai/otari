@@ -211,11 +211,11 @@ export function bootstrap(
     // Not frozen, because a fixture describes a deployment somebody can sign
     // in to; the maintenance-mode tests override it.
     maintenance_mode: false,
-    // Off by default, matching a deployment that has not set public_base_url:
-    // the passkey tests turn it on rather than every other test turning it off.
     // On, the setting default: the tests about a deployment that switched
     // passkeys off say so.
     passkeys_enabled: true,
+    // Off by default, matching a deployment that has not set public_base_url:
+    // the passkey tests turn it on rather than every other test turning it off.
     passkeys_ready: false,
     // Empty by default, matching a deployment that registered no OAuth client:
     // the OAuth tests name the providers they need rather than every other test

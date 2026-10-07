@@ -24,6 +24,7 @@ function renderShell(
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   localStorage.clear()
   document.documentElement.removeAttribute("data-theme")
   document.documentElement.classList.remove("dark")
@@ -52,13 +53,11 @@ it("flips between light and dark with one control and no animation control", asy
     await user.click(screen.getByRole("button", { name }))
     expect(localStorage.getItem(STORAGE_KEY)).toBe(stored)
   }
-  // Never a third state: a visitor who stored "system" before it was removed
-  // meets the same two-state control.
+  // Never a third state.
   expect(screen.queryByRole("button", { name: /system/i })).toBeNull()
   expect(screen.getByRole("main")).toContainElement(
     screen.getByRole("heading", { name: "Sign in" }),
   )
-  vi.unstubAllGlobals()
 })
 
 // The layout fact being pinned: the appearance toggle's box is 44x44 at every

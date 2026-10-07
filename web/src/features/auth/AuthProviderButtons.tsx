@@ -50,19 +50,17 @@ export function AuthOrRule({ className = "py-3" }: { className?: string }) {
  */
 export function AuthMethodRow({
   icon: Icon,
-  iconClassName = "",
   children,
   ...rest
 }: {
   icon: IconType
-  iconClassName?: string
   children: ReactNode
 } & Omit<React.ComponentProps<typeof Button>, "children" | "variant">) {
   return (
     <Button variant="ghost" className={ROW} {...rest}>
       <Icon
         aria-hidden
-        className={`absolute inset-y-0 left-[15px] my-auto size-4 ${iconClassName}`}
+        className={`absolute inset-y-0 left-[15px] my-auto size-4`}
       />
       {children}
     </Button>

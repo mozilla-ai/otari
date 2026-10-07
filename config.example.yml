@@ -86,7 +86,8 @@ providers:
 # mail_from_email: "otari@example.com"
 # mail_from_name: "Otari"
 
-# Passkeys default to the host of public_base_url. Set these only for a parent
+# Passkeys are on by default; set passkeys_enabled: false (OTARI_PASSKEYS_ENABLED)
+# to switch them off. They default to the host of public_base_url. Set these only for a parent
 # relying-party domain or multiple permitted dashboard origins.
 # webauthn_rp_id: "example.com"
 # webauthn_allowed_origins:

@@ -7,8 +7,8 @@
  * control that picks one; that version owns the choice and what it does with
  * it, so the pages here hold no state for a topology they do not have.
  *
- * Rendered by the four pages that post an address somewhere: sign-in, signup,
- * password recovery and resending a verification link. The pages that spend a
+ * Rendered by the pages that post an address somewhere: signup, password
+ * recovery and resending a verification link. The pages that spend a
  * token from a link do not render it, because the link already names where
  * it came from. `page` says which one is asking and `isBusy` whether a request
  * of that page's own is in flight, so a contributed control can hold still

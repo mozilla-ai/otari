@@ -60,8 +60,7 @@ describe("useTheme", () => {
   })
 
   it("treats a stored 'system' as nothing stored, and keeps following the system", () => {
-    // An earlier version wrote it for a visitor who had picked "System". Such a
-    // browser was following the OS, so it keeps doing so until its first click.
+    // Anything that is not light or dark follows the OS until the first click.
     window.localStorage.setItem(STORAGE_KEY, "system")
     mockPrefersDark(true)
     render(

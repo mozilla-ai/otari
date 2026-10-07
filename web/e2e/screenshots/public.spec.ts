@@ -25,7 +25,7 @@ test("sign-in screen offering a passkey and OAuth", async ({ page }) => {
   await withPasskeyAndOauth(page)
   await page.goto("/")
   await expect(
-    page.getByRole("button", { name: "Use a passkey" }),
+    page.getByRole("button", { name: "Sign in with a passkey" }),
   ).toBeVisible()
   await captureScreenshot(page, "sign-in-alternatives")
 })
@@ -131,6 +131,34 @@ test("signup", async ({ page }) => {
     page.getByRole("heading", { name: "Claim your account" }),
   ).toBeVisible()
   await captureScreenshot(page, "signup")
+})
+
+test("signup offering OAuth, address form folded and open", async ({
+  page,
+}) => {
+  // Open signup with providers is the one signup state this fixture cannot
+  // reach: it has no OAuth client and does not allow signup. Stubbed on the one
+  // response the shell reads before it mounts.
+  await page.route("**/v1/bootstrap", async (route) => {
+    const response = await route.fetch()
+    const bootstrap = await response.json()
+    await route.fulfill({
+      response,
+      json: {
+        ...bootstrap,
+        mail_ready: true,
+        open_signup: true,
+        oauth_providers: ["google", "github"],
+      },
+    })
+  })
+  await page.goto("/#/signup")
+  const reveal = page.getByRole("button", { name: /with email/i })
+  await expect(reveal).toBeVisible()
+  await captureScreenshot(page, "signup-oauth")
+  await reveal.click()
+  await expect(page.getByLabel("Email")).toBeVisible()
+  await captureScreenshot(page, "signup-oauth-form-open")
 })
 
 test("signup on a gateway that cannot send mail", async ({ page }) => {

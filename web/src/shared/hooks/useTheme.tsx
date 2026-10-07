@@ -36,10 +36,8 @@ function isPreference(value: string | null): value is ThemePreference {
 /**
  * The choice this browser remembers, or `null` when it has made none.
  *
- * `null` also answers a stored `"system"`, which an earlier version wrote and
- * this one no longer offers: a browser holding it was following the operating
- * system, and treating it as nothing stored keeps it doing exactly that until
- * the first click, with no write and no migration.
+ * `null` also answers any stored value that is not `"light"` or `"dark"`, so
+ * the browser keeps following the operating system until the first click.
  */
 function readStored(): ThemePreference | null {
   if (typeof window === "undefined") return null

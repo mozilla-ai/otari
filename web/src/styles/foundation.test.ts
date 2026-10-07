@@ -395,10 +395,8 @@ describe("the type scale's two halves", () => {
 })
 
 describe("the keyboard focus ring on a text field", () => {
-  // A guard rather than a check: a cascade is not something jsdom computes, so
-  // this can only pin where the rule lives. The behavior was measured in a real
-  // browser (Tab into the input, read `outline-style`): `none` without the rule,
-  // `solid` 2px in `--color-focus` with it, and `none` again after a mouse click.
+  // A guard rather than a check: jsdom does not compute the cascade, so this
+  // only pins where the rule lives.
   it("is drawn from the utilities layer, because HeroUI's `.input` is outline-none in the components layer", () => {
     const rule = CSS.match(
       /@layer utilities\s*\{\s*\.input\[data-focus-visible="true"\],\s*\.textarea\[data-focus-visible="true"\]\s*\{([^}]*)\}/,

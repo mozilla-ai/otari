@@ -1438,26 +1438,11 @@ main {
   }
 }
 
-/* The text field's ring, which the base rule above cannot give it.
-   HeroUI's `.input` is `outline-none` in the components layer and paints
-   nothing in its own `:focus-visible` rule (the block is empty), so under the
-   base ring it computed `outline-style: none` and `box-shadow: none` and a
-   keyboard user tabbing through a form saw no focus at all, on every input in
-   the product. `@layer base` loses to the components layer by design, which is
-   right for a component that draws its own indicator and wrong for one that
-   claims to and does not.
-
-   `@layer utilities` is above the components layer, and it is where
-   `outline-none` at a call site lives, so the deliberate suppression the base
-   rule documents still has a place to go. The ring is the same ink and offset
-   as every other control's.
-
-   Keyed on react-aria's `data-focus-visible` and not on `:focus-visible`: the
-   browser matches `:focus-visible` on a text field for a mouse click as well,
-   because a person is about to type, so the pseudo-class would ring every field
-   that is clicked into. react-aria tracks the modality instead and sets the
-   attribute for keyboard focus only, which is the moment this fixes, and a
-   click keeps what it shows today, the field's own border and fill. */
+/* Text-field focus ring. HeroUI's `.input` is `outline-none` in the components
+   layer, which beats `@layer base`, so the utilities layer draws the ring.
+   Keyed on react-aria's `data-focus-visible` and not `:focus-visible`: the
+   browser matches the pseudo-class on a mouse click into a text field too, and
+   a click should not ring the field. */
 @layer utilities {
   .input[data-focus-visible="true"],
   .textarea[data-focus-visible="true"] {
