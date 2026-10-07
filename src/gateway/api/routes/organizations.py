@@ -30,15 +30,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     CurrentIdentity,
-    MembershipListenerDep,
-    UnitOfWorkDep,
-    WorkspaceListenerDep,
+    OrganizationDomainServiceDep,
+    OrganizationManagementServiceDep,
     get_config,
-    get_db,
     verify_master_key,
 )
 from gateway.core.config import GatewayConfig
@@ -66,7 +63,6 @@ from gateway.models.tenancy import (
     PendingOrganizationInvitationsPublic,
     SwitchActiveOrganizationRequest,
 )
-from gateway.services.tenancy import OrganizationDomainService, OrganizationService
 
 # Auth is declared on the router, not left to arrive through `CurrentIdentity`:
 # every handler here happens to take one today, and a future handler that did
@@ -86,32 +82,9 @@ class Message(BaseModel):
     message: str = Field(description="What happened.")
 
 
-def get_organization_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    uow: UnitOfWorkDep,
-    membership_listener: MembershipListenerDep,
-    workspace_listener: WorkspaceListenerDep,
-) -> OrganizationService:
-    """Build the organization service on the request's session."""
-    return OrganizationService(
-        db, membership_listener=membership_listener, uow=uow, workspace_listener=workspace_listener
-    )
-
-
-OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
-
-
-def get_organization_domain_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganizationDomainService:
-    """Build the email-domain service on the request's session."""
-    return OrganizationDomainService(db)
-
-
-OrganizationDomainServiceDep = Annotated[OrganizationDomainService, Depends(get_organization_domain_service)]
-
-
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_organization(
-    service: OrganizationServiceDep,
+    service: OrganizationManagementServiceDep,
     current_identity: CurrentIdentity,
     body: OrganizationCreateRequest,
 ) -> OrganizationPublic:
@@ -131,7 +104,7 @@ async def create_organization(
 
 @router.get("/me")
 async def get_active_organization_context(
-    service: OrganizationServiceDep,
+    service: OrganizationManagementServiceDep,
     current_identity: CurrentIdentity,
 ) -> OrganizationMembershipContextPublic:
     """Get the caller's active organization and their standing in it."""
@@ -140,7 +113,7 @@ async def get_active_organization_context(
 
 @router.patch("/me")
 async def update_active_organization(
-    service: OrganizationServiceDep,
+    service: OrganizationManagementServiceDep,
     current_identity: CurrentIdentity,
     body: ActiveOrganizationUpdateRequest,
 ) -> OrganizationMembershipContextPublic:
@@ -153,7 +126,7 @@ async def update_active_organization(
 
 @router.get("/me/memberships")
 async def list_caller_organization_memberships(
-    service: OrganizationServiceDep,
+    service: OrganizationManagementServiceDep,
     current_identity: CurrentIdentity,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
@@ -175,7 +148,7 @@ async def list_caller_organization_memberships(
 
 @router.post("/me/switch")
 async def switch_active_organization(
-    service: OrganizationServiceDep,
+    service: OrganizationManagementServiceDep,
     current_identity: CurrentIdentity,
     body: SwitchActiveOrganizationRequest,
 ) -> OrganizationMembershipContextPublic:
@@ -195,7 +168,7 @@ async def switch_active_organization(
 
 @router.get("/me/members")
 async def list_active_organization_members(
-    service: OrganizationServiceDep,
+    service: OrganizationManagementServiceDep,
     current_identity: CurrentIdentity,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
@@ -223,7 +196,7 @@ async def list_active_organization_members(
 
 @router.post("/me/members", status_code=status.HTTP_201_CREATED)
 async def create_active_organization_member(
-    service: OrganizationServiceDep,
+    service: OrganizationManagementServiceDep,
     current_identity: CurrentIdentity,
     body: ActiveOrganizationMemberCreateRequest,
 ) -> ActiveOrganizationMemberCreateResultPublic:
@@ -241,7 +214,7 @@ async def create_active_organization_member(
 
 @router.patch("/me/members/{organization_member_id}")
 async def update_active_organization_member(
-    service: OrganizationServiceDep,
+    service: OrganizationManagementServiceDep,
     current_identity: CurrentIdentity,
     organization_member_id: uuid.UUID,
     body: ActiveOrganizationMemberUpdateRequest,
@@ -256,7 +229,7 @@ async def update_active_organization_member(
 
 @router.delete("/me/members/{organization_member_id}")
 async def remove_active_organization_member(
-    service: OrganizationServiceDep,
+    service: OrganizationManagementServiceDep,
     current_identity: CurrentIdentity,
     organization_member_id: uuid.UUID,
 ) -> Message:
@@ -270,7 +243,7 @@ async def remove_active_organization_member(
 
 @router.get("/me/pending-memberships")
 async def list_caller_pending_memberships(
-    service: OrganizationServiceDep,
+    service: OrganizationManagementServiceDep,
     current_identity: CurrentIdentity,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
@@ -297,7 +270,7 @@ async def list_caller_pending_memberships(
 
 @router.post("/me/pending-memberships/{organization_member_id}/accept")
 async def accept_caller_pending_membership(
-    service: OrganizationServiceDep,
+    service: OrganizationManagementServiceDep,
     current_identity: CurrentIdentity,
     organization_member_id: uuid.UUID,
 ) -> AcceptInvitationResultPublic:
@@ -327,7 +300,7 @@ async def accept_caller_pending_membership(
 
 @router.post("/me/pending-memberships/{organization_member_id}/decline")
 async def decline_caller_pending_membership(
-    service: OrganizationServiceDep,
+    service: OrganizationManagementServiceDep,
     current_identity: CurrentIdentity,
     organization_member_id: uuid.UUID,
 ) -> Message:
@@ -347,7 +320,7 @@ async def decline_caller_pending_membership(
 
 @router.post("/me/member-invitations", status_code=status.HTTP_201_CREATED)
 async def invite_active_organization_member(
-    service: OrganizationServiceDep,
+    service: OrganizationManagementServiceDep,
     current_identity: CurrentIdentity,
     config: Annotated[GatewayConfig, Depends(get_config)],
     body: InviteOrganizationMemberRequest,
@@ -370,7 +343,7 @@ async def invite_active_organization_member(
 
 @router.post("/me/member-invitations/bulk")
 async def bulk_invite_active_organization_members(
-    service: OrganizationServiceDep,
+    service: OrganizationManagementServiceDep,
     current_identity: CurrentIdentity,
     config: Annotated[GatewayConfig, Depends(get_config)],
     body: BulkInviteOrganizationMembersRequest,
@@ -393,7 +366,7 @@ async def bulk_invite_active_organization_members(
 
 @router.delete("/me/member-invitations/{invitation_id}")
 async def revoke_active_organization_member_invitation(
-    service: OrganizationServiceDep,
+    service: OrganizationManagementServiceDep,
     current_identity: CurrentIdentity,
     invitation_id: uuid.UUID,
 ) -> Message:
