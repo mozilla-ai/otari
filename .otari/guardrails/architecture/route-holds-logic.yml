@@ -17,3 +17,4 @@ gates:
       business rule decides what the product allows or does. A check on the shape of the
       request itself is not a business rule. This is the routes row in DOMAINS.md,
       "The target shape". Pass if the diff adds none of these.
+    accept_warnings: [judge-gate-cap]

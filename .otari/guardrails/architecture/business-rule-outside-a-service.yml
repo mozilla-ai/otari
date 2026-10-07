@@ -23,3 +23,4 @@ gates:
       status of an error class are not business rules. This is the "Must not" column in
       DOMAINS.md, "The target shape". Pass if the diff adds no business rule in
       these layers.
+    accept_warnings: [judge-gate-cap]

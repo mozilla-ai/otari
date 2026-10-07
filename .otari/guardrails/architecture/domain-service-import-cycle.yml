@@ -17,3 +17,4 @@ gates:
       through a third package. An interface that one domain defines and another
       implements is not a cycle. This is layer and import rule 6 in ARCHITECTURE.md,
       "The modular monolith". Pass if the diff adds no such import.
+    accept_warnings: [judge-gate-cap]
