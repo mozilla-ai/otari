@@ -101,6 +101,7 @@ from gateway.services.secret_box import (
 )
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
 # Same value as provider_store_service.PROVIDER_CACHE_TTL_SECONDS, defined
@@ -404,7 +405,9 @@ class OrgProviderKeyService:
         self.overrides = WorkspaceProviderKeyOverrideRepository(db)
         self.restrictions = WorkspaceProviderModelRestrictionRepository(db)
         self.workspaces = WorkspaceRepository(db)
-        self.organizations = OrganizationService(db, membership_listener=None, workspace_listener=None)
+        self.organizations = OrganizationService(
+            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        )
 
     # ------------------------------------------------------------------
     # Organization-scoped keys

@@ -53,6 +53,7 @@ from gateway.services.provider_kwargs import provider_key
 from gateway.services.tenancy.authorization import VisibleWorkspaceScope, resolve_visible_workspace_scope
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, has_credential, key_is_usable
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.workspace_scope import lookup_default_workspace_id, organization_for_workspace_id
 
 
@@ -338,7 +339,7 @@ async def resolve_session_catalog_scope(
     services = (
         organizations
         if organizations is not None
-        else OrganizationService(db, membership_listener=None, workspace_listener=None)
+        else OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
     )
     allowlist = {f"{instance}:*" for instance in config.providers}
     try:

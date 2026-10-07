@@ -32,6 +32,7 @@ from gateway.repositories.tools import WorkspaceCodeExecutionPolicyRepository
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAMES, SERVED_TOOL_NAMES
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.tools import (
     WorkspaceCodeExecutionPolicies,
     WorkspaceCodeExecutionPolicyService,
@@ -78,7 +79,9 @@ def _service(
     return WorkspaceCodeExecutionPolicyService(
         uow,
         WorkspaceCodeExecutionPolicyRepository(uow),
-        WorkspaceAccess(db, OrganizationService(db, membership_listener=None, workspace_listener=None)),
+        WorkspaceAccess(
+            db, OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+        ),
         sandbox_configured=sandbox_configured,
         allowed_images=allowed_images,
     )

@@ -67,7 +67,6 @@ from gateway.api.deps import (
     ToolPorts,
     extract_credential_token,
     get_budget_service,
-    get_workspace_code_execution_policies,
     verify_api_key_or_master_key,
 )
 from gateway.api.routes._attempts import AdmitAttempt, CandidateCannotServe, PrepareKwargs, walk_attempts
@@ -1859,6 +1858,7 @@ async def resolve_request_context(
     estimate_max_output_tokens: int | None,
     master_key_user_required_detail: str,
     user_forbidden_detail: str,
+    code_execution_policies: CodeExecutionPolicyPort,
     estimate_cache_write_ttl: Literal["5m", "1h"] | None = None,
     session_principal: SessionPrincipal | None = None,
     routing_signal: Callable[[], RoutingSignal] | None = None,
@@ -2306,7 +2306,9 @@ async def resolve_request_context(
         # already reserved, so a read that fails releases it before propagating.
         if workspace_id is not None and config.sandbox_configured() and declares_code_execution(tools):
             try:
-                code_execution_policy = await get_workspace_code_execution_policies(db).resolve(workspace_id)
+                code_execution_policy = await code_execution_policies.resolve(
+                    CodeExecutionPolicyScope(workspace_id=workspace_id, user_token=None)
+                )
             except Exception:
                 await refund_reservation(db, reservation)
                 raise

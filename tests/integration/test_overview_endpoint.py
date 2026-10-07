@@ -34,6 +34,7 @@ from gateway.repositories.tenancy import (
 from gateway.services.overview.overview_service import OverviewService, judge
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.tenancy.workspace_service import WorkspaceService
 
 from .tenancy_helpers import membership_writes
@@ -305,7 +306,7 @@ async def _workspace_in(db: AsyncSession, organization_id: uuid.UUID, *, name: s
 def _service(db: AsyncSession) -> OverviewService:
     return OverviewService(
         OverviewRepository(db),
-        OrganizationService(db, membership_listener=None, workspace_listener=None),
+        OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
         DeploymentUserService(db),
         WorkspaceService(db, **membership_writes(db)),
     )

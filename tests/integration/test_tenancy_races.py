@@ -94,6 +94,7 @@ from gateway.services.tenancy.workspace_activation_service import (
     ACTIVATION_KEY_NAME,
     WorkspaceActivationService,
 )
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 from .tenancy_helpers import MembershipWrites, budget_service, create_budget, create_member, membership_writes
 
@@ -604,7 +605,9 @@ async def test_a_join_during_a_workspace_delete_leaves_no_orphaned_ceiling(
 
 def _budget_service(db: AsyncSession, organizations: OrganizationService | None = None) -> BudgetService:
     uow = UnitOfWork(db)
-    organizations = organizations or OrganizationService(db, membership_listener=None, workspace_listener=None)
+    organizations = organizations or OrganizationService(
+        db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+    )
     return BudgetService(
         uow,
         BudgetRepositories.on(uow),
@@ -757,7 +760,7 @@ async def test_a_deployment_ceiling_created_during_a_workspace_delete_leaves_no_
         return await create_scoped_budget(
             CreateScopedBudgetRequest(scope_type=scope_type, scope_id=scope_id, budget_id=budget_id),
             session,
-            OrganizationService(session, membership_listener=None, workspace_listener=None),
+            OrganizationService(session, membership_listener=None, workspace_listener=NullWorkspaceListener()),
         )
 
     race = await _race_a_workspace_delete(
@@ -800,7 +803,9 @@ async def test_a_workspace_delete_sweeps_a_ceiling_that_won_the_lock(
         async with sessions() as session:
             actor = await UserRepository(session).get(owner.id)
             assert actor is not None
-            organizations = OrganizationService(session, membership_listener=None, workspace_listener=None)
+            organizations = OrganizationService(
+                session, membership_listener=None, workspace_listener=NullWorkspaceListener()
+            )
             creator = _budget_service(session, organizations)
             take_lock = organizations.lock_workspace
 

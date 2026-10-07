@@ -234,7 +234,7 @@ class OrganizationService:
         *,
         membership_listener: MembershipListener | None,
         uow: UnitOfWork | None = None,
-        workspace_listener: WorkspaceListener | None,
+        workspace_listener: WorkspaceListener,
     ):
         """Build the service on a session.
 
@@ -255,8 +255,7 @@ class OrganizationService:
 
     async def _start_new_workspace(self, workspace_id: uuid.UUID) -> None:
         """Stage what a workspace this service just created starts with, inside the open transaction."""
-        if self._workspace_listener is not None:
-            await self._workspace_listener.workspace_created(workspace_id)
+        await self._workspace_listener.workspace_created(workspace_id)
 
     # ------------------------------------------------------------------
     # Context resolution and authorization

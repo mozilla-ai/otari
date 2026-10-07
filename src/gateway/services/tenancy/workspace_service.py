@@ -49,7 +49,7 @@ from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRep
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.tenancy.workspace_listener import WorkspaceListener
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener, WorkspaceListener
 
 
 class WorkspaceService:
@@ -68,7 +68,9 @@ class WorkspaceService:
         self._uow = uow
         self.workspaces = WorkspaceRepository(db)
         self.members = WorkspaceMemberRepository(db)
-        self.organizations = OrganizationService(db, membership_listener=None, workspace_listener=None)
+        self.organizations = OrganizationService(
+            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        )
         self._workspace_listener = workspace_listener
         self._membership_listener = membership_listener
 

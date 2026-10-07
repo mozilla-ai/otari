@@ -61,6 +61,7 @@ from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 # What the guide calls the key it mints, as the Keys page shows it. One name for
 # every deployment, so an operator who finds it there can tell where it came
@@ -224,7 +225,9 @@ class WorkspaceActivationService:
         self.db = db
         self.config = config
         self.key_format = key_format
-        self.organizations = OrganizationService(db, membership_listener=None, workspace_listener=None)
+        self.organizations = OrganizationService(
+            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        )
 
     # ------------------------------------------------------------------
     # Reads

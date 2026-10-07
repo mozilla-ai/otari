@@ -26,6 +26,7 @@ from gateway.models.tenancy import (
     ValidateInvitationRequest,
 )
 from gateway.services.tenancy import OrganizationService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 router = APIRouter(prefix="/invitations", tags=["invitations"])
 
@@ -42,7 +43,9 @@ def get_organization_service(
     public, one is master-key gated), and importing the dependency alone
     across that boundary is not worth it for one function.
     """
-    return OrganizationService(db, membership_listener=membership_listener, uow=uow, workspace_listener=None)
+    return OrganizationService(
+        db, membership_listener=membership_listener, uow=uow, workspace_listener=NullWorkspaceListener()
+    )
 
 
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]

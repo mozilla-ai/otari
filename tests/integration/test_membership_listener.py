@@ -212,7 +212,7 @@ async def test_workspace_assignment_announces_new_and_revived_members_only(async
     listener = RecordingListener()
 
     await OrganizationService(
-        async_db, uow=UnitOfWork(async_db), membership_listener=listener, workspace_listener=None
+        async_db, uow=UnitOfWork(async_db), membership_listener=listener, workspace_listener=NullWorkspaceListener()
     ).create_active_organization_member_for_user(
         user=owner,
         request=ActiveOrganizationMemberCreateRequest(
@@ -238,7 +238,7 @@ async def test_an_organization_service_without_a_listener_refuses_membership_cha
 
     with pytest.raises(RuntimeError):
         await OrganizationService(
-            async_db, membership_listener=None, workspace_listener=None
+            async_db, membership_listener=None, workspace_listener=NullWorkspaceListener()
         ).create_active_organization_member_for_user(
             user=owner,
             request=ActiveOrganizationMemberCreateRequest(

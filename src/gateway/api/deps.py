@@ -849,7 +849,9 @@ def get_workspace_code_execution_policy_service(
     return WorkspaceCodeExecutionPolicyService(
         uow,
         WorkspaceCodeExecutionPolicyRepository(uow),
-        WorkspaceAccess(db, OrganizationService(db, membership_listener=None, workspace_listener=None)),
+        WorkspaceAccess(
+            db, OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+        ),
         sandbox_configured=config.sandbox_configured(),
         allowed_images=config.pinnable_sandbox_images(),
     )
@@ -1084,7 +1086,7 @@ def get_overview_service(
     """
     return OverviewService(
         OverviewRepository(db),
-        OrganizationService(db, membership_listener=None, workspace_listener=None),
+        OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
         DeploymentUserService(db),
         # The listener is for writes; this service only reads, and the same
         # pairing is what `routes/workspaces.py` builds.
@@ -1100,7 +1102,7 @@ def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Or
 
     It reads only. A membership write needs the listener this pairing leaves unset.
     """
-    return OrganizationService(db, membership_listener=None, workspace_listener=None)
+    return OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
 
 
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
@@ -1111,7 +1113,7 @@ def get_budget_service(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> BudgetService:
     """Build the request's budget service on the request's Unit of Work."""
-    organizations = OrganizationService(db, membership_listener=None, workspace_listener=None)
+    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
     return BudgetService(
         uow,
         BudgetRepositories.on(uow),
@@ -1146,7 +1148,7 @@ def get_organization_guardrail_definition_service(
     """
     return OrganizationGuardrailDefinitionService(
         definitions=OrganizationGuardrailDefinitionRepository(uow),
-        organizations=OrganizationService(db, membership_listener=None, workspace_listener=None),
+        organizations=OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
         uow=uow,
         build_state=organization_guardrail_runner.build_state,
         rebuild=organization_guardrail_runner.rebuild_definition,
@@ -1184,7 +1186,7 @@ def get_org_provider_model_service(
     return OrgProviderModelService(
         uow,
         config=config,
-        organizations=OrganizationService(db, membership_listener=None, workspace_listener=None),
+        organizations=OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
         provider_keys=OrgProviderKeyService(db),
         org_pricing=OrganizationPricingService(db, config, model_provider=model_provider),
         models=OrgProviderKeyModelRepository(uow),
@@ -1229,7 +1231,7 @@ def get_web_search_key_service(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WebSearchKeyService:
     """Build the organization web search key service on the request's Unit of Work."""
-    organizations = OrganizationService(db, membership_listener=None, workspace_listener=None)
+    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
     return WebSearchKeyService(
         uow,
         keys=OrgWebSearchKeyRepository(uow),
@@ -1387,7 +1389,7 @@ async def _caller_organization_id(
     """
     return (
         await OrganizationService(
-            db, membership_listener=None, workspace_listener=None
+            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
         ).get_active_organization_for_user(identity)
     ).id
 

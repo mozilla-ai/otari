@@ -91,6 +91,7 @@ from gateway.services.secret_box import (
     encrypt_secret,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 
 # What one organization may mandate. Every guardrail in scope for a workspace is
@@ -578,7 +579,9 @@ class OrganizationGuardrailService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.organizations = OrganizationService(db, membership_listener=None, workspace_listener=None)
+        self.organizations = OrganizationService(
+            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        )
 
     async def _manageable_organization_id(self, user: User) -> uuid.UUID:
         """The caller's organization, having checked they may manage its guardrails.

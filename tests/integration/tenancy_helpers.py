@@ -50,7 +50,7 @@ def membership_writes(db: AsyncSession) -> MembershipWrites:
 def budget_service(db: AsyncSession) -> BudgetService:
     """Build the budget service over ``db``, as ``get_budget_service`` does."""
     uow = UnitOfWork(db)
-    organizations = OrganizationService(db, membership_listener=None, workspace_listener=None)
+    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
     return BudgetService(
         uow,
         BudgetRepositories.on(uow),
