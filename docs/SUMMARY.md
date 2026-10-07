@@ -14,6 +14,7 @@
 * [Admin dashboard](dashboard.md)
 * [Access control](access-control.md)
 * [Models](models.md)
+* [Provider endpoints](provider-endpoints.md)
 * [Routing policies](routing.md)
 * [OpenAI provider guide](providers/openai.md)
 
@@ -23,7 +24,9 @@
 * [Built-in tools](tools.md)
 * [MCP](mcp.md)
 * [Files](files.md)
-* [Guardrails](guardrails.md)
+* [Inference Guardrails](guardrails.md)
+* [Agent Guardrails](agent-guardrails.md)
+* [Agent Guardrails reference](agent-guardrails-reference.md)
 * [Use with Claude Code](use-with-claude-code.md)
 * [Use with Codex](use-with-codex.md)
 * [Use with opencode](use-with-opencode.md)
