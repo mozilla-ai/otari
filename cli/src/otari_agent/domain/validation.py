@@ -249,13 +249,9 @@ def validate_policy(
     Left unset, verifier gates are not checked at all,
     which is what keeps this module free of the filesystem access such a check needs.
 
-    ``judge_gate_limit`` and ``verifier_gate_limit`` are the caller's own
-    per-Stop caps on the two gate types that run something
-    (``otari hook``'s ``_HOOK_JUDGE_MAX_GATES_PER_RUN`` and
-    ``_HOOK_CHECK_MAX_GATES_PER_RUN``), passed in rather than duplicated here
-    so the number an author is warned about is the number that will actually
-    be enforced. Both are needed: warning about one cap and not the other
-    would read as though the other has none.
+    ``judge_gate_limit`` and ``verifier_gate_limit`` are the per-Stop caps on the two gate types that run something.
+    They are passed in so the number an author is warned about is the number that will actually be enforced.
+    Both are needed: warning about one cap and not the other would read as though the other has none.
 
     Findings come back in declaration order, so a reader walks them beside the
     file rather than jumping around it.

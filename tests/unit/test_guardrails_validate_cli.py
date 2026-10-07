@@ -294,10 +294,10 @@ def _judge_gates(count: int) -> str:
 
 def test_the_dry_run_applies_the_same_judge_cap_the_hook_applies(repo: Path) -> None:
     """A preview promising six model calls where the hook makes five is wrong about its own point."""
-    _write(repo, _HEADER + _judge_gates(hook_cli._HOOK_JUDGE_MAX_GATES_PER_RUN + 1))
+    _write(repo, _HEADER + _judge_gates(hook_cli._HOOK_JUDGE_DEFAULT_MAX_GATES + 1))
     result = _invoke("--path", "README.md")
-    assert result.output.count("would run") == hook_cli._HOOK_JUDGE_MAX_GATES_PER_RUN
-    assert f"judge-{hook_cli._HOOK_JUDGE_MAX_GATES_PER_RUN} (judge, past the " in result.output
+    assert result.output.count("would run") == hook_cli._HOOK_JUDGE_DEFAULT_MAX_GATES
+    assert f"judge-{hook_cli._HOOK_JUDGE_DEFAULT_MAX_GATES} (judge, past the " in result.output
     assert "-gate cap for one Stop event)" in result.output
 
 
@@ -307,11 +307,21 @@ def test_the_dry_run_cap_counts_only_applicable_gates(repo: Path) -> None:
         "  - id: judge-scoped\n    type: judge\n    runs: [stop.session]\n"
         '    enforcement: advisory\n    when_changed: ["nothing/here/**"]\n    rubric: r\n    message: m\n'
     )
-    _write(repo, _HEADER + scoped_out + _judge_gates(hook_cli._HOOK_JUDGE_MAX_GATES_PER_RUN))
+    _write(repo, _HEADER + scoped_out + _judge_gates(hook_cli._HOOK_JUDGE_DEFAULT_MAX_GATES))
     result = _invoke("--path", "README.md")
     assert "skipped    judge-scoped (judge, when_changed does not match)" in result.output
-    assert result.output.count("would run") == hook_cli._HOOK_JUDGE_MAX_GATES_PER_RUN
+    assert result.output.count("would run") == hook_cli._HOOK_JUDGE_DEFAULT_MAX_GATES
     assert "past the" not in result.output
+
+
+def test_the_judge_cap_follows_max_judges(repo: Path) -> None:
+    """The preview and the cap warning assume the cap the hook is configured with, not the default."""
+    _write(repo, _HEADER + _judge_gates(8))
+    result = _invoke("--max-judges", "7", "--path", "README.md")
+    assert result.output.count("would run") == 7
+    assert "judge-7 (judge, past the 7-gate cap for one Stop event)" in result.output
+    assert "8 judge gates, over the 7 one Stop event evaluates" in result.output
+    assert "these are skipped: judge-7." in result.output
 
 
 def test_a_separator_in_a_require_phrase_is_reported_as_an_error(repo: Path) -> None:
@@ -631,3 +641,10 @@ def test_repo_only_and_guardrail_file_cannot_be_combined(repo: Path) -> None:
     result = _invoke("--repo-only", "--guardrail-file", str(repo / hook_cli.GUARDRAIL_FILE))
     assert result.exit_code == 2
     assert "--repo-only and --guardrail-file cannot be combined" in result.output
+
+
+@pytest.mark.parametrize("value", ["0", str(hook_cli._HOOK_JUDGE_MAX_GATES_CEILING + 1), "many"])
+def test_a_judge_gate_cap_outside_its_range_is_a_usage_error(repo: Path, value: str) -> None:
+    result = _invoke("--max-judges", value)
+    assert result.exit_code == 2
+    assert "--max-judges" in result.output

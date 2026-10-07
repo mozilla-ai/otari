@@ -388,9 +388,9 @@ Every gate sees the paths the change touches as `stop.working_tree` evidence. A 
 | `command` | Cannot run. It needs the command a tool call is about to run. |
 | `command_if_changed` | Cannot run. It needs the commands a session ran. |
 
-A `required` gate that fails, errors or gets no result exits 1. A gate the change gives nothing to run against is reported as unable to run, and never changes the exit status. A `judge` gate is advisory, so its finding never changes the exit status either. The hook's caps apply here too: at most five judge gates and twenty verifier gates run.
+A `required` gate that fails, errors or gets no result exits 1. A gate the change gives nothing to run against is reported as unable to run, and never changes the exit status. A `judge` gate is advisory, so its finding never changes the exit status either. The hook's caps apply here too: at most five judge gates (or `--max-judges`) and twenty verifier gates run.
 
-`--type` runs only the gate types it names, and is repeatable. Without it, the report also lists the `command` and `command_if_changed` gates that cannot run. Naming `verifier` together with `--head` is a usage error. `--judge-model` and `--judge-cli` choose the judge's model and CLI, as they do for `otari hook`, and read the same environment variables. `--guardrails-from <directory>` reads the guardrail files and the verifier scripts from another checkout instead of the one being checked. A check reads the repository's own guardrail only, and leaves your files in `~/.otari/` out, so it reads the same on every machine.
+`--type` runs only the gate types it names, and is repeatable. Without it, the report also lists the `command` and `command_if_changed` gates that cannot run. Naming `verifier` together with `--head` is a usage error. `--judge-model`, `--judge-cli` and `--max-judges` choose the judge's model, its CLI and how many judge gates run, as they do for `otari hook`, and read the same environment variables. `--guardrails-from <directory>` reads the guardrail files and the verifier scripts from another checkout instead of the one being checked. A check reads the repository's own guardrail only, and leaves your files in `~/.otari/` out, so it reads the same on every machine.
 
 A verifier that finds what changed through `git status`, as `no-stranded-docblocks.py` does, sees only the uncommitted part of a change. The path and verifier job below stages the whole pull request against its merge base for that reason.
 
@@ -462,17 +462,25 @@ pass, fail and error, and may be `required`. It carries the same trust as a
 Makefile target or a pre-commit hook. Keep it read-only: applicable verifiers run
 concurrently against one working tree.
 
-Keep `judge` gates few and scoped. Each costs one model call per applicable
-`Stop` event, at most five run per event, and all of them are advisory. Give a
-gate that must run a `priority`, and scope it with `when_changed` so a session
-that touched nothing relevant does not pay for it. Setting
-`OTARI_HOOK_JUDGE_DRY_RUN` in the harness's environment reports which calls would
-have been made, and their approximate size, without making them.
+Keep `judge` gates scoped. Each costs one model call per applicable `Stop`
+event, and all of them are advisory. Five run per event by default.
+`OTARI_HOOK_MAX_JUDGES` raises that cap to as many as twenty, which suits
+many judges that each decide one small thing. Raising it does not raise the
+time a run may take: eight judges run at a time, every judge in one event shares one 480-second
+budget, and a judge that cannot start before that budget runs out reports
+`error`. A high cap therefore suits fast judges. Give a gate that must run a
+`priority`, and scope it with `when_changed` so a session that touched nothing
+relevant does not pay for it. Setting `OTARI_HOOK_JUDGE_DRY_RUN` in the
+harness's environment reports which calls would have been made, and their
+approximate size, without making them.
 
 Run `otari guardrails validate --strict` in CI. A gate that has stopped matching
 reports the same as a gate that passed. A guardrail with more judge gates than
-one Stop event evaluates always carries the judge cap warning. `validate` has no
-way to accept a warning, so such a guardrail runs `validate` without `--strict`.
+one Stop event evaluates always carries the judge cap warning. `validate` reads
+the same `--max-judges` and `OTARI_HOOK_MAX_JUDGES` the hook does, so
+give it the value the hook runs with. A guardrail with more judge gates than
+even that value runs `validate` without `--strict`, because `validate` has no
+way to accept a warning.
 
 Run `otari guardrails check` on every pull request, with the gates and verifiers taken from the base commit, so a change made without the hook still meets them. See [Checking a pull request in CI](#checking-a-pull-request-in-ci).
 

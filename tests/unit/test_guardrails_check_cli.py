@@ -283,6 +283,24 @@ def test_the_judge_options_reach_the_judge_call(repo: Path, monkeypatch: pytest.
     assert [(call["judge_cli"], call["model"]) for call in seen] == [(("codex",), "m")]
 
 
+def test_max_judges_caps_the_judge_calls(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    judges = "".join(_JUDGE_GATE.replace("no-narrative-comments", f"judge-{index}") for index in range(3))
+    _write_guardrail(repo, judges)
+    head = _commit(repo)
+    seen: list[str] = []
+
+    def fake_run_judge(rubric: str, diff: str, transcript: str, **kwargs: object) -> tuple[str, str]:
+        seen.append(rubric)
+        return "pass", "fine"
+
+    monkeypatch.setattr(hook_cli, "_hook_run_judge", fake_run_judge)
+
+    result = _invoke("--base", f"{head}~1", "--head", head, "--type", "judge", "--max-judges", "2")
+
+    assert result.exit_code == 0, result.output
+    assert len(seen) == 2
+
+
 def test_asking_for_verifiers_against_a_commit_is_a_usage_error(repo: Path) -> None:
     head = _git(repo, "rev-parse", "HEAD")
 
@@ -365,3 +383,10 @@ def test_git_failing_to_run_is_reported_as_such(repo: Path, monkeypatch: pytest.
     assert result.exit_code != 0
     assert "`git rev-parse` could not run" in result.output
     assert "names no commit" not in result.output
+
+
+@pytest.mark.parametrize("value", ["0", str(hook_cli._HOOK_JUDGE_MAX_GATES_CEILING + 1), "many"])
+def test_a_judge_gate_cap_outside_its_range_is_a_usage_error(repo: Path, value: str) -> None:
+    result = _invoke("--max-judges", value)
+    assert result.exit_code == 2
+    assert "--max-judges" in result.output
