@@ -119,6 +119,10 @@ ocr = [
 s3 = [
     "boto3>=1.42.0",
 ]
+# AWS KMS as the key-encryption key for captured trace content (trace_content_key_backend: aws_kms).
+kms = [
+    "boto3>=1.42.0",
+]
 # The generic files backend (`FsspecFileStore`): one URL reaches whichever
 # filesystem the operator has an fsspec implementation installed for. fsspec
 # is already in the tree through any-llm-sdk[all], but as with s3 the extra is

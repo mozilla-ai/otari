@@ -1304,6 +1304,9 @@ e2b = [
 fsspec = [
     { name = "fsspec" },
 ]
+kms = [
+    { name = "boto3" },
+]
 metrics = [
     { name = "prometheus-client" },
 ]
@@ -1356,6 +1359,7 @@ requires-dist = [
     { name = "apron-auth", specifier = ">=0.15.1,<0.16.0" },
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "bcrypt", specifier = ">=5.0.0" },
+    { name = "boto3", marker = "extra == 'kms'", specifier = ">=1.42.0" },
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.42.0" },
     { name = "click", specifier = ">=8.1.0" },
     { name = "cryptography", specifier = ">=50.0.0" },
@@ -1389,7 +1393,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.53.0" },
     { name = "webauthn", specifier = ">=2.5.0" },
 ]
-provides-extras = ["ocr", "s3", "fsspec", "e2b", "redis", "metrics"]
+provides-extras = ["ocr", "s3", "kms", "fsspec", "e2b", "redis", "metrics"]
 
 [package.metadata.requires-dev]
 dev = [

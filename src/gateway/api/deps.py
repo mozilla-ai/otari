@@ -25,6 +25,7 @@ from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdi
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
 from gateway.ports.code_execution_port import CodeExecutionPort
+from gateway.ports.data_key_port import DataKeyPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
@@ -1086,6 +1087,11 @@ def get_trace_tables(uow: UnitOfWork) -> TracesRepositories:
     domain's repositories are built here and nowhere outside the domain.
     """
     return TracesRepositories.on(uow)
+
+
+def get_data_key_port(container: ContainerDep) -> DataKeyPort:
+    """Resolve the data-key adapter this build bound at startup. It needs no session."""
+    return container.resolve(DataKeyPort, None)
 
 
 def get_trace_storage_port(container: ContainerDep) -> TraceStoragePort:

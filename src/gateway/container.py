@@ -34,6 +34,7 @@ from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.code_execution_adapter import build_code_execution_port, verify_code_execution_ready
 from gateway.adapters.code_execution_policy_adapter import LocalCodeExecutionPolicy, RemoteCodeExecutionPolicy
+from gateway.adapters.data_key_adapter import build_data_key_port
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.file_storage_adapter import build_file_storage_port
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
@@ -54,6 +55,7 @@ from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
 from gateway.ports.code_execution_port import CodeExecutionPort
+from gateway.ports.data_key_port import DataKeyPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.file_storage_port import FileStoragePort
 from gateway.ports.growth_signal_port import GrowthSignalPort
@@ -374,6 +376,28 @@ def _code_execution_adapter_factory(config: GatewayConfig | None) -> PortFactory
     return factory
 
 
+def _data_key_port_factory(config: GatewayConfig | None) -> PortFactory[DataKeyPort]:
+    """The core ``DataKeyPort`` factory, closed over this app's config.
+
+    Which key wraps trace content is a deployment setting (``trace_content_key_backend``),
+    so the adapter is built on first resolve and reused. A process that never captures
+    content never resolves it, so needs neither a secret key nor the ``kms`` extra.
+    """
+    keys: DataKeyPort | None = None
+
+    def factory(session: AsyncSession | None) -> DataKeyPort:
+        del session
+        nonlocal keys
+        if config is None:
+            msg = "DataKeyPort needs the deployment config; build the container with it"
+            raise ContainerError(msg)
+        if keys is None:
+            keys = build_data_key_port(config.trace_content_key_backend, config.trace_content_kms_key_id)
+        return keys
+
+    return factory
+
+
 def _file_storage_port_factory(config: GatewayConfig | None) -> PortFactory[FileStoragePort]:
     """The core ``FileStoragePort`` factory, closed over this app's config.
 
@@ -619,6 +643,10 @@ def build_container(
     # bucket or any fsspec filesystem, whichever ``files_backend`` names. An
     # overlay binds a store of its own and changes nothing above the port.
     container.bind(FileStoragePort, _file_storage_port_factory(config))
+    # The key that encrypts captured trace content: OTARI_SECRET_KEY, or an AWS KMS
+    # key where ``trace_content_key_backend`` names one. Both adapters are core,
+    # because a data-plane gateway seals content and runs no overlay.
+    container.bind(DataKeyPort, _data_key_port_factory(config))
     # A provider's own files: the base reaches them through any-llm with the
     # credential a request dispatches with. An overlay that must not hand a
     # managed credential to this process binds a transfer of its own.

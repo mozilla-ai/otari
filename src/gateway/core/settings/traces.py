@@ -1,8 +1,8 @@
 """Settings for agent traces: whether the gateway records them, how long they are kept, and the writer's limits."""
 
-from typing import Annotated
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
 
@@ -44,3 +44,26 @@ class TraceSettings(BaseModel):
     trace_max_spans_per_request: Annotated[int, OMITTED] = Field(
         default=256, gt=0, description="Spans one request may record; past it the rest are counted, not kept."
     )
+    trace_content_key_backend: Annotated[Literal["secret_box", "aws_kms"], Shown(SettingsGroup.METERING)] = Field(
+        default="secret_box",
+        description=(
+            "Where the key that encrypts captured trace content lives: OTARI_SECRET_KEY (secret_box), or an AWS "
+            "KMS key (aws_kms, which needs the kms extra and trace_content_kms_key_id). Requires restart."
+        ),
+    )
+    trace_content_kms_key_id: Annotated[str | None, Shown(SettingsGroup.METERING)] = Field(
+        default=None,
+        description="The AWS KMS key id or ARN the aws_kms key backend generates and decrypts data keys with.",
+    )
+
+    @model_validator(mode="after")
+    def _kms_backend_names_its_key(self) -> Self:
+        if self.trace_content_key_backend == "aws_kms" and not self.trace_content_kms_key_id:
+            msg = "trace_content_key_backend 'aws_kms' requires trace_content_kms_key_id"
+            raise ValueError(msg)
+        # Decrypt is pinned to the key, so it is named by its id or ARN: an alias an operator
+        # later repoints would leave every stored session key unable to unwrap.
+        if self.trace_content_kms_key_id and ":alias/" in f":{self.trace_content_kms_key_id}":
+            msg = "trace_content_kms_key_id must name the key by id or ARN, not by alias"
+            raise ValueError(msg)
+        return self

@@ -235,7 +235,7 @@ It also owns the route helper `api/routes/_billing_schemas.py`.
 Agent traces: one agent session, its turns, and the spans inside them (each
 request, LLM round, routing attempt, guardrail check, MCP connection and tool
 call), as the gateway observed them or an instrumented agent sent them. It owns
-`ports/trace_storage_port.py` and its adapters.
+`ports/trace_storage_port.py`, `ports/data_key_port.py` and their adapters.
 
 A trace is a projection, written best-effort after accounting, and never a
 billing source: usage-and-telemetry keeps the usage rows and their cost.
