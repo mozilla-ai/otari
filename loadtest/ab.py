@@ -138,8 +138,10 @@ def compare_latency(runs: list[dict], args: argparse.Namespace) -> list[dict]:
             # is the machine. A bootstrap cannot tell a disturbed run from a slow
             # build when the disturbance lands on one build's runs more than the other's.
             run_p50s = {v: [float(np.percentile(r["samples"], 50)) for r in by_variant[v]] for v in VARIANTS}
-            spread = {v: max(p) / min(p) - 1 if min(p) > 0 else None for v, p in run_p50s.items()}
-            noisy = any(s is None or s > args.max_run_spread for s in spread.values())
+            # Relative to the smaller p50, floored at the smallest effect reported, so
+            # a p50 at or near zero does not divide by it.
+            spread = {v: (max(p) - min(p)) / max(abs(min(p)), args.min_effect_ms, 1e-9) for v, p in run_p50s.items()}
+            noisy = any(s > args.max_run_spread for s in spread.values())
             cell: dict[str, Any] = {
                 "scenario": scenario,
                 "mode": mode,
