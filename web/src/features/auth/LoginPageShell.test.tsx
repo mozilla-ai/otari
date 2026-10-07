@@ -6,6 +6,7 @@ import type { DeploymentBootstrap } from "@/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { STORAGE_KEY, ThemeProvider } from "@/shared/hooks/useTheme"
 import { bootstrap } from "@/tests/fixtures"
+import { authShellPage } from "./authShellSlot"
 import { LoginPageShell } from "./LoginPageShell"
 
 function renderShell(
@@ -107,5 +108,31 @@ describe("the header's logo", () => {
     renderShell(undefined, { site_url: null, public_catalog: false })
     expect(screen.queryByRole("link")).not.toBeInTheDocument()
     expect(screen.getByText("Otari")).toBeInTheDocument()
+  })
+})
+
+describe("the header slot an edition fills", () => {
+  it("is empty in this build and leaves the theme control alone", () => {
+    renderShell()
+    const header = screen.getByRole("banner")
+    expect(header.querySelectorAll("button")).toHaveLength(1)
+  })
+})
+
+describe("authShellPage", () => {
+  it.each([
+    ["", "login"],
+    ["#/", "login"],
+    ["#/signup", "signup"],
+    ["#/signup?email=ada%40example.com", "signup"],
+    ["#/recover-password", "recover-password"],
+    ["#/resend-verification", "resend-verification"],
+    // A page that spends a token from a link names where it came from.
+    ["#/verify-email?token=t", null],
+    ["#/reset-password?token=t", null],
+    ["#/check-email?type=signup", null],
+    ["#/auth/google/callback?code=c", null],
+  ])("reads %j as %j", (hash, page) => {
+    expect(authShellPage(hash)).toBe(page)
   })
 })

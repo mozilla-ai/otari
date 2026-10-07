@@ -9,6 +9,7 @@ export function PublicAuthLayout({
   description,
   children,
   footer,
+  isBusy = false,
 }: {
   title: string
   /** Optional subhead under the title. */
@@ -16,9 +17,11 @@ export function PublicAuthLayout({
   children: ReactNode
   /** Links below the divider: where to go next when this page is a dead end. */
   footer?: ReactNode
+  /** Whether a request of the page's own is in flight, for the header slot. */
+  isBusy?: boolean
 }) {
   return (
-    <LoginPageShell>
+    <LoginPageShell isBusy={isBusy}>
       <div className="flex flex-col gap-1.5 text-center">
         <h1 className="text-display">{title}</h1>
         {description ? (

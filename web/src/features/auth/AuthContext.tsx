@@ -30,7 +30,13 @@ interface AuthContextValue {
   // (see #557).
   isSigningOut: boolean
   login: () => void
-  logout: () => void
+  /**
+   * Ends the session, resolving once the server has been told. The page is
+   * signed out at once whatever the answer, so most callers ignore the promise;
+   * one that is about to send its next request somewhere else waits for it, or
+   * the revocation could follow it there.
+   */
+  logout: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -73,7 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // one.
   const hasSessionRef = useRef(isAuthenticated)
 
-  const logout = useCallback(() => {
+  const logout = useCallback((): Promise<void> => {
     // Recorded before anything is torn down, and from here rather than from the
     // account menu, because this is also the path a 401 takes: a session that
     // expired or was revoked ends the same funnel a deliberate sign-out does.
@@ -102,7 +108,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // be minted while any revocation might still land and clear its cookie.
     pendingSignOutsRef.current += 1
     setSigningOut(true)
-    void deleteSession().finally(() => {
+    // `deleteSession` swallows its own failure, so this never rejects.
+    return deleteSession().finally(() => {
       pendingSignOutsRef.current -= 1
       if (pendingSignOutsRef.current === 0) {
         setSigningOut(false)

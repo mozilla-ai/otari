@@ -131,6 +131,50 @@ describe("AuthProvider", () => {
     })
   })
 
+  it("resolves logout's promise only once the server has been told", async () => {
+    // A caller about to send its next request somewhere else (a switch to
+    // another region) waits for this, or the revocation would follow it there.
+    let resolveDelete!: () => void
+    vi.spyOn(globalThis, "fetch").mockReturnValue(
+      new Promise<Response>((resolve) => {
+        resolveDelete = () => resolve(new Response(null, { status: 204 }))
+      }),
+    )
+    let logoutResult: Promise<void> | undefined
+    function Capture() {
+      const { logout } = useAuth()
+      return (
+        <button
+          type="button"
+          onClick={() => {
+            logoutResult = logout()
+          }}
+        >
+          capture
+        </button>
+      )
+    }
+    const user = userEvent.setup()
+    render(
+      <AppProviders>
+        <Capture />
+      </AppProviders>,
+    )
+
+    await user.click(screen.getByRole("button", { name: "capture" }))
+    let settled = false
+    void logoutResult?.then(() => {
+      settled = true
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(settled).toBe(false)
+
+    resolveDelete()
+    await waitFor(() => expect(settled).toBe(true))
+  })
+
   it("keeps isSigningOut true until every concurrent logout's revocation settles", async () => {
     // A manual sign-out and a stray 401-triggered auto-logout can both call
     // logout() close together. If the flag cleared on whichever deleteSession

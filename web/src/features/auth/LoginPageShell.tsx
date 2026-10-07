@@ -1,9 +1,11 @@
 import { type ReactNode, useRef } from "react"
 import { FiMoon, FiSun } from "react-icons/fi"
 import { IconButton } from "@/design-system/actions/IconButton"
+import { AuthShellSlot } from "@/features/auth/overlayAuthShellSlot"
 import { siteHomeHref } from "@/features/models/publicCatalog"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { useTheme } from "@/shared/hooks/useTheme"
+import { authShellPage } from "./authShellSlot"
 import { LoginBackground } from "./background/LoginBackground"
 import savedBackground from "./background/login-background.json"
 
@@ -35,7 +37,14 @@ function BrandMark() {
   )
 }
 
-export function LoginPageShell({ children }: { children: ReactNode }) {
+export function LoginPageShell({
+  children,
+  isBusy = false,
+}: {
+  children: ReactNode
+  /** Whether a request of the page's own is in flight, for the header slot. */
+  isBusy?: boolean
+}) {
   const panelRef = useRef<HTMLDivElement>(null)
   const { resolved, toggle } = useTheme()
   const isDark = resolved === "dark"
@@ -47,14 +56,20 @@ export function LoginPageShell({ children }: { children: ReactNode }) {
         <BrandMark />
         {/* No `md:` step down: the header is `min-h-14`, so a 44px target fits
             inside it at every width without moving the row. */}
-        <IconButton
-          variant="ghost"
-          isIconOnly
-          label={isDark ? "Switch to light theme" : "Switch to dark theme"}
-          onPress={toggle}
-        >
-          <ThemeIcon aria-hidden />
-        </IconButton>
+        <div className="flex items-center gap-1">
+          <AuthShellSlot
+            page={authShellPage(window.location.hash)}
+            isBusy={isBusy}
+          />
+          <IconButton
+            variant="ghost"
+            isIconOnly
+            label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+            onPress={toggle}
+          >
+            <ThemeIcon aria-hidden />
+          </IconButton>
+        </div>
       </header>
       {/* Pinned to the top rather than centered: the card changes height when a
             folded form opens or an error appears, and a centered card would

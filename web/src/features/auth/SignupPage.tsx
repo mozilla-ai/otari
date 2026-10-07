@@ -209,6 +209,7 @@ export function SignupPage({ hash }: { hash: string }) {
 
   return (
     <PublicAuthLayout
+      isBusy={isBusy}
       title={open_signup ? "Create your account" : "Claim your account"}
       description={
         open_signup

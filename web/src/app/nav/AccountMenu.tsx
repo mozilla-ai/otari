@@ -20,6 +20,7 @@ import {
   AccountBadge,
   useAccountBadgeLabel,
 } from "@/app/nav/overlayAccountBadge"
+import { AccountMenuRows } from "@/app/nav/overlayAccountMenuRows"
 import { PLAYGROUND_NAV_ITEM } from "@/app/nav/registry"
 import { useSurfaceVisibility } from "@/app/nav/useNavVisibility"
 import type { OrganizationContext } from "@/client"
@@ -378,6 +379,10 @@ export function AccountMenu({
             to="/account"
             onNavigate={() => setOpen(false)}
           />
+          {/* Whatever an edition adds under the account itself, before the
+              appearance row: it belongs with who is signed in, not with how
+              the page looks. */}
+          <AccountMenuRows closeMenu={() => setOpen(false)} />
           <AppearanceControl />
           {/* The deployment's own pages, which used to sit in the organization
               rail's General section. They are the deployment talking about
@@ -510,7 +515,11 @@ export function AccountMenu({
           {/* Neutral, not danger-colored. Ending a session is reversible by
               signing in again, so red here spends the color that marks the
               deletes on the pages behind this menu. */}
-          <MenuItem label="Log out" icon={FiLogOut} onPress={logout} />
+          <MenuItem
+            label="Log out"
+            icon={FiLogOut}
+            onPress={() => void logout()}
+          />
         </Popover.Dialog>
       </Popover.Content>
     </Popover>

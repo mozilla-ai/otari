@@ -628,7 +628,14 @@ export function Login() {
   }
 
   return (
-    <LoginPageShell>
+    <LoginPageShell
+      isBusy={
+        isSubmitting ||
+        isSigningOut ||
+        isPasskeyPending ||
+        pendingProvider !== undefined
+      }
+    >
       <div className={CARD}>
         <div className="flex flex-col gap-1.5 text-center">
           <h1 className={HEADING}>Sign in to Otari</h1>
