@@ -1,12 +1,14 @@
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { FiChevronRight } from "react-icons/fi"
 
+import { Button } from "@/design-system/actions/Button"
 import { IconButton } from "@/design-system/actions/IconButton"
 import { formatCost, formatNumber } from "@/shared/helpers/format"
 
 import { formatDuration } from "./format"
 import { LevelChip } from "./LevelChip"
 import { TypeMark } from "./observationTypes"
+import { matchesSearch } from "./search"
 import { buildTree, flattenTreeOrder } from "./tree"
 import { summarizeTrace, type Trace } from "./types"
 
@@ -40,12 +42,19 @@ export function TraceTreeView({
   trace,
   selectedId,
   onSelect,
+  collapsed,
+  onToggle,
+  query,
+  onClearQuery,
 }: {
   trace: Trace
   selectedId: string | null
   onSelect: (observationId: string | null) => void
+  collapsed: ReadonlySet<string>
+  onToggle: (observationId: string) => void
+  query: string
+  onClearQuery: () => void
 }) {
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const roots = useMemo(() => buildTree(trace.observations), [trace])
   const items = useMemo(
     () => flattenTreeOrder(roots, collapsed),
@@ -53,12 +62,64 @@ export function TraceTreeView({
   )
   const summary = summarizeTrace(trace)
 
-  const toggle = (id: string) =>
-    setCollapsed((current) => {
-      const next = new Set(current)
-      if (!next.delete(id)) next.add(id)
-      return next
-    })
+  const toggle = onToggle
+
+  // As in Langfuse, a query turns the tree into a flat list of the matches.
+  if (query.trim()) {
+    const matches = [...trace.observations]
+      .sort((a, b) => a.startMs - b.startMs)
+      .filter((obs) => matchesSearch(obs, query))
+    if (matches.length === 0) {
+      return (
+        <div className="flex flex-col items-center gap-2 p-6 text-center">
+          <p className="text-body text-muted">No results found</p>
+          <p className="text-caption text-subtle">
+            Try searching by type, title, or id
+          </p>
+          <Button size="sm" onPress={onClearQuery}>
+            Clear search
+          </Button>
+        </div>
+      )
+    }
+    return (
+      <div
+        role="listbox"
+        aria-label="Search results"
+        className="flex flex-col py-1"
+      >
+        {matches.map((obs) => {
+          const selected = selectedId === obs.id
+          return (
+            <button
+              key={obs.id}
+              type="button"
+              role="option"
+              aria-selected={selected}
+              aria-label={`${obs.type.charAt(0)}${obs.type.slice(1).toLowerCase()}, ${obs.name}, ${formatDuration(obs.endMs - obs.startMs)}`}
+              onClick={() => onSelect(obs.id)}
+              className={`flex min-h-11 w-full items-center gap-1 px-3 text-left outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground ${selected ? "bg-primary-subtle" : "hover:bg-surface-alt"}`}
+            >
+              <span className="grid size-6 shrink-0 place-items-center">
+                <TypeMark type={obs.type} />
+              </span>
+              <span className="flex min-w-0 flex-1 flex-col py-0.5 pl-1">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="truncate text-body">{obs.name}</span>
+                  <LevelChip level={obs.level} />
+                </span>
+                <Metrics
+                  durationMs={obs.endMs - obs.startMs}
+                  cost={(obs.inputCost ?? 0) + (obs.outputCost ?? 0)}
+                  tokens={(obs.promptTokens ?? 0) + (obs.completionTokens ?? 0)}
+                />
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
 
   return (
     <div role="tree" aria-label="Observations" className="flex flex-col py-1">
@@ -66,7 +127,7 @@ export function TraceTreeView({
         role="treeitem"
         aria-selected={selectedId === null}
         aria-level={1}
-        className={`flex min-h-11 items-center pl-3 ${selectedId === null ? "bg-surface-subtle" : "hover:bg-surface-alt"}`}
+        className={`flex min-h-11 items-center pl-3 ${selectedId === null ? "bg-primary-subtle" : "hover:bg-surface-alt"}`}
       >
         <span className="grid size-6 shrink-0 place-items-center">
           <TypeMark type="TRACE" />
@@ -100,7 +161,7 @@ export function TraceTreeView({
             aria-level={node.depth + 2}
             aria-selected={selected}
             aria-expanded={hasChildren ? isOpen : undefined}
-            className={`flex min-h-11 items-stretch pl-3 ${selected ? "bg-surface-subtle" : "hover:bg-surface-alt"}`}
+            className={`flex min-h-11 items-stretch pl-3 ${selected ? "bg-primary-subtle" : "hover:bg-surface-alt"}`}
           >
             {treeLines.map((continues, level) => (
               <span

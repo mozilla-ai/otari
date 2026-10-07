@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   FiChevronDown,
   FiChevronUp,
@@ -23,6 +23,7 @@ import {
 import { type Format, IOBlock } from "./IOBlock"
 import { LogView } from "./LogView"
 import { TypeMark } from "./observationTypes"
+import { NavHeader, type NavView } from "./NavHeader"
 import { TraceTimelineView } from "./TraceTimelineView"
 import { TraceTreeView } from "./TraceTreeView"
 import { type Observation, summarizeTrace, type Trace } from "./types"
@@ -35,11 +36,6 @@ const ALL_TABS: { id: PeekTab; label: string }[] = [
   { id: "preview", label: "Preview" },
   { id: "attributes", label: "Attributes" },
   { id: "log", label: "Log View" },
-]
-
-const NAV_OPTIONS = [
-  { value: "tree", label: "Tree" },
-  { value: "timeline", label: "Timeline" },
 ]
 
 const FORMAT_OPTIONS = [
@@ -252,7 +248,12 @@ export function TracePeek({
     "entering",
   )
   const [navFraction, setNavFraction] = useState(0.4)
-  const [navView, setNavView] = useState<"tree" | "timeline">("tree")
+  const [navView, setNavView] = useState<NavView>("tree")
+  const [navCollapsed, setNavCollapsed] = useState(false)
+  const [navQuery, setNavQuery] = useState("")
+  const [collapsedIds, setCollapsedIds] = useState<ReadonlySet<string>>(
+    new Set(),
+  )
   const bodyRef = useRef<HTMLDivElement>(null)
   const summary = summarizeTrace(trace)
   const [selection, setSelection] = useState<{
@@ -269,6 +270,24 @@ export function TracePeek({
   const tabs = observation
     ? ALL_TABS
     : ALL_TABS.filter((t) => t.id !== "attributes")
+  const parentIds = useMemo(
+    () => [
+      ...new Set(
+        trace.observations
+          .map((o) => o.parentObservationId)
+          .filter((id): id is string => id !== null),
+      ),
+    ],
+    [trace],
+  )
+  const everythingCollapsed =
+    parentIds.length > 0 && parentIds.every((id) => collapsedIds.has(id))
+  const toggleCollapsed = (id: string) =>
+    setCollapsedIds((current) => {
+      const next = new Set(current)
+      if (!next.delete(id)) next.add(id)
+      return next
+    })
   const activeTab = tabs.some((t) => t.id === tab) ? tab : "preview"
   const shown = observation
     ? {
@@ -507,25 +526,38 @@ export function TracePeek({
           <>
             <div
               style={{
-                width: `min(max(${navFraction * 100}%, 280px), calc(100% - 360px))`,
+                width: navCollapsed
+                  ? "40px"
+                  : navView === "timeline"
+                    ? "max(280px, calc(100% - 360px))"
+                    : `min(max(${navFraction * 100}%, 280px), calc(100% - 360px))`,
               }}
               className="relative flex shrink-0 flex-col border-r border-border max-md:hidden"
             >
-              <div className="shrink-0 border-b border-border p-2">
-                <Segmented
-                  size="sm"
-                  label="Navigation view"
-                  options={NAV_OPTIONS}
-                  value={navView}
-                  onChange={(next) => setNavView(next as "tree" | "timeline")}
-                />
-              </div>
-              {navView === "tree" ? (
+              <NavHeader
+                isCollapsed={navCollapsed}
+                onToggleCollapsed={() => setNavCollapsed((value) => !value)}
+                query={navQuery}
+                onQueryChange={setNavQuery}
+                everythingCollapsed={everythingCollapsed}
+                onToggleAll={() =>
+                  setCollapsedIds(
+                    everythingCollapsed ? new Set() : new Set(parentIds),
+                  )
+                }
+                view={navView}
+                onViewChange={setNavView}
+              />
+              {navCollapsed ? null : navView === "tree" ? (
                 <div className="min-h-0 flex-1 overflow-auto">
                   <TraceTreeView
                     trace={trace}
                     selectedId={observation?.id ?? null}
                     onSelect={setSelectedId}
+                    collapsed={collapsedIds}
+                    onToggle={toggleCollapsed}
+                    query={navQuery}
+                    onClearQuery={() => setNavQuery("")}
                   />
                 </div>
               ) : (
@@ -533,11 +565,13 @@ export function TracePeek({
                   trace={trace}
                   selectedId={observation?.id ?? null}
                   onSelect={setSelectedId}
+                  collapsed={collapsedIds}
+                  query={navQuery}
                 />
               )}
               <ResizeHandle
                 label="Resize navigation pane"
-                className="-right-1.5"
+                className={`-right-1.5 ${navCollapsed || navView === "timeline" ? "hidden" : ""}`}
                 onDrag={(clientX) => {
                   const box = bodyRef.current?.getBoundingClientRect()
                   if (!box) return

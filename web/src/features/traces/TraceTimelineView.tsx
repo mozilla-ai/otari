@@ -1,83 +1,61 @@
 import {
+  type ReactNode,
   useCallback,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from "react"
-import { FiMaximize, FiMinus, FiPlus, FiType } from "react-icons/fi"
+import { FiMaximize, FiMinus, FiPlus } from "react-icons/fi"
 
 import { IconButton } from "@/design-system/actions/IconButton"
 import { Tooltip } from "@/design-system/overlays/Tooltip"
-import { formatCost } from "@/shared/helpers/format"
+import { formatCost, formatLatency } from "@/shared/helpers/format"
 
-import { formatDuration } from "./format"
 import { OBSERVATION_TYPES, TypeMark } from "./observationTypes"
+import { matchesSearch } from "./search"
 import { buildTree, flattenTreeOrder } from "./tree"
-import type { Observation, Trace } from "./types"
+import type { Trace } from "./types"
 
 // Structure after Langfuse's TraceTimelineDense (MIT, Copyright (c) 2023-2026
-// ClickHouse, Inc.): a gutter of type icons, a lane of bars on a shared time
-// axis, labels beside the bars, dashed idle bands. This port is horizontal zoom
-// only; the viewport lens, marquee and row zoom are not carried over.
+// ClickHouse, Inc.): a name gutter with connectors, a lane of bars on a shared
+// time axis with gridlines, duration and cost on the bars, dashed idle bands.
+// This port is horizontal zoom only; the viewport lens, marquee and row zoom
+// are not carried over.
 
-const GUTTER_COLLAPSED = 28
-const GUTTER_EXPANDED = 160
-const BAR_HEIGHT = 18
+const RAIL_WIDTH = 28
+const GUTTER_MIN = 112
+const GUTTER_MAX = 200
+const GUTTER_FRACTION = 0.42
+const LANE_MIN = 140
+const INDENT = 14
+const CONNECTOR_OFFSET = 6
+const BAR_MAX_HEIGHT = 18
 const LABEL_GAP = 6
+const BAR_INSET = 4
 const MIN_ZOOM = 1
 const MAX_ZOOM = 32
 const ZOOM_STEP = 1.6
+const TICK_MIN_PX = 56
 const IDLE_MIN_MS = 250
 const IDLE_LABEL_MIN_PX = 56
-const MIN_CLIPPED_LABEL_PX = 72
-
-// Fira Code is monospace, so the metrics line is a constant per glyph (13px).
-const METRIC_PX = 7.8
-const NAME_METRIC_GAP = 6
-
-// Names are proportional: measured once each, in the label's computed font.
-const nameWidths = new Map<string, number>()
-let nameContext: CanvasRenderingContext2D | null = null
-function measureName(text: string): number {
-  const cached = nameWidths.get(text)
-  if (cached !== undefined) return cached
-  if (!nameContext) {
-    const probe = document.createElement("span")
-    probe.className = "text-caption"
-    probe.style.cssText = "position:absolute;visibility:hidden"
-    document.body.append(probe)
-    const style = getComputedStyle(probe)
-    nameContext = document.createElement("canvas").getContext("2d")
-    if (nameContext) {
-      nameContext.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
-    }
-    probe.remove()
-  }
-  const width = nameContext?.measureText(text).width ?? text.length * 7
-  nameWidths.set(text, width)
-  return width
-}
+// Fira Code is monospace: 0.6em, so 11px text is 6.6px a glyph.
+const MICRO_GLYPH_PX = 6.6
+const LABEL_ITEM_GAP = 8
 
 function niceStep(totalMs: number, lanePx: number): number {
-  const targetCount = Math.max(2, Math.floor(lanePx / 90))
+  const targetCount = Math.max(1, Math.floor(lanePx / TICK_MIN_PX))
   const raw = totalMs / targetCount
   const pow = 10 ** Math.floor(Math.log10(raw))
   for (const m of [1, 2, 5, 10]) if (m * pow >= raw) return m * pow
   return 10 * pow
 }
 
-function tickLabel(ms: number): string {
-  if (ms === 0) return "0s"
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  if (ms < 60_000) return `${+(ms / 1000).toFixed(1)}s`
-  const s = Math.round(ms / 1000)
-  return `${Math.floor(s / 60)}m${s % 60 ? ` ${s % 60}s` : ""}`
-}
-
 // Stretches of the trace where no leaf observation is running.
-function idleGaps(observations: Observation[], totalMs: number) {
+function idleGaps(
+  observations: Trace["observations"],
+  totalMs: number,
+): { start: number; end: number }[] {
   const parents = new Set(observations.map((o) => o.parentObservationId))
   const leaves = observations
     .filter((o) => !parents.has(o.id) && o.endMs > o.startMs)
@@ -95,7 +73,7 @@ function idleGaps(observations: Observation[], totalMs: number) {
   return gaps
 }
 
-function ToolbarButton({
+function ZoomButton({
   label,
   isDisabled,
   onPress,
@@ -112,7 +90,7 @@ function ToolbarButton({
         label={label}
         size="sm"
         isDisabled={isDisabled}
-        className="md:min-h-7 md:min-w-7"
+        className="md:min-h-5 md:min-w-5"
         onPress={onPress}
       >
         {children}
@@ -125,15 +103,18 @@ export function TraceTimelineView({
   trace,
   selectedId,
   onSelect,
+  collapsed,
+  query,
 }: {
   trace: Trace
   selectedId: string | null
   onSelect: (observationId: string | null) => void
+  collapsed: ReadonlySet<string>
+  query: string
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [viewWidth, setViewWidth] = useState(0)
   const [zoom, setZoom] = useState(1)
-  const [showLabels, setShowLabels] = useState(false)
   const centerRatio = useRef<number | null>(null)
 
   const measure = useCallback((element: HTMLDivElement | null) => {
@@ -146,13 +127,23 @@ export function TraceTimelineView({
   }, [])
 
   const items = useMemo(
-    () => flattenTreeOrder(buildTree(trace.observations)),
-    [trace],
+    () => flattenTreeOrder(buildTree(trace.observations), collapsed),
+    [trace, collapsed],
   )
   const totalMs = Math.max(1, ...trace.observations.map((o) => o.endMs))
-  const gutter = showLabels ? GUTTER_EXPANDED : GUTTER_COLLAPSED
-  const baseLane = Math.max(viewWidth - gutter, 120)
+
+  // The gutter is 42% of the pane between 112 and 200px, and gives way to the
+  // icon rail when the lane would drop under 140px.
+  const content = Math.max(viewWidth - 2, 0)
+  const wanted = Math.min(
+    Math.max(content * GUTTER_FRACTION, GUTTER_MIN),
+    GUTTER_MAX,
+  )
+  const hasNames = content - wanted >= LANE_MIN
+  const gutter = hasNames ? Math.round(wanted) : RAIL_WIDTH
+  const baseLane = Math.max(viewWidth - gutter, 60)
   const lanePx = baseLane * zoom
+
   const gaps = useMemo(
     () => idleGaps(trace.observations, totalMs),
     [trace, totalMs],
@@ -160,7 +151,6 @@ export function TraceTimelineView({
   const step = niceStep(totalMs, lanePx)
   const ticks: number[] = []
   for (let t = 0; t <= totalMs; t += step) ticks.push(t)
-
   const x = (ms: number) => (ms / totalMs) * lanePx
 
   const zoomBy = (factor: number) => {
@@ -184,31 +174,26 @@ export function TraceTimelineView({
   }, [lanePx, gutter])
 
   const fitted = zoom === MIN_ZOOM
+  const hasQuery = query.trim().length > 0
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
-        <ToolbarButton
+      <div className="otari-toolbar flex h-11 shrink-0 items-center gap-1 border-b border-border px-1 md:h-[22px]">
+        <ZoomButton
           label="Zoom out"
           isDisabled={fitted}
           onPress={() => zoomBy(1 / ZOOM_STEP)}
         >
-          <FiMinus aria-hidden="true" className="size-4" />
-        </ToolbarButton>
-        <ToolbarButton
+          <FiMinus aria-hidden="true" className="size-3" />
+        </ZoomButton>
+        <ZoomButton
           label="Zoom in"
           isDisabled={zoom >= MAX_ZOOM}
           onPress={() => zoomBy(ZOOM_STEP)}
         >
-          <FiPlus aria-hidden="true" className="size-4" />
-        </ToolbarButton>
-        <ToolbarButton
-          label="Show labels"
-          onPress={() => setShowLabels((v) => !v)}
-        >
-          <FiType aria-hidden="true" className="size-4" />
-        </ToolbarButton>
-        <ToolbarButton
+          <FiPlus aria-hidden="true" className="size-3" />
+        </ZoomButton>
+        <ZoomButton
           label={fitted ? "Whole trace already fits" : "Fit whole trace"}
           isDisabled={fitted}
           onPress={() => {
@@ -216,14 +201,14 @@ export function TraceTimelineView({
             if (scrollRef.current) scrollRef.current.scrollLeft = 0
           }}
         >
-          <FiMaximize aria-hidden="true" className="size-4" />
-        </ToolbarButton>
+          <FiMaximize aria-hidden="true" className="size-3" />
+        </ZoomButton>
       </div>
 
       <div ref={measure} className="min-h-0 flex-1 overflow-auto">
         <div style={{ width: gutter + lanePx }} className="relative min-h-full">
           {/* Axis */}
-          <div className="sticky top-0 z-20 flex h-6 border-b border-border bg-surface">
+          <div className="sticky top-0 z-20 flex h-[18px] border-b border-border bg-surface">
             <div
               style={{ width: gutter }}
               className="sticky left-0 z-10 shrink-0 bg-surface"
@@ -233,9 +218,11 @@ export function TraceTimelineView({
                 <span
                   key={t}
                   style={{ left: x(t) }}
-                  className="absolute top-0 h-full border-l border-border pl-1 text-mono-micro leading-6 text-muted"
+                  className="absolute inset-y-0 border-l border-border-strong"
                 >
-                  {tickLabel(t)}
+                  <span className="absolute left-1 text-mono-micro leading-[18px] whitespace-nowrap text-subtle">
+                    {formatLatency(t)}
+                  </span>
                 </span>
               ))}
               {gaps.map((gap) =>
@@ -248,19 +235,26 @@ export function TraceTimelineView({
                     }}
                     className="absolute bottom-0 truncate text-center text-mono-micro text-subtle"
                   >
-                    {formatDuration(gap.end - gap.start)} idle
+                    {formatLatency(gap.end - gap.start)} idle
                   </span>
                 ) : null,
               )}
             </div>
           </div>
 
-          {/* Idle bands, behind the rows */}
+          {/* Gridlines and idle bands, behind the rows */}
           <div
             aria-hidden="true"
             style={{ left: gutter, width: lanePx }}
-            className="pointer-events-none absolute top-6 bottom-0"
+            className="pointer-events-none absolute top-[18px] bottom-0"
           >
+            {ticks.map((t) => (
+              <span
+                key={t}
+                style={{ left: x(t) }}
+                className="pointer-events-none absolute inset-y-0 border-l border-border"
+              />
+            ))}
             {gaps.map((gap) => (
               <span
                 key={gap.start}
@@ -273,8 +267,8 @@ export function TraceTimelineView({
             ))}
           </div>
 
-          <div role="listbox" aria-label="Timeline">
-            {items.map(({ node }) => {
+          <div role="listbox" aria-label="Timeline" className="relative">
+            {items.map(({ node, treeLines, isLast }) => {
               const { obs } = node
               const selected = selectedId === obs.id
               const vocab = OBSERVATION_TYPES[obs.type]
@@ -283,30 +277,25 @@ export function TraceTimelineView({
               const isPoint = vocab.barClass === null
               const width = isPoint ? 0 : Math.max(2, x(duration))
               const cost = (obs.inputCost ?? 0) + (obs.outputCost ?? 0)
-              const metric = [
-                formatDuration(duration),
-                cost ? formatCost(cost) : null,
-              ]
-                .filter(Boolean)
-                .join(" ")
+              const durationText = formatLatency(duration) ?? ""
+              const costText = cost ? formatCost(cost) : ""
               const labelPx =
-                measureName(obs.name) +
-                NAME_METRIC_GAP +
-                metric.length * METRIC_PX
+                (durationText.length + costText.length) * MICRO_GLYPH_PX +
+                (costText ? LABEL_ITEM_GAP : 0)
               const spaceAfter = lanePx - (left + width + LABEL_GAP)
               const spaceBefore = left - LABEL_GAP
-              const side: "after" | "before" | null =
-                labelPx <= spaceAfter
-                  ? "after"
-                  : labelPx <= spaceBefore
-                    ? "before"
-                    : Math.max(spaceAfter, spaceBefore) >= MIN_CLIPPED_LABEL_PX
-                      ? spaceAfter >= spaceBefore
-                        ? "after"
-                        : "before"
+              const placement: "inside" | "after" | "before" | null = isPoint
+                ? null
+                : labelPx + LABEL_ITEM_GAP <= width
+                  ? "inside"
+                  : labelPx <= spaceAfter
+                    ? "after"
+                    : labelPx <= spaceBefore
+                      ? "before"
                       : null
-              const room = side === "after" ? spaceAfter : spaceBefore
-              const accessibleName = `${vocab.label}, ${obs.name}, ${formatDuration(duration) ?? ""}`
+              const dimmed = hasQuery && !matchesSearch(obs, query)
+              const indent = node.depth * INDENT
+              const accessibleName = `${vocab.label}, ${obs.name}, ${durationText}`
               return (
                 // biome-ignore lint/a11y/useSemanticElements: a row of a listbox holding positioned children
                 <div
@@ -322,23 +311,88 @@ export function TraceTimelineView({
                       onSelect(obs.id)
                     }
                   }}
-                  className={`group flex h-11 cursor-pointer outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground md:h-7 ${selected ? "bg-surface-subtle" : "hover:bg-surface-alt"}`}
+                  className={`group relative flex h-11 cursor-pointer outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground md:h-[26px] ${dimmed ? "opacity-30" : ""}`}
                 >
+                  {selected ? (
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-0 z-0 bg-primary-subtle"
+                    />
+                  ) : (
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-0 z-0 hidden group-hover:block group-hover:bg-surface-alt"
+                    />
+                  )}
                   <div
                     style={{ width: gutter }}
-                    className={`sticky left-0 z-10 flex shrink-0 items-center gap-1.5 overflow-hidden ${showLabels ? "pr-2" : "justify-center"} ${selected ? "bg-surface-subtle" : "bg-surface group-hover:bg-surface-alt"}`}
+                    className="sticky left-0 z-10 shrink-0 overflow-hidden bg-surface"
                   >
-                    <span
-                      style={{
-                        marginLeft: showLabels ? 8 + node.depth * 8 : 0,
-                      }}
-                      className="grid shrink-0 place-items-center"
-                    >
-                      <TypeMark type={obs.type} className="size-3" />
-                    </span>
-                    {showLabels ? (
-                      <span className="truncate text-caption">{obs.name}</span>
+                    {selected ? (
+                      <span
+                        aria-hidden="true"
+                        className="absolute inset-0 bg-primary-subtle"
+                      />
                     ) : null}
+                    {hasNames ? (
+                      <>
+                        {treeLines.map((continues, a) =>
+                          a >= 1 && continues ? (
+                            <span
+                              key={a}
+                              aria-hidden="true"
+                              style={{
+                                left: (a - 1) * INDENT + CONNECTOR_OFFSET,
+                              }}
+                              className="absolute inset-y-0 w-px bg-border-strong"
+                            />
+                          ) : null,
+                        )}
+                        {node.depth >= 1 ? (
+                          <>
+                            <span
+                              aria-hidden="true"
+                              style={{
+                                left:
+                                  (node.depth - 1) * INDENT + CONNECTOR_OFFSET,
+                                width: INDENT - CONNECTOR_OFFSET,
+                              }}
+                              className="absolute top-0 h-1/2 border-b border-l border-border-strong"
+                            />
+                            {!isLast ? (
+                              <span
+                                aria-hidden="true"
+                                style={{
+                                  left:
+                                    (node.depth - 1) * INDENT +
+                                    CONNECTOR_OFFSET,
+                                }}
+                                className="absolute top-1/2 bottom-0 w-px bg-border-strong"
+                              />
+                            ) : null}
+                          </>
+                        ) : null}
+                        <div
+                          style={{ paddingLeft: indent + 2 }}
+                          className="relative flex h-full items-center gap-1 pr-1"
+                        >
+                          <TypeMark
+                            type={obs.type}
+                            className="size-3 shrink-0"
+                          />
+                          <span
+                            title={obs.name}
+                            className="truncate text-shell-secondary text-foreground"
+                          >
+                            {obs.name}
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="grid h-full place-items-center">
+                        <TypeMark type={obs.type} className="size-3" />
+                      </div>
+                    )}
                   </div>
                   <div className="relative" style={{ width: lanePx }}>
                     {isPoint ? (
@@ -348,26 +402,30 @@ export function TraceTimelineView({
                       />
                     ) : (
                       <span
-                        style={{ left, width, height: BAR_HEIGHT }}
+                        style={{
+                          left,
+                          width,
+                          height: `min(calc(100% - 1px), ${BAR_MAX_HEIGHT}px)`,
+                        }}
                         className={`absolute top-1/2 -translate-y-1/2 ${vocab.barClass} ${selected ? "outline outline-1 outline-foreground" : ""}`}
                       />
                     )}
-                    {side ? (
+                    {placement ? (
                       <span
-                        style={{
-                          maxWidth: room,
-                          ...(side === "after"
-                            ? { left: left + width + LABEL_GAP }
-                            : { right: lanePx - left + LABEL_GAP }),
-                        }}
-                        className="absolute top-1/2 flex -translate-y-1/2 items-baseline gap-1.5 overflow-hidden whitespace-nowrap"
+                        style={
+                          placement === "inside"
+                            ? {
+                                left: left + BAR_INSET,
+                                maxWidth: width - BAR_INSET,
+                              }
+                            : placement === "after"
+                              ? { left: left + width + LABEL_GAP }
+                              : { right: lanePx - left + LABEL_GAP }
+                        }
+                        className={`absolute top-1/2 z-[1] flex -translate-y-1/2 items-center gap-2 overflow-hidden text-mono-micro whitespace-nowrap ${placement === "inside" ? "text-[var(--trace-bar-ink)]" : "text-muted"}`}
                       >
-                        <span className="truncate text-caption text-foreground">
-                          {obs.name}
-                        </span>
-                        <span className="shrink-0 text-mono-caption text-muted">
-                          {metric}
-                        </span>
+                        <span>{durationText}</span>
+                        {costText ? <span>{costText}</span> : null}
                       </span>
                     ) : null}
                   </div>

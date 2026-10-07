@@ -52,16 +52,21 @@ export function IOBlock({
               <span className="text-mono-caption text-muted">
                 {String((message as { role?: string }).role ?? "message")}
               </span>
-              {typeof (message as { content?: unknown }).content ===
-              "string" ? (
-                <p className="text-body whitespace-pre-wrap">
-                  {(message as { content: string }).content}
-                </p>
-              ) : (
-                <pre className="overflow-x-auto text-mono-caption whitespace-pre-wrap">
-                  {JSON.stringify(message, null, 2)}
-                </pre>
-              )}
+              {(() => {
+                const content = (message as { content?: unknown }).content
+                const embedded =
+                  typeof content === "string" ? tryJson(content) : undefined
+                if (typeof content === "string" && embedded === undefined) {
+                  return (
+                    <p className="text-body whitespace-pre-wrap">{content}</p>
+                  )
+                }
+                return (
+                  <pre className="overflow-x-auto text-mono-caption whitespace-pre-wrap">
+                    {JSON.stringify(embedded ?? message, null, 2)}
+                  </pre>
+                )
+              })()}
             </div>
           ))}
         </div>

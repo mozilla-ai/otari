@@ -103,6 +103,14 @@
 :root,
 .light,
 [data-theme="light"] {
+
+  /* Trace timeline bar fills (features/traces only). Pastel, with one dark ink
+     for the in-bar duration. */
+  --trace-bar-tool: #c67f4d;
+  --trace-bar-agent: #a280c8;
+  --trace-bar-generation: #c77595;
+  --trace-bar-span: #5b97d3;
+  --trace-bar-ink: #08090a;
   /* ── Surfaces — four levels, two families, staggered ──────────────────
      Four neutral levels, with the surface family sitting one rung ABOVE
      the background family rather than sharing rungs with it. Two pairs
@@ -472,6 +480,12 @@
 
 .dark,
 [data-theme="dark"] {
+
+  --trace-bar-tool: #e89960;
+  --trace-bar-agent: #c09aeb;
+  --trace-bar-generation: #ea8db1;
+  --trace-bar-span: #70b3f7;
+  --trace-bar-ink: #08090a;
   /* ── Surfaces — the light block's stagger, mirrored ─────────────────────
      The same four levels and the same one-rung offset between the two
      families, read the other way up:
