@@ -99,12 +99,44 @@ class WorkspaceSearchKeys:
         workspace = await self.workspaces.get(workspace_id)
         if workspace is None:
             return None
-        candidates = await self.overrides.candidates(
-            organization_id=workspace.organization_id, workspace_id=workspace.id
-        )
         decrypted = _Decrypted()
-        chosen = resolve_web_search_key(candidates, decrypted.usable)
+        chosen = await _choose_key(self.overrides, workspace.organization_id, workspace.id, decrypted)
         return decrypted.credential(chosen) if chosen is not None else None
+
+
+# How many of the oldest keys are read at a time when no pin or default is usable.
+_OLDEST_BATCH = 20
+
+
+async def _choose_key(
+    overrides: WorkspaceWebSearchKeyOverrideRepository,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    decrypted: _Decrypted,
+) -> OrgWebSearchKey | None:
+    """The key :func:`resolve_web_search_key` picks, reading only the rows it can reach.
+
+    The pin and the defaults are read first. Only when none of them is usable are the oldest keys
+    read, a batch at a time, so a large organization costs one small read on the common path.
+    """
+    chosen = resolve_web_search_key(
+        await overrides.preferred_candidates(organization_id=organization_id, workspace_id=workspace_id),
+        decrypted.usable,
+    )
+    skip = 0
+    while chosen is None:
+        batch = await overrides.candidate_page(
+            organization_id=organization_id,
+            workspace_id=workspace_id,
+            skip=skip,
+            limit=_OLDEST_BATCH,
+            enabled_only=True,
+        )
+        chosen = resolve_web_search_key(batch, decrypted.usable)
+        if len(batch) < _OLDEST_BATCH:
+            break
+        skip += _OLDEST_BATCH
+    return chosen
 
 
 class WebSearchKeyService:
@@ -240,12 +272,13 @@ class WebSearchKeyService:
         The effective key is chosen across every live key, not the page, so paging never changes it.
         """
         workspace = await self.workspaces.resolve_visible_workspace(user=user, workspace_id=workspace_id)
-        async with self.uow:
-            candidates = await self.overrides.candidates(
-                organization_id=workspace.organization_id, workspace_id=workspace.id
-            )
         decrypted = _Decrypted()
-        effective = resolve_web_search_key(candidates, decrypted.usable)
+        async with self.uow:
+            page = await self.overrides.candidate_page(
+                organization_id=workspace.organization_id, workspace_id=workspace.id, skip=skip, limit=limit
+            )
+            count = await self.overrides.count_candidates(organization_id=workspace.organization_id)
+            effective = await _choose_key(self.overrides, workspace.organization_id, workspace.id, decrypted)
         return WorkspaceWebSearchKeysPublic(
             data=[
                 WorkspaceWebSearchKeyPublic(
@@ -259,9 +292,9 @@ class WebSearchKeyService:
                     is_effective=effective is not None and key.id == effective.id,
                     usable=decrypted.usable(key),
                 )
-                for key, override in candidates[skip : skip + limit]
+                for key, override in page
             ],
-            count=len(candidates),
+            count=count,
         )
 
     async def set_workspace_override(

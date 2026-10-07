@@ -7,7 +7,7 @@ function over rows the repository already loaded, so it is tested without a data
 import uuid
 from collections.abc import Callable, Sequence
 
-from sqlalchemy import func, select, update
+from sqlalchemy import Select, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -225,9 +225,11 @@ class WorkspaceWebSearchKeyOverrideRepository:
             .execution_options(synchronize_session=False)
         )
 
-    async def candidates(self, *, organization_id: uuid.UUID, workspace_id: uuid.UUID) -> list[SearchKeyCandidate]:
-        """Every live key of the organization with this workspace's override, oldest-first."""
-        result = await self.db.execute(
+    def _candidates(
+        self, organization_id: uuid.UUID, workspace_id: uuid.UUID
+    ) -> Select[tuple[OrgWebSearchKey, WorkspaceWebSearchKeyOverride]]:
+        """The organization's live keys, each with this workspace's override or ``None``."""
+        return (
             select(OrgWebSearchKey, WorkspaceWebSearchKeyOverride)
             .outerjoin(
                 WorkspaceWebSearchKeyOverride,
@@ -235,6 +237,44 @@ class WorkspaceWebSearchKeyOverrideRepository:
                 & (WorkspaceWebSearchKeyOverride.workspace_id == workspace_id),
             )
             .where(OrgWebSearchKey.organization_id == organization_id, OrgWebSearchKey.archived_at.is_(None))
-            .order_by(OrgWebSearchKey.created_at, OrgWebSearchKey.id)
+        )
+
+    async def preferred_candidates(
+        self, *, organization_id: uuid.UUID, workspace_id: uuid.UUID
+    ) -> list[SearchKeyCandidate]:
+        """The workspace's pin and the organization's defaults: at most one per provider and one more."""
+        result = await self.db.execute(
+            self._candidates(organization_id, workspace_id).where(
+                WorkspaceWebSearchKeyOverride.is_default.is_(True) | OrgWebSearchKey.is_org_default.is_(True)
+            )
         )
         return [(key, override) for key, override in result.tuples()]
+
+    async def candidate_page(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        skip: int,
+        limit: int,
+        enabled_only: bool = False,
+    ) -> list[SearchKeyCandidate]:
+        """A page of the live keys, oldest-first; ``enabled_only`` leaves out those the workspace turned off."""
+        query = self._candidates(organization_id, workspace_id)
+        if enabled_only:
+            query = query.where(
+                WorkspaceWebSearchKeyOverride.disabled.is_(None) | WorkspaceWebSearchKeyOverride.disabled.is_(False)
+            )
+        result = await self.db.execute(
+            query.order_by(OrgWebSearchKey.created_at, OrgWebSearchKey.id).offset(skip).limit(limit)
+        )
+        return [(key, override) for key, override in result.tuples()]
+
+    async def count_candidates(self, *, organization_id: uuid.UUID) -> int:
+        """How many live keys the organization holds."""
+        result = await self.db.execute(
+            select(func.count())
+            .select_from(OrgWebSearchKey)
+            .where(OrgWebSearchKey.organization_id == organization_id, OrgWebSearchKey.archived_at.is_(None))
+        )
+        return int(result.scalar_one())

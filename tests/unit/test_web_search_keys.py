@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -20,7 +20,7 @@ from gateway.models.tools import (
 from gateway.repositories.tools import resolve_web_search_key
 from gateway.services import search_backend
 from gateway.services.search_backend import SearchQuery
-from gateway.services.tools import apply_web_access_policy
+from gateway.services.tools import _web_search_keys, apply_web_access_policy
 from gateway.services.web_search_providers import WebSearchProviderError
 
 _START = datetime(2026, 1, 1, tzinfo=UTC)
@@ -226,3 +226,49 @@ async def test_direct_search_on_a_workspace_key_localizes_to_the_requested_count
     )
 
     assert seen["options"] == {"max_results": 2, "country": "de"}
+
+
+class _Overrides:
+    """Serves a fixed set of keys as the repository would, recording each read."""
+
+    def __init__(self, keys: list[OrgWebSearchKey]) -> None:
+        self.keys = keys
+        self.reads: list[str] = []
+
+    async def preferred_candidates(self, **_kwargs: Any) -> list[tuple[OrgWebSearchKey, None]]:
+        self.reads.append("preferred")
+        return [(key, None) for key in self.keys if key.is_org_default]
+
+    async def candidate_page(self, *, skip: int, limit: int, **_kwargs: Any) -> list[tuple[OrgWebSearchKey, None]]:
+        self.reads.append(f"page {skip}")
+        return [(key, None) for key in self.keys[skip : skip + limit]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("usable_name", "reads"),
+    [
+        ("default", ["preferred"]),
+        ("k3", ["preferred", "page 0"]),
+        ("k45", ["preferred", "page 0", "page 20", "page 40"]),
+    ],
+)
+async def test_the_choice_reads_only_the_keys_it_reaches(
+    monkeypatch: pytest.MonkeyPatch, usable_name: str, reads: list[str]
+) -> None:
+    keys = [_key(f"k{index}", age=index) for index in range(50)]
+    keys.append(_key("default", default=True, age=60))
+
+    def credential(key: OrgWebSearchKey) -> WebSearchCredential | None:
+        return WebSearchCredential(provider=key.provider, api_key="k") if key.name == usable_name else None
+
+    monkeypatch.setattr(_web_search_keys, "search_key_credential", credential)
+    overrides = _Overrides(keys)
+
+    chosen = await _web_search_keys._choose_key(
+        cast(Any, overrides), uuid.uuid4(), uuid.uuid4(), _web_search_keys._Decrypted()
+    )
+
+    assert chosen is not None
+    assert chosen.name == usable_name
+    assert overrides.reads == reads
