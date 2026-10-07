@@ -3323,6 +3323,127 @@ def test_a_user_level_verifier_outside_the_verifiers_directory_is_refused(tmp_pa
     assert "resolves outside ~/.otari/verifiers/" in detail
 
 
+def _assert_verifier_runs(repo: Path) -> None:
+    """The hook runs the user-level script, and `guardrails validate` reports nothing."""
+    scope = hook_cli._verifier_scope(repo, hook_cli.GuardrailOrigin.USER)
+    verifier = ".otari/verifiers/check.sh"
+    assert hook_cli._hook_run_check_verifier(repo, verifier, scope=scope, deadline=time.monotonic() + 10) == (
+        "pass",
+        "",
+    )
+    assert hook_cli._guardrails_probe_verifier(repo, verifier, hook_cli.GuardrailOrigin.USER) is None
+
+
+def _assert_verifier_refused(
+    repo: Path,
+    detail: str,
+    verifier: str = ".otari/verifiers/check.sh",
+    origin: hook_cli.GuardrailOrigin = hook_cli.GuardrailOrigin.USER,
+) -> None:
+    """The hook and `guardrails validate` refuse the script with the same reason."""
+    scope = hook_cli._verifier_scope(repo, origin)
+    outcome = hook_cli._hook_run_check_verifier(repo, verifier, scope=scope, deadline=time.monotonic() + 10)
+    assert outcome == ("error", detail)
+    assert hook_cli._guardrails_probe_verifier(repo, verifier, origin) == f"{detail}, so the hook refuses to run it."
+
+
+def _link_user_verifier(home: Path, target: Path) -> None:
+    (home / ".otari/verifiers").mkdir(parents=True)
+    (home / ".otari/verifiers/check.sh").symlink_to(target)
+
+
+def test_a_user_level_verifier_linked_to_a_script_the_user_owns_runs(tmp_path: Path, isolated_home: Path) -> None:
+    _link_user_verifier(isolated_home, _write_verifier(tmp_path, "check.sh", "exit 0"))
+    _assert_verifier_runs(tmp_path)
+
+
+def test_a_user_level_verifiers_directory_that_is_a_link_runs(tmp_path: Path, isolated_home: Path) -> None:
+    dotfiles = tmp_path / "dotfiles"
+    dotfiles.mkdir()
+    _write_verifier(dotfiles, "check.sh", "exit 0")
+    (isolated_home / ".otari").mkdir()
+    (isolated_home / ".otari/verifiers").symlink_to(dotfiles)
+    _assert_verifier_runs(tmp_path)
+
+
+@pytest.mark.parametrize("mode", [0o775, 0o757], ids=["group", "others"])
+def test_a_user_level_verifier_linked_to_a_script_others_can_write_is_refused(
+    tmp_path: Path, isolated_home: Path, mode: int
+) -> None:
+    target = _write_verifier(tmp_path, "check.sh", "exit 0")
+    target.chmod(mode)
+    _link_user_verifier(isolated_home, target)
+    _assert_verifier_refused(
+        tmp_path, f"verifier '.otari/verifiers/check.sh' resolves to {target}, which is writable by group or others"
+    )
+
+
+def test_a_user_level_verifier_others_can_write_is_refused(tmp_path: Path, isolated_home: Path) -> None:
+    (isolated_home / ".otari/verifiers").mkdir(parents=True)
+    _write_verifier(isolated_home / ".otari/verifiers", "check.sh", "exit 0").chmod(0o775)
+    _assert_verifier_refused(tmp_path, "verifier '.otari/verifiers/check.sh' is writable by group or others")
+
+
+def test_a_user_level_verifier_linked_to_another_users_script_is_refused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path
+) -> None:
+    target = _write_verifier(tmp_path, "check.sh", "exit 0")
+    _link_user_verifier(isolated_home, target)
+    monkeypatch.setattr(os, "getuid", lambda: target.stat().st_uid + 1)
+    _assert_verifier_refused(
+        tmp_path, f"verifier '.otari/verifiers/check.sh' resolves to {target}, which is owned by another user"
+    )
+
+
+def test_a_user_level_verifier_linked_to_a_directory_is_refused(tmp_path: Path, isolated_home: Path) -> None:
+    _link_user_verifier(isolated_home, tmp_path)
+    _assert_verifier_refused(
+        tmp_path, f"verifier '.otari/verifiers/check.sh' resolves to {tmp_path}, which is not a regular file"
+    )
+
+
+def test_a_user_level_verifier_linked_to_a_missing_script_names_the_target(tmp_path: Path, isolated_home: Path) -> None:
+    _link_user_verifier(isolated_home, tmp_path / "moved.sh")
+    _assert_verifier_refused(
+        tmp_path, f"verifier '.otari/verifiers/check.sh' resolves to {tmp_path / 'moved.sh'}, which does not exist"
+    )
+
+
+@pytest.mark.parametrize("target_name", ["check.sh", "moved.sh"], ids=["present", "missing"])
+def test_a_user_level_verifier_linked_out_is_refused_without_file_ownership(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, isolated_home: Path, target_name: str
+) -> None:
+    """A platform with no file owner (Windows) keeps the target inside `~/.otari/verifiers/`."""
+    _write_verifier(tmp_path, "check.sh", "exit 0")
+    _link_user_verifier(isolated_home, tmp_path / target_name)
+    monkeypatch.setattr(hook_cli, "_HAS_FILE_OWNERS", False)
+    target = tmp_path / target_name
+    _assert_verifier_refused(
+        tmp_path, f"verifier '.otari/verifiers/check.sh' resolves to {target}, which is outside ~/.otari/verifiers/"
+    )
+
+
+@pytest.mark.parametrize("verifier", [".otari/verifiers/../elsewhere.sh", "{home}/.otari/elsewhere.sh"])
+def test_a_user_level_verifier_path_out_of_the_verifiers_directory_is_refused(
+    tmp_path: Path, isolated_home: Path, verifier: str
+) -> None:
+    (isolated_home / ".otari/verifiers").mkdir(parents=True)
+    _write_verifier(isolated_home / ".otari", "elsewhere.sh", "exit 0")
+    verifier = verifier.format(home=isolated_home)
+    _assert_verifier_refused(tmp_path, f"verifier {verifier!r} resolves outside ~/.otari/verifiers/", verifier)
+
+
+def test_a_repo_verifier_linked_out_of_the_repo_is_refused(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    (repo / ".otari/verifiers").mkdir(parents=True)
+    (repo / ".otari/verifiers/check.sh").symlink_to(_write_verifier(tmp_path, "check.sh", "exit 0"))
+    _assert_verifier_refused(
+        repo,
+        "verifier '.otari/verifiers/check.sh' resolves outside the repo root",
+        origin=hook_cli.GuardrailOrigin.REPO,
+    )
+
+
 def test_a_repo_verifier_does_not_resolve_against_home(tmp_path: Path, isolated_home: Path) -> None:
     (isolated_home / ".otari/verifiers").mkdir(parents=True)
     _write_verifier(isolated_home / ".otari/verifiers", "check.sh", "exit 0")

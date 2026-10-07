@@ -669,7 +669,11 @@ reproducible the way a glob or phrase match is, not a model's opinion, so a
       markers before finishing.
 ```
 
-A `verifier` gate in a file under `~/.otari/` names its script relative to the home directory instead, and the script must be inside `~/.otari/verifiers/`. The hook refuses a path that resolves anywhere else, and still runs the script with the repository root as its working directory.
+A `verifier` gate in a file under `~/.otari/` names its script relative to the home directory instead, and the script must be inside `~/.otari/verifiers/`. The hook refuses a path that leaves that directory through `..` or an absolute path, and still runs the script with the repository root as its working directory.
+
+The script can be a symlink, for example into a dotfiles checkout that stow or yadm manages. The hook follows the link, and runs the target only when it is a regular file that the user owns and that group and others cannot write. The same rule applies to a script that is not a link, so a group-writable script in `~/.otari/verifiers/` is refused until `chmod go-w` fixes it. Only the target file is checked, not the directories above it. When the script's path leads through a link, a failed check names the file the link leads to. This includes a target that is missing. On a platform without POSIX file ownership (Windows), the target must instead resolve inside `~/.otari/verifiers/`.
+
+A repository's verifier gets no such allowance. Its script must resolve inside the repository with every symlink followed, because a cloned repository is less trusted than the user who runs it. `otari guardrails validate` applies the same rules as the hook, so it reports the same result.
 
 `when_changed` is optional, the same repo-relative POSIX glob grammar
 `judge`'s own field of that name uses. Omitted (the default), the gate always

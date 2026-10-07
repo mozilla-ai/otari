@@ -526,6 +526,7 @@ def test_a_user_level_verifier_is_probed_under_home(repo: Path, isolated_home: P
     verifiers = isolated_home / ".otari/verifiers"
     verifiers.mkdir(parents=True)
     (verifiers / "check.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (verifiers / "check.sh").chmod(0o644)
     _write_into(
         isolated_home,
         ".otari/guardrails.yml",
@@ -542,6 +543,7 @@ def test_a_user_level_file_named_directly_is_checked_as_the_users(repo: Path, is
     verifiers = isolated_home / ".otari/verifiers"
     verifiers.mkdir(parents=True)
     (verifiers / "check.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    (verifiers / "check.sh").chmod(0o644)
     personal = isolated_home / ".otari/guardrails.yml"
     _write_into(
         isolated_home,
@@ -553,6 +555,42 @@ def test_a_user_level_file_named_directly_is_checked_as_the_users(repo: Path, is
     assert result.exit_code == 1, result.output
     assert "user:g" in result.output
     assert "`chmod +x ~/.otari/verifiers/check.sh`" in result.output
+
+
+def _write_linked_user_gate(home: Path, dotfiles: Path, mode: int) -> Path:
+    """A user-level gate whose script links into `dotfiles`; returns the link's target."""
+    target = dotfiles / "check.sh"
+    target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    target.chmod(mode)
+    (home / ".otari/verifiers").mkdir(parents=True)
+    (home / ".otari/verifiers/check.sh").symlink_to(target)
+    _write_into(
+        home,
+        ".otari/guardrails.yml",
+        _HEADER + "  - id: g\n    type: verifier\n    runs: [stop.verifier]\n"
+        "    enforcement: required\n    verifier: .otari/verifiers/check.sh\n    message: m\n",
+    )
+    return target
+
+
+def test_a_user_level_verifier_linked_to_a_script_the_user_owns_is_clean(
+    repo: Path, isolated_home: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    _write_linked_user_gate(isolated_home, tmp_path_factory.mktemp("dotfiles"), 0o755)
+    result = _invoke()
+    assert result.exit_code == 0, result.output
+
+
+def test_a_user_level_verifier_linked_to_a_script_others_can_write_is_reported(
+    repo: Path, isolated_home: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    target = _write_linked_user_gate(isolated_home, tmp_path_factory.mktemp("dotfiles"), 0o775)
+    result = _invoke()
+    assert result.exit_code == 1, result.output
+    assert (
+        f"verifier '.otari/verifiers/check.sh' resolves to {target}, which is writable by group or others,"
+        " so the hook refuses to run it." in result.output
+    )
 
 
 def test_a_draft_under_otari_home_that_the_hook_never_reads_is_checked_as_a_repo_file(
