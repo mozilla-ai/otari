@@ -10,6 +10,7 @@ import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { HeadroomRing } from "@/design-system/metrics/HeadroomRing"
 import {
   useOrganizationBudgets,
   useOrganizationSpendCeilingsAll,
@@ -24,7 +25,7 @@ import {
 import { budgetLabeler } from "./budgetLabel"
 import { DeleteBudgetDialog } from "./DeleteBudgetDialog"
 import { OrganizationBudgetDialog } from "./OrganizationBudgetDialog"
-import { limitLabel } from "./organizationBudget"
+import { hasNoLimit, limitLabel, tightestUsage } from "./organizationBudget"
 import { cycleLabel } from "./resetCycle"
 
 // Budgets, for an organization owner or admin.
@@ -37,10 +38,11 @@ import { cycleLabel } from "./resetCycle"
 // duplicate the figure or hide the sharing. A budget-centric row does neither.
 // The figure is written once, where it is defined, and the sharing is the cell.
 //
-// Deliberately no spend column. A budget's figure is one number; what has been
-// spent against it is per applied entity, because each entity draws on its own
-// allowance of the limit. That belongs on the detail view, one bar per entity,
-// not summed into a cell that would read as a single pool.
+// Usage is the tightest entity, not a sum. Each entity draws on its own
+// allowance of the limit, so a summed cell would read as a single pool and hide
+// the one entity already being refused behind the others' headroom. The figure
+// names that entity when there is more than one; every entity's own bar is on
+// the detail view.
 
 export function OrganizationBudgetsPage({
   organization,
@@ -130,6 +132,30 @@ export function OrganizationBudgetsPage({
       // from the rows alone reads a budget applied to a dozen workspaces as
       // applied to nothing, for as long as the walk takes.
       cell: appliedLabel,
+    },
+    {
+      id: "usage",
+      header: "Usage",
+      cell: (row) => {
+        if (hasNoLimit(row))
+          return <span className="text-subtle">Uncapped</span>
+        // Blank until the ceilings land, rather than "Not applied" for a
+        // budget whose entities are still being read.
+        if (!ceilings.data) return null
+        const held = applied.get(row.budget_id) ?? []
+        const tightest = tightestUsage(row, held)
+        if (!tightest) return <span className="text-subtle">Not applied</span>
+        return (
+          <div className="flex flex-col gap-0.5">
+            <HeadroomRing used={tightest.used} />
+            {held.length > 1 ? (
+              <span className="text-caption">
+                {appliedToLabel([tightest.ceiling], context)}
+              </span>
+            ) : null}
+          </div>
+        )
+      },
     },
     {
       id: "resets",

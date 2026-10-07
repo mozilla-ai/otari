@@ -4,6 +4,7 @@ import {
   hasNoLimit,
   limitLabel,
   scopeLabel,
+  tightestUsage,
 } from "@/features/budgets/organizationBudget"
 import { workspace } from "@/tests/fixtures"
 
@@ -120,5 +121,56 @@ describe("scopeLabel", () => {
     expect(
       scopeLabel({ scope_type: "something_new", scope_id: "x" }, context),
     ).toBe("something_new")
+  })
+})
+
+describe("tightestUsage", () => {
+  const usage = (
+    overrides: Partial<{
+      current_spend: number
+      reserved_spend: number
+      current_tokens: number
+      reserved_tokens: number
+      current_requests: number
+      reserved_requests: number
+    }> = {},
+  ) => ({
+    current_spend: 0,
+    reserved_spend: 0,
+    current_tokens: 0,
+    reserved_tokens: 0,
+    current_requests: 0,
+    reserved_requests: 0,
+    ...overrides,
+  })
+
+  it("is the entity closest to its limit, not the sum or the average", () => {
+    const platform = usage({ current_spend: 440 })
+    const result = tightestUsage(caps({ max_budget: 500 }), [
+      usage({ current_spend: 120 }),
+      platform,
+      usage({ current_spend: 30 }),
+    ])
+    expect(result?.used).toBeCloseTo(0.88)
+    expect(result?.ceiling).toBe(platform)
+  })
+
+  it("counts held spend, and whichever capped axis is furthest along", () => {
+    const result = tightestUsage(caps({ max_budget: 100, request_limit: 10 }), [
+      usage({ current_spend: 10, reserved_spend: 10, current_requests: 9 }),
+    ])
+    expect(result?.used).toBeCloseTo(0.9)
+  })
+
+  it("is over for any use of a zero cap", () => {
+    expect(
+      tightestUsage(caps({ max_budget: 0 }), [usage({ current_spend: 1 })])
+        ?.used,
+    ).toBe(Infinity)
+  })
+
+  it("has nothing to measure without a cap or without entities", () => {
+    expect(tightestUsage(caps(), [usage({ current_spend: 5 })])).toBeNull()
+    expect(tightestUsage(caps({ max_budget: 500 }), [])).toBeNull()
   })
 })
