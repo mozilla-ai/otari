@@ -38,7 +38,9 @@ def _completion(message: dict[str, Any], finish_reason: str = "stop") -> ChatCom
     )
 
 
-def _chunk(delta: dict[str, Any] | None = None, finish_reason: str | None = None, usage: Any = None) -> ChatCompletionChunk:
+def _chunk(
+    delta: dict[str, Any] | None = None, finish_reason: str | None = None, usage: Any = None
+) -> ChatCompletionChunk:
     choices = [] if delta is None else [{"index": 0, "delta": delta, "finish_reason": finish_reason}]
     return ChatCompletionChunk.model_validate(
         {
@@ -211,7 +213,9 @@ async def test_prompt_cache_key_is_dropped_for_a_provider_without_one() -> None:
 @pytest.mark.asyncio
 async def test_server_state_fields_are_refused(field: str) -> None:
     with pytest.raises(UnsupportedParameterError, match=field):
-        await _call({}, _completion({"content": "ok"}), input_data="hi", **{field: "resp_1" if field != "background" else True})
+        await _call(
+            {}, _completion({"content": "ok"}), input_data="hi", **{field: "resp_1" if field != "background" else True}
+        )
 
 
 @pytest.mark.asyncio
@@ -224,6 +228,23 @@ async def test_hosted_tool_is_refused() -> None:
 async def test_input_item_without_chat_equivalent_is_refused() -> None:
     with pytest.raises(UnsupportedParameterError, match="item_reference"):
         await _call({}, _completion({"content": "ok"}), input_data=[{"type": "item_reference", "id": "msg_1"}])
+
+
+_IMAGE_PART = {"type": "input_image", "image_url": "data:image/png;base64,AA"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "item",
+    [
+        {"role": "developer", "content": [{"type": "input_text", "text": "rules"}, _IMAGE_PART]},
+        {"type": "function_call_output", "call_id": "call_1", "output": [_IMAGE_PART]},
+    ],
+    ids=["system", "tool-output"],
+)
+async def test_non_text_part_in_a_string_only_message_is_refused(item: dict[str, Any]) -> None:
+    with pytest.raises(UnsupportedParameterError, match="input_image"):
+        await _call({}, _completion({"content": "ok"}), input_data=[item])
 
 
 # ---------- non-streaming response ----------
@@ -322,7 +343,12 @@ async def test_streamed_tool_call_fragments_accumulate_into_a_function_call() ->
             _chunk(
                 {
                     "tool_calls": [
-                        {"index": 0, "id": "call_1", "type": "function", "function": {"name": "lookup", "arguments": '{"q"'}}
+                        {
+                            "index": 0,
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "lookup", "arguments": '{"q"'},
+                        }
                     ]
                 }
             ),
@@ -406,7 +432,9 @@ _TOOL_CALL = {"id": "call_1", "type": "function", "function": {"name": "fetch_ur
 
 @pytest.mark.asyncio
 async def test_tool_loop_replays_its_own_turn_through_the_bridge() -> None:
-    replies = iter([_completion({"content": None, "tool_calls": [_TOOL_CALL]}, "tool_calls"), _completion({"content": "done"})])
+    replies = iter(
+        [_completion({"content": None, "tool_calls": [_TOOL_CALL]}, "tool_calls"), _completion({"content": "done"})]
+    )
     sent: list[list[dict[str, Any]]] = []
 
     async def fake_acompletion(**kwargs: Any) -> ChatCompletion:

@@ -87,6 +87,8 @@ the field:
   than `function`.
 - Input items other than messages, function calls and their outputs, such as
   `item_reference`.
+- Image or file parts in a `system` or `developer` message or in a function
+  call output, where a chat completion only takes text.
 
 Fields that only control what a provider stores or adds to its answer
 (`store`, `metadata`, `include`, `truncation` and similar) are ignored, and

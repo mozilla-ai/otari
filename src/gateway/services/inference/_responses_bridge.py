@@ -201,7 +201,11 @@ def _messages(input_data: Any, instructions: Any, provider: str) -> list[dict[st
             _append_tool_call(messages, item)
         elif item_type == "function_call_output":
             messages.append(
-                {"role": "tool", "tool_call_id": item.get("call_id"), "content": _text_of(item.get("output"))}
+                {
+                    "role": "tool",
+                    "tool_call_id": item.get("call_id"),
+                    "content": _text_of(item.get("output"), provider),
+                }
             )
         elif item_type == "reasoning":
             continue
@@ -216,7 +220,7 @@ def _chat_message(item: dict[str, Any], provider: str) -> dict[str, Any]:
     if role == "developer":
         role = "system"
     if role in ("assistant", "system") or isinstance(content, str):
-        return {"role": role, "content": _text_of(content)}
+        return {"role": role, "content": _text_of(content, provider)}
     return {"role": role, "content": [_chat_part(part, provider) for part in content or []]}
 
 
@@ -236,8 +240,12 @@ def _chat_part(raw: Any, provider: str) -> dict[str, Any]:
     raise UnsupportedParameterError(f"input content type '{part_type}'", provider, _BRIDGE_NOTE)
 
 
-def _text_of(content: Any) -> str:
-    """Flatten a content value to the plain string chat completions take."""
+def _text_of(content: Any, provider: str) -> str:
+    """Flatten a content value to the plain string chat completions take.
+
+    Only text and refusal parts flatten; any other part is refused rather than
+    dropped, because the chat message it would land in takes a string.
+    """
     if content is None:
         return ""
     if isinstance(content, str):
@@ -245,8 +253,13 @@ def _text_of(content: Any) -> str:
     texts: list[str] = []
     for raw in content:
         part = _as_dict(raw)
-        if isinstance(part, dict):
-            texts.append(str(part.get("text") or part.get("refusal") or ""))
+        part_type = part.get("type") if isinstance(part, dict) else None
+        if part_type in _TEXT_PART_TYPES:
+            texts.append(str(part.get("text") or ""))
+        elif part_type == "refusal":
+            texts.append(str(part.get("refusal") or ""))
+        else:
+            raise UnsupportedParameterError(f"input content type '{part_type}'", provider, _BRIDGE_NOTE)
     return "".join(texts)
 
 
@@ -580,9 +593,7 @@ class _StreamTranslator:
                 content_index=0,
                 text=self.reasoning_text,
             ),
-            self._event(
-                "response.content_part.done", item_id=item_id, output_index=index, content_index=0, part=part
-            ),
+            self._event("response.content_part.done", item_id=item_id, output_index=index, content_index=0, part=part),
             self._event("response.output_item.done", output_index=index, item=item),
         ]
 
@@ -708,4 +719,3 @@ async def _stream_events(
         close = getattr(chunks, "aclose", None)
         if close is not None:
             await close()
-
