@@ -133,8 +133,13 @@ export function AuthPasswordField({
           {input}
           {/* Centered on the field and inset 2px from its edge, so the glyph
               reads as inside the input. 32px to the eye at every width; the
-              44px touch floor is the pseudo-element bleed, which a 36px field
-              can hold without the target overlapping anything. */}
+              44px touch floor is the pseudo-element bleed, 7px from the padding
+              box (the button's 1px transparent border takes one of them, so
+              6px past its edge), which a 36px field can hold without the
+              target overlapping anything. The `!` is the
+              exception to the phone-width floor on `[data-slot="button"]`
+              (globals.css), which would otherwise make the visible button 44
+              and the bleed 56, into the label above. */}
           <Button
             type="button"
             variant="ghost"
@@ -143,7 +148,7 @@ export function AuthPasswordField({
             aria-label={isRevealed ? "Hide password" : "Show password"}
             aria-pressed={isRevealed}
             onPress={() => setIsRevealed((shown) => !shown)}
-            className="absolute inset-y-0 right-0.5 my-auto size-8 min-h-8 min-w-8 text-muted before:absolute before:-inset-1.5"
+            className="absolute inset-y-0 right-0.5 my-auto size-8 min-h-8! min-w-8! text-muted before:absolute before:-inset-[7px]"
           >
             {isRevealed ? (
               <FiEyeOff aria-hidden className="size-4" />

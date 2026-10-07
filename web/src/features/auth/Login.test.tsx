@@ -1080,7 +1080,9 @@ describe("Login with a passkey", () => {
     // The row that opens the form is disabled while a ceremony is open, so the
     // form is opened first and the ceremony started with it in view.
     await user.click(screen.getByRole("button", { name: "Sign in with email" }))
-    await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+    await user.click(
+      screen.getByRole("button", { name: "Sign in with a passkey" }),
+    )
     await waitFor(() => expect(get).toHaveBeenCalled())
 
     // The ceremony is open. Fill the form and submit it anyway.
@@ -1106,7 +1108,7 @@ describe("Login with a passkey", () => {
       </Mounted>,
     )
     expect(
-      screen.queryByRole("button", { name: "Use a passkey" }),
+      screen.queryByRole("button", { name: "Sign in with a passkey" }),
     ).not.toBeInTheDocument()
   })
 
@@ -1119,7 +1121,7 @@ describe("Login with a passkey", () => {
     )
     // Published by the gateway, but the button would be a dead end here.
     expect(
-      screen.queryByRole("button", { name: "Use a passkey" }),
+      screen.queryByRole("button", { name: "Sign in with a passkey" }),
     ).not.toBeInTheDocument()
     // The form it sits beside is unaffected.
     expect(screen.getByLabelText("Email")).toBeInTheDocument()
@@ -1147,7 +1149,9 @@ describe("Login with a passkey", () => {
     expect(
       screen.getByRole("button", { name: "Sign in with email" }),
     ).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+    await user.click(
+      screen.getByRole("button", { name: "Sign in with a passkey" }),
+    )
 
     expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
     expect(get).toHaveBeenCalled()
@@ -1165,7 +1169,9 @@ describe("Login with a passkey", () => {
       </Mounted>,
     )
 
-    await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+    await user.click(
+      screen.getByRole("button", { name: "Sign in with a passkey" }),
+    )
 
     expect(
       await screen.findByText("That passkey did not sign you in"),
@@ -1186,14 +1192,16 @@ describe("Login with a passkey", () => {
       </Mounted>,
     )
 
-    await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+    await user.click(
+      screen.getByRole("button", { name: "Sign in with a passkey" }),
+    )
 
     await waitFor(() => expect(get).toHaveBeenCalled())
     // Pressing Escape is a decision, not a refused credential, so the screen
     // returns to its resting state with nothing said.
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "Use a passkey" }),
+        screen.getByRole("button", { name: "Sign in with a passkey" }),
       ).toBeInTheDocument(),
     )
     expect(screen.queryByText(/did not sign you in/)).not.toBeInTheDocument()
@@ -1218,7 +1226,9 @@ describe("Login with a passkey", () => {
           <Harness />
         </Mounted>,
       )
-      await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+      await user.click(
+        screen.getByRole("button", { name: "Sign in with a passkey" }),
+      )
 
       expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
       expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
@@ -1239,7 +1249,9 @@ describe("Login with a passkey", () => {
           <Harness />
         </Mounted>,
       )
-      await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+      await user.click(
+        screen.getByRole("button", { name: "Sign in with a passkey" }),
+      )
 
       await waitFor(() =>
         expect(recordEvent).toHaveBeenCalledWith(
@@ -1267,7 +1279,9 @@ describe("Login with a passkey", () => {
           <Harness />
         </Mounted>,
       )
-      await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+      await user.click(
+        screen.getByRole("button", { name: "Sign in with a passkey" }),
+      )
 
       await waitFor(() =>
         expect(recordEvent).toHaveBeenCalledWith(

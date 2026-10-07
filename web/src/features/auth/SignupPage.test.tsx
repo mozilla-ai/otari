@@ -206,6 +206,30 @@ describe("SignupPage", () => {
     expect(apiFetch).not.toHaveBeenCalled()
   })
 
+  it("keeps its fill, blocks the press and says it is busy while the claim is out", async () => {
+    let release!: () => void
+    vi.mocked(apiFetch).mockReturnValue(
+      new Promise((resolve) => {
+        release = () => resolve({ message: "…" } as never)
+      }),
+    )
+    const user = userEvent.setup()
+    const { container } = renderPage()
+    await user.type(screen.getByLabelText("Email"), "ada@example.com")
+    await user.type(screen.getByLabelText("Password"), "correct-horse")
+
+    await user.click(screen.getByRole("button", { name: "Claim account" }))
+
+    const pending = await screen.findByRole("button", {
+      name: "Claiming account…",
+    })
+    // Not disabled, which would dim it to the refused treatment.
+    expect(pending).not.toBeDisabled()
+    expect(pending).toHaveClass("pointer-events-none")
+    expect(container.querySelector("form")).toHaveAttribute("aria-busy", "true")
+    release()
+  })
+
   it("shows the gateway's own refusal and stays on the form", async () => {
     vi.mocked(apiFetch).mockRejectedValue(
       new ApiError(503, "Outgoing mail is not configured on this deployment."),
@@ -474,7 +498,14 @@ describe("the password reveal", () => {
     await user.type(field, "correct-horse")
     expect(field).toHaveAttribute("type", "password")
 
-    await user.click(screen.getByRole("button", { name: "Show password" }))
+    // Guards, not checks: jsdom computes no cascade. The toggle is 32px at
+    // every width, exempt from the phone-width 44px floor that would otherwise
+    // widen the button and push its 44px bleed into the label above; the
+    // measured result is a 32px box with a 6px bleed on every side.
+    const toggle = screen.getByRole("button", { name: "Show password" })
+    expect(toggle).toHaveClass("min-h-8!", "min-w-8!", "before:-inset-[7px]")
+
+    await user.click(toggle)
     expect(field).toHaveAttribute("type", "text")
     expect(field).toHaveValue("correct-horse")
 

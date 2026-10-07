@@ -668,7 +668,7 @@ export function Login() {
               >
                 {isPasskeyPending
                   ? "Waiting for your passkey…"
-                  : "Use a passkey"}
+                  : "Sign in with a passkey"}
               </AuthMethodRow>
             </div>
           ) : null}
