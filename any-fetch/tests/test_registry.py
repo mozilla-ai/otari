@@ -13,6 +13,7 @@ from any_fetch import (
     UnsupportedProviderError,
     afetch,
 )
+from any_fetch._http import ProviderHttp
 from any_fetch.providers import builtin
 from any_fetch.providers.builtin import BuiltinProvider
 from any_fetch.providers.fake import FakeProvider
@@ -105,3 +106,25 @@ def test_registering_again_replaces_the_factory() -> None:
     fetcher = AnyFetch.create("builtin")
     assert isinstance(fetcher, BuiltinProvider)
     assert fetcher._fetcher is second
+
+
+class _FailingCloseFetcher(_HostFetcher):
+    async def aclose(self) -> None:
+        raise RuntimeError("host fetcher failed to close")
+
+
+@pytest.mark.asyncio
+async def test_builtin_closes_its_own_client_when_the_host_fetcher_fails_to_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed: list[bool] = []
+
+    async def _record_close(self: ProviderHttp) -> None:
+        closed.append(True)
+
+    monkeypatch.setattr(ProviderHttp, "aclose", _record_close)
+    AnyFetch.register_builtin(_FailingCloseFetcher)
+    provider = AnyFetch.create("builtin")
+    with pytest.raises(RuntimeError, match="failed to close"):
+        await provider.aclose()
+    assert closed == [True]

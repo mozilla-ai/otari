@@ -56,5 +56,8 @@ class BuiltinProvider(AnyFetch):
         return await self._fetcher.fetch(url, max_chars=max_chars)
 
     async def aclose(self) -> None:
-        await self._fetcher.aclose()
-        await super().aclose()
+        # The library's own client is closed even when the host's fetcher fails to close.
+        try:
+            await self._fetcher.aclose()
+        finally:
+            await super().aclose()

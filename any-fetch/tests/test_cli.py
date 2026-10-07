@@ -40,7 +40,7 @@ def test_json_and_raw_keep_raw(capsys: pytest.CaptureFixture[str]) -> None:
     assert "raw" in json.loads(capsys.readouterr().out)
 
 
-@pytest.mark.parametrize("option", ["error=http_status", "in_body_error=crawl_not_found"])
+@pytest.mark.parametrize("option", ["error=http_status", "in_body_error=crawl_not_found", "delay=abc"])
 def test_an_error_exits_1_without_the_url(option: str, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["fake", "https://example.com/sentinel-url", "-o", option]) == 1
     captured = capsys.readouterr()
