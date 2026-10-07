@@ -57,7 +57,10 @@ the old shape.
 ## Commits
 
 - A commit happens only when a Unit of Work block ends, and only a service
-  opens a block. Flag a route or a repository that opens a block.
+  opens a block. Flag a route or a repository that opens a block. The one
+  exception is a core adapter whose port contract says a call settles before
+  it returns (`TraceStoragePort`), which opens its block on a Unit of Work
+  from a worker factory; flag any other adapter that opens one.
 - The check refuses a `commit()` or `rollback()` call outside
   `core/unit_of_work.py`, except in a module on
   `TRANSACTION_CONTROL_BASELINE`. Flag such a call added to a module already

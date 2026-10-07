@@ -34,7 +34,7 @@ How a domain fits together:
   domains it needs. It never receives the session or another domain's
   repository, so it cannot run a query.
 - **One Unit of Work per request or worker job.** Only a service opens a
-  block.
+  block, or a core adapter whose port says a call settles before it returns.
   [Who commits](.github/skills/backend-standards/SKILL.md#who-commits) gives
   the rules.
 - **Builders** live in `api/deps.py`. A worker job calls the same builder with a
@@ -229,6 +229,20 @@ the hook evaluates in process and never calls this route.
 Usage rows, the usage log writer, OTLP ingest and coding-agent telemetry.
 
 It also owns the route helper `api/routes/_billing_schemas.py`.
+
+### traces
+
+Agent traces: one agent session, its turns, and the spans inside them (each
+request, LLM round, routing attempt, guardrail check, MCP connection and tool
+call), as the gateway observed them or an instrumented agent sent them. It owns
+`ports/trace_storage_port.py` and its adapters.
+
+A trace is a projection, written best-effort after accounting, and never a
+billing source: usage-and-telemetry keeps the usage rows and their cost.
+Inference, tools and usage-and-telemetry depend on traces; traces depends on
+none of them.
+
+Built in the target shape from the start.
 
 ### inference
 

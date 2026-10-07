@@ -1753,6 +1753,14 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": "gateway/repositories/tools/web_search_key_repository.py",
         "baseline": (),
     },
+    "gateway.models.traces.Trace": {
+        "repository": "gateway/repositories/traces/trace_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.traces.TraceSpan": {
+        "repository": "gateway/repositories/traces/span_repository.py",
+        "baseline": (),
+    },
     "gateway.models.usage.AgentTelemetry": {
         "repository": None,
         "baseline": ("gateway/adapters/telemetry_storage_adapter.py",),

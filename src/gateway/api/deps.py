@@ -33,6 +33,7 @@ from gateway.ports.mcp_server_port import McpServerPort
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
+from gateway.ports.trace_storage_port import TraceStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.api_keys import ApiKeyRepository
 from gateway.repositories.budgets import BudgetRepositories
@@ -51,6 +52,7 @@ from gateway.repositories.tools import (
     WorkspaceCodeExecutionPolicyRepository,
     WorkspaceWebSearchKeyOverrideRepository,
 )
+from gateway.repositories.traces import TracesRepositories
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetMembershipListener, BudgetService
@@ -1076,6 +1078,23 @@ def get_telemetry_storage_port(
     return container.resolve(TelemetryStoragePort, db)
 
 
+def get_trace_tables(uow: UnitOfWork) -> TracesRepositories:
+    """Build the traces repositories on a Unit of Work.
+
+    The builder the container's database-backed trace store takes, because a
+    domain's repositories are built here and nowhere outside the domain.
+    """
+    return TracesRepositories.on(uow)
+
+
+def get_trace_storage_port(container: ContainerDep) -> TraceStoragePort:
+    """Resolve the trace-storage adapter this build bound at startup.
+
+    No session: every core trace store settles its own work, off the request's transaction.
+    """
+    return container.resolve(TraceStoragePort, None)
+
+
 def get_code_execution_policy_port(db: PortSessionDep, container: ContainerDep) -> CodeExecutionPolicyPort:
     """Resolve the code execution policy adapter this build bound at startup."""
     return container.resolve(CodeExecutionPolicyPort, db)
@@ -1281,6 +1300,7 @@ def get_rate_limit_service(
 
 RateLimitServiceDep = Annotated[RateLimitService, Depends(get_rate_limit_service)]
 TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_storage_port)]
+TraceStoragePortDep = Annotated[TraceStoragePort, Depends(get_trace_storage_port)]
 WebSearchPolicyPortDep = Annotated[WebSearchPolicyPort, Depends(get_web_search_policy_port)]
 
 

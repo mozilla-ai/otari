@@ -36,7 +36,7 @@ class UnitOfWork:
     Its outermost block then raises ``UnitOfWorkRolledBackError`` from the first such failure.
     A Unit of Work belongs to one task, because blocks that concurrent tasks open on it would commit each other's steps.
 
-    NOTE: only a service should open a block.
+    NOTE: only a service should open a block, or a core adapter whose port says a call settles before it returns.
     Repositories flush and never commit, and routes never open a block.
     """
 

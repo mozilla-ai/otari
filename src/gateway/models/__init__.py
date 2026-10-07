@@ -23,6 +23,7 @@ from gateway.models import (  # noqa: F401
     routing,
     tenancy,
     tools,
+    traces,
     usage,
     users,
 )

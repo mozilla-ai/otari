@@ -132,6 +132,12 @@ rolls back.
   `OutsideUnitOfWorkError` when no block is open. A Unit of Work exposes no session of its own.
   A `BaseRepository` built on a Unit of Work calls `session_for` for every operation.
 - Only a service opens a block. A repository never commits, and a route never opens a block.
+  One exception: a core adapter whose port contract says a call settles before it returns
+  (`TraceStoragePort`) opens its own block, on a Unit of Work from a worker factory, because
+  the port promises durability and a caller on a plane with no database has no block to give
+  it. Every commit still happens where a block ends. `TelemetryStoragePort` has the same
+  contract, but its adapter still commits directly and is on `TRANSACTION_CONTROL_BASELINE`;
+  moving it into a block is what this exception makes possible.
 - A request whose database work all runs in blocks needs no `release_session` before it
   dispatches upstream.
 - Hybrid mode has no local database and no Unit of Work.

@@ -43,10 +43,11 @@ from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapt
 from gateway.adapters.provider_file_adapter import AnyLlmProviderFiles
 from gateway.adapters.rate_limit_store_adapter import build_rate_limit_store
 from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
+from gateway.adapters.trace_storage_adapter import LocalTraceStorage, NullTraceStorage, TraceTablesBuilder
 from gateway.adapters.web_search_policy_adapter import LocalWebSearchPolicy, RemoteWebSearchPolicy
 from gateway.core.config import GatewayConfig
 from gateway.core.deployment import Plane, deployment_for
-from gateway.core.unit_of_work import UnitOfWork
+from gateway.core.unit_of_work import UnitOfWork, create_log_unit_of_work
 from gateway.log_config import logger
 from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
@@ -62,6 +63,7 @@ from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
+from gateway.ports.trace_storage_port import TraceStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.tenancy.membership_listener import MembershipListener
@@ -519,6 +521,36 @@ def _bind_workspace_ports(
         container.bind(WebSearchPolicyPort, _shared(RemoteWebSearchPolicy(config)))
 
 
+def _local_trace_storage(trace_tables: TraceTablesBuilder | None) -> PortFactory[TraceStoragePort]:
+    """Serve one database-backed store, which opens its own Unit of Work per call and so needs no session."""
+    store = LocalTraceStorage(create_log_unit_of_work, trace_tables) if trace_tables is not None else None
+
+    def factory(session: AsyncSession | None) -> TraceStoragePort:
+        del session
+        if store is None:
+            msg = f"a traces repositories builder is required to build {_port_name(TraceStoragePort)}"
+            raise ContainerError(msg)
+        return store
+
+    return factory
+
+
+def _bind_trace_storage(
+    container: Container, config: GatewayConfig | None, trace_tables: TraceTablesBuilder | None
+) -> None:
+    """Bind trace storage to this deployment's database where it serves the control plane, and to nothing elsewhere.
+
+    A data-plane-only gateway has no database to keep traces in. Until it can send
+    them to its control plane, it drops them, so recording costs it nothing.
+    """
+    if config is None:
+        container.bind(TraceStoragePort, _requires_config(TraceStoragePort))
+    elif deployment_for(config).supports(Plane.CONTROL):
+        container.bind(TraceStoragePort, _local_trace_storage(trace_tables))
+    else:
+        container.bind(TraceStoragePort, _shared(NullTraceStorage()))
+
+
 def build_container(
     bootstrap_selector: str | None = None,
     config: GatewayConfig | None = None,
@@ -527,6 +559,7 @@ def build_container(
     workspace_listener: WorkspaceListenerBuilder | None,
     search_keys: WorkspaceSearchKeysBuilder | None = None,
     code_execution_policies: CodeExecutionPoliciesBuilder | None = None,
+    trace_tables: TraceTablesBuilder | None = None,
 ) -> Container:
     """Build the composition-root container for this deployment.
 
@@ -540,7 +573,8 @@ def build_container(
     builds what sets up a workspace that adapter's open signup creates,
     ``search_keys`` the resolver of a workspace's own web search key, and
     ``code_execution_policies`` the reader of a workspace's code execution
-    policy, for the same reason.
+    policy, and ``trace_tables`` the traces repositories the trace store
+    writes through, for the same reason.
 
     Raises:
         BootstrapError: If the selector is present but blank, or names a
@@ -592,6 +626,9 @@ def build_container(
     # A workspace's MCP servers and its web search and code execution policies.
     # An overlay binds a source of its own and changes nothing above the port.
     _bind_workspace_ports(container, config, search_keys, code_execution_policies)
+    # Agent traces: the base keeps them in this deployment's database where it
+    # serves the control plane. An overlay binds a store built for many tenants.
+    _bind_trace_storage(container, config, trace_tables)
     # Rate-limit counts: the base keeps them in this process, or in Redis
     # where ``rate_limit_store`` asks for one count shared by every replica.
     container.bind(RateLimitStorePort, _rate_limit_store_port_factory(config))
