@@ -2058,7 +2058,8 @@ def _hook_judge_gate_cap(raw: str | None) -> tuple[int, str | None]:
     if raw is None:
         return _HOOK_JUDGE_DEFAULT_MAX_GATES, None
     try:
-        return int(_JUDGE_GATE_CAP.convert(raw, None, None)), None
+        # NOTE: click types IntRange as converting an int, but it parses a command-line string as well.
+        return int(_JUDGE_GATE_CAP.convert(raw, None, None)), None  # type: ignore[arg-type]
     except click.BadParameter as exc:
         return (
             _HOOK_JUDGE_DEFAULT_MAX_GATES,
