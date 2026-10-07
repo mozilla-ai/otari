@@ -122,7 +122,7 @@ class PlaygroundConsentUpdate(SQLModel):
     store_comparisons: bool | None = None
 
 
-class PlaygroundConsent(SQLModel, CreatedAtMixin, UpdatedAtMixin, table=True):
+class PlaygroundConsent(CreatedAtMixin, UpdatedAtMixin, table=True):
     """One identity's content-retention consent for the Playground.
 
     ``user_id`` is the primary key: an identity has one consent record or none,
@@ -226,7 +226,7 @@ class PlaygroundMessagesPublic(SQLModel):
     data: list[PlaygroundMessagePublic]
 
 
-class PlaygroundConversation(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+class PlaygroundConversation(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
     """One saved single-panel transcript, owned by the identity that saved it."""
 
     __tablename__ = "playground_conversation"
@@ -252,7 +252,7 @@ class PlaygroundConversation(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedA
     model: str = Field(max_length=MAX_MODEL_KEY_LENGTH)
 
 
-class PlaygroundMessage(SQLModel, PrimaryKeyMixin, CreatedAtMixin, table=True):
+class PlaygroundMessage(PrimaryKeyMixin, CreatedAtMixin, table=True):
     """One turn of a saved transcript."""
 
     __tablename__ = "playground_message"
@@ -320,7 +320,7 @@ class PlaygroundComparisonsPublic(SQLModel):
     data: list[PlaygroundComparisonSummary]
 
 
-class PlaygroundComparison(SQLModel, PrimaryKeyMixin, CreatedAtMixin, table=True):
+class PlaygroundComparison(PrimaryKeyMixin, CreatedAtMixin, table=True):
     """One recorded model preference, owned by the identity that recorded it."""
 
     __tablename__ = "playground_comparison"
@@ -382,7 +382,7 @@ class PlaygroundFavoriteModelsPublic(SQLModel):
     model_keys: list[str]
 
 
-class PlaygroundFavoriteModel(SQLModel, PrimaryKeyMixin, CreatedAtMixin, table=True):
+class PlaygroundFavoriteModel(PrimaryKeyMixin, CreatedAtMixin, table=True):
     """One model key an identity has pinned in one workspace."""
 
     __tablename__ = "playground_favorite_model"

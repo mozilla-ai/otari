@@ -60,7 +60,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import JSON, Column, ForeignKeyConstraint, Index, UniqueConstraint, text, true
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field
 
 from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, _timestamp_field
 
@@ -81,7 +81,7 @@ from gateway.models.base import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin,
 # ==============================================================================
 
 
-class OrgProviderKey(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+class OrgProviderKey(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
     """One organization-scoped, BYO provider credential."""
 
     __tablename__ = "org_provider_keys"
@@ -126,7 +126,7 @@ class OrgProviderKey(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
 # ==============================================================================
 
 
-class WorkspaceProviderKeyOverride(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+class WorkspaceProviderKeyOverride(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
     """A workspace's departure from its organization's default for one key."""
 
     __tablename__ = "workspace_provider_key_overrides"
@@ -160,7 +160,7 @@ class WorkspaceProviderKeyOverride(SQLModel, PrimaryKeyMixin, CreatedAtMixin, Up
 # ==============================================================================
 
 
-class WorkspaceProviderModelRestriction(SQLModel, PrimaryKeyMixin, CreatedAtMixin, table=True):
+class WorkspaceProviderModelRestriction(PrimaryKeyMixin, CreatedAtMixin, table=True):
     """One allowed model for a workspace+key pair.
 
     No rows for a pair means every model is allowed; this is an allow-list,
@@ -196,7 +196,7 @@ class WorkspaceProviderModelRestriction(SQLModel, PrimaryKeyMixin, CreatedAtMixi
 # ==============================================================================
 
 
-class OrgProviderKeyModel(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+class OrgProviderKeyModel(PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
     """One model an organization offers on one of its provider keys.
 
     Membership and a serving switch, nothing more. The rate lives in

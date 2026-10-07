@@ -1269,7 +1269,7 @@ class Invitation(InvitationBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin
     )
     token_hash: str = Field(unique=True, index=True, max_length=64)
     workspace_assignments: list[dict[str, str]] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
-    expires_at: datetime = Field(sa_type=UtcDateTime())  # type: ignore[call-overload]
+    expires_at: datetime = Field(sa_type=UtcDateTime())
 
 
 # =============================================================================
@@ -1456,7 +1456,7 @@ class WebAuthnChallenge(SQLModel, table=True):
         default_factory=lambda: datetime.now(UTC),
         column_kwargs={"server_default": func.now()},
     )
-    expires_at: datetime = Field(sa_type=UtcDateTime(), index=True)  # type: ignore[call-overload]
+    expires_at: datetime = Field(sa_type=UtcDateTime(), index=True)
 
     @field_validator("ceremony")
     @classmethod
@@ -1510,7 +1510,7 @@ class OAuthPendingState(SQLModel, table=True):
         default_factory=lambda: datetime.now(UTC),
         column_kwargs={"server_default": func.now()},
     )
-    expires_at: datetime = Field(sa_type=UtcDateTime(), index=True)  # type: ignore[call-overload]
+    expires_at: datetime = Field(sa_type=UtcDateTime(), index=True)
 
 
 class DashboardSession(Base):

@@ -103,7 +103,7 @@ _RATE_FIELDS = (
 class _Price:
     """What one offered model currently costs, and which rung said so."""
 
-    source: str
+    source: PriceSource
     input_price_per_million: float | None = None
     output_price_per_million: float | None = None
     cache_read_price_per_million: float | None = None

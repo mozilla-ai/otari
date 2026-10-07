@@ -26,9 +26,10 @@ from apron_auth import OAuthClient
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-from sqlmodel import col, delete, select
+from sqlmodel import col, delete
 
 from gateway.api.routes import auth_oauth
 from gateway.core.config import API_ROOT, GatewayConfig
