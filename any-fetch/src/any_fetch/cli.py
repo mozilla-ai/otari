@@ -28,7 +28,10 @@ def _option(text: str) -> tuple[str, Any]:
 
 
 def _positive(text: str) -> int:
-    value = int(text)
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a whole number") from None
     if value < 1:
         raise argparse.ArgumentTypeError("must be at least 1")
     return value
