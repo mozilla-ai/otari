@@ -6,6 +6,7 @@ on:
     paths:
       - 'src/gateway/**'
       - 'cli/**'
+      - 'any-search/**'
       - 'tests/**'
       - 'scripts/**'
       - 'Makefile'
@@ -17,6 +18,7 @@ on:
     paths:
       - 'src/gateway/**'
       - 'cli/**'
+      - 'any-search/**'
       - 'tests/**'
       - 'scripts/**'
       - 'Makefile'

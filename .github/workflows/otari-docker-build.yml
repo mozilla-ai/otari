@@ -17,8 +17,10 @@ name: Otari Docker Build
 # also serves a request below: what the hybrid smoke adds here is whether the
 # *image* can serve one (its layout, entrypoint and baked environment), and the
 # same walk against the source checkout runs per PR in otari-oss-edition.yml.
-# cli/src/** is the one Python source that is listed: the liveness check asserts
-# what `otari --version` reports inside the image.
+# cli/src/** is listed because the liveness check asserts what `otari --version`
+# reports inside the image. The two libraries' pyproject.toml and src/** are
+# listed as cli's are, since the image installs every workspace member from its
+# source tree.
 #
 # Single-platform on purpose too: this proves the recipe works and the container
 # boots. The publish workflow still builds linux/arm64 under QEMU, which is
@@ -35,6 +37,8 @@ on:
       - 'pyproject.toml'
       - 'cli/pyproject.toml'
       - 'cli/src/**'
+      - 'any-search/pyproject.toml'
+      - 'any-search/src/**'
       - 'uv.lock'
       - 'scripts/docker_liveness_check.sh'
       - 'scripts/hybrid_edition_smoke.py'

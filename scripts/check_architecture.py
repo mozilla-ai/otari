@@ -13,7 +13,7 @@ Enforces:
 9. Registry: only the app wiring reads gateway/features.py, so a service or a
    route may not import it; and nothing under gateway/ imports
    importlib.metadata, importlib_metadata or pkg_resources, so nothing is
-   discovered.
+   discovered. The same ban holds under otari_agent/ and the library.
 10. Top-level packages: src/ holds only the packages on an explicit list, so a
     feature cannot sit beside gateway/, outside every rule above.
 11. Service database access: nothing under services/ imports sqlalchemy or
@@ -77,6 +77,12 @@ Enforces:
     A FastAPI dependency declares a listener as Annotated[Listener, Depends(...)], since a Depends(...) default counts.
     A field kept out of the constructor, such as field(init=False), is not a parameter, so the rule skips it.
     The parameters and fields that still have one are named on a baseline, and the baseline only shrinks.
+25. Libraries: nothing under any-search/, tests and scripts included,
+    imports the gateway, SQLAlchemy, SQLModel, FastAPI, uvicorn or the
+    fetch library, so it runs on its own with httpx and pydantic. A
+    library keeps its tests and scripts inside its directory rather than
+    under tests/ or src/, so each directory is a root of its own, mapped to
+    its rule. Entry-point discovery is banned there as under gateway/.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -100,6 +106,10 @@ TESTS_ROOT = REPO_ROOT / "tests"
 # The otari-agent workspace member (cli/pyproject.toml); its files are checked
 # relative to this root so the "otari_agent" rule key matches them.
 CLI_ROOT = REPO_ROOT / "cli" / "src"
+# The library workspace members, each checked whole against the rule it maps to.
+LIBRARY_ROOTS: dict[str, Path] = {
+    "any_search": REPO_ROOT / "any-search",
+}
 
 
 # session_for hands out the Unit of Work's session, so the repositories package is
@@ -167,6 +177,14 @@ RULES: dict[str, LayerRule] = {
             "fastapi",
         ],
         "description": "Light CLI (otari-agent)",
+    },
+    # The web search library is built to run without otari: import it, give it
+    # a key, call it. It does not import the fetch library either, so each
+    # stays self-contained. These keys match through LIBRARY_ROOTS, not a path.
+    "any_search": {
+        "allowed": [],
+        "forbidden": ["gateway", "sqlalchemy", "sqlmodel", "fastapi", "uvicorn", "any_fetch"],
+        "description": "Library (any-search)",
     },
     "gateway/services": {
         "allowed": ["gateway.repositories", "gateway.models", "gateway.core", "gateway.auth", "gateway.ports"],
@@ -287,11 +305,12 @@ ADAPTER_IMPORT = "gateway.adapters"
 LIGHT_CLI_ATTACH_POINT = "otari_agent/cli.py"
 LIGHT_CLI_ATTACH_IMPORT = "gateway.cli"
 
-# Entry-point discovery is banned everywhere under gateway/ and otari_agent/,
-# with a message of its own because "OSS base" would not say why: the feature
-# registry in gateway/features.py is a literal tuple on purpose
-# (ARCHITECTURE.md), and these are the modules discovery is written with.
-DISCOVERY_SCOPE = ("gateway/", "otari_agent/")
+# Entry-point discovery is banned everywhere under gateway/, otari_agent/ and
+# the library, with a message of its own because "OSS base" would not say
+# why: the feature registry in gateway/features.py is a literal tuple on purpose
+# (ARCHITECTURE.md), as is each library's provider table, and these are the
+# modules discovery is written with.
+DISCOVERY_SCOPE = ("gateway/", "otari_agent/", "any_search/")
 DISCOVERY_IMPORTS = ("importlib.metadata", "importlib_metadata", "pkg_resources")
 DISCOVERY_RULE = "OSS base (no entry-point discovery; the feature registry is a literal tuple)"
 
@@ -326,14 +345,19 @@ def _imported_modules(node: ast.Import | ast.ImportFrom, file_path: Path, src_ro
     return [base] + [f"{base}.{alias.name}" for alias in node.names]
 
 
-def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
+def check_file(file_path: Path, src_root: Path, rule_key: str | None = None) -> list[tuple[int, str, str]]:
     """Check one Python file below src_root against the layer rules for its location.
+
+    A library's files pass the rule key their root maps to (LIBRARY_ROOTS), and
+    are checked as if their path below the root started with it.
 
     Returns:
         One (line number, module, message) tuple per offending import statement.
 
     """
     relative_path = file_path.relative_to(src_root).as_posix()
+    if rule_key is not None:
+        relative_path = f"{rule_key}/{relative_path}"
     # Restrictions accumulate: a file answers to its own layer's rules and to
     # every enclosing layer's, so declaration order cannot silently shadow
     # either a nested rule or a broader one. Most specific first, so a violation
@@ -2046,10 +2070,10 @@ def check_model_access(src_root: Path) -> list[str]:
 
 
 def main() -> int:
-    """Run the architecture checks over the gateway package, the light CLI and the OSS test suite."""
+    """Run the architecture checks over the gateway package, the light CLI, the libraries and the OSS test suite."""
     # All must exist: silently skipping one would let its rules (including
     # the OSS/enterprise boundary) stop enforcing while the check stays green.
-    for required_root in (GATEWAY_ROOT, TESTS_ROOT, CLI_ROOT):
+    for required_root in (GATEWAY_ROOT, TESTS_ROOT, CLI_ROOT, *LIBRARY_ROOTS.values()):
         if not required_root.is_dir():
             print(f"❌ Expected directory not found at {required_root}")
             return 1
@@ -2067,6 +2091,14 @@ def main() -> int:
         import_violations.extend(
             (py_file, lineno, module, message) for lineno, module, message in check_file(py_file, CLI_ROOT)
         )
+    for rule_key, library_root in LIBRARY_ROOTS.items():
+        for py_file in sorted(library_root.rglob("*.py")):
+            if "__pycache__" in py_file.parts:
+                continue
+            import_violations.extend(
+                (py_file, lineno, module, message)
+                for lineno, module, message in check_file(py_file, library_root, rule_key)
+            )
     # tests/ sits beside src/, not under it, so its relative paths (and the
     # "tests" rule key above) are rooted at the repo root instead.
     for py_file in sorted(TESTS_ROOT.rglob("*.py")):

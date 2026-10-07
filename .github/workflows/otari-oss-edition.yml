@@ -38,6 +38,7 @@ on:
     paths:
       - 'src/gateway/**'
       - 'cli/**'
+      - 'any-search/**'
       - 'alembic/**'
       - 'alembic.ini'
       - 'scripts/oss_edition_smoke.py'
@@ -50,6 +51,7 @@ on:
     paths:
       - 'src/gateway/**'
       - 'cli/**'
+      - 'any-search/**'
       - 'alembic/**'
       - 'alembic.ini'
       - 'scripts/oss_edition_smoke.py'

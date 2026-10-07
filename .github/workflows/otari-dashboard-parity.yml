@@ -23,6 +23,7 @@ on:
       # make, tenancy, auth, usage and the deployment bootstrap included.
       - 'src/gateway/**'
       - 'cli/**'
+      - 'any-search/**'
       # The dashboard bundles this guide (web/src/features/docs/DocsPage.tsx), so a
       # change to it changes the built app.
       - 'docs/dashboard.md'
@@ -37,6 +38,7 @@ on:
       - 'web/**'
       - 'src/gateway/**'
       - 'cli/**'
+      - 'any-search/**'
       - 'docs/dashboard.md'
       - 'pyproject.toml'
       - 'uv.lock'
