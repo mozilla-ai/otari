@@ -332,7 +332,6 @@ function generated(i: number): Trace {
         name: "chat (attempt 2)",
         start: 2200,
         end: 7600,
-        level: "WARNING",
         statusMessage: "Served by fallback provider",
         model: alt,
         tokens: [p, c],

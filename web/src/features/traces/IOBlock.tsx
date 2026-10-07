@@ -2,6 +2,16 @@ export type Format = "formatted" | "raw"
 
 // Input or output of a trace or observation. Formatted reads as text, Raw is
 // the JSON the record carries. No fill: the section title says which is which.
+function tryJson(text: string): unknown {
+  const trimmed = text.trim()
+  if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) return undefined
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return undefined
+  }
+}
+
 export function IOBlock({
   label,
   value,
@@ -11,21 +21,30 @@ export function IOBlock({
   value: unknown
   format: Format
 }) {
+  if (value == null) return null
+  // A string that is really JSON reads as an object in Formatted; Raw is as stored.
+  const parsed =
+    format === "formatted" && typeof value === "string"
+      ? tryJson(value)
+      : undefined
+  if (parsed !== undefined) value = parsed
   const messages = Array.isArray(value)
     ? value
     : value && typeof value === "object" && "role" in (value as object)
       ? [value]
       : null
-  const text =
+  const rawText =
     value && typeof value === "object" && "message" in (value as object)
       ? String((value as { message: unknown }).message)
       : null
+  const embedded =
+    format === "formatted" && rawText !== null ? tryJson(rawText) : undefined
+  if (embedded !== undefined) value = embedded
+  const text = embedded !== undefined ? null : rawText
   return (
     <section className="flex flex-col gap-1.5">
       <h3 className="text-overline text-muted">{label}</h3>
-      {value == null ? (
-        <span className="text-subtle">—</span>
-      ) : format === "formatted" && messages ? (
+      {format === "formatted" && messages ? (
         <div className="flex flex-col gap-2">
           {messages.map((message, index) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: static mock content

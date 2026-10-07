@@ -132,6 +132,54 @@ function Breakdown({ rows }: { rows: [string, string][] }) {
 const DOTTED =
   "underline decoration-dotted decoration-control-border underline-offset-4"
 
+const STATUS_TITLE: Record<Observation["level"], string> = {
+  ERROR: "Error",
+  WARNING: "Warning",
+  DEBUG: "Debug",
+  DEFAULT: "Status",
+}
+
+const STATUS_TONE: Record<Observation["level"], string> = {
+  ERROR: "bg-danger-subtle text-danger",
+  WARNING: "bg-warning-subtle text-warning",
+  DEBUG: "bg-surface-alt text-muted",
+  DEFAULT: "bg-surface-alt text-muted",
+}
+
+function PreviewBody({
+  input,
+  output,
+  statusMessage,
+  level,
+  format,
+}: {
+  input: unknown
+  output: unknown
+  statusMessage?: string
+  level: Observation["level"]
+  format: Format
+}) {
+  if (input == null && output == null && !statusMessage) {
+    return <span className="text-caption text-subtle">No input or output</span>
+  }
+  return (
+    <>
+      {statusMessage ? (
+        <section className="flex flex-col gap-1.5">
+          <h3 className="text-overline text-muted">{STATUS_TITLE[level]}</h3>
+          <p
+            className={`px-3 py-2 whitespace-pre-wrap break-words ${STATUS_TONE[level]}`}
+          >
+            {statusMessage}
+          </p>
+        </section>
+      ) : null}
+      <IOBlock label="Input" value={input} format={format} />
+      <IOBlock label="Output" value={output} format={format} />
+    </>
+  )
+}
+
 function Attributes({
   trace,
   observation,
@@ -511,18 +559,13 @@ export function TracePeek({
               {activeTab === "attributes" && observation ? (
                 <Attributes trace={trace} observation={observation} />
               ) : (
-                <>
-                  <IOBlock
-                    label="Input"
-                    value={observation ? observation.input : trace.input}
-                    format={format}
-                  />
-                  <IOBlock
-                    label="Output"
-                    value={observation ? observation.output : trace.output}
-                    format={format}
-                  />
-                </>
+                <PreviewBody
+                  input={observation ? observation.input : trace.input}
+                  output={observation ? observation.output : trace.output}
+                  statusMessage={observation?.statusMessage}
+                  level={observation?.level ?? "DEFAULT"}
+                  format={format}
+                />
               )}
             </div>
           </>

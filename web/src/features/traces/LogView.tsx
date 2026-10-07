@@ -94,7 +94,7 @@ export function LogView({ trace, format }: { trace: Trace; format: Format }) {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
+      <div className="otari-toolbar flex h-9 shrink-0 items-center gap-1 border-b border-border px-2">
         <SearchField
           label="Search observations"
           placeholder="Search observations..."

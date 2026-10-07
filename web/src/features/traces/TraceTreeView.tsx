@@ -66,7 +66,7 @@ export function TraceTreeView({
         role="treeitem"
         aria-selected={selectedId === null}
         aria-level={1}
-        className={`flex min-h-11 items-center gap-1 pl-3 ${selectedId === null ? "bg-surface-subtle" : "hover:bg-surface-alt"}`}
+        className={`flex min-h-11 items-center pl-3 ${selectedId === null ? "bg-surface-subtle" : "hover:bg-surface-alt"}`}
       >
         <span className="grid size-6 shrink-0 place-items-center">
           <TypeMark type="TRACE" />
