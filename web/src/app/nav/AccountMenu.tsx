@@ -146,6 +146,7 @@ function MenuItem({
   title,
   trailing,
   trailingIcon,
+  hasTrailingGutter = false,
   ariaLabel,
   className = "",
 }: {
@@ -158,6 +159,13 @@ function MenuItem({
   trailing?: string
   /** Fills the same lane as `trailing`, for a mark rather than a value. */
   trailingIcon?: ReactNode
+  /**
+   * Leaves an empty chevron-width slot after the value, so a value ends where
+   * the value of a row that does end in a chevron does. A row an edition adds
+   * to this menu (the data region) ends in one, and without the slot the
+   * appearance row's value would stop 26px to the right of it.
+   */
+  hasTrailingGutter?: boolean
   ariaLabel?: string
   className?: string
 }) {
@@ -189,6 +197,9 @@ function MenuItem({
       ) : (
         <span aria-hidden="true" className="h-0 w-11 shrink-0" />
       )}
+      {hasTrailingGutter ? (
+        <span aria-hidden="true" className="size-4 shrink-0" />
+      ) : null}
     </button>
   )
 }
@@ -281,6 +292,7 @@ function AppearanceControl() {
       label="Appearance"
       icon={FiMoon}
       trailing={current}
+      hasTrailingGutter
       ariaLabel={`Appearance: ${current}. Switch to ${next}.`}
       onPress={toggle}
     />

@@ -115,6 +115,21 @@ afterEach(() => {
 })
 
 describe("AccountMenu", () => {
+  it("ends the appearance row in an empty chevron-width slot, so its value lines up with a row that ends in a chevron", async () => {
+    // A guard on the structure: the row an edition adds under the account (the
+    // data region) ends in a 16px chevron, and the value of this row has to stop
+    // where that one does. jsdom measures nothing, so the slot is what is pinned.
+    mockCaller(OPERATOR)
+    await openMenu()
+
+    const row = await screen.findByRole("button", { name: /^Appearance:/ })
+    const slot = row.lastElementChild
+    expect(slot).toHaveAttribute("aria-hidden", "true")
+    expect(slot).toHaveClass("size-4", "shrink-0")
+    expect(slot).toBeEmptyDOMElement()
+    expect(row).toHaveTextContent(/Light|Dark/)
+  })
+
   it("keeps Playground reachable on mobile before Documentation", async () => {
     mockCaller(OPERATOR)
     await openMenu()
