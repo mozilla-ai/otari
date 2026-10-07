@@ -55,7 +55,7 @@ from gateway.services.tools._code_execution_policy import (
 from gateway.services.tools._code_execution_responses import CODE_INTERPRETER_CALL_ID_PREFIX
 from gateway.services.tools._code_execution_tool import TOOL as CODE_EXECUTION_TOOL
 from gateway.services.tools._combined_backend import CombinedToolBackend, owning_backend
-from gateway.services.tools._declarations import Tool, extract_first_matching_tool
+from gateway.services.tools._declarations import Tool
 from gateway.services.tools._loop_limits import MAX_TOOL_ITERATIONS_CAP
 from gateway.services.tools._mcp_admission import admit_mcp_servers, refuse_shadowed_builtin_tools
 from gateway.services.tools._native import (
@@ -174,7 +174,6 @@ __all__ = [
     "declare_code_execution",
     "declares_code_execution",
     "extract_code_execution_tool",
-    "extract_first_matching_tool",
     "extract_web_tools",
     "first_provider_code_execution_tool",
     "is_capped_call",
