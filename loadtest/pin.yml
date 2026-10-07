@@ -1,0 +1,15 @@
+# Pins the replica under test to cores of its own, away from Postgres, Redis,
+# the fake provider and the load generator, so their work does not land on the
+# cores whose time is being measured. The defaults fit a 4-vCPU CI runner.
+# run.sh adds this file when LOADTEST_PIN=1.
+services:
+  otari-1:
+    cpuset: "${PIN_GATEWAY_CPUS:-0-1}"
+  postgres:
+    cpuset: "${PIN_OTHER_CPUS:-2-3}"
+  redis:
+    cpuset: "${PIN_OTHER_CPUS:-2-3}"
+  fakeprovider:
+    cpuset: "${PIN_OTHER_CPUS:-2-3}"
+  tools:
+    cpuset: "${PIN_OTHER_CPUS:-2-3}"

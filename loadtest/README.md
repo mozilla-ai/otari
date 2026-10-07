@@ -109,27 +109,61 @@ and compares them, which is how CI judges a PR:
 ```bash
 docker build -t otari:base /path/to/main-checkout
 docker build -t otari:head ..
+export LOADTEST_PIN=1 FAKE_LATENCY_MS=50 FAKE_TTFT_MS=50   # as CI runs it
 OTARI_IMAGE=otari:head LOADTEST_BUILD=0 ./run.sh up
 ./run.sh ab otari:base otari:head
 ```
 
-Each image gets a database of its own (`ab_base`, `ab_head`), since a migration
-in head would break base on a shared one. Swapping recreates both replicas and
-restarts nginx. The images alternate base, head, head, base, base, head
-(`AB_ROUNDS`, default 3), each run `AB_SECONDS` (20) at `AB_RPM` (1,000) after a
-discarded warm-up, so drift in the machine's speed lands on both. Keep the rate
-below what the machine saturates at: past it requests queue, and overhead
-measures the queue rather than the gateway. A 4-vCPU CI runner saturates
-somewhere under 3,000. Then each
-counts its statements per request, direct and spilled, and head's tenant is
-checked. `ab.py report` writes `results/ab-TIMESTAMP/report.md` and fails on:
+The load goes straight to `otari-1`, with `otari-2` and nginx stopped: they
+would add noise that belongs to neither build. `LOADTEST_PIN=1` adds `pin.yml`,
+which gives `otari-1` cores of its own (`PIN_GATEWAY_CPUS`, default `0-1`) and
+puts everything else on others (`PIN_OTHER_CPUS`, `2-3`); set it on every
+`run.sh` call, `up` included. Each image gets a database of its own (`ab_base`,
+`ab_head`), since a migration in head would break base on a shared one.
 
-- **statements per request** growing by more than 0.5, direct or spilled;
-- **any failed request** on head (not a 200, or a stream cut short).
+Each scenario is a route or hot path, run in two modes:
 
-CPU per request and overhead p50 are compared too, against how far base's own
-runs spread, but only `AB_FLAGS=--enforce-timing` makes them fail;
-`AB_FLAGS=--allow-regression` reports and passes.
+| scenario | what it sends |
+|---|---|
+| `direct` | non-streamed, straight to Model 2, no shared pool on the key |
+| `pooled` | the same, with a shared pool on the key (one row every request locks) |
+| `spill` | non-streamed at the policy with Model 1's minute already full |
+| `stream` | streamed, straight to Model 2; measured at the first token |
+
+- **idle**: one request at a time for `AB_IDLE_SECONDS` (10). Nothing queues,
+  so this is the gateway's own path.
+- **loaded**: `AB_RPM` (1,000) open loop for `AB_SECONDS` (12). A costlier path
+  shows up here as queueing. Keep the rate below what the machine saturates at.
+
+The builds alternate base, head, head, base, ... (`AB_ROUNDS`, default 4),
+each block on a freshly started replica after a discarded warm-up, so drift in
+the machine's speed lands on both and neither build is measured on an older
+process (a process gets slower as it ages).
+`AB_SCENARIOS` runs a subset. Then each build's statements per request are
+counted, direct and spilled, and head's tenants are checked.
+
+`ab.py report` writes `results/ab-TIMESTAMP/perf.json` and renders `report.md`
+from it. The figure is the gateway's overhead: the client's latency minus the
+fake provider's. For each scenario and mode, the change in p50 and p90 gets a
+95% interval from a hierarchical bootstrap (resample each build's runs, then
+the requests within them, so a run that went slow as a whole widens the
+interval instead of reading as a difference between builds), and a verdict:
+
+- **regression** or **improvement**: the whole interval is beyond the smallest
+  change worth reporting, the larger of 1 ms and 10% of base (identical
+  builds have differed by up to 6% at p50)
+  (`--min-effect-ms`, `--min-effect-pct`);
+- **unchanged**: the whole interval is within it;
+- **inconclusive**: neither, usually because the runs disagreed.
+
+The run fails on a whole extra statement per request, direct or spilled, and on
+any failed request on head. A latency regression fails it only with
+`AB_FLAGS=--enforce-latency`; `AB_FLAGS=--allow-regression` reports and passes.
+
+`perf.json` is the contract for tooling and agents: per scenario and mode, each
+quantile's `base`, `head`, `delta`, `ci95` and `verdict`, CPU per request, and
+every run's own figures; per statement mode, the counts and the statements
+whose count per request changed. `report.md` adds nothing it does not hold.
 
 ## In CI
 
@@ -145,9 +179,10 @@ separate runners:
   re-run the job.
 
 Nightly, `scenarios` runs every scenario at full length and `ab` compares main
-with itself. That A/A run is what the timed allowances should be set from
-before `--enforce-timing` is turned on. The fake provider answers in 50 ms in
-CI rather than 300.
+with itself. That A/A run should read unchanged or inconclusive, never a
+regression or an improvement, and shows how often a runner comes out noisy;
+`--enforce-latency` waits on it. The fake provider answers in 50 ms in CI
+rather than 300.
 
 ## Profiling
 

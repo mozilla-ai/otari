@@ -9,11 +9,13 @@ name: Otari Load Test
 #   stream). Nightly, every scenario at full length, including the replica kill
 #   and the Redis outage.
 # - ab: the PR's merge commit and its base, built on the same runner and run in
-#   turn by `./run.sh ab`, so the two share the runner's noise. Statements per
-#   request and failed requests are enforced. CPU per request and overhead are
-#   reported in the job summary but not enforced, until the nightly A/A run
-#   (main against itself) has shown how far they move on their own; then
-#   AB_FLAGS gains --enforce-timing.
+#   turn by `./run.sh ab` on one replica pinned to cores of its own, scenario by
+#   scenario (direct, pooled, spill, stream), idle and loaded. Each scenario's
+#   overhead gets a verdict from a bootstrap interval on the difference (see
+#   ab.py); the job summary is report.md and the artifact carries perf.json.
+#   Statements per request and failed requests are enforced. Latency is not yet:
+#   the nightly A/A run (main against itself) must first show it says
+#   "unchanged" when nothing changed; then AB_FLAGS gains --enforce-latency.
 #
 # A deliberate cost: add the `perf-accepted` label and re-run the ab job. The
 # label is read when the job runs, not from the event, so a re-run sees it.
@@ -109,7 +111,9 @@ jobs:
 
   ab:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    env:
+      LOADTEST_PIN: 1
     permissions:
       contents: read
       pull-requests: read
@@ -175,6 +179,8 @@ jobs:
       - name: Compare base and head
         env:
           AB_RESTORE: 0
+          AB_BASE_REF: ${{ github.event.pull_request.base.sha || inputs.base || github.sha }}
+          AB_HEAD_REF: ${{ github.sha }}
         run: ./loadtest/run.sh ab otari:base otari:head
 
       - name: Job summary

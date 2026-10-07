@@ -94,12 +94,14 @@ services:
         condition: service_healthy
     healthcheck: &otari-health
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
-      # Often, so `up --wait` and run.sh's image swaps see a replica healthy
-      # as soon as it is.
-      interval: 1s
+      # Every second while starting, so `up --wait` and run.sh's image swaps see
+      # a replica healthy as soon as it is; then rarely, because each probe starts
+      # a Python process on the cores whose time a run is measuring.
+      start_period: 180s
+      start_interval: 1s
+      interval: 30s
       timeout: 3s
-      retries: 180
-      start_period: 10s
+      retries: 3
 
   otari-2:
     <<: *otari

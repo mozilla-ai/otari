@@ -68,6 +68,9 @@ class Summary:
     refusals_429: dict[str, int] = field(default_factory=dict)
     late_starts: int = 0
     per_phase: list[dict] = field(default_factory=list)
+    # --samples: every successful request's overhead, by the slot that served it,
+    # so ab.py can compare distributions rather than one run's percentiles.
+    samples: dict[str, dict[str, list[float]]] = field(default_factory=dict)
 
 
 def percentiles(values: list[float]) -> dict[str, float]:
@@ -200,6 +203,31 @@ async def run_phase(
     return total, late
 
 
+async def run_closed(
+    workers: int,
+    seconds: int,
+    client: httpx.AsyncClient,
+    args: argparse.Namespace,
+    headers: dict[str, str],
+    prompts: dict[int, str],
+    results: list[Result],
+) -> int:
+    """WORKERS clients each sending a request as soon as their last one returns.
+
+    With one worker nothing queues, so latency is the gateway's own path; an
+    open-loop phase measures what queueing adds on top.
+    """
+    deadline = time.perf_counter() + seconds
+    print(f"[{args.label}] closed loop, {workers} worker(s) for {seconds}s", flush=True)
+
+    async def worker() -> None:
+        while time.perf_counter() < deadline:
+            results.append(await one_request(client, args, headers, prompts))
+
+    await asyncio.gather(*(worker() for _ in range(workers)))
+    return len(results)
+
+
 def summarize(label: str, results: list[Result], args: argparse.Namespace, sent: int, late: int) -> Summary:
     summary = Summary(
         label=label,
@@ -234,6 +262,16 @@ def summarize(label: str, results: list[Result], args: argparse.Namespace, sent:
         summary.gateway_overhead_ms = percentiles(
             [r.latency_ms - args.provider_latency_ms for r in ok if not r.stream and r.served_by != "m3"]
         )
+    if args.samples:
+        overhead: dict[str, list[float]] = {}
+        ttft: dict[str, list[float]] = {}
+        for r in ok:
+            slot = r.served_by or "?"
+            if not r.stream and args.provider_latency_ms is not None:
+                overhead.setdefault(slot, []).append(round(r.latency_ms - args.provider_latency_ms, 2))
+            elif r.stream and r.ttft_ms is not None and args.provider_ttft_ms is not None:
+                ttft.setdefault(slot, []).append(round(r.ttft_ms - args.provider_ttft_ms, 2))
+        summary.samples = {"overhead_ms": overhead, "ttft_overhead_ms": ttft}
     return summary
 
 
@@ -249,6 +287,10 @@ async def main_async(args: argparse.Namespace) -> Summary:
     results: list[Result] = []
     sent = late = 0
     async with httpx.AsyncClient(base_url=args.base_url, timeout=args.timeout, limits=limits) as client:
+        if args.closed:
+            workers, seconds = (int(part) for part in args.closed.split(":"))
+            sent = await run_closed(workers, seconds, client, args, headers, prompts, results)
+            return summarize(args.label, results, args, sent, 0)
         for phase in args.phase:
             rpm, seconds = (int(part) for part in phase.split(":"))
             before = len(results)
@@ -308,13 +350,18 @@ def main() -> int:
     parser.add_argument("--users", type=int, default=200, help="end users behind the key; 0 sends no user")
     parser.add_argument("--prompt-mix", type=parse_mix, default=DEFAULT_PROMPT_MIX)
     parser.add_argument("--max-tokens", type=int, default=256)
+    parser.add_argument(
+        "--closed", help="WORKERS:SECONDS, a closed loop instead of --phase (1 worker: latency with nothing queued)"
+    )
     parser.add_argument("--provider-latency-ms", type=float, default=None)
+    parser.add_argument("--provider-ttft-ms", type=float, default=None, help="the fake's time to first chunk")
+    parser.add_argument("--samples", action="store_true", help="keep every request's overhead in the result")
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--max-connections", type=int, default=1000)
     parser.add_argument("--label", default="run")
     parser.add_argument("--out", default="results")
     args = parser.parse_args()
-    if not args.phase:
+    if not args.phase and not args.closed:
         args.phase = ["300:60"]
 
     summary = asyncio.run(main_async(args))
@@ -322,7 +369,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{args.label}-{time.strftime('%Y%m%d-%H%M%S')}.json"
     path.write_text(json.dumps(asdict(summary), indent=2))
-    print(json.dumps(asdict(summary), indent=2))
+    print(json.dumps({k: v for k, v in asdict(summary).items() if k != "samples"}, indent=2))
     print(f"wrote {path}", file=sys.stderr)
     return 0
 
