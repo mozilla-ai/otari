@@ -1986,7 +1986,7 @@ def test_stop_event_caps_the_number_of_judge_gates_evaluated(
 ) -> None:
     """Each judge gate costs one model call, so only the first `cap` gates by priority get a `claude -p` call.
 
-    The rest are skipped with a stderr message naming which.
+    The rest are submitted as `not_run`, and a stderr message names them.
     """
     for name, value in env.items():
         monkeypatch.setenv(name, value)
@@ -2029,12 +2029,47 @@ def test_stop_event_caps_the_number_of_judge_gates_evaluated(
     result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)}, **extra_args)
     assert result.exit_code == 0, result.output
 
-    submitted_ids = [entry.gate_id for entry in captured["judge_results"]]
-    assert submitted_ids == [f"judge-{i}" for i in range(cap)]
+    submitted = [(entry.gate_id, entry.outcome) for entry in captured["judge_results"]]
+    assert submitted == [(f"judge-{i}", "pass" if i < cap else "not_run") for i in range(gate_count)]
     assert claude_call_count == cap
     assert "over the" in result.output
     for skipped_id in (f"judge-{i}" for i in range(cap, gate_count)):
         assert skipped_id in result.output
+
+
+@pytest.mark.parametrize(
+    ("cap", "advice"),
+    [
+        (1, "Raise it with --max-judges or OTARI_HOOK_MAX_JUDGES, up to 20."),
+        (hook_cli._HOOK_JUDGE_MAX_GATES_CEILING, "That is the highest limit allowed."),
+    ],
+    ids=["below-ceiling", "at-ceiling"],
+)
+def test_a_judge_gate_past_the_cap_is_reported_as_skipped_in_the_system_message(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cap: int, advice: str
+) -> None:
+    """The person sees which judge the cap skipped, and how to raise the cap where it can still be raised."""
+    (tmp_path / ".git").mkdir()
+    gates_yaml = "schema_version: '1.0'\npolicy:\n  id: test\ngates:\n" + "".join(
+        f"  - id: judge-{i}\n    type: judge\n"
+        f"    runs: [stop.session]\n    enforcement: advisory\n    rubric: r{i}\n    message: m{i}\n"
+        for i in range(cap + 1)
+    )
+    _guardrail_path(tmp_path).write_text(gates_yaml, encoding="utf-8")
+    monkeypatch.setattr(hook_cli, "_hook_collect_diff", lambda *args, **kwargs: "")
+    monkeypatch.setattr(hook_cli, "_hook_collect_changed_paths", lambda root: [])
+    monkeypatch.setattr(hook_cli, "_hook_run_judge", lambda *args, **kwargs: ("pass", "ok"))
+
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(tmp_path)}, max_judges=str(cap))
+
+    assert result.exit_code == 0, result.output
+    message = _system_message(result)
+    assert "judge-0:" not in message
+    assert (
+        f"judge-{cap}: This judge gate was skipped. ({cap + 1} judge gates applied, over the limit of {cap}" in message
+    )
+    assert advice in message
+    assert "additionalContext" not in result.stdout
 
 
 @pytest.mark.parametrize("value", ["0", str(hook_cli._HOOK_JUDGE_MAX_GATES_CEILING + 1), "many"])

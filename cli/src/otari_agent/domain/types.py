@@ -458,17 +458,20 @@ class CommandEvidence:
 
 @dataclass(frozen=True, slots=True)
 class JudgeVerdict:
-    """One judge gate's model-produced verdict, as the caller observed it.
+    """One judge gate's outcome, as the caller reported it.
 
     ``outcome`` is the caller's own report, not a value Otari computed:
     ``"error"`` means the caller's model call itself failed or returned
     something it could not parse as a verdict (no `claude` on PATH, a
     timeout, malformed JSON), distinct from ``"fail"``, which means the model
     call succeeded and judged the rubric unmet. Otari does not verify either.
+
+    ``"not_run"`` means the caller skipped the gate and made no model call.
+    ``reasoning`` says why.
     """
 
     gate_id: str
-    outcome: Literal["pass", "fail", "error"]
+    outcome: Literal["pass", "fail", "error", "not_run"]
     reasoning: str
 
 

@@ -299,6 +299,7 @@ def test_max_judges_caps_the_judge_calls(repo: Path, monkeypatch: pytest.MonkeyP
 
     assert result.exit_code == 0, result.output
     assert len(seen) == 2
+    assert re.search(r"^  not_run +judge-2 ", result.output, re.MULTILINE)
 
 
 def test_asking_for_verifiers_against_a_commit_is_a_usage_error(repo: Path) -> None:

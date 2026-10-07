@@ -1592,7 +1592,7 @@ class _JudgeSettings(NamedTuple):
 def _hook_collect_judge_verdicts(
     spec: PolicySpec, change: _JudgedChange, settings: _JudgeSettings
 ) -> list[JudgeVerdict]:
-    """Run every applicable judge gate in the local policy, one model-CLI call each,
+    """Run the highest-priority applicable judge gates, up to `settings.max_gates`, one model-CLI call each,
     up to `_HOOK_GATE_MAX_WORKERS` of them concurrently.
 
     Reads `rubric`/`when_changed` off the already-parsed policy the caller
@@ -1631,6 +1631,8 @@ def _hook_collect_judge_verdicts(
     The returned list keeps the order the gates run in:
     `ThreadPoolExecutor.map` yields results in the order its inputs were
     given, not completion order.
+    Each gate past `settings.max_gates` makes no model call.
+    Its `not_run` verdict names the cap, and comes after the verdicts of the gates that ran.
     """
     changed_paths_tuple = tuple(change.changed_paths)
     judge_gates = by_priority(
@@ -1643,11 +1645,21 @@ def _hook_collect_judge_verdicts(
     )
     if not judge_gates:
         return []
-    if len(judge_gates) > settings.max_gates:
-        skipped = [gate.id for gate in judge_gates[settings.max_gates :]]
+    skipped: list[JudgeVerdict] = []
+    overflow = judge_gates[settings.max_gates :]
+    if overflow:
+        over_the_cap = (
+            f"{len(judge_gates)} judge gates applied, over the limit of {settings.max_gates} one run evaluates."
+        )
+        if settings.max_gates < _HOOK_JUDGE_MAX_GATES_CEILING:
+            over_the_cap += (
+                f" Raise it with --max-judges or OTARI_HOOK_MAX_JUDGES, up to {_HOOK_JUDGE_MAX_GATES_CEILING}."
+            )
+        else:
+            over_the_cap += " That is the highest limit allowed."
+        skipped = [JudgeVerdict(gate_id=gate.id, outcome="not_run", reasoning=over_the_cap) for gate in overflow]
         click.echo(
-            f"otari: {len(judge_gates):,} judge gates in this guardrail, over the "
-            f"{settings.max_gates:,} limit; skipping the lowest priority: {', '.join(skipped)}.",
+            f"otari: {over_the_cap} Skipping the lowest priority: {', '.join(gate.id for gate in overflow)}.",
             err=True,
         )
         judge_gates = judge_gates[: settings.max_gates]
@@ -1714,7 +1726,7 @@ def _hook_collect_judge_verdicts(
         return JudgeVerdict(gate_id=gate.id, outcome=cast(_VerdictOutcome, outcome), reasoning=reasoning)
 
     with ThreadPoolExecutor(max_workers=min(len(judge_gates), _HOOK_GATE_MAX_WORKERS)) as executor:
-        return list(executor.map(run_one, judge_gates))
+        return [*executor.map(run_one, judge_gates), *skipped]
 
 
 # A verifier script is expected to be fast and deterministic (a grep, a lint

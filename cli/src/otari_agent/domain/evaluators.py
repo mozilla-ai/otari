@@ -990,8 +990,9 @@ def evaluate_judge(gate: JudgeGate, path_evidence: PathEvidence | None, evidence
     evaluated (see :class:`JudgeEvidence`); a gate whose id has no matching
     verdict here resolves ``unknown``: unlike ``evidence`` being absent
     outright, this caller did run judge gates for this event and is
-    genuinely missing one, most often the caller's judge gate cap skipping a
-    gate this run never got to rather than it resolving cleanly.
+    genuinely missing one.
+
+    A ``"not_run"`` verdict resolves ``not_run``, with the caller's reason as its detail.
 
     The caller's own ``"error"`` outcome (its model call failed or returned
     something unparsable) maps to :class:`Outcome.ERROR`: this is
@@ -1030,6 +1031,15 @@ def evaluate_judge(gate: JudgeGate, path_evidence: PathEvidence | None, evidence
             enforcement=gate.enforcement,
             outcome=Outcome.UNKNOWN,
             message="No model verdict was submitted for this gate.",
+        )
+
+    if verdict.outcome == "not_run":
+        return GateResult(
+            gate_id=gate.id,
+            enforcement=gate.enforcement,
+            outcome=Outcome.NOT_RUN,
+            message="This judge gate was skipped.",
+            detail=verdict.reasoning or None,
         )
 
     if verdict.outcome == "error":
