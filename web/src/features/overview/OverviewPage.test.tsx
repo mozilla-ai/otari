@@ -1020,7 +1020,7 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
     // may hand them off to it.
     expect(screen.getByRole("link", { name: /view all/i })).toHaveAttribute(
       "href",
-      "/activity",
+      "/activity?view=requests",
     )
   })
 

@@ -1290,6 +1290,7 @@ function RecentActivity({
         <h2 className="text-title">Recent activity</h2>
         <Link
           to="/activity"
+          search={{ view: "requests" }}
           className="text-sm text-muted underline underline-offset-2 hover:text-foreground"
         >
           View all →

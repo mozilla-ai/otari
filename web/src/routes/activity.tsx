@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router"
 
-import { ActivityPage } from "@/features/activity/ActivityPage"
+import { ActivityHub } from "@/features/traces/ActivityHub"
 
 export const Route = createFileRoute("/activity")({
-  component: ActivityPage,
+  component: ActivityHub,
 })
