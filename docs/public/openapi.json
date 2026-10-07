@@ -6983,6 +6983,11 @@
       },
       "HostedModelCreateRequest": {
         "description": "Offer a model on a hosted provider, optionally at a custom price.\n\nOmitting the rates means the deployment serves the model at whatever the\nprice ladder already answers: a stored deployment price, else the community\ndefault, which the offer stores as the deployment's own rate.",
+        "example": {
+          "input_price_per_million": 2.5,
+          "model": "gpt-4o",
+          "output_price_per_million": 10
+        },
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -7178,6 +7183,9 @@
       },
       "HostedModelUpdateRequest": {
         "description": "Reprice an offered model, toggle whether it is served, or both.\n\nA price is the input/output pair or nothing: sending the pair writes a new\npricing version, and the cache rates then follow ``POST /pricing``'s own\nsemantics (a field the caller omits inherits the most recent stored value,\nan explicit null clears it). ``enabled`` travels alone freely, so a toggle\nnever re-sends rates it did not change.",
+        "example": {
+          "enabled": false
+        },
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -7324,6 +7332,10 @@
       },
       "HostedProviderCreateRequest": {
         "description": "Configure a provider this deployment will serve hosted inference on.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.",
+        "example": {
+          "api_key": "sk-live-...",
+          "provider": "openai"
+        },
         "properties": {
           "api_base": {
             "anyOf": [
@@ -7453,6 +7465,9 @@
       },
       "HostedProviderUpdateRequest": {
         "description": "Rotate the key, repoint the base, or turn a provider off.\n\n``provider`` is immutable: changing it is a delete plus a create, because\nthe key belongs to the provider it was issued by. Omitting ``api_key``\nleaves the stored credential untouched, so a toggle never re-sends a secret\nthe caller does not have. ``client_args`` omitted is left alone; an explicit\nnull clears it, and an entry echoed back as the mask keeps the stored value.",
+        "example": {
+          "enabled": false
+        },
         "properties": {
           "api_base": {
             "anyOf": [

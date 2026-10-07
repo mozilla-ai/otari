@@ -2333,7 +2333,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"provider\": \"string\",\n  \"api_key\": \"string\"\n}"
+              "raw": "{\n  \"api_key\": \"sk-live-...\",\n  \"provider\": \"openai\"\n}"
             },
             "description": "Configure a provider with the key this deployment will serve it on.\n\nEverything the provider lists on that key is offered at once; a provider\nthat will not say yields a provider with no models, not an error.",
             "header": [
@@ -2407,7 +2407,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"client_args\": {},\n  \"enabled\": false\n}"
+              "raw": "{\n  \"enabled\": false\n}"
             },
             "description": "Rotate the key, repoint the base, or turn a provider off.",
             "header": [
@@ -2545,7 +2545,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"model\": \"string\"\n}"
+              "raw": "{\n  \"input_price_per_million\": 2.5,\n  \"model\": \"gpt-4o\",\n  \"output_price_per_million\": 10\n}"
             },
             "description": "Offer a model on a provider, optionally at a custom price.",
             "header": [
@@ -2616,7 +2616,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"cache_read_price_per_million\": 0,\n  \"cache_write_1h_price_per_million\": 0,\n  \"cache_write_price_per_million\": 0,\n  \"enabled\": false,\n  \"input_price_per_million\": 0,\n  \"output_price_per_million\": 0\n}"
+              "raw": "{\n  \"enabled\": false\n}"
             },
             "description": "Reprice one offered model, toggle whether it is served, or both.",
             "header": [

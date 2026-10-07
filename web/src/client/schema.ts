@@ -9363,6 +9363,11 @@ export interface components {
          *     Omitting the rates means the deployment serves the model at whatever the
          *     price ladder already answers: a stored deployment price, else the community
          *     default, which the offer stores as the deployment's own rate.
+         * @example {
+         *       "input_price_per_million": 2.5,
+         *       "model": "gpt-4o",
+         *       "output_price_per_million": 10
+         *     }
          */
         HostedModelCreateRequest: {
             /** Cache Read Price Per Million */
@@ -9429,6 +9434,9 @@ export interface components {
          *     semantics (a field the caller omits inherits the most recent stored value,
          *     an explicit null clears it). ``enabled`` travels alone freely, so a toggle
          *     never re-sends rates it did not change.
+         * @example {
+         *       "enabled": false
+         *     }
          */
         HostedModelUpdateRequest: {
             /** Cache Read Price Per Million */
@@ -9484,6 +9492,10 @@ export interface components {
          *     ``client_args`` is whatever the provider's SDK client needs beyond the key
          *     (Bedrock's region and IAM pair), the same shape an organization provider
          *     key takes. Values under credential-shaped names come back masked.
+         * @example {
+         *       "api_key": "sk-live-...",
+         *       "provider": "openai"
+         *     }
          */
         HostedProviderCreateRequest: {
             /** Api Base */
@@ -9545,6 +9557,9 @@ export interface components {
          *     leaves the stored credential untouched, so a toggle never re-sends a secret
          *     the caller does not have. ``client_args`` omitted is left alone; an explicit
          *     null clears it, and an entry echoed back as the mask keeps the stored value.
+         * @example {
+         *       "enabled": false
+         *     }
          */
         HostedProviderUpdateRequest: {
             /** Api Base */
