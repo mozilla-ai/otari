@@ -83,8 +83,12 @@ Requests must pass every applicable limit.
 Two budget forms exist:
 
 - A per-user budget limits each attached user independently.
-- A scoped budget limits an organization, workspace, membership, or API key and
-  can optionally narrow the limit to one provider.
+- An organization budget is a limit, a reset cycle, and the entities it applies
+  to: the organization, workspaces, organization members, workspace members, API
+  keys, providers, and models. A provider entity is the organization narrowed to
+  one provider; a model entity is the organization narrowed to one model on a
+  provider. Each entity draws on its own allowance of the limit rather than
+  sharing one pool, and an entity carries at most one budget.
 
 A budget caps up to three things over its period, each set independently and
 each unlimited when left unset: spend in USD (`max_budget`), total tokens
@@ -99,9 +103,27 @@ pass-through routes) are refused once a token cap is exhausted rather than
 reserving headroom for themselves, so a token cap can be passed by the requests
 already in flight when it runs out.
 
-Scoped budgets can use a rolling duration or a UTC calendar boundary. A key with
-`exclude_from_budget`, or a deployment with `budget_strategy: disabled`,
-bypasses enforcement.
+A budget's reset cycle is one of: never, every N hours, every N days, daily,
+weekly on chosen weekdays, monthly on a day of the month (1 to 28), or yearly on
+a date. Calendar cycles reset at a UTC boundary; interval cycles count whole
+steps from the budget's anchor, so a quiet entity does not walk its reset
+forward. Changing a cycle moves every entity and user on the budget to the new
+boundary. Spend reads as zero once a period ends, even before the next request
+rolls the counters.
+
+A request is held to every budget covering it: its API key, its workspace, the
+member, the organization, and any provider or model entity matching where it is
+sent. A model entity is checked before the provider's. A request that falls over
+to another model stays held to the budgets resolved for the first one. A
+Playground request is held to the budgets of the workspace it runs in.
+
+Removing a member from an organization ends their workspace memberships there and
+deletes their member budgets. Their API keys keep working and keep their budgets,
+because keys belong to the workspace; deleting a key deletes its budgets.
+Deleting a budget removes it from every entity it applies to.
+
+A key with `exclude_from_budget`, or a deployment with
+`budget_strategy: disabled`, bypasses enforcement.
 
 Imported usage is retrospective and never counts toward a budget. Batch cost is
 also settled after submission, so operators should not treat those paths as a
