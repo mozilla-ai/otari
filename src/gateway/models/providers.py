@@ -1,4 +1,4 @@
-"""ORM tables for providers: provider instances configured at runtime, owned endpoints, and model aliases."""
+"""ORM tables for providers: runtime instances, owned endpoints, hosted providers, and model aliases."""
 
 import uuid
 from datetime import UTC, datetime
@@ -181,4 +181,69 @@ class ProviderEndpoint(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
+    )
+
+
+# ==============================================================================
+# Hosted providers
+# ==============================================================================
+
+
+class HostedProvider(Base):
+    """A provider this deployment serves hosted inference on, and the key it serves it with.
+
+    One row per any-llm implementation: the deployment's own credential for a
+    request that brings none and names no configured instance, asked for only
+    after every rung upstream of it has missed. Keyed on the implementation
+    because the runtime echoes ``provider`` back as the name usage is keyed on;
+    named instances of one implementation stay a configuration concern.
+
+    The key and the SDK client extras are both stored encrypted and read back
+    in one place. ``api_key_last4`` is kept in clear so a listing can tell rows
+    apart without decrypting every credential.
+    """
+
+    __tablename__ = "hosted_providers"
+    __table_args__ = (UniqueConstraint("provider", name="uq_hosted_providers_provider"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    provider: Mapped[str] = mapped_column(String(64))
+    encrypted_api_key: Mapped[str] = mapped_column()
+    api_key_last4: Mapped[str | None] = mapped_column(String(4))
+    api_base: Mapped[str | None] = mapped_column(String(1024))
+    # Bedrock's region and IAM pair, as one encrypted JSON document: an IAM
+    # secret in there is a credential, and masking it on the way out does not
+    # protect a copy of the database.
+    encrypted_client_args: Mapped[str | None] = mapped_column()
+    enabled: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
+    )
+
+
+class HostedProviderModel(Base):
+    """One model the deployment offers on a hosted provider.
+
+    Membership and a serving switch. The rate lives in ``model_pricing`` keyed
+    ``provider:model``, so this table cannot drift from what a request settles
+    at. Keyed on the provider's name rather than a foreign key, because a
+    hosted provider may also be declared in configuration with no row of its
+    own, and its roster still lives here.
+
+    The switch is one-sided at dispatch: a row switched off refuses, and a
+    model with no row is served but not advertised.
+    """
+
+    __tablename__ = "hosted_provider_models"
+    __table_args__ = (UniqueConstraint("provider", "model", name="uq_hosted_provider_models_provider_model"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    provider: Mapped[str] = mapped_column(String(64))
+    model: Mapped[str] = mapped_column(String(255))
+    # A model nothing prices is offered but not served.
+    enabled: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None, onupdate=lambda: datetime.now(UTC)
     )

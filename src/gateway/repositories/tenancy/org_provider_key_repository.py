@@ -17,6 +17,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.provider_keys import (
     OrgProviderKey,
     WorkspaceProviderKeyOverride,
@@ -75,8 +76,24 @@ class OrgProviderKeyRepository(
     request as-is.
     """
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession | UnitOfWork):
         super().__init__(db, OrgProviderKey)
+
+    async def live_provider_pairs(self, providers: Collection[str]) -> set[tuple[uuid.UUID, str]]:
+        """Each ``(organization_id, provider)`` for which an organization holds a live key.
+
+        Live means unarchived, whether or not the stored secret decrypts: a key
+        this process cannot read is still a tenant's key.
+        """
+        wanted = set(providers)
+        if not wanted:
+            return set()
+        result = await self.db.execute(
+            select(col(OrgProviderKey.organization_id), col(OrgProviderKey.provider))
+            .where(col(OrgProviderKey.provider).in_(wanted), col(OrgProviderKey.archived_at).is_(None))
+            .distinct()
+        )
+        return {(organization_id, provider) for organization_id, provider in result.all()}
 
     async def get_in_organization(self, key_id: uuid.UUID, organization_id: uuid.UUID) -> OrgProviderKey | None:
         """Return a key by id, scoped to the organization it must belong to.

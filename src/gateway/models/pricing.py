@@ -17,10 +17,10 @@ from gateway.models.money import UsdRate
 PRICING_UNITS: tuple[str, ...] = ("tokens", "requests", "images")
 
 # The vocabulary of ``origin`` on the same two tables. ``seed`` belongs to
-# ``organization_model_pricing`` alone: it marks a rate the offered-models
-# surface copied from the community dataset on the organization's behalf, which
-# a later refresh may move, where every other origin is a rate somebody chose
-# and a refresh leaves alone.
+# a rate an offered-models surface copied from the community dataset, an
+# organization's on its own keys or the deployment's on its hosted providers,
+# which a later refresh may move, where every other origin is a rate somebody
+# chose and a refresh leaves alone.
 PRICING_ORIGINS: tuple[str, ...] = ("config", "api", "migration", "seed")
 
 # The one origin a refresh may move. Named because three modules compare against
@@ -105,8 +105,9 @@ class ModelPricing(Base):
     # cannot tell which from the number, so the row says (``PRICING_UNITS``).
     unit: Mapped[str] = mapped_column(String(16), default="tokens", server_default="tokens")
     # Which path wrote the row: ``config`` (the file's ``pricing:`` block),
-    # ``api`` (``POST /v1/pricing``), or ``migration``. NULL on a row written
-    # before origins were recorded, which is a real answer and not a default.
+    # ``api`` (``POST /v1/pricing``), ``migration``, or ``seed`` (a community
+    # default stored on a hosted model's behalf). NULL on a row written before
+    # origins were recorded, which is a real answer and not a default.
     origin: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
