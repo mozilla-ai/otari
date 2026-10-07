@@ -107,7 +107,7 @@ describe("UnpricedUsageWarning", () => {
       screen.getByRole("link", { name: "View unpriced requests" }),
     ).toHaveAttribute(
       "href",
-      "/activity?status=success&priced=false&range=24h&source=gateway",
+      "/activity?view=requests&status=success&priced=false&range=24h&source=gateway",
     )
 
     const params = summaryParams(spy)

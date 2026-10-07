@@ -90,7 +90,12 @@ export function PricingWarning() {
                 </strong>{" "}
                 <Link
                   to="/activity"
-                  search={{ status: "error", range: "1h", source: "gateway" }}
+                  search={{
+                    view: "requests",
+                    status: "error",
+                    range: "1h",
+                    source: "gateway",
+                  }}
                   className="underline underline-offset-2"
                 >
                   View failed requests

@@ -115,6 +115,13 @@ export type RenamePasskeyRequest = Schemas["WebAuthnCredentialUpdate"]
 // Usage and analytics
 // ---------------------------------------------------------------------------
 export type UsageEntry = Schemas["UsageEntry"]
+export type TraceSummary = Schemas["TraceSummaryPublic"]
+export type TraceList = Schemas["TraceListPublic"]
+export type TraceCount = Schemas["TraceCountPublic"]
+export type TraceSeries = Schemas["TraceSeriesPublic"]
+export type TraceDetail = Schemas["TraceDetailPublic"]
+export type TraceSpan = Schemas["SpanPublic"]
+export type TraceTurn = Schemas["TurnPublic"]
 export type UsageCount = Schemas["UsageCount"]
 export type UsageTotals = Schemas["UsageTotals"]
 export type UsageSummary = Schemas["UsageSummary"]

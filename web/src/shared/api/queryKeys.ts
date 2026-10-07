@@ -59,6 +59,7 @@ export const BUDGETS = "budgets"
 export const SCOPED_BUDGETS = "scoped-budgets"
 export const USERS = "users"
 export const USAGE = "usage"
+export const TRACES = "traces"
 export const ORGANIZATIONS = "organizations"
 // The caller's standing in the organization they are acting in. Composed here
 // rather than spelled at the hook, because two things outside that hook address

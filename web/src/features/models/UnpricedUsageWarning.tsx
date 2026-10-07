@@ -99,6 +99,7 @@ export function UnpricedUsageWarning() {
             <Link
               to="/activity"
               search={{
+                view: "requests",
                 status: "success",
                 priced: "false",
                 range: "24h",

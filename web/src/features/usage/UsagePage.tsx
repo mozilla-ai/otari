@@ -883,7 +883,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
         ),
       ),
     }
-    navigate({ to: "/activity", search })
+    navigate({ to: "/activity", search: { ...search, view: "requests" } })
   }
 
   const errorRate =
