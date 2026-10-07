@@ -230,6 +230,20 @@ Usage rows, the usage log writer, OTLP ingest and coding-agent telemetry.
 
 It also owns the route helper `api/routes/_billing_schemas.py`.
 
+### traces
+
+Agent traces: one agent session, its turns, and the spans inside them (each
+request, LLM round, routing attempt, guardrail check, MCP connection and tool
+call), as the gateway observed them or an instrumented agent sent them. Its
+records live in `types/traces.py`, and `TraceService` is its one service.
+
+A trace is a projection, written best-effort after accounting, and never a
+billing source: usage-and-telemetry keeps the usage rows and their cost.
+Inference, tools and usage-and-telemetry depend on traces; traces depends on
+none of them.
+
+Built in the target shape from the start.
+
 ### inference
 
 The request path: the completion dialects, the pass-through endpoints, batches
