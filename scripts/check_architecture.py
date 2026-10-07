@@ -923,7 +923,6 @@ DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
     "gateway/repositories/code_execution/": (
         "__init__.py",
         "sandbox_container_repository.py",
-        "workspace_code_execution_policy_repository.py",
     ),
     "gateway/repositories/tenancy/": (
         "__init__.py",
@@ -938,7 +937,6 @@ DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
     ),
     "gateway/services/code_execution/": (
         "__init__.py",
-        "_workspace_defaults.py",
         "container_sweeper.py",
         "containers.py",
     ),
@@ -1544,11 +1542,8 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "baseline": ("gateway/services/search_tool_store_service.py",),
     },
     "gateway.models.tools.WorkspaceCodeExecutionPolicy": {
-        "repository": "gateway/repositories/code_execution/workspace_code_execution_policy_repository.py",
-        "baseline": (
-            "gateway/services/playground_service.py",
-            "gateway/services/tenancy/workspace_code_execution_policy_service.py",
-        ),
+        "repository": "gateway/repositories/tools/workspace_code_execution_policy_repository.py",
+        "baseline": (),
     },
     "gateway.models.tools.WorkspaceMcpServer": {
         "repository": None,
