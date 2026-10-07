@@ -279,6 +279,7 @@ reworded.
 | `model_not_allowed` | 403 | The key may not use the model | |
 | `context_length_exceeded` | 400 | The prompt is too long for the model | |
 | `pricing_required` | 402 | `require_pricing` is on and the model has no price | |
+| `end_user_budget_not_allowed` | 403 | A service key named an end-user budget that is not on its `end_user_budget_ids` | |
 
 A failure after a stream has started arrives as an error event, which carries
 the code as `error.code` on Chat Completions and Responses:

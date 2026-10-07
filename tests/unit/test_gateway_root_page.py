@@ -377,8 +377,8 @@ def test_hybrid_mode_also_reports_a_missing_dashboard(
     """
     monkeypatch.setattr(gateway_main, "get_dashboard_dir", lambda: None)
     # The platform token alone selects hybrid, which is how a hybrid deployment is
-    # configured (see deploy/render/render.hybrid.yaml). It is resolved once at
-    # config-load time, so it has to be set before the config is built.
+    # configured (see docs/modes.md). It is resolved once at config-load time, so
+    # it has to be set before the config is built.
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw-test-token")
     config = GatewayConfig(
         database_url=f"sqlite:///{tmp_path / 'gateway-hybrid-log-test.db'}",

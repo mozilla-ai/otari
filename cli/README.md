@@ -7,6 +7,7 @@ coding agent. It talks HTTP to a running gateway and needs none of the server.
 |---|---|
 | `otari hook` | The callback a coding agent's hook calls. Composes the repository's guardrail files under `.otari/`, and your own under `~/.otari/`, and evaluates them in process; see `docs/agent-guardrails.md`. |
 | `otari hook setup` | Registers that callback in the agent's own settings file. |
+| `otari guardrails check` | Runs the repository's gates against a change, such as a pull request in CI; see `docs/agent-guardrails.md`. |
 | `otari guardrails generate` | Proposes guardrail gates from the repository's own `AGENTS.md` or `CLAUDE.md`, one at a time. |
 | `otari guardrails validate` | Checks the composed guardrail offline, and dry-runs it against a command or a path. |
 | `otari import claude-code` | Backfills Claude Code usage from local transcripts into a gateway. |
@@ -39,7 +40,7 @@ commands (`serve`, `migrate`, ...) to the same `otari` group through
 `gateway.cli.register`. On its own, `otari --help` lists only the commands
 above.
 
-Dependencies are click, httpx, python-dotenv and pyyaml, all pure Python.
+Dependencies are click, httpx and pyyaml, all pure Python.
 `scripts/check_architecture.py` refuses an import of the gateway or of the
 server stack from here, and `tests/unit/test_otari_agent_cli.py` checks that
 importing the CLI loads none of it.

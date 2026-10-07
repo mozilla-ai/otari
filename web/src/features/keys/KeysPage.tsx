@@ -69,6 +69,13 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import { ExpiryFields } from "./ExpiryFields"
 import { KeyActionsMenu } from "./KeyActionsMenu"
+import {
+  NO_SERVICE_KEY,
+  ServiceKeyFields,
+  serviceKeyBody,
+  serviceKeyChoice,
+  useServiceKeyReady,
+} from "./ServiceKeyFields"
 import { isVirtualUser, keyFingerprint, secretCaption } from "./secretCaption"
 
 // ---------- helpers ----------
@@ -438,6 +445,7 @@ function CreateKeyDialog({
     undefined,
   )
   const [excludeFromBudget, setExcludeFromBudget] = useState(false)
+  const [serviceKey, setServiceKey] = useState(NO_SERVICE_KEY)
   const [rejectUserMismatch, setRejectUserMismatch] =
     useState<UserMismatchChoice>("inherit")
   const [scopeValid, setScopeValid] = useState(true)
@@ -469,7 +477,9 @@ function CreateKeyDialog({
   // caller belongs to that default, which is the answer this form surfaces
   // rather than pre-empting.
   const workspaceUnresolved = workspaceLoading
-  const isBlocked = !scopeValid || ownerMissing || workspaceUnresolved
+  const serviceKeyReady = useServiceKeyReady(serviceKey)
+  const isBlocked =
+    !scopeValid || !serviceKeyReady || ownerMissing || workspaceUnresolved
 
   // What the form owns, handed to the guard whole rather than compared field by
   // field: the two drifted apart once already, with the guard armed for three
@@ -487,6 +497,7 @@ function CreateKeyDialog({
     userId,
     allowedModels,
     excludeFromBudget,
+    serviceKey,
     rejectUserMismatch,
     scopeValid,
   })
@@ -498,6 +509,7 @@ function CreateKeyDialog({
     setUserId("")
     setAllowedModels(undefined)
     setExcludeFromBudget(false)
+    setServiceKey(NO_SERVICE_KEY)
     setRejectUserMismatch("inherit")
     setScopeValid(true)
     create.reset()
@@ -536,6 +548,7 @@ function CreateKeyDialog({
           ...shared,
           user_id: userId.trim(),
           exclude_from_budget: excludeFromBudget,
+          ...serviceKeyBody(serviceKey),
         }
       : shared
     create.mutate(body, {
@@ -675,6 +688,9 @@ function CreateKeyDialog({
               onChange={setExcludeFromBudget}
             />
           ) : null}
+          {isDeploymentWide ? (
+            <ServiceKeyFields value={serviceKey} onChange={setServiceKey} />
+          ) : null}
           <UserMismatchPicker
             value={rejectUserMismatch}
             onChange={setRejectUserMismatch}
@@ -750,22 +766,28 @@ function EditKeyForm({
   const [excludeFromBudget, setExcludeFromBudget] = useState(
     apiKey.exclude_from_budget,
   )
+  const [serviceKey, setServiceKey] = useState(() => serviceKeyChoice(apiKey))
   const [rejectUserMismatch, setRejectUserMismatch] =
     useState<UserMismatchChoice>(
       userMismatchChoice(apiKey.reject_user_mismatch),
     )
   const [scopeValid, setScopeValid] = useState(true)
+  // Only the deployment-wide form shows the service key fields, so only it waits on the budgets.
+  const serviceKeyReady = useServiceKeyReady(
+    isDeploymentWide ? serviceKey : NO_SERVICE_KEY,
+  )
   const { isDirty } = useDirtySnapshot({
     keyName,
     expiresAt,
     allowedModels,
     excludeFromBudget,
+    serviceKey,
     rejectUserMismatch,
     scopeValid,
   })
 
   const submit = () => {
-    if (update.isPending || !scopeValid) return
+    if (update.isPending || !scopeValid || !serviceKeyReady) return
     const shared = {
       key_name: keyName.trim() || null,
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
@@ -774,7 +796,11 @@ function EditKeyForm({
     }
     // The member surface has no budget exemption to send (see CreateKeyDialog).
     const body: UpdateKeyRequest | UpdateOwnKeyRequest = isDeploymentWide
-      ? { ...shared, exclude_from_budget: excludeFromBudget }
+      ? {
+          ...shared,
+          exclude_from_budget: excludeFromBudget,
+          ...serviceKeyBody(serviceKey),
+        }
       : shared
     update.mutate({ id: apiKey.id, body }, { onSuccess: onClose })
   }
@@ -792,7 +818,7 @@ function EditKeyForm({
       submitLabel="Save"
       onSubmit={submit}
       isPending={update.isPending}
-      isSubmitDisabled={!scopeValid}
+      isSubmitDisabled={!scopeValid || !serviceKeyReady}
       isDirty={isDirty}
       error={update.error}
     >
@@ -836,6 +862,9 @@ function EditKeyForm({
           checked={excludeFromBudget}
           onChange={setExcludeFromBudget}
         />
+      ) : null}
+      {isDeploymentWide ? (
+        <ServiceKeyFields value={serviceKey} onChange={setServiceKey} />
       ) : null}
       <UserMismatchPicker
         value={rejectUserMismatch}
@@ -915,6 +944,15 @@ function KeyMetaLine({
       ink: "text-muted",
       title:
         "Requests on this key are logged with cost but never counted toward budget",
+    })
+  }
+  if (apiKey.is_service_key) {
+    const count = apiKey.end_user_budget_ids.length
+    facts.push({
+      key: "service",
+      text: "Service key",
+      ink: "text-muted",
+      title: `Bills the end users its requests name, on ${count} end-user budget${count === 1 ? "" : "s"}`,
     })
   }
   if (apiKey.reject_user_mismatch !== null) {

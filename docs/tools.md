@@ -501,6 +501,34 @@ backend is configured.
 The policy also applies to direct search where relevant. In hybrid mode, the
 connected control plane supplies workspace search configuration.
 
+### Organization search keys
+
+An organization can bring its own key for a search provider (`tavily` or
+`brave`), so its workspaces' searches are paid by its own search account and
+count against its own quota, rather than the deployment's. Organization owners
+and admins manage the keys under `/api/v1/organizations/me/web-search-keys`: add,
+rename or replace a key, archive it, and make one key per provider the
+organization's default. Only the last four characters of a key are ever shown.
+
+Each workspace searches with one key, for model-initiated and
+[direct search](#direct-search) alike:
+
+1. the key the workspace pinned as its own, if any;
+2. otherwise an organization default, Tavily before Brave;
+3. otherwise the organization's oldest key.
+
+A key the workspace turned off, an archived key, or one this deployment cannot
+decrypt is passed over. A workspace with no usable key uses the deployment's
+search exactly as before. A workspace's owners and admins pin or turn off keys
+under `/api/v1/workspaces/{workspace_id}/web-search-keys`, which any member of
+the workspace can read to see which key it uses.
+
+A key changes who pays for a search, not whether search is available: the
+deployment must still have web search configured, and the workspace's
+web-access policy still applies. In hybrid mode the control plane chooses the
+key and returns it with the workspace's policy; see
+[Web Access resolution](hybrid-mode-protocol.md#web-access-resolution).
+
 ## Direct search
 
 In standalone mode, `POST /api/v1/search` lets the caller submit a query directly
@@ -510,3 +538,10 @@ through [`search_tools`](configuration.md#search-tools) or the Search tools API.
 A SearXNG search tool can reuse `web_search_url`, so model-initiated and direct
 search can share one backend. They remain distinct surfaces with separate
 pricing keys.
+
+A workspace with a usable [organization search key](#organization-search-keys)
+runs its direct searches on that key rather than on the named tool's backend.
+The named tool must still be configured, and the request is still allowlisted,
+rate-limited, priced and timed out as that tool. A Brave key localizes results to
+the request's `country`; Tavily takes a country by its full name, so a Tavily key
+does not.

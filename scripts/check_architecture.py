@@ -49,6 +49,7 @@ Enforces:
     each name is a domain that docs/domains.md gives a section. An exceptions
     module is named <domain>_exceptions.py. The names that do not match yet are
     on a baseline, and the baseline only shrinks.
+    A package on it holds only the modules the baseline lists, so new code goes in its domain's package.
 20. Repository imports: only a domain's own service package, its own
     repository package and the builders in gateway/api/deps.py import a
     domain's repository package, so a domain's queries stay behind its
@@ -58,6 +59,16 @@ Enforces:
 21. Service package imports: code outside a domain's service package
     imports only its root, so the root's exports are the domain's whole
     public API.
+22. Mode branches: nothing under services/ reads the deployment's mode,
+    so the behavior for each mode is chosen by a binding, not by a branch in a service.
+    A read is any use of is_hosted_mode, is_hybrid_mode, effective_mode or configured_mode, or a call to deployment_for.
+    The raw mode field and the platform token stay with review, because their names do not say that a mode is read.
+    The modules that still read one are named on a baseline, and the baseline only shrinks.
+23. Model access: each ORM model has one repository module that may construct or query it,
+    so a table has one writer and its queries stay in one place.
+    A model has none until a repository holds its queries.
+    The other modules that use a model are named on its baseline, and the baseline only shrinks.
+    A class in models/ is an ORM model when it passes table=True or assigns __tablename__ or __table__.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -70,7 +81,7 @@ Exit codes:
 import ast
 import re
 import sys
-from collections.abc import Container, Iterator
+from collections.abc import Callable, Container, Iterator
 from pathlib import Path
 from typing import TypedDict
 
@@ -709,6 +720,58 @@ def check_unit_of_work_construction(src_root: Path) -> list[str]:
     return violations
 
 
+MODE_READS = ("configured_mode", "effective_mode", "is_hosted_mode", "is_hybrid_mode")
+MODE_FUNCTION = "deployment_for"
+# The services that still read the deployment's mode.
+# An entry that stops reading it fails the check until it is removed, so the list only shrinks.
+SERVICE_MODE_READ_BASELINE = (
+    "gateway/services/playground_service.py",
+    "gateway/services/provider_kwargs.py",
+)
+
+
+def _mode_reads(tree: ast.Module) -> list[tuple[int, str]]:
+    """Return the line and name of each read of the deployment's mode in a module, including one through getattr."""
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load) and node.attr in MODE_READS:
+            found.append((node.lineno, node.attr))
+        elif isinstance(node, ast.Call) and _called_name(node.func) == MODE_FUNCTION:
+            found.append((node.lineno, MODE_FUNCTION))
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and len(node.args) > 1
+        ):
+            name = node.args[1]
+            if isinstance(name, ast.Constant) and isinstance(name.value, str) and name.value in MODE_READS:
+                found.append((node.lineno, name.value))
+    return sorted(found)
+
+
+def check_service_mode_reads(src_root: Path) -> list[str]:
+    """Check that no service off the baseline reads the deployment's mode, and that every baseline entry still does."""
+    violations: list[str] = []
+    reading: set[str] = set()
+    for relative_path, tree in _parsed_modules(src_root, SERVICE_SCOPE):
+        reads = _mode_reads(tree)
+        if not reads:
+            continue
+        reading.add(relative_path)
+        if relative_path not in SERVICE_MODE_READ_BASELINE:
+            violations.extend(
+                f"{relative_path}:{line} reads {name}; a service gets the behavior for each mode from a binding, "
+                "not from a branch on the mode"
+                for line, name in reads
+            )
+    violations.extend(
+        f"{relative_path} is on the mode read baseline but reads no mode; remove it from the baseline"
+        for relative_path in sorted(set(SERVICE_MODE_READ_BASELINE) - reading)
+    )
+    return violations
+
+
 # Service modules are purpose-named (guardrails.py, url_safety.py, ...), so
 # there is no *_service.py naming rule to enforce.
 def check_naming_conventions(src_root: Path) -> list[str]:
@@ -853,16 +916,74 @@ DOMAIN_HEADING = re.compile(r"^### (.*)$", re.MULTILINE)
 DOMAIN_NAME = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 SHARED_HEADING = "Shared"
 # These names do not match a domain yet. The baseline only shrinks, so a reviewer refuses a new entry.
-DOMAIN_NAME_BASELINE = (
-    "gateway/exceptions/budget_exceptions.py",
-    "gateway/exceptions/control_plane_exceptions.py",
-    "gateway/repositories/code_execution/",
-    "gateway/repositories/tenancy/",
-    "gateway/services/code_execution/",
-    "gateway/services/control_plane/",
-    "gateway/services/mail/",
-    "gateway/services/tenancy/",
-)
+# A package's entry names every module it holds, so a new module in it is refused.
+DOMAIN_NAME_BASELINE: dict[str, tuple[str, ...]] = {
+    "gateway/exceptions/budget_exceptions.py": (),
+    "gateway/exceptions/control_plane_exceptions.py": (),
+    "gateway/repositories/code_execution/": (
+        "__init__.py",
+        "sandbox_container_repository.py",
+        "workspace_code_execution_policy_repository.py",
+    ),
+    "gateway/repositories/tenancy/": (
+        "__init__.py",
+        "invitation_repository.py",
+        "org_provider_key_repository.py",
+        "organization_domain_repository.py",
+        "organization_guardrail_definition_repository.py",
+        "organization_member_repository.py",
+        "organization_repository.py",
+        "user_repository.py",
+        "workspace_repository.py",
+    ),
+    "gateway/services/code_execution/": (
+        "__init__.py",
+        "_workspace_defaults.py",
+        "container_sweeper.py",
+        "containers.py",
+    ),
+    "gateway/services/control_plane/": (
+        "__init__.py",
+        "_resolve.py",
+        "transport.py",
+    ),
+    "gateway/services/mail/": (
+        "__init__.py",
+        "mailer.py",
+        "message.py",
+        "templates.py",
+        "transports.py",
+    ),
+    "gateway/services/tenancy/": (
+        "__init__.py",
+        "authorization.py",
+        "deployment_user_service.py",
+        "domain_verification.py",
+        "email_address.py",
+        "invitation_email.py",
+        "membership_listener.py",
+        "org_provider_key_service.py",
+        "organization_domain_service.py",
+        "organization_guardrail_definition_service.py",
+        "organization_guardrail_runner.py",
+        "organization_guardrail_service.py",
+        "organization_model_access.py",
+        "organization_service.py",
+        "password_policy.py",
+        "password_reset_email.py",
+        "provisioning_service.py",
+        "tokens.py",
+        "user_service.py",
+        "verification_email.py",
+        "webauthn_service.py",
+        "workspace_activation_service.py",
+        "workspace_code_execution_policy_service.py",
+        "workspace_listener.py",
+        "workspace_mcp_server_service.py",
+        "workspace_service.py",
+        "workspace_web_search_service.py",
+    ),
+}
 # These modules belong to no domain. The set grows when the shared set does.
 SHARED_EXCEPTION_MODULES = ("gateway/exceptions/_base.py", "gateway/exceptions/shared_exceptions.py")
 
@@ -923,8 +1044,38 @@ def read_domains_page(doc_path: Path) -> tuple[set[str], list[str]]:
     return documented_domains(doc_path.read_text(encoding="utf-8"))
 
 
+def _baseline_package_modules(src_root: Path) -> list[str]:
+    """Return each module a package on the domain name baseline holds but does not list, and each it lists but lacks."""
+    violations: list[str] = []
+    for package, listed in DOMAIN_NAME_BASELINE.items():
+        package_root = src_root / package
+        if not package.endswith("/"):
+            if listed:
+                violations.append(f"{package} is a module, so its domain name baseline entry lists no modules")
+            continue
+        if not package_root.is_dir():
+            continue
+        held = {
+            module.relative_to(package_root).as_posix()
+            for module in package_root.rglob("*.py")
+            if "__pycache__" not in module.parts
+        }
+        violations.extend(
+            f"{package}{module} is a new module in a package named for no domain; put it in its domain's package"
+            for module in sorted(held - set(listed))
+        )
+        violations.extend(
+            f"{package}{module} is on the domain name baseline but no longer exists; remove it from the baseline"
+            for module in sorted(set(listed) - held)
+        )
+    return violations
+
+
 def check_domain_names(src_root: Path, domains: set[str]) -> list[str]:
-    """Check that each domain package and domain module names one of the documented domains."""
+    """Check that each domain package and domain module names one of the documented domains.
+
+    A package whose name is not a domain yet holds only the modules its baseline entry lists.
+    """
     locations, misnamed = _domain_named_locations(src_root)
     violations = list(misnamed)
     violations.extend(
@@ -939,6 +1090,7 @@ def check_domain_names(src_root: Path, domains: set[str]) -> list[str]:
         for relative_path in DOMAIN_NAME_BASELINE
         if not (src_root / relative_path).exists() or locations.get(relative_path) in domains
     )
+    violations.extend(_baseline_package_modules(src_root))
     return violations
 
 
@@ -1056,6 +1208,694 @@ def check_service_package_imports(src_root: Path, domains: set[str]) -> list[str
     ]
 
 
+MODELS_SCOPE = "gateway/models"
+TABLE_ATTRIBUTES = ("__table__", "__tablename__")
+TYPE_ALIAS = ("TypeAlias", "typing.TypeAlias", "typing_extensions.TypeAlias")
+TYPE_CHECKS = ("isinstance", "issubclass")
+TYPING_CASTS = ("typing.cast", "typing_extensions.cast")
+
+
+class ModelAccess(TypedDict):
+    """Each field names modules that may use one ORM model: its repository, and the others that still do."""
+
+    repository: str | None
+    baseline: tuple[str, ...]
+
+
+# The map has an entry for each ORM model, keyed by its import path.
+# Its repository is the one module that may construct or query the model,
+# or None where no repository holds its queries yet.
+# Its baseline names the other modules that still use the model, and a baseline only shrinks.
+MODEL_ACCESS: dict[str, ModelAccess] = {
+    "gateway.models.api_keys.APIKey": {
+        "repository": "gateway/repositories/api_keys/api_key_repository.py",
+        "baseline": (
+            "gateway/api/deps.py",
+            "gateway/api/routes/batches.py",
+            "gateway/api/routes/catalog.py",
+            "gateway/api/routes/keys.py",
+            "gateway/api/routes/organization_keys.py",
+            "gateway/api/routes/organization_usage.py",
+            "gateway/api/routes/scoped_budgets.py",
+            "gateway/api/routes/usage.py",
+            "gateway/api/routes/users.py",
+            "gateway/repositories/overview/overview_repository.py",
+            "gateway/repositories/users_repository.py",
+            "gateway/services/bootstrap_service.py",
+            "gateway/services/playground_dispatch.py",
+            "gateway/services/tenancy/workspace_activation_service.py",
+            "gateway/services/workspace_scope.py",
+        ),
+    },
+    "gateway.models.budgets.Budget": {
+        "repository": "gateway/repositories/budgets/budget_repository.py",
+        "baseline": (
+            "gateway/api/routes/budgets.py",
+            "gateway/api/routes/scoped_budgets.py",
+            "gateway/api/routes/users.py",
+            "gateway/repositories/budgets/scoped_budget_repository.py",
+            "gateway/repositories/overview/overview_repository.py",
+            "gateway/repositories/tenancy/organization_member_repository.py",
+            "gateway/services/budgets/_organization_surface.py",
+            "gateway/services/budgets/_reservations.py",
+            "gateway/services/budgets/_scoped_enforcement.py",
+        ),
+    },
+    "gateway.models.budgets.BudgetReservation": {
+        "repository": None,
+        "baseline": ("gateway/services/budgets/_ledger.py",),
+    },
+    "gateway.models.budgets.BudgetReservationScope": {
+        "repository": None,
+        "baseline": ("gateway/services/budgets/_ledger.py",),
+    },
+    "gateway.models.budgets.BudgetResetLog": {
+        "repository": "gateway/repositories/budgets/budget_repository.py",
+        "baseline": (
+            "gateway/api/routes/budgets.py",
+            "gateway/services/budgets/_reservations.py",
+        ),
+    },
+    "gateway.models.budgets.ScopedBudget": {
+        "repository": "gateway/repositories/budgets/scoped_budget_repository.py",
+        "baseline": (
+            "gateway/api/routes/scoped_budgets.py",
+            "gateway/repositories/overview/overview_repository.py",
+            "gateway/repositories/tenancy/organization_member_repository.py",
+            "gateway/services/budgets/_member_policies.py",
+            "gateway/services/budgets/_organization_surface.py",
+            "gateway/services/budgets/_retiming.py",
+            "gateway/services/budgets/_scoped_enforcement.py",
+        ),
+    },
+    "gateway.models.budgets.WorkspaceBudgetDefault": {
+        "repository": "gateway/repositories/budgets/workspace_budget_default_repository.py",
+        "baseline": ("gateway/services/budgets/_member_policies.py",),
+    },
+    "gateway.models.files.FileObject": {
+        "repository": "gateway/repositories/files/file_repository.py",
+        "baseline": ("gateway/services/files/_service.py",),
+    },
+    "gateway.models.files.FileProviderCopy": {
+        "repository": "gateway/repositories/files/file_provider_copy_repository.py",
+        "baseline": ("gateway/services/files/_provider_uploads.py",),
+    },
+    "gateway.models.guardrails.OrganizationGuardrail": {
+        "repository": None,
+        "baseline": (
+            "gateway/repositories/tenancy/organization_guardrail_definition_repository.py",
+            "gateway/services/tenancy/organization_guardrail_service.py",
+        ),
+    },
+    "gateway.models.guardrails.OrganizationGuardrailDefinition": {
+        "repository": "gateway/repositories/tenancy/organization_guardrail_definition_repository.py",
+        "baseline": (
+            "gateway/services/tenancy/organization_guardrail_definition_service.py",
+            "gateway/services/tenancy/organization_guardrail_service.py",
+        ),
+    },
+    "gateway.models.guardrails.OrganizationGuardrailWorkspace": {
+        "repository": None,
+        "baseline": ("gateway/services/tenancy/organization_guardrail_service.py",),
+    },
+    "gateway.models.inference.BatchRecord": {
+        "repository": None,
+        "baseline": ("gateway/services/batch_service.py",),
+    },
+    "gateway.models.inference.IdempotencyRecord": {
+        "repository": "gateway/repositories/inference/idempotency_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.platform.RuntimeSetting": {
+        "repository": None,
+        "baseline": (
+            "gateway/services/dashboard_session_service.py",
+            "gateway/services/maintenance_mode_service.py",
+            "gateway/services/master_key_service.py",
+            "gateway/services/runtime_settings_service.py",
+            "gateway/services/tenancy/provisioning_service.py",
+            "gateway/services/tool_settings_service.py",
+        ),
+    },
+    "gateway.models.playground.PlaygroundComparison": {
+        "repository": None,
+        "baseline": ("gateway/services/playground_service.py",),
+    },
+    "gateway.models.playground.PlaygroundConsent": {
+        "repository": None,
+        "baseline": ("gateway/services/playground_service.py",),
+    },
+    "gateway.models.playground.PlaygroundConversation": {
+        "repository": None,
+        "baseline": ("gateway/services/playground_service.py",),
+    },
+    "gateway.models.playground.PlaygroundFavoriteModel": {
+        "repository": None,
+        "baseline": ("gateway/services/playground_service.py",),
+    },
+    "gateway.models.playground.PlaygroundMessage": {
+        "repository": None,
+        "baseline": ("gateway/services/playground_service.py",),
+    },
+    "gateway.models.pricing.ModelPricing": {
+        "repository": None,
+        "baseline": (
+            "gateway/api/routes/models.py",
+            "gateway/api/routes/pricing.py",
+            "gateway/repositories/pricing/organization_model_pricing_repository.py",
+            "gateway/services/external_usage_service.py",
+            "gateway/services/merged_catalog_service.py",
+            "gateway/services/pricing_init_service.py",
+            "gateway/services/pricing_service.py",
+            "gateway/services/usage_admin_service.py",
+        ),
+    },
+    "gateway.models.pricing.OrganizationModelPricing": {
+        "repository": "gateway/repositories/pricing/organization_model_pricing_repository.py",
+        "baseline": (
+            "gateway/services/organization_pricing_service.py",
+            "gateway/services/pricing_service.py",
+            "gateway/services/providers/_org_provider_model_service.py",
+        ),
+    },
+    "gateway.models.pricing.PricingSnapshot": {
+        "repository": None,
+        "baseline": (
+            "gateway/api/routes/catalog.py",
+            "gateway/services/pricing_refresh_service.py",
+        ),
+    },
+    "gateway.models.pricing.PricingSnapshotHistory": {
+        "repository": None,
+        "baseline": ("gateway/services/pricing_refresh_service.py",),
+    },
+    "gateway.models.provider_keys.OrgProviderKey": {
+        "repository": "gateway/repositories/tenancy/org_provider_key_repository.py",
+        "baseline": ("gateway/services/tenancy/org_provider_key_service.py",),
+    },
+    "gateway.models.provider_keys.OrgProviderKeyModel": {
+        "repository": "gateway/repositories/providers/org_provider_key_model_repository.py",
+        "baseline": ("gateway/services/providers/_org_provider_model_service.py",),
+    },
+    "gateway.models.provider_keys.WorkspaceProviderKeyOverride": {
+        "repository": "gateway/repositories/tenancy/org_provider_key_repository.py",
+        "baseline": ("gateway/services/tenancy/org_provider_key_service.py",),
+    },
+    "gateway.models.provider_keys.WorkspaceProviderModelRestriction": {
+        "repository": "gateway/repositories/tenancy/org_provider_key_repository.py",
+        "baseline": ("gateway/services/tenancy/org_provider_key_service.py",),
+    },
+    "gateway.models.providers.ModelAlias": {
+        "repository": None,
+        "baseline": (
+            "gateway/api/routes/aliases.py",
+            "gateway/api/routes/organization_routing.py",
+            "gateway/services/alias_service.py",
+        ),
+    },
+    "gateway.models.providers.ProviderCredential": {
+        "repository": None,
+        "baseline": ("gateway/services/provider_store_service.py",),
+    },
+    "gateway.models.providers.ProviderEndpoint": {
+        "repository": "gateway/repositories/providers/provider_endpoint_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.rate_limits.StoredRateLimitRule": {
+        "repository": "gateway/repositories/rate_limits/rate_limit_rule_repository.py",
+        "baseline": ("gateway/services/rate_limits/_service.py",),
+    },
+    "gateway.models.routing.RouterPreference": {
+        "repository": None,
+        "baseline": ("gateway/api/routes/routing_memory.py",),
+    },
+    "gateway.models.routing.RoutingMemory": {
+        "repository": None,
+        "baseline": (
+            "gateway/api/routes/routing_memory.py",
+            "gateway/services/routing/knn.py",
+        ),
+    },
+    "gateway.models.routing.RoutingPolicy": {
+        "repository": None,
+        "baseline": (
+            "gateway/api/routes/organization_routing.py",
+            "gateway/api/routes/routing.py",
+            "gateway/services/policy_store.py",
+        ),
+    },
+    "gateway.models.tenancy.DashboardSession": {
+        "repository": None,
+        "baseline": ("gateway/services/dashboard_session_service.py",),
+    },
+    "gateway.models.tenancy.Invitation": {
+        "repository": "gateway/repositories/tenancy/invitation_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.tenancy.OAuthPendingState": {
+        "repository": None,
+        "baseline": ("gateway/services/oauth_service.py",),
+    },
+    "gateway.models.tenancy.Organization": {
+        "repository": "gateway/repositories/tenancy/organization_repository.py",
+        "baseline": (
+            "gateway/api/routes/scoped_budgets.py",
+            "gateway/repositories/tenancy/invitation_repository.py",
+            "gateway/repositories/tenancy/organization_member_repository.py",
+            "gateway/services/tenancy/provisioning_service.py",
+            "gateway/services/workspace_scope.py",
+        ),
+    },
+    "gateway.models.tenancy.OrganizationDomain": {
+        "repository": "gateway/repositories/tenancy/organization_domain_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.tenancy.OrganizationMember": {
+        "repository": "gateway/repositories/tenancy/organization_member_repository.py",
+        "baseline": (
+            "gateway/api/routes/scoped_budgets.py",
+            "gateway/repositories/tenancy/invitation_repository.py",
+            "gateway/repositories/users_repository.py",
+            "gateway/services/budgets/_scoped_enforcement.py",
+        ),
+    },
+    "gateway.models.tenancy.User": {
+        "repository": "gateway/repositories/tenancy/user_repository.py",
+        "baseline": (
+            "gateway/api/deps.py",
+            "gateway/repositories/tenancy/organization_member_repository.py",
+            "gateway/repositories/tenancy/workspace_repository.py",
+            "gateway/services/dashboard_session_service.py",
+            "gateway/services/tenancy/provisioning_service.py",
+            "gateway/services/tenancy/webauthn_service.py",
+        ),
+    },
+    "gateway.models.tenancy.WebAuthnChallenge": {
+        "repository": None,
+        "baseline": ("gateway/services/tenancy/webauthn_service.py",),
+    },
+    "gateway.models.tenancy.WebAuthnCredential": {
+        "repository": None,
+        "baseline": ("gateway/services/tenancy/webauthn_service.py",),
+    },
+    "gateway.models.tenancy.Workspace": {
+        "repository": "gateway/repositories/tenancy/workspace_repository.py",
+        "baseline": (
+            "gateway/api/routes/_helpers.py",
+            "gateway/api/routes/catalog.py",
+            "gateway/api/routes/keys.py",
+            "gateway/api/routes/organization_keys.py",
+            "gateway/api/routes/organization_routing.py",
+            "gateway/api/routes/organization_usage.py",
+            "gateway/api/routes/scoped_budgets.py",
+            "gateway/repositories/budgets/workspace_budget_default_repository.py",
+            "gateway/repositories/overview/overview_repository.py",
+            "gateway/repositories/tenancy/organization_member_repository.py",
+            "gateway/repositories/users_repository.py",
+            "gateway/services/budgets/_scoped_enforcement.py",
+            "gateway/services/tenancy/org_provider_key_service.py",
+            "gateway/services/tenancy/organization_model_access.py",
+            "gateway/services/workspace_scope.py",
+        ),
+    },
+    "gateway.models.tenancy.WorkspaceActivationState": {
+        "repository": None,
+        "baseline": ("gateway/services/tenancy/workspace_activation_service.py",),
+    },
+    "gateway.models.tenancy.WorkspaceMember": {
+        "repository": "gateway/repositories/tenancy/workspace_repository.py",
+        "baseline": (
+            "gateway/api/routes/scoped_budgets.py",
+            "gateway/repositories/overview/overview_repository.py",
+            "gateway/repositories/tenancy/organization_member_repository.py",
+            "gateway/services/budgets/_scoped_enforcement.py",
+        ),
+    },
+    "gateway.models.tools.OrgWebSearchKey": {
+        "repository": "gateway/repositories/tools/web_search_key_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.tools.SandboxContainer": {
+        "repository": "gateway/repositories/code_execution/sandbox_container_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.tools.SearchToolCredential": {
+        "repository": None,
+        "baseline": ("gateway/services/search_tool_store_service.py",),
+    },
+    "gateway.models.tools.WorkspaceCodeExecutionPolicy": {
+        "repository": "gateway/repositories/code_execution/workspace_code_execution_policy_repository.py",
+        "baseline": (
+            "gateway/services/playground_service.py",
+            "gateway/services/tenancy/workspace_code_execution_policy_service.py",
+        ),
+    },
+    "gateway.models.tools.WorkspaceMcpServer": {
+        "repository": None,
+        "baseline": (
+            "gateway/services/playground_service.py",
+            "gateway/services/tenancy/workspace_mcp_server_service.py",
+        ),
+    },
+    "gateway.models.tools.WorkspaceWebSearchConfig": {
+        "repository": None,
+        "baseline": (
+            "gateway/services/playground_service.py",
+            "gateway/services/tenancy/workspace_web_search_service.py",
+        ),
+    },
+    "gateway.models.tools.WorkspaceWebSearchKeyOverride": {
+        "repository": "gateway/repositories/tools/web_search_key_repository.py",
+        "baseline": (),
+    },
+    "gateway.models.usage.AgentTelemetry": {
+        "repository": None,
+        "baseline": ("gateway/adapters/telemetry_storage_adapter.py",),
+    },
+    "gateway.models.usage.UsageLog": {
+        "repository": None,
+        "baseline": (
+            "gateway/api/routes/_passthrough.py",
+            "gateway/api/routes/_pipeline.py",
+            "gateway/api/routes/agent_telemetry.py",
+            "gateway/api/routes/batches.py",
+            "gateway/api/routes/catalog.py",
+            "gateway/api/routes/organization_usage.py",
+            "gateway/api/routes/search.py",
+            "gateway/api/routes/usage.py",
+            "gateway/api/routes/users.py",
+            "gateway/repositories/users_repository.py",
+            "gateway/services/external_usage_service.py",
+            "gateway/services/tenancy/workspace_activation_service.py",
+            "gateway/services/usage_admin_service.py",
+        ),
+    },
+    "gateway.models.users.User": {
+        "repository": "gateway/repositories/users_repository.py",
+        "baseline": (
+            "gateway/api/routes/budgets.py",
+            "gateway/api/routes/keys.py",
+            "gateway/api/routes/organization_keys.py",
+            "gateway/api/routes/organization_usage.py",
+            "gateway/api/routes/usage.py",
+            "gateway/api/routes/users.py",
+            "gateway/repositories/budgets/budget_repository.py",
+            "gateway/repositories/budgets/end_user_repository.py",
+            "gateway/repositories/inference/idempotency_repository.py",
+            "gateway/repositories/overview/overview_repository.py",
+            "gateway/services/budgets/_end_users.py",
+            "gateway/services/budgets/_ledger.py",
+            "gateway/services/budgets/_reservations.py",
+            "gateway/services/external_usage_service.py",
+            "gateway/services/model_access.py",
+            "gateway/services/playground_service.py",
+        ),
+    },
+}
+
+
+def _module_name(relative_path: str) -> str:
+    """Return the import path of a module from its path below the source root."""
+    return relative_path.removesuffix(".py").removesuffix("/__init__").replace("/", ".")
+
+
+def _assigned_names(statement: ast.stmt) -> list[str]:
+    """Return each plain name an assignment statement binds, or none for any other statement."""
+    if isinstance(statement, ast.Assign):
+        targets = statement.targets
+    elif isinstance(statement, ast.AnnAssign):
+        targets = [statement.target]
+    else:
+        return []
+    return [target.id for target in targets if isinstance(target, ast.Name)]
+
+
+def _declares_table(node: ast.ClassDef) -> bool:
+    """Return whether a class is an ORM model, which it is when it passes table=True or assigns a table attribute."""
+    if any(
+        keyword.arg == "table" and isinstance(keyword.value, ast.Constant) and keyword.value.value is True
+        for keyword in node.keywords
+    ):
+        return True
+    return any(name in TABLE_ATTRIBUTES for statement in node.body for name in _assigned_names(statement))
+
+
+def _orm_models(src_root: Path) -> set[str]:
+    """Return the import path of each ORM model in the models package."""
+    return {
+        f"{_module_name(relative_path)}.{node.name}"
+        for relative_path, tree in _parsed_modules(src_root, MODELS_SCOPE)
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and _declares_table(node)
+    }
+
+
+def _module_bindings(tree: ast.Module, file_path: Path, src_root: Path) -> dict[str, dict[str, int]]:
+    """Return each import path a name in a module is bound to, with the first line that binds it.
+
+    A name is bound by an import anywhere in the module, or by a module-level assignment from a bound name.
+    """
+    bindings: dict[str, dict[str, int]] = {}
+
+    def bind(name: str, target: str, line: int) -> None:
+        bindings.setdefault(name, {}).setdefault(target, line)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                head = alias.name.split(".")[0]
+                bind(alias.asname or head, alias.name if alias.asname else head, node.lineno)
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module if node.level == 0 else _resolve_relative(node, file_path, src_root)
+            for alias in node.names:
+                if base is not None and alias.name != "*":
+                    bind(alias.asname or alias.name, f"{base}.{alias.name}", node.lineno)
+    for statement in tree.body:
+        value = statement.value if isinstance(statement, ast.Assign | ast.AnnAssign) else None
+        dotted = None if value is None else _dotted_name(value)
+        head, _, rest = (dotted or "").partition(".")
+        if dotted is None or len(bindings.get(head, {})) != 1:
+            continue
+        target = next(iter(bindings[head]))
+        for name in _assigned_names(statement):
+            bind(name, f"{target}.{rest}" if rest else target, statement.lineno)
+    return bindings
+
+
+def _star_imports(tree: ast.Module, file_path: Path, src_root: Path) -> list[tuple[int, str]]:
+    """Return the line and module of each star import in a module."""
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or all(alias.name != "*" for alias in node.names):
+            continue
+        base = node.module if node.level == 0 else _resolve_relative(node, file_path, src_root)
+        if base is not None:
+            found.append((node.lineno, base))
+    return sorted(found)
+
+
+def _resolve_reexports(path: str, reexports: dict[str, str]) -> str:
+    """Follow an import path through the modules that re-export it to where the name is defined."""
+    seen: set[str] = set()
+    while path not in seen:
+        seen.add(path)
+        parts = path.split(".")
+        prefixes = (".".join(parts[:end]) for end in range(len(parts), 0, -1))
+        prefix = next((candidate for candidate in prefixes if candidate in reexports), None)
+        if prefix is None:
+            break
+        path = reexports[prefix] + path.removeprefix(prefix)
+    return path
+
+
+def _dotted_name(node: ast.expr) -> str | None:
+    """Return the dotted name an expression spells, such as tools.Workspace, or None if it is not one.
+
+    A getattr call with a literal name spells the attribute it reads.
+    """
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _dotted_name(node.value)
+        return None if base is None else f"{base}.{node.attr}"
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and len(node.args) > 1
+        and isinstance(node.args[1], ast.Constant)
+        and isinstance(node.args[1].value, str)
+    ):
+        base = _dotted_name(node.args[0])
+        return None if base is None else f"{base}.{node.args[1].value}"
+    return None
+
+
+def _type_position_nodes(tree: ast.Module, bindings: dict[str, str]) -> set[int]:
+    """Return the identity of every node in a module that names a type without constructing or querying it.
+
+    Such a node sits in an annotation, a type alias, the target type of a typing cast, the bound of a TypeVar,
+    or the types an isinstance or issubclass call checks against.
+    A SQL cast takes a column, so its arguments stay uses.
+    """
+    positions: list[ast.expr] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.arg) and node.annotation is not None:
+            positions.append(node.annotation)
+        elif isinstance(node, ast.AnnAssign):
+            positions.append(node.annotation)
+            if node.value is not None and _dotted_name(node.annotation) in TYPE_ALIAS:
+                positions.append(node.value)
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.returns is not None:
+            positions.append(node.returns)
+        elif isinstance(node, ast.TypeAlias):
+            positions.append(node.value)
+        elif isinstance(node, ast.Call):
+            called = _called_name(node.func)
+            dotted = _dotted_name(node.func) or ""
+            head, _, rest = dotted.partition(".")
+            target = bindings.get(head)
+            if target is not None and (f"{target}.{rest}" if rest else target) in TYPING_CASTS and node.args:
+                positions.append(node.args[0])
+            elif called == "TypeVar":
+                positions.extend(keyword.value for keyword in node.keywords if keyword.arg == "bound")
+            elif called in TYPE_CHECKS and len(node.args) > 1:
+                positions.append(node.args[1])
+    return {id(inner) for position in positions for inner in ast.walk(position)}
+
+
+def _model_uses(
+    tree: ast.Module, bindings: dict[str, str], reexports: dict[str, str], models: set[str]
+) -> dict[str, int]:
+    """Return the first line on which a module names each ORM model in an expression."""
+    type_positions = _type_position_nodes(tree, bindings)
+    uses: dict[str, int] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Name | ast.Attribute | ast.Call) or id(node) in type_positions:
+            continue
+        if isinstance(node, ast.Name | ast.Attribute) and not isinstance(node.ctx, ast.Load):
+            continue
+        dotted = _dotted_name(node)
+        if dotted is None:
+            continue
+        head, _, rest = dotted.partition(".")
+        if head not in bindings:
+            continue
+        model = _resolve_reexports(f"{bindings[head]}.{rest}" if rest else bindings[head], reexports)
+        if model in models:
+            uses[model] = min(uses.get(model, node.lineno), node.lineno)
+    return uses
+
+
+def _model_access_violations(model: str, access: ModelAccess, users: dict[str, int], src_root: Path) -> list[str]:
+    """Check one ORM model's entry in the model access map against the modules that use it."""
+    repository = access["repository"]
+    violations: list[str] = []
+    if repository is not None and not repository.startswith(f"{REPOSITORY_SCOPE}/"):
+        violations.append(f"{model} names {repository} as its repository, which is not under {REPOSITORY_SCOPE}/")
+    elif repository is not None and not (src_root / repository).is_file():
+        violations.append(f"{model} names {repository} as its repository, which does not exist")
+    elif repository is not None and repository not in users:
+        violations.append(f"{model} names {repository} as its repository, which does not use it")
+    if repository is not None and repository in access["baseline"]:
+        violations.append(f"{model} has its repository {repository} on its baseline; remove it from the baseline")
+    remedy = (
+        f"only {repository} constructs or queries it"
+        if repository is not None
+        else "its queries belong in a repository, which the model access map names"
+    )
+    violations.extend(
+        f"{module}:{line} uses {model}; {remedy}"
+        for module, line in sorted(users.items())
+        if module != repository and module not in access["baseline"]
+    )
+    violations.extend(
+        f"{module} is on the baseline for {model} but does not use it; remove it from the baseline"
+        for module in access["baseline"]
+        if module not in users and module != repository
+    )
+    return violations
+
+
+def _ambiguous_model_names(
+    relative_path: str,
+    bindings: dict[str, dict[str, int]],
+    resolve: Callable[[str], str],
+    holds_model: Callable[[str], bool],
+) -> list[str]:
+    """Return a violation for each name a module binds to more than one target when one of them holds an ORM model."""
+    return [
+        f"{relative_path}:{sorted(targets.values())[1]} binds {name} to more than one target, one of them an ORM "
+        "model or a module that holds one; import each under a name of its own"
+        for name, targets in sorted(bindings.items())
+        if len({resolve(target) for target in targets}) > 1 and any(holds_model(target) for target in targets)
+    ]
+
+
+def check_model_access(src_root: Path) -> list[str]:
+    """Check that only an ORM model's repository and the modules on its baseline use it.
+
+    A module uses a model when it names it in an expression, which is how a module constructs or queries one.
+    Naming a type without constructing or querying it, as an annotation or a cast does, is not a use.
+    The module that declares a model may name it.
+    A star import from a module that holds a model is refused, because it would hide a use.
+    So is a name bound both to a model or a module that holds one and to something else.
+
+    NOTE: Names are resolved per module, not per scope, so a parameter that shadows an imported model counts as a use.
+    """
+    models = _orm_models(src_root)
+    parsed = list(_parsed_modules(src_root, "gateway"))
+    bindings = {
+        relative_path: _module_bindings(tree, src_root / relative_path, src_root) for relative_path, tree in parsed
+    }
+    reexports = {
+        f"{_module_name(relative_path)}.{name}": next(iter(targets))
+        for relative_path, names in bindings.items()
+        for name, targets in names.items()
+        if len(targets) == 1 and f"{_module_name(relative_path)}.{name}" not in targets
+    }
+
+    def resolve(path: str) -> str:
+        return _resolve_reexports(path, reexports)
+
+    model_holders = {model.rpartition(".")[0] for model in models} | {
+        name.rpartition(".")[0] for name, target in reexports.items() if resolve(target) in models
+    }
+
+    def holds_model(path: str) -> bool:
+        resolved = resolve(path)
+        return resolved in models or any(
+            holder == resolved or holder.startswith(f"{resolved}.") for holder in model_holders
+        )
+
+    violations: list[str] = []
+    uses: dict[str, dict[str, int]] = {model: {} for model in models}
+    for relative_path, tree in parsed:
+        names = bindings[relative_path]
+        violations.extend(_ambiguous_model_names(relative_path, names, resolve, holds_model))
+        violations.extend(
+            f"{relative_path}:{line} imports * from {module}, which holds an ORM model; import the names it uses"
+            for line, module in _star_imports(tree, src_root / relative_path, src_root)
+            if holds_model(module)
+        )
+        resolved = {name: {resolve(target) for target in targets} for name, targets in names.items()}
+        unambiguous = {name: next(iter(paths)) for name, paths in resolved.items() if len(paths) == 1}
+        for model, line in _model_uses(tree, unambiguous, reexports, models).items():
+            uses[model][relative_path] = line
+    violations.extend(
+        f"{model} is an ORM model with no entry in the model access map; name the repository that may use it"
+        for model in sorted(models - MODEL_ACCESS.keys())
+    )
+    violations.extend(
+        f"{model} is in the model access map but is not an ORM model; remove it from the map"
+        for model in sorted(MODEL_ACCESS.keys() - models)
+    )
+    for model, access in sorted(MODEL_ACCESS.items()):
+        if model in models:
+            violations.extend(_model_access_violations(model, access, uses[model], src_root))
+    return violations
+
+
 def main() -> int:
     """Run the architecture checks over the gateway package, the light CLI and the OSS test suite."""
     # All must exist: silently skipping one would let its rules (including
@@ -1093,11 +1933,13 @@ def main() -> int:
     database_violations = check_database_imports(SRC_ROOT)
     transaction_violations = check_transaction_control(SRC_ROOT)
     unit_of_work_violations = check_unit_of_work_construction(SRC_ROOT)
+    mode_read_violations = check_service_mode_reads(SRC_ROOT)
     # NOTE: A page with no domains fails here, so a rule that reads them cannot pass by checking nothing.
     domains, domains_page_violations = read_domains_page(REPO_ROOT / DOMAINS_DOC)
     domain_name_violations = domains_page_violations + (check_domain_names(SRC_ROOT, domains) if domains else [])
     repository_import_violations = check_repository_imports(SRC_ROOT, domains)
     service_package_import_violations = check_service_package_imports(SRC_ROOT, domains)
+    model_access_violations = check_model_access(SRC_ROOT)
 
     if import_violations:
         print("❌ Architecture violations found:\n")
@@ -1136,6 +1978,12 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal Unit of Work construction violations: {len(unit_of_work_violations)}")
 
+    if mode_read_violations:
+        print("\n❌ Mode read violations:\n")
+        for violation in mode_read_violations:
+            print(f"  {violation}")
+        print(f"\nTotal mode read violations: {len(mode_read_violations)}")
+
     if flat_module_violations:
         print("\n❌ Flat module violations:\n")
         for violation in flat_module_violations:
@@ -1160,6 +2008,12 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal service package import violations: {len(service_package_import_violations)}")
 
+    if model_access_violations:
+        print("\n❌ Model access violations:\n")
+        for violation in model_access_violations:
+            print(f"  {violation}")
+        print(f"\nTotal model access violations: {len(model_access_violations)}")
+
     if (
         import_violations
         or naming_violations
@@ -1167,10 +2021,12 @@ def main() -> int:
         or database_violations
         or transaction_violations
         or unit_of_work_violations
+        or mode_read_violations
         or flat_module_violations
         or domain_name_violations
         or repository_import_violations
         or service_package_import_violations
+        or model_access_violations
     ):
         print("\n💡 See ARCHITECTURE.md for the intended layering")
         return 1

@@ -51,6 +51,7 @@ from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.services.tenancy.membership_listener import MembershipListener
+from gateway.services.tools import WorkspaceSearchKeys
 
 # The core adapters ignore the session, so a placeholder stands in for one; a
 # unit test of the wiring has no database and needs none.
@@ -102,6 +103,10 @@ def _write_bootstrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str,
 
 def _no_membership_listener(uow: UnitOfWork) -> MembershipListener:
     return cast(MembershipListener, object())
+
+
+def _no_search_keys(session: AsyncSession) -> WorkspaceSearchKeys:
+    return cast(WorkspaceSearchKeys, object())
 
 
 def test_core_defaults_are_bound_for_every_port() -> None:
@@ -249,10 +254,32 @@ def test_web_search_policy_needs_no_session_where_a_peer_holds_the_rows() -> Non
 def test_web_search_policy_is_chosen_once_when_the_container_is_built() -> None:
     """A config change after the build does not move the port to another plane."""
     config = GatewayConfig()
-    container = build_container(config=config)
+    container = build_container(config=config, search_keys=_no_search_keys)
     config.mode = "hybrid"
 
     assert isinstance(container.resolve(WebSearchPolicyPort, A_SESSION), LocalWebSearchPolicy)
+
+
+def test_the_stored_web_search_policy_refuses_to_build_without_a_search_key_resolver() -> None:
+    """Built without one, a workspace's own key would be silently skipped and the deployment would pay."""
+    container = build_container(config=GatewayConfig())
+
+    with pytest.raises(ContainerError, match="a search key resolver is required"):
+        container.resolve(WebSearchPolicyPort, A_SESSION)
+
+
+def test_the_stored_web_search_policy_builds_its_search_key_resolver_on_the_requests_session() -> None:
+    built_on: list[AsyncSession] = []
+
+    def build_search_keys(session: AsyncSession) -> WorkspaceSearchKeys:
+        built_on.append(session)
+        return _no_search_keys(session)
+
+    container = build_container(config=GatewayConfig(), search_keys=build_search_keys)
+
+    container.resolve(WebSearchPolicyPort, A_SESSION)
+
+    assert built_on == [A_SESSION]
 
 
 def test_code_execution_policy_refuses_a_deployment_that_holds_the_rows_and_has_no_session() -> None:

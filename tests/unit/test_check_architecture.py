@@ -31,7 +31,7 @@ def _write(src_root: Path, relative_path: str, content: str) -> Path:
 
 
 def _point_main_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Every baseline is emptied, so an entry that is stale in the temporary tree cannot fail main() on its own.
+    # Every baseline and the model access map are emptied, so a stale entry cannot fail main() on its own.
     monkeypatch.setattr(check, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(check, "SRC_ROOT", tmp_path / "src")
     monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
@@ -41,7 +41,8 @@ def _point_main_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write(tmp_path, "cli/src/otari_agent/__init__.py", "")
     _write(tmp_path, "docs/domains.md", "## The domains\n\n### things\n")
     for name in [name for name in vars(check) if name.endswith("_BASELINE")]:
-        monkeypatch.setattr(check, name, ())
+        monkeypatch.setattr(check, name, type(getattr(check, name))())
+    monkeypatch.setattr(check, "MODEL_ACCESS", {})
 
 
 def test_service_importing_models_is_clean(tmp_path: Path) -> None:
@@ -851,6 +852,80 @@ def test_renaming_the_unit_of_work_on_a_relative_import_is_flagged(tmp_path: Pat
     ]
 
 
+_MODE_READ_REMEDY = "a service gets the behavior for each mode from a binding, not from a branch on the mode"
+
+
+@pytest.mark.parametrize(
+    ("source", "name"),
+    [
+        ("def pick(config):\n    return config.is_hybrid_mode\n", "is_hybrid_mode"),
+        ("def pick(self):\n    return self._config.is_hosted_mode\n", "is_hosted_mode"),
+        ("def pick(config):\n    return config.effective_mode\n", "effective_mode"),
+        ("def pick(config):\n    return config.configured_mode\n", "configured_mode"),
+        ('def pick(config):\n    return getattr(config, "is_hybrid_mode")\n', "is_hybrid_mode"),
+        ("def pick(config):\n    return deployment_for(config).supports(Plane.DATA)\n", "deployment_for"),
+        ("def pick(config):\n    return deployment.deployment_for(config)\n", "deployment_for"),
+    ],
+)
+@pytest.mark.parametrize("relative_path", ["gateway/services/thing_service.py", "gateway/services/things/_store.py"])
+def test_a_service_that_reads_the_mode_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_path: str, source: str, name: str
+) -> None:
+    monkeypatch.setattr(check, "SERVICE_MODE_READ_BASELINE", ())
+    _write(tmp_path, relative_path, source)
+    assert check.check_service_mode_reads(tmp_path) == [f"{relative_path}:2 reads {name}; {_MODE_READ_REMEDY}"]
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "source"),
+    [
+        ("gateway/api/main.py", "def mount(config):\n    return config.is_hybrid_mode\n"),
+        ("gateway/container.py", "def bind(config):\n    return config.is_hosted_mode\n"),
+        ("gateway/services/thing_service.py", "def pick(is_hybrid_mode: bool) -> bool:\n    return is_hybrid_mode\n"),
+        ("gateway/services/thing_service.py", "def pick(state):\n    state.is_hybrid_mode = True\n"),
+        (
+            "gateway/services/thing_service.py",
+            'def pick(helpers, config):\n    return helpers.getattr(config, "is_hybrid_mode")\n',
+        ),
+    ],
+)
+def test_a_mode_read_outside_services_or_a_mode_passed_in_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_path: str, source: str
+) -> None:
+    monkeypatch.setattr(check, "SERVICE_MODE_READ_BASELINE", ())
+    _write(tmp_path, relative_path, source)
+    assert check.check_service_mode_reads(tmp_path) == []
+
+
+def test_a_service_on_the_mode_read_baseline_may_read_the_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "SERVICE_MODE_READ_BASELINE", ("gateway/services/thing_service.py",))
+    _write(tmp_path, "gateway/services/thing_service.py", "def pick(config):\n    return config.is_hybrid_mode\n")
+    assert check.check_service_mode_reads(tmp_path) == []
+
+
+@pytest.mark.parametrize("source", ["def pick(config):\n    return config.port\n", None])
+def test_a_mode_read_baseline_entry_that_reads_no_mode_must_leave_the_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str | None
+) -> None:
+    monkeypatch.setattr(check, "SERVICE_MODE_READ_BASELINE", ("gateway/services/thing_service.py",))
+    _write(tmp_path, "gateway/services/other.py", "")
+    if source is not None:
+        _write(tmp_path, "gateway/services/thing_service.py", source)
+    assert check.check_service_mode_reads(tmp_path) == [
+        "gateway/services/thing_service.py is on the mode read baseline but reads no mode; remove it from the baseline"
+    ]
+
+
+def test_main_fails_on_a_service_that_reads_the_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(tmp_path, "src/gateway/services/__init__.py", "")
+    _write(tmp_path, "src/gateway/services/things/__init__.py", "")
+    _write(tmp_path, "tests/__init__.py", "")
+    _point_main_at(tmp_path, monkeypatch)
+    assert check.main() == 0
+    _write(tmp_path, "src/gateway/services/things/_store.py", "def pick(config):\n    return config.is_hybrid_mode\n")
+    assert check.main() == 1
+
+
 _DOMAINS_PAGE = """# Backend domains
 
 ## The target shape
@@ -922,7 +997,7 @@ def test_a_lower_case_shared_heading_is_not_a_domain() -> None:
 def test_a_location_named_for_a_documented_domain_is_clean(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_path: str
 ) -> None:
-    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {})
     _write(tmp_path, relative_path, "")
     assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == []
 
@@ -939,7 +1014,7 @@ def test_a_location_named_for_a_documented_domain_is_clean(
 def test_a_location_named_for_no_documented_domain_is_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative_path: str, location: str
 ) -> None:
-    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {})
     _write(tmp_path, relative_path, "")
     assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == [
         f"{location} names no domain in docs/domains.md; name it for a domain there, or give the new domain a section"
@@ -947,7 +1022,7 @@ def test_a_location_named_for_no_documented_domain_is_flagged(
 
 
 def test_an_exceptions_module_without_the_suffix_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {})
     _write(tmp_path, "gateway/exceptions/budgets.py", "")
     assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == [
         "gateway/exceptions/budgets.py is not named <domain>_exceptions.py"
@@ -955,29 +1030,70 @@ def test_an_exceptions_module_without_the_suffix_is_flagged(tmp_path: Path, monk
 
 
 def test_a_shared_exceptions_module_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {})
     _write(tmp_path, "gateway/exceptions/_base.py", "")
     _write(tmp_path, "gateway/exceptions/shared_exceptions.py", "")
     assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == []
 
 
 def test_a_directory_that_is_not_a_package_is_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ())
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {})
     _write(tmp_path, "gateway/services/.mypy_cache/cache.json", "")
     assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == []
 
 
 def test_a_location_on_the_domain_name_baseline_is_clean(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", ("gateway/services/tenancy/",))
+    monkeypatch.setattr(
+        check,
+        "DOMAIN_NAME_BASELINE",
+        {"gateway/services/tenancy/": ("__init__.py", "handlers/__init__.py", "handlers/invite.py")},
+    )
     _write(tmp_path, "gateway/services/tenancy/__init__.py", "")
+    _write(tmp_path, "gateway/services/tenancy/handlers/__init__.py", "")
+    _write(tmp_path, "gateway/services/tenancy/handlers/invite.py", "")
+    _write(tmp_path, "gateway/services/tenancy/__pycache__/cached.py", "")
     assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == []
+
+
+@pytest.mark.parametrize("module", ["invite.py", "handlers/invite.py"])
+def test_a_new_module_in_a_package_on_the_domain_name_baseline_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, module: str
+) -> None:
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {"gateway/services/tenancy/": ("__init__.py",)})
+    _write(tmp_path, "gateway/services/tenancy/__init__.py", "")
+    _write(tmp_path, f"gateway/services/tenancy/{module}", "")
+    assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == [
+        f"gateway/services/tenancy/{module} is a new module in a package named for no domain; "
+        "put it in its domain's package"
+    ]
+
+
+def test_a_listed_module_that_no_longer_exists_must_leave_the_domain_name_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {"gateway/services/tenancy/": ("__init__.py", "invite.py")})
+    _write(tmp_path, "gateway/services/tenancy/__init__.py", "")
+    assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == [
+        "gateway/services/tenancy/invite.py is on the domain name baseline but no longer exists; "
+        "remove it from the baseline"
+    ]
+
+
+def test_a_module_entry_on_the_domain_name_baseline_that_lists_modules_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {"gateway/exceptions/budget_exceptions.py": ("invite.py",)})
+    _write(tmp_path, "gateway/exceptions/budget_exceptions.py", "")
+    assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == [
+        "gateway/exceptions/budget_exceptions.py is a module, so its domain name baseline entry lists no modules"
+    ]
 
 
 @pytest.mark.parametrize("package", ["tenancy", "budgets"])
 def test_a_domain_name_baseline_entry_that_is_gone_or_now_a_domain_must_leave_the_baseline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, package: str
 ) -> None:
-    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", (f"gateway/services/{package}/",))
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {f"gateway/services/{package}/": ("__init__.py",)})
     if package == "budgets":
         _write(tmp_path, "gateway/services/budgets/__init__.py", "")
     assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == [
@@ -1003,6 +1119,19 @@ def test_main_fails_on_a_package_named_for_no_domain(tmp_path: Path, monkeypatch
     _point_main_at(tmp_path, monkeypatch)
     assert check.main() == 0
     _write(tmp_path, "src/gateway/services/billing/__init__.py", "")
+    assert check.main() == 1
+
+
+def test_main_fails_on_a_new_module_in_a_package_on_the_domain_name_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write(tmp_path, "src/gateway/services/__init__.py", "")
+    _write(tmp_path, "src/gateway/services/tenancy/__init__.py", "")
+    _write(tmp_path, "tests/__init__.py", "")
+    _point_main_at(tmp_path, monkeypatch)
+    monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {"gateway/services/tenancy/": ("__init__.py",)})
+    assert check.main() == 0
+    _write(tmp_path, "src/gateway/services/tenancy/invite.py", "")
     assert check.main() == 1
 
 
@@ -1176,4 +1305,269 @@ def test_main_fails_on_an_import_below_a_service_package_root(tmp_path: Path, mo
     _point_main_at(tmp_path, monkeypatch)
     assert check.main() == 0
     _write(tmp_path, "src/gateway/core/thing.py", "from gateway.services.things._store import Store\n")
+    assert check.main() == 1
+
+
+_THING = "gateway.models.things.Thing"
+_THING_REPOSITORY = "gateway/repositories/things/thing_repository.py"
+_THING_REMEDY = f"only {_THING_REPOSITORY} constructs or queries it"
+_MODELS_SOURCE = (
+    "from sqlmodel import Field, SQLModel\n\nfrom gateway.models.base import Base\n\n\n"
+    'class Thing(Base):\n    __tablename__ = "things"\n\n\n'
+    "class Gadget(SQLModel, table=True):\n    id: int = Field(primary_key=True)\n\n\n"
+    "class ThingCreate(SQLModel):\n    name: str\n"
+)
+
+
+def _thing_access(
+    repository: str | None = _THING_REPOSITORY, baseline: tuple[str, ...] = ()
+) -> dict[str, dict[str, object]]:
+    return {
+        _THING: {"repository": repository, "baseline": baseline},
+        "gateway.models.things.Gadget": {"repository": None, "baseline": ()},
+    }
+
+
+def _write_thing_model(src_root: Path) -> None:
+    _write(src_root, "gateway/models/things.py", _MODELS_SOURCE)
+    _write(src_root, "gateway/repositories/things/__init__.py", "")
+    _write(src_root, _THING_REPOSITORY, "from gateway.models.things import Thing\n\nMODEL = Thing\n")
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from gateway.models.things import Thing\n\n\ndef build():\n    return Thing()\n",
+        "from gateway.models.things import Thing\n\n\ndef build():\n    return select(Thing)\n",
+        "from gateway.models.things import Thing\n\n\ndef build(name):\n    return Thing.name == name\n",
+        "from gateway.models.things import Thing as Row\n\n\ndef build():\n    return Row()\n",
+        "from gateway.models import things\n\n\ndef build():\n    return things.Thing()\n",
+        "import gateway.models.things as things\n\n\ndef build():\n    return things.Thing()\n",
+        "import gateway.models.things\n\n\ndef build():\n    return gateway.models.things.Thing()\n",
+        "from ...models.things import Thing\n\n\ndef build():\n    return Thing()\n",
+        "from gateway.services.shared import Thing\n\n\ndef build():\n    return Thing()\n",
+        "from gateway.services import shared\n\n\ndef build():\n    return shared.Thing()\n",
+        "from gateway.models import things\n\n\ndef build():\n    return getattr(things, 'Thing')()\n",
+        "from gateway.models.things import Thing\nfrom gateway.services.shared import Thing\n\n\nROW = Thing()\n",
+        "from sqlalchemy import cast\nfrom gateway.models.things import Thing\n\n\nNAME = cast(Thing.name, str)\n",
+    ],
+)
+def test_a_module_other_than_the_repository_that_uses_a_model_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    monkeypatch.setattr(check, "MODEL_ACCESS", _thing_access())
+    _write_thing_model(tmp_path)
+    _write(tmp_path, "gateway/services/shared.py", "from gateway.models.things import Thing\n\n__all__ = []\n")
+    _write(tmp_path, "gateway/services/things/_store.py", source)
+    assert check.check_model_access(tmp_path) == [f"gateway/services/things/_store.py:5 uses {_THING}; {_THING_REMEDY}"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from gateway.models.things import Thing\n\n\ndef keep(row: Thing) -> Thing:\n    return row\n",
+        "from gateway.models.things import Thing\n\nrows: list[Thing] = []\n",
+        "from gateway.models.things import Thing\n\ntype Rows = list[Thing]\n",
+        "from typing import TypeAlias\n\nfrom gateway.models.things import Thing\n\nRows: TypeAlias = list[Thing]\n",
+        "from typing import cast\n\nfrom gateway.models.things import Thing\n\n\ndef keep(row):\n"
+        "    return cast(Thing, row)\n",
+        "from typing import TypeVar\n\nfrom gateway.models.things import Thing\n\n"
+        "RowT = TypeVar('RowT', bound=Thing)\n",
+        "from gateway.models.things import Thing\n\n\ndef build(row) -> bool:\n    return isinstance(row, Thing)\n",
+        "from gateway.services.unrelated import *\n\n\ndef build():\n    return 1\n",
+        "from gateway.models.things import ThingCreate\n\n\ndef build():\n    return ThingCreate(name='a')\n",
+        "def build(Thing):\n    return Thing()\n",
+    ],
+)
+def test_annotating_with_a_model_or_naming_something_else_is_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    monkeypatch.setattr(check, "MODEL_ACCESS", _thing_access())
+    _write_thing_model(tmp_path)
+    _write(tmp_path, "gateway/services/things/_store.py", source)
+    assert check.check_model_access(tmp_path) == []
+
+
+def test_the_declaring_module_and_a_module_on_the_baseline_may_use_a_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "MODEL_ACCESS", _thing_access(baseline=("gateway/services/thing_service.py",)))
+    _write_thing_model(tmp_path)
+    _write(tmp_path, "gateway/models/things.py", _MODELS_SOURCE + "\n\nDEFAULT = Thing\n")
+    _write(tmp_path, "gateway/services/thing_service.py", "from gateway.models.things import Thing\n\nROW = Thing()\n")
+    assert check.check_model_access(tmp_path) == []
+
+
+def test_another_models_module_that_uses_a_model_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "MODEL_ACCESS", _thing_access())
+    _write_thing_model(tmp_path)
+    _write(tmp_path, "gateway/models/links.py", "from gateway.models.things import Thing\n\nLINKED = Thing\n")
+    assert check.check_model_access(tmp_path) == [f"gateway/models/links.py:3 uses {_THING}; {_THING_REMEDY}"]
+
+
+def test_a_model_reexported_by_assignment_is_followed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "MODEL_ACCESS", _thing_access(baseline=("gateway/services/shared.py",)))
+    _write_thing_model(tmp_path)
+    _write(tmp_path, "gateway/services/shared.py", "from gateway.models.things import Thing\n\nRow = Thing\n")
+    _write(tmp_path, "gateway/services/things/_store.py", "from gateway.services.shared import Row\n\nROW = Row()\n")
+    assert check.check_model_access(tmp_path) == [f"gateway/services/things/_store.py:3 uses {_THING}; {_THING_REMEDY}"]
+
+
+def test_a_name_bound_to_a_model_and_to_something_else_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "MODEL_ACCESS", _thing_access())
+    _write_thing_model(tmp_path)
+    _write(
+        tmp_path,
+        "gateway/services/things/_store.py",
+        "from gateway.services.other import Thing\n\n\ndef build():\n"
+        "    from gateway.models.things import Thing\n\n    return Thing()\n",
+    )
+    assert check.check_model_access(tmp_path) == [
+        "gateway/services/things/_store.py:5 binds Thing to more than one target, one of them an ORM model or a "
+        "module that holds one; import each under a name of its own"
+    ]
+
+
+def test_a_name_bound_to_a_module_that_holds_a_model_and_to_something_else_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "MODEL_ACCESS", _thing_access())
+    _write_thing_model(tmp_path)
+    _write(
+        tmp_path,
+        "gateway/services/things/_store.py",
+        "from gateway.repositories import things\n\n\ndef build():\n"
+        "    from gateway.models import things\n\n    return things.Thing()\n",
+    )
+    assert check.check_model_access(tmp_path) == [
+        "gateway/services/things/_store.py:5 binds things to more than one target, one of them an ORM model or a "
+        "module that holds one; import each under a name of its own"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("source", "module"),
+    [
+        ("from gateway.models.things import *\n", "gateway.models.things"),
+        ("from gateway.models import *\n", "gateway.models"),
+        ("from gateway.services.shared import *\n", "gateway.services.shared"),
+    ],
+)
+def test_a_star_import_from_a_module_that_holds_a_model_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str, module: str
+) -> None:
+    monkeypatch.setattr(check, "MODEL_ACCESS", _thing_access())
+    _write_thing_model(tmp_path)
+    _write(tmp_path, "gateway/services/shared.py", "from gateway.models.things import Thing\n\n__all__ = []\n")
+    _write(tmp_path, "gateway/services/things/_store.py", source)
+    assert check.check_model_access(tmp_path) == [
+        f"gateway/services/things/_store.py:1 imports * from {module}, which holds an ORM model; "
+        "import the names it uses"
+    ]
+
+
+def test_a_model_no_repository_holds_yet_is_flagged_wherever_it_is_used(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(check, "MODEL_ACCESS", _thing_access(repository=None, baseline=(_THING_REPOSITORY,)))
+    _write_thing_model(tmp_path)
+    _write(tmp_path, "gateway/api/routes/things.py", "from gateway.models.things import Thing\n\nROW = Thing()\n")
+    assert check.check_model_access(tmp_path) == [
+        f"gateway/api/routes/things.py:3 uses {_THING}; its queries belong in a repository, "
+        "which the model access map names"
+    ]
+
+
+def test_two_models_with_one_class_name_are_told_apart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    access = _thing_access()
+    access["gateway.models.legacy.Thing"] = {"repository": None, "baseline": ("gateway/services/thing_service.py",)}
+    monkeypatch.setattr(check, "MODEL_ACCESS", access)
+    _write_thing_model(tmp_path)
+    _write(tmp_path, "gateway/models/legacy.py", 'class Thing:\n    __tablename__ = "legacy_things"\n')
+    _write(tmp_path, "gateway/services/thing_service.py", "from gateway.models.legacy import Thing\n\nROW = Thing()\n")
+    assert check.check_model_access(tmp_path) == []
+
+
+def test_a_model_missing_from_the_map_and_an_entry_that_is_no_model_are_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    access = _thing_access()
+    del access["gateway.models.things.Gadget"]
+    access["gateway.models.things.ThingCreate"] = {"repository": None, "baseline": ()}
+    monkeypatch.setattr(check, "MODEL_ACCESS", access)
+    _write_thing_model(tmp_path)
+    _write(tmp_path, "gateway/models/legacy.py", "class Legacy:\n    __table__ = None\n")
+    assert check.check_model_access(tmp_path) == [
+        "gateway.models.legacy.Legacy is an ORM model with no entry in the model access map; "
+        "name the repository that may use it",
+        "gateway.models.things.Gadget is an ORM model with no entry in the model access map; "
+        "name the repository that may use it",
+        "gateway.models.things.ThingCreate is in the model access map but is not an ORM model; remove it from the map",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("repository", "message"),
+    [
+        (
+            "gateway/services/thing_service.py",
+            f"{_THING} names gateway/services/thing_service.py as its repository, "
+            "which is not under gateway/repositories/",
+        ),
+        (
+            "gateway/repositories/things/other_repository.py",
+            f"{_THING} names gateway/repositories/things/other_repository.py as its repository, which does not exist",
+        ),
+        (
+            "gateway/repositories/things/__init__.py",
+            f"{_THING} names gateway/repositories/things/__init__.py as its repository, which does not use it",
+        ),
+    ],
+)
+def test_a_repository_entry_that_is_no_repository_or_does_not_use_the_model_is_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repository: str, message: str
+) -> None:
+    monkeypatch.setattr(check, "MODEL_ACCESS", _thing_access(repository=repository, baseline=(_THING_REPOSITORY,)))
+    _write_thing_model(tmp_path)
+    _write(tmp_path, "gateway/services/thing_service.py", "from gateway.models.things import Thing\n\nROW = Thing()\n")
+    assert check.check_model_access(tmp_path)[0] == message
+
+
+def test_a_repository_on_its_own_models_baseline_is_flagged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(check, "MODEL_ACCESS", _thing_access(baseline=(_THING_REPOSITORY,)))
+    _write_thing_model(tmp_path)
+    assert check.check_model_access(tmp_path) == [
+        f"{_THING} has its repository {_THING_REPOSITORY} on its baseline; remove it from the baseline"
+    ]
+
+
+@pytest.mark.parametrize(
+    "source", ["from gateway.models.things import Thing\n\n\ndef keep(row: Thing) -> None: ...\n", None]
+)
+def test_a_model_baseline_entry_that_does_not_use_the_model_must_leave_the_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str | None
+) -> None:
+    monkeypatch.setattr(check, "MODEL_ACCESS", _thing_access(baseline=("gateway/services/thing_service.py",)))
+    _write_thing_model(tmp_path)
+    if source is not None:
+        _write(tmp_path, "gateway/services/thing_service.py", source)
+    assert check.check_model_access(tmp_path) == [
+        f"gateway/services/thing_service.py is on the baseline for {_THING} but does not use it; "
+        "remove it from the baseline"
+    ]
+
+
+def test_main_fails_on_a_second_module_that_uses_a_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(tmp_path, "src/gateway/services/__init__.py", "")
+    _write(tmp_path, "src/gateway/services/things/__init__.py", "")
+    _write(tmp_path, "tests/__init__.py", "")
+    _point_main_at(tmp_path, monkeypatch)
+    _write_thing_model(tmp_path / "src")
+    monkeypatch.setattr(check, "MODEL_ACCESS", _thing_access())
+    assert check.main() == 0
+    _write(
+        tmp_path, "src/gateway/services/things/_store.py", "from gateway.models.things import Thing\n\nROW = Thing()\n"
+    )
     assert check.main() == 1

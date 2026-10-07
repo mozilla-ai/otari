@@ -169,9 +169,13 @@ resolved server is connected to directly; neither implementation proxies MCP
 traffic.
 
 `web_search_policy_port.py` names where a workspace's web search policy comes
-from, in the same two ways. The policy says who may search and how far. A
+from, in the same two ways. The policy says who may search and how far, and
+carries the workspace's own search key where its organization brought one. A
 tools service applies it to a request with one rule on every plane, and
 neither implementation carries a search.
+
+It also owns an organization's web search keys and each workspace's choice
+among them (`org_web_search_keys`, `workspace_web_search_key_overrides`).
 
 `code_execution_policy_port.py` names where a workspace's code execution
 policy comes from, in the same two ways. The policy says who may run code and

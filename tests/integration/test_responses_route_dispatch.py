@@ -274,6 +274,34 @@ def test_gateway_internal_fields_are_stripped_from_upstream_kwargs(
         assert field not in captured, f"gateway-internal field {field!r} leaked to upstream"
 
 
+def test_client_cannot_smuggle_sdk_request_options(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """The provider SDK's per-request headers and query string stay the gateway's to set."""
+    captured: dict[str, Any] = {}
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        captured.update(kwargs)
+        return _response()
+
+    with patch("gateway.api.routes.responses.aresponses", new=fake_aresponses):
+        resp = client.post(
+            f"{API_ROOT}/responses",
+            json={
+                "model": _MODEL,
+                "input": "hi",
+                "extra_headers": {"OpenAI-Project": "proj_other"},
+                "extra_query": {"api-version": "preview"},
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert "extra_headers" not in captured
+    assert "extra_query" not in captured
+
+
 def test_user_supplied_chat_shape_tools_get_flattened_to_responses_shape(
     client: TestClient,
     api_key_header: dict[str, str],

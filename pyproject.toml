@@ -233,6 +233,7 @@ include = ["gateway*"]
 # them at /pwa and /fonts). A subdirectory needs its own line: these patterns do
 # not recurse, so a bundle directory missing here ships as a 404 at runtime.
 gateway = [
+    "py.typed",
     "templates/*.html",
     "templates/*.svg",
     "templates/email/*.html",

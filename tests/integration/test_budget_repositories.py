@@ -215,6 +215,32 @@ async def test_count_member_policies_and_users_for_budget(async_db: AsyncSession
         assert await budgets.count_users_for_budget(free.budget_id) == 0
 
 
+async def test_minute_limits_for_user_reads_only_a_live_users_limiting_budget(async_db: AsyncSession) -> None:
+    acme = await _organization(async_db, slug="acme")
+    limiting = Budget(organization_id=acme.id, name="limiting", rpm_limit=5, tpm_limit=None)
+    unlimited = Budget(organization_id=acme.id, name="unlimited")
+    async_db.add_all([limiting, unlimited])
+    await async_db.flush()
+    async_db.add_all(
+        [
+            ApiUser(user_id="limited", budget_id=limiting.budget_id),
+            ApiUser(user_id="unlimited", budget_id=unlimited.budget_id),
+            ApiUser(user_id="unbudgeted", budget_id=None),
+            ApiUser(user_id="deleted", budget_id=limiting.budget_id, deleted_at=datetime.now(UTC)),
+        ]
+    )
+    await async_db.flush()
+    uow = UnitOfWork(async_db)
+
+    async with uow:
+        budgets = BudgetRepository(uow)
+        assert await budgets.minute_limits_for_user("limited") == (limiting.budget_id, 5, None)
+        assert await budgets.minute_limits_for_user("unlimited") is None
+        assert await budgets.minute_limits_for_user("unbudgeted") is None
+        assert await budgets.minute_limits_for_user("deleted") is None
+        assert await budgets.minute_limits_for_user("missing") is None
+
+
 async def test_add_stages_a_budget_with_its_generated_values(async_db: AsyncSession) -> None:
     acme = await _organization(async_db, slug="acme")
     uow = UnitOfWork(async_db)

@@ -24,6 +24,7 @@ from gateway.api.deps import (
     build_idempotency_service,
     get_membership_listener,
     get_workspace_listener,
+    get_workspace_search_keys,
     set_config,
 )
 from gateway.api.main import register_routers
@@ -31,7 +32,7 @@ from gateway.container import Container, build_container
 from gateway.context_propagation import TraceContextPropagationMiddleware
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, dispose_db, init_db
-from gateway.core.error_codes import error_code_of
+from gateway.core.error_codes import error_code_of, error_headers
 from gateway.core.feature import Worker
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.exceptions import TenancyError
@@ -796,7 +797,13 @@ async def _tenancy_error_handler(_: Request, exc: Exception) -> Response:
             status_code=exc.status_code,
             content={"detail": "Internal server error"},
         )
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+    if exc.error_code is None:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.message, "code": exc.error_code},
+        headers=error_headers(exc.error_code),
+    )
 
 
 async def _control_plane_error_handler(_: Request, exc: Exception) -> Response:
@@ -1049,7 +1056,16 @@ def create_app(config: GatewayConfig) -> FastAPI:
             CORSMiddleware,
             allow_origins=config.cors_allow_origins,
             allow_credentials=allow_credentials,
-            allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+            # A hybrid deployment mounts the platform's own routes behind this
+            # same app (see the platform's OTARI_CORS_ALLOW_ORIGINS, enabled
+            # wherever a shared dashboard needs its session cookie honored
+            # cross-origin), so this list has to cover every method the
+            # platform's own routes use too, not just the gateway's. A
+            # workspace's web-search config is PUT, and was rejected with
+            # "Disallowed CORS method" everywhere this middleware was enabled
+            # (mozilla-ai/infrastructure -- reported from both EU stacks,
+            # which are the only ones that set cors_allow_origins at all).
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
             allow_headers=[
                 "Content-Type",
                 "Authorization",
@@ -1100,6 +1116,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         config=config,
         membership_listener=get_membership_listener,
         workspace_listener=functools.partial(get_workspace_listener, config=config),
+        search_keys=get_workspace_search_keys,
     )
     install_rate_limits(app, config)
 

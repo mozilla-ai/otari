@@ -13,7 +13,7 @@ The template stands up two services and a bucket:
 
 | Service | Source | Notes |
 | --- | --- | --- |
-| **otari** | `mzdotai/otari:0.14.1` (Docker Hub) | Target port `8000` with a public domain, healthcheck `/api/v1/health/readiness`, which fails while the database is unreachable. Pulls the published image, pinned to a release; builds nothing. See [Upgrade](#upgrade). |
+| **otari** | `mzdotai/otari:0.15.0` (Docker Hub) | Target port `8000` with a public domain, healthcheck `/api/v1/health/readiness`, which fails while the database is unreachable. Pulls the published image, pinned to a release; builds nothing. See [Upgrade](#upgrade). |
 | **Postgres** | Railway managed | Durable storage for keys, users, budgets, and usage. |
 | **otari-files** | Railway bucket | S3-compatible object storage for the bytes behind the Files API: uploads, attachments, and files a sandbox produced. They survive a redeploy and every replica reads the same bucket. Billed per stored GB; see [Files](#files). |
 
@@ -162,7 +162,7 @@ To upgrade:
    added to it later. The release notes name such variables; [`template.json`](template.json) at the target
    release's tag shows what a new deploy would get.
 4. On the otari service, open Settings → Source and change the image tag to the
-   target release (for example `0.15.0`). Railway
+   target release (for example `0.16.0`). Railway
    redeploys, and Otari migrates the schema on startup.
 5. Check `/api/v1/health/readiness` and make one real request, as in [Verify](#verify).
 
@@ -170,7 +170,7 @@ To take patch releases without doing this by hand, turn on Railway's
 [Image Auto Updates](https://docs.railway.com/deployments/image-auto-updates):
 on the otari service, open Settings → Source → **Configure Auto Updates**,
 choose **Patches only**, and pick a maintenance window. Railway then moves the
-pinned tag within its minor line (`0.14.1` to `0.14.2`) and notifies workspace
+pinned tag within its minor line (`0.15.0` to `0.15.1`) and notifies workspace
 admins. Avoid **Minor updates and patches**: a minor release can migrate the
 schema, and the backup Railway takes before an update covers the otari
 service's volumes, not the Postgres service.

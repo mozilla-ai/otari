@@ -9,6 +9,7 @@ on:
       - 'alembic/**'
       - 'tests/**'
       - 'scripts/**'
+      - 'docs/domains.md'
       - 'Makefile'
       - '.pre-commit-config.yaml'
       - 'pyproject.toml'
@@ -22,6 +23,7 @@ on:
       - 'alembic/**'
       - 'tests/**'
       - 'scripts/**'
+      - 'docs/domains.md'
       - 'Makefile'
       - '.pre-commit-config.yaml'
       - 'pyproject.toml'
@@ -47,5 +49,12 @@ jobs:
     - name: Install dependencies
       run: uv sync --dev --frozen
 
+    - name: Architecture check
+      id: architecture
+      run: make check-architecture
+
     - name: Run lint checks
+      if: ${{ success() || steps.architecture.conclusion == 'failure' }}
+      env:
+        SKIP: check-architecture
       run: make lint-python

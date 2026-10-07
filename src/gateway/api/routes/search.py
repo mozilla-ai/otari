@@ -49,7 +49,14 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_budget_service, get_config, get_db, get_log_writer, verify_api_key_or_master_key
+from gateway.api.deps import (
+    WorkspaceSearchKeysDep,
+    get_budget_service,
+    get_config,
+    get_db,
+    get_log_writer,
+    verify_api_key_or_master_key,
+)
 from gateway.api.routes._passthrough import (
     PASSTHROUGH_PROVIDER_ERROR_DETAIL,
     resolve_passthrough_user_id,
@@ -61,7 +68,7 @@ from gateway.api.routes._pipeline import (
     log_gateway_rejection,
     rate_limit_headers,
 )
-from gateway.core.config import GatewayConfig
+from gateway.core.config import END_USER_BUDGET_HEADER, GatewayConfig
 from gateway.core.metered_pricing import quantize_cost
 from gateway.exceptions.tools_exceptions import WebSearchNotEnabledError, WebSearchPolicyResolutionFailure
 from gateway.inflight import track_request
@@ -86,12 +93,14 @@ from gateway.services.search_backend import (
     SearchTool,
     SearchToolError,
     resolve_search_tool,
+    run_keyed_search,
     run_search,
 )
 from gateway.services.tenancy.workspace_web_search_service import (
     InvalidStoredWebSearchDomainError,
     resolve_workspace_web_search_config,
 )
+from gateway.services.tools import WorkspaceSearchKeys
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 
 router = APIRouter(tags=["search"])
@@ -170,6 +179,7 @@ async def create_search(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     budget_service: Annotated[BudgetService, Depends(get_budget_service)],
+    search_keys: WorkspaceSearchKeysDep,
 ) -> SearchResponse:
     """Run a search against a configured search tool.
 
@@ -184,8 +194,9 @@ async def create_search(
       disabled and the key does not override it); it is never billed to that
       user.
     - Service key: a ``user`` field names one of the key owner's end users,
-      created on first use with the key's end-user budget, and is billed and
-      rate limited as that end user, as on chat completions.
+      created on first use on the budget ``Otari-End-User-Budget`` names (or
+      the key's default), and is billed and rate limited as that end user, as
+      on chat completions.
     """
     return await _dispatch_search(
         raw_request=raw_request,
@@ -197,6 +208,7 @@ async def create_search(
         config=config,
         log_writer=log_writer,
         budget_service=budget_service,
+        search_keys=search_keys,
     )
 
 
@@ -211,6 +223,7 @@ async def create_search_for_tool(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     budget_service: Annotated[BudgetService, Depends(get_budget_service)],
+    search_keys: WorkspaceSearchKeysDep,
 ) -> SearchResponse:
     """Run a search against the search tool named in the path.
 
@@ -226,8 +239,9 @@ async def create_search_for_tool(
       disabled and the key does not override it); it is never billed to that
       user.
     - Service key: a ``user`` field names one of the key owner's end users,
-      created on first use with the key's end-user budget, and is billed and
-      rate limited as that end user, as on chat completions.
+      created on first use on the budget ``Otari-End-User-Budget`` names (or
+      the key's default), and is billed and rate limited as that end user, as
+      on chat completions.
     """
     return await _dispatch_search(
         raw_request=raw_request,
@@ -239,6 +253,7 @@ async def create_search_for_tool(
         config=config,
         log_writer=log_writer,
         budget_service=budget_service,
+        search_keys=search_keys,
     )
 
 
@@ -253,6 +268,7 @@ async def _dispatch_search(
     config: GatewayConfig,
     log_writer: LogWriter,
     budget_service: BudgetService,
+    search_keys: WorkspaceSearchKeys,
 ) -> SearchResponse:
     """Run the search request scaffold: reserve, call, log, settle.
 
@@ -271,7 +287,14 @@ async def _dispatch_search(
     if api_key is not None and request.user and _names_end_user(api_key, request.user):
         # As on chat: the owner's own rpm is checked before an end user is created for it.
         rate_limit_info = await check_rate_limit(raw_request, str(api_key.user_id))
-        user_id = await budget_service.resolve_end_user(api_key=api_key, external_id=request.user)
+        end_user = await budget_service.resolve_end_user(
+            api_key=api_key,
+            external_id=request.user,
+            requested_budget_id=raw_request.headers.get(END_USER_BUDGET_HEADER) or None,
+        )
+        user_id = end_user.user_id
+        if end_user.budget_id is not None:
+            response.headers[END_USER_BUDGET_HEADER] = end_user.budget_id
     else:
         user_id = resolve_passthrough_user_id(auth_result, request.user, reject_mismatch=config.reject_user_mismatch)
         rate_limit_info = await check_rate_limit(raw_request, user_id)
@@ -348,6 +371,11 @@ async def _dispatch_search(
             status_code=status.HTTP_403_FORBIDDEN,
         )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=refusal.message)
+
+    # A workspace whose organization brought its own search key searches with it, so
+    # its own account pays. The named tool must still be configured, and is still what
+    # the request is allowlisted, rate-limited and priced as, as the in-loop tool is.
+    search_credential = await search_keys.credential_for(usage_workspace_id)
 
     pricing_key = f"{tool.provider}:{tool.name}"
 
@@ -444,7 +472,11 @@ async def _dispatch_search(
     )
 
     try:
-        outcome = await run_search(tool, _search_query(request))
+        query = _search_query(request)
+        if search_credential is not None:
+            outcome = await run_keyed_search(search_credential, query, timeout_s=tool.timeout_s)
+        else:
+            outcome = await run_search(tool, query)
         # The provider's own charge is the true cost; the configured flat rate is
         # the fallback for a provider that reports none.
         # Rounded once, here, so the row and the reconciled spend agree.

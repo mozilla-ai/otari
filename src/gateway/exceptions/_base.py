@@ -11,6 +11,8 @@ class TenancyError(Exception):
     """Base class for a tenancy operation that cannot be completed."""
 
     status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR
+    # The ``Otari-Error-Code`` a caller maps this refusal by, when it has one.
+    error_code: str | None = None
 
     def __init__(self, message: str):
         super().__init__(message)

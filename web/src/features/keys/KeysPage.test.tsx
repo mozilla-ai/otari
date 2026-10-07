@@ -1024,6 +1024,33 @@ describe("KeysPage", () => {
     expect(JSON.parse(String(post?.[1]?.body)).user_id).toBe("alice")
   })
 
+  it("creates a service key from the Advanced section", async () => {
+    const fetchMock = mockApi({ keys: [] })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    await user.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "mlpa")
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    await user.click(screen.getByLabelText("Service key"))
+    await user.click(screen.getByRole("button", { name: "Create key" }))
+
+    const post = fetchMock.mock.calls.find(
+      ([u, init]) =>
+        String(u).endsWith(`${API_ROOT}/keys`) &&
+        (init?.method ?? "") === "POST",
+    )
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
+      is_service_key: true,
+      end_user_budget_ids: [],
+      end_user_budget_id: null,
+    })
+  })
+
   it("creates a budget-exempt key when the toggle is checked", async () => {
     const fetchMock = mockApi({ keys: [] })
     const user = userEvent.setup()

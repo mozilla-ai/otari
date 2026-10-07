@@ -1,5 +1,6 @@
 """The ``rate_limits`` rules: their config, admission, settlement, and the middleware that gives slots back."""
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -11,7 +12,7 @@ from starlette.types import Message, Receive, Scope, Send
 from gateway.adapters.rate_limit_store_adapter import InMemoryRateLimitStore
 from gateway.core.config import GatewayConfig, RateLimitRule
 from gateway.main import _validate_rate_limit_store
-from gateway.rate_limit import BudgetMinuteLimits, RateLimitGrantMiddleware, RateLimitRules
+from gateway.rate_limit import BudgetMinuteLimits, RateLimitGrantMiddleware, RateLimitRules, admit_rate_limit_rules
 
 
 def _request() -> Request:
@@ -436,3 +437,59 @@ async def test_a_budgets_tpm_counts_what_was_used_not_the_estimate() -> None:
     await grant.settle(2500)
     with pytest.raises(HTTPException):
         await rules.admit(_request(), key_id="k", user_id="u", estimated_tokens=8192, budget_limits=limits)
+
+
+@pytest.mark.asyncio
+async def test_a_budget_refusal_gives_back_what_the_rules_before_it_counted() -> None:
+    store = InMemoryRateLimitStore()
+    rules = _rules(store, {"name": "wide", "per": "deployment", "rpm": 5})
+    limits = BudgetMinuteLimits(budget_id="b", rpm=1, tpm=None)
+
+    await rules.admit(_request(), key_id="k", user_id="u", estimated_tokens=10, budget_limits=limits)
+    with pytest.raises(HTTPException, match="'budget'"):
+        await rules.admit(_request(), key_id="k", user_id="u", estimated_tokens=10, budget_limits=limits)
+
+    assert (await store.hit("rule:wide:all:rpm", 5, 60)).count == 2
+
+
+@pytest.mark.asyncio
+async def test_a_budgets_minute_limits_skip_a_request_with_no_user() -> None:
+    rules = _rules(InMemoryRateLimitStore())
+    limits = BudgetMinuteLimits(budget_id="b", rpm=1, tpm=None)
+
+    await rules.admit(_request(), key_id="k", user_id=None, estimated_tokens=10, budget_limits=limits)
+    await rules.admit(_request(), key_id="k", user_id=None, estimated_tokens=10, budget_limits=limits)
+
+
+def _app_request(rules: RateLimitRules | None) -> Request:
+    app = SimpleNamespace(state=SimpleNamespace(rate_limit_rules=rules))
+    return Request({"type": "http", "headers": [], "app": app})
+
+
+@pytest.mark.asyncio
+async def test_admission_counts_a_budgets_minute_limits_when_no_rule_is_configured() -> None:
+    """A deployment with no ``rate_limits`` still enforces the rpm a budget sets."""
+    request = _app_request(_rules(InMemoryRateLimitStore()))
+    limits = BudgetMinuteLimits(budget_id="b", rpm=1, tpm=None)
+
+    assert await admit_rate_limit_rules(request, key_id="k", user_id="u", estimated_tokens=10) is None
+    assert (
+        await admit_rate_limit_rules(request, key_id="k", user_id="u", estimated_tokens=10, budget_limits=limits)
+        is not None
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await admit_rate_limit_rules(request, key_id="k", user_id="u", estimated_tokens=10, budget_limits=limits)
+
+    assert exc_info.value.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_admission_is_skipped_on_an_app_that_holds_no_rules() -> None:
+    limits = BudgetMinuteLimits(budget_id="b", rpm=1, tpm=None)
+
+    assert (
+        await admit_rate_limit_rules(
+            _app_request(None), key_id="k", user_id="u", estimated_tokens=10, budget_limits=limits
+        )
+        is None
+    )

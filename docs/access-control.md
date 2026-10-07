@@ -92,14 +92,12 @@ and `metadata.user_id` on `/v1/messages`. Otari then:
   its own user: two services that both name `alice` get two separate end users,
   and naming another key's user creates an end user of your own rather than
   reaching theirs.
-- Caps each end user at the key's `end_user_budget_id`, copied onto the end
-  user when it is created. Each end user gets the full limit and its own reset
-  period. Changing the key's setting affects end users created afterwards; to
-  give one end user a different budget, update it on `/api/v1/users`, where it
-  is listed with `parent_user_id` (the key's user) and `external_id` (the name
-  the service sent). `GET /api/v1/users?parent_user_id=...&external_id=...`
-  finds one end user by the name you sent, and `include_total=true` counts every
-  match in the `Otari-Total-Count` header.
+- Caps each end user at a budget copied onto it when it is created: the one
+  the request names in the `Otari-End-User-Budget` header, or else the key's
+  `end_user_budget_id`. Each end user gets the full limit and its own reset
+  period. Changing the key's setting affects end users created afterwards. See
+  [Several budgets on one key](#several-budgets-on-one-key) and
+  [Managing end users](#managing-end-users).
 - Applies the per-minute limits of the end user's budget (`rpm_limit`,
   `tpm_limit`), and any `per: user` rate limit rule, each counting every end
   user on its own. Since the limits live on the budget, two service keys with
@@ -118,7 +116,79 @@ would on any other key. Blocking the key's user stops its end users too.
 Each distinct `user` value creates an end user, whether or not the request is
 then admitted, and nothing else caps how many a key can create. Set a rate
 limit on a deployment that issues service keys, and send a stable id per end
-user rather than a per-session or per-request value.
+user rather than a per-session or per-request value. An id is at most 256
+characters, and a new one may not contain `/` or be `.` or `..`, so that it
+can be named in the path of the end user routes below.
+
+### Several budgets on one key
+
+One key can start its end users on different budgets, for a service whose
+features each carry their own per-user limits. List the budgets the key may
+assign in `end_user_budget_ids`, and keep `end_user_budget_id` as the default
+for a request that names none:
+
+```http
+POST /api/v1/keys
+{"user_id": "mlpa", "is_service_key": true,
+ "end_user_budget_ids": ["end-user-budget-ai", "end-user-budget-memories"],
+ "end_user_budget_id": "end-user-budget-ai"}
+```
+
+A key with a default and no list may assign the default alone, which is how
+every key behaves until it is given a list. When both are set, the default must
+be on the list. Each entry must be a deployment budget, not an organization's.
+Deleting a budget takes it off every list, but a budget that is some key's
+default cannot be deleted until that key's default changes: without one, the
+key's new end users would start uncapped.
+
+A request then names the budget for a new end user in a header:
+
+```http
+POST /v1/chat/completions
+Otari-End-User-Budget: end-user-budget-memories
+
+{"model": "...", "user": "fxa123:memories", "messages": [...]}
+```
+
+The header applies only when the request creates the end user. An existing end
+user keeps its budget, whatever a later request names, so a request cannot undo
+a move an operator made. A budget that is not on the key's list is refused with
+403 and the code `end_user_budget_not_allowed`, even for an end user that
+already exists. The response carries `Otari-End-User-Budget` with the budget
+the end user is on, so a caller can see when it differs from the one it named.
+
+Give budgets ids of your own with `PUT /api/v1/budgets/{budget_id}`, which
+creates the budget under that id or replaces it, so the same request can run
+at every deploy. An id is up to 128 letters, digits, `.`, `_` and `-`, and
+starts with a letter or digit.
+`POST /api/v1/budgets` still generates an id, and `GET /api/v1/budgets`
+reports how many users are on each budget in `user_count`.
+
+### Managing end users
+
+An end user is addressed by the key and the id the service named it by:
+
+| Request | Does |
+|---|---|
+| `GET /api/v1/keys/{key_id}/end-users/{external_id}` | Reads the end user: its budget, counters and whether it is blocked |
+| `PUT /api/v1/keys/{key_id}/end-users/{external_id}` `{"budget_id": ...}` | Puts the end user on a budget, creating it first if it has not made a request yet (201) |
+| `PATCH /api/v1/keys/{key_id}/end-users/{external_id}` `{"blocked": true}` or `{"budget_id": ...}` | Blocks, unblocks or moves the end user |
+
+A budget set this way must be on the key's list too. Moving an end user
+restarts its period on the new budget and applies that budget's per-minute
+limits, but keeps its spend, tokens and requests so far, as moving a user
+through `/api/v1/users` does: an end user that used up one budget can be over
+the next one's limits until that period resets. End users belong to the key's
+user, so every service key of one user reaches the same end users.
+
+To list end users, use `/api/v1/users`, where each one carries
+`parent_user_id` (the key's user) and `external_id`.
+`GET /api/v1/users?parent_user_id=...&external_id=...` filters on them, and
+`include_total=true` counts every match in the `Otari-Total-Count` header. The
+users API can also put an end user on any deployment budget, not only one on a
+key's list.
+
+### Where end users apply
 
 End users are supported on the endpoints above. The other endpoints
 (embeddings, files, batches and the other pass-through

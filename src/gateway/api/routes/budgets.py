@@ -1,7 +1,7 @@
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,7 @@ from gateway.models.budgets import Budget, BudgetResetLog
 from gateway.models.money import to_usd, to_usd_or_none
 from gateway.models.users import User
 from gateway.schemas.budgets import (
+    BUDGET_ID_PATTERN,
     BudgetResetLogResponse,
     BudgetResponse,
     CreateBudgetRequest,
@@ -245,6 +246,37 @@ async def update_budget(
     )
 
 
+@router.put(
+    "/{budget_id}",
+    responses={status.HTTP_201_CREATED: {"model": BudgetResponse, "description": "The budget was created"}},
+)
+async def put_budget(
+    budget_id: Annotated[
+        str,
+        Path(
+            pattern=BUDGET_ID_PATTERN,
+            description=(
+                "An id you choose: up to 128 letters, digits, '.', '_' and '-', starting with a letter or digit"
+            ),
+        ),
+    ],
+    request: CreateBudgetRequest,
+    response: Response,
+    service: BudgetServiceDep,
+) -> BudgetResponse:
+    """Create a budget under an id you choose, or replace the one with that id.
+
+    Every field takes the value in the body, and a field left out is cleared, so
+    the same request always leaves the same budget. Answers 201 when it created
+    the budget. Users on a budget it replaces stay on it, and its ceilings follow
+    a change of reset period. A budget an organization owns is not replaced.
+    """
+    budget, created = await service.put_deployment_budget(budget_id, request)
+    if created:
+        response.status_code = status.HTTP_201_CREATED
+    return budget
+
+
 @router.delete("/{budget_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_budget(budget_id: str, service: BudgetServiceDep) -> None:
     """Delete a budget the deployment owns.
@@ -258,7 +290,9 @@ async def delete_budget(budget_id: str, service: BudgetServiceDep) -> None:
     which, and where.
 
     Gateway users assigned to the budget are left uncapped, as the dashboard's
-    confirmation says, and its reset history is deleted with it.
+    confirmation says, its reset history is deleted with it, and it is taken off
+    every service key's ``end_user_budget_ids``. A budget that is a key's
+    ``end_user_budget_id`` is refused (409) until that key's default changes.
     """
     await service.delete_deployment_budget(budget_id)
 

@@ -21,6 +21,7 @@ Contents:
 - [Guardrails and gates](#guardrails-and-gates)
 - [Where the files live](#where-the-files-live)
 - [Checking a guardrail before it runs](#checking-a-guardrail-before-it-runs)
+- [Checking a pull request in CI](#checking-a-pull-request-in-ci)
 - [Generating gates from AGENTS.md or CLAUDE.md](#generating-gates-from-agentsmd-or-claudemd)
 - [Recommendations](#recommendations)
 - [Why gates rather than written rules](#why-gates-rather-than-written-rules)
@@ -47,13 +48,14 @@ uv tool install https://github.com/mozilla-ai/otari/releases/download/vX.Y.Z/ota
 A source checkout's virtualenv carries the same command. See
 [cli/README.md](../cli/README.md) for the rest of that distribution.
 
-Four commands apply here:
+Five commands apply here:
 
 | Command | What it does |
 | --- | --- |
 | `otari hook setup` | Registers the callback in a supported agent's own settings file. |
 | `otari hook` | The callback itself. The harness invokes it; it is not run by hand. |
 | `otari guardrails validate` | Checks the composed guardrail offline, and dry-runs it against a command or path. |
+| `otari guardrails check` | Runs the gates against a change, such as a pull request, without a session. |
 | `otari guardrails generate` | Proposes gates from the repository's own AGENTS.md or CLAUDE.md. |
 
 ## Registering the hook
@@ -366,6 +368,46 @@ Nothing is contacted and no model is called, so a `judge` gate reports
 `would run` rather than running. The full output is documented under
 [Checking a guardrail before it runs](agent-guardrails-reference.md#checking-a-guardrail-before-it-runs).
 
+## Checking a pull request in CI
+
+`otari hook` runs only on a machine that registered it, so a pull request from a contributor or an agent without the hook skips every gate. `otari guardrails check` runs the gates against a change instead, which is what CI needs:
+
+```bash
+otari guardrails check --base origin/main
+```
+
+The change runs from the commit where the branch left `--base` to the working tree, untracked files included. `--head <commit>` ends it at a commit instead, and reads the change from Git alone. `--base` defaults to `HEAD`, which checks the uncommitted change, the way a `Stop` event does.
+
+Every gate sees the paths the change touches as `stop.working_tree` evidence. A deleted path counts as changed, and a rename counts as both of its paths.
+
+| Type | In a check |
+| --- | --- |
+| `path` | Runs when its `runs` names `stop.working_tree`. A gate that runs only before a tool call does not apply. |
+| `verifier` | Runs, with the checked repository as its working directory. It cannot run with `--head`, because it inspects the working tree. |
+| `judge` | Runs where a judge CLI is installed and signed in, and reads the change's diff. It has no transcript to read. |
+| `command` | Cannot run. It needs the command a tool call is about to run. |
+| `command_if_changed` | Cannot run. It needs the commands a session ran. |
+
+A `required` gate that fails, errors or gets no result exits 1. A gate the change gives nothing to run against is reported as unable to run, and never changes the exit status. A `judge` gate is advisory, so its finding never changes the exit status either. The hook's caps apply here too: at most five judge gates and twenty verifier gates run.
+
+`--type` runs only the gate types it names, and is repeatable. Without it, the report also lists the `command` and `command_if_changed` gates that cannot run. Naming `verifier` together with `--head` is a usage error. `--judge-model` and `--judge-cli` choose the judge's model and CLI, as they do for `otari hook`, and read the same environment variables. `--guardrails-from <directory>` reads the guardrail files and the verifier scripts from another checkout instead of the one being checked. A check reads the repository's own guardrail only, and leaves your files in `~/.otari/` out, so it reads the same on every machine.
+
+A verifier that finds what changed through `git status`, as `no-stranded-docblocks.py` does, sees only the uncommitted part of a change. The path and verifier job below stages the whole pull request against its merge base for that reason.
+
+### The CI jobs
+
+Two workflows run the check on every pull request to `main`. Both take the CLI, the guardrail files and the verifier scripts from the base commit, so a pull request that edits a gate, a verifier or the CLI is checked by the version it changes, not by its own.
+
+- **Path and verifier gates**, in `.github/workflows/otari-guardrails-check.yml`. The job checks out the base commit and the pull request side by side, stages the pull request against its merge base, and runs `otari guardrails check --type path --type verifier --guardrails-from <base>` in the pull request's tree. A `required` gate that does not pass fails the job.
+- **Judge gates**, in `.github/workflows/otari-guardrails-judges.yml`. The job checks out the base commit only, fetches the pull request as Git objects, and runs `otari guardrails check --base <base> --head <head> --type judge`. The judge calls `claude -p` with every tool and MCP server disabled, because the diff it reads is the pull request author's text. Findings go to the job summary. A failing judge also starts one comment on the pull request, which names the commit it describes and which later runs edit. A finding never fails the job.
+
+The judge job reads its credential from the `agent-guardrails` GitHub environment, which holds `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. Without either, the judges skip with a notice. A pull request from a fork skips them with a notice too, because it is not given the credential. In both workflows, a base commit whose CLI has no `otari guardrails check` skips the job with a notice, rather than take the command from the pull request.
+
+The two workflows protect different things, and neither is a boundary against someone with write access:
+
+- The judge workflow runs on `pull_request_target`, so GitHub runs it as it is on `main`, and a pull request cannot edit the job that holds the credential. No tree from the pull request is checked out there. The pull request arrives as Git objects, and only its diff reaches the judge, so nothing in it runs next to the credential. That is also why the `agent-guardrails` environment can restrict its deployment branches to `main`.
+- The path and verifier workflow runs on `pull_request`, so it runs as the pull request has it, and holds no secret. A pull request can edit it, and a verifier runs in the pull request's tree, so whatever it calls there, such as `scripts/check_architecture.py`, is the pull request's own code. A required status check and review of the workflow and the scripts a verifier calls are what keep it honest.
+
 ## Generating gates from AGENTS.md or CLAUDE.md
 
 `otari guardrails generate` proposes gates from a repository's own AGENTS.md, or
@@ -428,7 +470,11 @@ that touched nothing relevant does not pay for it. Setting
 have been made, and their approximate size, without making them.
 
 Run `otari guardrails validate --strict` in CI. A gate that has stopped matching
-reports the same as a gate that passed.
+reports the same as a gate that passed. A guardrail with more judge gates than
+one Stop event evaluates always carries the judge cap warning. `validate` has no
+way to accept a warning, so such a guardrail runs `validate` without `--strict`.
+
+Run `otari guardrails check` on every pull request, with the gates and verifiers taken from the base commit, so a change made without the hook still meets them. See [Checking a pull request in CI](#checking-a-pull-request-in-ci).
 
 Keep one file until the concerns can be named, then split by concern.
 
@@ -461,6 +507,8 @@ after eight consecutive blocks without progress and ends the turn with a warning
 block rather than standing down, and reports that the budget is running out, so
 the remaining attempts go to fixing the gate or explaining why it cannot be
 fixed.
+
+A pull request cannot be checked against a `command` or `command_if_changed` gate. Both read a session's tool calls, and a change carries none, so `otari guardrails check` reports them as unable to run.
 
 Nothing reports a secret that was already read. `pre_tool_use.read_target`
 refuses the `Read` tool and does nothing else; a session that reached a secret

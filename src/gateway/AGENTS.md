@@ -181,6 +181,8 @@ outbound URL checks in `services/url_safety.py`.
 
 Deployment settings establish available backends. Workspace code-execution and
 web-search policy can disable or narrow those settings but cannot widen them.
+An organization's own web search key changes which account a workspace's
+searches bill to, not whether search is available (`services/tools/_web_search_keys.py`).
 MCP servers are workspace resources rather than a refinement of a deployment
 server list.
 

@@ -5,7 +5,7 @@ import pytest
 from otari_agent.domain.evaluators import (
     _command_segments,
     _contains_subsequence,
-    _strip_shell_comment,
+    _strip_comments_and_heredoc_bodies,
     evaluate_command,
     tokenize_commands,
 )
@@ -22,6 +22,10 @@ def _gate(**overrides: object) -> CommandGate:
     }
     defaults.update(overrides)
     return CommandGate(**defaults)  # type: ignore[arg-type]
+
+
+def _pnpm_gate() -> CommandGate:
+    return _gate(id="use-pnpm", forbidden=("npm install",), message="Use pnpm, not npm.")
 
 
 def test_pass_when_no_forbidden_command_run() -> None:
@@ -146,15 +150,16 @@ def test_unbalanced_quotes_do_not_crash_and_still_match_bare_words() -> None:
 
 
 def test_an_unparseable_heredoc_does_not_block_an_unrelated_command() -> None:
-    """The reason the fallback is a whitespace split rather than `unknown`.
-
-    A Bash call carrying a heredoc of another language is routinely
-    unparseable to shlex. Reporting `unknown` there blocks a required gate on
-    every such call, which is every ordinary session, not the forbidden ones.
-    """
-    gate = _gate(id="use-pnpm", forbidden=("npm install",), message="Use pnpm, not npm.")
-    heredoc = "python3 - <<'EOF'\ns = \"it's fine\"\nprint(s)\nEOF"
-    assert evaluate_command(gate, CommandEvidence(commands=(heredoc,))).outcome is Outcome.PASS
+    """A double quote in a heredoc inside a double-quoted command substitution leaves shlex an unbalanced quote."""
+    heredoc = 'git commit -m "$(cat <<\'EOF\'\na lone " quote\nEOF\n)"'
+    assert _command_segments(heredoc) == [
+        ["git", "commit", "-m", '"$'],
+        ["cat", "<<'EOF'"],
+        ["a", "lone", '"', "quote"],
+        ["EOF"],
+        ['"'],
+    ]
+    assert evaluate_command(_pnpm_gate(), CommandEvidence(commands=(heredoc,))).outcome is Outcome.PASS
 
 
 @pytest.mark.parametrize(
@@ -229,16 +234,9 @@ def test_contains_subsequence_rejects_an_empty_phrase() -> None:
 
 
 # --- Shell comments: word-boundary-aware, not shlex's own comments=True ----
-#
-# shlex.split(..., comments=True) treats *any* '#' as starting a comment,
-# even mid-word ("echo a#b" -> ["echo", "a"], where real bash prints "a#b"
-# unchanged). That is unsafe here: a mid-word '#' (a URL fragment, a
-# --flag=value#123) would silently swallow everything after it, including a
-# genuinely separate, later command joined by &&/;/|. _strip_shell_comment
-# only treats a '#' as a comment at a real POSIX word boundary.
 
 
-def test_strip_shell_comment_cases() -> None:
+def test_strip_comments_and_heredoc_bodies_cases() -> None:
     cases = [
         ("npm install # don't use yarn", "npm install "),
         ('npm install # a comment with a stray " quote', "npm install "),
@@ -260,18 +258,16 @@ def test_strip_shell_comment_cases() -> None:
         # it, so \' is a literal apostrophe, not the closing quote; the '#'
         # right after it is still inside the string, not a comment start.
         ("echo $'a\\' # b' && npm install", "echo 'a'\\'' # b' && npm install"),
+        ("cat <<'EOF' > f\nnpm install\nEOF\nls", "cat <<'EOF' > f\nls"),
+        ("cat <<EOF # note\nnpm install\nEOF", "cat <<EOF \n"),
+        ("cat <<EOF\nnpm install", "cat <<EOF\nnpm install"),
     ]
     for command, expected in cases:
-        assert _strip_shell_comment(command) == expected, command
+        assert _strip_comments_and_heredoc_bodies(command) == expected, command
 
 
 def test_a_comment_on_an_earlier_line_does_not_swallow_a_later_real_command() -> None:
-    """A multi-line command's own comment only extends to its own line.
-
-    A prior version of _strip_shell_comment truncated everything from the
-    first comment to the end of the whole string, so a leading comment line
-    silently discarded every real command after it.
-    """
+    """A multi-line command's own comment only extends to its own line."""
     gate = _gate(id="use-pnpm", forbidden=("npm",), message="Use pnpm, not npm.")
     for command in [
         "# install dependencies\nnpm install",
@@ -443,6 +439,104 @@ def test_newline_boundary_also_applies_to_the_malformed_command_fallback() -> No
     """
     segments = _command_segments('npm install "unterminated\ngit push --force')
     assert segments == [["npm", "install", '"unterminated'], ["git", "push", "--force"]]
+
+
+def test_a_heredoc_body_is_not_a_command() -> None:
+    command = "git commit -F - <<'MSG'\nfix: mention npm install here\nMSG"
+    assert _command_segments(command) == [["git", "commit", "-F", "-", "<<MSG"]]
+    assert evaluate_command(_pnpm_gate(), CommandEvidence(commands=(command,))).outcome is Outcome.PASS
+
+
+def test_the_same_text_after_the_terminator_is_a_command() -> None:
+    command = "cat <<'EOF' > notes.txt\nnpm install\nEOF\nnpm install"
+    assert _command_segments(command) == [["cat", "<<EOF", ">", "notes.txt"], ["npm", "install"]]
+    assert evaluate_command(_pnpm_gate(), CommandEvidence(commands=(command,))).outcome is Outcome.FAIL
+
+
+def test_the_rest_of_the_heredoc_line_is_a_command() -> None:
+    command = "cat <<EOF > notes.txt && npm install\nbody\nEOF"
+    assert _command_segments(command) == [["cat", "<<EOF", ">", "notes.txt"], ["npm", "install"]]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'cat <<"EOF"\nnpm install\nEOF',
+        "cat <<\\EOF\nnpm install\nEOF",
+        'cat <<E"O"F\nnpm install\nEOF',
+        "cat << EOF\nnpm install\nEOF",
+        "cat <<-EOF\n\tnpm install\n\tEOF",
+        "cat <<A <<B\nnpm install\nA\nnpm install\nB",
+        "cat <<''\nnpm install\n\nls",
+        'cat <<"E\\"F"\nnpm install\nE"F',
+        "cat <<'$EOF'\nnpm install\n$EOF",
+        "echo $((1 + 2)) && cat <<'EOF'\nnpm install\nEOF",
+        "[ -f x ] && cat <<'EOF'\nnpm install\nEOF",
+        "body=$(cat <<'EOF'\nnpm install\nEOF\n)",
+        "sort < a > b; git commit -F - <<MSG\nnpm install\nMSG",
+        "cat <<'EOF'\nEO\\\nF\nnpm install\nEOF",
+    ],
+)
+def test_every_heredoc_spelling_hides_its_body(command: str) -> None:
+    assert evaluate_command(_pnpm_gate(), CommandEvidence(commands=(command,))).outcome is Outcome.PASS
+
+
+def test_a_heredoc_body_with_an_apostrophe_leaves_the_command_parseable() -> None:
+    command = "python3 - <<'EOF' && ls\ns = \"it's fine\"\nEOF"
+    assert _command_segments(command) == [["python3", "-", "<<EOF"], ["ls"]]
+
+
+def test_a_heredoc_piped_to_a_shell_is_not_seen() -> None:
+    """A command gate does not see what a command runs, and here the shell runs the body."""
+    command = "bash <<'EOF'\nnpm install\nEOF"
+    assert evaluate_command(_pnpm_gate(), CommandEvidence(commands=(command,))).outcome is Outcome.PASS
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat <<EOF\nnpm install",
+        "cat <<< word\nnpm install",
+        'echo "a <<EOF"\nnpm install\nEOF',
+        "echo 'a <<EOF'\nnpm install\nEOF",
+        "ls # <<EOF\nnpm install\nEOF",
+        "cat <<\nnpm install",
+        "cat <<< word\nnpm install\nword",
+        "cat <<<-5\nnpm install\n5",
+        "cat <<$'EOF'\nbody\nEOF\nnpm install\n$EOF",
+        "cat <<`x`\nnpm install\n`x`",
+        "echo $((1<<2))\nnpm install\n2",
+        "echo $(( 1 << 2 ))\nnpm install\n2",
+        "echo $(( (1 + (2)) << 3 ))\nnpm install\n3",
+        "((x<<2))\nnpm install\n2",
+        "echo $[1<<2]\nnpm install\n2]",
+        "for ((i=1<<0; i<1; i++)); do :; done\nnpm install\n0",
+        "echo ${a[1<<2]}\nnpm install\n2]}",
+        "a[1<<2]=9\nnpm install\n2]=9",
+        "arr=( [1<<2]=x )\nnpm install\n2]=x",
+        "echo $((1<<2\nnpm install\n2",
+        "sort < in.txt\nnpm install\nin.txt",
+        "cat <in\nnpm install\nn",
+        "diff <(ls) x\nnpm install\nls",
+        "cat <<$EOF\nbody\n$EOF\nnpm install\nEOF",
+        "cat <<EOF\nEO\\\nF\nnpm install\nEOF",
+        "echo $((1))#; npm install",
+    ],
+)
+def test_text_that_is_not_a_terminated_heredoc_body_is_still_checked(command: str) -> None:
+    assert evaluate_command(_pnpm_gate(), CommandEvidence(commands=(command,))).outcome is Outcome.FAIL
+
+
+def test_many_unterminated_heredocs_resolve_quickly() -> None:
+    command = "cat <<X\n" * 20_000
+    start = time.perf_counter()
+    _command_segments(command)
+    assert time.perf_counter() - start < 1.0
+
+
+def test_the_malformed_command_fallback_does_not_see_a_heredoc_body() -> None:
+    command = "cat <<'EOF'\nnpm install\nEOF\necho \"unterminated"
+    assert _command_segments(command) == [["cat", "<<'EOF'"], ["echo", '"unterminated']]
 
 
 # --- Empty segments: two separators back to back, or at either end --------

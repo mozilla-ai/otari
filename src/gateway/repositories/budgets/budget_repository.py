@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Sequence
+from decimal import Decimal
 from typing import Never
 
 from sqlalchemy import delete, func, select
@@ -24,6 +25,32 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
         await self.db.flush()
         await self.db.refresh(budget)
         return budget
+
+    async def add_if_absent(self, budget_id: str) -> bool:
+        """Stage an empty budget under ``budget_id``, returning False when a concurrent request created it first.
+
+        The insert runs in a SAVEPOINT, so losing that race rolls back this row alone.
+        """
+        try:
+            async with self.db.begin_nested():
+                self.db.add(Budget(budget_id=budget_id))
+        except IntegrityError:
+            return False
+        return True
+
+    async def usage(self, budget_id: str) -> tuple[int, float, float]:
+        """Count the active users on a budget and sum their spend and reservations."""
+        row = (
+            await self.db.execute(
+                select(
+                    func.count(),
+                    # Decimal defaults: ``coalesce(numeric, double precision)`` would sum exact counters as floats.
+                    func.coalesce(func.sum(User.spend), Decimal(0)),
+                    func.coalesce(func.sum(User.reserved), Decimal(0)),
+                ).where(User.budget_id == budget_id, User.deleted_at.is_(None))
+            )
+        ).one()
+        return int(row[0]), float(row[1]), float(row[2])
 
     async def count_by_organization(self, organization_id: uuid.UUID) -> int:
         """Count the organization's budgets."""

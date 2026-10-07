@@ -285,6 +285,61 @@ class McpSessionsInterruptedError(Exception):
         super().__init__("MCP sessions were canceled before they opened")
 
 
+class WebSearchKeyNotFoundError(TenancyNotFoundError):
+    """No web search key with this id in the caller's organization."""
+
+    def __init__(self, key_id: object):
+        super().__init__(f"Web search key {key_id} not found")
+
+
+class WebSearchKeyUnknownProviderError(TenancyValidationError):
+    """A key named a search provider the managed search tool cannot call."""
+
+    def __init__(self, provider: str, known: tuple[str, ...]):
+        super().__init__(f"Unknown web search provider '{provider}'. Use one of: {', '.join(known)}")
+
+
+class WebSearchKeyNameRequiredError(TenancyValidationError):
+    def __init__(self) -> None:
+        super().__init__("A web search key needs a name")
+
+
+class WebSearchKeyMalformedError(TenancyValidationError):
+    def __init__(self) -> None:
+        super().__init__("A web search key cannot contain whitespace or control characters")
+
+
+class WebSearchKeyAlreadyExistsError(TenancyConflictError):
+    def __init__(self, provider: str, name: str):
+        super().__init__(f"The organization already has a {provider} web search key named '{name}'")
+
+
+class WebSearchKeyArchivedError(TenancyValidationError):
+    """An archived key cannot be changed, made a default or pinned until it is restored."""
+
+    def __init__(self, key_id: object):
+        super().__init__(f"Web search key {key_id} is archived; restore it first")
+
+
+class WebSearchKeyNotArchivedError(TenancyValidationError):
+    """A key in use is archived before it is deleted, so a deletion is never a surprise."""
+
+    def __init__(self, key_id: object):
+        super().__init__(f"Web search key {key_id} is not archived; archive it before deleting it")
+
+
+class WebSearchKeyDefaultConflictError(TenancyConflictError):
+    """Another key became the provider's default at the same time."""
+
+    def __init__(self, provider: str):
+        super().__init__(f"Another {provider} web search key became the default at the same time; retry")
+
+
+class WorkspaceWebSearchKeyOverrideConflictError(TenancyValidationError):
+    def __init__(self) -> None:
+        super().__init__("A web search key cannot be both pinned and turned off for a workspace")
+
+
 __all__ = [
     "CodeExecutionPolicyResolutionFailedError",
     "CodeExecutionPolicyResolutionFailure",
