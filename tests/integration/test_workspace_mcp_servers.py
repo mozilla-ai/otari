@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.adapters.code_execution_policy_adapter import LocalCodeExecutionPolicy
 from gateway.adapters.mcp_server_adapter import LocalMcpServers
 from gateway.adapters.web_search_policy_adapter import LocalWebSearchPolicy
-from gateway.api.deps import ToolPorts
+from gateway.api.deps import ToolPorts, get_workspace_search_keys
 from gateway.api.routes import chat, messages
 from gateway.api.routes._pipeline import DeclaredTools, RequestContext, ToolBackends, prepare_gateway_tools
 from gateway.api.routes.chat import ChatCompletionRequest
@@ -73,7 +73,7 @@ def _tool_ports(db: AsyncSession) -> ToolPorts:
         code_execution=None,
         code_execution_policy=LocalCodeExecutionPolicy(db),
         mcp_server=LocalMcpServers(db),
-        web_search_policy=LocalWebSearchPolicy(db),
+        web_search_policy=LocalWebSearchPolicy(db, search_keys=get_workspace_search_keys(db)),
     )
 
 

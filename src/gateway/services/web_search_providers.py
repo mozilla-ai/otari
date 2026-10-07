@@ -86,6 +86,15 @@ class WebSearchProviderError(RuntimeError):
     """The search provider could not be reached or returned malformed data."""
 
 
+def is_sendable_api_key(api_key: str) -> bool:
+    """Whether a key can go in a request header as is.
+
+    A key with whitespace or a control character is refused before it is sent, because the
+    HTTP client's own error for an illegal header value quotes the whole header.
+    """
+    return bool(api_key) and api_key.isprintable() and not any(char.isspace() for char in api_key)
+
+
 async def provider_search(
     *,
     provider: str,
@@ -102,12 +111,16 @@ async def provider_search(
     is what lets ``WebSearchBackend`` skip its own fetch-and-extract pass.
 
     Raises:
-        WebSearchProviderError: If the provider refused the request, could not
-            be reached, or answered a shape this cannot read.
+        WebSearchProviderError: If the key cannot be sent in a header, or the
+            provider refused the request, could not be reached, or answered a
+            shape this cannot read.
         ValueError: If ``provider`` is not one of :data:`WEB_SEARCH_PROVIDERS`.
 
     """
     normalized = (provider or "").strip().lower()
+    if not is_sendable_api_key(api_key):
+        msg = f"{normalized or 'the'} search key contains whitespace or a control character"
+        raise WebSearchProviderError(msg)
     if normalized == TAVILY_PROVIDER:
         return await _search_tavily(api_key, query, options or {}, client, timeout_s)
     if normalized == BRAVE_PROVIDER:
@@ -200,6 +213,10 @@ async def _search_brave(
     freshness = _BRAVE_FRESHNESS.get(str(options.get("time_range") or "").strip().lower())
     if freshness is not None:
         params["freshness"] = freshness
+    # Brave reads a two-letter country code as is. Tavily is not sent one: it takes a country's full name.
+    country = options.get("country")
+    if isinstance(country, str) and len(country.strip()) == 2 and country.strip().isalpha():
+        params["country"] = country.strip().upper()
 
     payload = await _request(
         BRAVE_PROVIDER,
@@ -266,6 +283,10 @@ async def _request(
             headers=headers,
             timeout=timeout_s,
         )
+    except httpx.LocalProtocolError:
+        # Its message quotes the offending header, which may be the key itself.
+        msg = f"{provider} search request could not be built"
+        raise WebSearchProviderError(msg) from None
     except httpx.HTTPError as exc:
         msg = f"{provider} search could not be reached: {exc}"
         raise WebSearchProviderError(msg) from exc

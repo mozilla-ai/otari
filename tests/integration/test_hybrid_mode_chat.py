@@ -2505,17 +2505,22 @@ def test_hybrid_mode_searches_with_the_workspace_key_the_control_plane_returns(
     assert "tvly-workspace" not in repr(credential)
 
 
+@pytest.mark.parametrize("credential", [{"provider": "tavily"}, {"provider": "tavily", "api_key": "tvly-key\n"}])
 def test_hybrid_mode_refuses_a_malformed_workspace_key(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     control_plane_transport: InstallControlPlane,
+    credential: dict[str, str],
 ) -> None:
-    """Read strictly, like the rest of the answer, so a malformed one fails closed."""
+    """Read strictly, like the rest of the answer, so a malformed one fails closed.
+
+    A key that cannot go in a header is malformed too: sending it would quote it in the client's error.
+    """
     response = _search_with_web_search_answer(
         platform_client,
         monkeypatch,
         control_plane_transport,
-        {"enabled": True, "credential": {"provider": "tavily"}},
+        {"enabled": True, "credential": credential},
     )
 
     assert response.status_code == 502, response.text

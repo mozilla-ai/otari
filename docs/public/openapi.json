@@ -20841,6 +20841,11 @@
       },
       "WorkspaceWebSearchKeysPublic": {
         "properties": {
+          "count": {
+            "description": "Every live key of the organization, not only this page.",
+            "title": "Count",
+            "type": "integer"
+          },
           "data": {
             "items": {
               "$ref": "#/components/schemas/WorkspaceWebSearchKeyPublic"
@@ -20850,7 +20855,8 @@
           }
         },
         "required": [
-          "data"
+          "data",
+          "count"
         ],
         "title": "WorkspaceWebSearchKeysPublic",
         "type": "object"
@@ -40244,7 +40250,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/web-search-keys": {
       "get": {
-        "description": "The organization's web search keys as this workspace sees them, and which one it searches with.\n\nAny member of the workspace may read it.",
+        "description": "The organization's web search keys as this workspace sees them, and which one it searches with.\n\nAny member of the workspace may read it. ``is_effective`` is decided across every key, not only this page.",
         "operationId": "web-search-keys-list_workspace_web_search_keys",
         "parameters": [
           {
@@ -40255,6 +40261,33 @@
               "format": "uuid",
               "title": "Workspace Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
             }
           }
         ],
@@ -40296,7 +40329,7 @@
     },
     "/api/v1/workspaces/{workspace_id}/web-search-keys/{key_id}": {
       "delete": {
-        "description": "Return this workspace to inheriting the key. Idempotent.",
+        "description": "Return this workspace to inheriting the key. Idempotent. Answers with the list's first page.",
         "operationId": "web-search-keys-reset_workspace_web_search_key_override",
         "parameters": [
           {
@@ -40356,7 +40389,7 @@
         ]
       },
       "patch": {
-        "description": "Pin a web search key as this workspace's own, or turn it off for this workspace.\n\nOrganization owners and admins, or this workspace's owners and admins.",
+        "description": "Pin a web search key as this workspace's own, or turn it off for this workspace.\n\nOrganization owners and admins, or this workspace's owners and admins. Answers with the list's first page.",
         "operationId": "web-search-keys-set_workspace_web_search_key_override",
         "parameters": [
           {

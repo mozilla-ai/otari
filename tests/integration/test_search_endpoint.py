@@ -48,7 +48,7 @@ def test_config(postgres_url: str) -> GatewayConfig:
         auto_migrate=False,
         require_pricing=False,
         search_tools={
-            "exa-search": {"provider": "exa", "api_key": "exa-secret"},
+            "exa-search": {"provider": "exa", "api_key": "exa-secret", "timeout": 7},
             "exa-fast": {"provider": "exa", "api_key": "exa-secret", "options": {"type": "fast"}},
         },
     )
@@ -678,6 +678,8 @@ def test_search_uses_the_workspaces_own_key(
     deployment.assert_not_called()
     credential = keyed.call_args.args[0]
     assert (credential.provider, credential.api_key) == ("tavily", "tvly-org-secret")
+    # The key changes who pays, not how long the named tool may take.
+    assert keyed.call_args.kwargs["timeout_s"] == 7
 
 
 @pytest.mark.usefixtures("_secret_key")

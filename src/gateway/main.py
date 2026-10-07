@@ -24,6 +24,7 @@ from gateway.api.deps import (
     build_idempotency_service,
     get_membership_listener,
     get_workspace_listener,
+    get_workspace_search_keys,
     set_config,
 )
 from gateway.api.main import register_routers
@@ -1115,6 +1116,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         config=config,
         membership_listener=get_membership_listener,
         workspace_listener=functools.partial(get_workspace_listener, config=config),
+        search_keys=get_workspace_search_keys,
     )
     install_rate_limits(app, config)
 

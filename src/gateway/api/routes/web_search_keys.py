@@ -102,13 +102,17 @@ async def set_org_default_web_search_key(
 
 @workspace_router.get("")
 async def list_workspace_web_search_keys(
-    service: WebSearchKeyServiceDep, current_identity: CurrentIdentity, workspace_id: uuid.UUID
+    service: WebSearchKeyServiceDep,
+    current_identity: CurrentIdentity,
+    workspace_id: uuid.UUID,
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
 ) -> WorkspaceWebSearchKeysPublic:
     """The organization's web search keys as this workspace sees them, and which one it searches with.
 
-    Any member of the workspace may read it.
+    Any member of the workspace may read it. ``is_effective`` is decided across every key, not only this page.
     """
-    return await service.list_workspace_keys(user=current_identity, workspace_id=workspace_id)
+    return await service.list_workspace_keys(user=current_identity, workspace_id=workspace_id, skip=skip, limit=limit)
 
 
 @workspace_router.patch("/{key_id}")
@@ -121,7 +125,7 @@ async def set_workspace_web_search_key_override(
 ) -> WorkspaceWebSearchKeysPublic:
     """Pin a web search key as this workspace's own, or turn it off for this workspace.
 
-    Organization owners and admins, or this workspace's owners and admins.
+    Organization owners and admins, or this workspace's owners and admins. Answers with the list's first page.
     """
     return await service.set_workspace_override(
         user=current_identity, workspace_id=workspace_id, key_id=key_id, request=body
@@ -132,5 +136,5 @@ async def set_workspace_web_search_key_override(
 async def reset_workspace_web_search_key_override(
     service: WebSearchKeyServiceDep, current_identity: CurrentIdentity, workspace_id: uuid.UUID, key_id: uuid.UUID
 ) -> WorkspaceWebSearchKeysPublic:
-    """Return this workspace to inheriting the key. Idempotent."""
+    """Return this workspace to inheriting the key. Idempotent. Answers with the list's first page."""
     return await service.reset_workspace_override(user=current_identity, workspace_id=workspace_id, key_id=key_id)

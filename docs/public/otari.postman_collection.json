@@ -6508,7 +6508,7 @@
         {
           "name": "List Workspace Web Search Keys",
           "request": {
-            "description": "The organization's web search keys as this workspace sees them, and which one it searches with.\n\nAny member of the workspace may read it.",
+            "description": "The organization's web search keys as this workspace sees them, and which one it searches with.\n\nAny member of the workspace may read it. ``is_effective`` is decided across every key, not only this page.",
             "header": [],
             "method": "GET",
             "url": {
@@ -6522,7 +6522,21 @@
                 ":workspace_id",
                 "web-search-keys"
               ],
-              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/web-search-keys",
+              "query": [
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/workspaces/:workspace_id/web-search-keys?skip=&limit=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -6545,7 +6559,7 @@
               },
               "raw": "{\n  \"disabled\": false,\n  \"is_default\": false\n}"
             },
-            "description": "Pin a web search key as this workspace's own, or turn it off for this workspace.\n\nOrganization owners and admins, or this workspace's owners and admins.",
+            "description": "Pin a web search key as this workspace's own, or turn it off for this workspace.\n\nOrganization owners and admins, or this workspace's owners and admins. Answers with the list's first page.",
             "header": [
               {
                 "key": "Content-Type",
@@ -6584,7 +6598,7 @@
         {
           "name": "Reset Workspace Web Search Key Override",
           "request": {
-            "description": "Return this workspace to inheriting the key. Idempotent.",
+            "description": "Return this workspace to inheriting the key. Idempotent. Answers with the list's first page.",
             "header": [],
             "method": "DELETE",
             "url": {

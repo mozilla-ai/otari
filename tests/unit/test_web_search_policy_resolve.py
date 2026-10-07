@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Any
+import uuid
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import httpx
 import pytest
 
 from conftest import InstallControlPlane
+from gateway.adapters import web_search_policy_adapter
 from gateway.adapters.web_search_policy_adapter import LocalWebSearchPolicy, RemoteWebSearchPolicy
 from gateway.exceptions.control_plane_exceptions import ControlPlaneError, ControlPlaneRefusedError
 from gateway.exceptions.tools_exceptions import WebSearchPolicyResolutionFailedError, WebSearchPolicyResolutionFailure
-from gateway.models.tools import WebTool
+from gateway.models.tools import WebSearchCredential, WebTool
 from gateway.ports.web_search_policy_port import WebSearchPolicyScope
+from gateway.services.tools import WorkspaceSearchKeys
 
 
 def _scope(user_token: str | None = "tk_user") -> WebSearchPolicyScope:
@@ -198,6 +201,61 @@ async def test_resolve_misconfigured_platform_500() -> None:
 @pytest.mark.asyncio
 async def test_a_local_scope_without_a_workspace_is_a_resolution_failure() -> None:
     with pytest.raises(WebSearchPolicyResolutionFailedError) as ei:
-        await LocalWebSearchPolicy(MagicMock()).resolve(_scope(), [WebTool.SEARCH])
+        await LocalWebSearchPolicy(MagicMock(), search_keys=MagicMock()).resolve(_scope(), [WebTool.SEARCH])
 
     assert ei.value.reason is WebSearchPolicyResolutionFailure.NO_WORKSPACE
+
+
+class _SearchKeys:
+    """A resolver that answers one credential and records which workspaces asked."""
+
+    def __init__(self, credential: WebSearchCredential | None) -> None:
+        self.credential = credential
+        self.asked: list[uuid.UUID] = []
+
+    async def credential_for(self, workspace_id: uuid.UUID) -> WebSearchCredential | None:
+        self.asked.append(workspace_id)
+        return self.credential
+
+
+def _local(search_keys: _SearchKeys, monkeypatch: pytest.MonkeyPatch) -> LocalWebSearchPolicy:
+    async def no_stored_policy(_session: Any, _workspace_id: uuid.UUID) -> None:
+        return None
+
+    monkeypatch.setattr(web_search_policy_adapter, "resolve_workspace_web_search_config", no_stored_policy)
+    return LocalWebSearchPolicy(MagicMock(), search_keys=cast(WorkspaceSearchKeys, search_keys))
+
+
+@pytest.mark.asyncio
+async def test_a_local_search_carries_the_workspaces_own_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    workspace_id = uuid.uuid4()
+    credential = WebSearchCredential(provider="brave", api_key="brv-own")
+    search_keys = _SearchKeys(credential)
+
+    policy = await _local(search_keys, monkeypatch).resolve(
+        WebSearchPolicyScope(workspace_id=workspace_id, user_token=None), [WebTool.SEARCH]
+    )
+
+    assert policy is not None
+    assert policy.credential == credential
+    assert search_keys.asked == [workspace_id]
+
+
+@pytest.mark.asyncio
+async def test_a_local_search_with_no_key_uses_the_deployments_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    policy = await _local(_SearchKeys(None), monkeypatch).resolve(
+        WebSearchPolicyScope(workspace_id=uuid.uuid4(), user_token=None), [WebTool.SEARCH]
+    )
+
+    assert policy is None
+
+
+@pytest.mark.asyncio
+async def test_a_fetch_alone_never_reads_a_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    search_keys = _SearchKeys(WebSearchCredential(provider="brave", api_key="brv-own"))
+
+    await _local(search_keys, monkeypatch).resolve(
+        WebSearchPolicyScope(workspace_id=uuid.uuid4(), user_token=None), [WebTool.FETCH]
+    )
+
+    assert search_keys.asked == []

@@ -182,11 +182,12 @@ async def test_direct_search_on_a_workspace_key_reads_the_providers_hits(monkeyp
     credential = WebSearchCredential(provider="tavily", api_key="workspace-key")
 
     outcome = await search_backend.run_keyed_search(
-        credential, SearchQuery(query="q", max_results=2, domain_filter=("-dropped.example",))
+        credential, SearchQuery(query="q", max_results=2, domain_filter=("-dropped.example",)), timeout_s=3.0
     )
 
     assert (seen["provider"], seen["api_key"], seen["query"]) == ("tavily", "workspace-key", "q")
     assert seen["options"] == {"max_results": 2}
+    assert seen["timeout_s"] == 3.0
     assert [hit.url for hit in outcome.results] == ["https://kept.example/a", "https://kept.example/c"]
     assert outcome.cost_usd is None
 
@@ -200,7 +201,28 @@ async def test_direct_search_on_a_workspace_key_reports_a_provider_failure(monke
 
     with pytest.raises(search_backend.SearchProviderError) as raised:
         await search_backend.run_keyed_search(
-            WebSearchCredential(provider="tavily", api_key="workspace-key"), SearchQuery(query="q")
+            WebSearchCredential(provider="tavily", api_key="workspace-key"), SearchQuery(query="q"), timeout_s=3.0
         )
 
     assert "workspace-key" not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_direct_search_on_a_workspace_key_localizes_to_the_requested_country(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, Any] = {}
+
+    async def fake_provider_search(**kwargs: Any) -> list[dict[str, Any]]:
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr(search_backend, "provider_search", fake_provider_search)
+
+    await search_backend.run_keyed_search(
+        WebSearchCredential(provider="brave", api_key="workspace-key"),
+        SearchQuery(query="q", max_results=2, country="de"),
+        timeout_s=3.0,
+    )
+
+    assert seen["options"] == {"max_results": 2, "country": "de"}

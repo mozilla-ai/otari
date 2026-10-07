@@ -282,20 +282,25 @@ async def run_search(tool: SearchTool, query: SearchQuery) -> SearchOutcome:
     raise SearchProviderError(msg)
 
 
-async def run_keyed_search(credential: WebSearchCredential, query: SearchQuery) -> SearchOutcome:
+async def run_keyed_search(credential: WebSearchCredential, query: SearchQuery, *, timeout_s: float) -> SearchOutcome:
     """Dispatch one search on a workspace's own provider key, in place of the named tool's backend.
 
+    ``timeout_s`` is the named tool's, so the key changes who pays and not how long a search may take.
     The provider bills the key's owner directly, so no cost is reported and the tool's
     configured flat rate is what the gateway records, as for the in-loop tool.
     """
     limit = _result_limit(query)
+    options: dict[str, Any] = {"max_results": limit}
+    if query.country:
+        options["country"] = query.country
     try:
         raw = await provider_search(
             provider=credential.provider,
             api_key=credential.api_key,
             query=query.query,
-            options={"max_results": limit},
+            options=options,
             client=get_search_client(),
+            timeout_s=timeout_s,
         )
     except (WebSearchProviderError, ValueError) as exc:
         msg = f"{credential.provider} search request failed: {exc}"

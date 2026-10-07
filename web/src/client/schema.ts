@@ -5803,7 +5803,7 @@ export interface paths {
          * List Workspace Web Search Keys
          * @description The organization's web search keys as this workspace sees them, and which one it searches with.
          *
-         *     Any member of the workspace may read it.
+         *     Any member of the workspace may read it. ``is_effective`` is decided across every key, not only this page.
          */
         get: operations["web-search-keys-list_workspace_web_search_keys"];
         put?: never;
@@ -5826,7 +5826,7 @@ export interface paths {
         post?: never;
         /**
          * Reset Workspace Web Search Key Override
-         * @description Return this workspace to inheriting the key. Idempotent.
+         * @description Return this workspace to inheriting the key. Idempotent. Answers with the list's first page.
          */
         delete: operations["web-search-keys-reset_workspace_web_search_key_override"];
         options?: never;
@@ -5835,7 +5835,7 @@ export interface paths {
          * Set Workspace Web Search Key Override
          * @description Pin a web search key as this workspace's own, or turn it off for this workspace.
          *
-         *     Organization owners and admins, or this workspace's owners and admins.
+         *     Organization owners and admins, or this workspace's owners and admins. Answers with the list's first page.
          */
         patch: operations["web-search-keys-set_workspace_web_search_key_override"];
         trace?: never;
@@ -15327,6 +15327,11 @@ export interface components {
         };
         /** WorkspaceWebSearchKeysPublic */
         WorkspaceWebSearchKeysPublic: {
+            /**
+             * Count
+             * @description Every live key of the organization, not only this page.
+             */
+            count: number;
             /** Data */
             data: components["schemas"]["WorkspaceWebSearchKeyPublic"][];
         };
@@ -25042,7 +25047,12 @@ export interface operations {
     };
     "web-search-keys-list_workspace_web_search_keys": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
             header?: never;
             path: {
                 workspace_id: string;

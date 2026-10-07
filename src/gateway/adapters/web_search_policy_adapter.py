@@ -18,15 +18,14 @@ from gateway.exceptions.tools_exceptions import WebSearchPolicyResolutionFailedE
 from gateway.log_config import logger
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential, WebTool
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
-from gateway.repositories.tenancy import WorkspaceRepository
-from gateway.repositories.tools import WorkspaceWebSearchKeyOverrideRepository
 from gateway.services.control_plane import ResolveEndpoint, resolve
 from gateway.services.tenancy.workspace_web_search_service import (
     InvalidStoredWebSearchDomainError,
     read_web_search_policy,
     resolve_workspace_web_search_config,
 )
-from gateway.services.tools import workspace_search_credential
+from gateway.services.tools import WorkspaceSearchKeys
+from gateway.services.web_search_providers import is_sendable_api_key
 
 # The policy of a workspace that holds no row, carrying only its search key.
 _NO_NARROWING = ResolvedWebSearchConfig(
@@ -43,8 +42,9 @@ _NO_NARROWING = ResolvedWebSearchConfig(
 class LocalWebSearchPolicy(WebSearchPolicyPort):
     """The policy stored in this deployment's own database."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, *, search_keys: WorkspaceSearchKeys) -> None:
         self._session = session
+        self._search_keys = search_keys
 
     async def resolve(
         self, scope: WebSearchPolicyScope, requested_tools: Sequence[WebTool]
@@ -58,11 +58,7 @@ class LocalWebSearchPolicy(WebSearchPolicyPort):
             raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.STORED_POLICY_INVALID) from None
         if WebTool.SEARCH not in requested_tools:
             return policy
-        credential = await workspace_search_credential(
-            WorkspaceRepository(self._session),
-            WorkspaceWebSearchKeyOverrideRepository(self._session),
-            scope.workspace_id,
-        )
+        credential = await self._search_keys.credential_for(scope.workspace_id)
         if credential is None:
             return policy
         return replace(policy or _NO_NARROWING, credential=credential)
@@ -106,7 +102,7 @@ def _credential(answer: dict[str, Any]) -> WebSearchCredential | None:
     if not isinstance(raw, dict):
         raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.ANSWER_UNREADABLE)
     provider, api_key = raw.get("provider"), raw.get("api_key")
-    if not isinstance(provider, str) or not isinstance(api_key, str) or not api_key:
+    if not isinstance(provider, str) or not isinstance(api_key, str) or not is_sendable_api_key(api_key):
         raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.ANSWER_UNREADABLE)
     if provider not in WEB_SEARCH_PROVIDERS:
         logger.warning("Ignoring a workspace web search key for a provider this gateway cannot call: %s", provider)

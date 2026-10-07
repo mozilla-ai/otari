@@ -1533,6 +1533,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/services/budgets/_scoped_enforcement.py",
         ),
     },
+    "gateway.models.tools.OrgWebSearchKey": {
+        "repository": "gateway/repositories/tools/web_search_key_repository.py",
+        "baseline": (),
+    },
     "gateway.models.tools.SandboxContainer": {
         "repository": "gateway/repositories/code_execution/sandbox_container_repository.py",
         "baseline": (),
@@ -1561,6 +1565,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/services/playground_service.py",
             "gateway/services/tenancy/workspace_web_search_service.py",
         ),
+    },
+    "gateway.models.tools.WorkspaceWebSearchKeyOverride": {
+        "repository": "gateway/repositories/tools/web_search_key_repository.py",
+        "baseline": (),
     },
     "gateway.models.usage.AgentTelemetry": {
         "repository": None,

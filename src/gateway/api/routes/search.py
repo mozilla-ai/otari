@@ -49,7 +49,14 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_budget_service, get_config, get_db, get_log_writer, verify_api_key_or_master_key
+from gateway.api.deps import (
+    WorkspaceSearchKeysDep,
+    get_budget_service,
+    get_config,
+    get_db,
+    get_log_writer,
+    verify_api_key_or_master_key,
+)
 from gateway.api.routes._passthrough import (
     PASSTHROUGH_PROVIDER_ERROR_DETAIL,
     resolve_passthrough_user_id,
@@ -69,8 +76,6 @@ from gateway.log_config import logger
 from gateway.models.api_keys import APIKey
 from gateway.models.usage import UsageLog
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit
-from gateway.repositories.tenancy import WorkspaceRepository
-from gateway.repositories.tools import WorkspaceWebSearchKeyOverrideRepository
 from gateway.services.budgets import (
     BudgetScopeRequest,
     BudgetService,
@@ -95,7 +100,7 @@ from gateway.services.tenancy.workspace_web_search_service import (
     InvalidStoredWebSearchDomainError,
     resolve_workspace_web_search_config,
 )
-from gateway.services.tools import workspace_search_credential
+from gateway.services.tools import WorkspaceSearchKeys
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 
 router = APIRouter(tags=["search"])
@@ -174,6 +179,7 @@ async def create_search(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     budget_service: Annotated[BudgetService, Depends(get_budget_service)],
+    search_keys: WorkspaceSearchKeysDep,
 ) -> SearchResponse:
     """Run a search against a configured search tool.
 
@@ -202,6 +208,7 @@ async def create_search(
         config=config,
         log_writer=log_writer,
         budget_service=budget_service,
+        search_keys=search_keys,
     )
 
 
@@ -216,6 +223,7 @@ async def create_search_for_tool(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     budget_service: Annotated[BudgetService, Depends(get_budget_service)],
+    search_keys: WorkspaceSearchKeysDep,
 ) -> SearchResponse:
     """Run a search against the search tool named in the path.
 
@@ -245,6 +253,7 @@ async def create_search_for_tool(
         config=config,
         log_writer=log_writer,
         budget_service=budget_service,
+        search_keys=search_keys,
     )
 
 
@@ -259,6 +268,7 @@ async def _dispatch_search(
     config: GatewayConfig,
     log_writer: LogWriter,
     budget_service: BudgetService,
+    search_keys: WorkspaceSearchKeys,
 ) -> SearchResponse:
     """Run the search request scaffold: reserve, call, log, settle.
 
@@ -365,9 +375,7 @@ async def _dispatch_search(
     # A workspace whose organization brought its own search key searches with it, so
     # its own account pays. The named tool must still be configured, and is still what
     # the request is allowlisted, rate-limited and priced as, as the in-loop tool is.
-    search_credential = await workspace_search_credential(
-        WorkspaceRepository(db), WorkspaceWebSearchKeyOverrideRepository(db), usage_workspace_id
-    )
+    search_credential = await search_keys.credential_for(usage_workspace_id)
 
     pricing_key = f"{tool.provider}:{tool.name}"
 
@@ -466,7 +474,7 @@ async def _dispatch_search(
     try:
         query = _search_query(request)
         if search_credential is not None:
-            outcome = await run_keyed_search(search_credential, query)
+            outcome = await run_keyed_search(search_credential, query, timeout_s=tool.timeout_s)
         else:
             outcome = await run_search(tool, query)
         # The provider's own charge is the true cost; the configured flat rate is

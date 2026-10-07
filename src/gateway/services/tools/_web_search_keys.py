@@ -20,6 +20,7 @@ from gateway.exceptions.tools_exceptions import (
     WebSearchKeyAlreadyExistsError,
     WebSearchKeyArchivedError,
     WebSearchKeyDefaultConflictError,
+    WebSearchKeyMalformedError,
     WebSearchKeyNameRequiredError,
     WebSearchKeyNotArchivedError,
     WebSearchKeyNotFoundError,
@@ -53,6 +54,7 @@ from gateway.services.secret_box import (
 )
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.authorization import WorkspaceAccess
+from gateway.services.web_search_providers import is_sendable_api_key
 
 # Takes the workspace's row lock for the rest of the transaction.
 LockWorkspace = Callable[[uuid.UUID], Awaitable[None]]
@@ -67,31 +69,42 @@ def search_key_credential(key: OrgWebSearchKey) -> WebSearchCredential | None:
         return None
 
 
-def search_key_is_usable(key: OrgWebSearchKey) -> bool:
-    return search_key_credential(key) is not None
+class _Decrypted:
+    """Each key decrypted at most once, and only when asked."""
+
+    def __init__(self) -> None:
+        self._credentials: dict[uuid.UUID, WebSearchCredential | None] = {}
+
+    def credential(self, key: OrgWebSearchKey) -> WebSearchCredential | None:
+        if key.id not in self._credentials:
+            self._credentials[key.id] = search_key_credential(key)
+        return self._credentials[key.id]
+
+    def usable(self, key: OrgWebSearchKey) -> bool:
+        return self.credential(key) is not None
 
 
-async def workspace_search_credential(
-    workspaces: WorkspaceRepository, overrides: WorkspaceWebSearchKeyOverrideRepository, workspace_id: uuid.UUID
-) -> WebSearchCredential | None:
-    """The key a workspace searches with, or ``None`` where it uses the deployment's search.
+class WorkspaceSearchKeys:
+    """The key each workspace searches with, read by every search it makes: the in-loop tool and direct search."""
 
-    Read by every search a workspace makes: the in-loop tool and direct search alike.
-    Only the keys the choice reaches are decrypted.
-    """
-    workspace = await workspaces.get(workspace_id)
-    if workspace is None:
-        return None
-    candidates = await overrides.candidates(organization_id=workspace.organization_id, workspace_id=workspace.id)
-    credentials: dict[uuid.UUID, WebSearchCredential | None] = {}
+    def __init__(self, *, workspaces: WorkspaceRepository, overrides: WorkspaceWebSearchKeyOverrideRepository) -> None:
+        self.workspaces = workspaces
+        self.overrides = overrides
 
-    def credential(key: OrgWebSearchKey) -> WebSearchCredential | None:
-        if key.id not in credentials:
-            credentials[key.id] = search_key_credential(key)
-        return credentials[key.id]
+    async def credential_for(self, workspace_id: uuid.UUID) -> WebSearchCredential | None:
+        """The workspace's key, or ``None`` where it uses the deployment's search.
 
-    chosen = resolve_web_search_key(candidates, lambda key: credential(key) is not None)
-    return credential(chosen) if chosen is not None else None
+        Only the keys the choice reaches are decrypted.
+        """
+        workspace = await self.workspaces.get(workspace_id)
+        if workspace is None:
+            return None
+        candidates = await self.overrides.candidates(
+            organization_id=workspace.organization_id, workspace_id=workspace.id
+        )
+        decrypted = _Decrypted()
+        chosen = resolve_web_search_key(candidates, decrypted.usable)
+        return decrypted.credential(chosen) if chosen is not None else None
 
 
 class WebSearchKeyService:
@@ -189,7 +202,8 @@ class WebSearchKeyService:
         organization_id = await self._managed_organization(user)
         async with self.uow:
             key = await self._key(key_id, organization_id)
-            key = await self.keys.update_key(key, {"archived_at": None})
+            # Not a default again: another key may have become the default while it was archived.
+            key = await self.keys.update_key(key, {"archived_at": None, "is_org_default": False})
         return _public(key)
 
     async def delete_key(self, *, user: User, key_id: uuid.UUID) -> None:
@@ -218,15 +232,20 @@ class WebSearchKeyService:
     # One workspace's choice among its organization's keys
     # ------------------------------------------------------------------
 
-    async def list_workspace_keys(self, *, user: User, workspace_id: uuid.UUID) -> WorkspaceWebSearchKeysPublic:
-        """Every live key as the workspace sees it, and which one it searches with. Any member may read it."""
+    async def list_workspace_keys(
+        self, *, user: User, workspace_id: uuid.UUID, skip: int = 0, limit: int = 100
+    ) -> WorkspaceWebSearchKeysPublic:
+        """A page of the live keys as the workspace sees them, and which one it searches with. Any member may read it.
+
+        The effective key is chosen across every live key, not the page, so paging never changes it.
+        """
         workspace = await self.workspaces.resolve_visible_workspace(user=user, workspace_id=workspace_id)
         async with self.uow:
             candidates = await self.overrides.candidates(
                 organization_id=workspace.organization_id, workspace_id=workspace.id
             )
-        usable = {key.id: search_key_is_usable(key) for key, _ in candidates}
-        effective = resolve_web_search_key(candidates, lambda key: usable[key.id])
+        decrypted = _Decrypted()
+        effective = resolve_web_search_key(candidates, decrypted.usable)
         return WorkspaceWebSearchKeysPublic(
             data=[
                 WorkspaceWebSearchKeyPublic(
@@ -238,10 +257,11 @@ class WebSearchKeyService:
                     is_default=override.is_default if override else False,
                     disabled=override.disabled if override else False,
                     is_effective=effective is not None and key.id == effective.id,
-                    usable=usable[key.id],
+                    usable=decrypted.usable(key),
                 )
-                for key, override in candidates
-            ]
+                for key, override in candidates[skip : skip + limit]
+            ],
+            count=len(candidates),
         )
 
     async def set_workspace_override(
@@ -322,7 +342,7 @@ class WebSearchKeyService:
 
 
 def _public(key: OrgWebSearchKey) -> OrgWebSearchKeyPublic:
-    return OrgWebSearchKeyPublic.from_row(key, usable=search_key_is_usable(key))
+    return OrgWebSearchKeyPublic.from_row(key, usable=search_key_credential(key) is not None)
 
 
 def _validated_provider(provider: str) -> str:
@@ -340,7 +360,13 @@ def _validated_name(name: str) -> str:
 
 
 def _encrypted(api_key: str) -> tuple[str, str]:
-    """Encrypt a plaintext key for storage, with the last four characters an operator tells keys apart by."""
+    """Encrypt a plaintext key for storage, with the last four characters an operator tells keys apart by.
+
+    Surrounding whitespace from a paste is dropped; whitespace or a control character inside is refused.
+    """
+    api_key = api_key.strip()
+    if not is_sendable_api_key(api_key):
+        raise WebSearchKeyMalformedError()
     try:
         return encrypt_secret(api_key), api_key[-4:]
     except SecretBoxUnavailableError:

@@ -144,6 +144,35 @@ def test_renaming_a_key_onto_another_keys_name_is_refused(
     assert "first" in response.json()["detail"]
 
 
+def test_a_pasted_key_is_trimmed_and_one_that_cannot_be_sent_is_refused(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    trimmed = _add_key(client, master_key_header, api_key="  tvly-secret-1234\n")
+    assert trimmed["last4"] == "1234"
+
+    for api_key in ("tvly-secret 1234", "tvly-secret\n1234", "tvly-\x00-1234", "   "):
+        refused = client.post(
+            _KEYS, json={"provider": "tavily", "name": "bad", "api_key": api_key}, headers=master_key_header
+        )
+        assert refused.status_code in (400, 422), refused.text
+        assert "secret" not in refused.text
+    renamed = client.patch(f"{_KEYS}/{trimmed['id']}", json={"api_key": "tvly-new\r\n9999"}, headers=master_key_header)
+    assert renamed.status_code == 400, renamed.text
+
+
+def test_a_restored_key_is_not_a_default_again(client: TestClient, master_key_header: dict[str, str]) -> None:
+    first = _add_key(client, master_key_header, name="first", api_key="tvly-1")
+    second = _add_key(client, master_key_header, name="second", api_key="tvly-2")
+    client.post(f"{_KEYS}/{first['id']}/default", headers=master_key_header)
+    client.post(f"{_KEYS}/{first['id']}/archive", headers=master_key_header)
+    client.post(f"{_KEYS}/{second['id']}/default", headers=master_key_header)
+
+    restored = client.post(f"{_KEYS}/{first['id']}/restore", headers=master_key_header)
+
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["is_org_default"] is False
+
+
 def test_one_default_per_provider_and_a_live_key_cannot_be_deleted(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
@@ -186,6 +215,24 @@ def test_a_workspace_pins_or_turns_off_a_key(client: TestClient, master_key_head
     reset = client.delete(f"{view}/{tavily['id']}", headers=master_key_header)
     assert reset.status_code == 200
     assert effective() == ["t"]
+
+
+def test_a_workspaces_keys_are_paged_and_the_effective_key_is_chosen_across_pages(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    workspace_id = _workspace_id(client, master_key_header)
+    _add_key(client, master_key_header, name="oldest", api_key="tvly-1")
+    newest = _add_key(client, master_key_header, name="newest", api_key="tvly-2")
+    view = f"{API_ROOT}/workspaces/{workspace_id}/web-search-keys"
+    client.patch(f"{view}/{newest['id']}", json={"is_default": True}, headers=master_key_header)
+
+    first = client.get(view, params={"limit": 1}, headers=master_key_header).json()
+    second = client.get(view, params={"skip": 1, "limit": 1}, headers=master_key_header).json()
+
+    assert (first["count"], second["count"]) == (2, 2)
+    assert [(key["name"], key["is_effective"]) for key in first["data"]] == [("oldest", False)]
+    assert [(key["name"], key["is_effective"]) for key in second["data"]] == [("newest", True)]
+    assert client.get(view, params={"limit": 1001}, headers=master_key_header).status_code == 422
 
 
 def test_pinning_and_turning_off_one_key_at_once_is_refused(

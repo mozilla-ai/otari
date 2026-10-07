@@ -65,6 +65,7 @@ from gateway.repositories.tenancy import UserRepository
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.workspace_listener import WorkspaceListener
+from gateway.services.tools import WorkspaceSearchKeys
 
 T = TypeVar("T")
 
@@ -88,6 +89,7 @@ PortFactory = Callable[[AsyncSession | None], T]
 UnitOfWorkPortFactory = Callable[[AsyncSession | None, UnitOfWork | None], T]
 MembershipListenerBuilder = Callable[[UnitOfWork], MembershipListener]
 WorkspaceListenerBuilder = Callable[[UnitOfWork], WorkspaceListener]
+WorkspaceSearchKeysBuilder = Callable[[AsyncSession], WorkspaceSearchKeys]
 Register = Callable[["Container"], None]
 
 
@@ -443,7 +445,23 @@ def _with_session(port: PortKey[T], adapter: Callable[[AsyncSession], T]) -> Por
     return factory
 
 
-def _bind_workspace_ports(container: Container, config: GatewayConfig | None) -> None:
+def _local_web_search_policy(
+    search_keys: WorkspaceSearchKeysBuilder | None,
+) -> Callable[[AsyncSession], WebSearchPolicyPort]:
+    """Build the stored web search policy, which also reads the workspace's own search key."""
+
+    def build(session: AsyncSession) -> WebSearchPolicyPort:
+        if search_keys is None:
+            msg = f"a search key resolver is required to build {_port_name(WebSearchPolicyPort)}"
+            raise ContainerError(msg)
+        return LocalWebSearchPolicy(session, search_keys=search_keys(session))
+
+    return build
+
+
+def _bind_workspace_ports(
+    container: Container, config: GatewayConfig | None, search_keys: WorkspaceSearchKeysBuilder | None
+) -> None:
     """Bind each workspace port to this deployment's own rows, or to its peer where a peer holds them.
 
     The planes a deployment serves are fixed for the life of the process, so they are read once, here.
@@ -455,7 +473,7 @@ def _bind_workspace_ports(container: Container, config: GatewayConfig | None) ->
     elif deployment_for(config).supports(Plane.CONTROL):
         container.bind(CodeExecutionPolicyPort, _with_session(CodeExecutionPolicyPort, LocalCodeExecutionPolicy))
         container.bind(McpServerPort, _with_session(McpServerPort, LocalMcpServers))
-        container.bind(WebSearchPolicyPort, _with_session(WebSearchPolicyPort, LocalWebSearchPolicy))
+        container.bind(WebSearchPolicyPort, _with_session(WebSearchPolicyPort, _local_web_search_policy(search_keys)))
     else:
         container.bind(CodeExecutionPolicyPort, _shared(RemoteCodeExecutionPolicy(config)))
         container.bind(McpServerPort, _shared(RemoteMcpServers(config)))
@@ -468,6 +486,7 @@ def build_container(
     *,
     membership_listener: MembershipListenerBuilder | None = None,
     workspace_listener: WorkspaceListenerBuilder | None = None,
+    search_keys: WorkspaceSearchKeysBuilder | None = None,
 ) -> Container:
     """Build the composition-root container for this deployment.
 
@@ -478,7 +497,8 @@ def build_container(
     ``membership_listener`` builds the listener the OAuth sign-in adapter's
     organization service notifies. It is a parameter because its builder lives
     in the API layer, which this module cannot import. ``workspace_listener``
-    builds what sets up a workspace that adapter's open signup creates, for the
+    builds what sets up a workspace that adapter's open signup creates, and
+    ``search_keys`` the resolver of a workspace's own web search key, for the
     same reason.
 
     Raises:
@@ -530,7 +550,7 @@ def build_container(
     container.bind(ProviderFilePort, _provider_file_adapter)
     # A workspace's MCP servers and its web search and code execution policies.
     # An overlay binds a source of its own and changes nothing above the port.
-    _bind_workspace_ports(container, config)
+    _bind_workspace_ports(container, config, search_keys)
     # Rate-limit counts: the base keeps them in this process, or in Redis
     # where ``rate_limit_store`` asks for one count shared by every replica.
     container.bind(RateLimitStorePort, _rate_limit_store_port_factory(config))

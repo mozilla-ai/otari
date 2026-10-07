@@ -304,6 +304,11 @@ class WebSearchKeyNameRequiredError(TenancyValidationError):
         super().__init__("A web search key needs a name")
 
 
+class WebSearchKeyMalformedError(TenancyValidationError):
+    def __init__(self) -> None:
+        super().__init__("A web search key cannot contain whitespace or control characters")
+
+
 class WebSearchKeyAlreadyExistsError(TenancyConflictError):
     def __init__(self, provider: str, name: str):
         super().__init__(f"The organization already has a {provider} web search key named '{name}'")

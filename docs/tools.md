@@ -542,4 +542,6 @@ pricing keys.
 A workspace with a usable [organization search key](#organization-search-keys)
 runs its direct searches on that key rather than on the named tool's backend.
 The named tool must still be configured, and the request is still allowlisted,
-rate-limited and priced as that tool.
+rate-limited, priced and timed out as that tool. A Brave key localizes results to
+the request's `country`; Tavily takes a country by its full name, so a Tavily key
+does not.

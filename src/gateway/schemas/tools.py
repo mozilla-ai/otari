@@ -93,3 +93,4 @@ class WorkspaceWebSearchKeyPublic(SQLModel):
 
 class WorkspaceWebSearchKeysPublic(SQLModel):
     data: list[WorkspaceWebSearchKeyPublic]
+    count: int = Field(description="Every live key of the organization, not only this page.")
