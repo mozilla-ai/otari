@@ -61,6 +61,14 @@ async def test_error_raises_with_its_tag_and_status() -> None:
 
 
 @pytest.mark.asyncio
+async def test_an_option_of_the_wrong_type_raises_a_library_error() -> None:
+    with pytest.raises(ProviderError) as raised:
+        await _search(delay="abc")
+    assert (raised.value.provider, raised.value.tag, raised.value.status) == ("fake", "invalid_option", None)
+    assert "abc" not in str(raised.value)
+
+
+@pytest.mark.asyncio
 async def test_in_body_error_is_returned_not_raised() -> None:
     result = await _search(in_body_error="engine_unavailable")
     assert result.hits == []

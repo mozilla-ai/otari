@@ -35,7 +35,7 @@ def test_json_and_raw_keep_raw(capsys: pytest.CaptureFixture[str]) -> None:
     assert "raw" in printed and "raw" in printed["hits"][0]
 
 
-@pytest.mark.parametrize("option", ["error=rate_limit", "in_body_error=engine_unavailable"])
+@pytest.mark.parametrize("option", ["error=rate_limit", "in_body_error=engine_unavailable", "delay=abc"])
 def test_an_error_exits_1_without_the_query(option: str, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["fake", "sentinel-query", "-o", option]) == 1
     captured = capsys.readouterr()

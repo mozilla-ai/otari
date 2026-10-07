@@ -9,7 +9,7 @@ import asyncio
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from any_search._api import AnySearch
 from any_search._errors import ProviderError
@@ -110,7 +110,12 @@ class FakeProvider(AnySearch):
         time_range: TimeRange | None,
         options: dict[str, Any],
     ) -> SearchResult:
-        parsed = FakeOptions.model_validate(options)
+        # A known option with a value of the wrong type, such as delay=abc from the command line, is refused
+        # the way a provider refuses a bad value: as a library error, never pydantic's, which quotes the value.
+        try:
+            parsed = FakeOptions.model_validate(options)
+        except ValidationError:
+            raise ProviderError(self.METADATA.name, None, "invalid_option") from None
         if parsed.delay > 0:
             await asyncio.sleep(parsed.delay)
         if parsed.leak_query:
