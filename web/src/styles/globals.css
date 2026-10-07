@@ -1879,6 +1879,13 @@ main {
   --button-bg-hover: transparent;
   --button-bg-pressed: transparent;
 }
+/* The same pull on the leading side, for a ghost action that is the first item in
+   the row (a lone Help, where there is no link beside it): its label lines up with
+   the card's content edge as a link's does, and its target keeps its width. */
+.otari-auth-actions
+.button--ghost:not(.button--sm):not(.button--icon-only):first-child {
+  margin-inline-start: -13px;
+}
 .otari-auth-actions
   .button--ghost:not(.button--sm):not(.button--icon-only):is(
     :hover,
