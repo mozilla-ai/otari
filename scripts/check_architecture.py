@@ -792,13 +792,7 @@ FIELD_DEFAULT_KEYWORDS = ("default", "default_factory")
 # The path is the dotted chain of enclosing class and function names, not Python's __qualname__.
 # An entry whose default is gone fails the check until it is removed, so the list only shrinks.
 LISTENER_DEFAULT_BASELINE: tuple[tuple[str, str, str], ...] = (
-    ("gateway/container.py", "_identity_provider_adapter_factory", "workspace_listener"),
     ("gateway/container.py", "build_container", "membership_listener"),
-    ("gateway/container.py", "build_container", "workspace_listener"),
-    ("gateway/services/tenancy/organization_service.py", "OrganizationService.__init__", "workspace_listener"),
-    ("gateway/services/tenancy/provisioning_service.py", "ensure_bootstrap_identity", "workspace_listener"),
-    ("gateway/services/tenancy/user_service.py", "create_user_for_signup", "workspace_listener"),
-    ("gateway/services/tenancy/workspace_service.py", "WorkspaceService.__init__", "workspace_listener"),
 )
 
 
