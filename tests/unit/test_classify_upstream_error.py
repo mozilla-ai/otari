@@ -9,6 +9,7 @@ import pytest
 from anthropic import APIConnectionError as AnthropicAPIConnectionError
 from anthropic import APIStatusError as AnthropicAPIStatusError
 from anthropic import APITimeoutError as AnthropicAPITimeoutError
+from botocore.exceptions import ClientError
 from openai import APIConnectionError as OpenAIAPIConnectionError
 from openai import APIStatusError as OpenAIAPIStatusError
 from openai import APITimeoutError as OpenAIAPITimeoutError
@@ -249,3 +250,12 @@ def test_bare_402_is_billing_even_when_the_provider_message_is_lost() -> None:
 
     echoed = _MessageStatusError(400, "Invalid value: 'payment required'. Supported values are: 'none', 'auto'.")
     assert _classify_upstream_error(echoed) == (True, "http_400")
+
+
+def test_bedrock_client_error_reports_its_http_status() -> None:
+    exc = ClientError(
+        {"Error": {"Code": "ValidationException", "Message": "invalid"}, "ResponseMetadata": {"HTTPStatusCode": 400}},  # type: ignore[typeddict-item]
+        "Converse",
+    )
+
+    assert _classify_upstream_error(exc) == (True, "http_400")

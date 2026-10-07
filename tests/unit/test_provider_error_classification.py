@@ -14,11 +14,13 @@ upstream text.
 
 import asyncio
 import json
+from typing import Any
 
 import httpx
 import pytest
 from anthropic import APITimeoutError as AnthropicAPITimeoutError
 from any_llm.exceptions import ContextLengthExceededError, InvalidRequestError, UnsupportedParameterError
+from botocore.exceptions import ClientError
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from gateway.api.routes._pipeline import (
@@ -838,3 +840,70 @@ def test_a_stream_error_event_carries_the_code_that_ended_it() -> None:
     payload = json.loads(event.removeprefix("data: "))
     assert payload["error"]["code"] == "upstream_rate_limited"
     assert openai_error_event(OPENAI_STREAM_FORMAT, None) == OPENAI_STREAM_FORMAT.error_payload
+
+
+# ---------------------------------------------------------------------------
+# Bedrock: botocore's ClientError carries its status in a response dict
+# ---------------------------------------------------------------------------
+
+_BEDROCK_INVALID_MODEL = "The provided model identifier is invalid."
+
+
+def _bedrock_error(code: str, message: str, status_code: int | None) -> ClientError:
+    """A botocore ``ClientError`` as Bedrock raises it from a Converse call."""
+    response: dict[str, Any] = {"Error": {"Code": code, "Message": message}}
+    if status_code is not None:
+        response["ResponseMetadata"] = {"HTTPStatusCode": status_code, "HTTPHeaders": {}}
+    return ClientError(response, "Converse")  # type: ignore[arg-type]
+
+
+def test_bedrock_validation_error_is_a_caller_fault_400() -> None:
+    exc = _bedrock_error("ValidationException", _BEDROCK_INVALID_MODEL, 400)
+
+    mapping = classify_provider_error(exc)
+
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert _BEDROCK_INVALID_MODEL in mapping.detail
+    assert failure_status_code(exc) == 400
+
+
+def test_bedrock_access_denied_keeps_a_fixed_detail() -> None:
+    exc = _bedrock_error("AccessDeniedException", f"User arn:aws:iam::123456789012:user/otari {_RAW}", 403)
+
+    assert classify_provider_error(exc) == (502, PROVIDER_CREDENTIALS_DETAIL)
+    assert failure_status_code(exc) == 403
+
+
+def test_bedrock_throttling_is_an_upstream_rate_limit() -> None:
+    exc = _bedrock_error("ThrottlingException", "Too many requests, please wait before trying again.", 429)
+
+    mapping = classify_provider_error(exc)
+
+    assert mapping is not None
+    assert mapping.status_code == 429
+    assert refusal_code(exc) == "upstream_rate_limited"
+
+
+def test_bedrock_service_failure_stays_the_generic_502() -> None:
+    exc = _bedrock_error("ServiceUnavailableException", _RAW, 503)
+
+    assert classify_provider_error(exc) is None
+    assert failure_status_code(exc) == 503
+
+
+def test_bedrock_error_without_a_status_stays_unclassified() -> None:
+    exc = _bedrock_error("ValidationException", _BEDROCK_INVALID_MODEL, None)
+
+    assert classify_provider_error(exc) is None
+    assert failure_status_code(exc) == 502
+
+
+def test_bedrock_status_is_read_through_the_unified_exception_wrapper() -> None:
+    wrapper = Exception("Provider error")
+    wrapper.original_exception = _bedrock_error("ValidationException", _BEDROCK_INVALID_MODEL, 400)  # type: ignore[attr-defined]
+
+    mapping = classify_provider_error(wrapper)
+
+    assert mapping is not None
+    assert mapping.status_code == 400
