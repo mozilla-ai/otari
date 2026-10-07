@@ -13,7 +13,7 @@
     "otari": {
       "name": "otari",
       "source": {
-        "image": "mzdotai/otari:0.14.1"
+        "image": "mzdotai/otari:0.15.0"
       },
       "deploy": {
         "startCommand": null,
