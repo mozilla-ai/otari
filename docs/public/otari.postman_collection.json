@@ -3484,7 +3484,7 @@
         {
           "name": "Delete Organization Budget",
           "request": {
-            "description": "Delete a budget, refused with 409 while a ceiling or workspace default names it.",
+            "description": "Delete a budget and stop it applying to every entity it applied to, in one step.\n\nRefused with 409 while a workspace member default names it.",
             "header": [],
             "method": "DELETE",
             "url": {

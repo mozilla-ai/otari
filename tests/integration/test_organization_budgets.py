@@ -495,11 +495,11 @@ def test_an_omitted_provider_narrowing_still_caps_every_provider(
     assert created.json()["provider_key_id"] is None
 
 
-def test_deleting_a_budget_a_ceiling_names_is_refused(
+def test_deleting_a_budget_removes_the_ceilings_applying_it(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """RESTRICT, reported as a 409 saying what to go and change."""
+    """One step: the dashboard confirms what stops being capped, and the delete does the rest."""
     budget = client.post(_BUDGETS, json=_budget_body(), headers=master_key_header).json()
     client.post(
         _CEILINGS,
@@ -511,13 +511,10 @@ def test_deleting_a_budget_a_ceiling_names_is_refused(
         headers=master_key_header,
     )
 
-    refused = client.delete(f"{_BUDGETS}/{budget['budget_id']}", headers=master_key_header)
-    assert refused.status_code == status.HTTP_409_CONFLICT, refused.text
-    assert "1 spend ceiling" in refused.json()["detail"]
-
-    # And the list reports the hold, so the page can say so before trying.
-    listed = client.get(_BUDGETS, headers=master_key_header).json()
-    assert listed["data"][0]["ceiling_count"] == 1
+    deleted = client.delete(f"{_BUDGETS}/{budget['budget_id']}", headers=master_key_header)
+    assert deleted.status_code == status.HTTP_200_OK, deleted.text
+    assert client.get(_CEILINGS, headers=master_key_header).json()["count"] == 0
+    assert client.get(_BUDGETS, headers=master_key_header).json()["count"] == 0
 
 
 def test_the_deployment_budget_list_is_not_this_one(
@@ -1176,6 +1173,25 @@ async def test_a_delete_is_refused_while_a_gateway_user_holds_the_budget(async_d
 
     with pytest.raises(OrganizationBudgetHeldElsewhereError):
         await service.delete_organization_budget(user=owner, budget_id=budget.budget_id)
+
+
+@pytest.mark.asyncio
+async def test_a_refused_delete_leaves_the_ceilings_applying_the_budget(async_db: AsyncSession) -> None:
+    """The ceilings go in the same step as the budget, so a refusal keeps both."""
+    organization = await _organization(async_db, slug="acme-delete-atomic")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+    budget = await service.create_organization_budget(
+        user=owner,
+        request=_create(applied_to=[AppliedEntity(scope_type="organization", scope_id=str(organization.id))]),
+    )
+    async_db.add(ApiUser(user_id="capped-elsewhere", budget_id=budget.budget_id))
+    await async_db.flush()
+
+    with pytest.raises(OrganizationBudgetHeldElsewhereError):
+        await service.delete_organization_budget(user=owner, budget_id=budget.budget_id)
+
+    assert len((await service.list_organization_ceilings(user=owner)).data) == 1
 
 
 @pytest.mark.asyncio

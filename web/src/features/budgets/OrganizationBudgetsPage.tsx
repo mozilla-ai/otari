@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { FiEdit2, FiTrash2 } from "react-icons/fi"
 
@@ -5,13 +6,11 @@ import type { OrganizationBudget, OrganizationContext } from "@/client"
 import { Button } from "@/design-system/actions/Button"
 import { RowAction, RowActionRow } from "@/design-system/actions/RowAction"
 import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
-import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import {
-  useDeleteOrganizationBudget,
   useOrganizationBudgets,
   useOrganizationSpendCeilingsAll,
 } from "@/shared/api/budgets"
@@ -23,6 +22,7 @@ import {
   ceilingsByBudget,
 } from "./appliedTo"
 import { budgetLabeler } from "./budgetLabel"
+import { DeleteBudgetDialog } from "./DeleteBudgetDialog"
 import { OrganizationBudgetDialog } from "./OrganizationBudgetDialog"
 import { limitLabel } from "./organizationBudget"
 import { cycleLabel } from "./resetCycle"
@@ -50,7 +50,6 @@ export function OrganizationBudgetsPage({
   const budgets = useOrganizationBudgets()
   const ceilings = useOrganizationSpendCeilingsAll()
   const workspaces = useWorkspaces()
-  const remove = useDeleteOrganizationBudget()
 
   const [isDialogOpen, setDialogOpen] = useState(false)
   // Bumped on every open and used as the dialog's key, so the draft is cleared
@@ -92,13 +91,29 @@ export function OrganizationBudgetsPage({
     setDialogOpen(true)
   }
 
+  const appliedLabel = (row: OrganizationBudget) => {
+    if (row.ceiling_count === 0) return APPLIED_TO_NOTHING
+    const held = applied.get(row.budget_id) ?? []
+    return held.length === 0
+      ? `${row.ceiling_count} ${row.ceiling_count === 1 ? "entity" : "entities"}`
+      : appliedToLabel(held, context)
+  }
+
   const nameBudget = budgetLabeler(rows)
   const columns: DataTableColumn<OrganizationBudget>[] = [
     {
       id: "name",
       header: "Name",
       isRowHeader: true,
-      cell: (row) => <span className="text-body">{nameBudget(row)}</span>,
+      cell: (row) => (
+        <Link
+          to="/budgets/$budgetId"
+          params={{ budgetId: row.budget_id }}
+          className="text-link hover:text-link-hover"
+        >
+          {nameBudget(row)}
+        </Link>
+      ),
     },
     {
       id: "limit",
@@ -114,13 +129,7 @@ export function OrganizationBudgetsPage({
       // saying how many is the answer that cannot be wrong: deriving the cell
       // from the rows alone reads a budget applied to a dozen workspaces as
       // applied to nothing, for as long as the walk takes.
-      cell: (row) => {
-        if (row.ceiling_count === 0) return APPLIED_TO_NOTHING
-        const held = applied.get(row.budget_id) ?? []
-        return held.length === 0
-          ? `${row.ceiling_count} ${row.ceiling_count === 1 ? "entity" : "entities"}`
-          : appliedToLabel(held, context)
-      },
+      cell: appliedLabel,
     },
     {
       id: "resets",
@@ -206,28 +215,15 @@ export function OrganizationBudgetsPage({
         onSaved={() => setDialogOpen(false)}
       />
 
-      <ConfirmDialog
-        isOpen={pendingDelete !== undefined}
+      <DeleteBudgetDialog
+        key={pendingDelete?.budget_id}
+        budget={pendingDelete}
+        budgetName={pendingDelete ? nameBudget(pendingDelete) : ""}
+        appliedTo={pendingDelete ? appliedLabel(pendingDelete) : ""}
         onOpenChange={(open) => {
           if (!open) setPendingDelete(undefined)
         }}
-        heading="Delete budget"
-        body={
-          pendingDelete
-            ? pendingDelete.ceiling_count > 0
-              ? `${nameBudget(pendingDelete)} is applied to ${pendingDelete.ceiling_count} ${pendingDelete.ceiling_count === 1 ? "entity" : "entities"}, so this will be refused. Edit it and remove them first.`
-              : `${nameBudget(pendingDelete)} stops existing. It applies to nothing, so no cap changes.`
-            : null
-        }
-        confirmLabel="Delete budget"
-        isPending={remove.isPending}
-        error={remove.error}
-        onConfirm={() => {
-          if (!pendingDelete) return
-          remove.mutate(pendingDelete.budget_id, {
-            onSuccess: () => setPendingDelete(undefined),
-          })
-        }}
+        onDeleted={() => setPendingDelete(undefined)}
       />
     </div>
   )

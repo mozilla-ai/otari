@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
@@ -22,6 +23,7 @@ import {
   organizationSpendCeiling as spendCeiling,
   workspace,
 } from "@/tests/fixtures"
+import { withRouter } from "@/tests/router"
 
 interface RecordedRequest {
   url: string
@@ -166,20 +168,29 @@ function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  const tree = (context: OrganizationContext) => (
-    <DeploymentProvider value={bootstrap()}>
-      <QueryClientProvider client={client}>
-        <OrganizationBudgetsPage organization={context} />
-      </QueryClientProvider>
-    </DeploymentProvider>
-  )
-  const result = render(tree(admin()))
   // Switching organization invalidates every query rather than remounting this
   // page, so the page seeing a new context in place is what a switch looks like
-  // from here.
+  // from here. Held in state rather than passed by `rerender`, because the
+  // router renders the page and does not re-render it for new wrapper props.
+  let switchContext: (context: OrganizationContext) => void = () => {}
+  function Harness() {
+    const [context, setContext] = useState(admin())
+    switchContext = setContext
+    return (
+      <DeploymentProvider value={bootstrap()}>
+        <QueryClientProvider client={client}>
+          <OrganizationBudgetsPage organization={context} />
+        </QueryClientProvider>
+      </DeploymentProvider>
+    )
+  }
+  const result = render(<Harness />, {
+    wrapper: withRouter({ url: "/budgets" }),
+  })
   return {
     ...result,
-    switchTo: (context: OrganizationContext) => result.rerender(tree(context)),
+    switchTo: (context: OrganizationContext) =>
+      act(() => switchContext(context)),
   }
 }
 
@@ -380,25 +391,44 @@ describe("OrganizationBudgetsPage", () => {
     expect(within(reopened).getByLabelText(/^Name/)).toHaveValue("")
   })
 
-  it("warns that deleting a held budget will be refused, before trying", async () => {
-    mockApi({ budgets: [organizationBudget({ ceiling_count: 3 })] })
+  it("says what stops being capped before deleting a budget that applies to something", async () => {
+    const requests = mockApi({
+      budgets: [organizationBudget({ ceiling_count: 1 })],
+      ceilings: [
+        spendCeiling({ scope_type: "workspace", scope_id: workspace().id }),
+      ],
+    })
     const user = userEvent.setup()
     renderPage()
-    const table = await screen.findByRole("grid", {
-      name: "Budgets",
-    })
+    const table = await screen.findByRole("grid", { name: "Budgets" })
+    await within(table).findByText("Engineering")
 
     await user.click(
       await within(table).findByRole("button", {
         name: "Delete Engineering monthly",
       }),
     )
-
+    const confirm = await screen.findByRole("alertdialog")
     expect(
-      await screen.findByText(
-        /is applied to 3 entities, so this will be refused/,
-      ),
+      within(confirm).getByText(/Engineering stops being capped by it/),
     ).toBeInTheDocument()
+    await user.click(
+      within(confirm).getByRole("button", { name: "Delete budget" }),
+    )
+    await waitFor(() =>
+      expect(requests.some((request) => request.method === "DELETE")).toBe(
+        true,
+      ),
+    )
+  })
+
+  it("links each budget to its own page", async () => {
+    mockApi()
+    renderPage()
+    const table = await screen.findByRole("grid", { name: "Budgets" })
+    expect(
+      await within(table).findByRole("link", { name: "Engineering monthly" }),
+    ).toHaveAttribute("href", "/budgets/bbbbbbbb-1111-2222-3333-444444444444")
   })
 
   it("reports a failed read rather than an empty organization", async () => {

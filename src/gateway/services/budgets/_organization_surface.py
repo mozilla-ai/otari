@@ -236,21 +236,24 @@ class _OrganizationSurface:
         return OrganizationScopedBudgetPublic.from_model(ceiling, budget, organization_id=organization.id)
 
     async def delete_budget(self, *, user: User, budget_id: str) -> None:
-        """Delete a budget of the organization's, refusing while anything names it.
+        """Delete a budget of the organization's and the ceilings applying it, in one step.
 
-        Ceilings and member policies are counted so the refusal can say which.
+        The entities it applied to stop being capped by it; the dashboard confirms that first.
+        Refused while a workspace member default names it, because that is managed on another page
+        and would re-create ceilings for new members.
         A gateway user's assignment is counted but not named, because the admin cannot act on gateway users,
         and without the count the ORM would null the assignment out silently.
-        A reset record refuses at flush time instead, and is reported the same way.
+        A reset record refuses at flush time instead, and is reported the same way;
+        either refusal rolls the ceiling deletes back with it.
         """
         organization = await self._get_managed_organization(user)
         budget = await self._require_own_budget(organization=organization, budget_id=budget_id)
-        ceilings = await self._repositories.ceilings.count_for_budget(budget.budget_id)
         defaults = await self._repositories.member_policies.count_for_budget(budget.budget_id)
-        if ceilings or defaults:
-            raise OrganizationBudgetInUseError(budget.budget_id, ceilings=ceilings, defaults=defaults)
+        if defaults:
+            raise OrganizationBudgetInUseError(budget.budget_id, defaults=defaults)
         if await self._repositories.budgets.count_users_for_budget(budget.budget_id):
             raise OrganizationBudgetHeldElsewhereError(budget.budget_id)
+        await self._repositories.ceilings.delete_for_budget(budget.budget_id)
         try:
             await self._repositories.budgets.remove(budget)
         except BudgetStillReferencedError:

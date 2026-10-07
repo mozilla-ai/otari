@@ -4,16 +4,12 @@ import type { OrganizationBudget } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { Field } from "@/design-system/forms/Field"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
-import { useKeys } from "@/shared/api/apiKeys"
 import {
   useCreateOrganizationBudget,
   useOrganizationBudgets,
   useOrganizationSpendCeilingsAll,
   useUpdateOrganizationBudget,
 } from "@/shared/api/budgets"
-import { useModels } from "@/shared/api/models"
-import { useOrganizationMembers } from "@/shared/api/organizations"
-import { useWorkspaces } from "@/shared/api/workspaces"
 import { AppliedToPicker } from "./AppliedToPicker"
 import {
   ceilingKey,
@@ -32,6 +28,7 @@ import {
   cycleDraftFrom,
   cycleFieldsFromDraft,
 } from "./resetCycle"
+import { useEntitySources } from "./useEntitySources"
 
 // The form behind both New and Edit for one of the organization's budgets: the
 // limit, the reset cycle and the entities it applies to, saved as one write. One
@@ -86,10 +83,7 @@ export function OrganizationBudgetDialog({
 
   const budgets = useOrganizationBudgets()
   const ceilings = useOrganizationSpendCeilingsAll()
-  const workspaces = useWorkspaces()
-  const members = useOrganizationMembers()
-  const keys = useKeys()
-  const models = useModels()
+  const { sources, failedLists } = useEntitySources(organizationId)
 
   // What this budget already applies to, read from the ceilings naming it.
   const heldKeys = (data: typeof ceilings.data) =>
@@ -137,28 +131,11 @@ export function OrganizationBudgetDialog({
     const budget = budgets.data?.find((row) => row.budget_id === id)
     return budget ? nameBudget(budget) : undefined
   })
-  const groups = entityGroups(
-    {
-      organizationId,
-      workspaces: workspaces.data ?? [],
-      members: members.data ?? [],
-      keys: keys.data ?? [],
-      modelIds: (models.data?.data ?? []).map((model) => model.id),
-    },
-    taken,
-  )
+  const groups = entityGroups(sources, taken)
   const organizationKey = entityKey({
     scope_type: "organization",
     scope_id: organizationId,
   })
-
-  // Named, so an empty list reads as a failed read rather than as nothing to pick.
-  const failedLists = [
-    workspaces.isError && "workspaces",
-    members.isError && "members",
-    keys.isError && "API keys",
-    models.isError && "providers and models",
-  ].filter(Boolean)
 
   const seedReason = appliedSeeded
     ? undefined
@@ -248,7 +225,7 @@ export function OrganizationBudgetDialog({
           describe={(key) =>
             describeEntity(entityFromKey(key), {
               organizationName,
-              workspaces: workspaces.data ?? [],
+              workspaces: sources.workspaces,
             })
           }
         />

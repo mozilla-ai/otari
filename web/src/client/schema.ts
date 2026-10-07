@@ -1861,7 +1861,9 @@ export interface paths {
         post?: never;
         /**
          * Delete Organization Budget
-         * @description Delete a budget, refused with 409 while a ceiling or workspace default names it.
+         * @description Delete a budget and stop it applying to every entity it applied to, in one step.
+         *
+         *     Refused with 409 while a workspace member default names it.
          */
         delete: operations["organization-budgets-delete_organization_budget"];
         options?: never;

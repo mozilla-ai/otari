@@ -108,6 +108,12 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
         )
         return dict(result.tuples().all())
 
+    async def delete_for_budget(self, budget_id: str) -> None:
+        """Delete every ceiling naming this budget. A reservation still held against one settles into nothing."""
+        await self.db.execute(
+            delete(ScopedBudget).where(ScopedBudget.budget_id == budget_id).execution_options(synchronize_session=False)
+        )
+
     async def list_for_budget(self, budget_id: str, scopes: ScopeIdSets) -> list[ScopedBudget]:
         """Return the ceilings on these scopes that name this budget."""
         result = await self.db.execute(

@@ -44,22 +44,16 @@ class OrganizationBudgetNotFoundError(TenancyNotFoundError):
 
 
 class OrganizationBudgetInUseError(TenancyConflictError):
-    """The budget still holds ceilings or workspace defaults.
+    """The budget is still a workspace's member default.
 
-    Both foreign keys are ``RESTRICT``, so the database refuses the delete anyway,
-    without naming what to change. Raised here so the refusal can say which rows
-    hold the budget and how many.
+    The foreign key is ``RESTRICT``, so the database refuses the delete anyway,
+    without naming what to change. Raised here so the refusal says what holds the
+    budget and how many.
     """
 
-    def __init__(self, budget_id: object, *, ceilings: int, defaults: int):
-        held = []
-        if ceilings:
-            held.append(f"{ceilings} spend {'ceiling' if ceilings == 1 else 'ceilings'}")
-        if defaults:
-            held.append(f"{defaults} workspace member {'default' if defaults == 1 else 'defaults'}")
-        super().__init__(
-            f"Budget {budget_id} is still used by {' and '.join(held)}. Remove or repoint them before deleting it."
-        )
+    def __init__(self, budget_id: object, *, defaults: int):
+        held = f"{defaults} workspace member {'default' if defaults == 1 else 'defaults'}"
+        super().__init__(f"Budget {budget_id} is still used by {held}. Remove or repoint them before deleting it.")
 
 
 class OrganizationBudgetHeldElsewhereError(TenancyConflictError):

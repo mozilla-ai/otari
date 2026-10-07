@@ -89,7 +89,10 @@ async def delete_organization_budget(
     current_identity: CurrentIdentity,
     budget_id: str,
 ) -> Message:
-    """Delete a budget, refused with 409 while a ceiling or workspace default names it."""
+    """Delete a budget and stop it applying to every entity it applied to, in one step.
+
+    Refused with 409 while a workspace member default names it.
+    """
     await service.delete_organization_budget(user=current_identity, budget_id=budget_id)
     return Message(message="Budget deleted")
 
