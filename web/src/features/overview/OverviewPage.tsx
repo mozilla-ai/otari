@@ -395,8 +395,8 @@ function OrganizationOverview() {
 
   const periodSeries = period.data?.series ?? []
   const ceilingHealth = allocationStrip(summary.data?.ceilings, {
-    none: "No spend ceilings configured",
-    noneCapped: "No ceiling caps spend",
+    none: "No budgets applied",
+    noneCapped: "No budget caps spend",
     // No workspace roster is loaded here, so a workspace ceiling reads as
     // "A workspace", which is what the Spend page shows for an id it cannot
     // resolve either.
@@ -418,8 +418,8 @@ function OrganizationOverview() {
   // yet, or what is capped is capped on tokens or requests rather than dollars.
   const noCeilingReason =
     (summary.data?.ceilings?.total_count ?? 0) === 0
-      ? "no spend ceilings set"
-      : "no ceiling caps spend"
+      ? "no budgets applied"
+      : "no budget caps spend"
 
   const activeKeys = summary.data?.active_keys ?? 0
   const activeMembers = summary.data?.active_members ?? 0
@@ -511,7 +511,7 @@ function OrganizationOverview() {
                 <SpendMeter
                   spent={ceilingHealth.worst.spent}
                   allocated={ceilingHealth.worst.allocated}
-                  ariaLabel={`Tightest spend ceiling: ${ceilingHealth.worst.name}`}
+                  ariaLabel={`Tightest budget: ${ceilingHealth.worst.name}`}
                 />
               ) : undefined
             }

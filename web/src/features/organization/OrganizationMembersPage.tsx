@@ -525,12 +525,12 @@ function MemberEditor({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<unknown>(undefined)
 
-  // "No ceiling" first, then every budget. A workspace's own default is labelled
+  // "No budget" first, then every budget. A workspace's own default is labelled
   // so an operator can tell the inherited one from the rest without leaving the
   // form to look it up.
   const nameBudget = budgetLabeler(budgets)
   const budgetOptions = (fallback: WorkspaceBudgetDefault | undefined) => [
-    { value: "", label: "No ceiling" },
+    { value: "", label: "No budget" },
     ...budgets.map((budget) => {
       const label = nameBudget(budget)
       return {

@@ -1112,7 +1112,7 @@ describe("the tenant Overview's budget signal", () => {
     // The same meter the Spend page's own rows draw, naming the row it is about.
     expect(
       screen.getByRole("progressbar", {
-        name: "Tightest spend ceiling: Staging cap",
+        name: "Tightest budget: Staging cap",
       }),
     ).toBeInTheDocument()
     // And never /api/v1/budgets, the operator cell's endpoint, which is
@@ -1218,7 +1218,7 @@ describe("the tenant Overview's budget signal", () => {
     // Awaited, not read off the first paint: an unresolved query and an empty
     // list both leave the value an em dash, and only the subline tells them
     // apart.
-    const subline = await screen.findByText("no spend ceilings set")
+    const subline = await screen.findByText("no budgets applied")
     expect(subline.closest("div")).toHaveTextContent("Budget health")
   })
 })
