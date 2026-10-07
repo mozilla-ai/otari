@@ -150,14 +150,14 @@ def test_messages_forwards_anthropic_user_id_and_tags_the_rest(
                 "model": MODEL_NAME,
                 "max_tokens": 16,
                 "messages": [{"role": "user", "content": "hi"}],
-                "metadata": {"user_id": "tags-messages", **_LITELLM_METADATA},
+                "metadata": {"user_id": "tags-messages", "feature": "smart-window", **_LITELLM_METADATA},
             },
             headers=master_key_header,
         )
 
     assert captured, "amessages was never called"
     assert captured["metadata"] == {"user_id": "tags-messages"}
-    assert _row(db_session, "tags-messages").tags == _TAGS
+    assert _row(db_session, "tags-messages").tags == {"feature": "smart-window", **_TAGS}
 
 
 # ---------------------------------------------------------------------------

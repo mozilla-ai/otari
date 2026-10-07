@@ -105,12 +105,25 @@ AnthropicRequestMetadata = Annotated[
 ]
 
 
+def anthropic_metadata(fields: dict[str, Any]) -> dict[str, Any]:
+    """Keep only ``user_id`` in ``fields["metadata"]``, in place.
+
+    Anthropic's ``metadata`` takes nothing else, so a tag forwarded there would
+    fail the provider call. The field is removed when no ``user_id`` was sent.
+    """
+    metadata = fields.get("metadata")
+    if isinstance(metadata, dict) and ANTHROPIC_USER_KEY in metadata:
+        fields["metadata"] = {ANTHROPIC_USER_KEY: metadata[ANTHROPIC_USER_KEY]}
+    else:
+        fields.pop("metadata", None)
+    return fields
+
+
 def forwarded_metadata(fields: dict[str, Any]) -> dict[str, Any]:
     """Drop the gateway-consumed LiteLLM key from ``fields["metadata"]`` in place.
 
-    For the routes whose provider takes ``metadata`` itself (Anthropic's
-    ``metadata.user_id``, the Responses API's stored metadata). The field is
-    removed when nothing else was in it.
+    For the Responses API, whose provider stores ``metadata`` itself. The field
+    is removed when nothing else was in it.
     """
     metadata = fields.get("metadata")
     if isinstance(metadata, dict) and LITELLM_SPEND_LOGS_KEY in metadata:

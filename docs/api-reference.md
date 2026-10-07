@@ -109,10 +109,10 @@ pairs, keys up to 64 characters and values up to 512. A null value is ignored,
 and anything else is refused with a 422.
 
 What reaches the provider depends on the surface. Chat Completions never
-forwards `metadata`. Messages and Responses forward it as before, minus
-`spend_logs_metadata`, because those providers take `metadata` themselves. On
-Messages, `metadata.user_id` names the billed user, as it always has, and is not
-a tag.
+forwards `metadata`. Messages forwards only `metadata.user_id`, the one key
+Anthropic accepts there, which also names the billed user, as it always has, and
+is not a tag. Responses forwards `metadata` as before, minus
+`spend_logs_metadata`, because the Responses API stores it.
 
 The usage endpoints (`GET /api/v1/usage`, `/count`, `/summary`, `/series`, and
 their `/api/v1/organizations/me/usage` counterparts) filter by tag with a

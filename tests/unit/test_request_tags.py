@@ -7,6 +7,7 @@ from gateway.api.routes._request_tags import (
     MAX_REQUEST_TAGS,
     MAX_TAG_KEY_LENGTH,
     MAX_TAG_VALUE_LENGTH,
+    anthropic_metadata,
     forwarded_metadata,
     request_tags,
 )
@@ -59,6 +60,12 @@ def test_ignored_keys_are_neither_read_nor_checked() -> None:
     ignore = frozenset({ANTHROPIC_USER_KEY})
     assert request_tags({"user_id": 42, "purpose": "chat"}, ignore=ignore) == {"purpose": "chat"}
     assert request_tags({"user_id": "u1"}, ignore=ignore) is None
+
+
+def test_anthropic_metadata_keeps_only_user_id() -> None:
+    fields = {"metadata": {"user_id": "u1", "purpose": "chat", "spend_logs_metadata": {"country": "DE"}}}
+    assert anthropic_metadata(fields) == {"metadata": {"user_id": "u1"}}
+    assert anthropic_metadata({"metadata": {"purpose": "chat"}, "model": "m"}) == {"model": "m"}
 
 
 def test_forwarded_metadata_drops_only_the_litellm_key() -> None:
