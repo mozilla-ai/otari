@@ -1769,10 +1769,16 @@ def _verifier_scopes(origins: Mapping[str, GuardrailOrigin], guardrail_root: Pat
     return {gate_id: _verifier_scope(guardrail_root, origin) for gate_id, origin in origins.items()}
 
 
-def _resolve_verifier(scope: _VerifierScope, verifier: str) -> Path | None:
-    """The script `verifier` names, or None when it resolves outside the scope's boundary."""
+class _VerifierRefusedError(Exception):
+    """A verifier script that its scope's rules refuse to run."""
+
+
+def _resolve_verifier(scope: _VerifierScope, verifier: str) -> Path:
+    """Return the script `verifier` names, or raise `_VerifierRefusedError` when the scope refuses it."""
     script_path = (scope.base / verifier).resolve()
-    return script_path if script_path.is_relative_to(scope.boundary.resolve()) else None
+    if not script_path.is_relative_to(scope.boundary.resolve()):
+        raise _VerifierRefusedError(f"verifier {verifier!r} resolves outside {scope.boundary_label}")
+    return script_path
 
 
 def _hook_run_check_verifier(
@@ -1826,9 +1832,10 @@ def _hook_run_check_verifier(
     if remaining <= 0:
         return "error", "check time budget exhausted before this verifier could run"
 
-    script_path = _resolve_verifier(scope, verifier)
-    if script_path is None:
-        return "error", f"verifier {verifier!r} resolves outside {scope.boundary_label}"
+    try:
+        script_path = _resolve_verifier(scope, verifier)
+    except _VerifierRefusedError as exc:
+        return "error", str(exc)
 
     if not script_path.is_file():
         return "error", f"verifier {verifier!r} does not exist"
@@ -3351,9 +3358,10 @@ def _guardrails_probe_verifier(repo_root: Path, verifier: str, origin: Guardrail
     required gate, and an author would rather hear it here.
     """
     scope = _verifier_scope(repo_root, origin)
-    script_path = _resolve_verifier(scope, verifier)
-    if script_path is None:
-        return f"verifier {verifier!r} resolves outside {scope.boundary_label}, so the hook refuses to run it."
+    try:
+        script_path = _resolve_verifier(scope, verifier)
+    except _VerifierRefusedError as exc:
+        return f"{exc}, so the hook refuses to run it."
     if not script_path.is_file():
         return f"verifier {verifier!r} does not exist."
     if not os.access(script_path, os.X_OK):
