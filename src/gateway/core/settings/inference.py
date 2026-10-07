@@ -8,7 +8,18 @@ from gateway.core.settings_view import OMITTED
 
 
 class InferenceSettings(BaseModel):
-    """How a completion request that carries an ``Idempotency-Key`` is deduplicated."""
+    """How a completion request is sent upstream and, with an ``Idempotency-Key``, deduplicated."""
+
+    provider_request_timeout_seconds: Annotated[float, OMITTED] = Field(
+        default=600.0,
+        gt=0,
+        description=(
+            "How long a non-streaming provider call may take, in seconds, for providers that take a "
+            "per-request timeout. Connecting stays capped at 5 seconds where the provider's SDK allows "
+            "it. Without one the Anthropic SDK refuses a non-streaming request with a large max_tokens "
+            "before sending it."
+        ),
+    )
 
     idempotency_retention_sec: Annotated[int, OMITTED] = Field(
         default=86400,
