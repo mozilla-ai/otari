@@ -15,9 +15,13 @@ provider sign-in claims it.
 
 from fastapi import APIRouter, BackgroundTasks, Request
 
-from gateway.api.deps import GrowthSignalPortDep, InvitationClaimSettingsDep, OrganizationServiceDep
+from gateway.api.deps import (
+    GrowthSignalPortDep,
+    InvitationClaimSettingsDep,
+    MembershipOrganizationServiceDep,
+    OrganizationServiceDep,
+)
 from gateway.api.routes._public_auth import throttle_public_auth
-from gateway.api.routes.organizations import OrganizationServiceDep as MembershipOrganizationServiceDep
 from gateway.models.tenancy import (
     AcceptInvitationRequest,
     AcceptInvitationResultPublic,

@@ -506,7 +506,6 @@ ROUTE_DATABASE_IMPORT_BASELINE = (
     "gateway/api/routes/organization_pricing.py",
     "gateway/api/routes/organization_routing.py",
     "gateway/api/routes/organization_usage.py",
-    "gateway/api/routes/organizations.py",
     "gateway/api/routes/otlp.py",
     "gateway/api/routes/playground.py",
     "gateway/api/routes/pricing.py",

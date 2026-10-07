@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     GrowthSignalPortDep,
+    MembershipOrganizationServiceDep,
     OrganizationServiceDep,
     UnitOfWorkDep,
     get_config,
@@ -35,7 +36,6 @@ from gateway.api.routes._public_auth import (
     refuse_exhausted_verification_attempts,
     throttle_public_auth,
 )
-from gateway.api.routes.organizations import OrganizationServiceDep as MembershipOrganizationServiceDep
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.identity_exceptions import VerificationTokenInvalidError
 from gateway.models.tenancy import MAX_FULL_NAME_LENGTH

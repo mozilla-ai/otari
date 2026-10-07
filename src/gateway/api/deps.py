@@ -81,6 +81,7 @@ from gateway.services.routing import clear_router_backend_cache
 from gateway.services.tenancy import (
     DomainAutoJoinListener,
     InvitationClaimSettings,
+    OrganizationDomainService,
     OrganizationService,
     organization_guardrail_runner,
 )
@@ -1274,6 +1275,29 @@ def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Or
 
 
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
+
+
+def get_membership_organization_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
+    membership_listener: MembershipListenerDep,
+    workspace_listener: WorkspaceListenerDep,
+) -> OrganizationService:
+    """Build the request's organization service for writing memberships and creating workspaces."""
+    return OrganizationService(
+        db, membership_listener=membership_listener, uow=uow, workspace_listener=workspace_listener
+    )
+
+
+MembershipOrganizationServiceDep = Annotated[OrganizationService, Depends(get_membership_organization_service)]
+
+
+def get_organization_domain_service(db: Annotated[AsyncSession, Depends(get_db)]) -> OrganizationDomainService:
+    """Build the email-domain service on the request's session."""
+    return OrganizationDomainService(db)
+
+
+OrganizationDomainServiceDep = Annotated[OrganizationDomainService, Depends(get_organization_domain_service)]
 
 
 def get_invitation_claim_settings(config: Annotated[GatewayConfig, Depends(get_config)]) -> InvitationClaimSettings:
