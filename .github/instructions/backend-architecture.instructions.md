@@ -18,8 +18,9 @@ against the rules below, and do not accept "the module next to it does the
 same" as a reason.
 
 `SERVICE_DATABASE_IMPORT_BASELINE`, `ROUTE_DATABASE_IMPORT_BASELINE`, `FLAT_MODULE_BASELINE`,
-`SERVICE_MODE_READ_BASELINE` and the baseline on each `MODEL_ACCESS` entry in
-`scripts/check_architecture.py` name the code still in the old shape.
+`SERVICE_MODE_READ_BASELINE`, `LISTENER_DEFAULT_BASELINE` and the baseline on each
+`MODEL_ACCESS` entry in `scripts/check_architecture.py` name the code still in
+the old shape.
 
 - Do not flag an existing baseline entry the PR does not touch.
 - Flag a PR that adds a name to any baseline.
@@ -125,6 +126,9 @@ model, except a module on the model's baseline.
   domain where the change happens.
 - Flag a listener implementation that commits or rolls back. The caller owns
   the transaction.
+- The check refuses a default on a parameter or a class field whose type name
+  contains `Listener`. Flag a default on a listener whose type does not name
+  it, such as a bare `Callable`.
 
 The boundary check does not enforce the cycle rule yet, so review is the only
 gate for it.

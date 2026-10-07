@@ -69,6 +69,14 @@ Enforces:
     A model has none until a repository holds its queries.
     The other modules that use a model are named on its baseline, and the baseline only shrinks.
     A class in models/ is an ORM model when it passes table=True or assigns __tablename__ or __table__.
+24. Listener defaults: no parameter or class field typed as a listener has a default,
+    so a caller cannot skip a listener by leaving it out.
+    A listener type is one whose name contains Listener.
+    Containing it, rather than ending in it, also catches an alias such as WorkspaceListenerDep.
+    A name in a Callable's parameter list or in Annotated's metadata is not the parameter's type, so it is skipped.
+    A FastAPI dependency declares a listener as Annotated[Listener, Depends(...)], since a Depends(...) default counts.
+    A field kept out of the constructor, such as field(init=False), is not a parameter, so the rule skips it.
+    The parameters and fields that still have one are named on a baseline, and the baseline only shrinks.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -770,6 +778,163 @@ def check_service_mode_reads(src_root: Path) -> list[str]:
     violations.extend(
         f"{relative_path} is on the mode read baseline but reads no mode; remove it from the baseline"
         for relative_path in sorted(set(SERVICE_MODE_READ_BASELINE) - reading)
+    )
+    return violations
+
+
+LISTENER_TYPE_MARKER = "Listener"
+# A Literal holds values rather than types, and a ClassVar is not a constructor parameter.
+LISTENER_SKIPPED_SUBSCRIPTS = ("ClassVar", "Literal")
+# Only the first argument of Annotated is a type. The rest is metadata.
+LISTENER_METADATA_SUBSCRIPTS = ("Annotated",)
+# A Callable that returns a listener builds one, and a Callable that takes one only consumes it.
+LISTENER_CALLABLE_SUBSCRIPTS = ("Callable",)
+# These constructors match by name, because no module under gateway/ binds the names to anything else.
+DATACLASS_FIELD_CONSTRUCTOR = "field"
+PYDANTIC_FIELD_CONSTRUCTOR = "Field"
+PYDANTIC_PRIVATE_ATTRIBUTE_CONSTRUCTOR = "PrivateAttr"
+FIELD_DEFAULT_KEYWORDS = ("default", "default_factory")
+# The listener parameters and fields that still have a default, as (module, path, name).
+# The path is the dotted chain of enclosing class and function names, not Python's __qualname__.
+# An entry whose default is gone fails the check until it is removed, so the list only shrinks.
+LISTENER_DEFAULT_BASELINE: tuple[tuple[str, str, str], ...] = (
+    ("gateway/container.py", "_identity_provider_adapter_factory", "workspace_listener"),
+    ("gateway/container.py", "build_container", "membership_listener"),
+    ("gateway/container.py", "build_container", "workspace_listener"),
+    ("gateway/services/tenancy/organization_service.py", "OrganizationService.__init__", "workspace_listener"),
+    ("gateway/services/tenancy/provisioning_service.py", "ensure_bootstrap_identity", "workspace_listener"),
+    ("gateway/services/tenancy/user_service.py", "create_user_for_signup", "workspace_listener"),
+    ("gateway/services/tenancy/workspace_service.py", "WorkspaceService.__init__", "workspace_listener"),
+)
+
+
+def _names_a_listener(annotation: ast.expr) -> bool:
+    """Return whether a type annotation names a listener type, including in a quoted forward reference."""
+    if isinstance(annotation, ast.Constant):
+        if not isinstance(annotation.value, str):
+            return False
+        try:
+            return _names_a_listener(ast.parse(annotation.value, mode="eval").body)
+        except (SyntaxError, ValueError):
+            return False
+    if isinstance(annotation, ast.Subscript):
+        subscript = _called_name(annotation.value)
+        if subscript in LISTENER_SKIPPED_SUBSCRIPTS:
+            return False
+        if subscript in LISTENER_METADATA_SUBSCRIPTS:
+            arguments = annotation.slice.elts if isinstance(annotation.slice, ast.Tuple) else [annotation.slice]
+            return bool(arguments) and _names_a_listener(arguments[0])
+        if subscript in LISTENER_CALLABLE_SUBSCRIPTS:
+            arguments = annotation.slice.elts if isinstance(annotation.slice, ast.Tuple) else [annotation.slice]
+            return bool(arguments) and _names_a_listener(arguments[-1])
+    name = _called_name(annotation)
+    if name is not None and LISTENER_TYPE_MARKER in name:
+        return True
+    # NOTE: An attribute chain names the type by its last name, so a type nested in a listener is not one.
+    if isinstance(annotation, ast.Attribute):
+        return False
+    return any(_names_a_listener(child) for child in ast.iter_child_nodes(annotation) if isinstance(child, ast.expr))
+
+
+def _defaulted_parameters(function: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[ast.arg]:
+    """Yield each parameter of a function that has a default."""
+    positional = [*function.args.posonlyargs, *function.args.args]
+    yield from positional[len(positional) - len(function.args.defaults) :]
+    yield from (
+        parameter
+        for parameter, default in zip(function.args.kwonlyargs, function.args.kw_defaults, strict=True)
+        if default is not None
+    )
+
+
+def _is_pydantic_missing(value: ast.expr, keyword: str) -> bool:
+    """Return whether a default argument to Pydantic's Field leaves the field required."""
+    # Pydantic marks a required field with a default of ..., and a default_factory of None means no factory.
+    missing = None if keyword == "default_factory" else Ellipsis
+    return isinstance(value, ast.Constant) and value.value is missing
+
+
+def _supplies_default(value: ast.expr) -> bool:
+    """Return whether a class field's value gives the constructor a default.
+
+    A call to a dataclass or Pydantic field constructor supplies one only through a default argument,
+    and never when the field is left out of the constructor.
+    An unpacked mapping counts as a default argument, because it may carry one.
+    """
+    if not isinstance(value, ast.Call):
+        return True
+    constructor = _called_name(value.func)
+    if constructor == PYDANTIC_PRIVATE_ATTRIBUTE_CONSTRUCTOR:
+        return False
+    if constructor == DATACLASS_FIELD_CONSTRUCTOR:
+        if any(
+            keyword.arg == "init" and isinstance(keyword.value, ast.Constant) and keyword.value.value is False
+            for keyword in value.keywords
+        ):
+            return False
+        return any(keyword.arg is None or keyword.arg in FIELD_DEFAULT_KEYWORDS for keyword in value.keywords)
+    if constructor == PYDANTIC_FIELD_CONSTRUCTOR:
+        if any(
+            keyword.arg is None
+            or (keyword.arg in FIELD_DEFAULT_KEYWORDS and not _is_pydantic_missing(keyword.value, keyword.arg))
+            for keyword in value.keywords
+        ):
+            return True
+        return bool(value.args) and not _is_pydantic_missing(value.args[0], "default")
+    return True
+
+
+def _listener_defaults(tree: ast.Module) -> list[tuple[int, str, str]]:
+    """Return the line, path and name of each listener parameter or class field with a default in a module.
+
+    A class field counts because a dataclass or a Pydantic model turns its default into a constructor default.
+    """
+    found: list[tuple[int, str, str]] = []
+
+    def visit(node: ast.AST, path: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                found.extend(
+                    (field.lineno, f"{path}{child.name}", field.target.id)
+                    for field in child.body
+                    if isinstance(field, ast.AnnAssign)
+                    and isinstance(field.target, ast.Name)
+                    and field.value is not None
+                    and _supplies_default(field.value)
+                    and _names_a_listener(field.annotation)
+                )
+                visit(child, f"{path}{child.name}.")
+            elif isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                function = f"{path}{child.name}"
+                found.extend(
+                    (parameter.lineno, function, parameter.arg)
+                    for parameter in _defaulted_parameters(child)
+                    if parameter.annotation is not None and _names_a_listener(parameter.annotation)
+                )
+                visit(child, f"{function}.")
+            else:
+                visit(child, path)
+
+    visit(tree, "")
+    return sorted(found)
+
+
+def check_listener_defaults(src_root: Path) -> list[str]:
+    """Check that no listener off the baseline has a default, and that every baseline entry still has one."""
+    violations: list[str] = []
+    defaulted: set[tuple[str, str, str]] = set()
+    for relative_path, tree in _parsed_modules(src_root, "gateway"):
+        for line, path, name in _listener_defaults(tree):
+            defaulted.add((relative_path, path, name))
+            if (relative_path, path, name) not in LISTENER_DEFAULT_BASELINE:
+                violations.append(
+                    f"{relative_path}:{line} gives the listener {name} of {path} a default; "
+                    "a caller that leaves a listener out skips it with no error, so every caller passes one"
+                )
+    violations.extend(
+        f"{relative_path} is on the listener default baseline for {name} of {path}, "
+        "but no such listener has a default; remove it from the baseline"
+        for relative_path, path, name in sorted(set(LISTENER_DEFAULT_BASELINE) - defaulted)
     )
     return violations
 
@@ -1928,6 +2093,7 @@ def main() -> int:
     transaction_violations = check_transaction_control(SRC_ROOT)
     unit_of_work_violations = check_unit_of_work_construction(SRC_ROOT)
     mode_read_violations = check_service_mode_reads(SRC_ROOT)
+    listener_default_violations = check_listener_defaults(SRC_ROOT)
     # NOTE: A page with no domains fails here, so a rule that reads them cannot pass by checking nothing.
     domains, domains_page_violations = read_domains_page(REPO_ROOT / DOMAINS_DOC)
     domain_name_violations = domains_page_violations + (check_domain_names(SRC_ROOT, domains) if domains else [])
@@ -1978,6 +2144,12 @@ def main() -> int:
             print(f"  {violation}")
         print(f"\nTotal mode read violations: {len(mode_read_violations)}")
 
+    if listener_default_violations:
+        print("\n❌ Listener default violations:\n")
+        for violation in listener_default_violations:
+            print(f"  {violation}")
+        print(f"\nTotal listener default violations: {len(listener_default_violations)}")
+
     if flat_module_violations:
         print("\n❌ Flat module violations:\n")
         for violation in flat_module_violations:
@@ -2016,6 +2188,7 @@ def main() -> int:
         or transaction_violations
         or unit_of_work_violations
         or mode_read_violations
+        or listener_default_violations
         or flat_module_violations
         or domain_name_violations
         or repository_import_violations
