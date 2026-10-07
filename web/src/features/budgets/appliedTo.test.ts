@@ -21,6 +21,7 @@ function ceiling(partial: Partial<AppliedCeiling>): AppliedCeiling {
     scope_type: "workspace",
     scope_id: "ws-1",
     provider_key_id: null,
+    model: null,
     budget_id: "b-1",
     ...partial,
   }
@@ -84,6 +85,27 @@ describe("appliedToLabel", () => {
       CONTEXT,
     )
     expect(label).toBe("Acme (organization), openai")
+  })
+
+  it("reads a model-narrowed ceiling as the model on its provider", () => {
+    const onOpenai = {
+      scope_type: "organization",
+      scope_id: "org-1",
+      provider_key_id: "openai",
+    } as const
+    expect(
+      appliedToLabel([ceiling({ ...onOpenai, model: "gpt-4o" })], CONTEXT),
+    ).toBe("gpt-4o on openai")
+    expect(
+      appliedToLabel(
+        [
+          ceiling(onOpenai),
+          ceiling({ ...onOpenai, model: "gpt-4o" }),
+          ceiling({ ...onOpenai, model: "o3" }),
+        ],
+        CONTEXT,
+      ),
+    ).toBe("openai, 2 models")
   })
 
   it("counts members and keys without inventing names for them", () => {

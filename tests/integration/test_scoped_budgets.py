@@ -56,8 +56,8 @@ class Fixture:
         self.user_id = user_id
         self.api_key = api_key
 
-    def scope(self, provider: str | None = "openai") -> BudgetScopeRequest:
-        return BudgetScopeRequest(api_key=self.api_key, provider_instance=provider)
+    def scope(self, provider: str | None = "openai", model: str | None = None) -> BudgetScopeRequest:
+        return BudgetScopeRequest(api_key=self.api_key, provider_instance=provider, model=model)
 
 
 async def _build_tenancy(db: AsyncSession, slug: str) -> Fixture:
@@ -304,6 +304,52 @@ async def test_narrowed_and_aggregate_caps_both_apply(async_db: AsyncSession, te
     await refund_reservation(async_db, handle)
     assert await _counters(async_db, aggregate.id) == (0.0, 0.0)
     assert await _counters(async_db, narrowed.id) == (0.0, 0.0)
+
+
+@pytest.mark.asyncio
+async def test_model_narrowed_cap_binds_only_that_model(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """A cap narrowed to one model of a provider is invisible to its other models
+    and to the same model id on another provider, and names the model when it refuses."""
+    narrowed = await _scoped(
+        async_db,
+        scope_type="workspace",
+        scope_id=str(tenancy.workspace_id),
+        max_budget=1.0,
+        provider_key_id="openai",
+    )
+    narrowed.model = "gpt-4o"
+    async_db.add(narrowed)
+    await async_db.commit()
+
+    for scope in (tenancy.scope("openai", "gpt-4o-mini"), tenancy.scope("azure", "gpt-4o"), tenancy.scope("openai")):
+        handle = await reserve_budget(async_db, tenancy.user_id, 5.0, scope=scope)
+        assert handle.scoped_budget_ids == ()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await reserve_budget(async_db, tenancy.user_id, 5.0, scope=tenancy.scope("openai", "gpt-4o"))
+    assert exc_info.value.status_code == 403
+    assert "Workspace (gpt-4o)" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_model_provider_and_aggregate_caps_all_apply_most_specific_first(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    workspace_id = str(tenancy.workspace_id)
+    aggregate = await _scoped(async_db, scope_type="workspace", scope_id=workspace_id, max_budget=50.0)
+    provider = await _scoped(
+        async_db, scope_type="workspace", scope_id=workspace_id, max_budget=20.0, provider_key_id="openai"
+    )
+    model = await _scoped(
+        async_db, scope_type="workspace", scope_id=workspace_id, max_budget=5.0, provider_key_id="openai"
+    )
+    model.model = "gpt-4o"
+    async_db.add_all([aggregate, provider, model])
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai", "gpt-4o"))
+    assert handle.scoped_budget_ids == (model.id, provider.id, aggregate.id)
+    await refund_reservation(async_db, handle)
 
 
 @pytest.mark.asyncio

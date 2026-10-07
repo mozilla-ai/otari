@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from gateway.models.budgets import (
     MAX_COUNT_LIMIT,
@@ -50,6 +50,25 @@ _MONTH_DESCRIPTION = "The month a yearly cycle resets in, 1 to 12"
 
 # A blank value matches no provider instance, so a ceiling that stored one would never bind.
 _ProviderKeyId = Annotated[str, Field(min_length=1, max_length=255, pattern=r"^\S+$")]
+
+
+class _ModelNarrowing(BaseModel):
+    """The resource axes of a ceiling's create body: a provider, and optionally one of its models."""
+
+    provider_key_id: _ProviderKeyId | None = None
+    model: _ProviderKeyId | None = Field(
+        default=None,
+        description=(
+            "Narrow the cap to one model of the provider, by the id the provider gives it; omit or null to cap "
+            "every model. Requires provider_key_id, because a model id is only unique within its provider"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _model_needs_provider(self) -> Self:
+        if self.model is not None and self.provider_key_id is None:
+            raise ValueError("model requires provider_key_id")
+        return self
 
 
 class CreateBudgetRequest(BaseModel):
@@ -190,7 +209,7 @@ class BudgetResetLogResponse(BaseModel):
         )
 
 
-class CreateScopedBudgetRequest(BaseModel):
+class CreateScopedBudgetRequest(_ModelNarrowing):
     """Request model for creating a scoped budget."""
 
     scope_type: ScopeType = Field(description="Which kind of identity this ceiling caps")
@@ -233,6 +252,7 @@ class ScopedBudgetFigures(BaseModel):
     scope_type: str
     scope_id: str
     provider_key_id: str | None
+    model: str | None
     budget_id: str
     name: str | None
     max_budget: float | None
@@ -263,6 +283,7 @@ class ScopedBudgetFigures(BaseModel):
             "scope_type": ceiling.scope_type,
             "scope_id": ceiling.scope_id,
             "provider_key_id": ceiling.provider_key_id,
+            "model": ceiling.model,
             "budget_id": ceiling.budget_id,
             "name": ceiling.name,
             "max_budget": as_float(budget.max_budget),
@@ -421,7 +442,7 @@ class OrganizationBudgetsPublic(BaseModel):
     count: int
 
 
-class OrganizationScopedBudgetCreate(BaseModel):
+class OrganizationScopedBudgetCreate(_ModelNarrowing):
     """Attach one of the organization's budgets to a scope inside it."""
 
     scope_type: ScopeType = Field(description="Which kind of identity this ceiling caps")

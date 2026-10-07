@@ -77,11 +77,13 @@ class BudgetScopeRequest:
     master-key caller, which bills to the deployment's default workspace and has
     no API-key ceiling. ``provider_instance`` is the resolved provider the call
     is about to go to (``openai``, or a named instance), which is what a
-    provider-narrowed ceiling matches on.
+    provider-narrowed ceiling matches on, and ``model`` is the model id as that
+    provider names it, which a model-narrowed ceiling matches on.
     """
 
     api_key: APIKey | None
     provider_instance: str | None = None
+    model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -91,6 +93,7 @@ class ApplicableBudget:
     budget_id: str
     scope_type: str
     provider_key_id: str | None
+    model: str | None = None
     # The non-USD caps of the budget this ceiling names, carried so a caller can
     # tell whether an axis is capped anywhere without reading every budget again.
     # The reserve path reads them from the row instead, inside its one conditional
@@ -105,8 +108,9 @@ class ApplicableBudget:
 
     @property
     def subject(self) -> str:
-        """The scope's name in a refusal message."""
-        return _SCOPE_SUBJECT.get(self.scope_type, "Budget")
+        """The scope's name in a refusal message, and the model when the ceiling narrows to one."""
+        subject = _SCOPE_SUBJECT.get(self.scope_type, "Budget")
+        return subject if self.model is None else f"{subject} ({self.model})"
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -250,7 +254,8 @@ async def applicable_budgets(
     """Every ceiling this request must pass, in reservation order.
 
     A ceiling applies when its identity is one the request bills to AND it is
-    either aggregate (no provider) or narrowed to this request's provider. A
+    aggregate, narrowed to this request's provider, or narrowed to this
+    request's model on that provider. A
     window that has run out is rolled here, before the reservation reads the
     counters, so a request at the boundary is gated on the new period.
     """
@@ -266,8 +271,11 @@ async def applicable_budgets(
     )
     key_clause: ColumnElement[bool] = ScopedBudget.provider_key_id.is_(None)
     if scope.provider_instance is not None:
+        model_clause: ColumnElement[bool] = ScopedBudget.model.is_(None)
+        if scope.model is not None:
+            model_clause = or_(ScopedBudget.model == scope.model, ScopedBudget.model.is_(None))
         key_clause = or_(
-            ScopedBudget.provider_key_id == scope.provider_instance,
+            and_(ScopedBudget.provider_key_id == scope.provider_instance, model_clause),
             ScopedBudget.provider_key_id.is_(None),
         )
 
@@ -277,6 +285,7 @@ async def applicable_budgets(
                 ScopedBudget.id,
                 ScopedBudget.scope_type,
                 ScopedBudget.provider_key_id,
+                ScopedBudget.model,
                 Budget.reset_cycle,
                 Budget.reset_every_n,
                 Budget.reset_anchor_at,
@@ -301,6 +310,7 @@ async def applicable_budgets(
             budget_id,
             _scope_type,
             _provider,
+            _model,
             cycle,
             every_n,
             anchor_at,
@@ -321,6 +331,7 @@ async def applicable_budgets(
             budget_id=budget_id,
             scope_type=scope_type,
             provider_key_id=provider,
+            model=model,
             token_limit=token_limit,
             request_limit=request_limit,
         )
@@ -328,6 +339,7 @@ async def applicable_budgets(
             budget_id,
             scope_type,
             provider,
+            model,
             _cycle,
             _every_n,
             _anchor_at,
@@ -339,12 +351,12 @@ async def applicable_budgets(
             request_limit,
         ) in rows
     ]
-    # Most specific first, provider-narrowed before aggregate within a scope, then
-    # the id so the order stays total when two ceilings tie on both.
+    # Most specific first: by scope, then model-narrowed before provider-narrowed
+    # before aggregate, then the id so the order stays total.
     resolved.sort(
         key=lambda budget: (
             _SCOPE_PRECEDENCE.get(budget.scope_type, len(_SCOPE_PRECEDENCE)),
-            0 if budget.provider_key_id is not None else 1,
+            0 if budget.model is not None else 1 if budget.provider_key_id is not None else 2,
             budget.budget_id,
         )
     )

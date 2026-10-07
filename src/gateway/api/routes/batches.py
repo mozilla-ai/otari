@@ -417,7 +417,7 @@ async def create_batch(
         model=request.model,
         strategy=config.budget_strategy,
         counts_toward_budget=not budget_exempt,
-        scope=BudgetScopeRequest(api_key=api_key, provider_instance=resolved.instance),
+        scope=BudgetScopeRequest(api_key=api_key, provider_instance=resolved.instance, model=resolved.model),
         # So the free-model shortcut reads this organization's rate, the same one
         # the results are priced at when they are retrieved. Derived from the
         # workspace already resolved above (not `organization_for_key_id`,

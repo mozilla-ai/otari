@@ -428,6 +428,7 @@ export function scopedBudget(
     scope_type: "workspace_member",
     scope_id: "99999999-9999-9999-9999-999999999999",
     provider_key_id: null,
+    model: null,
     name: null,
     // The budget this ceiling enforces. `max_budget` and the cadence below are
     // read off it and travel on the wire; they are not stored on the ceiling.
@@ -473,6 +474,7 @@ export function organizationSpendCeiling(
     scope_type: "organization",
     scope_id: ORGANIZATION_ID,
     provider_key_id: null,
+    model: null,
     budget_id: "bbbbbbbb-1111-2222-3333-444444444444",
     name: null,
     max_budget: 250,

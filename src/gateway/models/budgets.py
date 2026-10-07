@@ -267,12 +267,12 @@ class BudgetResetLog(Base):
 
 
 class ScopedBudget(Base):
-    """A spending ceiling on one tenancy scope, optionally narrowed to one provider.
+    """A spending ceiling on one tenancy scope, optionally narrowed to a provider or one of its models.
 
-    Two axes. The identity axis is ``(scope_type, scope_id)``: who is capped, an
+    The identity axis is ``(scope_type, scope_id)``: who is capped, an
     organization, a workspace, a member of either, or a single API key. The
-    resource axis is ``provider_key_id``: NULL caps spend across every provider,
-    a value narrows the cap to one provider instance. A request must pass every
+    resource axes are ``provider_key_id`` and ``model``: NULL caps spend across
+    every provider (or every model of the provider), a value narrows the cap. A request must pass every
     row that applies to it, and each row is an independent ceiling with its own
     counters and its own period window, unlike ``budgets``, where the window and
     the counters live on the user.
@@ -304,32 +304,23 @@ class ScopedBudget(Base):
 
     __tablename__ = "scoped_budgets"
     __table_args__ = (
-        # PostgreSQL treats NULLs as distinct in a plain UNIQUE, so one index
-        # over the triple would enforce nothing on the aggregate rows (every one
-        # of them has a NULL key, so no two are ever "equal"). Two partial
-        # indexes instead: the narrowed rows are unique on the triple, and the
-        # aggregate rows are unique on the identity alone, which is what makes
-        # "one aggregate cap per scope" a real constraint.
+        # One budget per entity, and an entity is the scope plus both resource
+        # axes with NULL reading as "all". COALESCE because both dialects treat
+        # NULLs as distinct in a plain UNIQUE, so two "all" rows would never
+        # collide; the API refuses a blank provider or model, which leaves ''
+        # free to stand for "all".
         Index(
-            "uq_scoped_budgets_scope_with_key",
+            "uq_scoped_budgets_entity",
             "scope_type",
             "scope_id",
-            "provider_key_id",
+            text("coalesce(provider_key_id, '')"),
+            text("coalesce(model, '')"),
             unique=True,
-            postgresql_where=text("provider_key_id IS NOT NULL"),
-            sqlite_where=text("provider_key_id IS NOT NULL"),
         ),
-        Index(
-            "uq_scoped_budgets_scope_no_key",
-            "scope_type",
-            "scope_id",
-            unique=True,
-            postgresql_where=text("provider_key_id IS NULL"),
-            sqlite_where=text("provider_key_id IS NULL"),
+        # Model ids are only unique per provider, so a model names one.
+        CheckConstraint(
+            "model IS NULL OR provider_key_id IS NOT NULL", name="ck_scoped_budgets_model_needs_provider"
         ),
-        # The request path resolves rows by identity, so the lookup needs a
-        # non-partial index: neither unique index above covers a scan that spans
-        # narrowed and aggregate rows.
         Index("ix_scoped_budgets_scope", "scope_type", "scope_id"),
     )
 
@@ -337,6 +328,9 @@ class ScopedBudget(Base):
     scope_type: Mapped[str] = mapped_column()
     scope_id: Mapped[str] = mapped_column()
     provider_key_id: Mapped[str | None] = mapped_column(default=None)
+    # The second resource axis: NULL caps every model of the provider, a value
+    # narrows the cap to one model id as the provider names it.
+    model: Mapped[str | None] = mapped_column(default=None)
     name: Mapped[str | None] = mapped_column(default=None)
     # The budget this ceiling enforces. NOT NULL: a ceiling with no budget caps
     # nothing. The limit and the period are read through it rather than copied, so

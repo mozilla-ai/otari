@@ -6,9 +6,9 @@
  * list of ceiling rows into the phrase a single table cell can hold.
  *
  * Two axes decide what an entity is called, and the resource axis wins. A
- * ceiling narrowed to a provider caps the organization's spend with that
- * provider, so it reads as the provider rather than as the scope carrying it;
- * only an un-narrowed ceiling reads as its scope. Reading `scope_type` alone is
+ * ceiling narrowed to a provider, or to one of its models, caps the
+ * organization's spend there, so it reads as the provider or the model rather
+ * than as the scope carrying it; only an un-narrowed ceiling reads as its scope. Reading `scope_type` alone is
  * what would print the organization twice and the provider never.
  */
 
@@ -22,12 +22,14 @@ const GROUP_ORDER = [
   "workspace_member",
   "api_token",
   "provider",
+  "model",
 ] as const
 
 type GroupKey = (typeof GROUP_ORDER)[number]
 
-/** What a ceiling counts as: the provider it narrows to, else its scope. */
+/** What a ceiling counts as: the model or provider it narrows to, else its scope. */
 function groupOf(ceiling: AppliedCeiling): GroupKey {
+  if (ceiling.model) return "model"
   if (ceiling.provider_key_id) return "provider"
   return GROUP_ORDER.includes(ceiling.scope_type as GroupKey)
     ? (ceiling.scope_type as GroupKey)
@@ -37,7 +39,7 @@ function groupOf(ceiling: AppliedCeiling): GroupKey {
 /** The ceiling fields a phrase is derived from, as the list endpoint carries them. */
 export type AppliedCeiling = Pick<
   OrganizationSpendCeiling,
-  "scope_type" | "scope_id" | "provider_key_id" | "budget_id"
+  "scope_type" | "scope_id" | "provider_key_id" | "model" | "budget_id"
 >
 
 export type AppliedToContext = {
@@ -78,6 +80,11 @@ function groupPhrase(
     case "provider": {
       if (count > 1) return counted(count, "provider", "providers")
       return ceilings[0].provider_key_id ?? "1 provider"
+    }
+    case "model": {
+      if (count > 1) return counted(count, "model", "models")
+      // A model id is only unique within its provider, so the provider is named too.
+      return `${ceilings[0].model} on ${ceilings[0].provider_key_id}`
     }
     case "org_member":
       return counted(count, "organization member", "organization members")
