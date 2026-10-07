@@ -14,9 +14,10 @@ class InferenceSettings(BaseModel):
         default=600.0,
         gt=0,
         description=(
-            "Timeout in seconds for a non-streaming provider call, for providers that take a "
-            "per-request timeout. Without one the Anthropic SDK refuses a non-streaming request "
-            "with a large max_tokens before sending it."
+            "How long a non-streaming provider call may take, in seconds, for providers that take a "
+            "per-request timeout. Connecting stays capped at 5 seconds where the provider's SDK allows "
+            "it. Without one the Anthropic SDK refuses a non-streaming request with a large max_tokens "
+            "before sending it."
         ),
     )
 

@@ -65,7 +65,9 @@ def test_large_max_tokens_non_streaming_message_reaches_anthropic(
 
     assert resp.status_code == 200, resp.text
     assert len(sent) == 1
-    assert sent[0].extensions["timeout"]["read"] == test_config.provider_request_timeout_seconds
+    timeout = sent[0].extensions["timeout"]
+    assert timeout["read"] == test_config.provider_request_timeout_seconds
+    assert timeout["connect"] == 5.0
 
 
 def _capture_chat(client: TestClient, headers: dict[str, str], model: str, **body: Any) -> dict[str, Any]:
@@ -89,6 +91,15 @@ def test_chat_completion_carries_the_default_timeout(
     api_key_header: dict[str, str],
 ) -> None:
     captured = _capture_chat(client, api_key_header, "openai:gpt-4o")
+    assert captured["timeout"] == httpx.Timeout(600.0, connect=5.0)
+
+
+def test_a_mapped_provider_gets_seconds(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """Mistral's SDK takes one number, which any-llm converts from seconds."""
+    captured = _capture_chat(client, api_key_header, "mistral:mistral-large-latest")
     assert captured["timeout"] == 600.0
 
 
@@ -109,7 +120,7 @@ def test_responses_call_carries_the_timeout(
             headers=api_key_header,
         )
 
-    assert captured["timeout"] == 600.0
+    assert captured["timeout"] == httpx.Timeout(600.0, connect=5.0)
 
 
 def test_provider_without_a_per_request_timeout_gets_none(
@@ -152,5 +163,4 @@ def test_configured_timeout_is_honored(client_with_short_timeout: TestClient) ->
     assert created.status_code == 200, created.text
 
     captured = _capture_chat(client_with_short_timeout, headers, "openai:gpt-4o", user="timeout-user")
-    assert captured["timeout"] == 42.0
-
+    assert captured["timeout"] == httpx.Timeout(42.0, connect=5.0)

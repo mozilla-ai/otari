@@ -48,6 +48,7 @@ from enum import Enum, StrEnum, auto
 from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar, assert_never
 from urllib.parse import ParseResult, urlparse
 
+import httpx
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError, ContextLengthExceededError, InvalidRequestError, UnsupportedParameterError
 from any_llm.types.completion import (
@@ -3931,13 +3932,25 @@ def _native_loop_options(adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext
     return {"native_tools": native_tools} if native_tools else {}
 
 
+# The connect timeout the anthropic and openai SDKs default to. Only the response
+# needs the long budget; a short connect keeps failover off a dead provider fast.
+_PROVIDER_CONNECT_TIMEOUT_S = 5.0
+
+
 def _with_provider_timeout(kwargs: dict[str, Any], config: GatewayConfig) -> dict[str, Any]:
     """``kwargs`` with ``provider_request_timeout_seconds``, when the provider takes a per-request timeout.
 
     Without one the anthropic SDK refuses a non-streaming call whose ``max_tokens``
-    could outlast its default limit. any-llm rejects any timeout for a provider it
-    marks ``unsupported``, so that provider keeps its client default.
+    could outlast its default limit. A ``native`` provider's SDK takes an
+    ``httpx.Timeout``, so its connect stays short; a ``mapped`` one converts a
+    float into its own setting. any-llm rejects any timeout for an
+    ``unsupported`` provider, and for a pre-built client it cannot rebuild
+    (Bedrock's bearer-token shape), so those keep their client's own timeout,
+    as does a client the operator gave a ``timeout`` in ``client_args``.
     """
+    client_args = kwargs.get("client_args") or {}
+    if "timeout" in client_args or "client" in client_args:
+        return kwargs
     provider = kwargs.get("provider")
     try:
         if provider is None:
@@ -3946,9 +3959,12 @@ def _with_provider_timeout(kwargs: dict[str, Any], config: GatewayConfig) -> dic
     except (KeyError, TypeError, ValueError, ImportError, AttributeError, AnyLLMError):
         # Unresolvable here means unresolvable in any-llm too, which reports it.
         return kwargs
-    if support == "unsupported":
-        return kwargs
-    return {**kwargs, "timeout": config.provider_request_timeout_seconds}
+    seconds = config.provider_request_timeout_seconds
+    if support == "native":
+        return {**kwargs, "timeout": httpx.Timeout(seconds, connect=min(seconds, _PROVIDER_CONNECT_TIMEOUT_S))}
+    if support == "mapped":
+        return {**kwargs, "timeout": seconds}
+    return kwargs
 
 
 async def dispatch_non_stream(
