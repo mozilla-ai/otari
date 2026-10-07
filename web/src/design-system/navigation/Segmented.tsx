@@ -30,6 +30,7 @@ export function Segmented({
   value,
   onChange,
   size = "sm",
+  isFullWidth = false,
 }: {
   label: string
   options: { value: string; label: string }[]
@@ -37,13 +38,21 @@ export function Segmented({
   onChange: (next: string) => void
   /** Match adjacent 32px or 36px controls; both retain 44px mobile targets. */
   size?: "sm" | "md"
+  /**
+   * Stretch the track across its container, each segment taking an equal share.
+   * For a choice that is the whole point of a card rather than a filter in a
+   * toolbar, where a track the width of its labels would sit off to one side.
+   */
+  isFullWidth?: boolean
 }) {
   const name = useId()
   return (
     <div
       role="radiogroup"
       aria-label={label}
-      className="inline-flex w-fit max-w-full overflow-x-auto border border-control-border"
+      className={`max-w-full overflow-x-auto border border-control-border ${
+        isFullWidth ? "flex w-full" : "inline-flex w-fit"
+      }`}
     >
       {options.map((option) => {
         const selected = option.value === value
@@ -56,7 +65,9 @@ export function Segmented({
             // The divider is a leading border on every segment but the first,
             // so the count of rules is always one less than the count of
             // segments, however many there are.
-            className={`flex min-h-11 items-center md:min-h-0 shrink-0 cursor-pointer border-l border-control-border text-sm whitespace-nowrap transition-colors first:border-l-0 has-[:focus-visible]:otari-focus-ring motion-reduce:transition-none ${
+            className={`flex min-h-11 items-center md:min-h-0 ${
+              isFullWidth ? "flex-1 justify-center" : "shrink-0"
+            } cursor-pointer border-l border-control-border text-sm whitespace-nowrap transition-colors first:border-l-0 has-[:focus-visible]:otari-focus-ring motion-reduce:transition-none ${
               size === "md" ? "px-3.5 py-[0.4375rem]" : "px-3 py-[0.3125rem]"
             } ${size === "md" && selected ? "font-medium" : ""} ${
               selected

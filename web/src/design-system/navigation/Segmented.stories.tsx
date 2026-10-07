@@ -64,6 +64,20 @@ export const TwoOptions: Story = {
   },
 }
 
+/** The track fills its container, for a choice that is the point of a card. */
+export const FullWidth: Story = {
+  args: {
+    size: "md",
+    isFullWidth: true,
+    label: "Data region",
+    value: "us",
+    options: [
+      { value: "us", label: "United States" },
+      { value: "eu", label: "European Union" },
+    ],
+  },
+}
+
 export const Medium: Story = {
   args: {
     size: "md",
