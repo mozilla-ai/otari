@@ -29,7 +29,7 @@ The docs are grouped by what you are trying to do.
 
 Running and managing a gateway.
 
-- [Deployment](deployment.md): Docker, Render, Railway, hybrid mode, and optional services.
+- [Deployment](deployment.md): Docker, Railway, hybrid mode, and optional services.
 - [Configuration](configuration.md): configuration sources, precedence, and common settings.
 - [Admin dashboard](dashboard.md): sign-in, setup, and management surfaces.
 - [Access control](access-control.md): identities, organizations, workspaces, keys, and budgets.
