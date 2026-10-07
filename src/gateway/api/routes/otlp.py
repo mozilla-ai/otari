@@ -36,15 +36,17 @@ exporter's endpoint at the Otari root; the exporter appends the signal path
 (``/otlp/v1/traces`` or ``/otlp/v1/logs``) itself.
 """
 
+import base64
 import hashlib
+import json
 import re
 import zlib
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from google.protobuf.json_format import MessageToJson, Parse, ParseError
+from google.protobuf.json_format import MessageToJson, ParseDict, ParseError
 from google.protobuf.message import DecodeError, Message
 from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import (
     ExportLogsServiceRequest,
@@ -80,6 +82,7 @@ from gateway.services.external_usage_service import (
     ingest_external_events,
     is_reserved_source,
 )
+from gateway.services.traces import OtlpSpan, TraceWriter, project_otlp_spans
 
 router = APIRouter(tags=["otel"])
 
@@ -95,6 +98,9 @@ _DEFAULT_SOURCE = "otel"
 # instead of retry-looping.
 _MAX_BODY_BYTES = 8 * 1024 * 1024
 _MAX_EVENTS_PER_EXPORT = 10 * MAX_EVENTS_PER_BATCH
+# Spans of one export that are kept as trace rows; the rest are counted as dropped.
+# The export itself is never refused for it, so usage ingest is as it was.
+_MAX_SPANS_PER_EXPORT = _MAX_EVENTS_PER_EXPORT
 # The metrics endpoint's own bound, deliberately independent of the event cap
 # above. A metric's attribute cardinality is caller-controlled: one metric name
 # fans out into a data point per attribute combination, so the body-size cap
@@ -113,6 +119,14 @@ _CODEX_USAGE_EVENTS = ("codex.api_request", "codex.sse_event")
 # the Anthropic shape. Everything else is assumed OpenAI-shaped, where cached
 # tokens are a subset of ``input_tokens`` and must be de-included before pricing.
 _ADDITIVE_CACHE_PROVIDERS = {"anthropic"}
+
+# ``Status.code`` of a span that ended in error (``STATUS_CODE_ERROR`` in the OTLP schema).
+_STATUS_CODE_ERROR = 2
+
+# OTLP/JSON id fields, with their size in bytes. The OTLP spec encodes them as hex,
+# while protobuf's JSON mapping reads every bytes field as base64.
+_JSON_ID_BYTES = {"traceId": 16, "spanId": 8, "parentSpanId": 8}
+_HEX = re.compile(r"[0-9A-Fa-f]+")
 
 
 def _content_type(request: Request) -> str:
@@ -149,14 +163,46 @@ def _parse(body: bytes, content_type: str, message: Message) -> Message:
         return message
     if content_type == _JSON:
         try:
-            Parse(body.decode("utf-8"), message, ignore_unknown_fields=True)
-        except (ParseError, UnicodeDecodeError, ValueError) as exc:
+            document = json.loads(body.decode("utf-8"))
+            _hex_ids_to_base64(document)
+            ParseDict(document, message, ignore_unknown_fields=True)
+        except (ParseError, UnicodeDecodeError, ValueError, TypeError, RecursionError) as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid OTLP/JSON payload") from exc
         return message
     raise HTTPException(
         status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
         "Unsupported content-type; send OTLP as application/json or application/x-protobuf.",
     )
+
+
+def _json_items(parent: Any, key: str) -> list[Any]:
+    value = parent.get(key) if isinstance(parent, dict) else None
+    return value if isinstance(value, list) else []
+
+
+def _hex_id_to_base64(item: Any) -> None:
+    if not isinstance(item, dict):
+        return
+    for field, size in _JSON_ID_BYTES.items():
+        value = item.get(field)
+        # Hex of the right length is never a valid base64 id of that size, so an
+        # exporter that sends base64 anyway is still read as it was before.
+        if isinstance(value, str) and len(value) == 2 * size and _HEX.fullmatch(value):
+            item[field] = base64.b64encode(bytes.fromhex(value)).decode()
+
+
+def _hex_ids_to_base64(document: Any) -> None:
+    """Rewrite the hex span and trace ids of an OTLP/JSON body as protobuf's JSON mapping reads them."""
+    for resource in _json_items(document, "resourceSpans"):
+        for scope in _json_items(resource, "scopeSpans"):
+            for span in _json_items(scope, "spans"):
+                _hex_id_to_base64(span)
+                for link in _json_items(span, "links"):
+                    _hex_id_to_base64(link)
+    for resource in _json_items(document, "resourceLogs"):
+        for scope in _json_items(resource, "scopeLogs"):
+            for record in _json_items(scope, "logRecords"):
+                _hex_id_to_base64(record)
 
 
 def _any_value(value: Any) -> Any:
@@ -350,6 +396,44 @@ def _build_event(
     return source, event
 
 
+def _otlp_span(span: Any) -> OtlpSpan:
+    """Read the fields a trace keeps out of one received span."""
+    return OtlpSpan(
+        trace_id=span.trace_id.hex(),
+        span_id=span.span_id.hex(),
+        parent_span_id=span.parent_span_id.hex() or None,
+        name=span.name,
+        start_time=_nanos_to_dt(span.start_time_unix_nano),
+        end_time=_nanos_to_dt(span.end_time_unix_nano),
+        failed=span.status.code == _STATUS_CODE_ERROR,
+        attributes=_attributes(span.attributes),
+    )
+
+
+def _record_spans(
+    writer: TraceWriter, received: list[Any], *, api_key: APIKey, config: GatewayConfig, truncated: int = 0
+) -> None:
+    """Hand an export's spans to the trace writer. Never raises: the export has already been answered for.
+
+    ``truncated`` counts the export's spans past the per-export cap, which were never projected.
+    """
+    try:
+        projection = project_otlp_spans(
+            [_otlp_span(span) for span in received],
+            workspace_id=api_key.workspace_id,
+            user_id=api_key.user_id,
+            api_key_id=api_key.id,
+            retention=timedelta(days=config.trace_retention_days),
+        )
+        for index, write in enumerate(projection.writes):
+            writer.submit(write, truncated=truncated if index == 0 else 0)
+    except Exception as exc:  # noqa: BLE001 - recording spans never fails the export
+        logger.warning("otlp traces: %d span(s) not recorded: %s", len(received), type(exc).__name__)
+        return
+    if projection.dropped:
+        logger.info("otlp traces: %d of %d span(s) not recorded", projection.dropped, len(received))
+
+
 def _require_import_key(api_key: APIKey | None) -> APIKey:
     """Reject master-key OTLP exports before any parsing work.
 
@@ -450,9 +534,11 @@ async def receive_traces(
     assert isinstance(parsed, ExportTraceServiceRequest)
 
     pairs: list[tuple[str, ExternalUsageEvent]] = []
+    received: list[Any] = []
     for resource_spans in parsed.resource_spans:
         for scope_spans in resource_spans.scope_spans:
             for span in scope_spans.spans:
+                received.append(span)
                 duration = None
                 if span.start_time_unix_nano and span.end_time_unix_nano:
                     duration = (span.end_time_unix_nano - span.start_time_unix_nano) / 1_000_000
@@ -471,6 +557,19 @@ async def receive_traces(
         if rejected:
             response.partial_success.rejected_spans = rejected
             response.partial_success.error_message = f"{rejected} usage event(s) rejected (see gateway logs)"
+
+    # Only an export whose usage was taken is recorded on the exporting key's trace:
+    # best-effort, off the request path, never failing the export.
+    writer: TraceWriter | None = getattr(request.app.state, "trace_writer", None)
+    if writer is not None and config.trace_capture_enabled and received:
+        # Tracing keeps a bounded share of one export; the usage above is never refused for it.
+        _record_spans(
+            writer,
+            received[:_MAX_SPANS_PER_EXPORT],
+            api_key=api_key,
+            config=config,
+            truncated=max(0, len(received) - _MAX_SPANS_PER_EXPORT),
+        )
     return _otlp_response(content_type, response)
 
 
