@@ -2291,6 +2291,409 @@
     {
       "item": [
         {
+          "name": "List Hosted Providers",
+          "request": {
+            "description": "List the providers this deployment serves hosted inference on.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Create Hosted Provider",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"api_key\": \"sk-live-...\",\n  \"provider\": \"openai\"\n}"
+            },
+            "description": "Configure a provider with the key this deployment will serve it on.\n\nEverything the provider lists on that key is offered at once; a provider\nthat will not say yields a provider with no models, not an error.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers"
+            }
+          }
+        },
+        {
+          "name": "Refresh Catalog",
+          "request": {
+            "description": "Re-ask every enabled provider what it lists, then take the rest off the catalog.\n\nThe whole deployment rather than one provider: a stored price is what puts a\nmodel on a tenant's Models page, and a price under a provider nothing here\nserves cannot be reached by a per-provider refresh. Declared before the\n``/{provider}`` paths to read in the order the surface is used; no method\ncollides in any case.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                "refresh"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/refresh"
+            }
+          }
+        },
+        {
+          "name": "Preview Catalog Refresh",
+          "request": {
+            "description": "What a catalog sweep would remove, without removing it.\n\nA GET, and a truthful one: it writes nothing. It does dial every enabled\nprovider, as ``available-models`` does, because a model the provider still\nlists would survive the sweep and previewing it as doomed would be a lie.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                "refresh",
+                "preview"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/refresh/preview"
+            }
+          }
+        },
+        {
+          "name": "Update Hosted Provider",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"enabled\": false\n}"
+            },
+            "description": "Rotate the key, repoint the base, or turn a provider off.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                ":provider"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/:provider",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Hosted Provider",
+          "request": {
+            "description": "Remove a provider and its roster, leaving the runtime with no hosted path for it.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                ":provider"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/:provider",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Available Models",
+          "request": {
+            "description": "Ask the provider what it serves on the stored credential.\n\nDials the upstream on every call rather than caching: the caller is the\nadmin form's model picker, opened rarely and entitled to a current answer.\nFailure comes back in the body, so the picker can fall back to a text box.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                ":provider",
+                "available-models"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/:provider/available-models",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Hosted Models",
+          "request": {
+            "description": "List the models offered on one provider, with the price each currently serves at.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                ":provider",
+                "models"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/:provider/models?skip=&limit=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Add Hosted Model",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"input_price_per_million\": 2.5,\n  \"model\": \"gpt-4o\",\n  \"output_price_per_million\": 10\n}"
+            },
+            "description": "Offer a model on a provider, optionally at a custom price.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                ":provider",
+                "models"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/:provider/models",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Refresh Hosted Models",
+          "request": {
+            "description": "Ask the provider again and offer whatever is newly listed.\n\nAdditive only: nothing already offered is removed or toggled. New models\nfollow the offer rule, seeded with the community default price and off\nwhen nothing prices them. A seeded price nobody changed moves with the\ndefault.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                ":provider",
+                "models",
+                "refresh"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/:provider/models/refresh",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Hosted Model",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"enabled\": false\n}"
+            },
+            "description": "Reprice one offered model, toggle whether it is served, or both.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                ":provider",
+                "models",
+                ":model_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/:provider/models/:model_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "model_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Remove Hosted Model",
+          "request": {
+            "description": "Stop offering a model on a provider. Its pricing history stays.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hosted-providers",
+                ":provider",
+                "models",
+                ":model_id"
+              ],
+              "raw": "{{baseUrl}}/api/v1/hosted-providers/:provider/models/:model_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "provider",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "model_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "hosted-providers"
+    },
+    {
+      "item": [
+        {
           "name": "Create Image",
           "request": {
             "body": {

@@ -6819,6 +6819,730 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HostedAvailableModelsPublic": {
+        "description": "What the provider says it serves on the stored credential.\n\nFailure is a field rather than a status: an unreachable upstream, or a\nprovider with no model listing, is an answer about the provider rather than\nabout this request, and the form still has to render a plain text box when\nthe list cannot be fetched.",
+        "properties": {
+          "discovery_unsupported": {
+            "default": false,
+            "title": "Discovery Unsupported",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider"
+        ],
+        "title": "HostedAvailableModelsPublic",
+        "type": "object"
+      },
+      "HostedCatalogKeptGroupPublic": {
+        "description": "Priced models a sweep left in place, grouped by the reason it did.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "count",
+          "models"
+        ],
+        "title": "HostedCatalogKeptGroupPublic",
+        "type": "object"
+      },
+      "HostedCatalogProviderRefreshPublic": {
+        "description": "What one hosted provider newly lists, as a catalog sweep found it.\n\nPer provider rather than one total, because a dial that failed is a fact\nabout that provider, and the operator has to be told which one went quiet\nrather than read a smaller number than they expected.",
+        "properties": {
+          "added": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Added",
+            "type": "array"
+          },
+          "credential_unreadable": {
+            "default": false,
+            "title": "Credential Unreadable",
+            "type": "boolean"
+          },
+          "discovery_unsupported": {
+            "default": false,
+            "title": "Discovery Unsupported",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "repriced": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Repriced",
+            "type": "array"
+          }
+        },
+        "required": [
+          "provider",
+          "added"
+        ],
+        "title": "HostedCatalogProviderRefreshPublic",
+        "type": "object"
+      },
+      "HostedCatalogRefreshPublic": {
+        "description": "What a catalog sweep did, or would do.\n\n``removed`` is a sample and ``removed_count`` the total, so a deployment\nthat has never been swept does not answer one button press with a few\nthousand strings.",
+        "properties": {
+          "kept": {
+            "items": {
+              "$ref": "#/components/schemas/HostedCatalogKeptGroupPublic"
+            },
+            "title": "Kept",
+            "type": "array"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/HostedCatalogProviderRefreshPublic"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "removed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Removed",
+            "type": "array"
+          },
+          "removed_count": {
+            "title": "Removed Count",
+            "type": "integer"
+          },
+          "removed_override_rows": {
+            "title": "Removed Override Rows",
+            "type": "integer"
+          },
+          "removed_price_rows": {
+            "title": "Removed Price Rows",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "providers",
+          "removed",
+          "removed_count",
+          "removed_price_rows",
+          "removed_override_rows",
+          "kept"
+        ],
+        "title": "HostedCatalogRefreshPublic",
+        "type": "object"
+      },
+      "HostedModelCreateRequest": {
+        "description": "Offer a model on a hosted provider, optionally at a custom price.\n\nOmitting the rates means the deployment serves the model at whatever the\nprice ladder already answers: a stored deployment price, else the community\ndefault, which the offer stores as the deployment's own rate.",
+        "example": {
+          "input_price_per_million": 2.5,
+          "model": "gpt-4o",
+          "output_price_per_million": 10
+        },
+        "properties": {
+          "cache_read_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Price Per Million"
+          },
+          "cache_write_1h_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write 1H Price Per Million"
+          },
+          "cache_write_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Price Per Million"
+          },
+          "input_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Price Per Million"
+          },
+          "model": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "output_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Price Per Million"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "title": "HostedModelCreateRequest",
+        "type": "object"
+      },
+      "HostedModelPublic": {
+        "description": "One offered model, with the price the deployment currently serves it at.\n\n``price_source`` says which rung of the deployment's ladder answered:\n``deployment`` for a rate an operator set, ``defaults`` for the\ncommunity-maintained rate, whether this surface stored it or the fallback\nsupplies it, and None when nothing prices the model yet. ``enabled`` is the\nserving switch; a model offered without a discoverable price starts off.",
+        "properties": {
+          "cache_read_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Price Per Million"
+          },
+          "cache_write_1h_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write 1H Price Per Million"
+          },
+          "cache_write_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Price Per Million"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "input_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Price Per Million"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "output_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Price Per Million"
+          },
+          "price_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "organization",
+                  "deployment",
+                  "defaults"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Source"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "model",
+          "enabled",
+          "created_at"
+        ],
+        "title": "HostedModelPublic",
+        "type": "object"
+      },
+      "HostedModelUpdateRequest": {
+        "description": "Reprice an offered model, toggle whether it is served, or both.\n\nA price is the input/output pair or nothing: sending the pair writes a new\npricing version, and the cache rates then follow ``POST /pricing``'s own\nsemantics (a field the caller omits inherits the most recent stored value,\nan explicit null clears it). ``enabled`` travels alone freely, so a toggle\nnever re-sends rates it did not change.",
+        "example": {
+          "enabled": false
+        },
+        "properties": {
+          "cache_read_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Price Per Million"
+          },
+          "cache_write_1h_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write 1H Price Per Million"
+          },
+          "cache_write_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Price Per Million"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "input_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Price Per Million"
+          },
+          "output_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Price Per Million"
+          }
+        },
+        "title": "HostedModelUpdateRequest",
+        "type": "object"
+      },
+      "HostedModelsPublic": {
+        "description": "A page of one hosted provider's offered models, and how many there are in total.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/HostedModelPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "HostedModelsPublic",
+        "type": "object"
+      },
+      "HostedModelsRefreshPublic": {
+        "description": "What a refresh did: the models newly offered, the seeded rates it moved, and the list's new size.\n\nFailure is a field rather than a status, for the reason\n``HostedAvailableModelsPublic`` gives: the list is still standing, and the\npanel renders the reason beside it.",
+        "properties": {
+          "added": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Added",
+            "type": "array"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "discovery_unsupported": {
+            "default": false,
+            "title": "Discovery Unsupported",
+            "type": "boolean"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "repriced": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Repriced",
+            "type": "array"
+          }
+        },
+        "required": [
+          "added",
+          "repriced",
+          "count"
+        ],
+        "title": "HostedModelsRefreshPublic",
+        "type": "object"
+      },
+      "HostedProviderCreateRequest": {
+        "description": "Configure a provider this deployment will serve hosted inference on.\n\n``client_args`` is whatever the provider's SDK client needs beyond the key\n(Bedrock's region and IAM pair), the same shape an organization provider\nkey takes. Values under credential-shaped names come back masked.",
+        "example": {
+          "api_key": "sk-live-...",
+          "provider": "openai"
+        },
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Api Key",
+            "type": "string"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "provider": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "api_key"
+        ],
+        "title": "HostedProviderCreateRequest",
+        "type": "object"
+      },
+      "HostedProviderPublic": {
+        "description": "One hosted provider, named by its provider and the tail of its key.\n\nNo shape in this section carries key material: a stored credential is\nknown by its last four characters and nothing else, and ``client_args``\ngoes out with credential-shaped values masked.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key_last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Last4"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "enabled",
+          "created_at"
+        ],
+        "title": "HostedProviderPublic",
+        "type": "object"
+      },
+      "HostedProviderUpdateRequest": {
+        "description": "Rotate the key, repoint the base, or turn a provider off.\n\n``provider`` is immutable: changing it is a delete plus a create, because\nthe key belongs to the provider it was issued by. Omitting ``api_key``\nleaves the stored credential untouched, so a toggle never re-sends a secret\nthe caller does not have. ``client_args`` omitted is left alone; an explicit\nnull clears it, and an entry echoed back as the mask keeps the stored value.",
+        "example": {
+          "enabled": false
+        },
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          }
+        },
+        "title": "HostedProviderUpdateRequest",
+        "type": "object"
+      },
+      "HostedProvidersPublic": {
+        "description": "A page of hosted providers, and how many there are in total.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/HostedProviderPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "HostedProvidersPublic",
+        "type": "object"
+      },
       "Icon": {
         "additionalProperties": true,
         "description": "An icon for display in user interfaces.",
@@ -24673,6 +25397,654 @@
         "summary": "Check Policy",
         "tags": [
           "hooks"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers": {
+      "get": {
+        "description": "List the providers this deployment serves hosted inference on.",
+        "operationId": "hosted-providers-list_hosted_providers",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedProvidersPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Hosted Providers",
+        "tags": [
+          "hosted-providers"
+        ]
+      },
+      "post": {
+        "description": "Configure a provider with the key this deployment will serve it on.\n\nEverything the provider lists on that key is offered at once; a provider\nthat will not say yields a provider with no models, not an error.",
+        "operationId": "hosted-providers-create_hosted_provider",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedProviderCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedProviderPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Hosted Provider",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/refresh": {
+      "post": {
+        "description": "Re-ask every enabled provider what it lists, then take the rest off the catalog.\n\nThe whole deployment rather than one provider: a stored price is what puts a\nmodel on a tenant's Models page, and a price under a provider nothing here\nserves cannot be reached by a per-provider refresh. Declared before the\n``/{provider}`` paths to read in the order the surface is used; no method\ncollides in any case.",
+        "operationId": "hosted-providers-refresh_catalog",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedCatalogRefreshPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Refresh Catalog",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/refresh/preview": {
+      "get": {
+        "description": "What a catalog sweep would remove, without removing it.\n\nA GET, and a truthful one: it writes nothing. It does dial every enabled\nprovider, as ``available-models`` does, because a model the provider still\nlists would survive the sweep and previewing it as doomed would be a lie.",
+        "operationId": "hosted-providers-preview_catalog_refresh",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedCatalogRefreshPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Preview Catalog Refresh",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/{provider}": {
+      "delete": {
+        "description": "Remove a provider and its roster, leaving the runtime with no hosted path for it.",
+        "operationId": "hosted-providers-delete_hosted_provider",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Hosted Provider",
+        "tags": [
+          "hosted-providers"
+        ]
+      },
+      "patch": {
+        "description": "Rotate the key, repoint the base, or turn a provider off.",
+        "operationId": "hosted-providers-update_hosted_provider",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedProviderUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedProviderPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Hosted Provider",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/{provider}/available-models": {
+      "get": {
+        "description": "Ask the provider what it serves on the stored credential.\n\nDials the upstream on every call rather than caching: the caller is the\nadmin form's model picker, opened rarely and entitled to a current answer.\nFailure comes back in the body, so the picker can fall back to a text box.",
+        "operationId": "hosted-providers-list_available_models",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedAvailableModelsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Available Models",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/{provider}/models": {
+      "get": {
+        "description": "List the models offered on one provider, with the price each currently serves at.",
+        "operationId": "hosted-providers-list_hosted_models",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedModelsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Hosted Models",
+        "tags": [
+          "hosted-providers"
+        ]
+      },
+      "post": {
+        "description": "Offer a model on a provider, optionally at a custom price.",
+        "operationId": "hosted-providers-add_hosted_model",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedModelCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedModelPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Add Hosted Model",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/{provider}/models/refresh": {
+      "post": {
+        "description": "Ask the provider again and offer whatever is newly listed.\n\nAdditive only: nothing already offered is removed or toggled. New models\nfollow the offer rule, seeded with the community default price and off\nwhen nothing prices them. A seeded price nobody changed moves with the\ndefault.",
+        "operationId": "hosted-providers-refresh_hosted_models",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedModelsRefreshPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Refresh Hosted Models",
+        "tags": [
+          "hosted-providers"
+        ]
+      }
+    },
+    "/api/v1/hosted-providers/{provider}/models/{model_id}": {
+      "delete": {
+        "description": "Stop offering a model on a provider. Its pricing history stays.",
+        "operationId": "hosted-providers-remove_hosted_model",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Remove Hosted Model",
+        "tags": [
+          "hosted-providers"
+        ]
+      },
+      "patch": {
+        "description": "Reprice one offered model, toggle whether it is served, or both.",
+        "operationId": "hosted-providers-update_hosted_model",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HostedModelUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostedModelPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Hosted Model",
+        "tags": [
+          "hosted-providers"
         ]
       }
     },

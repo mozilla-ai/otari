@@ -124,6 +124,19 @@ POST /api/v1/provider-endpoints                     # not yet wrapped
 GET /api/v1/provider-endpoints/{endpoint_id}        # not yet wrapped
 PATCH /api/v1/provider-endpoints/{endpoint_id}      # not yet wrapped
 DELETE /api/v1/provider-endpoints/{endpoint_id}     # not yet wrapped
+# Hosted providers (the deployment's own upstream credentials, operator-only)
+GET /api/v1/hosted-providers                        # dashboard-only
+POST /api/v1/hosted-providers                       # dashboard-only
+GET /api/v1/hosted-providers/refresh/preview        # dashboard-only
+POST /api/v1/hosted-providers/refresh               # dashboard-only
+PATCH /api/v1/hosted-providers/{provider}           # dashboard-only
+DELETE /api/v1/hosted-providers/{provider}          # dashboard-only
+GET /api/v1/hosted-providers/{provider}/models      # dashboard-only
+POST /api/v1/hosted-providers/{provider}/models     # dashboard-only
+POST /api/v1/hosted-providers/{provider}/models/refresh                  # dashboard-only
+GET /api/v1/hosted-providers/{provider}/available-models                 # dashboard-only
+PATCH /api/v1/hosted-providers/{provider}/models/{model_id}              # dashboard-only
+DELETE /api/v1/hosted-providers/{provider}/models/{model_id}             # dashboard-only
 # Provider credentials (runtime provider management)
 GET /api/v1/provider-credentials                    # not yet wrapped
 POST /api/v1/provider-credentials                   # not yet wrapped
