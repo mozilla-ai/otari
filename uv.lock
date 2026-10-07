@@ -14,6 +14,7 @@ supported-markers = [
 
 [manifest]
 members = [
+    "any-fetch",
     "any-search",
     "gateway",
     "otari-agent",
@@ -208,6 +209,20 @@ wheels = [
 [package.optional-dependencies]
 vertex = [
     { name = "google-auth", extra = ["requests"] },
+]
+
+[[package]]
+name = "any-fetch"
+source = { editable = "any-fetch" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "pydantic", specifier = ">=2.7.0" },
 ]
 
 [[package]]
@@ -1191,6 +1206,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
     { name = "alembic" },
+    { name = "any-fetch" },
     { name = "any-guardrail", extra = ["azure-content-safety", "bedrock", "openai", "watsonx"] },
     { name = "any-llm-sdk", extra = ["all"] },
     { name = "any-search" },
@@ -1270,6 +1286,7 @@ dev = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.19.0" },
     { name = "alembic", specifier = ">=1.13.0" },
+    { name = "any-fetch", editable = "any-fetch" },
     { name = "any-guardrail", extras = ["azure-content-safety", "bedrock", "openai", "watsonx"], specifier = ">=0.7.7,<0.8.0" },
     { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.32.0" },
     { name = "any-search", editable = "any-search" },

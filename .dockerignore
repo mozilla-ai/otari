@@ -17,6 +17,7 @@ docs/
 # Tests
 tests/
 any-search/tests/
+any-fetch/tests/
 .pytest_cache/
 .coverage
 htmlcov/
@@ -105,6 +106,7 @@ docker-compose*.yml
 demo/
 scripts/
 any-search/scripts/
+any-fetch/scripts/
 
 # Config / tooling files
 Makefile

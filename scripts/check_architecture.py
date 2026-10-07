@@ -13,7 +13,7 @@ Enforces:
 9. Registry: only the app wiring reads gateway/features.py, so a service or a
    route may not import it; and nothing under gateway/ imports
    importlib.metadata, importlib_metadata or pkg_resources, so nothing is
-   discovered. The same ban holds under otari_agent/ and the library.
+   discovered. The same ban holds under otari_agent/ and the two libraries.
 10. Top-level packages: src/ holds only the packages on an explicit list, so a
     feature cannot sit beside gateway/, outside every rule above.
 11. Service database access: nothing under services/ imports sqlalchemy or
@@ -77,9 +77,9 @@ Enforces:
     A FastAPI dependency declares a listener as Annotated[Listener, Depends(...)], since a Depends(...) default counts.
     A field kept out of the constructor, such as field(init=False), is not a parameter, so the rule skips it.
     The parameters and fields that still have one are named on a baseline, and the baseline only shrinks.
-25. Libraries: nothing under any-search/, tests and scripts included,
-    imports the gateway, SQLAlchemy, SQLModel, FastAPI, uvicorn or the
-    fetch library, so it runs on its own with httpx and pydantic. A
+25. Libraries: nothing under any-search/ or any-fetch/, tests and scripts
+    included, imports the gateway, SQLAlchemy, SQLModel, FastAPI, uvicorn or
+    the other library, so each runs on its own with httpx and pydantic. A
     library keeps its tests and scripts inside its directory rather than
     under tests/ or src/, so each directory is a root of its own, mapped to
     its rule. Entry-point discovery is banned there as under gateway/.
@@ -106,9 +106,10 @@ TESTS_ROOT = REPO_ROOT / "tests"
 # The otari-agent workspace member (cli/pyproject.toml); its files are checked
 # relative to this root so the "otari_agent" rule key matches them.
 CLI_ROOT = REPO_ROOT / "cli" / "src"
-# The library workspace members, each checked whole against the rule it maps to.
+# The two library workspace members, each checked whole against the rule it maps to.
 LIBRARY_ROOTS: dict[str, Path] = {
     "any_search": REPO_ROOT / "any-search",
+    "any_fetch": REPO_ROOT / "any-fetch",
 }
 
 
@@ -178,13 +179,18 @@ RULES: dict[str, LayerRule] = {
         ],
         "description": "Light CLI (otari-agent)",
     },
-    # The web search library is built to run without otari: import it, give it
-    # a key, call it. It does not import the fetch library either, so each
+    # The web search and fetch libraries are built to run without otari: import
+    # one, give it a key, call it. Neither imports the other either, so each
     # stays self-contained. These keys match through LIBRARY_ROOTS, not a path.
     "any_search": {
         "allowed": [],
         "forbidden": ["gateway", "sqlalchemy", "sqlmodel", "fastapi", "uvicorn", "any_fetch"],
         "description": "Library (any-search)",
+    },
+    "any_fetch": {
+        "allowed": [],
+        "forbidden": ["gateway", "sqlalchemy", "sqlmodel", "fastapi", "uvicorn", "any_search"],
+        "description": "Library (any-fetch)",
     },
     "gateway/services": {
         "allowed": ["gateway.repositories", "gateway.models", "gateway.core", "gateway.auth", "gateway.ports"],
@@ -306,11 +312,11 @@ LIGHT_CLI_ATTACH_POINT = "otari_agent/cli.py"
 LIGHT_CLI_ATTACH_IMPORT = "gateway.cli"
 
 # Entry-point discovery is banned everywhere under gateway/, otari_agent/ and
-# the library, with a message of its own because "OSS base" would not say
+# the two libraries, with a message of its own because "OSS base" would not say
 # why: the feature registry in gateway/features.py is a literal tuple on purpose
 # (ARCHITECTURE.md), as is each library's provider table, and these are the
 # modules discovery is written with.
-DISCOVERY_SCOPE = ("gateway/", "otari_agent/", "any_search/")
+DISCOVERY_SCOPE = ("gateway/", "otari_agent/", "any_search/", "any_fetch/")
 DISCOVERY_IMPORTS = ("importlib.metadata", "importlib_metadata", "pkg_resources")
 DISCOVERY_RULE = "OSS base (no entry-point discovery; the feature registry is a literal tuple)"
 

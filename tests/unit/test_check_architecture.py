@@ -37,10 +37,13 @@ def _point_main_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
     monkeypatch.setattr(check, "TESTS_ROOT", tmp_path / "tests")
     monkeypatch.setattr(check, "CLI_ROOT", tmp_path / "cli" / "src")
-    monkeypatch.setattr(check, "LIBRARY_ROOTS", {"any_search": tmp_path / "any-search"})
+    monkeypatch.setattr(
+        check, "LIBRARY_ROOTS", {"any_search": tmp_path / "any-search", "any_fetch": tmp_path / "any-fetch"}
+    )
     # main() refuses to run without the light CLI's root and the libraries', so every temporary tree gets empty ones.
     _write(tmp_path, "cli/src/otari_agent/__init__.py", "")
     _write(tmp_path, "any-search/src/any_search/__init__.py", "")
+    _write(tmp_path, "any-fetch/src/any_fetch/__init__.py", "")
     _write(tmp_path, "DOMAINS.md", "## The domains\n\n### things\n")
     for name in [name for name in vars(check) if name.endswith("_BASELINE")]:
         monkeypatch.setattr(check, name, type(getattr(check, name))())
@@ -400,12 +403,12 @@ def test_a_library_importing_the_gateway_or_the_server_stack_is_flagged(
 
 
 def test_a_library_may_import_httpx_pydantic_and_itself(tmp_path: Path) -> None:
-    imports = "import httpx\nfrom pydantic import BaseModel\nfrom any_search._types import SearchResult\n"
+    imports = "import httpx\nfrom pydantic import BaseModel\nfrom any_fetch._types import FetchedPage\n"
     file_path = _write(tmp_path, "tests/test_fake.py", imports)
-    assert check.check_file(file_path, tmp_path, "any_search") == []
+    assert check.check_file(file_path, tmp_path, "any_fetch") == []
 
 
-@pytest.mark.parametrize(("rule_key", "other"), [("any_search", "any_fetch")])
+@pytest.mark.parametrize(("rule_key", "other"), [("any_search", "any_fetch"), ("any_fetch", "any_search")])
 def test_the_libraries_may_not_import_each_other(tmp_path: Path, rule_key: str, other: str) -> None:
     file_path = _write(tmp_path, "src/module.py", f"from {other} import thing\n")
     [(_, module, _)] = check.check_file(file_path, tmp_path, rule_key)
@@ -413,8 +416,8 @@ def test_the_libraries_may_not_import_each_other(tmp_path: Path, rule_key: str, 
 
 
 def test_a_library_may_not_discover_entry_points(tmp_path: Path) -> None:
-    file_path = _write(tmp_path, "src/any_search/_registry.py", "from importlib.metadata import entry_points\n")
-    assert check.check_file(file_path, tmp_path, "any_search") == [(1, "importlib.metadata", _DISCOVERY_MESSAGE)]
+    file_path = _write(tmp_path, "src/any_fetch/_registry.py", "from importlib.metadata import entry_points\n")
+    assert check.check_file(file_path, tmp_path, "any_fetch") == [(1, "importlib.metadata", _DISCOVERY_MESSAGE)]
 
 
 def test_main_walks_the_libraries_tests_included(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -422,7 +425,7 @@ def test_main_walks_the_libraries_tests_included(tmp_path: Path, monkeypatch: py
     _write(tmp_path, "tests/unit/test_thing.py", "")
     _point_main_at(tmp_path, monkeypatch)
     assert check.main() == 0
-    _write(tmp_path, "any-search/tests/conformance/test_conformance.py", "import gateway\n")
+    _write(tmp_path, "any-fetch/tests/conformance/test_conformance.py", "import gateway\n")
     assert check.main() == 1
 
 

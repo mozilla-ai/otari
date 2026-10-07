@@ -15,8 +15,9 @@ description = "otari, an OpenAI-compatible LLM gateway"
 requires-python = ">=3.13"
 dependencies = [
     "any-llm-sdk[all]>=1.32.0",
-    # The web search library, a workspace member at any-search/. It may not
-    # import the gateway back.
+    # The web search and web fetch libraries, workspace members at any-search/
+    # and any-fetch/. Each may not import the gateway back.
+    "any-fetch",
     "any-search",
     # The built-in guardrail catalog (`services/guardrail_catalog.py`) and the
     # runner that builds an organization's definitions from it
@@ -213,11 +214,12 @@ environments = [
 constraint-dependencies = ["authlib>=1.7.2"]
 
 [tool.uv.workspace]
-members = ["cli", "any-search"]
+members = ["cli", "any-search", "any-fetch"]
 
 [tool.uv.sources]
 otari-agent = { workspace = true }
 any-search = { workspace = true }
+any-fetch = { workspace = true }
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -251,7 +253,7 @@ gateway = [
 [tool.ruff]
 target-version = "py313"
 line-length = 120
-src = ["src", "cli/src", "any-search/src", "tests", "scripts"]
+src = ["src", "cli/src", "any-search/src", "any-fetch/src", "tests", "scripts"]
 # `demo/` is shell scripts; nothing for ruff to do there.
 extend-exclude = ["demo/"]
 
@@ -267,7 +269,7 @@ python_version = "3.13"
 strict = true
 # The libraries' tests and scripts are checked one library at a time (Makefile,
 # typecheck-python), because the two have files of the same names.
-files = ["src", "cli/src", "any-search/src", "tests", "scripts"]
+files = ["src", "cli/src", "any-search/src", "any-fetch/src", "tests", "scripts"]
 # Standalone web-search adapters are independent services (own Dockerfile +
 # requirements), not part of the gateway package. They each ship a top-level
 # `app.py`, so type-checking them together trips mypy's duplicate-module guard.

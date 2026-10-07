@@ -105,7 +105,7 @@ network or a monkeypatch:
 
 ## Tests
 
-From the repository root, `make test-libs` runs this package's tests.
+From the repository root, `make test-libs` runs this package's tests and any-fetch's.
 `tests/conformance/` holds the checks every provider must pass; a provider joins them by adding
 its scenarios there. `scripts/record_fixture.py` records a provider's live answer as a fixture
 under `tests/fixtures/<provider>/`, with the key redacted.

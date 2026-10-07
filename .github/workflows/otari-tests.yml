@@ -7,6 +7,7 @@ on:
       - 'src/gateway/**'
       - 'cli/**'
       - 'any-search/**'
+      - 'any-fetch/**'
       - 'alembic/**'
       - 'tests/integration/**'
       - 'tests/unit/**'
@@ -32,6 +33,7 @@ on:
       - 'src/gateway/**'
       - 'cli/**'
       - 'any-search/**'
+      - 'any-fetch/**'
       - 'alembic/**'
       - 'tests/integration/**'
       - 'tests/unit/**'
@@ -136,7 +138,7 @@ jobs:
         flags: integration
         fail_ci_if_error: false
 
-  # The any-search library tests apart from the gateway's suite,
+  # The any-search and any-fetch libraries test apart from the gateway's suite,
   # one run per library (Makefile, test-libs).
   test-libs:
     runs-on: ubuntu-latest
@@ -156,7 +158,7 @@ jobs:
       run: |
          uv sync --dev --frozen
 
-    - name: Run the any-search tests
+    - name: Run the any-search and any-fetch tests
       run: make test-libs
 
   openapi-spec:

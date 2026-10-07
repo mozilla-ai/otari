@@ -7,7 +7,7 @@ help:
 	@printf "  test Run full test suite (unit + integration)\n"
 	@printf "  test-unit Run unit tests\n"
 	@printf "  test-integration Run integration tests\n"
-	@printf "  test-libs Run the any-search tests\n"
+	@printf "  test-libs Run the any-search and any-fetch tests\n"
 	@printf "  lint Run every linter, fixing what it can (lint-python + lint-web)\n"
 	@printf "  lint-python Run the pre-commit hooks: architecture, migrations, Ruff lint and format\n"
 	@printf "  lint-web Run Biome over the dashboard\n"
@@ -62,6 +62,7 @@ test-integration:
 # import mode), so one run would fail to collect the second of each pair.
 test-libs:
 	uv run pytest -v any-search/tests
+	uv run pytest -v any-fetch/tests
 
 # NOTE: The linters fix what they can in place, so a run can leave changes to commit.
 lint: lint-python lint-web
@@ -92,6 +93,7 @@ typecheck: typecheck-python typecheck-web
 typecheck-python:
 	uv run mypy
 	uv run mypy --no-warn-unused-configs any-search/tests any-search/scripts
+	uv run mypy --no-warn-unused-configs any-fetch/tests any-fetch/scripts
 
 typecheck-web: web/node_modules/.install-stamp
 	pnpm --dir web run typecheck

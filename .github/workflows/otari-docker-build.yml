@@ -39,6 +39,8 @@ on:
       - 'cli/src/**'
       - 'any-search/pyproject.toml'
       - 'any-search/src/**'
+      - 'any-fetch/pyproject.toml'
+      - 'any-fetch/src/**'
       - 'uv.lock'
       - 'scripts/docker_liveness_check.sh'
       - 'scripts/hybrid_edition_smoke.py'
