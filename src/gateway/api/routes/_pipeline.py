@@ -52,7 +52,7 @@ from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Proto
 from urllib.parse import ParseResult, urlparse
 
 import httpx
-from any_llm import LLMProvider
+from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import (
     AnyLLMError,
     ContextLengthExceededError,
@@ -5343,6 +5343,26 @@ async def _open_tool_backends(
     return _OpenedTools(pool=backends[0] if len(backends) == 1 else CombinedToolBackend(backends), sandbox=sandbox)
 
 
+def _with_provider_timeout(kwargs: dict[str, Any], config: GatewayConfig) -> dict[str, Any]:
+    """``kwargs`` with ``provider_request_timeout_seconds``, when the provider takes a per-request timeout.
+
+    Without one the anthropic SDK refuses a non-streaming call whose ``max_tokens``
+    could outlast its default limit. any-llm rejects any timeout for a provider it
+    marks ``unsupported``, so that provider keeps its client default.
+    """
+    provider = kwargs.get("provider")
+    try:
+        if provider is None:
+            provider, _ = AnyLLM.split_model_provider(kwargs["model"])
+        support = AnyLLM.get_provider_class(provider).TIMEOUT_SUPPORT
+    except (KeyError, TypeError, ValueError, ImportError, AttributeError, AnyLLMError):
+        # Unresolvable here means unresolvable in any-llm too, which reports it.
+        return kwargs
+    if support == "unsupported":
+        return kwargs
+    return {**kwargs, "timeout": config.provider_request_timeout_seconds}
+
+
 async def dispatch_non_stream(
     *,
     adapter: FormatAdapter[ResultT, Any],
@@ -5354,6 +5374,7 @@ async def dispatch_non_stream(
     backend the request declared (MCP pool / sandbox / web retrieval), opened for
     the duration of the loop.
     """
+    call_kwargs = _with_provider_timeout(call_kwargs, tool_ctx.config)
     if not tool_ctx.use_tool_loop:
         return await adapter.call_provider(call_kwargs)
 

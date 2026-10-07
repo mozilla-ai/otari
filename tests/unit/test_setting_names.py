@@ -121,6 +121,7 @@ _SETTING_NAMES = frozenset(
         "provider_allow_private_hosts",
         "provider_endpoints_enabled",
         "provider_max_retries",
+        "provider_request_timeout_seconds",
         "provider_user_identifier_enabled",
         "provider_user_identifier_key",
         "providers",

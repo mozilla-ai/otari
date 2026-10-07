@@ -8,7 +8,7 @@ from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 
 
 class InferenceSettings(BaseModel):
-    """How a completion request is retried upstream, deduplicated, streamed and attributed to an end user."""
+    """How a completion request is sent and retried upstream, deduplicated, streamed and attributed to an end user."""
 
     provider_max_retries: Annotated[int | None, Shown(SettingsGroup.MODELS)] = Field(
         default=None,
@@ -18,6 +18,16 @@ class InferenceSettings(BaseModel):
             "before Otari sees the failure. Unset leaves each provider SDK's own default. A provider "
             "instance's max_retries overrides it. Applies to the OpenAI-compatible, Anthropic, Groq, "
             "Cerebras, Together, Gemini and Vertex AI clients; other providers keep their SDK's behavior."
+        ),
+    )
+
+    provider_request_timeout_seconds: Annotated[float, Shown(SettingsGroup.MODELS)] = Field(
+        default=600.0,
+        gt=0,
+        description=(
+            "Timeout in seconds for a non-streaming provider call, for providers that take a "
+            "per-request timeout. Without one the Anthropic SDK refuses a non-streaming request "
+            "with a large max_tokens before sending it."
         ),
     )
 
