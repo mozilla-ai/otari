@@ -46,14 +46,14 @@ Enforces:
     rule 10 keeps src/ to the gateway, and this one keeps the CLI out of it.
 19. Domain names: a package in services/ or repositories/, a module in
     schemas/ and a module in exceptions/ take their domain from their name, so
-    each name is a domain that docs/domains.md gives a section. An exceptions
+    each name is a domain that DOMAINS.md gives a section. An exceptions
     module is named <domain>_exceptions.py. The names that do not match yet are
     on a baseline, and the baseline only shrinks.
     A package on it holds only the modules the baseline lists, so new code goes in its domain's package.
 20. Repository imports: only a domain's own service package, its own
     repository package and the builders in gateway/api/deps.py import a
     domain's repository package, so a domain's queries stay behind its
-    service. A domain is one that docs/domains.md gives a section. Service code
+    service. A domain is one that DOMAINS.md gives a section. Service code
     outside every domain package is not checked, because its path does not
     say which domain owns it.
 21. Service package imports: code outside a domain's service package
@@ -1077,7 +1077,7 @@ def check_flat_modules(src_root: Path) -> list[str]:
     return violations
 
 
-DOMAINS_DOC = "docs/domains.md"
+DOMAINS_DOC = "DOMAINS.md"
 DOMAINS_SECTION = "## The domains"
 DOMAIN_HEADING = re.compile(r"^### (.*)$", re.MULTILINE)
 DOMAIN_NAME = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")

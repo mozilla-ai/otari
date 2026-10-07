@@ -68,4 +68,4 @@ Calling the gateway from your own code.
 ### For contributors
 
 - [Architecture](../ARCHITECTURE.md): the two-plane model and the extension seam (ports, adapters, and capability lines) that mark what Otari's core ships versus what an overlay can add.
-- [Backend domains](domains.md): what each backend domain owns, and the layer shape each domain moves toward.
+- [Backend domains](../DOMAINS.md): what each backend domain owns, and the layer shape each domain moves toward.

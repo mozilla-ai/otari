@@ -39,7 +39,7 @@ def _point_main_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(check, "CLI_ROOT", tmp_path / "cli" / "src")
     # main() refuses to run without the light CLI's root, so every temporary tree gets an empty one.
     _write(tmp_path, "cli/src/otari_agent/__init__.py", "")
-    _write(tmp_path, "docs/domains.md", "## The domains\n\n### things\n")
+    _write(tmp_path, "DOMAINS.md", "## The domains\n\n### things\n")
     for name in [name for name in vars(check) if name.endswith("_BASELINE")]:
         monkeypatch.setattr(check, name, type(getattr(check, name))())
     monkeypatch.setattr(check, "MODEL_ACCESS", {})
@@ -1136,7 +1136,7 @@ _PAGE_DOMAINS = {"api_keys", "budgets"}
 
 
 def _domains_page(tmp_path: Path, text: str = _DOMAINS_PAGE) -> Path:
-    return _write(tmp_path, "docs/domains.md", text)
+    return _write(tmp_path, "DOMAINS.md", text)
 
 
 def test_documented_domains_reads_only_the_domains_section() -> None:
@@ -1148,10 +1148,10 @@ def test_documented_domains_reads_only_the_domains_section() -> None:
     [
         (
             "agent guardrails",
-            "docs/domains.md heading '### agent guardrails' is not a domain name in lower case with hyphens",
+            "DOMAINS.md heading '### agent guardrails' is not a domain name in lower case with hyphens",
         ),
-        ("Budgets", "docs/domains.md heading '### Budgets' is not a domain name in lower case with hyphens"),
-        ("budgets", "docs/domains.md names the domain 'budgets' twice"),
+        ("Budgets", "DOMAINS.md heading '### Budgets' is not a domain name in lower case with hyphens"),
+        ("budgets", "DOMAINS.md names the domain 'budgets' twice"),
     ],
 )
 def test_documented_domains_refuses_a_heading_it_cannot_read(heading: str, violation: str) -> None:
@@ -1162,7 +1162,7 @@ def test_documented_domains_refuses_a_heading_it_cannot_read(heading: str, viola
 def test_documented_domains_refuses_a_page_with_no_domains_section() -> None:
     assert check.documented_domains("# Backend domains\n") == (
         set(),
-        ["docs/domains.md has no '## The domains' section"],
+        ["DOMAINS.md has no '## The domains' section"],
     )
 
 
@@ -1203,7 +1203,7 @@ def test_a_location_named_for_no_documented_domain_is_flagged(
     monkeypatch.setattr(check, "DOMAIN_NAME_BASELINE", {})
     _write(tmp_path, relative_path, "")
     assert check.check_domain_names(tmp_path, _PAGE_DOMAINS) == [
-        f"{location} names no domain in docs/domains.md; name it for a domain there, or give the new domain a section"
+        f"{location} names no domain in DOMAINS.md; name it for a domain there, or give the new domain a section"
     ]
 
 
@@ -1289,9 +1289,9 @@ def test_a_domain_name_baseline_entry_that_is_gone_or_now_a_domain_must_leave_th
 
 
 def test_a_missing_domains_page_is_flagged(tmp_path: Path) -> None:
-    assert check.read_domains_page(tmp_path / "docs" / "domains.md") == (
+    assert check.read_domains_page(tmp_path / "DOMAINS.md") == (
         set(),
-        ["docs/domains.md not found; the domain names are read from its '## The domains' section"],
+        ["DOMAINS.md not found; the domain names are read from its '## The domains' section"],
     )
 
 

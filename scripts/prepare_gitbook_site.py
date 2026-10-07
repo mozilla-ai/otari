@@ -1,6 +1,6 @@
 """Build the GitBook site for the documentation into site/.
 
-The site holds the pages that docs/SUMMARY.md lists, so the menu decides what is published.
+The site holds the pages that docs/SUMMARY.md lists, and every page under docs/ must be on that menu.
 A relative link to any other file in the repository becomes a GitHub link at the published ref.
 The pages keep their paths under docs/, so links between published pages need no rewriting.
 
@@ -24,9 +24,6 @@ DOCS_DIR = REPO_ROOT / "docs"
 REPO_URL = "https://github.com/mozilla-ai/otari"
 SUMMARY = "SUMMARY.md"
 
-# Pages under docs/ that are written for contributors to this repository, not for users of Otari.
-UNPUBLISHED_PAGES = frozenset({"domains.md"})
-
 # Repository-root files copied to the root of the site, keyed by their name in the repository.
 BRANCH_FILES = {
     ".gitbook-branch-readme.md": "README.md",
@@ -45,10 +42,10 @@ def summary_pages(summary: str) -> list[str]:
     return [match.group(1) for line in summary.splitlines() if (match := _SUMMARY_ENTRY.match(line))]
 
 
-def unclassified_pages(docs_dir: Path, published: frozenset[str]) -> list[str]:
-    """Return the Markdown pages under docs_dir that are neither published nor marked unpublished."""
+def pages_off_the_menu(docs_dir: Path, published: frozenset[str]) -> list[str]:
+    """Return the Markdown pages under docs_dir that the menu does not list."""
     pages = (path.relative_to(docs_dir).as_posix() for path in docs_dir.rglob("*.md"))
-    return sorted(page for page in pages if page != SUMMARY and page not in published | UNPUBLISHED_PAGES)
+    return sorted(page for page in pages if page != SUMMARY and page not in published)
 
 
 @dataclass(frozen=True)
@@ -129,9 +126,9 @@ def main() -> int:
     args = parser.parse_args()
 
     site = Site.from_summary(DOCS_DIR, args.ref)
-    if unclassified := unclassified_pages(DOCS_DIR, site.published):
+    if off_menu := pages_off_the_menu(DOCS_DIR, site.published):
         print(
-            f"Pages neither listed in docs/{SUMMARY} nor marked unpublished: {', '.join(unclassified)}",
+            f"Pages under docs/ that docs/{SUMMARY} does not list: {', '.join(off_menu)}",
             file=sys.stderr,
         )
         return 1

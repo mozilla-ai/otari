@@ -17,7 +17,7 @@ gates:
     rubric: >-
       Judge only the import lines this diff adds under src/gateway/. Fail if one of them
       imports a module below the root of a service package whose name is not a domain
-      docs/domains.md gives a section, from outside that package. For example,
+      DOMAINS.md gives a section, from outside that package. For example,
       gateway.services.tenancy.user_service imported by a module outside
       services/tenancy/ fails. This is layer and import rule 5 in ARCHITECTURE.md, "The
       modular monolith". The architecture check covers the packages named for a domain.

@@ -21,5 +21,5 @@ gates:
       what the product allows or does. A query filter that a use case asks for, the
       mapping of a row to a schema, the closed vocabulary of a column, and the HTTP
       status of an error class are not business rules. This is the "Must not" column in
-      docs/domains.md, "The target shape". Pass if the diff adds no business rule in
+      DOMAINS.md, "The target shape". Pass if the diff adds no business rule in
       these layers.

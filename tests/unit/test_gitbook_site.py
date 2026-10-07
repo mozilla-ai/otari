@@ -124,21 +124,15 @@ def test_build_fails_when_the_menu_names_a_missing_page(repo: Path) -> None:
         site.build(repo / "site")
 
 
-def test_unclassified_pages_lists_pages_off_the_menu(repo: Path, site: Any) -> None:
-    assert gitbook.unclassified_pages(repo / "docs", site.published) == ["internal.md"]
+def test_pages_off_the_menu_lists_pages_the_menu_does_not_name(repo: Path, site: Any) -> None:
+    assert gitbook.pages_off_the_menu(repo / "docs", site.published) == ["internal.md"]
 
 
-def test_every_docs_page_is_published_or_marked_unpublished() -> None:
+def test_every_docs_page_is_on_the_menu() -> None:
     site = gitbook.Site.from_summary(_DOCS_DIR, "main")
-    assert gitbook.unclassified_pages(_DOCS_DIR, site.published) == [], (
-        "List each new page in docs/SUMMARY.md, or add it to UNPUBLISHED_PAGES in scripts/prepare_gitbook_site.py"
+    assert gitbook.pages_off_the_menu(_DOCS_DIR, site.published) == [], (
+        "List each new page in docs/SUMMARY.md, or move a page for contributors out of docs/"
     )
-
-
-def test_unpublished_pages_exist_and_are_off_the_menu() -> None:
-    site = gitbook.Site.from_summary(_DOCS_DIR, "main")
-    assert all((_DOCS_DIR / page).is_file() for page in gitbook.UNPUBLISHED_PAGES)
-    assert not gitbook.UNPUBLISHED_PAGES & site.published
 
 
 def test_menu_lists_the_published_pages_of_the_docs_map() -> None:
@@ -146,7 +140,7 @@ def test_menu_lists_the_published_pages_of_the_docs_map() -> None:
     mapped = {target.split("#", 1)[0] for target in re.findall(r"\]\(([^)\s]+)\)", index)}
     mapped_pages = {target for target in mapped if target.endswith(".md") and not target.startswith("../")}
     site = gitbook.Site.from_summary(_DOCS_DIR, "main")
-    assert site.published - {"index.md"} == mapped_pages - gitbook.UNPUBLISHED_PAGES
+    assert site.published - {"index.md"} == mapped_pages
 
 
 def test_real_docs_build(tmp_path: Path) -> None:

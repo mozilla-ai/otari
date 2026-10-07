@@ -7,7 +7,7 @@ applyTo: "src/gateway/**/*.py"
 The backend is a modular monolith. The layers are the top-level folders under
 `src/gateway/`, and each layer holds one package or module per domain.
 A module in its domain's target location belongs to that domain by its path,
-and `docs/domains.md` says what each domain owns.
+and `DOMAINS.md` says what each domain owns.
 
 ## Old shape and new shape
 
@@ -112,11 +112,11 @@ model, except a module on the model's baseline.
 
 - Code outside a domain imports its service only through the package root,
   `gateway.services.<domain>`. The check refuses an import below the root
-  from outside the package, for each domain `docs/domains.md` gives a section.
+  from outside the package, for each domain `DOMAINS.md` gives a section.
   Flag such an import into a service package that is not a domain yet.
 - Only the domain's own service and repository packages and `api/deps.py`
   import `gateway.repositories.<domain>`. The check refuses any other import of
-  one, for each domain `docs/domains.md` gives a section, except from service
+  one, for each domain `DOMAINS.md` gives a section, except from service
   code outside every domain package, whose domain its path does not give.
   Flag such an import added there, and an import of a repository package that
   is not a domain yet from outside its own packages.

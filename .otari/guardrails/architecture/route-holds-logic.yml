@@ -15,5 +15,5 @@ gates:
       Judge only code this diff adds under src/gateway/api/routes/. Fail if it adds a
       database query, a business rule or a Pydantic model class to a route module. A
       business rule decides what the product allows or does. A check on the shape of the
-      request itself is not a business rule. This is the routes row in docs/domains.md,
+      request itself is not a business rule. This is the routes row in DOMAINS.md,
       "The target shape". Pass if the diff adds none of these.

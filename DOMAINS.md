@@ -35,13 +35,13 @@ How a domain fits together:
   repository, so it cannot run a query.
 - **One Unit of Work per request or worker job.** Only a service opens a
   block.
-  [Who commits](../.github/skills/backend-standards/SKILL.md#who-commits) gives
+  [Who commits](.github/skills/backend-standards/SKILL.md#who-commits) gives
   the rules.
 - **Builders** live in `api/deps.py`. A worker job calls the same builder with a
   Unit of Work over its own session. Nothing under `services/` may import
   `api/`, so the code that starts a worker passes the builder in.
 - **Imports** follow the
-  [layer and import rules](../ARCHITECTURE.md#the-modular-monolith).
+  [layer and import rules](ARCHITECTURE.md#the-modular-monolith).
 - **Reacting to another domain.** Dependencies between domains run one way.
   When a domain must react to a change in a domain that does not depend on it,
   the domain where the change happens defines a listener interface and receives
