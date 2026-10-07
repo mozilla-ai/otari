@@ -19,7 +19,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
-from gateway.core.database import create_session
+from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work_with_session
 from gateway.log_config import logger
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.catalog_selectors import (
@@ -282,7 +282,7 @@ SELECTOR_INDEX_INTERVAL_SECONDS = 60.0
 
 async def run_selector_index_refresher(
     config: GatewayConfig,
-    resolve_model_provider: Callable[[AsyncSession], ModelProviderPort] | None = None,
+    resolve_model_provider: Callable[[AsyncSession, UnitOfWork], ModelProviderPort] | None = None,
     interval: float | None = None,
 ) -> None:
     """Keep the selector index current with discovery, pricing and providers.
@@ -292,13 +292,14 @@ async def run_selector_index_refresher(
     build is one catalog read, and a spelling that lags a minute behind a
     change is a far smaller hazard than one hook missed.
 
-    ``resolve_model_provider`` hands each tick the hosted port for its session,
-    the way a request resolves it; the composition root is not named here.
+    ``resolve_model_provider`` hands each tick the hosted port for its session
+    and Unit of Work, the way a request resolves it; the composition root is
+    not named here.
     """
     while True:
         try:
-            async with create_session() as session:
-                model_provider = None if resolve_model_provider is None else resolve_model_provider(session)
+            async with create_unit_of_work_with_session() as (session, uow):
+                model_provider = None if resolve_model_provider is None else resolve_model_provider(session, uow)
                 await rebuild_selector_index(session, config, model_provider=model_provider)
         except asyncio.CancelledError:
             raise

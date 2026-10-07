@@ -118,7 +118,8 @@ rolls back.
 - Each request, and each worker job, has one Unit of Work over its one session, and every service
   built in that scope shares it. A request gets it from `get_unit_of_work` in `api/deps.py`. A
   worker job gets it from `create_unit_of_work()`, or from `create_log_unit_of_work()` for work
-  on the metering pool.
+  on the metering pool. A worker whose own reads still take the session gets both from
+  `create_unit_of_work_with_session()`, until those reads move into repositories.
 - A business step is one `async with uow:` block, an async context manager. The block commits
   when it ends, and rolls back and re-raises on an error. Either way the connection goes back to
   the pool.
