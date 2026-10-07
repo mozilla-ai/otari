@@ -49,7 +49,9 @@ function snippet(value: unknown): string | null {
 function TextCell({ value }: { value: unknown }) {
   const text = snippet(value)
   return text ? (
-    <span className="block w-72 truncate text-mono-caption text-muted">{text}</span>
+    <span className="block w-72 truncate text-mono-caption text-muted">
+      {text}
+    </span>
   ) : (
     EMPTY
   )

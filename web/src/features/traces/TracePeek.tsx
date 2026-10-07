@@ -25,6 +25,7 @@ import {
 import { type Format, IOBlock } from "./IOBlock"
 import { LogView } from "./LogView"
 import { TypeMark } from "./observationTypes"
+import { TraceTimelineView } from "./TraceTimelineView"
 import { TraceTreeView } from "./TraceTreeView"
 import { type Observation, summarizeTrace, type Trace } from "./types"
 
@@ -36,6 +37,11 @@ const ALL_TABS: { id: PeekTab; label: string }[] = [
   { id: "preview", label: "Preview" },
   { id: "attributes", label: "Attributes" },
   { id: "log", label: "Log View" },
+]
+
+const NAV_OPTIONS = [
+  { value: "tree", label: "Tree" },
+  { value: "timeline", label: "Timeline" },
 ]
 
 const FORMAT_OPTIONS = [
@@ -189,6 +195,7 @@ export function TracePeek({
     "entering",
   )
   const [navFraction, setNavFraction] = useState(0.4)
+  const [navView, setNavView] = useState<"tree" | "timeline">("tree")
   const bodyRef = useRef<HTMLDivElement>(null)
   const summary = summarizeTrace(trace)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -437,13 +444,32 @@ export function TracePeek({
           <>
             <div
               style={{ width: `${navFraction * 100}%` }}
-              className="relative flex min-w-[260px] shrink-0 flex-col overflow-auto border-r border-border max-md:hidden"
+              className="relative flex min-w-[260px] shrink-0 flex-col border-r border-border max-md:hidden"
             >
-              <TraceTreeView
-                trace={trace}
-                selectedId={observation?.id ?? null}
-                onSelect={setSelectedId}
-              />
+              <div className="shrink-0 border-b border-border p-2">
+                <Segmented
+                  size="sm"
+                  label="Navigation view"
+                  options={NAV_OPTIONS}
+                  value={navView}
+                  onChange={(next) => setNavView(next as "tree" | "timeline")}
+                />
+              </div>
+              {navView === "tree" ? (
+                <div className="min-h-0 flex-1 overflow-auto">
+                  <TraceTreeView
+                    trace={trace}
+                    selectedId={observation?.id ?? null}
+                    onSelect={setSelectedId}
+                  />
+                </div>
+              ) : (
+                <TraceTimelineView
+                  trace={trace}
+                  selectedId={observation?.id ?? null}
+                  onSelect={setSelectedId}
+                />
+              )}
               <ResizeHandle
                 label="Resize navigation pane"
                 className="-right-1.5"
