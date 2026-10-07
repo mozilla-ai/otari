@@ -1,0 +1,676 @@
+# Configuration
+
+Otari reads a YAML file, environment variables, and selected settings stored by
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.17.0/config.example.yml);
+the running dashboard's Settings page shows the effective non-secret scalar
+configuration and which values can be changed without a restart.
+
+## Config file
+
+Pass a file explicitly:
+
+```bash
+otari serve --config config.yml
+```
+
+A small standalone configuration looks like this:
+
+```yaml
+database_url: "postgresql://otari:otari@postgres:5432/otari"
+master_key: ${OTARI_MASTER_KEY}
+default_pricing: true
+
+providers:
+  openai:
+    api_key: ${OPENAI_API_KEY}
+```
+
+String values support `${ENV_VAR}` interpolation. Keep credentials in the
+environment or a secret store rather than committing them to YAML.
+
+## Environment variables
+
+Every scalar `GatewayConfig` field can be overridden as
+`OTARI_<UPPERCASE_FIELD>`, for example:
+
+```bash
+export OTARI_DATABASE_URL="postgresql://otari:otari@localhost:5432/otari"
+export OTARI_MASTER_KEY="..."
+export OTARI_DEFAULT_PRICING=true
+```
+
+Provider credentials come from the environment through `${VAR}` references
+in the `providers` map (see [Provider configuration](#provider-configuration)).
+Setting a provider's native variable, such as `OPENAI_API_KEY`, without
+declaring the provider is deprecated; see [Models](models.md#configuring-a-provider).
+
+Booleans accept `true`, `false`, `1`, `0`, `yes`, `no`, `on`, and
+`off`, without regard to case.
+
+### Full config via environment
+
+Container platforms can supply the whole YAML document through
+`OTARI_CONFIG_YAML`, or its base64-encoded form through `OTARI_CONFIG_B64`.
+Use only one; raw YAML wins when both are present.
+
+```bash
+export OTARI_CONFIG_YAML='
+default_pricing: true
+providers:
+  openai:
+    api_key: ${OPENAI_API_KEY}
+'
+```
+
+Precedence from lowest to highest is the config file, structured environment
+config, then scalar `OTARI_<FIELD>` values. Stored runtime settings override
+the corresponding startup value after the database is available.
+
+## Common settings
+
+| Setting | Purpose |
+| --- | --- |
+| `database_url` | SQLite or PostgreSQL connection. PostgreSQL is recommended for production. |
+| `master_key` | Deployment-wide management credential. |
+| `host`, `port` | Server bind address. |
+| `auto_migrate` | Apply Alembic migrations at startup. |
+| `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
+| `default_pricing` | Use the bundled genai-prices catalog when no stored price exists. |
+| `pricing_refresh` | What a scheduled genai-prices check does with an update: `manual`, `review`, or `auto`. |
+| `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `false`; startup setting, unavailable in hybrid mode. See [Product feedback](#product-feedback). |
+| `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
+| `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
+| `rate_limit_rpm` | Per-user request limit. Unset disables it. |
+| `rate_limit_store` | Where `rate_limit_rpm` and the `rate_limits` rules are counted: `memory` (the default) or `redis`. See [Rate limits across replicas](#rate-limits-across-replicas). |
+| `rate_limit_redis_url` | The Redis that the `redis` store counts in. |
+| `rate_limits` | Requests per minute, tokens per minute and requests in flight, per deployment, API key, user or model. Also managed from the dashboard. See [Rate limit rules](#rate-limit-rules). |
+| `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
+| `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
+| `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
+| `enable_docs` | Serve OpenAPI, Swagger UI, and ReDoc. |
+| `mode` | `standalone`, `hosted`, or `hybrid`. See [Modes](modes.md). |
+
+For every field, its current default, validation, and description live on
+`GatewayConfig` in `src/gateway/core/config.py`, or in the per-domain module
+under `src/gateway/core/settings/` that it inherits. Operators can read the
+non-secret effective set through `GET /api/v1/settings`.
+
+### Database connections
+
+| Setting | Purpose |
+| --- | --- |
+| `db_pool_size`, `db_max_overflow` | Connections available for serving requests. |
+| `db_pool_timeout` | Seconds a request waits for a free connection before it is refused. |
+| `db_pool_recycle` | Retire a connection after this many seconds. `-1` disables. |
+| `db_connect_timeout` | Seconds to wait for a new connection to be established. |
+| `db_command_timeout` | Client-side ceiling on one statement. `0` disables. |
+| `db_statement_timeout_ms` | Server-side ceiling on one statement, the backstop for the setting above. Must exceed it; `0` disables. |
+| `db_log_pool_size` | Connections reserved for usage logging, separate from the pool above. |
+
+The pool sizes bound concurrent *database* work, not concurrent provider calls:
+a request hands its connection back before the upstream call. Raise them for a
+deployment whose dashboard and management traffic are heavy, not because
+inference is.
+
+Recycling and the two statement timeouts matter most behind a managed database
+or a NAT, which drop idle connections without closing them. The pool's pre-ping
+would catch a closed connection, but the ping is itself a statement and blocks
+on a socket that went away silently, so leaving these unset turns a dropped
+connection into a request that hangs for minutes.
+
+`db_command_timeout` is enforced client-side and `db_statement_timeout_ms`
+server-side, so the second one still ends a statement when the client is the
+stuck half. Configure the server-side value above the client-side one, which
+the defaults do and startup validation requires: set equal, whichever fires
+first is a race.
+
+### Rate limits across replicas
+
+`rate_limit_rpm` is counted in this process by default, so a deployment
+running N replicas (or N workers) admits up to N times the limit. To hold the
+limit for the deployment as a whole, count it in Redis:
+
+```yaml
+rate_limit_rpm: 600
+rate_limit_store: redis
+rate_limit_redis_url: redis://redis:6379/0
+```
+
+This needs the `redis` extra (`pip install gateway[redis]`), which the Docker
+image installs, and Redis 5 or later. Startup refuses `redis` without a URL or
+without the extra, because quietly counting per process would multiply the
+limit again.
+
+Each request is checked and counted in one step, against Redis's own clock, so
+replicas never both take the last slot and their clock skew does not matter.
+If Redis cannot be reached, each replica counts on its own instead of refusing
+traffic, and tries Redis again a few seconds later; the gateway log says when
+that starts and stops.
+
+### Rate limit rules
+
+`rate_limits` sets limits beyond `rate_limit_rpm`. Each rule names what one
+count is shared by (`per`) and sets any of three limits:
+
+```yaml
+rate_limits:
+  - name: keys          # each API key on its own
+    per: key
+    rpm: 600
+    tpm: 200000
+  - name: end-users     # each user, including a service key's end users
+    per: user
+    rpm: 30
+  - name: everyone      # one count for the whole deployment
+    per: deployment
+    max_concurrent: 200
+  - name: flash-cap     # each model listed, however a request reaches it
+    per: model
+    models: ["vertex:gemini-2.5-flash"]
+    rpm: 100
+```
+
+- `rpm`: requests per minute.
+- `tpm`: tokens per minute, counted on what each request used. A request is
+  admitted while the minute's tokens are under the limit and charged what it
+  used once it completes, as LiteLLM does, so the last request admitted in a
+  minute can take the count past the limit. A request that fails is charged the
+  tokens its provider reported before failing, usually none, and a request
+  refused after admission (by its budget, say) is charged nothing.
+  `tpm_admission: estimate` counts the way providers count their own quotas
+  instead: a request holds an estimate (its prompt plus `max_tokens`, or
+  `budget_estimate_default_output_tokens` when it sets none) while it runs, and
+  is refused when that does not fit. Use it for a limit meant to stay under a
+  provider's quota, such as a `per: model` rule that should move traffic to the
+  next model before the provider refuses it. Under it, a request whose estimate
+  alone exceeds the limit is always refused, with no `Retry-After`, since
+  waiting would not let it in.
+- `max_concurrent`: requests in flight at once. A slot is given back when the
+  response ends, streamed or not. `lease_sec` (15 minutes by default) bounds how
+  long a slot outlives a process that dies holding it.
+
+`per: key` does not limit a request made without an API key (the master key or
+a dashboard session), and `per: user` does not limit one billed to no user. A request has to fit every rule that applies to it; one
+that does not is refused with a 429 naming the rule and the limit it hit, counted by none of them,
+and holds no budget. Rules count in `rate_limit_store`, so with Redis they hold
+across replicas. They apply to chat completions, messages, responses and search, after
+`rate_limit_rpm`. A hybrid gateway does not enforce them yet, so it refuses to
+start with `rate_limits` set.
+
+`per: model` limits each model in `models`, written as `instance:model` (the
+provider instance it is called through, then the model). One count is kept per
+model and shared by every policy, alias and direct call that reaches it, so it
+can stand for a provider's quota. It is checked when an attempt is about to call
+the model, after any policy has picked its candidates, rather than at admission:
+a [routing policy](routing.md#spill-over-when-a-model-is-full-priority-routing)
+skips a full model and tries its next candidate, and a request is refused with a
+429 only when no candidate has room. A direct call to a full model is refused.
+A candidate that fails before responding gives back its tokens and its slot but
+keeps its request counted, since the provider was sent it.
+A search tool is limited the same way, named as `provider:tool` (`exa:exa-search`),
+the name its pricing uses.
+
+Rules can also be added, changed and removed from the dashboard (Settings, Rate
+limit rules) or through `/api/v1/rate-limits`. A change applies at once on the
+replica that served it and on every other replica within 30 seconds; a changed
+rule keeps the requests it already counted. Choose "Each model" to add a
+`per: model` rule and pick its models. The rules in config.yml are listed there read-only, and a stored rule cannot take the name of one. A stored rule
+whose name config.yml later declares is skipped with a warning at startup and
+left out of the list; `DELETE /api/v1/rate-limits/{name}` still removes it. A
+hosted control plane serves no inference, so its dashboard does not offer the
+rules.
+
+### Trace context propagation
+
+With `accept_incoming_trace_context: true`, Otari extracts incoming context with
+OpenTelemetry's configured propagators (`OTEL_PROPAGATORS`; W3C `traceparent`,
+`tracestate` and `baggage` by default) and makes it current for the request, so
+the spans the gateway creates join the caller's trace. The context is detached
+when the response, including a streamed body, finishes. Missing or invalid
+headers never reject a request; the gateway starts a new trace instead. Otari
+does not inject propagation headers into provider or platform requests.
+
+It is off by default because the headers are unauthenticated: the middleware
+runs before route auth, so any caller can choose the trace ID and sampling flag
+your collector ingests, and a malformed `tracestate` makes OpenTelemetry log a
+warning per offending member (`opentelemetry.trace.span`). Enable it for trusted
+service-to-service callers, ideally behind a proxy that strips these headers at
+the edge. Browsers cannot send them cross-origin: they are not in the CORS
+allow-list.
+
+## Provider configuration
+
+The `providers` map is keyed by provider instance. A standard provider needs
+only its credential:
+
+```yaml
+providers:
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+```
+
+A custom or self-hosted endpoint can use a named instance:
+
+```yaml
+providers:
+  home_lab:
+    provider_type: openai
+    api_base: "https://models.example.com/v1"
+    api_key: ${HOME_LAB_TOKEN}
+    models: [qwen3-32b]
+```
+
+Call it as `home_lab:qwen3-32b`. The optional `models` list supplies discovery
+for backends without a model-listing endpoint. See [Models](models.md).
+
+### Runtime provider management
+
+Standalone operators can store provider credentials through the Providers page
+or `/api/v1/provider-credentials`. Stored entries override config-file entries with
+the same instance name. Config-file entries remain read-only in the dashboard.
+
+Stored credentials require `OTARI_SECRET_KEY`, a Fernet key generated with
+`otari gen-secret-key`. To rotate it, configure the new key before the old key,
+run the provider and search-tool re-encryption endpoints, then remove the old
+key. Losing every configured encryption key makes stored credentials
+unrecoverable.
+
+### Provider copies
+
+A request that asks a provider's own code execution to run over an attached file
+gets a short-lived copy of that file in the provider's account (see
+[Files](files.md#a-file-the-providers-own-code-execution-reads)). The account a
+copy is in is named by a keyed digest of the credential that made it, so the
+digest needs a key of its own: `OTARI_PROVIDER_ACCOUNT_PEPPER`.
+
+Otari refuses to start while `files_provider_upload_enabled` is on, which it is
+by default, and the pepper is unset, shorter than 32 characters, or equal to the
+master key or an `OTARI_SECRET_KEY` key. Generate one with
+`otari gen-provider-account-pepper` or `openssl rand -base64 32`, and keep it in
+your secret store. Rotating it costs nothing but a fresh copy of each file the
+next time a request uses it. Hybrid mode makes no copies and needs no pepper.
+
+## Pricing
+
+Pricing keys use `provider:model` or `instance:model`:
+
+```yaml
+pricing:
+  openai:gpt-5:
+    input_price_per_million: 1.25
+    output_price_per_million: 10.00
+```
+
+Config-file prices seed the database. Prices stored through `/api/v1/pricing` take
+precedence. Rates and settled costs use decimal arithmetic and costs are rounded
+once to a micro-dollar. Use PostgreSQL for durable accounting.
+
+### Default pricing
+
+`default_pricing: true` enables a bundled genai-prices snapshot when no stored
+price exists. Explicit database or config pricing always wins. The dashboard can
+review and accept newer snapshots.
+
+Default pricing is off because provider catalogs and reseller rates change.
+With `require_pricing: true`, a budgeted request with no effective price is
+rejected instead of bypassing the budget.
+
+With `require_pricing: false`, such a request is served, its model tokens carry
+no cost, and its response carries no inline `cost_usd`. The usage row records no
+cost unless the request also ran priced gateway tools, whose charges are still
+recorded. The gateway logs a warning for each unpriced model at most once an
+hour per process, and the dashboard shows operators a banner naming the models
+that served unpriced traffic in the selected workspace in the last 24 hours
+and still have no stored price, linked to those requests in Activity, where
+each can be priced.
+
+### Keeping the defaults current
+
+`pricing_refresh` decides what the gateway does with a newer genai-prices
+snapshot on its own:
+
+- `manual` (the default) never fetches. An operator checks for updates with
+  `POST /api/v1/pricing/refresh` and accepts or rejects what it finds with
+  `/refresh/confirm` or `/refresh/reject`. The dashboard has no page for this.
+- `review` fetches every `pricing_refresh_interval_seconds` (default one day,
+  minimum five minutes) and holds a changed snapshot for review.
+  `GET /api/v1/pricing/refresh/pending` is what reads it; nothing is metered
+  differently until an operator accepts it. On a deployment with nobody to make
+  that call, prefer `auto`.
+- `auto` fetches on the same schedule and applies a changed snapshot at once.
+
+Rejecting a pending update means "not now": nothing remembers what was
+rejected, so the next check re-offers the same update while upstream still
+differs from what is active. One worker performs each check, whichever claims
+the tick first, so a deployment running several does not fetch or accept an
+update once per worker.
+
+Every accepted snapshot is recorded with who accepted it, `operator` or
+`schedule`, and how many models it priced; `GET /api/v1/pricing/snapshots` lists
+the history, which keeps the newest thirty. `GET /api/v1/pricing/drift` puts every stored deployment rate beside
+the default it shadows, so a config-file price that has fallen behind the
+provider's list is visible before it costs anyone. Both are operator reads, and
+`pricing_refresh` can be changed at runtime through `PATCH /api/v1/settings`.
+
+Each stored rate also carries its `unit` (`tokens`, `requests`, or `images`)
+and its `origin` (`config` or `api`), so a rate the config file re-seeds on
+every restart is distinguishable from one set in the dashboard.
+
+### A public catalog
+
+`public_catalog: true` serves `GET /api/v1/catalog/models` and the dashboard's
+Models page to a visitor with no credential, so a deployment can show what it
+serves before anyone signs up. A visitor sees the configured `providers:`
+instances and any hosted models the deployment serves, priced at the
+deployment's rates, and never an organization's
+override, key-scoped allow-list, or usage. A caller who sends a credential is
+served as that caller, valid or not. The setting is off by default, off in
+hybrid mode, and can be changed at runtime.
+
+Anonymous reads are throttled per client address by
+`public_catalog_rate_limit_per_minute`, sixty a minute by default and its own
+budget: `rate_limit_rpm` keys on an authenticated user and covers no anonymous
+path, and `dashboard_login_rate_limit_per_minute` is sized for password
+attempts, not for browsing. Set it to `null` to remove the limit.
+
+Two limits of that throttle are worth knowing before a catalog is put on the
+open internet. Behind a reverse proxy every visitor shares the proxy's
+address, and one scraper exhausts the budget for everyone, unless
+`forwarded_allow_ips` trusts that proxy; see
+[Behind a reverse proxy](deployment.md#behind-a-reverse-proxy). And the counter
+is per worker, so a deployment running N workers serves up to N times the
+configured number.
+
+In hosted mode a visitor sees the same thing a visitor sees anywhere else: the
+process-wide `providers:` instances, which in that mode are the deployment's
+own rather than any tenant's, and the deployment-wide roster of the hosted
+models it pays for (what `ModelProviderPort.get_hosted_models` answers with no
+organization), priced at the deployment's rates. No
+organization's providers, overrides, or usage are public, whatever the flag is
+set to.
+
+The instance names `otari` and `hosted` are reserved for a managed platform's
+own offerings and are refused in `providers:`.
+
+### Cache and tiered pricing
+
+Optional cache fields reprice cached input when a provider reports it:
+
+- `cache_read_price_per_million`
+- `cache_write_price_per_million`
+- `cache_write_1h_price_per_million`
+
+Use `pricing_tiers` for a rate that applies to an entire request after an input
+token threshold. The OpenAPI pricing schemas and dashboard editor show the
+accepted shape.
+
+### Per-request pricing (audio and moderations)
+
+Audio, moderations, and direct search do not use token pricing. They reuse
+`input_price_per_million` as USD per million requests. An unpriced request on
+these endpoints is served at zero cost.
+
+### Per-image pricing (image generation)
+
+Image generation uses `input_price_per_million` as raw USD per image, without
+million-unit scaling. Image generation is subject to `require_pricing` and
+reserves the requested image count before dispatch.
+
+These overloaded units are retained for schema compatibility. Do not apply a
+token price to a request-priced or image-priced endpoint.
+
+## Search tools
+
+`search_tools` configures direct `POST /api/v1/search` calls. The same entries can
+be managed at runtime from Tools or `/api/v1/search-tools`.
+
+```yaml
+search_tools:
+  local:
+    provider: searxng
+    api_base: "http://searxng:8080"
+```
+
+`GET /api/v1/search-tools/providers` publishes the supported providers and whether
+each requires an `api_key` or `api_base`. Provider options and request filters
+are covered in [Built-in tools](tools.md). A tool carrying an `api_key` must use
+an HTTPS `api_base`; a keyless local SearXNG endpoint may use HTTP.
+
+## Decision providers
+
+`decision_providers` configures the upstreams behind `POST /api/v1/decisions`. The
+key is the prefix callers write in `model`, so the entry below serves
+`typesafe:jev-latest`, `openrouter:typesafe/jev-1.13` and `local:openjev`:
+
+```yaml
+decision_providers:
+  typesafe:
+    api_key: ${TYPESAFE_API_KEY}
+  openrouter:
+    api_key: ${OPENROUTER_API_KEY}
+  local:
+    provider: llamacpp
+    api_base: "http://127.0.0.1:8080"
+```
+
+`provider` is one of `typesafe`, `openrouter` or `llamacpp`, and defaults to the
+key. TypeSafe and OpenRouter need an `api_key`, and their default `api_base` can be
+replaced with another https root. A `llamacpp` entry points at a `llama-server`
+running a decision model and needs an `api_base`; it may use plain http only when
+it has no `api_key`. `timeout` sets the seconds to wait for an answer (default 30).
+
+These entries are separate from `providers` because none of these upstreams serves
+chat: they never appear in `/api/v1/models` or provider health. Price a decision
+model like any other, as `<provider>:<model>` in `pricing`. Decisions are
+standalone-mode only.
+
+### Agent model recommendations
+
+`POST /api/v1/routing/recommend` asks a decision model which of a few
+candidate models a coding agent's subagent should run on (see
+[Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model)).
+Two settings shape the question:
+
+```yaml
+agent_recommender_model: typesafe:jev-latest
+agent_recommender_candidates:
+  haiku: Simple, well-specified, mechanical work. Little judgment needed.
+  sonnet: Moderate reasoning across a few files, contained code changes.
+  opus: Hard reasoning, ambiguous goals, large or security-sensitive changes.
+```
+
+`agent_recommender_model` is a `decision_providers` selector, resolved per
+request, so a deployment that never asks need not configure the provider.
+`agent_recommender_candidates` maps each model name, as the asking harness
+spells it, to what it is for; `null` is allowed when the name says enough. At
+least two are required, and at most 255, the limit a choice question has. The
+defaults are Claude Code's `haiku`, `sonnet` and `opus` aliases with
+descriptions along the lines above.
+
+## Mail
+
+Mail is optional. Invitations always return an accept link, and an invitee who
+has never signed in chooses a password on the page it opens, so members can join
+a deployment with no transport configured. Without mail, signup, email verification, and password
+reset are unavailable.
+
+SMTP needs the deployment's public URL, a host, and a sender:
+
+```yaml
+public_base_url: "https://otari.example.com"
+mail_transport: smtp
+smtp_host: "smtp.example.com"
+smtp_port: 587
+smtp_tls: true
+mail_from_email: "otari@example.com"
+smtp_user: ${SMTP_USER}
+smtp_password: ${SMTP_PASSWORD}
+```
+
+`mail_transport: console` writes complete messages to logs for local testing.
+Those messages can contain invitation or password-reset tokens, so never use it
+where logs are shared. Test delivery from Settings or
+`POST /api/v1/settings/mail/test`.
+
+## Signup
+
+Signup is closed by default: only an address an owner or admin already added or invited can get an account, by setting a password or by signing in with Google or GitHub. Open it where the deployment serves many tenants and each new address should arrive with an organization of its own:
+
+```yaml
+open_signup: true
+```
+
+The signup form needs mail configured in either case, because it sends a verification link. A Google or GitHub sign-in needs no mail, because the provider has already verified the address. See [Access control](access-control.md) for what each value does with an address nobody has added.
+
+## Built-in tools and guardrails variables
+
+The Tools pages and `GET /api/v1/tool-settings` show effective sandbox, web-search,
+and guardrail configuration. Common startup settings are:
+
+- `sandbox_provider` and `sandbox_url`
+- `sandbox_container_idle_ttl_sec` and `sandbox_container_max_lifetime_sec`
+- `code_execution_executor`
+- `web_search_url`
+- `web_search_provider` and `web_search_provider_api_key`
+- `guardrails_url`
+- `guardrail_thread_pool_size`
+- `mcp_allow_loopback` and `mcp_allow_private_hosts`
+- `web_search_allow_private_hosts`
+- `provider_allow_private_hosts`
+- `provider_endpoints_enabled` (see [Provider endpoints](provider-endpoints.md))
+
+See [Built-in tools](tools.md), [MCP](mcp.md), and
+[Guardrails](guardrails.md) for behavior and security boundaries.
+
+## Documentation links
+
+By default the dashboard's Documentation link opens the bundled guide at
+`/#/docs`. Set `docs_url` or `OTARI_DOCS_URL` to point it at an absolute
+HTTP or HTTPS URL. The bundled guide remains available.
+
+## Legal pages
+
+The account menu carries a Terms of service row and a Data & Privacy row for
+whichever of them this deployment has published. Set `terms_url` or
+`OTARI_TERMS_URL`, and `privacy_url` or `OTARI_PRIVACY_URL`, to absolute HTTP or
+HTTPS URLs:
+
+```yaml
+terms_url: "https://example.com/terms"
+privacy_url: "https://example.com/privacy"
+```
+
+Each is independent. Unset, the Terms of service row is absent and the Data &
+Privacy row stays disabled. A deployment whose dashboard sits beside a site that
+owns the documents points at that site. `GET /api/v1/bootstrap` publishes both
+addresses unauthenticated, so a credential in either is refused at startup, the
+way `data_plane_url` refuses one. The same check covers `docs_url` and
+`site_url`.
+
+## The public site
+
+A deployment with a website of its own (a landing page beside the dashboard)
+sets `site_url` or `OTARI_SITE_URL` to its absolute HTTP or HTTPS address. The
+logo on the pages a visitor reaches without an account (the sign-in pages and
+the public model catalog) then links there. Unset, it links to the catalog where
+the deployment publishes one, and is not a link otherwise.
+
+## The interface address
+
+The gateway hands a browser absolute URLs in two places: the redirect that
+finishes an OAuth sign-in, and the links in verification, password-reset and
+invitation mail. Both point at `public_base_url`, which is right wherever this
+process serves its own dashboard.
+
+Where an edge serves the dashboard from another origin or path prefix, set
+`ui_base_url` or `OTARI_UI_BASE_URL` to where a browser reaches it:
+
+```yaml
+public_base_url: "https://api.example.com"
+ui_base_url: "https://app.example.com/dashboard"
+```
+
+Unset, `public_base_url` answers for it. Supply an absolute http(s) URL with no
+trailing slash; a relative one would survive the redirect and mean nothing in an
+inbox. Credentials and fragments are refused: this value travels in a redirect
+and into outgoing mail. A query string is kept and placed ahead of the hash
+route in every link (`https://app.example.com/dashboard/?edge=a#/verify-email?token=…`),
+for an edge that serves one interface for several deployments and needs each
+link to say which one built it.
+
+A dashboard served from a sibling host of this process may hold a session here
+only when that host is listed in `cors_allow_origins`: the session cookie is
+`SameSite=Strict`, and a same-site request from any origin not on that list is
+refused.
+
+Left unset on a split deployment, an OAuth callback lands the browser on an
+origin holding none of the sign-in state it started with, and the sign-in fails
+with the authorization code unspent. Passkeys need their own settings there; see
+[Access control](access-control.md#passkeys).
+
+## The data-plane address
+
+A hosted control plane does not serve inference. Set `data_plane_url` or
+`OTARI_DATA_PLANE_URL` to the gateway origin used by client snippets:
+
+```yaml
+data_plane_url: "https://gateway.example.com"
+```
+
+Supply the origin or path prefix without a trailing slash or `/api/v1`. Credentials,
+query strings, and fragments are refused because `GET /api/v1/bootstrap` publishes
+this value without authentication.
+
+## otari.ai variables
+
+Hybrid mode requires `OTARI_AI_TOKEN`. Optional platform settings control the
+platform API URL, management URL, health-probe path, resolution timeout,
+usage-report timeout and retries, and first-chunk fallback timeout. See
+[Modes](modes.md) and the normative
+[hybrid-mode protocol](hybrid-mode-protocol.md).
+
+## Extending Otari with a bootstrap module
+
+`bootstrap` or `OTARI_BOOTSTRAP` names a trusted `module:callable` loaded
+inside the gateway process. The callable can rebind extension ports and
+contribute capability-gated routers. Most deployments should leave it unset.
+
+This is executable code, not a feature flag. Install the module in the gateway
+environment, pin it to a compatible Otari release, and authenticate every
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.17.0/ARCHITECTURE.md) for the extension
+boundary.
+
+## Product feedback
+
+With `feedback_enabled` on, signed-in dashboard users can choose **Feedback**,
+beside Documentation in the top bar (in the account menu on a phone), to send a
+message to the Otari team. The team receives it privately in Slack. Only the
+message is sent: no email, screenshot, page URL, account identifier, deployment
+identifier, or usage history is attached. Opening the form, typing, and
+canceling make no outbound request.
+
+The gateway forwards the message to
+`https://api.otari.ai/api/v1/feedback/submissions`. It does not forward the
+browser's cookies, authorization, referrer, or IP headers. Network peers still
+see connection metadata, so this is private feedback, not anonymous feedback.
+Keep request-body capture disabled for the feedback endpoint in any additional
+logging or tracing you configure.
+
+Feedback is off by default. To turn it on, set `feedback_enabled: true` in YAML
+or `OTARI_FEEDBACK_ENABLED=true`, then restart. Off, the endpoint is not mounted
+and the Feedback entry is hidden. Standalone and hosted deployments can offer
+it; hybrid gateways never do. This setting is visible in Settings but cannot be
+changed there at runtime.
+
+The otari.ai intake does not deliver to Slack yet, so until it does, every send
+fails with the "didn't reach us" message and the gateway logs the receiver's
+status. That is why feedback is off by default for now.
+
+Each signed-in person (and the master key) can send five messages every ten
+minutes; past that the gateway answers `429` with `Retry-After`.
+
+Feedback text accepts up to 4,000 Unicode code points. The gateway waits up to
+10 seconds for the receiver and does not retry automatically. An unconfirmed
+submission stays in the form until the person retries or explicitly discards
+it. Drafts are held only in memory and disappear on page reload. A manual retry
+after an unconfirmed delivery can produce a duplicate.

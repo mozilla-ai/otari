@@ -1,9 +1,0 @@
-# pnpm keeps its settings here rather than in package.json.
-#
-# pnpm does not run a dependency's install scripts unless it is approved below
-# (`pnpm approve-builds` writes these entries). esbuild's postinstall is what
-# puts the platform binary in place for Vite, so without this every install
-# fails the pre-run dependency check and `vite build` never gets to start.
-# Approve a package here only when its build produces something the app needs.
-allowBuilds:
-  esbuild: true

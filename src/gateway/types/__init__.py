@@ -1,1 +1,0 @@
-"""Gateway-local type definitions."""

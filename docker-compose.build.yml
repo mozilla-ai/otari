@@ -1,7 +1,0 @@
-services:
-  otari:
-    build:
-      context: .
-      dockerfile: Dockerfile
-
-    image: otari:local

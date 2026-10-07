@@ -1,0 +1,71 @@
+# Otari
+
+Otari is an OpenAI-compatible LLM gateway. It routes to 40+ providers, manages
+API keys, enforces budgets, and records usage. It is also the gateway at the
+heart of [otari.ai](https://otari.ai).
+
+## Runtime modes
+
+- **Standalone** serves management and inference with local storage.
+- **Hosted** serves a multi-tenant control plane while inference runs elsewhere.
+- **Hybrid** serves inference using a connected control plane such as otari.ai.
+
+See [Modes](modes.md) for the full comparison.
+
+## New here?
+
+Start with the [Quickstart](quickstart.md).
+
+## Browse the docs
+
+The docs are grouped by what you are trying to do.
+
+### Start here
+
+- [Quickstart](quickstart.md): get running and make your first request.
+- [Modes](modes.md): standalone, hosted, and hybrid deployments.
+
+### For operators
+
+Running and managing a gateway.
+
+- [Deployment](deployment.md): Docker, Railway, hybrid mode, and optional services.
+- [Configuration](configuration.md): configuration sources, precedence, and common settings.
+- [Admin dashboard](dashboard.md): sign-in, setup, and management surfaces.
+- [Access control](access-control.md): identities, organizations, workspaces, keys, and budgets.
+- [Models](models.md): selectors, providers, discovery, aliases, and capabilities.
+- [Provider endpoints](provider-endpoints.md): model servers a workspace or a user brings, reached by name and kept out of budgets.
+- [Routing policies](routing.md): failover, conditions, weighted, priority and learned routing, and mandatory guardrails.
+- [OpenAI provider guide](providers/openai.md): configure OpenAI and route your first request through Otari.
+
+### For integrators
+
+Calling the gateway from your own code.
+
+- [API reference](api-reference.md): authentication, mode availability, and links to generated schemas.
+- [Built-in tools](tools.md): sandboxed code execution and web search Otari runs itself.
+- [MCP](mcp.md): connect MCP servers to chat, messages, and responses requests,
+  or drive them from your own application through the caller-orchestrated endpoints.
+- [Files](files.md): file uploads and document understanding for local models.
+- [Inference Guardrails](guardrails.md): request-level checks like prompt-injection detection.
+- [Agent Guardrails](agent-guardrails.md): repository-owned rules checked against what a
+  coding agent actually did to the working tree. `otari hook` runs beside Claude Code or
+  Codex and evaluates them locally, with no server and no credential.
+- [Agent Guardrails reference](agent-guardrails-reference.md): every gate type and field,
+  and what each harness can see at each event.
+- [Use with Claude Code](use-with-claude-code.md): point the Claude Code CLI at Otari.
+- [Use with Codex](use-with-codex.md): route the Codex CLI through Otari over the Responses API, or import its usage without routing.
+- [Use with opencode](use-with-opencode.md): point the opencode CLI at Otari.
+- [Use with a ChatGPT subscription](chatgpt-subscription.md): route Otari at ChatGPT Plus/Pro models through a local Codex-OAuth proxy.
+- [Importing external usage](external-usage.md): bring subscription-backed usage (Claude Code, Codex, any OTLP app) into your analytics.
+- [SDK compatibility](sdk-compatibility.md): how the language SDKs are released and which SDK version works with which Otari version.
+
+### For platform builders
+
+- [Hybrid-mode protocol](hybrid-mode-protocol.md): the Otari/platform wire contract, for building a platform that Otari connects to.
+- [Code-execution protocol](code-execution-protocol.md): the Otari/sandbox contract, for building a code-execution backend that Otari dispatches to. Its machine-readable form is [`public/code-execution-openapi.yaml`](https://github.com/mozilla-ai/otari/blob/v0.17.0/docs/public/code-execution-openapi.yaml).
+
+### For contributors
+
+- [Architecture](https://github.com/mozilla-ai/otari/blob/v0.17.0/ARCHITECTURE.md): the two-plane model and the extension seam (ports, adapters, and capability lines) that mark what Otari's core ships versus what an overlay can add.
+- [Backend domains](https://github.com/mozilla-ai/otari/blob/v0.17.0/DOMAINS.md): what each backend domain owns, and the layer shape each domain moves toward.

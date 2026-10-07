@@ -1,0 +1,446 @@
+# File uploads & document understanding
+
+Frontier models read PDFs, office documents, and images natively. Most local /
+open-source models can't; many are text-only. Otari closes that gap: you can attach a file and a text-only local model can still understand it,
+because Otari extracts the file to text (and captions images) before the
+model ever sees the request.
+
+This works the same way Otari's other "frontier capabilities" do: it
+inspects the request, decides what to do per attachment, and only does work the
+target model actually needs.
+
+> Standalone mode only. Hybrid mode routes to frontier providers that already
+> understand documents/images, so attachments pass through untouched.
+
+
+
+## Uploading a file
+
+```bash
+curl -X POST http://localhost:8000/api/v1/files \
+  -H "Otari-Key: <your-api-key>" \
+  -F purpose=user_data \
+  -F file=@report.pdf
+# -> {"id": "file-abc123", "object": "file", "bytes": 84213, "filename": "report.pdf", ...}
+```
+
+Then reference it from a chat request. The example below uses the OpenAI chat
+format; uploaded files also work with Anthropic `document` blocks and Responses
+`input_file` items:
+
+```bash
+curl http://localhost:8000/api/v1/chat/completions \
+  -H "Otari-Key: <your-api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "ollama:llama3",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          { "type": "text", "text": "Summarize the attached report." },
+          { "type": "file", "file": { "file_id": "file-abc123" } }
+        ]
+      }
+    ]
+  }'
+```
+
+Before you use a local or self-hosted model here (for example
+`ollama:llama3`), make sure Otari is configured for that backend under
+`providers`: set its route (`api_base`, when needed) and any backend
+credentials it expects (such as an API key or token). In standalone mode,
+Otari also requires pricing for that model key by default: add pricing, enable
+`default_pricing` if it covers the model, or set `require_pricing: false` for
+an intentionally unpriced backend.
+
+You can also inline a file as a base64 `data:` URL (`file.file_data`) or send an
+`image_url` block, with or without uploading first. On the Responses API a
+`input_file` or `input_image` item may sit directly in `input` as well as inside
+a message.
+
+### Using the OpenAI or Anthropic SDK
+
+The five routes (`POST`/`GET /v1/files`, `GET`/`DELETE /v1/files/{id}`,
+`GET /v1/files/{id}/content`) share their paths and verbs with both vendors'
+Files APIs, so either official SDK works against Otari with only its base URL
+changed. The response shape follows the caller: a request carrying Anthropic's
+`anthropic-version` header, which its SDK sends on every call, gets the
+`FileMetadata` of Anthropic's GA Files API (`type`, `size_bytes`, `mime_type`,
+`downloadable`, and RFC 3339 `created_at` and `expires_at`, with `expires_at`
+`null` for a file kept indefinitely); everything else gets the OpenAI file
+object (`object`, `bytes`, `purpose`, an epoch `created_at`).
+
+Otari serves Anthropic's GA shapes only. A request whose `anthropic-beta`
+header includes `files-api-2025-04-14` gets a 400, because that beta answers in
+different shapes. Anthropic's Python SDK before 1.2.0, and earlier releases of
+its other SDKs, send that header from `client.beta.files`, so call
+`client.files` instead (see Anthropic's
+[migration notes](https://platform.claude.com/docs/en/build-with-claude/files#migrate-from-files-api-2025-04-14)).
+
+Mind the base URL: Anthropic's SDK appends `/v1` itself, so it takes
+`http://localhost:8000/api`, while an OpenAI-compatible client takes
+`http://localhost:8000/api/v1` (see the
+[API reference](api-reference.md)).
+
+```python
+from anthropic import Anthropic
+client = Anthropic(base_url="http://localhost:8000/api", api_key="<your-api-key>")
+meta = client.files.upload(file=("report.pdf", open("report.pdf", "rb"), "application/pdf"))
+client.files.download(meta.id)  # Otari serves every stored file's bytes back
+```
+
+Listings are cursor-paged, and each flavor pages with its own vendor's cursor.
+Both take `limit` (default 100, at most 1000).
+
+- OpenAI: `after` names the last file of the previous page, `order` is `desc`
+  by default, and the page carries `has_more`, `first_id` and `last_id`.
+- Anthropic: the page is `{data, next_page}`, and `next_page` goes back as
+  `page` to get the next one. To read up to 100 known files in one page, name
+  them with `ids[]`, which cannot be combined with `page` or `limit`; a file you
+  cannot see is left out. `after_id` and `before_id` get a 400.
+
+Unlike Anthropic, Otari leaves an expired file out of a listing.
+
+### From the Playground
+
+The dashboard's Playground uploads through `/api/v1/playground/files`, which
+takes the dashboard session rather than an API key. A file uploaded there
+belongs to the signed-in person in the workspace the switcher has selected, the
+same owner a Playground completion runs as, so its `file_id` resolves in their
+messages and in nobody else's. The same person's files uploaded with one of
+their keys in that workspace are listed there too. A hosted control plane does
+not serve these routes, because the data plane that runs its completions could
+not read a file stored on the control plane.
+
+## Files and code execution
+
+When a request's code runs on Otari's sandbox, because it declared the
+`otari_code_execution` tool or because the
+[executor](tools.md#code-execution-executor) brought a provider's own
+declaration here, every uploaded file it references is also seeded into the
+sandbox session's working directory, so the code the model writes can open it.
+The file keeps its own filename, reduced to its last path segment; a second
+upload with the same name is suffixed (`data.csv`, then `data-2.csv`), and the
+marker the model is given carries the name the file actually has. An Anthropic
+`container_upload` block (`{"type": "container_upload", "file_id": "..."}`) is
+for the sandbox only: the model is told the file is there and never sees its
+contents. A `document`, `file`, or `input_file` block with a `file_id` is both
+shown to the model (extracted or passed through as usual) and seeded. A request
+that runs no code execution at all reads a `container_upload` block as a
+document. Where a file goes follows who runs the code, decided once from the
+workspace pin, the header and the deployment default.
+
+### A file the provider's own code execution reads
+
+A declaration the [executor](tools.md#code-execution-executor) leaves with the
+provider runs in the provider's container, which reads only files that provider
+holds. So Otari uploads a copy of the attached file to the provider, and the
+`container_upload` block carries the provider's ID for that copy rather than
+Otari's. The model still never sees the contents.
+
+Otari's store stays the source of truth and the copy is a cache. The copy
+carries an expiry, `files_provider_upload_ttl_hours` (1 hour by default, up to
+the 90 days Anthropic accepts), and the provider deletes it when that passes. A
+copy with time left is reused, so attaching the same file on every turn of a
+conversation uploads it once. Otari asks the provider whether it still holds a
+recorded copy before using it, and makes one fresh copy where the provider has
+dropped it early. A lookup that fails for another reason keeps the copy in use.
+
+A provider file ID exists only inside the account of the credential that
+uploaded it, so a copy is recorded against the account it is in. Otari names the
+account by a digest of the credential the request is dispatched with, never by
+the credential itself. A request whose credential changed, because a key was
+rotated or an organization added its own, therefore makes a fresh copy rather
+than naming one its account does not hold.
+
+The copy is made for each candidate as it is dispatched. A routing policy that
+falls over to a model on another key sends that model a copy in its own account.
+A candidate whose provider cannot hold a copy is passed over, in the policy's
+order, and the request is refused when no candidate can.
+
+Each copy is recorded before it is uploaded and confirmed once the provider
+holds it. Two requests copying one file at the same moment each make and record
+a copy. A copy whose upload or confirmation was cut off is left unnamed for the
+provider to expire, and the file sweep removes its unconfirmed row.
+
+**A copy never outlives the file's expiry.** Where `files_retention_hours` is
+set, the copy's expiry is cut back to whatever the file itself has left, less a
+minute for the provider to accept the upload, so the provider never holds a file
+past the point Otari would have stopped serving it.
+A provider that reports a longer expiry than that has the copy deleted again and
+the request refused, because the promise is about the copy that exists rather
+than the one Otari asked for.
+Anthropic will not hold a file for less than an hour, so a file with less than an
+hour and a minute left cannot have a copy at all, and such a request is refused. That makes
+`files_retention_hours` and the provider's floor interact: set retention to an
+hour against Anthropic and no file is ever copyable, because a file is under an
+hour from its expiry almost at once. Leave retention comfortably above the floor
+where provider-side code execution is wanted. Deleting a
+file early is the one case this does not cover: see the note at the end of this
+section.
+
+These refuse the request rather than answering without the file, because the
+request asked for code over that file:
+
+- 400: a `file_id` this deployment does not hold, which also keeps a provider
+  file ID of the caller's choosing from reaching the provider, whose files are
+  scoped to the account rather than to the caller;
+- 400: a file with too little left for a copy to expire no later than it does;
+- 400: `files_provider_upload_enabled` set to `false`;
+- 400: `file_understanding_enabled` set to `false`, because nothing then reads
+  the block;
+- 400: a routing policy with no candidate whose provider can hold a copy;
+- 502: a provider that would not take the copy. A routing policy tries its next
+  candidate first.
+
+`files_provider_upload_enabled` does not decide whether a file's contents reach
+the provider, which they do either way, inline in the request. It decides
+whether a copy is stored in the provider's account until it expires.
+
+Today this applies to Anthropic's code execution, whose `container_upload` block
+is the only provider-native block that names a file. Anthropic's Files API is
+generally available on the Claude API and is not available on Amazon Bedrock or
+Google Cloud, so a deployment reaching Anthropic through one of those refuses
+rather than copying.
+
+One limit is worth knowing. Deleting the Otari file before its expiry does not
+yet reach the copy, so the copy stands at the provider until its own expiry
+passes, which is never later than the file's would have been. Keep
+`files_provider_upload_ttl_hours` short where that matters.
+
+A file the code writes into the working directory comes back as a new stored
+file owned by the same user and workspace, with purpose `code_execution_output`.
+Otari finds it two ways and unions them: the result block's own list of produced
+files, and a listing of the workspace after each call compared with the one
+before, so a backend that leaves the block's list empty (the reference container
+does) still has its files collected. A seeded input the code rewrote counts as
+produced.
+The model sees it in the tool result as `chart.png (file_id: file-...)` and is
+asked to pass that id on, and the caller downloads it with
+`GET /v1/files/{id}/content`. A caller who declared Anthropic's own code tool
+also gets the id in the `code_execution_tool_result` block's
+`code_execution_output` entries, where Anthropic's SDK looks for it. Both directions need a sandbox backend that
+implements the protocol's optional `PutFile` and `GetFile` operations, and
+collecting a file the block does not name needs `ListFiles` as well; a seed the
+backend refuses fails the request rather than running code over a missing input,
+while an output that cannot be fetched is named without an id and the run stands.
+
+### A file the provider's own sandbox produced
+
+A declaration the [executor](tools.md#code-execution-executor) leaves with the
+provider runs in the provider's container, and the provider names each file the
+code writes by an ID of its own. When the reply arrives, Otari copies each of
+those files into its store and keeps the provider's ID as the file's ID. The
+copy belongs to the user and workspace the request is billed to, like an
+upload. So `GET /v1/files/{id}/content` serves a chart whichever sandbox drew
+it, and still serves it after the provider has discarded its container. OpenAI
+discards a container 20 minutes after its last use.
+
+The ID stays the provider's because a client that sends the turn back carries a
+container reference, and a rewritten ID would name a file the provider never
+issued. The copy is a stored file like any other: a listing shows its size, and
+a later request can name it in a `file_id` block.
+
+Otari copies a file before the caller sees its ID: before the reply returns,
+or, on a stream, before the event that names the file is sent. The cost is
+time. The reply, or the stream, waits for the download, for at most
+`files_provider_copy_max_sec` (60 seconds by default) across the whole request.
+A stream keeps emitting its usual keepalive while it waits
+(`streaming_keepalive_interval_ms`), so an intermediary with a read timeout
+does not sever the connection during a copy.
+
+Some files are not copied: one past an allowance below or past the time limit,
+one the provider will not serve, and any file from a provider other than
+Anthropic or OpenAI. Such a file's ID still appears in the reply, and Otari
+answers 404 for it. A provider that merely refused is retried on a later event
+naming the same file, where the response offers one; an allowance it ran past
+is not, because the allowance only shrinks.
+
+`files_output_max_files` and `files_output_max_bytes` (20 files and 64 MB by
+default, the latter also bounded by `files_max_bytes`) are each spent twice
+over, once per source: one call may store that many files from Otari's own
+sandbox, and one request may copy that many from a provider's. A request that
+uses both has an allowance of each rather than one between them. What a run
+writes is untrusted, so a file past either is named without an id rather than
+stored. Only a file that actually lands spends from an allowance, so a provider
+having a bad minute does not cost the files named after it their place. A
+produced file is streamed from the sandbox into the store and never held whole.
+
+> The reference `otari-sandbox-container` leaves the result block's
+> file-reference list empty, so with it collection depends on `ListFiles`, which
+> it implements. A backend that neither names nor lists a file does not have it
+> collected.
+
+### Who can see an uploaded file
+
+A file belongs to the user who uploaded it and to the workspace the uploading API
+key belongs to. Both have to match for a request to reach it, on the listing, the
+metadata, the download, the delete, and the `file_id` references resolved out of
+a chat message. So a user who holds keys in two workspaces reaches each
+workspace's files only through that workspace's key, and anything they cannot see
+answers 404 rather than 403, which is what keeps a foreign id indistinguishable
+from a missing one.
+
+The workspace comes off the key rather than a header, because a caller controls
+its headers and not which key it holds. The master key is the exception: it is the
+operator acting deployment-wide and sees every workspace, narrowable with
+`GET /api/v1/files?workspace_id=<id>`. A master-key upload lands in the deployment's
+default workspace.
+
+## What Otari does per attachment
+
+For each file/image block it resolves the **target model's** capabilities, then:
+
+
+| Target model                                          | Documents                                  | Images                                                        |
+| ----------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------- |
+| **Natively capable** (e.g. Anthropic, OpenAI, GPT-4o) | forwarded unchanged                        | forwarded unchanged                                           |
+| **Text-only** (most local models)                     | extracted to text (markitdown) and inlined | captioned by a vision model / OCR, or dropped with a log line |
+
+
+A natively capable model is sent an uploaded document only when it is a PDF,
+because the providers' document parts take PDFs. Any other upload (Markdown,
+CSV, plain text, an office document) is extracted to text for every model. A
+document block the caller wrote inline is forwarded as written.
+
+Scanned/image-only PDFs (no extractable text) are rasterized page-by-page and
+sent through the image path.
+
+### Capability resolution
+
+Otari must know whether the target model is natively multimodal. It uses,
+in order:
+
+1. `model_capabilities` **config override**: authoritative.
+2. **any-llm provider metadata**: trusted only for hosted providers.
+3. **Default: extract**, safe, since a needless extraction still yields a
+  correct answer while a wrong passthrough silently drops the file.
+
+> any-llm's capability flags are set per provider *class*, so they over-report
+> for text-only models served behind OpenAI-compatible servers (vLLM, llama.cpp,
+> Ollama). For those, set a `model_capabilities` override to enable native
+> passthrough where the served model truly supports it.
+
+
+
+## Configuration
+
+See [config.example.yml](https://github.com/mozilla-ai/otari/blob/v0.17.0/config.example.yml) for the full list. Key knobs:
+
+- `files_enabled`, `files_backend`, `files_max_bytes`, `files_retention_hours`:
+upload storage (see [Storage backends](#storage-backends)). With `files_enabled`
+off, a backend that cannot be built (an `s3` backend with no bucket, say) is
+logged at startup rather than stopping it, and a stored `file_id` then does not
+resolve; with it on, the same fault stops the boot.
+`files_output_max_files` and `files_output_max_bytes` each bound what one
+code-execution call may store from its sandbox and, separately, what one
+request may copy from a provider's, and `files_provider_copy_max_sec` bounds
+how long that copying may take (see above). An expired file answers 404 at once, and the
+background sweep (`files_sweep_interval_sec`, hourly by default, `0` to
+disable) then reclaims its bytes and row along with those of deleted files and
+of uploads that never completed.
+- `files_provider_upload_enabled` and `files_provider_upload_ttl_hours`: whether
+a copy of an attached file may be stored at the provider that runs a request's
+code, and how long that copy lives (see
+[A file the provider's own code execution reads](#a-file-the-providers-own-code-execution-reads)).
+- `OTARI_PROVIDER_ACCOUNT_PEPPER`: the key for the digest that names the provider
+account a copy is in. Required while `files_provider_upload_enabled` is on (see
+[Provider copies](configuration.md#provider-copies)).
+- `file_understanding_enabled`: master switch for content normalization.
+- `vision_strategy` (`describe` | `ocr` | `off`) and `vision_describe_model`:
+how images are handled for text-only models. The describe model may be a local
+vision model (e.g. `ollama:qwen2-vl`) to keep captioning free.
+- `model_capabilities`: per-model `supports_image` / `supports_pdf` overrides.
+
+**Upgrading from 0.6.** Two things change. `GET /api/v1/files` returns at most
+100 files per page where it returned every file, so a client with more than
+100 files must follow `has_more`. And the sweep now runs by default, so a
+deleted file, or one past `files_retention_hours`, loses its row and bytes
+within an hour where cleanup was the operator's task. Set
+`files_sweep_interval_sec: 0` to keep it that way.
+
+A file's row is written before its bytes, so an upload that is refused, loses
+its connection or stops partway leaves a row naming its blob rather than a blob
+nothing names. A refused upload gives both back at once. Where that cleanup
+cannot finish, because the store will not drop the bytes or the database will
+not take the change, the row remains and the sweep reclaims it once it is more
+than an hour old, which is how long an upload has to arrive. Files produced by
+a sandbox or copied from a provider are recorded the same way, so nothing needs
+manual reconciliation.
+
+### Storage backends
+
+`files_backend` chooses where the file bytes live. Their metadata stays in the
+database either way.
+
+- `local`, the default, writes under `files_local_dir`. Use it for development
+  and for a single node.
+- `s3` writes to `files_s3_bucket` through boto3. Use it for AWS S3 and for
+  S3-compatible stores, such as the SeaweedFS below; `files_s3_endpoint_url`
+  names a store that is not AWS. Credentials come from boto3's standard chain:
+  environment variables, `~/.aws/credentials`, or an IAM role.
+- `fsspec` writes under `files_url` through
+  [fsspec](https://filesystem-spec.readthedocs.io). Use it for the stores the
+  other two do not reach, such as GCS (`gcs://bucket/prefix`), Azure
+  (`abfs://container/prefix`) or SFTP (`sftp://host/path`).
+  `files_storage_options` holds the keyword arguments of the protocol's
+  implementation. It is an optional extra, like `s3` (`uv sync --extra fsspec`
+  in a checkout); install the implementation package for the protocol as well
+  (`gcsfs`, `adlfs`, `s3fs`, `paramiko`). Most read their standard credential
+  environment variables on their own.
+
+`fsspec` also accepts `s3://`, but prefer `s3` for an S3 store: the published
+image includes boto3 and does not include `s3fs`.
+
+### Object storage with Docker Compose
+
+The `object-storage` Compose profile runs
+[SeaweedFS](https://github.com/seaweedfs/seaweedfs), an S3-compatible store,
+with an `otari-files` bucket. Set its credentials in `.env` beside
+`docker-compose.yml`. Compose gives Otari the same pair, as
+`AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`:
+
+```dotenv
+OTARI_S3_ACCESS_KEY=otari
+OTARI_S3_SECRET_KEY=<a long random secret>
+```
+
+```bash
+docker compose --profile object-storage up -d
+```
+
+Then point `config.yml` at the bucket:
+
+```yaml
+files_backend: s3
+files_s3_bucket: otari-files
+files_s3_endpoint_url: http://seaweedfs:8333
+```
+
+A gateway that runs on the host rather than in Compose uses
+`http://localhost:8333`, with the pair exported as `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY`. With an image that adds `s3fs`, `fsspec` reaches the
+same bucket with `files_url: s3://otari-files` and
+`files_storage_options: { endpoint_url: "http://seaweedfs:8333" }`.
+
+Three things to know:
+
+- The AWS variables reach every AWS client in Otari, so Bedrock also uses
+  them when its provider entry sets no credentials of its own.
+- SeaweedFS's filer API answers on port 8888 without credentials, so the store
+  sits on an `object-storage` network that only the otari service joins. Keep
+  every other service off that network.
+- `OTARI_MCP_ALLOW_PRIVATE_HOSTS` and `OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS`
+  let Otari call private addresses on a request's behalf, and the store is one
+  of them. Leave both off in this setup.
+
+
+
+## Dependencies
+
+Text/office/PDF extraction uses [markitdown](https://github.com/microsoft/markitdown)
+(MIT); scanned-PDF rasterization uses [pypdfium2](https://github.com/pypdfium2-team/pypdfium2)
+(Apache-2.0). Both are permissively licensed, deliberately avoiding AGPL PDF
+libraries since Otari is a network service. OCR is optional; install the
+`ocr` extra (`uv sync --extra ocr` in a checkout) to enable it.
