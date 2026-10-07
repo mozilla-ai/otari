@@ -39,7 +39,7 @@ import json
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -549,11 +549,9 @@ def _upstream_message_detail(exc: BaseException, fallback: str) -> str:
     Returns the provider's own message, redacted and length-capped, because the
     provider is the only party that knows what it objected to.
 
-    A ``message`` attribute wins over the joined chain for the same reason
-    :func:`_unsupported_feature_detail` prefers one: an SDK that stringifies a
-    failure usually re-embeds its own message, and google-genai appends the
-    whole response body, so the joined text reads as a stutter followed by
-    JSON. Only the joined chain sees an exception that carries no ``message``.
+    A message the provider put on an exception wins over the joined chain.
+    An SDK's string form can repeat that message, add its own labels, or append the response body.
+    A wrapper's message is its original's string form, so a message deeper in the chain wins over it.
 
     Falls back to ``fallback`` when what is left says nothing. Some SDKs
     stringify a failure as bare punctuation or the status code itself, and
@@ -563,11 +561,28 @@ def _upstream_message_detail(exc: BaseException, fallback: str) -> str:
     A message made entirely of redaction placeholders is empty for this
     purpose, too.
     """
+    wrapper_message: str | None = None
     for candidate in upstream_exception_chain(exc):
-        message = getattr(candidate, "message", None)
-        if isinstance(message, str) and (detail := _redacted_upstream_detail(message, "")):
+        message = _carried_message(candidate)
+        if message is None:
+            continue
+        if getattr(candidate, "original_exception", None) is not None:
+            wrapper_message = wrapper_message or message
+        elif detail := _redacted_upstream_detail(message, ""):
             return detail
+    if wrapper_message is not None and (detail := _redacted_upstream_detail(wrapper_message, "")):
+        return detail
     return _redacted_upstream_detail(upstream_error_message(exc), fallback)
+
+
+def _carried_message(exc: BaseException) -> str | None:
+    """The message the provider put on one exception, without text the SDK adds, or ``None``."""
+    message = getattr(exc, "message", None)
+    if not isinstance(message, str):
+        response = getattr(exc, "response", None)
+        error = response.get("Error") if isinstance(response, Mapping) else None
+        message = error.get("Message") if isinstance(error, Mapping) else None
+    return message if isinstance(message, str) else None
 
 
 def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:

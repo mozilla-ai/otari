@@ -20,6 +20,7 @@ import httpx
 import pytest
 from anthropic import APITimeoutError as AnthropicAPITimeoutError
 from any_llm.exceptions import ContextLengthExceededError, InvalidRequestError, UnsupportedParameterError
+from any_llm.utils.exception_handler import convert_exception
 from botocore.exceptions import ClientError
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
@@ -864,8 +865,18 @@ def test_bedrock_validation_error_is_a_caller_fault_400() -> None:
 
     assert mapping is not None
     assert mapping.status_code == 400
-    assert _BEDROCK_INVALID_MODEL in mapping.detail
+    assert mapping.detail == _BEDROCK_INVALID_MODEL
     assert failure_status_code(exc) == 400
+
+
+def test_bedrock_caller_fault_detail_is_still_redacted() -> None:
+    exc = _bedrock_error("ValidationException", f"Rejected {_RAW}", 400)
+
+    mapping = classify_provider_error(exc)
+
+    assert mapping is not None
+    assert "abc123" not in mapping.detail
+    assert "Converse" not in mapping.detail
 
 
 def test_bedrock_access_denied_keeps_a_fixed_detail() -> None:
@@ -900,10 +911,10 @@ def test_bedrock_error_without_a_status_stays_unclassified() -> None:
 
 
 def test_bedrock_status_is_read_through_the_unified_exception_wrapper() -> None:
-    wrapper = Exception("Provider error")
-    wrapper.original_exception = _bedrock_error("ValidationException", _BEDROCK_INVALID_MODEL, 400)  # type: ignore[attr-defined]
+    wrapper = convert_exception(_bedrock_error("ValidationException", _BEDROCK_INVALID_MODEL, 400), "bedrock")
 
     mapping = classify_provider_error(wrapper)
 
     assert mapping is not None
     assert mapping.status_code == 400
+    assert mapping.detail == _BEDROCK_INVALID_MODEL
