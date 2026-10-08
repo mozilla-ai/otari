@@ -1084,6 +1084,26 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     vi.restoreAllMocks()
   })
 
+  it.each([
+    ["an operator", true],
+    ["an organization owner who is not one", false],
+  ])(
+    "tells %s whose pages Settings and Accounts are",
+    async (_who, operator) => {
+      mockApi({
+        members: [OWNER],
+        context: organizationContext({ deployment_operator: operator }),
+      })
+      renderPage(<OrganizationMembersPage />)
+
+      expect(
+        await screen.findByText(
+          /which belong to whoever operates the gateway\./,
+        ),
+      ).toBeInTheDocument()
+    },
+  )
+
   it("asks for none of the deployment-wide reads", async () => {
     // /api/v1/users, /api/v1/budgets and /api/v1/scoped-budgets have refused a tenant
     // since #821. An organization owner is one, so the page must not ask: the
