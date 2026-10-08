@@ -102,6 +102,12 @@ function mockApi({
             scope_id: ceiling.scope_id,
             provider_key_id: ceiling.provider_key_id,
             model: ceiling.model,
+            current_spend: ceiling.current_spend,
+            reserved_spend: ceiling.reserved_spend,
+            current_tokens: ceiling.current_tokens,
+            reserved_tokens: ceiling.reserved_tokens,
+            current_requests: ceiling.current_requests,
+            reserved_requests: ceiling.reserved_requests,
             name:
               ceiling.scope_type === "organization"
                 ? organization().name
