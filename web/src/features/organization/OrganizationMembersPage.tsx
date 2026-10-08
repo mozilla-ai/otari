@@ -471,7 +471,7 @@ function MemberEditor({
   defaultByWorkspace: ReadonlyMap<string, WorkspaceBudgetDefault>
   placements: WorkspacePlacement[]
   /**
-   * Whether this caller isOperator the deployment, which two halves of this form
+   * Whether this caller operates the deployment, which two halves of this form
    * need and the rest does not. Model access writes the gateway's own `users`
    * row and a workspace ceiling is a `scoped_budgets` row; both are
    * deployment-wide since #821, while placing somebody in a workspace is the
@@ -1187,8 +1187,8 @@ export function OrganizationMembersPage() {
             does not operate the deployment is shown, so they are only told to
             one. */}
         {isOperator
-          ? "Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization (its workspaces, provider keys, guardrails, pricing and this roster) and read its usage in full, while members and viewers read the workspaces they belong to. No role set here reaches the deployment's own pages, such as Settings and Accounts, which belong to whoever isOperator the gateway. Budgets and API keys do not attach to this list; they attach to the gateway identity a member is linked to, which is what lets a key be issued to them by name. A member with no such link yet shows no access or spend, and cannot own a key until one exists."
-          : "Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization (its workspaces, provider keys, guardrails, pricing and this roster) and read its usage in full, while members and viewers read the workspaces they belong to. No role set here reaches the deployment's own pages, such as Settings and Accounts, which belong to whoever isOperator the gateway."}
+          ? "Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization (its workspaces, provider keys, guardrails, pricing and this roster) and read its usage in full, while members and viewers read the workspaces they belong to. No role set here reaches the deployment's own pages, such as Settings and Accounts, which belong to whoever operates the gateway. Budgets and API keys do not attach to this list; they attach to the gateway identity a member is linked to, which is what lets a key be issued to them by name. A member with no such link yet shows no access or spend, and cannot own a key until one exists."
+          : "Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization (its workspaces, provider keys, guardrails, pricing and this roster) and read its usage in full, while members and viewers read the workspaces they belong to. No role set here reaches the deployment's own pages, such as Settings and Accounts, which belong to whoever operates the gateway."}
       </PageIntro>
 
       {/* `remove.error`/`revoke.error` are deliberately absent: their confirm
