@@ -1,4 +1,4 @@
-"""The scheduled genai-prices check: what each policy does with what it fetches."""
+"""The scheduled models.dev price check: what each policy does with what it fetches."""
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
@@ -39,7 +39,7 @@ async def test_review_holds_an_update_for_an_operator(stubs: dict[str, AsyncMock
 
     assert await refresh.poll_price_updates(session, "review") == "pending"
 
-    stubs["prepare"].assert_awaited_once_with(session)
+    stubs["prepare"].assert_awaited_once_with(session, None, reuse_within=0.0)
     stubs["confirm"].assert_not_awaited()
     stubs["reject"].assert_not_awaited()
 
