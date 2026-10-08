@@ -324,7 +324,7 @@ client MAY be configured to present a bearer credential on every operation, and
 a backend (or a front door in front of one) MAY require it. Otari presents none
 today, in either mode, so a backend it reaches must not depend on one.
 
-In hybrid mode that credential will be the grant the control plane issued for the request. The front door checks it, enforces its claims, and derives tenancy from the workspace it names, so the backend behind it never has to. A grant names one workspace, the tools it may use, and a deadline. Otari receives grants and never mints them, and it never logs a grant, stores one, or hands one to a client. The control plane issues a grant only to a workspace whose policy allows code execution. [#1603](https://github.com/mozilla-ai/otari/issues/1603) records the decision.
+In hybrid mode that credential will be the grant the control plane issued for the request. The front door checks it, enforces its claims, and derives tenancy from the workspace it names, so the backend behind it never has to. A grant names one workspace, the tools it may use, and a deadline. Otari receives grants and never mints them, and it never logs a grant, stores one, or hands one to a client. The control plane issues a grant only to a workspace whose policy allows code execution. The grant's format and the token a front door verifies are specified in [the hybrid-mode protocol](hybrid-mode-protocol.md#grants). [#1603](https://github.com/mozilla-ai/otari/issues/1603) records the decision.
 
 Tenancy, when a backend is multi-tenant, is injected by whichever component
 authenticates the caller. A backend that expects tenancy MUST fail closed when

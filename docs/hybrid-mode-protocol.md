@@ -685,7 +685,7 @@ Otari sends the sandbox no caller credential, whatever that setting names. A
 control plane that serves the sandbox itself therefore cannot tell which
 workspace a call is for.
 
-[#1603](https://github.com/mozilla-ai/otari/issues/1603) decided how a data plane will reach the sandbox: with a scoped grant, presented to a front door in front of the backend. This endpoint will then also return the front door's address and a grant, as fields an older data plane ignores. [#1688](https://github.com/mozilla-ai/otari/issues/1688) holds the grant's design, and this section specifies the new fields when they ship.
+[#1603](https://github.com/mozilla-ai/otari/issues/1603) decided how a data plane will reach a sandbox the platform runs: with a [grant](#grants) in the series form, presented to a front door in front of the backend. This response will then also carry `grant`, an optional field an older data plane ignores. Its `url` is the front door's base URL, its token's `authorization_details` type is `code_execution`, and it expires at the sandbox session's deadline. A deployment whose sandbox someone else runs gets no `grant`, and Otari keeps using `OTARI_SANDBOX_URL`.
 
 ## Usage report
 
