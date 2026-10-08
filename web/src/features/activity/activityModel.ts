@@ -401,6 +401,7 @@ export function describeSelectionReason(
   if (reason === "static") return "the policy's only target"
   if (reason === "default") return "the policy's default target"
   if (reason === "on_failure") return "a fallback candidate"
+  if (reason === "catalog") return "the catalog's first choice"
   if (reason.startsWith("condition:")) {
     const keys = reason
       .slice("condition:".length)

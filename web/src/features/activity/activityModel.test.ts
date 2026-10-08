@@ -481,6 +481,19 @@ describe("describeAttempt", () => {
     ).toBe("served on attempt 2 of 2 (a fallback candidate)")
   })
 
+  it("names the catalog's choice when a catalog ID led the plan", () => {
+    expect(
+      describeAttempt(
+        attempt({
+          status: "success",
+          attempt_position: 1,
+          selection_reason: "catalog",
+        }),
+        served,
+      ),
+    ).toBe("served on attempt 1 of 2 (the catalog's first choice)")
+  })
+
   it("says only why the candidate was picked when the plan has one target", () => {
     expect(
       describeAttempt(
