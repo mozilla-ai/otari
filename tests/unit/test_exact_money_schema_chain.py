@@ -60,7 +60,7 @@ _CATALOG_MODELS = (
     ("openai", "text-embedding-3-small"),
     ("anthropic", "claude-sonnet-4-5"),
     ("google", "gemini-2.5-pro"),
-    ("deepseek", "deepseek-chat"),
+    ("deepseek", "deepseek-v4-flash"),
     ("mistral", "mistral-large-latest"),
 )
 

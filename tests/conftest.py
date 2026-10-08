@@ -172,7 +172,9 @@ def install_models_dev() -> Callable[[dict[str, Any] | None], "ModelsDevPriceInd
 
         document = catalog if catalog is not None else json.loads(MODELS_DEV_MINI.read_text())
         index = ModelsDevPriceIndex.from_catalog(document)
-        set_accepted_generations([PriceGeneration(effective_at=datetime(2020, 1, 1, tzinfo=UTC), index=index)])
+        set_accepted_generations(
+            [PriceGeneration(effective_at=datetime(2020, 1, 1, tzinfo=UTC), index=index)], complete=False
+        )
         return index
 
     return install

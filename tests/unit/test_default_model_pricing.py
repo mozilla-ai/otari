@@ -65,13 +65,17 @@ def test_default_pricing_bare_id_priced_differently_by_providers_is_not_priced()
     assert default_model_pricing(None, "shared/same-price", NOW) is not None
 
 
-def test_default_pricing_input_only_model_prices_output_at_zero(install_models_dev: Install) -> None:
-    """Input-only models (embeddings) price with a real input rate and 0 output."""
+def test_default_pricing_input_only_model_with_an_explicit_zero_output_prices_output_at_zero(
+    install_models_dev: Install,
+) -> None:
+    """Embeddings are listed with output 0, a real rate, and price with it."""
     install_models_dev(
         {
             "openai": {
                 "id": "openai",
-                "models": {"text-embedding-3-small": {"id": "text-embedding-3-small", "cost": {"input": 0.02}}},
+                "models": {
+                    "text-embedding-3-small": {"id": "text-embedding-3-small", "cost": {"input": 0.02, "output": 0}}
+                },
             }
         }
     )
@@ -80,6 +84,13 @@ def test_default_pricing_input_only_model_prices_output_at_zero(install_models_d
     assert pricing is not None
     assert pricing.input_price_per_million == Decimal("0.02")
     assert pricing.output_price_per_million == 0
+
+
+def test_default_pricing_never_infers_a_free_output_rate(install_models_dev: Install) -> None:
+    install_models_dev(
+        {"openai": {"id": "openai", "models": {"m": {"id": "m", "cost": {"input": 0.02}}}}},
+    )
+    assert default_model_pricing("openai", "m", NOW) is None
 
 
 def test_default_pricing_model_without_a_rate_is_not_priced() -> None:
@@ -252,7 +263,7 @@ def test_model_context_window_reads_the_catalog() -> None:
 
 
 def test_as_of_prices_from_the_snapshot_in_force_then(install_models_dev: Install) -> None:
-    """The rate follows the accepted snapshot in effect at the lookup time, the oldest before the first."""
+    """The rate follows the accepted snapshot in effect at the lookup time."""
     old = ModelsDevPriceIndex.from_catalog(
         {"openai": {"id": "openai", "models": {"gpt-4.1": {"id": "gpt-4.1", "cost": {"input": 5, "output": 9}}}}}
     )
@@ -261,16 +272,57 @@ def test_as_of_prices_from_the_snapshot_in_force_then(install_models_dev: Instal
         [
             PriceGeneration(effective_at=datetime(2026, 1, 1, tzinfo=UTC), index=old),
             PriceGeneration(effective_at=datetime(2026, 3, 1, tzinfo=UTC), index=new),
-        ]
+        ],
+        complete=False,
     )
 
-    before = default_model_pricing("openai", "gpt-4.1", datetime(2025, 1, 1, tzinfo=UTC))
     middle = default_model_pricing("openai", "gpt-4.1", datetime(2026, 2, 1, tzinfo=UTC))
     after = default_model_pricing("openai", "gpt-4.1", datetime(2026, 4, 1, tzinfo=UTC))
 
-    assert before is not None and middle is not None and after is not None
-    assert (before.input_price_per_million, middle.input_price_per_million) == (Decimal("5"), Decimal("5"))
+    assert middle is not None and after is not None
+    assert middle.input_price_per_million == Decimal("5")
     assert after.input_price_per_million == Decimal("2")
+
+
+def test_a_date_no_generation_covers_degrades_to_unpriced(install_models_dev: Install) -> None:
+    """Before the first generation there is no price, no reference and no context window."""
+    install_models_dev(None)
+    before = datetime(2019, 1, 1, tzinfo=UTC)
+
+    assert default_model_pricing("openai", "gpt-4.1", before) is None
+    assert default_pricing_reference("openai", "gpt-4.1", before) is None
+    assert model_context_window("openai", "gpt-4.1", before) is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_model_pricing_degrades_to_unpriced_and_resolves_once(
+    install_models_dev: Install, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import MagicMock
+
+    from gateway.services import pricing_service
+
+    async def no_stored_rate(*_: object) -> None:
+        return None
+
+    monkeypatch.setattr(pricing_service, "_find_by_model_key", no_stored_rate)
+    monkeypatch.setattr(pricing_service, "_default_pricing_enabled", True)
+    install_models_dev(None)
+    calls = MagicMock(wraps=pricing_service._resolve_default)
+    monkeypatch.setattr(pricing_service, "_resolve_default", calls)
+
+    db: Any = None
+    uncovered = await pricing_service.resolve_model_pricing(
+        db, "openai", "gpt-4.1", as_of=datetime(2019, 1, 1, tzinfo=UTC)
+    )
+    assert uncovered is None
+
+    calls.reset_mock()
+    covered = await pricing_service.resolve_model_pricing(db, "openai", "gpt-4.1", as_of=NOW)
+    assert covered is not None
+    assert covered.source == "defaults"
+    assert covered.reference == "models.dev:openai/gpt-4.1"
+    assert calls.call_count == 1
 
 
 def test_the_bundled_snapshot_serves_when_nothing_was_accepted() -> None:

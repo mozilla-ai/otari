@@ -14,7 +14,7 @@ from gateway.core.config import API_ROOT
 from gateway.core.metered_pricing import meter_cost, priced_per_request, quantize_cost, request_charge_line, to_decimal
 from gateway.log_config import logger
 from gateway.models.pricing import ModelPricing, OrganizationModelPricing, PriceSource
-from gateway.services.pricing import ModelsDevPrice, active_generations, resolve_as_of
+from gateway.services.pricing import ModelsDevPrice, active_timeline, resolve_as_of
 
 # Bound on the model keys named in one ``IN()`` list, so a batched override load
 # stays under SQLite's default limit of 999 bind parameters in a statement.
@@ -92,11 +92,13 @@ def normalize_effective_at(value: datetime | None) -> datetime:
 def _resolve_default(provider: str | None, model: str, as_of: datetime) -> ModelsDevPrice | None:
     """The models.dev entry pricing ``model`` at ``as_of``, or ``None`` on a miss.
 
+    A date no generation covers is a miss too, so callers degrade to unpriced.
+
     Matching rules live in ``ModelsDevPriceIndex.resolve``. The any-llm
     implementation behind an instance is looked up per call because it is
     registered state: re-typing an instance in the dashboard takes effect at once.
     """
-    return resolve_as_of(active_generations(), as_of, provider, model, _provider_implementation(provider))
+    return resolve_as_of(active_timeline(), as_of, provider, model, _provider_implementation(provider))
 
 
 def model_context_window(provider: str | None, model: str, as_of: datetime | None = None) -> int | None:
@@ -130,10 +132,11 @@ def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> 
 
     Returns a *transient* (unpersisted) ``ModelPricing`` carrying the per-million
     rates of the snapshot in force at ``as_of``, or ``None`` when no matching
-    model is found. The returned object is never added to a session: it is a
-    lookup result, not a stored price, so explicit config/API pricing always wins
-    (the DB is consulted first) and ``require_pricing`` still fails closed for
-    genuinely unknown models.
+    model is found, no snapshot covers ``as_of``, or the match carries no input
+    or no output rate: a missing rate is never read as free. The returned object
+    is never added to a session: it is a lookup result, not a stored price, so
+    explicit config/API pricing always wins (the DB is consulted first) and
+    ``require_pricing`` still fails closed for genuinely unknown models.
 
     Whether this fallback runs at all is the caller's decision (the
     ``default_pricing`` config field, gating ``find_model_pricing``).
@@ -142,9 +145,14 @@ def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> 
     resolve an ambiguous model *name* to a different provider's rate only when
     every provider listing it agrees on the price.
     """
+    resolved = default_pricing_match(provider, model, as_of)
+    return None if resolved is None else resolved[0]
 
+
+def default_pricing_match(provider: str | None, model: str, as_of: datetime) -> tuple[ModelPricing, str] | None:
+    """:func:`default_model_pricing` with the reference of the entry that answered, from one resolution."""
     entry = _resolve_default(provider, model, as_of)
-    if entry is None or entry.input is None:
+    if entry is None or entry.input is None or entry.output is None:
         return None
 
     model_key = f"{provider}:{model}" if provider else model
@@ -154,17 +162,16 @@ def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> 
         model_key,
         entry.reference,
     )
-    # Input-only models (embeddings, rerank) legitimately have no output rate;
-    # price output at 0 rather than rejecting the whole model.
-    return ModelPricing(
+    pricing = ModelPricing(
         model_key=model_key,
         effective_at=as_of,
         input_price_per_million=entry.input,
-        output_price_per_million=entry.output if entry.output is not None else Decimal(0),
+        output_price_per_million=entry.output,
         cache_read_price_per_million=entry.cache_read,
         cache_write_price_per_million=entry.cache_write,
         pricing_tiers=entry.pricing_tiers(),
     )
+    return pricing, entry.reference
 
 
 def override_as_model_pricing(override: OrganizationModelPricing) -> ModelPricing:
@@ -596,10 +603,9 @@ async def resolve_model_pricing(
         return ResolvedPricing(stored, "deployment", stored.model_key, normalize_effective_at(stored.effective_at))
 
     if use_defaults and default_pricing_enabled():
-        default = default_model_pricing(provider, model, lookup_time)
-        if default is not None:
-            # A dictionary read: the lookup above memoized the resolution.
-            return ResolvedPricing(default, "defaults", default_pricing_reference(provider, model, lookup_time))
+        matched = default_pricing_match(provider, model, lookup_time)
+        if matched is not None:
+            return ResolvedPricing(matched[0], "defaults", matched[1])
 
     return None
 
