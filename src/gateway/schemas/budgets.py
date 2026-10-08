@@ -7,7 +7,7 @@ Responses echo the stored string, so a row that holds an unknown value still rea
 from __future__ import annotations
 
 import uuid
-from typing import Annotated, Any
+from typing import Annotated, Any, Self
 
 from pydantic import AwareDatetime, BaseModel, Field, model_validator
 
@@ -80,8 +80,27 @@ class _RefusesRemovedPeriodFields(BaseModel):
 # reads the same in a path, a header and a config file.
 BUDGET_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 
-# A blank value matches no provider instance, so a ceiling that stored one would never bind.
-_ProviderKeyId = Annotated[str, Field(min_length=1, max_length=255, pattern=r"^\S+$")]
+# A provider instance or model id. A blank value matches nothing, so a ceiling that stored one would never bind.
+_NarrowingId = Annotated[str, Field(min_length=1, max_length=255, pattern=r"^\S+$")]
+
+
+class _ModelNarrowing(BaseModel):
+    """The resource axes of a ceiling's create body: a provider, and optionally one of its models."""
+
+    provider_key_id: _NarrowingId | None = None
+    model: _NarrowingId | None = Field(
+        default=None,
+        description=(
+            "Narrow the cap to one model of the provider, by the id the provider gives it; omit or null to cap "
+            "every model. Requires provider_key_id, because a model id is only unique within its provider"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _model_needs_provider(self) -> Self:
+        if self.model is not None and self.provider_key_id is None:
+            raise ValueError("model requires provider_key_id")
+        return self
 
 
 class CreateBudgetRequest(_RefusesRemovedPeriodFields):
@@ -305,7 +324,7 @@ class BudgetResetLogResponse(BaseModel):
         )
 
 
-class CreateScopedBudgetRequest(BaseModel):
+class CreateScopedBudgetRequest(_ModelNarrowing):
     """Request model for creating a scoped budget."""
 
     scope_type: ScopeType = Field(description="Which kind of identity this ceiling caps")
@@ -314,7 +333,7 @@ class CreateScopedBudgetRequest(BaseModel):
         max_length=255,
         description="Id of the capped identity: an organization, workspace, membership row, or API key",
     )
-    provider_key_id: _ProviderKeyId | None = Field(
+    provider_key_id: _NarrowingId | None = Field(
         default=None,
         description=(
             "Narrow the cap to one provider instance; omit or null to cap spend across every provider. "
@@ -348,6 +367,7 @@ class ScopedBudgetFigures(BaseModel):
     scope_type: str
     scope_id: str
     provider_key_id: str | None
+    model: str | None
     budget_id: str
     name: str | None
     max_budget: float | None
@@ -378,6 +398,7 @@ class ScopedBudgetFigures(BaseModel):
             "scope_type": ceiling.scope_type,
             "scope_id": ceiling.scope_id,
             "provider_key_id": ceiling.provider_key_id,
+            "model": ceiling.model,
             "budget_id": ceiling.budget_id,
             "name": ceiling.name,
             "max_budget": as_float(budget.max_budget),
@@ -469,11 +490,12 @@ class OrganizationBudgetUpdate(OrganizationBudgetRates):
 
 
 class AppliedEntityPublic(BaseModel):
-    """One entity a budget applies to: the scope a ceiling caps, and the provider it narrows to."""
+    """One entity a budget applies to: the scope a ceiling caps, and the provider or model it narrows to."""
 
     scope_type: str
     scope_id: str
     provider_key_id: str | None
+    model: str | None
     name: str | None = Field(
         description="The organization's or the workspace's name; null for a membership or an API key",
     )
@@ -549,7 +571,7 @@ class OrganizationBudgetsPublic(BaseModel):
     count: int
 
 
-class OrganizationScopedBudgetCreate(BaseModel):
+class OrganizationScopedBudgetCreate(_ModelNarrowing):
     """Attach one of the organization's budgets to a scope inside it."""
 
     scope_type: ScopeType = Field(description="Which kind of identity this ceiling caps")
@@ -561,7 +583,7 @@ class OrganizationScopedBudgetCreate(BaseModel):
             "a membership in either, or an API key in one"
         ),
     )
-    provider_key_id: _ProviderKeyId | None = Field(
+    provider_key_id: _NarrowingId | None = Field(
         default=None,
         description=(
             "Narrow the cap to one provider instance; omit or null to cap spend across every provider. "
@@ -623,7 +645,7 @@ class WorkspaceMemberBudgetPolicyCreate(BaseModel):
         max_length=255,
         description="The budget this workspace hands to every member",
     )
-    provider_key_id: _ProviderKeyId | None = Field(
+    provider_key_id: _NarrowingId | None = Field(
         default=None,
         description=(
             "Narrow the default to one provider instance; omit or null to apply to every provider. "

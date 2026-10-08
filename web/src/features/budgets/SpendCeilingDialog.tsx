@@ -214,9 +214,11 @@ export function SpendCeilingDialog({
           <span className="text-body">Capping</span>
           <span className="text-sm text-muted">
             {scopeLabel(editing, { organizationName, workspaces })}
-            {editing.provider_key_id
-              ? `, on ${editing.provider_key_id}`
-              : ", on every provider"}
+            {editing.model
+              ? `, on ${editing.model} on ${editing.provider_key_id}`
+              : editing.provider_key_id
+                ? `, on ${editing.provider_key_id}`
+                : ", on every provider"}
           </span>
           <span className="text-caption">
             What a ceiling caps cannot be changed. Delete it and add one for the

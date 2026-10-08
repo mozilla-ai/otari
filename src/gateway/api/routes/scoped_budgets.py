@@ -136,6 +136,7 @@ async def create_scoped_budget(
         scope_type=request.scope_type,
         scope_id=request.scope_id,
         provider_key_id=request.provider_key_id,
+        model=request.model,
         budget_id=limit.budget_id,
         name=request.name,
         period_start=period_start,
@@ -148,7 +149,7 @@ async def create_scoped_budget(
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="A budget already exists for this scope and provider",
+            detail="A budget already exists for this scope, provider and model",
         ) from None
     except SQLAlchemyError:
         await db.rollback()

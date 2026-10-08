@@ -194,6 +194,7 @@ describe("OrganizationBudgetsPage", () => {
       scope_type,
       scope_id,
       provider_key_id: null,
+      model: null,
       name: null,
     })
     mockApi({

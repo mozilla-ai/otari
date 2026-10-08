@@ -205,7 +205,8 @@ Two budget forms exist:
 
 - A per-user budget limits each attached user independently.
 - A scoped budget limits an organization, workspace, membership, or API key and
-  can optionally narrow the limit to one provider.
+  can optionally narrow the limit to one provider, or to one model of a provider.
+  A model-narrowed limit is checked first, and its refusal names the model.
 
 A budget caps up to three things over its period, each set independently and
 each unlimited when left unset: spend in USD (`max_budget`), total tokens
