@@ -72,6 +72,9 @@ async def _active_user_with_budget(db: AsyncSession, user_id: str) -> tuple[User
             select(User, Budget)
             .outerjoin(Budget, Budget.budget_id == User.budget_id)
             .where(User.user_id == user_id, User.deleted_at.is_(None))
+            # The session commits rather than rolls back, so an identity-mapped
+            # user would otherwise keep reservation counters older than the row.
+            .execution_options(populate_existing=True)
         )
     ).first()
     return None if row is None else (row[0], row[1])

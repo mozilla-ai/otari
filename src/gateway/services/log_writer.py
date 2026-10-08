@@ -98,6 +98,9 @@ class BatchLogWriter:
         self._stop_timeout = stop_timeout
         self._stopping = asyncio.Event()
         self._flushing = False
+        # Rows taken off the queue and neither written nor counted as dropped yet,
+        # so a stop that times out mid-flush counts them among what it drops.
+        self._taken = 0
         self._task: asyncio.Task[None] | None = None
 
     async def put(self, log: UsageLog) -> None:
@@ -115,13 +118,15 @@ class BatchLogWriter:
     async def stop(self) -> None:
         """Write everything queued, then stop, giving up on what is left after ``stop_timeout``."""
         self._stopping.set()
-        try:
+        # Counted however the drain ended: a timeout that cancels a flush in
+        # progress ends the loop quietly, so no ``TimeoutError`` reaches here.
+        with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(self._drain(), timeout=self._stop_timeout)
-        except TimeoutError:
-            logger.error(
-                "BatchLogWriter did not drain within %ss; dropping %d rows", self._stop_timeout, self._queue.qsize()
-            )
-            ROWS.labels(writer="batch", result="dropped").inc(self._queue.qsize())
+        lost = self._queue.qsize() + self._taken
+        if lost:
+            self._taken = 0
+            logger.error("BatchLogWriter did not drain within %ss; dropping %d rows", self._stop_timeout, lost)
+            ROWS.labels(writer="batch", result="dropped").inc(lost)
 
     async def _drain(self) -> None:
         """Finish a flush in progress, then write what is still queued."""
@@ -141,8 +146,10 @@ class BatchLogWriter:
                 batch = await self._collect_batch()
                 if batch:
                     self._flushing = True
+                    self._taken += len(batch)
                     try:
                         await self._flush(batch)
+                        self._taken -= len(batch)
                     finally:
                         self._flushing = False
             except asyncio.CancelledError:  # pragma: no cover - cooperative cancel
@@ -218,8 +225,11 @@ class BatchLogWriter:
                 self._queue.task_done()
             except asyncio.QueueEmpty:
                 break
+        self._taken += len(batch)
         for offset in range(0, len(batch), self._max_batch):
-            await self._flush(batch[offset : offset + self._max_batch])
+            chunk = batch[offset : offset + self._max_batch]
+            await self._flush(chunk)
+            self._taken -= len(chunk)
 
 
 def create_log_writer(strategy: str) -> LogWriter:

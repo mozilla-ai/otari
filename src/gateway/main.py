@@ -401,6 +401,8 @@ class SecurityHeadersMiddleware:
 
         async def send_with_headers(message: Message) -> None:
             if message["type"] == "http.response.start":
+                # Optional in ASGI, and ``MutableHeaders`` needs the list to exist.
+                message.setdefault("headers", [])
                 _add_security_headers(MutableHeaders(scope=message), path, message["status"])
             await send(message)
 

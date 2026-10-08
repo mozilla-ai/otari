@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from sqlalchemy.exc import IntegrityError, OperationalError
 
+from gateway.metrics import REGISTRY
 from gateway.models.usage import UsageLog
 from gateway.services import log_writer as log_writer_module
 from gateway.services.log_writer import BatchLogWriter
@@ -113,16 +114,29 @@ async def test_a_full_queue_drops_the_row_rather_than_blocking_the_request() -> 
     assert writer._queue.qsize() == 1
 
 
+def _dropped() -> float:
+    return REGISTRY.get_sample_value("gateway_usage_log_rows_total", {"writer": "batch", "result": "dropped"}) or 0.0
+
+
 @pytest.mark.asyncio
-async def test_stop_gives_up_after_its_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("started", [False, True])
+async def test_stop_gives_up_after_its_timeout_and_counts_what_it_was_flushing(
+    monkeypatch: pytest.MonkeyPatch, started: bool
+) -> None:
+    """Rows already off the queue when the timeout hits are dropped too, so the metric counts them."""
     store = _Store(failures=100)
     _install(monkeypatch, store)
-    writer = BatchLogWriter(retries=50, retry_backoff=1, stop_timeout=0.2)
+    writer = BatchLogWriter(flush_interval=0.01, retries=50, retry_backoff=1, stop_timeout=0.2)
     await writer.put(_rows(1)[0])
+    if started:
+        await writer.start()
+        await asyncio.sleep(0.05)  # the loop takes the row and backs off from its first failure
+    before = _dropped()
 
     await asyncio.wait_for(writer.stop(), timeout=5)
 
     assert store.written == []
+    assert _dropped() - before == 1
 
 
 @pytest.mark.asyncio

@@ -464,9 +464,11 @@ class RateLimitRules:
         refusal = next((failure for failure in failures if isinstance(failure, HTTPException)), None)
         if refusal is not None:
             RATE_LIMIT_HITS.inc()
-            await asyncio.gather(*(_undo(self._store, hold) for hold in holds))
-            raise refusal
-        raise failures[0]
+        # A store that broke mid-phase gives back what the rest counted, as a
+        # refusal does; the undo can fail on that same store, so the original
+        # failure is the one raised.
+        await asyncio.gather(*(_undo(self._store, hold) for hold in holds), return_exceptions=True)
+        raise refusal if refusal is not None else failures[0]
 
 
 def _budget_rule(limits: BudgetMinuteLimits) -> RateLimitRule:

@@ -429,6 +429,19 @@ async def test_an_attempt_whose_admission_breaks_gives_back_what_it_took() -> No
 
 
 @pytest.mark.asyncio
+async def test_a_request_whose_admission_breaks_gives_back_what_it_took() -> None:
+    store = _BrokenStore("rule:second:k1:rpm")
+    rules = _rules(store, {"name": "first", "per": "user", "rpm": 1}, {"name": "second", "per": "key", "rpm": 5})
+
+    with pytest.raises(ConnectionError):
+        await _admit(rules)
+
+    assert (await store.hit("rule:first:u1:rpm", 1, 60)).handle is not None, (
+        "the request the first rule counted was kept"
+    )
+
+
+@pytest.mark.asyncio
 async def test_a_served_attempt_is_settled_and_released_with_its_request() -> None:
     rules = _rules(
         InMemoryRateLimitStore(),
