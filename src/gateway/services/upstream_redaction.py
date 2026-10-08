@@ -35,6 +35,8 @@ _SECRET_SHAPES: tuple[re.Pattern[str], ...] = (
     # platform's own provider account, so an error naming that account would
     # tell a workspace user whose credentials served them.
     re.compile(r"\b(?:org|proj|acct|account)[-_][A-Za-z0-9]{6,}", re.IGNORECASE),
+    # An AWS resource name (ARN) holds the operator's account ID and the names of its resources.
+    re.compile(r"\barn:aws[a-z-]*:[A-Za-z0-9:/_.+=@*-]+", re.IGNORECASE),
     # Any absolute URL. A self-hosted or proxied ``api_base`` is gateway
     # topology the caller has no business learning, and a credential is
     # sometimes embedded in one.
@@ -44,6 +46,9 @@ _SECRET_SHAPES: tuple[re.Pattern[str], ...] = (
     # Catch-all for key material with no recognizable prefix. Long unbroken
     # alphanumeric runs are tokens, not prose.
     re.compile(r"[A-Za-z0-9_-]{40,}"),
+    # NOTE: This masks any whole 12-digit number, dashed or not, because a bare AWS account ID has no other marker.
+    # It runs after the key shapes, so a key that holds 12 digits is masked whole first.
+    re.compile(r"(?<![\d.])\d{4}-?\d{4}-?\d{4}(?!\.?\d)"),
 )
 
 # Upstream APIs sometimes reflect the request that failed. Such an echo can

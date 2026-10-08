@@ -453,6 +453,16 @@ def test_upstream_message_and_unsupported_feature_read_from_nested_original_exce
         ("Cannot reach http://10.0.0.4:8000/v1/chat", "10.0.0.4"),
         ("Bad request (api_key=hunter2hunter2)", "hunter2hunter2"),
         ("Model unavailable for org-DDDDDDDDDD", "org-DDDDDDDDDD"),
+        ("Profile arn:aws:bedrock:eu-west-1:123456789012:inference-profile/p1 is not ready", "123456789012"),
+        (
+            "Profile arn:aws-us-gov:bedrock:us-gov-west-1:123456789012:inference-profile/p1 failed",
+            "inference-profile/p1",
+        ),
+        ("Account 123456789012 has no access to this model", "123456789012"),
+        ("Incorrect key ab123456789012cdef0123456789abcd provided", "cdef0123456789abcd"),
+        ("Account 1234-5678-9012 has no access to this model", "1234-5678-9012"),
+        ("Denied for account123456789012", "123456789012"),
+        ("Profile ARN:AWS:bedrock:eu-west-1::inference-profile/p1 is not ready", "inference-profile/p1"),
         ("Rejected: " + "E" * 48, "E" * 48),
     ],
 )
@@ -877,6 +887,37 @@ def test_bedrock_caller_fault_detail_is_still_redacted() -> None:
     assert mapping is not None
     assert "abc123" not in mapping.detail
     assert "Converse" not in mapping.detail
+
+
+def test_bedrock_caller_fault_detail_hides_the_aws_account() -> None:
+    arn = "arn:aws:bedrock:us-east-1:123456789012:provisioned-model/abc1"
+    exc = _bedrock_error("ValidationException", f"The provisioned model {arn} is not ready.", 400)
+
+    mapping = classify_provider_error(exc)
+
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert "123456789012" not in mapping.detail
+    assert "provisioned-model/abc1" not in mapping.detail
+    assert "is not ready" in mapping.detail
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"resource":"arn:aws:bedrock:us-east-1:123456789012:provisioned-model/abc1","reason":"not ready"}',
+        "Model (arn:aws:bedrock:us-east-1:123456789012:provisioned-model/abc1), reason: not ready",
+    ],
+)
+def test_redaction_masks_only_the_arn(raw: str) -> None:
+    redacted = redact_upstream_message(raw)
+
+    assert "provisioned-model/abc1" not in redacted
+    assert "not ready" in redacted
+
+
+def test_redaction_keeps_a_decimal_number() -> None:
+    assert "0.123456789012" in redact_upstream_message("temperature 0.123456789012 is out of range")
 
 
 def test_bedrock_access_denied_keeps_a_fixed_detail() -> None:
