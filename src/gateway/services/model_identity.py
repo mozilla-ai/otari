@@ -35,7 +35,7 @@ from dataclasses import dataclass
 _ROUTING_PREFIX = re.compile(r"^(?:us-gov|us|eu|apac|au|ca|global|in|jp)\.")
 
 # models.dev names a routing profile after its region (``Kimi K3 (US)``), which describes the offering.
-_ROUTING_QUALIFIER = re.compile(r"\s*\([^()]*\)$")
+_ROUTING_QUALIFIER = re.compile(r"\s*\((?:APAC|AU|CA|EU|Global|GovCloud|India|JP|US)\)$", re.IGNORECASE)
 
 # Provider-side path prefixes that say where a model is hosted, not what it is.
 _PATH_PREFIXES = (

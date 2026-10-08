@@ -308,3 +308,15 @@ def test_every_bedrock_routing_prefix_is_stripped(prefix: str) -> None:
 
 def test_a_parenthesized_name_without_a_routing_prefix_is_kept() -> None:
     assert identity_key("nvidia", "nemotron-nano", "Nemotron Nano (25.02)") == normalize("Nemotron Nano (25.02)")
+
+
+def test_a_routing_profile_keeps_a_qualifier_that_is_not_a_region() -> None:
+    """``(Thinking)`` names a different model, so only a region label leaves the name."""
+    seeds = [
+        OfferingSeed("bedrock:us.vendor.example", "bedrock", "us.vendor.example", "Example (US)"),
+        OfferingSeed(
+            "bedrock:us.vendor.example-thinking", "bedrock", "us.vendor.example-thinking", "Example (Thinking)"
+        ),
+    ]
+
+    assert len(group_offerings(seeds)) == 2
