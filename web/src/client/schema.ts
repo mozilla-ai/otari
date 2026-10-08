@@ -10888,8 +10888,6 @@ export interface components {
         ModelPricingInfo: {
             /** Cache Read Price Per Million */
             cache_read_price_per_million?: number | null;
-            /** Cache Write 1H Price Per Million */
-            cache_write_1h_price_per_million?: number | null;
             /** Cache Write Price Per Million */
             cache_write_price_per_million?: number | null;
             /** Input Price Per Million */
@@ -11218,8 +11216,6 @@ export interface components {
         OrgProviderKeyModelPublic: {
             /** Cache Read Price Per Million */
             cache_read_price_per_million?: number | null;
-            /** Cache Write 1H Price Per Million */
-            cache_write_1h_price_per_million?: number | null;
             /** Cache Write Price Per Million */
             cache_write_price_per_million?: number | null;
             /**
@@ -12150,11 +12146,6 @@ export interface components {
              */
             cache_read_price_per_million?: number | null;
             /**
-             * Cache Write 1H Price Per Million
-             * @description Price per 1M Anthropic 1-hour cache-write tokens
-             */
-            cache_write_1h_price_per_million?: number | null;
-            /**
              * Cache Write Price Per Million
              * @description Price per 1M cache-write (creation) tokens
              */
@@ -12204,8 +12195,6 @@ export interface components {
         OrganizationModelPricingPublic: {
             /** Cache Read Price Per Million */
             cache_read_price_per_million: number | null;
-            /** Cache Write 1H Price Per Million */
-            cache_write_1h_price_per_million: number | null;
             /** Cache Write Price Per Million */
             cache_write_price_per_million: number | null;
             /**
@@ -12274,11 +12263,6 @@ export interface components {
              * @description Price per 1M cached-input tokens
              */
             cache_read_price_per_million?: number | null;
-            /**
-             * Cache Write 1H Price Per Million
-             * @description Price per 1M Anthropic 1-hour cache-write tokens
-             */
-            cache_write_1h_price_per_million?: number | null;
             /**
              * Cache Write Price Per Million
              * @description Price per 1M cache-write (creation) tokens
@@ -13142,8 +13126,6 @@ export interface components {
         PricingResponse: {
             /** Cache Read Price Per Million */
             cache_read_price_per_million: number | null;
-            /** Cache Write 1H Price Per Million */
-            cache_write_1h_price_per_million: number | null;
             /** Cache Write Price Per Million */
             cache_write_price_per_million: number | null;
             /** Created At */
@@ -13178,8 +13160,6 @@ export interface components {
         PricingTier: {
             /** Cache Read Price Per Million */
             cache_read_price_per_million?: number | null;
-            /** Cache Write 1H Price Per Million */
-            cache_write_1h_price_per_million?: number | null;
             /** Cache Write Price Per Million */
             cache_write_price_per_million?: number | null;
             /** Input Price Per Million */
@@ -14702,11 +14682,6 @@ export interface components {
              * @description Price per 1M cached-input tokens
              */
             cache_read_price_per_million?: number | null;
-            /**
-             * Cache Write 1H Price Per Million
-             * @description Price per 1M Anthropic 1-hour cache-write tokens
-             */
-            cache_write_1h_price_per_million?: number | null;
             /**
              * Cache Write Price Per Million
              * @description Price per 1M cache-write (creation) tokens

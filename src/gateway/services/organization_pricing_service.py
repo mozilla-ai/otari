@@ -86,7 +86,6 @@ class PricingOverrideInput:
     output_price_per_million: float
     cache_read_price_per_million: float | None
     cache_write_price_per_million: float | None
-    cache_write_1h_price_per_million: float | None
     pricing_tiers: list[dict[str, object]]
     effective_from: datetime
     effective_to: datetime | None
@@ -418,7 +417,6 @@ class OrganizationPricingService:
             output_price_per_million=to_usd(override.output_price_per_million),
             cache_read_price_per_million=to_usd_or_none(override.cache_read_price_per_million),
             cache_write_price_per_million=to_usd_or_none(override.cache_write_price_per_million),
-            cache_write_1h_price_per_million=to_usd_or_none(override.cache_write_1h_price_per_million),
             pricing_tiers=override.pricing_tiers,
             effective_from=effective_from,
             effective_to=effective_to,
@@ -538,7 +536,6 @@ class OrganizationPricingService:
         row.output_price_per_million = to_usd(override.output_price_per_million)
         row.cache_read_price_per_million = to_usd_or_none(override.cache_read_price_per_million)
         row.cache_write_price_per_million = to_usd_or_none(override.cache_write_price_per_million)
-        row.cache_write_1h_price_per_million = to_usd_or_none(override.cache_write_1h_price_per_million)
         row.pricing_tiers = override.pricing_tiers
         row.effective_from = effective_from
         row.effective_to = effective_to
@@ -580,7 +577,6 @@ def validate_rates(override: PricingOverrideInput) -> None:
         "output_price_per_million": override.output_price_per_million,
         "cache_read_price_per_million": override.cache_read_price_per_million,
         "cache_write_price_per_million": override.cache_write_price_per_million,
-        "cache_write_1h_price_per_million": override.cache_write_1h_price_per_million,
     }
     for field, value in rates.items():
         if value is not None and value < 0:

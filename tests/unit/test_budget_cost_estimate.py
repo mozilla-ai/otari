@@ -30,14 +30,12 @@ def _pricing(**overrides: Any) -> ModelPricing:
         "input_price_per_million": 3.0,
         "output_price_per_million": 15.0,
         "cache_write_price_per_million": 3.75,
-        "cache_write_1h_price_per_million": 6.0,
         "pricing_tiers": [
             {
                 "min_input_tokens": 200_000,
                 "input_price_per_million": 6.0,
                 "output_price_per_million": 22.5,
                 "cache_write_price_per_million": 7.5,
-                "cache_write_1h_price_per_million": 12.0,
             }
         ],
     }
@@ -95,7 +93,7 @@ def test_estimate_cost_reserves_cache_write_using_the_context_tier() -> None:
     assert estimate == _micro_dollars(Decimal(200_000) * Decimal("7.5"), Decimal(100) * Decimal("22.5"))
 
 
-def test_estimate_cost_uses_requested_one_hour_cache_write_rate() -> None:
+def test_estimate_cost_prices_a_one_hour_cache_write_at_the_cache_write_rate() -> None:
     estimate = estimate_cost(
         _pricing(),
         prompt_chars=1_000 * 4,
@@ -104,12 +102,12 @@ def test_estimate_cost_uses_requested_one_hour_cache_write_rate() -> None:
         cache_write_ttl="1h",
     )
 
-    assert estimate == _micro_dollars(1_000 * 6)
+    assert estimate == _micro_dollars(Decimal(1_000) * Decimal("3.75"))
 
 
 def test_estimate_cost_falls_back_to_input_when_cache_write_is_unpriced() -> None:
     estimate = estimate_cost(
-        _pricing(cache_write_price_per_million=None, cache_write_1h_price_per_million=None),
+        _pricing(cache_write_price_per_million=None),
         prompt_chars=1_000 * 4,
         max_output_tokens=0,
         default_output_tokens=1_024,
@@ -121,7 +119,7 @@ def test_estimate_cost_falls_back_to_input_when_cache_write_is_unpriced() -> Non
 
 def test_estimate_cost_preserves_a_free_cache_write_rate() -> None:
     estimate = estimate_cost(
-        _pricing(cache_write_1h_price_per_million=0.0),
+        _pricing(cache_write_price_per_million=0.0),
         prompt_chars=1_000 * 4,
         max_output_tokens=0,
         default_output_tokens=1_024,

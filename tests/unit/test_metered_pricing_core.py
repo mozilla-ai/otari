@@ -33,7 +33,6 @@ def _pricing(**overrides: Any) -> SimpleNamespace:
         "output_price_per_million": Decimal("60"),
         "cache_read_price_per_million": None,
         "cache_write_price_per_million": None,
-        "cache_write_1h_price_per_million": None,
         "pricing_tiers": [],
     }
     rates.update(overrides)
@@ -140,7 +139,6 @@ def test_a_1h_write_is_a_subset_of_the_write_total() -> None:
     )
 
     assert usage.cache_write_1h_tokens == 100
-    assert usage.cache_write_base_tokens == 0
 
 
 def test_an_inclusive_payload_that_contradicts_itself_loses_its_cache_discount() -> None:
@@ -215,7 +213,7 @@ def test_an_unusable_base_rate_refuses_to_price(rate: Any) -> None:
         effective_rates(_pricing(input_price_per_million=rate), 1_000)
 
 
-def test_an_unpriced_1h_write_bills_at_the_ordinary_cache_write_rate() -> None:
+def test_a_1h_write_bills_at_the_ordinary_cache_write_rate() -> None:
     cost = calculate_token_cost(
         _pricing(cache_write_price_per_million=Decimal("3.75")),
         input_tokens=0,
@@ -294,10 +292,7 @@ def test_a_meter_with_no_units_gets_no_charge_line() -> None:
 
 
 def test_an_estimate_reserves_the_dearest_rate_a_prompt_token_could_attract() -> None:
-    pricing = _pricing(
-        cache_write_price_per_million=Decimal("37.5"),
-        cache_write_1h_price_per_million=Decimal("60"),
-    )
+    pricing = _pricing(cache_write_price_per_million=Decimal("37.5"))
 
     plain = estimate_metered_cost(pricing, estimated_input_tokens=1_000, estimated_output_tokens=0)
     five_minute = estimate_metered_cost(
@@ -309,7 +304,7 @@ def test_an_estimate_reserves_the_dearest_rate_a_prompt_token_could_attract() ->
 
     assert plain == Decimal("0.030000")
     assert five_minute == Decimal("0.037500")
-    assert one_hour == Decimal("0.060000")
+    assert one_hour == Decimal("0.037500")
 
 
 def test_an_estimate_never_prices_below_the_input_rate() -> None:

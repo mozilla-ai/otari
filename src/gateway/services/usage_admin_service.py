@@ -307,7 +307,6 @@ async def set_usage_price(
         output_price_per_million=request.output_price_per_million,
         cache_read_price_per_million=request.cache_read_price_per_million,
         cache_write_price_per_million=request.cache_write_price_per_million,
-        cache_write_1h_price_per_million=None,
         pricing_tiers=[],
     )
     conditions = _selection_conditions(request, workspace_ids=workspace_ids)

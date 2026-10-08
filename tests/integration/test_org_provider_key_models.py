@@ -501,7 +501,6 @@ async def test_replacing_a_rate_through_the_pricing_api_stops_a_refresh_moving_i
             output_price_per_million=4.0,
             cache_read_price_per_million=None,
             cache_write_price_per_million=None,
-            cache_write_1h_price_per_million=None,
             pricing_tiers=[],
             effective_from=seeded.effective_from,
             effective_to=None,

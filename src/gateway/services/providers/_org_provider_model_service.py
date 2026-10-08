@@ -96,7 +96,6 @@ _RATE_FIELDS = (
     "output_price_per_million",
     "cache_read_price_per_million",
     "cache_write_price_per_million",
-    "cache_write_1h_price_per_million",
 )
 
 
@@ -109,7 +108,6 @@ class _Price:
     output_price_per_million: float | None = None
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
-    cache_write_1h_price_per_million: float | None = None
     pricing_id: uuid.UUID | None = None
     unit: str = "tokens"
 
@@ -167,7 +165,6 @@ def _price_from(rate: EffectiveRate) -> _Price:
         output_price_per_million=float(rate.rates.output_price_per_million),
         cache_read_price_per_million=as_float(rate.rates.cache_read_price_per_million),
         cache_write_price_per_million=as_float(rate.rates.cache_write_price_per_million),
-        cache_write_1h_price_per_million=as_float(rate.rates.cache_write_1h_price_per_million),
         pricing_id=rate.row.id if rate.row is not None else None,
         unit=rate.rates.unit or "tokens",
     )
@@ -184,7 +181,6 @@ def _seeded_row(
         output_price_per_million=to_usd(float(default.output_price_per_million)),
         cache_read_price_per_million=to_usd_or_none(as_float(default.cache_read_price_per_million)),
         cache_write_price_per_million=to_usd_or_none(as_float(default.cache_write_price_per_million)),
-        cache_write_1h_price_per_million=to_usd_or_none(as_float(default.cache_write_1h_price_per_million)),
         pricing_tiers=list(default.pricing_tiers or []),
         unit=default.unit or "tokens",
         origin=SEED_ORIGIN,
@@ -204,7 +200,6 @@ def _apply_default(row: OrganizationModelPricing, default: ModelPricing) -> None
     row.output_price_per_million = to_usd(float(default.output_price_per_million))
     row.cache_read_price_per_million = to_usd_or_none(as_float(default.cache_read_price_per_million))
     row.cache_write_price_per_million = to_usd_or_none(as_float(default.cache_write_price_per_million))
-    row.cache_write_1h_price_per_million = to_usd_or_none(as_float(default.cache_write_1h_price_per_million))
     row.pricing_tiers = list(default.pricing_tiers or [])
 
 
@@ -227,7 +222,6 @@ def _model_public(row: OrgProviderKeyModel, price: _Price | None) -> OrgProvider
         output_price_per_million=price.output_price_per_million if price else None,
         cache_read_price_per_million=price.cache_read_price_per_million if price else None,
         cache_write_price_per_million=price.cache_write_price_per_million if price else None,
-        cache_write_1h_price_per_million=price.cache_write_1h_price_per_million if price else None,
         price_source=price.source if price else None,
         pricing_id=price.pricing_id if price else None,
         unit=price.unit if price else "tokens",

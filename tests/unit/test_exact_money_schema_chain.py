@@ -42,7 +42,6 @@ _RATE_COLUMNS = (
     "output_price_per_million",
     "cache_read_price_per_million",
     "cache_write_price_per_million",
-    "cache_write_1h_price_per_million",
 )
 _RATE_CHECKS = {
     "ck_organization_model_pricing_input_non_negative",
@@ -129,11 +128,9 @@ def _float_era_cost(rates: dict[str, Any], tiers: list[dict[str, Any]], **usage:
     completion = usage["output_tokens"]
     cache_read = usage.get("cache_read_tokens", 0)
     cache_write = usage.get("cache_write_tokens", 0)
-    cache_write_1h = min(usage.get("cache_write_1h_tokens", 0), cache_write)
     if included:
         cache_read = min(cache_read, prompt)
         cache_write = min(cache_write, prompt - cache_read)
-        cache_write_1h = min(cache_write_1h, cache_write)
         total_input = prompt
     else:
         total_input = prompt + cache_read + cache_write
@@ -148,9 +145,6 @@ def _float_era_cost(rates: dict[str, Any], tiers: list[dict[str, Any]], **usage:
 
     read_rate = effective["cache_read_price_per_million"]
     write_rate = effective["cache_write_price_per_million"]
-    write_1h_rate = effective["cache_write_1h_price_per_million"]
-    if write_1h_rate is None:
-        write_1h_rate = write_rate
 
     fresh = total_input
     cost = 0.0
@@ -158,11 +152,8 @@ def _float_era_cost(rates: dict[str, Any], tiers: list[dict[str, Any]], **usage:
         fresh -= cache_read
         cost += cache_read * read_rate / 1_000_000
     if write_rate is not None:
-        fresh -= cache_write - cache_write_1h
-        cost += (cache_write - cache_write_1h) * write_rate / 1_000_000
-    if write_1h_rate is not None:
-        fresh -= cache_write_1h
-        cost += cache_write_1h * write_1h_rate / 1_000_000
+        fresh -= cache_write
+        cost += cache_write * write_rate / 1_000_000
     cost += fresh * effective["input_price_per_million"] / 1_000_000
     cost += completion * effective["output_price_per_million"] / 1_000_000
     return float(cost)
@@ -205,10 +196,10 @@ def _seed_float_rows(engine: Engine) -> list[tuple[str, dict[str, Any]]]:
                 text(
                     "INSERT INTO model_pricing (model_key, effective_at, input_price_per_million, "
                     "output_price_per_million, cache_read_price_per_million, cache_write_price_per_million, "
-                    "cache_write_1h_price_per_million, pricing_tiers, created_at, updated_at) "
+                    "pricing_tiers, created_at, updated_at) "
                     "VALUES (:model_key, :now, :input_price_per_million, :output_price_per_million, "
                     ":cache_read_price_per_million, :cache_write_price_per_million, "
-                    ":cache_write_1h_price_per_million, '[]', :now, :now)"
+                    "'[]', :now, :now)"
                 ),
                 {
                     "model_key": model_key,

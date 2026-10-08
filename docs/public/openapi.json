@@ -9358,17 +9358,6 @@
             ],
             "title": "Cache Read Price Per Million"
           },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cache Write 1H Price Per Million"
-          },
           "cache_write_price_per_million": {
             "anyOf": [
               {
@@ -10024,17 +10013,6 @@
               }
             ],
             "title": "Cache Read Price Per Million"
-          },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cache Write 1H Price Per Million"
           },
           "cache_write_price_per_million": {
             "anyOf": [
@@ -11847,19 +11825,6 @@
             "description": "Price per 1M cached-input tokens",
             "title": "Cache Read Price Per Million"
           },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Price per 1M Anthropic 1-hour cache-write tokens",
-            "title": "Cache Write 1H Price Per Million"
-          },
           "cache_write_price_per_million": {
             "anyOf": [
               {
@@ -11968,17 +11933,6 @@
             ],
             "title": "Cache Read Price Per Million"
           },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cache Write 1H Price Per Million"
-          },
           "cache_write_price_per_million": {
             "anyOf": [
               {
@@ -12059,7 +12013,6 @@
           "output_price_per_million",
           "cache_read_price_per_million",
           "cache_write_price_per_million",
-          "cache_write_1h_price_per_million",
           "pricing_tiers",
           "unit",
           "effective_from",
@@ -12085,19 +12038,6 @@
             ],
             "description": "Price per 1M cached-input tokens",
             "title": "Cache Read Price Per Million"
-          },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Price per 1M Anthropic 1-hour cache-write tokens",
-            "title": "Cache Write 1H Price Per Million"
           },
           "cache_write_price_per_million": {
             "anyOf": [
@@ -13816,17 +13756,6 @@
             ],
             "title": "Cache Read Price Per Million"
           },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cache Write 1H Price Per Million"
-          },
           "cache_write_price_per_million": {
             "anyOf": [
               {
@@ -13894,7 +13823,6 @@
           "output_price_per_million",
           "cache_read_price_per_million",
           "cache_write_price_per_million",
-          "cache_write_1h_price_per_million",
           "pricing_tiers",
           "unit",
           "origin",
@@ -13918,18 +13846,6 @@
               }
             ],
             "title": "Cache Read Price Per Million"
-          },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cache Write 1H Price Per Million"
           },
           "cache_write_price_per_million": {
             "anyOf": [
@@ -17172,19 +17088,6 @@
             ],
             "description": "Price per 1M cached-input tokens",
             "title": "Cache Read Price Per Million"
-          },
-          "cache_write_1h_price_per_million": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Price per 1M Anthropic 1-hour cache-write tokens",
-            "title": "Cache Write 1H Price Per Million"
           },
           "cache_write_price_per_million": {
             "anyOf": [

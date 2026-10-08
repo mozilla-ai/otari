@@ -41,7 +41,6 @@ export interface PricingOverrideDraft {
   output_price_per_million: number
   cache_read_price_per_million: number | null
   cache_write_price_per_million: number | null
-  cache_write_1h_price_per_million: number | null
   effective_from: string | null
   effective_to: string | null
   unit: PricingUnit
@@ -175,7 +174,6 @@ export function PricingOverrideDialog({
     output: rateToInput(editing?.output_price_per_million),
     cacheRead: rateToInput(editing?.cache_read_price_per_million),
     cacheWrite: rateToInput(editing?.cache_write_price_per_million),
-    cacheWrite1h: rateToInput(editing?.cache_write_1h_price_per_million),
     from: toLocalInput(editing?.effective_from),
     to: toLocalInput(editing?.effective_to),
   }
@@ -189,7 +187,6 @@ export function PricingOverrideDialog({
   const [output, setOutput] = useState(seed.output)
   const [cacheRead, setCacheRead] = useState(seed.cacheRead)
   const [cacheWrite, setCacheWrite] = useState(seed.cacheWrite)
-  const [cacheWrite1h, setCacheWrite1h] = useState(seed.cacheWrite1h)
   const [from, setFrom] = useState(seed.from)
   const [to, setTo] = useState(seed.to)
   // One predicate naming every field, so what "unsaved" means cannot drift
@@ -201,7 +198,6 @@ export function PricingOverrideDialog({
     output,
     cacheRead,
     cacheWrite,
-    cacheWrite1h,
     from,
     to,
   })
@@ -210,7 +206,6 @@ export function PricingOverrideDialog({
   const outputRate = parseRate(output)
   const cacheReadRate = parseRate(cacheRead)
   const cacheWriteRate = parseRate(cacheWrite)
-  const cacheWrite1hRate = parseRate(cacheWrite1h)
 
   const keyInvalid = !isValidModelKey(modelKey)
   // Judged on the key the request would carry: the one being typed on the add
@@ -243,8 +238,7 @@ export function PricingOverrideDialog({
       (outputRate === undefined ||
         Number.isNaN(outputRate) ||
         Number.isNaN(cacheReadRate ?? 0) ||
-        Number.isNaN(cacheWriteRate ?? 0) ||
-        Number.isNaN(cacheWrite1hRate ?? 0)))
+        Number.isNaN(cacheWriteRate ?? 0)))
 
   // A replacement states the whole row, so the endpoint requires a start: an
   // omitted one would otherwise be defaulted to now and move a stored period.
@@ -308,9 +302,6 @@ export function PricingOverrideDialog({
       cache_write_price_per_million: Number.isNaN(cacheWriteRate ?? 0)
         ? null
         : (cacheWriteRate ?? null),
-      cache_write_1h_price_per_million: Number.isNaN(cacheWrite1hRate ?? 0)
-        ? null
-        : (cacheWrite1hRate ?? null),
       effective_from: fromLocalInput(from),
       effective_to: fromLocalInput(to),
       unit,
@@ -396,12 +387,6 @@ export function PricingOverrideDialog({
             value={cacheWrite}
             onChange={setCacheWrite}
             description="Leave blank to price cache writes as fresh input."
-          />
-          <RateField
-            label="Cache write, 1 hour TTL"
-            value={cacheWrite1h}
-            onChange={setCacheWrite1h}
-            description="Anthropic's longer cache TTL. Blank falls back to the ordinary cache-write rate."
           />
         </div>
       ) : (

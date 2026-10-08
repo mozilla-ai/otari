@@ -302,9 +302,8 @@ def test_context_pricing_tier_is_a_whole_request_cliff() -> None:
     assert cost == _usd(150_000, "60.0") + _usd(1_000, "120.0") + _usd(100_000, "10.0")
 
 
-def test_anthropic_1h_cache_write_uses_its_own_rate() -> None:
+def test_anthropic_1h_cache_write_bills_at_the_cache_write_rate() -> None:
     pricing = _pricing(cache_write_price_per_million=3.75)
-    pricing.cache_write_1h_price_per_million = Decimal("6")
     usage = GatewayUsage(
         prompt_tokens=1_000,
         completion_tokens=0,
@@ -316,13 +315,11 @@ def test_anthropic_1h_cache_write_uses_its_own_rate() -> None:
 
     cost = _compute_cost(pricing, usage)
 
-    assert cost == _usd(1_000, "30.0") + _usd(200, "3.75") + _usd(100, "6.0")
+    assert cost == _usd(1_000, "30.0") + _usd(300, "3.75")
 
 
-def test_anthropic_1h_cache_write_allows_a_free_rate() -> None:
-    """A configured $0 1-hour rate must not fall back to the 5-minute rate."""
-    pricing = _pricing(cache_write_price_per_million=3.75)
-    pricing.cache_write_1h_price_per_million = Decimal(0)
+def test_anthropic_1h_cache_write_follows_a_free_cache_write_rate() -> None:
+    pricing = _pricing(cache_write_price_per_million=0)
     usage = GatewayUsage(
         prompt_tokens=1_000,
         completion_tokens=0,
