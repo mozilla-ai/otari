@@ -50,6 +50,7 @@ from gateway.models.routing import RoutingConfig
 from gateway.services import catalog as selectors
 
 from .conftest import build_test_client
+from .test_scoped_budgets import _a_budget_id, _a_workspace_id
 
 HEADERS = {API_KEY_HEADER: "Bearer test-master-key"}
 
@@ -122,6 +123,11 @@ def routing_config(postgres_url: str) -> GatewayConfig:
                     "fast": {
                         "select": [{"default": "openai:gpt-5-mini"}],
                         "on_failure": ["anthropic:claude-haiku-4-5"],
+                    },
+                    # A fallback on another provider, then one back on the head's provider.
+                    "fast_three": {
+                        "select": [{"default": "openai:gpt-5-mini"}],
+                        "on_failure": ["anthropic:claude-haiku-4-5", "openai:gpt-5-nano"],
                     },
                     # A one-candidate policy: the alias-equivalent shape.
                     "solo": {"select": [{"default": "openai:gpt-5-mini"}]},
@@ -1790,3 +1796,86 @@ def test_a_catalog_id_reaches_the_offering_a_key_may_use(catalog_client: TestCli
     assert resp.status_code == 200, resp.text
     assert _awaited_model(mock) == "anthropic:m1-b"
     assert [(r["model"], r["selection_reason"]) for r in _usage_rows(catalog_client)] == [("m1-b", "catalog")]
+
+
+def _cap_anthropic_spend(client: TestClient) -> None:
+    """Price the anthropic fallback, and give a workspace budget narrowed to anthropic no room for it."""
+    priced = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "anthropic:claude-haiku-4-5",
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 5.0,
+        },
+        headers=HEADERS,
+    )
+    assert priced.status_code == 200, priced.text
+    created = client.post(
+        f"{API_ROOT}/scoped-budgets",
+        json={
+            "scope_type": "workspace",
+            "scope_id": _a_workspace_id(client, HEADERS),
+            "provider_key_id": "anthropic",
+            "budget_id": _a_budget_id(client, HEADERS, max_budget=0.000001),
+        },
+        headers=HEADERS,
+    )
+    assert created.status_code == 200, created.text
+
+
+def test_a_failure_before_a_skipped_last_fallback_is_logged_once(client: TestClient) -> None:
+    """The head's failure is not absorbed by a fallback that was never sent the request."""
+    _create_user(client)
+    _cap_anthropic_spend(client)
+
+    async def flaky(**kwargs: Any) -> ChatCompletion:
+        if kwargs["model"] == "openai:gpt-5-mini":
+            raise _http_error(503)
+        return _completion("claude-haiku-4-5")
+
+    with patch("gateway.api.routes.chat.acompletion", new=flaky):
+        resp = _chat(client, "fast")
+
+    assert resp.status_code == 502, resp.text
+    head_rows = [r for r in _usage_rows(client) if r["model"] == "gpt-5-mini"]
+    assert [r["status"] for r in head_rows] == ["error"]
+
+
+def test_a_fallback_is_skipped_when_its_providers_cap_is_full(client: TestClient) -> None:
+    """A cap narrowed to the fallback's provider binds the fallback, though the head's provider has none."""
+    _create_user(client)
+    priced = client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "anthropic:claude-haiku-4-5",
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 5.0,
+        },
+        headers=HEADERS,
+    )
+    assert priced.status_code == 200, priced.text
+    created = client.post(
+        f"{API_ROOT}/scoped-budgets",
+        json={
+            "scope_type": "workspace",
+            "scope_id": _a_workspace_id(client, HEADERS),
+            "provider_key_id": "anthropic",
+            "budget_id": _a_budget_id(client, HEADERS, max_budget=0.000001),
+        },
+        headers=HEADERS,
+    )
+    assert created.status_code == 200, created.text
+    calls: list[str] = []
+
+    async def flaky(**kwargs: Any) -> ChatCompletion:
+        calls.append(kwargs["model"])
+        if kwargs["model"] == "openai:gpt-5-mini":
+            raise _http_error(503)
+        return _completion("gpt-5-nano")
+
+    with patch("gateway.api.routes.chat.acompletion", new=flaky):
+        resp = _chat(client, "fast_three")
+
+    assert resp.status_code == 200, resp.text
+    assert calls == ["openai:gpt-5-mini", "openai:gpt-5-nano"]
+    assert [r["model"] for r in _usage_rows(client) if r["status"] == "success"] == ["gpt-5-nano"]

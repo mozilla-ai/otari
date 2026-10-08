@@ -26,6 +26,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import gateway.api.routes._pipeline as pipeline
+from gateway.api.routes._attempts import CandidateCannotServe
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import BUDGET_EXCEEDED, error_headers
 from gateway.services import pricing_service
@@ -233,3 +234,76 @@ async def test_no_estimate_inputs_means_nothing_to_reprice(increases: list[Decim
     ctx.estimate_inputs = None
     await pipeline.top_up_reservation_for_attempt(ctx, _attempt(2, "anthropic", "pricey"))
     assert increases == []
+
+
+@pytest.fixture
+def moves(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, Decimal | None]]:
+    """Record the provider each reservation is moved to, and the estimate it is moved at."""
+    recorded: list[tuple[str, Decimal | None]] = []
+
+    async def fake_move(
+        _db: Any, _handle: Any, provider_instance: str, *, estimate: Decimal | None, **_kwargs: Any
+    ) -> None:
+        recorded.append((provider_instance, estimate))
+
+    monkeypatch.setattr(pipeline, "move_reservation_to_provider", fake_move)
+    return recorded
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_is_moved_to_its_provider_at_its_own_estimate(
+    increases: list[Decimal], moves: list[tuple[str, Decimal | None]]
+) -> None:
+    await pipeline.move_reservation_for_attempt(_ctx(estimate=Decimal(5)), _attempt(2, "anthropic", "pricey"))
+
+    assert moves == [("anthropic", Decimal(9))]
+    assert increases == []
+
+
+@pytest.mark.asyncio
+async def test_only_a_fallback_is_moved_when_the_walk_admits_it(
+    increases: list[Decimal], moves: list[tuple[str, Decimal | None]]
+) -> None:
+    ctx = _ctx(estimate=Decimal(5))
+    ctx.rate_limit_grant = None
+    admit = pipeline._candidate_admission(ctx)
+
+    await admit(_attempt(1, "openai", "cheap"))
+    await admit(_attempt(2, "anthropic", "pricey"))
+
+    assert [provider for provider, _estimate in moves] == ["anthropic"]
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_whose_providers_cap_is_full_is_skipped(
+    increases: list[Decimal], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A full cap on the fallback's provider says nothing about the next candidate, so the walk moves on."""
+    refusal = HTTPException(status_code=403, detail="Workspace budget has exceeded its limit")
+
+    async def refuse(_db: Any, _handle: Any, _provider_instance: str, **_kwargs: Any) -> None:
+        raise refusal
+
+    monkeypatch.setattr(pipeline, "move_reservation_to_provider", refuse)
+
+    with pytest.raises(CandidateCannotServe) as exc_info:
+        await pipeline.move_reservation_for_attempt(_ctx(estimate=Decimal(5)), _attempt(2, "anthropic", "pricey"))
+
+    assert exc_info.value.refusal is refusal
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_move_that_fails_for_another_reason_is_not_skipped(
+    increases: list[Decimal], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    failure = HTTPException(status_code=404, detail="User not found")
+
+    async def fail(_db: Any, _handle: Any, _provider_instance: str, **_kwargs: Any) -> None:
+        raise failure
+
+    monkeypatch.setattr(pipeline, "move_reservation_to_provider", fail)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await pipeline.move_reservation_for_attempt(_ctx(estimate=Decimal(5)), _attempt(2, "anthropic", "pricey"))
+
+    assert exc_info.value is failure
