@@ -1,6 +1,7 @@
 """Preview and apply explicit updates to the models.dev price snapshot."""
 
 import asyncio
+import hashlib
 import json
 import uuid
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ from gateway.services.pricing import (
     PriceGeneration,
     add_accepted_generation,
     current_index,
+    invalid_rate_count,
     reset_generations,
     set_accepted_generations,
     trim_catalog,
@@ -28,6 +30,10 @@ from gateway.services.pricing import (
 from gateway.services.pricing_service import normalize_effective_at, reset_price_cache
 
 _PREVIEW_CHANGE_LIMIT = 100
+# A candidate that loses more than this share of the active priced models, or
+# removes more than this share of them, is held for a person even under ``auto``.
+MAX_PRICED_MODELS_DROP_FRACTION = 0.10
+MAX_REMOVED_MODELS_FRACTION = 0.10
 MODELS_DEV_SOURCE = "models.dev"
 MODELS_DEV_PENDING_SOURCE = "models.dev-pending"
 # Not a snapshot: the row every worker's poller claims a tick on. It lives in the
@@ -84,6 +90,9 @@ class PricingRefreshPreview:
     removed_count: int
     changes: list[PricingRefreshChange]
     changes_truncated: bool
+    digest: str = ""
+    needs_review: bool = False
+    review_reason: str | None = None
 
 
 def _snapshot_prices(index: ModelsDevPriceIndex) -> dict[str, tuple[object, ...]]:
@@ -94,8 +103,25 @@ def _snapshot_prices(index: ModelsDevPriceIndex) -> dict[str, tuple[object, ...]
     }
 
 
+def _review_reason(active_count: int, latest_count: int, removed_count: int) -> str | None:
+    """Why a candidate must not be applied without a person, or ``None``."""
+    if active_count == 0:
+        return None
+    reasons: list[str] = []
+    if (active_count - latest_count) / active_count > MAX_PRICED_MODELS_DROP_FRACTION:
+        reasons.append(f"priced models fall from {active_count} to {latest_count}")
+    if removed_count / active_count > MAX_REMOVED_MODELS_FRACTION:
+        reasons.append(f"{removed_count} of {active_count} priced models are removed")
+    return "; ".join(reasons) or None
+
+
+def snapshot_digest(raw_snapshot: str) -> str:
+    """The identity of a stored snapshot, for binding a confirm to what was previewed."""
+    return hashlib.sha256(raw_snapshot.encode("utf-8")).hexdigest()
+
+
 def _build_preview(
-    current: ModelsDevPriceIndex, latest: ModelsDevPriceIndex, fetched_at: datetime
+    current: ModelsDevPriceIndex, latest: ModelsDevPriceIndex, fetched_at: datetime, raw_snapshot: str
 ) -> PricingRefreshPreview:
     """Compare the priced models of two snapshots."""
 
@@ -122,6 +148,7 @@ def _build_preview(
         if len(changes) < _PREVIEW_CHANGE_LIMIT:
             changes.append(PricingRefreshChange(model_key=model_key, change=change))
 
+    reason = _review_reason(len(current_prices), len(latest_prices), removed_count)
     return PricingRefreshPreview(
         fetched_at=fetched_at,
         added_count=added_count,
@@ -129,12 +156,21 @@ def _build_preview(
         removed_count=removed_count,
         changes=changes,
         changes_truncated=(added_count + changed_count + removed_count) > len(changes),
+        digest=snapshot_digest(raw_snapshot),
+        needs_review=reason is not None,
+        review_reason=reason,
     )
 
 
 def _prepare_document(document: dict[str, object]) -> _PendingSnapshot:
-    raw_snapshot = json.dumps(trim_catalog(document), separators=(",", ":"), ensure_ascii=False)
-    return _PendingSnapshot(index=_parse_snapshot(raw_snapshot), raw_snapshot=raw_snapshot)
+    trimmed = trim_catalog(document)
+    if (invalid := invalid_rate_count(trimmed)) > 0:
+        raise PricingRefreshError(f"The models.dev data carries {invalid} implausible rates")
+    raw_snapshot = json.dumps(trimmed, separators=(",", ":"), ensure_ascii=False)
+    index = _parse_snapshot(raw_snapshot)
+    if not any(entry.priced for entry in index.entries()):
+        raise PricingRefreshError("The models.dev data prices no models")
+    return _PendingSnapshot(index=index, raw_snapshot=raw_snapshot)
 
 
 async def _fetch_latest_snapshot(config: GatewayConfig | None, reuse_within: float) -> _PendingSnapshot:
@@ -157,11 +193,14 @@ async def prepare_price_refresh(
 
     try:
         latest = await _fetch_latest_snapshot(config, reuse_within)
+    except PricingRefreshError:
+        logger.warning("Refusing the fetched models.dev data as implausible", exc_info=True)
+        raise
     except Exception as exc:
         raise PricingRefreshError("Unable to fetch the latest models.dev data") from exc
 
     fetched_at = datetime.now(UTC)
-    preview = _build_preview(current_index(), latest.index, fetched_at)
+    preview = _build_preview(current_index(), latest.index, fetched_at, latest.raw_snapshot)
     pending_row = await session.get(PricingSnapshot, MODELS_DEV_PENDING_SOURCE)
     if pending_row is None:
         session.add(PricingSnapshot(source=MODELS_DEV_PENDING_SOURCE, snapshot=latest.raw_snapshot))
@@ -247,7 +286,7 @@ async def preview_pending_refresh(session: AsyncSession) -> PricingRefreshPrevie
     except ValueError as exc:
         raise PricingRefreshError("The pending models.dev data is invalid") from exc
     fetched_at = normalize_effective_at(pending_row.updated_at)
-    return _build_preview(current_index(), latest, fetched_at)
+    return _build_preview(current_index(), latest, fetched_at, pending_row.snapshot)
 
 
 @dataclass(frozen=True)
@@ -323,6 +362,9 @@ async def poll_price_updates(session: AsyncSession, policy: str, config: Gateway
     if preview.added_count + preview.changed_count + preview.removed_count == 0:
         await reject_price_refresh(session)
         return "unchanged"
+    if policy == "auto" and preview.needs_review:
+        logger.warning("Leaving the models.dev price update pending for review: %s", preview.review_reason)
+        return "pending"
     if policy == "auto":
         await confirm_price_refresh(session, accepted_by="schedule")
         return "applied"

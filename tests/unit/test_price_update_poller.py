@@ -11,7 +11,7 @@ from gateway.core.config import GatewayConfig
 from gateway.services.pricing_refresh_service import PricingRefreshPreview
 
 
-def _preview(changed: int) -> PricingRefreshPreview:
+def _preview(changed: int, *, needs_review: bool = False) -> PricingRefreshPreview:
     return PricingRefreshPreview(
         fetched_at=datetime.now(UTC),
         added_count=0,
@@ -19,6 +19,8 @@ def _preview(changed: int) -> PricingRefreshPreview:
         removed_count=0,
         changes=[],
         changes_truncated=False,
+        needs_review=needs_review,
+        review_reason="priced models fall from 10 to 1" if needs_review else None,
     )
 
 
@@ -51,6 +53,17 @@ async def test_auto_applies_an_update_and_says_who_did(stubs: dict[str, AsyncMoc
     assert await refresh.poll_price_updates(session, "auto") == "applied"
 
     stubs["confirm"].assert_awaited_once_with(session, accepted_by="schedule")
+
+
+@pytest.mark.asyncio
+async def test_auto_leaves_an_implausible_update_pending(stubs: dict[str, AsyncMock]) -> None:
+    stubs["prepare"].return_value = _preview(changed=2, needs_review=True)
+    session = AsyncMock(spec=AsyncSession)
+
+    assert await refresh.poll_price_updates(session, "auto") == "pending"
+
+    stubs["confirm"].assert_not_awaited()
+    stubs["reject"].assert_not_awaited()
 
 
 @pytest.mark.asyncio
