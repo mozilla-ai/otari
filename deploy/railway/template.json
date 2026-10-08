@@ -42,7 +42,7 @@
         "OTARI_DEFAULT_PRICING": {
           "defaultValue": "true",
           "isOptional": false,
-          "description": "Fall back to community-maintained default pricing (the bundled models.dev snapshot) for models you have not priced explicitly. The image default is false; pre-set to true here so a fresh deploy meters common models out of the box. Prices you set in the dashboard or via /api/v1/pricing always override the fallback."
+          "description": "Fall back to community-maintained default pricing (the bundled genai-prices dataset) for models you have not priced explicitly. The image default is false; pre-set to true here so a fresh deploy meters common models out of the box. Prices you set in the dashboard or via /api/v1/pricing always override the fallback."
         },
         "OTARI_SECRET_KEY": {
           "defaultValue": "${{secret(43, \"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_\")}}=",
