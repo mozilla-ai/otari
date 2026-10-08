@@ -13,6 +13,7 @@ import type {
 import { CONTROL_LANE } from "@/design-system/layout/SettingRow"
 import { ToolsGuardrailsPage } from "@/features/tools/ToolsGuardrailsPage"
 import { API_ROOT } from "@/shared/api/client"
+import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
@@ -245,7 +246,10 @@ function mockApi(opts: MockOpts = {}) {
 const named = (label: string, key: string) => `${label} ${key}`
 const WEB_SEARCH_URL = named("Backend URL", "web_search_url")
 const ENGINES = named("Engines", "web_search_engines")
-const MAX_RESULTS = named("Max results", "web_search_max_results")
+const MAX_RESULTS = named(
+  "Default max results (all workspaces)",
+  "web_search_max_results",
+)
 const EXTRACT = named("Extract page content", "web_search_extract")
 const INTERCEPT = named("Intercept provider web search", "web_search_intercept")
 const SANDBOX_URL = named("Sandbox URL", "sandbox_url")
@@ -294,7 +298,9 @@ describe("ToolsGuardrailsPage", () => {
     // The combined page names the service in each group heading, since three
     // groups called "Backend" would not say which one they configure.
     expect(
-      await screen.findByRole("heading", { name: "Web search · Backend" }),
+      await screen.findByRole("heading", {
+        name: "Web search · Search backend",
+      }),
     ).toBeInTheDocument()
     expect(
       screen.getByRole("heading", { name: "Code execution · Sandbox" }),
@@ -553,8 +559,9 @@ describe("ToolsGuardrailsPage", () => {
   it("sends web_search_extract=false when the tri-state select is set to Off", async () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
-    renderWithClient(<ToolsGuardrailsPage />)
+    renderWithClient(<ToolsGuardrailsPage only="web_search" />)
     await screen.findByLabelText(WEB_SEARCH_URL)
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
 
     await pickOption(user, EXTRACT, "Off")
 
@@ -566,8 +573,9 @@ describe("ToolsGuardrailsPage", () => {
   it("saves web_search_intercept from the tri-state select", async () => {
     const fetchMock = mockApi()
     const user = userEvent.setup()
-    renderWithClient(<ToolsGuardrailsPage />)
+    renderWithClient(<ToolsGuardrailsPage only="web_search" />)
     await screen.findByLabelText(WEB_SEARCH_URL)
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
 
     await pickOption(user, INTERCEPT, "On")
 
@@ -628,8 +636,9 @@ describe("ToolsGuardrailsPage", () => {
       patchDetail: "web_search_extract must be a boolean.",
     })
     const user = userEvent.setup()
-    renderWithClient(<ToolsGuardrailsPage />)
+    renderWithClient(<ToolsGuardrailsPage only="web_search" />)
     await screen.findByLabelText(WEB_SEARCH_URL)
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
 
     await pickOption(user, EXTRACT, "Off")
 
@@ -661,6 +670,24 @@ describe("ToolsGuardrailsPage", () => {
     expect(
       await screen.findByLabelText("web_search_timeout_s"),
     ).toBeInTheDocument()
+  })
+
+  it("folds the search backend's tuning under Advanced and leaves the purpose hint to the API", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    renderWithClient(<ToolsGuardrailsPage only="web_search" />)
+    await screen.findByLabelText(WEB_SEARCH_URL)
+
+    expect(screen.getByRole("button", { name: "Advanced" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    )
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    expect(screen.getByLabelText(ENGINES)).toBeInTheDocument()
+    expect(screen.getByLabelText(MAX_RESULTS)).toBeInTheDocument()
+    expect(
+      screen.queryByText("web_search_purpose_hint"),
+    ).not.toBeInTheDocument()
   })
 
   it("lays every row out with the label left and the control in a shared lane", async () => {
@@ -853,6 +880,33 @@ describe("ToolsGuardrailsPage tool status", () => {
     })
   })
 
+  it("locks the workspace switch when neither web tool can run here", async () => {
+    mockApi({
+      tools: {
+        object: "list",
+        data: TOOLS.data.map((tool) => ({ ...tool, available: false })),
+      },
+      context: organizationContext({
+        workspace_memberships: [
+          {
+            workspace_id: "11111111-1111-1111-1111-111111111111",
+            name: "Alpha",
+            role: "admin",
+          },
+        ],
+      }),
+    })
+    renderWithClient(
+      <SelectedWorkspaceProvider>
+        <ToolsGuardrailsPage only="web_search" />
+      </SelectedWorkspaceProvider>,
+    )
+
+    expect(
+      await screen.findByText(/Neither tool can run on this deployment/),
+    ).toBeInTheDocument()
+  })
+
   it("keeps the editable settings usable when /api/v1/tools fails", async () => {
     // The status row is reference material; a failed discovery fetch must not
     // take the settings form down with it.
@@ -949,7 +1003,7 @@ describe("ToolsGuardrailsPage by caller role", () => {
     )
   })
 
-  it("renders a non-operator's tool settings as values rather than controls", async () => {
+  it("shows a non-operator none of the deployment's web-search settings", async () => {
     mockApi({
       settings: TENANT_RESPONSE,
       context: organizationContext({
@@ -957,19 +1011,17 @@ describe("ToolsGuardrailsPage by caller role", () => {
         role: "member",
       }),
     })
-    renderWithClient(<ToolsGuardrailsPage />)
+    renderWithClient(<ToolsGuardrailsPage only="web_search" />)
 
-    // The field is shown, so a member is told what the tools do to their
-    // requests, and it is text: there is no control to press.
+    // The tools and the workspace answer are what a member acts on; the
+    // backend, its tuning and its per-call rate are the operator's.
     expect(
-      await screen.findByText("web_search_max_results"),
+      await screen.findByRole("button", { name: /otari_web_search/ }),
     ).toBeInTheDocument()
-    expect(screen.queryByLabelText(MAX_RESULTS)).not.toBeInTheDocument()
-    // The service endpoints never arrive, so nothing renders them either.
-    expect(screen.queryByText("web_search_url")).not.toBeInTheDocument()
-    expect(screen.queryByText("guardrails_url")).not.toBeInTheDocument()
-    // Nor the per-call rate: /api/v1/pricing is still operator-only, so this row
-    // would show a member an editable "unpriced" field that only fails on save.
+    expect(
+      screen.queryByRole("heading", { name: "Search backend" }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText("web_search_max_results")).not.toBeInTheDocument()
     expect(screen.queryByText("Price per call")).not.toBeInTheDocument()
   })
 
@@ -1061,6 +1113,22 @@ describe("ToolsGuardrailsPage by caller role", () => {
 
     const card = await screen.findByRole("button", { name: /otari_web_search/ })
     expect(card).not.toHaveTextContent(/available/i)
+  })
+
+  it("leaves the control plane's own search backend and search tools off a hosted page, even for an operator", async () => {
+    // Searches run on the data plane, and a hosted control plane serves no
+    // /api/v1/search for the search tools to configure.
+    mockApi()
+    renderWithClient(<ToolsGuardrailsPage only="web_search" />, {
+      ...WITHOUT_ORGANIZATION_GUARDRAILS,
+      deployment_type: "hosted",
+    })
+
+    await screen.findByRole("button", { name: /otari_web_search/ })
+    expect(screen.queryByLabelText(WEB_SEARCH_URL)).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("heading", { name: "Search tools" }),
+    ).not.toBeInTheDocument()
   })
 
   it("shows a non-operator no deployment sandbox settings at all", async () => {

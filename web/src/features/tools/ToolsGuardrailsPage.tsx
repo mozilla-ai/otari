@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router"
-import { Fragment, type ReactNode, useState } from "react"
+import { Fragment } from "react"
 import type {
   ToolServiceName,
   ToolSettingField,
@@ -10,7 +10,7 @@ import { Skeleton } from "@/design-system/feedback/Skeleton"
 import { PageIntro } from "@/design-system/layout/PageIntro"
 import { CONTROL_LANE, SettingRow } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
-import { DisclosureRow } from "@/design-system/navigation/DisclosureRow"
+import { AdvancedRows } from "@/features/tools/AdvancedRows"
 import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
 import type { FieldCopy } from "@/features/tools/ToolSettingRows"
 import { ToolPriceRow, ToolSettingRow } from "@/features/tools/ToolSettingRows"
@@ -51,7 +51,7 @@ function oneField(
 const FIELD_COPY: Record<string, FieldCopy & { defaultLabel?: string }> = {
   web_search_url: {
     label: "Backend URL",
-    help: "While unset, otari_web_search requests are rejected with 400.",
+    help: "A SearXNG-compatible service. Not needed when web_search_provider names Tavily or Brave; otherwise, while unset, otari_web_search requests are rejected with 400.",
     placeholder: "http://searxng:8080",
     isMachineReadable: true,
   },
@@ -62,7 +62,7 @@ const FIELD_COPY: Record<string, FieldCopy & { defaultLabel?: string }> = {
     isMachineReadable: true,
   },
   web_search_max_results: {
-    label: "Max results",
+    label: "Default max results (all workspaces)",
     help: "Cap on hits per call. A per-tool max_results still overrides it.",
     placeholder: "10",
   },
@@ -77,11 +77,6 @@ const FIELD_COPY: Record<string, FieldCopy & { defaultLabel?: string }> = {
     help: "Run a bare web_search declaration here instead of at the provider. Needs a backend URL.",
     placeholder: "",
     defaultLabel: "Default (off)",
-  },
-  web_search_purpose_hint: {
-    label: "Purpose hint",
-    help: "Sent to the backend when a tool entry has none of its own.",
-    placeholder: "Answer from official docs",
   },
   sandbox_url: {
     label: "Sandbox URL",
@@ -179,20 +174,25 @@ interface ServiceSpec {
   groups: GroupSpec[]
   /** Keys the backend reports that this page deliberately leaves to the API. */
   omit?: string[]
+  /**
+   * Run by the data plane, so a hosted control plane's own settings for it run
+   * nothing: the platform's do.
+   */
+  isDataPlane?: boolean
 }
 
 const SERVICES: ServiceSpec[] = [
   {
     key: "web_search",
     label: "Web search",
-    intro:
-      "Give models live Search and Fetch tools and decide which workspaces may use them. Changes apply immediately.",
+    intro: "Live web search and page reading while models work on a request.",
     docsAnchor: "web-search",
     managedTools: [
       {
         toolId: "otari_web_search",
         pricingKey: "otari:web_search",
         urlBacked: true,
+        help: "Lets the model search the web for current information.",
       },
       {
         toolId: "otari_web_fetch",
@@ -205,34 +205,29 @@ const SERVICES: ServiceSpec[] = [
         unavailableHelp:
           "Fetch is off on this gateway. Set OTARI_WEB_FETCH_ENABLED=true (or web_fetch_enabled in config.yml) and restart.",
         docsAnchor: "web-fetch",
+        help: "Lets the model read a web page by its URL.",
       },
     ],
     groups: [
       {
-        title: "Backend",
+        title: "Search backend",
         blurb:
-          "Search uses a SearXNG-shaped service at the URL below or a licensed API. Fetch uses the gateway's bounded retrieval service and needs no separate backend.",
+          "What runs the model's searches, for every workspace. Fetch needs no backend.",
         docsAnchor: "web-search",
-        keys: [
-          "web_search_url",
+        keys: ["web_search_url"],
+        advanced: [
           "web_search_engines",
           "web_search_max_results",
-        ],
-        isPriced: true,
-      },
-      {
-        title: "Behavior",
-        blurb:
-          "How a search runs once the backend answers. Each default applies unless a request says otherwise.",
-        docsAnchor: "web-search-interception",
-        keys: [
           "web_search_extract",
           "web_search_intercept",
-          "web_search_purpose_hint",
         ],
+        isPriced: true,
         catchAll: true,
+        isOperatorOnly: true,
       },
     ],
+    omit: ["web_search_purpose_hint"],
+    isDataPlane: true,
   },
   {
     key: "sandbox",
@@ -264,6 +259,7 @@ const SERVICES: ServiceSpec[] = [
       },
     ],
     omit: ["sandbox_purpose_hint"],
+    isDataPlane: true,
   },
   {
     key: "guardrails",
@@ -285,22 +281,6 @@ const SERVICES: ServiceSpec[] = [
 ]
 
 const toolsDocs = (anchor?: string) => docsSourceHref("tools.md", anchor)
-
-/** Rows most operators never touch, folded under one row at the end of a group. */
-function AdvancedRows({ children }: { children: ReactNode }) {
-  const [isOpen, setIsOpen] = useState(false)
-  return (
-    <DisclosureRow
-      label="Advanced"
-      isOpen={isOpen}
-      onToggle={() => setIsOpen((open) => !open)}
-    >
-      <div className="flex flex-col divide-y divide-border-subtle">
-        {children}
-      </div>
-    </DisclosureRow>
-  )
-}
 
 /** Which sandbox runs the code. Chosen at startup, so it is stated, not edited. */
 function SandboxProviderRow({ provider }: { provider: "protocol" | "e2b" }) {
@@ -409,9 +389,9 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
         {/* Two readings: an operator configures the service endpoints, and a
             caller who does not is told what the deployment's tools do to their
             requests instead of how to configure a backend they cannot reach.
-            Code execution's intro says only what the tool does, so it reads
+            A narrowed service's intro says only what its tools do, so it reads
             the same to both. */}
-        {narrowed && (isOperator || narrowed.key === "sandbox")
+        {narrowed
           ? narrowed.intro
           : isOperator
             ? "Configure the built-in tool and guardrail service endpoints without a restart. Changes apply immediately and persist."
@@ -431,7 +411,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
         })
         // Where the "no backend" case sends the operator. Found by type rather
         // than by position, so it survives a group's keys being reordered.
-        const urlField = (data?.fields ?? []).find(
+        const urlField = [...byKey.values()].find(
           (field) => field.service === service.key && field.type === "url",
         )
         const known = new Set([
@@ -505,32 +485,41 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
           )
         }
 
+        const leading =
+          managed.length > 0
+            ? managed.map((entry) => statusRow({ ...entry, asRow: true }))
+            : undefined
+
         return (
           <Fragment key={service.key}>
-            {/* The question an operator arrives with, above the settings that
-                answer it: can this deployment run the tool at all. */}
-            {service.key === "sandbox" ? null : managed.map(statusRow)}
-
-            {/* The tool and the switch most readers came for, as one card
+            {/* The tools and the switch most readers came for, as one card
                 above the one-time setup. */}
             {service.key === "sandbox" ? (
               <WorkspaceCodeExecutionPolicyCard
                 isHosted={isHosted}
-                leading={
-                  managed.length > 0
-                    ? managed.map((entry) =>
-                        statusRow({ ...entry, asRow: true }),
-                      )
-                    : undefined
-                }
+                leading={leading}
               />
-            ) : null}
+            ) : service.key === "web_search" ? (
+              <WorkspaceWebSearchCard
+                isHosted={isHosted}
+                // Unknown until the tool list answers, and a failed read must
+                // not lock the switch over tools that may well run.
+                isAvailable={
+                  isHosted ||
+                  managed.length === 0 ||
+                  managed.some(({ tool }) => tool.available)
+                }
+                leading={leading}
+              />
+            ) : (
+              managed.map((entry) => statusRow(entry))
+            )}
 
             {service.groups.map((group) => {
               if (group.isOperatorOnly && !isOperator) return null
-              // A hosted control plane serves no inference, so its own sandbox
-              // settings run nothing: the platform's sandbox does.
-              if (service.key === "sandbox" && isHosted) return null
+              // A hosted control plane serves no inference, so its own tool
+              // settings run nothing: the platform's do.
+              if (service.isDataPlane && isHosted) return null
               const fields = [
                 ...fieldsFor(group.keys),
                 ...(group.catchAll ? unlisted : []),
@@ -601,21 +590,13 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
               )
             })}
 
-            {/* Directly below the in-loop web-search settings, because a searxng
-                search tool that declares no backend URL of its own inherits the
-                one set just above it. Operator-only, like those settings: its
-                rows are the deployment's own /api/v1/search credentials. The
-                workspace group goes below both, because it narrows the backend
-                above it and the /api/v1/search tools beside it. */}
-            {service.key === "web_search" ? (
-              <>
-                {isOperator ? (
-                  <SearchToolsCard docsHref={toolsDocs("direct-search")} />
-                ) : null}
-                <WorkspaceWebSearchCard
-                  docsHref={toolsDocs("per-workspace-search-policy")}
-                />
-              </>
+            {/* Last, because it configures the direct search API rather than
+                the model's tools. Below the backend, because a searxng search
+                tool with no URL of its own inherits the one set there.
+                Operator-only: its rows are the deployment's own credentials.
+                A hosted control plane serves no /api/v1/search at all. */}
+            {service.key === "web_search" && isOperator && !isHosted ? (
+              <SearchToolsCard docsHref={toolsDocs("direct-search")} />
             ) : null}
             {service.key === "guardrails" &&
             serves("organization_guardrails") ? (

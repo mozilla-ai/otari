@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import type { ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { WorkspaceWebSearchConfig } from "@/client"
 import {
@@ -11,10 +12,9 @@ import {
 } from "@/features/tools/WorkspaceWebSearchCard"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { organizationContext, workspaceWebSearchConfig } from "@/tests/fixtures"
-import { pickOption, selectTrigger } from "@/tests/select"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
-const STANCE = "Web access for this workspace"
+const SWITCH = "Allow web access"
 
 function mockApi({
   memberships = [{ workspace_id: ALPHA, name: "Alpha", role: "admin" }],
@@ -43,14 +43,26 @@ function mockApi({
   return calls
 }
 
-function renderCard() {
+function renderCard({
+  leading,
+  isHosted = false,
+  isAvailable = true,
+}: {
+  leading?: ReactNode
+  isHosted?: boolean
+  isAvailable?: boolean
+} = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
       <SelectedWorkspaceProvider>
-        <WorkspaceWebSearchCard docsHref="https://docs.example/tools" />
+        <WorkspaceWebSearchCard
+          leading={leading}
+          isHosted={isHosted}
+          isAvailable={isAvailable}
+        />
       </SelectedWorkspaceProvider>
     </QueryClientProvider>,
   )
@@ -59,9 +71,17 @@ function renderCard() {
 // Every control is disabled until the row has arrived, so a save cannot race
 // the load that would overwrite the field under it. That is the signal to wait
 // on before typing.
-async function renderLoaded() {
-  renderCard()
-  await waitFor(() => expect(selectTrigger(STANCE)).toBeEnabled())
+async function renderLoaded(opts?: Parameters<typeof renderCard>[0]) {
+  renderCard(opts)
+  await waitFor(() =>
+    expect(screen.getByRole("switch", { name: SWITCH })).toBeEnabled(),
+  )
+}
+
+/** Loaded, with the narrowing rows under Advanced shown. */
+async function renderOpen(user: ReturnType<typeof userEvent.setup>) {
+  await renderLoaded()
+  await user.click(screen.getByRole("button", { name: "Advanced" }))
 }
 
 /** The one PUT body, once the write has gone out. */
@@ -72,39 +92,58 @@ async function putBody(calls: { method: string; body: unknown }[]) {
   return calls.filter((call) => call.method === "PUT").at(-1)?.body
 }
 
+const allowed = (extra: Partial<WorkspaceWebSearchConfig> = {}) =>
+  workspaceWebSearchConfig({
+    workspace_id: ALPHA,
+    configured: true,
+    enabled: true,
+    ...extra,
+  })
+
 describe("WorkspaceWebSearchCard", () => {
   afterEach(() => {
     vi.restoreAllMocks()
     window.localStorage.clear()
   })
 
-  it("reads an unconfigured workspace as the deployment default, with nothing to narrow", async () => {
+  it("reads a workspace with no row as allowed, with the narrowing folded away", async () => {
     mockApi()
     await renderLoaded()
 
-    expect(selectTrigger(STANCE)).toHaveTextContent("Deployment default")
-    // There is no stored row, so the four rows below have nothing to write.
-    expect(screen.getByLabelText("Max results")).toBeDisabled()
-    expect(screen.getByLabelText("Allowed domains")).toBeDisabled()
+    expect(screen.getByRole("switch", { name: SWITCH })).toBeChecked()
+    expect(screen.getByRole("button", { name: "Advanced" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    )
+    // The purpose hint is left to the API.
+    expect(screen.queryByText("Prompt hint")).toBeNull()
   })
 
-  it("shows a stored row's stance, ceiling and domain lists", async () => {
+  it("shows a blocked row switched off, with nothing to narrow", async () => {
+    mockApi({ config: allowed({ enabled: false }) })
+    const user = userEvent.setup()
+    await renderOpen(user)
+
+    expect(screen.getByRole("switch", { name: SWITCH })).not.toBeChecked()
+    expect(
+      screen.getByLabelText("Max results for this workspace"),
+    ).toBeDisabled()
+  })
+
+  it("shows a stored row's ceiling and domain lists", async () => {
     mockApi({
-      config: workspaceWebSearchConfig({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: false,
+      config: allowed({
         max_results: 3,
         allowed_domains: ["arxiv.org", "wikipedia.org"],
         blocked_domains: ["example.invalid"],
       }),
     })
-    await renderLoaded()
+    const user = userEvent.setup()
+    await renderOpen(user)
 
-    expect(selectTrigger(STANCE)).toHaveTextContent(
-      "Blocked (tools and /api/v1/search)",
+    expect(screen.getByLabelText("Max results for this workspace")).toHaveValue(
+      "3",
     )
-    expect(screen.getByLabelText("Max results")).toHaveValue("3")
     expect(screen.getByLabelText("Allowed domains")).toHaveValue(
       "arxiv.org, wikipedia.org",
     )
@@ -113,34 +152,64 @@ describe("WorkspaceWebSearchCard", () => {
     )
   })
 
-  it("saves the stance the moment it changes, with no Save button anywhere", async () => {
+  it("blocks the moment the switch flips, with no Save button anywhere", async () => {
     const calls = mockApi()
     const user = userEvent.setup()
     await renderLoaded()
 
-    await pickOption(user, STANCE, "Allowed")
+    await user.click(screen.getByRole("switch", { name: SWITCH }))
 
-    await waitFor(() =>
-      expect(calls.some((call) => call.method === "PUT")).toBe(true),
-    )
+    expect(await putBody(calls)).toMatchObject({ enabled: false })
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull()
   })
 
-  it("saves a ceiling and a domain list when the field is left", async () => {
+  it("drops a blocked row that narrows nothing when allowed again", async () => {
+    const calls = mockApi({ config: allowed({ enabled: false }) })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(screen.getByRole("switch", { name: SWITCH }))
+
+    await waitFor(() =>
+      expect(calls.some((call) => call.method === "DELETE")).toBe(true),
+    )
+    expect(calls.some((call) => call.method === "PUT")).toBe(false)
+  })
+
+  it("keeps a blocked row's narrowing, including fields set over the API, when allowed again", async () => {
     const calls = mockApi({
-      config: workspaceWebSearchConfig({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
+      config: allowed({
+        enabled: false,
+        purpose_hint: "Official docs",
+        provider_options: { search_depth: "advanced" },
       }),
     })
     const user = userEvent.setup()
     await renderLoaded()
 
-    await user.type(screen.getByLabelText("Max results"), "4")
+    await user.click(screen.getByRole("switch", { name: SWITCH }))
+
+    expect(await putBody(calls)).toMatchObject({
+      enabled: true,
+      purpose_hint: "Official docs",
+      provider_options: { search_depth: "advanced" },
+    })
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false)
+  })
+
+  it("saves a ceiling and a domain list when the field is left", async () => {
+    const calls = mockApi({ config: allowed() })
+    const user = userEvent.setup()
+    await renderOpen(user)
+
+    await user.type(
+      screen.getByLabelText("Max results for this workspace"),
+      "4",
+    )
     await user.tab()
     await waitFor(() =>
       expect(calls.find((call) => call.method === "PUT")?.body).toMatchObject({
+        enabled: true,
         max_results: 4,
       }),
     )
@@ -162,84 +231,32 @@ describe("WorkspaceWebSearchCard", () => {
     )
   })
 
-  it("commits on Enter without leaving the field by hand", async () => {
-    const calls = mockApi({
-      config: workspaceWebSearchConfig({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
-      }),
-    })
+  it("narrows a workspace with no row by storing an enabled one", async () => {
+    // No row reads as on here, so the first narrowing creates the row on.
+    const calls = mockApi()
     const user = userEvent.setup()
-    await renderLoaded()
+    await renderOpen(user)
 
     await user.type(
-      screen.getByLabelText("Prompt hint"),
-      "Official docs{Enter}",
+      screen.getByLabelText("Allowed domains"),
+      "arxiv.org{Enter}",
     )
 
-    await waitFor(() =>
-      expect(calls.find((call) => call.method === "PUT")?.body).toMatchObject({
-        purpose_hint: "Official docs",
-      }),
-    )
-  })
-
-  it("preserves provider options it has no form for", async () => {
-    // The bag is set over the API, and this is a PUT: sending nothing would
-    // silently clear it on the next save from the dashboard.
-    const calls = mockApi({
-      config: workspaceWebSearchConfig({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
-        provider_options: { search_depth: "advanced" },
-      }),
+    expect(await putBody(calls)).toMatchObject({
+      enabled: true,
+      allowed_domains: ["arxiv.org"],
     })
-    const user = userEvent.setup()
-    await renderLoaded()
-
-    await user.type(screen.getByLabelText("Max results"), "4")
-    await user.tab()
-
-    await waitFor(() =>
-      expect(calls.find((call) => call.method === "PUT")?.body).toMatchObject({
-        provider_options: { search_depth: "advanced" },
-      }),
-    )
-  })
-
-  it("clears the row rather than storing one when set back to the deployment default", async () => {
-    const calls = mockApi({
-      config: workspaceWebSearchConfig({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: false,
-      }),
-    })
-    const user = userEvent.setup()
-    await renderLoaded()
-
-    await pickOption(user, STANCE, "Deployment default")
-
-    await waitFor(() =>
-      expect(calls.some((call) => call.method === "DELETE")).toBe(true),
-    )
-    expect(calls.some((call) => call.method === "PUT")).toBe(false)
   })
 
   it("refuses a ceiling the backend could never honor without asking the server", async () => {
-    const calls = mockApi({
-      config: workspaceWebSearchConfig({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
-      }),
-    })
+    const calls = mockApi({ config: allowed() })
     const user = userEvent.setup()
-    await renderLoaded()
+    await renderOpen(user)
 
-    await user.type(screen.getByLabelText("Max results"), "500")
+    await user.type(
+      screen.getByLabelText("Max results for this workspace"),
+      "500",
+    )
     await user.tab()
 
     expect(
@@ -254,15 +271,9 @@ describe("WorkspaceWebSearchCard", () => {
     // The server matches an entry against a result URL's hostname, so a scheme
     // or a path matches nothing: on a block-list that is a guardrail that reads
     // as set and blocks nothing.
-    const calls = mockApi({
-      config: workspaceWebSearchConfig({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
-      }),
-    })
+    const calls = mockApi({ config: allowed() })
     const user = userEvent.setup()
-    await renderLoaded()
+    await renderOpen(user)
 
     await user.type(
       screen.getByLabelText("Blocked domains"),
@@ -277,9 +288,6 @@ describe("WorkspaceWebSearchCard", () => {
   })
 
   it("keeps every control disabled when the initial read failed, so a change cannot drop a stored row", async () => {
-    // A failed GET leaves isLoading false and config undefined, so the rows sit
-    // at "Deployment default" over a workspace that may have a row, and one
-    // change would DELETE it.
     const calls: { url: string; method: string }[] = []
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = String(input)
@@ -295,76 +303,139 @@ describe("WorkspaceWebSearchCard", () => {
         }),
       )
     })
+    const user = userEvent.setup()
     renderCard()
 
-    await waitFor(() => expect(selectTrigger(STANCE)).toBeDisabled())
-    expect(screen.getByLabelText("Max results")).toBeDisabled()
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: SWITCH })).toBeDisabled(),
+    )
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    expect(
+      screen.getByLabelText("Max results for this workspace"),
+    ).toBeDisabled()
     expect(calls.some((call) => call.method === "DELETE")).toBe(false)
   })
 
-  it("says Fetch requires deployment enablement and workspace permission when Search is unavailable", async () => {
-    mockApi({
-      config: workspaceWebSearchConfig({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
-        web_search_configured: false,
-      }),
-    })
-    renderCard()
-
-    expect(
-      await screen.findByText(/no in-loop search backend configured/i),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText(
-        /otari_web_fetch is available only if this deployment has enabled it and this workspace policy allows it/i,
-      ),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText(/still takes effect on POST \/api\/v1\/search/i),
-    ).toBeInTheDocument()
-  })
-
-  it("describes the Web Access scope and Search-only settings", async () => {
+  it("switches off and explains when neither tool can run here", async () => {
     mockApi()
-    await renderLoaded()
+    renderCard({ isAvailable: false })
 
     expect(
-      screen.getByText(/otari_web_search, otari_web_fetch/i),
+      await screen.findByText(/Neither tool can run on this deployment/),
     ).toBeInTheDocument()
-    expect(screen.getByText(/^Search only\. Lowers/)).toBeInTheDocument()
-    expect(screen.getByText(/^Search only\. Used/)).toBeInTheDocument()
-    expect(screen.getAllByText(/redirected Fetch destinations/)).toHaveLength(2)
+    const toggle = screen.getByRole("switch", { name: SWITCH })
+    expect(toggle).not.toBeChecked()
+    expect(toggle).toBeDisabled()
   })
 
-  it("does not read the row at all for a member who cannot manage the workspace", async () => {
-    // Reads take the management role server-side, so asking would earn a 403.
-    // The card says who can set it instead of rendering a form over an error.
-    const configRequests: string[] = []
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input)
-      if (url.includes("/web-search")) {
-        configRequests.push(url)
-        return new Response("forbidden", { status: 403 })
-      }
-      return Response.json(
-        organizationContext({
-          role: "member",
-          workspace_memberships: [
-            { workspace_id: ALPHA, name: "Alpha", role: "member" },
-          ],
-        }),
+  describe("on a hosted control plane", () => {
+    // There a workspace with no row may not reach the web.
+    async function renderHosted() {
+      renderCard({ isHosted: true })
+      await waitFor(() =>
+        expect(screen.getByRole("switch", { name: SWITCH })).toBeEnabled(),
       )
-    })
-    renderCard()
+    }
 
-    expect(
-      await screen.findByText(/set by an owner or admin/i),
-    ).toBeInTheDocument()
-    expect(screen.queryByLabelText("Max results")).toBeNull()
-    expect(configRequests).toEqual([])
+    it("reads no row as off", async () => {
+      mockApi()
+      await renderHosted()
+
+      expect(screen.getByRole("switch", { name: SWITCH })).not.toBeChecked()
+    })
+
+    it("shows a member the tools alone, without the playground's reading of a missing row", async () => {
+      const reads: string[] = []
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const url = String(input)
+        if (url.includes("/playground/tools") || url.includes("/web-search")) {
+          reads.push(url)
+          return new Response("unexpected", { status: 500 })
+        }
+        return Response.json(
+          organizationContext({
+            role: "member",
+            workspace_memberships: [
+              { workspace_id: ALPHA, name: "Alpha", role: "member" },
+            ],
+          }),
+        )
+      })
+      renderCard({ leading: <div>tool rows</div>, isHosted: true })
+
+      expect(await screen.findByText("tool rows")).toBeInTheDocument()
+      expect(screen.queryByText("Allowed in Alpha")).toBeNull()
+      expect(reads).toEqual([])
+    })
+
+    it("turns on by storing an enabled row, never by deleting one", async () => {
+      const calls = mockApi()
+      const user = userEvent.setup()
+      await renderHosted()
+
+      await user.click(screen.getByRole("switch", { name: SWITCH }))
+
+      expect(await putBody(calls)).toMatchObject({ enabled: true })
+      expect(calls.some((call) => call.method === "DELETE")).toBe(false)
+    })
+
+    it("turns off by storing a disabled row", async () => {
+      const calls = mockApi({ config: allowed() })
+      const user = userEvent.setup()
+      await renderHosted()
+
+      expect(screen.getByRole("switch", { name: SWITCH })).toBeChecked()
+      await user.click(screen.getByRole("switch", { name: SWITCH }))
+
+      expect(await putBody(calls)).toMatchObject({ enabled: false })
+      expect(calls.some((call) => call.method === "DELETE")).toBe(false)
+    })
   })
+
+  it.each([
+    [true, "Yes"],
+    [false, "No"],
+  ])(
+    "shows a member whether their workspace allows it, without reading the row (enabled %s)",
+    async (enabled, answer) => {
+      // Row reads take the management role server-side, so asking would earn a
+      // 403. The playground's per-workspace answer is what a member may read.
+      const configRequests: string[] = []
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const url = String(input)
+        if (url.includes("/web-search")) {
+          configRequests.push(url)
+          return new Response("forbidden", { status: 403 })
+        }
+        if (url.includes("/playground/tools")) {
+          return Response.json({
+            web_search: {
+              configured: true,
+              enabled,
+              reason: enabled ? null : "Turned off for this workspace.",
+            },
+            code_execution: { configured: false, enabled: false, reason: null },
+            mcp_servers: [],
+          })
+        }
+        return Response.json(
+          organizationContext({
+            role: "member",
+            workspace_memberships: [
+              { workspace_id: ALPHA, name: "Alpha", role: "member" },
+            ],
+          }),
+        )
+      })
+      renderCard({ leading: <div>tool rows</div> })
+
+      expect(await screen.findByText("Allowed in Alpha")).toBeInTheDocument()
+      expect(screen.getByText(answer)).toBeInTheDocument()
+      expect(screen.getByText("tool rows")).toBeInTheDocument()
+      expect(screen.queryByRole("switch")).toBeNull()
+      expect(configRequests).toEqual([])
+    },
+  )
 
   it("does not let a second row's save revert the first", async () => {
     // Autosave is what opens this: every control has its own save state, so two
@@ -384,13 +455,7 @@ describe("WorkspaceWebSearchCard", () => {
         )
       }
       if ((init?.method ?? "GET") !== "PUT") {
-        return Response.json(
-          workspaceWebSearchConfig({
-            workspace_id: ALPHA,
-            configured: true,
-            enabled: true,
-          }),
-        )
+        return Response.json(allowed())
       }
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>
       bodies.push(body)
@@ -399,17 +464,10 @@ describe("WorkspaceWebSearchCard", () => {
           releaseFirst = resolve
         })
       }
-      return Response.json(
-        workspaceWebSearchConfig({
-          workspace_id: ALPHA,
-          configured: true,
-          enabled: true,
-          ...body,
-        }),
-      )
+      return Response.json(allowed(body))
     })
     const user = userEvent.setup()
-    await renderLoaded()
+    await renderOpen(user)
 
     await user.type(screen.getByLabelText("Allowed domains"), "arxiv.org")
     await user.tab()
@@ -431,17 +489,14 @@ describe("WorkspaceWebSearchCard", () => {
   it("sends only the writable half of the row", async () => {
     // The stored shape also carries workspace_id, configured, the server's own
     // web_search_configured and two timestamps. None of them belongs in a PUT.
-    const calls = mockApi({
-      config: workspaceWebSearchConfig({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
-      }),
-    })
+    const calls = mockApi({ config: allowed() })
     const user = userEvent.setup()
-    await renderLoaded()
+    await renderOpen(user)
 
-    await user.type(screen.getByLabelText("Max results"), "4")
+    await user.type(
+      screen.getByLabelText("Max results for this workspace"),
+      "4",
+    )
     await user.tab()
 
     expect(Object.keys((await putBody(calls)) as object).sort()).toEqual([

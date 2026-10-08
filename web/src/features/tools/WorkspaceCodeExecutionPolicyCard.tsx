@@ -10,8 +10,8 @@ import { SettingRow } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
 import { canManageWorkspace } from "@/features/organization/roles"
 import { usePolicyWriter } from "@/features/tools/usePolicyWriter"
+import { WorkspaceToolStatus } from "@/features/tools/WorkspaceToolStatus"
 import { useOrganizationContext } from "@/shared/api/organizations"
-import { usePlaygroundTools } from "@/shared/api/playground"
 import {
   useClearWorkspaceCodeExecutionPolicy,
   useSetWorkspaceCodeExecutionPolicy,
@@ -59,44 +59,6 @@ function staleParts(policy: WorkspaceCodeExecutionPolicy, isHosted: boolean) {
       (name) => !policy.available_tools.includes(name),
     ),
   }
-}
-
-/**
- * Whether a member's workspace allows code execution, read-only.
- *
- * The policy itself is for owners and admins, so this reads the playground's
- * per-workspace answer, which any member may and which reads "no policy" the
- * way the deployment does (on standalone, off on a hosted control plane).
- */
-function MemberStatus({
-  leading,
-  workspace,
-}: {
-  leading?: ReactNode
-  workspace: { workspace_id: string; name: string }
-}) {
-  const status = usePlaygroundTools(workspace.workspace_id).data?.code_execution
-  if (!leading && !status?.configured) return null
-  return (
-    <SettingsGroup isBounded>
-      {leading}
-      {status?.configured ? (
-        <SettingRow
-          label={`Allowed in ${workspace.name}`}
-          help={
-            status.enabled
-              ? "Set by an owner or admin."
-              : "An owner or admin can turn it on for this workspace."
-          }
-          control={
-            <span className="text-caption text-foreground">
-              {status.enabled ? "Yes" : "No"}
-            </span>
-          }
-        />
-      ) : null}
-    </SettingsGroup>
-  )
 }
 
 /**
@@ -168,7 +130,13 @@ export function WorkspaceCodeExecutionPolicyCard({
   }
 
   if (!manages) {
-    return <MemberStatus leading={leading} workspace={selected} />
+    return (
+      <WorkspaceToolStatus
+        tool="code_execution"
+        leading={leading}
+        workspace={selected}
+      />
+    )
   }
 
   const policy = query.data

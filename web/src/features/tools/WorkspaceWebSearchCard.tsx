@@ -1,16 +1,21 @@
-import type { UpdateWorkspaceWebSearchConfigRequest } from "@/client"
-import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import type { ReactNode } from "react"
+import type {
+  UpdateWorkspaceWebSearchConfigRequest,
+  WorkspaceWebSearchConfig,
+} from "@/client"
+import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { Toggle } from "@/design-system/forms/Toggle"
 import { SettingRow } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { canManageWorkspace } from "@/features/organization/roles"
+import { AdvancedRows } from "@/features/tools/AdvancedRows"
 import {
   ceilingParser,
   type Parse,
   PolicyRow,
-  parsePhrase,
 } from "@/features/tools/PolicyRow"
 import { usePolicyWriter } from "@/features/tools/usePolicyWriter"
+import { WorkspaceToolStatus } from "@/features/tools/WorkspaceToolStatus"
 import { useOrganizationContext } from "@/shared/api/organizations"
 import {
   useClearWorkspaceWebSearchConfig,
@@ -20,19 +25,14 @@ import {
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useAutosave } from "@/shared/hooks/useAutosave"
 
-// The layer above the deployment-wide Web Access settings this group sits
-// under: the settings above say which backends can reach the web, this says
-// which workspaces may ask and how far they may reach. A row can only narrow,
-// so there is no control here that turns anything on the deployment has not
-// configured.
+// The stored row has three states (allowed, blocked, none) and can also narrow
+// results and domains. The card shows the switch with the narrowing under
+// Advanced; the purpose hint and provider options are set through the API.
 //
-// Three states, not two, which is why the first control is a select rather than
-// a toggle: a workspace can be allowed, blocked, or carry no row at all.
-// "Deployment default" is the last of those and is a delete, not a saved
-// `enabled: true`. While it is chosen there is no row to narrow, so the four
-// rows below it have nothing to write and are disabled.
-
-type Stance = "default" | "allowed" | "blocked"
+// What "none" means depends on the deployment. Standalone, no row narrows
+// nothing, so it reads as on, and switching on deletes a row that narrows
+// nothing else. Hosted, the platform reads a workspace with no row as off, so
+// the switch reads the stored `enabled` alone and only ever writes it.
 
 // The server's own bounds (`workspace_web_search_service`): a ceiling above
 // what the backend honors could never take effect, and the list bound stops one
@@ -69,15 +69,37 @@ const parseDomains: Parse<string[] | null> = (raw) => {
   return { value: hosts.length > 0 ? hosts : null, error: "" }
 }
 
+/** Whether a stored row narrows anything beyond allowing or blocking. */
+function narrowsAnything(config: WorkspaceWebSearchConfig): boolean {
+  return [
+    config.max_results,
+    config.purpose_hint,
+    config.allowed_domains,
+    config.blocked_domains,
+    config.provider_options,
+  ].some((value) => value != null)
+}
+
 /**
- * Whether requests billed to this workspace may access the web, and how far
- * Search and Fetch may reach.
+ * Whether requests billed to this workspace may use the web tools, and how far
+ * they may reach.
  *
  * Blocking covers `otari_web_search`, `otari_web_fetch`, and `POST /api/v1/search`.
  * Nothing here grants a backend the deployment has not configured, and nothing
  * here holds a credential.
  */
-export function WorkspaceWebSearchCard({ docsHref }: { docsHref: string }) {
+export function WorkspaceWebSearchCard({
+  leading,
+  isHosted = false,
+  isAvailable = true,
+}: {
+  /** Rows above the switch, so the tools and their switch read as one card. */
+  leading?: ReactNode
+  /** A hosted control plane, where no row means off. */
+  isHosted?: boolean
+  /** Whether this deployment can run either tool at all. */
+  isAvailable?: boolean
+}) {
   const { selected, isLoading: workspaceLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
   // The client half of the gate the service enforces, and it gates the *read*
@@ -89,8 +111,8 @@ export function WorkspaceWebSearchCard({ docsHref }: { docsHref: string }) {
   const query = useWorkspaceWebSearchConfig(workspaceId)
   const setConfig = useSetWorkspaceWebSearchConfig()
   const clearConfig = useClearWorkspaceWebSearchConfig()
-  const stanceSave = useAutosave()
-  // One writer for the group: a PUT replaces the whole row, so two rows saving
+  const save = useAutosave()
+  // One writer for the card: a PUT replaces the whole row, so two rows saving
   // at once would each carry the other's pre-save value.
   const write = usePolicyWriter({
     server: query.data,
@@ -101,9 +123,6 @@ export function WorkspaceWebSearchCard({ docsHref }: { docsHref: string }) {
       purpose_hint: stored.purpose_hint,
       allowed_domains: stored.allowed_domains,
       blocked_domains: stored.blocked_domains,
-      // Not editable here: an opaque per-backend bag with no form that could
-      // validate it, preserved so a save from the dashboard never clears a
-      // value set over the API.
       provider_options: stored.provider_options,
     }),
     put: (body: UpdateWorkspaceWebSearchConfigRequest) =>
@@ -115,143 +134,129 @@ export function WorkspaceWebSearchCard({ docsHref }: { docsHref: string }) {
 
   if (!selected) {
     return (
-      <InfoBanner>
-        {workspaceLoading
-          ? "Reading the workspaces you belong to."
-          : "Per-workspace web access is set on a workspace you belong to. An owner or admin can add you to one on the Workspaces page."}
-      </InfoBanner>
+      <SettingsGroup isBounded>
+        {leading}
+        <SettingRow
+          label="Workspace access"
+          help={
+            workspaceLoading
+              ? "Reading the workspaces you belong to."
+              : "Per-workspace web access is set on a workspace you belong to. An owner or admin can add you to one on the Workspaces page."
+          }
+          control={null}
+        />
+      </SettingsGroup>
     )
   }
 
   if (!manages) {
+    // The playground's answer reads a missing row as on, which a hosted
+    // control plane does not, so there a member is shown the tools alone.
+    if (isHosted) {
+      return leading ? <SettingsGroup isBounded>{leading}</SettingsGroup> : null
+    }
     return (
-      <InfoBanner>
-        Web access for {selected.name} is set by an owner or admin of the
-        workspace, or of the organization.
-      </InfoBanner>
+      <WorkspaceToolStatus
+        tool="web_search"
+        leading={leading}
+        workspace={selected}
+      />
     )
   }
 
   const config = query.data
-  const stance: Stance = !config?.configured
-    ? "default"
-    : config.enabled
-      ? "allowed"
-      : "blocked"
-
-  // Disabled until the read has succeeded. Without that a failed GET leaves the
-  // rows sitting at "Deployment default" over a workspace that may well have a
-  // stored row, and one blur issues the write that drops it.
+  const isOn = isHosted
+    ? Boolean(config?.configured && config.enabled)
+    : !(config?.configured && !config.enabled)
+  const organizationName = context.data?.organization.name
+  // Disabled until the read has succeeded. Without that the switch sits on over
+  // a workspace that may well have a stored row, and one change issues the
+  // write that drops it.
   const isUnreadable = query.isLoading || query.isError || !config
-  const narrowingDisabled = isUnreadable || stance === "default"
+  const narrowingDisabled = isUnreadable || !isAvailable || !isOn
 
-  // `enabled` is the one field a patch always restates: the stance select is
-  // the only control that changes it, and every other row must not flip it.
-  const commitField = (patch: Partial<UpdateWorkspaceWebSearchConfigRequest>) =>
-    write({ enabled: stance !== "blocked", ...patch })
-
-  const setStance = (next: Stance) =>
-    void stanceSave.run(() =>
-      next === "default"
-        ? clearConfig.mutateAsync({ workspaceId: selected.workspace_id })
-        : commitField({ enabled: next === "allowed" }),
+  const setAllowed = (allowed: boolean) =>
+    save.run(() =>
+      isHosted || !allowed || (config && narrowsAnything(config))
+        ? write({ enabled: allowed })
+        : clearConfig.mutateAsync({ workspaceId: selected.workspace_id }),
     )
+  // Reachable only while the switch is on, so the row it writes stays on.
+  const commitField = (patch: Partial<UpdateWorkspaceWebSearchConfigRequest>) =>
+    write({ enabled: true, ...patch })
 
   return (
-    <SettingsGroup
-      isBounded
-      title="This workspace"
-      description={`Narrows what the deployment allows for requests billed to ${selected.name}. Never widens it, and holds no credential.`}
-      docsHref={docsHref}
-    >
-      {config && !config.web_search_configured ? (
+    <SettingsGroup isBounded>
+      {leading}
+      {query.error ? (
         <div className="px-4 py-3">
-          <InfoBanner>
-            This deployment has no in-loop search backend configured, so
-            otari_web_search is unavailable here. otari_web_fetch is available
-            only if this deployment has enabled it and this workspace policy
-            allows it. Blocking still takes effect on POST /api/v1/search, which
-            runs off the search tools below.
-          </InfoBanner>
+          <ErrorBanner error={query.error} />
         </div>
       ) : null}
 
       <SettingRow
-        label="Web access"
-        help="Allow or block otari_web_search, otari_web_fetch, and POST /api/v1/search for requests billed here."
-        error={
-          stanceSave.error ||
-          (query.isError
-            ? "Could not read this workspace's setting. Reload before editing."
-            : "")
+        label={`Allow in ${selected.name}`}
+        help={
+          organizationName
+            ? `Workspace in ${organizationName}. Also covers the search API.`
+            : "Also covers the search API."
+        }
+        error={save.error}
+        note={
+          isAvailable ? null : (
+            <p className="text-caption text-subtle">
+              Neither tool can run on this deployment, so web access is off
+              everywhere.
+            </p>
+          )
         }
         control={
-          <FilterSelect
-            fullWidth
-            ariaLabel="Web access for this workspace"
-            value={stance}
-            onChange={(next) => setStance(next as Stance)}
-            options={[
-              { value: "default", label: "Deployment default" },
-              { value: "allowed", label: "Allowed" },
-              // Named for what it covers: an admin choosing this is also
-              // switching off the workspace's POST /api/v1/search calls, which
-              // "Blocked" alone would not have told them.
-              {
-                value: "blocked",
-                label: "Blocked (tools and /api/v1/search)",
-              },
-            ]}
-            disabled={isUnreadable || stanceSave.isSaving}
+          <Toggle
+            label="Allow web access"
+            isSelected={isAvailable && isOn}
+            onChange={(next) => void setAllowed(next)}
+            isDisabled={isUnreadable || !isAvailable || save.isSaving}
           />
         }
       />
 
-      <PolicyRow
-        key={`results-${selected.workspace_id}`}
-        label="Max results"
-        help="Search only. Lowers how many results one search returns; it never raises the number."
-        placeholder="10"
-        isNumeric
-        committed={
-          config?.max_results == null ? "" : String(config.max_results)
-        }
-        parse={ceilingParser(MAX_RESULTS, "results")}
-        commit={(max_results) => commitField({ max_results })}
-        disabled={narrowingDisabled}
-      />
-      <PolicyRow
-        key={`hint-${selected.workspace_id}`}
-        label="Prompt hint"
-        help="Search only. Used when a request declares otari_web_search without a hint of its own."
-        placeholder="Prefer official sources"
-        committed={config?.purpose_hint ?? ""}
-        parse={parsePhrase}
-        commit={(purpose_hint) => commitField({ purpose_hint })}
-        disabled={narrowingDisabled}
-      />
-      <PolicyRow
-        key={`allowed-${selected.workspace_id}`}
-        label="Allowed domains"
-        help="Filters Search results and constrains initial and redirected Fetch destinations. A request list can only narrow this policy."
-        placeholder="mozilla.org, wikipedia.org"
-        isMachineReadable
-        committed={(config?.allowed_domains ?? []).join(", ")}
-        parse={parseDomains}
-        commit={(allowed_domains) => commitField({ allowed_domains })}
-        disabled={narrowingDisabled}
-      />
-      <PolicyRow
-        key={`blocked-${selected.workspace_id}`}
-        label="Blocked domains"
-        help="Filters Search results and blocks initial and redirected Fetch destinations, whatever a request asks for."
-        placeholder="reddit.com, pinterest.com"
-        isMachineReadable
-        committed={(config?.blocked_domains ?? []).join(", ")}
-        parse={parseDomains}
-        commit={(blocked_domains) => commitField({ blocked_domains })}
-        disabled={narrowingDisabled}
-      />
+      <AdvancedRows>
+        <PolicyRow
+          key={`results-${selected.workspace_id}`}
+          label="Max results for this workspace"
+          help="Search only. Lowers how many results one search returns."
+          placeholder="10"
+          isNumeric
+          committed={
+            config?.max_results == null ? "" : String(config.max_results)
+          }
+          parse={ceilingParser(MAX_RESULTS, "results")}
+          commit={(max_results) => commitField({ max_results })}
+          disabled={narrowingDisabled}
+        />
+        <PolicyRow
+          key={`allowed-${selected.workspace_id}`}
+          label="Allowed domains"
+          help="Only these sites and their subdomains, for Search results and Fetch."
+          placeholder="mozilla.org, wikipedia.org"
+          isMachineReadable
+          committed={(config?.allowed_domains ?? []).join(", ")}
+          parse={parseDomains}
+          commit={(allowed_domains) => commitField({ allowed_domains })}
+          disabled={narrowingDisabled}
+        />
+        <PolicyRow
+          key={`blocked-${selected.workspace_id}`}
+          label="Blocked domains"
+          help="Never these sites, for Search results or Fetch."
+          placeholder="reddit.com, pinterest.com"
+          isMachineReadable
+          committed={(config?.blocked_domains ?? []).join(", ")}
+          parse={parseDomains}
+          commit={(blocked_domains) => commitField({ blocked_domains })}
+          disabled={narrowingDisabled}
+        />
+      </AdvancedRows>
     </SettingsGroup>
   )
 }
