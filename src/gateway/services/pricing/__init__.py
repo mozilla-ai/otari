@@ -5,6 +5,7 @@ from gateway.services.pricing.catalog_trim import trim_catalog
 from gateway.services.pricing.generations import (
     MAX_RESIDENT_GENERATIONS,
     active_generations,
+    active_timeline,
     add_accepted_generation,
     current_index,
     reset_generations,
@@ -35,6 +36,7 @@ __all__ = [
     "invalid_rate_count",
     "parse_rate",
     "active_generations",
+    "active_timeline",
     "add_accepted_generation",
     "bundled_generation",
     "current_index",
