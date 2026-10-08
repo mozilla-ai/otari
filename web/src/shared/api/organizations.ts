@@ -349,12 +349,13 @@ export function useDeleteOrganization() {
   })
 }
 
-export function useOrganizationMembers() {
+export function useOrganizationMembers(enabled = true) {
   return useQuery({
     queryKey: [ORGANIZATION_MEMBERS],
     queryFn: () =>
       fetchAllPaged<OrganizationMember>("/organizations/me/members"),
     staleTime: 60_000,
+    enabled,
   })
 }
 

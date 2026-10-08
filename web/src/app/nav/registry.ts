@@ -316,8 +316,8 @@ const ORGANIZATION_NAV_SECTIONS = [
       // No `operatorOnly`, because the destination is two pages now: an
       // operator gets the deployment's budgets and an organization owner or
       // admin gets their own organization's (otari-ai#1943). The roles matrix
-      // has this row at Edit for an admin, and `/organizations/me/budgets`
-      // plus `/organizations/me/spend-ceilings` are what it edits. A plain
+      // has this row at Edit for an admin, and `/organizations/me/budgets` is
+      // what it edits. A plain
       // member is not offered it, because the organization rail opens only to a
       // caller who manages the organization.
       {

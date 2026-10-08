@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import type { AppliedEntity } from "@/client"
+import type { NamedAppliedEntity } from "@/client"
 
 import { APPLIED_TO_NOTHING, formatAppliedTo } from "./appliedTo"
 
@@ -11,7 +11,7 @@ const NAMES: Record<string, string> = {
 }
 
 /** An entity as the server lists it: the organization and workspaces named, the rest not. */
-function entity(partial: Partial<AppliedEntity>): AppliedEntity {
+function entity(partial: Partial<NamedAppliedEntity>): NamedAppliedEntity {
   const fields = {
     scope_type: "workspace",
     scope_id: "ws-1",

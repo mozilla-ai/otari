@@ -146,9 +146,6 @@ function mockApi(
       if (url.includes(`${API_ROOT}/organizations/me/budgets`)) {
         return jsonResponse({ data: [], count: 0 })
       }
-      if (url.includes(`${API_ROOT}/organizations/me/spend-ceilings`)) {
-        return jsonResponse({ data: [], count: 0 })
-      }
       if (url.includes(`${API_ROOT}/organizations/me`))
         return jsonResponse(context)
       return jsonResponse([])
@@ -1020,9 +1017,6 @@ describe("BudgetsPage", () => {
     // Both grids are named "Budgets"; this column is the organization page's own.
     expect(
       await screen.findByRole("columnheader", { name: "Applied to" }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole("grid", { name: "Organization spend ceilings" }),
     ).toBeInTheDocument()
 
     // Withheld at the request, not only in the markup.
