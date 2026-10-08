@@ -276,3 +276,35 @@ def test_slug_keeps_a_version_s_dot(name: str, slug: str) -> None:
 )
 def test_vendor_slug_spells_the_vendor_the_way_the_ecosystem_does(vendor: str, slug: str) -> None:
     assert vendor_slug(vendor) == slug
+
+
+def test_bedrock_routing_profiles_of_one_model_are_one_model() -> None:
+    """models.dev names each profile after its region, as ``Kimi K3 (US)``, and that region is the offering's."""
+    seeds = [
+        OfferingSeed(
+            "bedrock:global.moonshotai.kimi-k3",
+            "bedrock",
+            "global.moonshotai.kimi-k3",
+            "Kimi K3 (Global)",
+            "moonshotai/kimi-k3",
+        ),
+        OfferingSeed(
+            "bedrock:us.moonshotai.kimi-k3", "bedrock", "us.moonshotai.kimi-k3", "Kimi K3 (US)", "moonshotai/kimi-k3"
+        ),
+    ]
+
+    identities = list(group_offerings(seeds).values())
+
+    assert len(identities) == 1
+    assert identities[0].name == "Kimi K3"
+    assert identities[0].slug == "kimi-k3"
+    assert identities[0].selectors == ("bedrock:global.moonshotai.kimi-k3", "bedrock:us.moonshotai.kimi-k3")
+
+
+@pytest.mark.parametrize("prefix", ["au", "ca", "in", "us-gov"])
+def test_every_bedrock_routing_prefix_is_stripped(prefix: str) -> None:
+    assert clean_model_id(f"{prefix}.anthropic.claude-sonnet-5").model == "claude-sonnet-5"
+
+
+def test_a_parenthesized_name_without_a_routing_prefix_is_kept() -> None:
+    assert identity_key("nvidia", "nemotron-nano", "Nemotron Nano (25.02)") == normalize("Nemotron Nano (25.02)")

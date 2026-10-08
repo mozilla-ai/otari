@@ -210,7 +210,8 @@ the genai-prices default. Both routes accept the same credentials as
 Grouping keys on the models.dev display name where the dataset knows the
 model, and on the provider's id with its path prefixes, org segment and version
 pins removed where it does not; a vendor's name written in front of its own
-model (`NVIDIA Nemotron 3 Ultra`, `openai-gpt-oss-120b`) is dropped from both. A
+model (`NVIDIA Nemotron 3 Ultra`, `openai-gpt-oss-120b`) is dropped from both.
+Bedrock's cross-region inference profiles of one model, such as `us.moonshotai.kimi-k3` and `global.moonshotai.kimi-k3`, are offerings of that one model: the profile prefix is dropped from the id, and the region models.dev puts in the profile's name, as in `Kimi K3 (US)`, is dropped from the name. A
 model's id is its vendor and its name, `z-ai/glm-5.3`, or the bare name where
 nobody could say the vendor. The vendor is the org of models.dev's
 `canonical_model_id` where the dataset has one, else the org segment of the

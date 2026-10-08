@@ -31,10 +31,16 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+# Bedrock's cross-region inference profiles: where AWS may run the request, not what the model is.
+_ROUTING_PREFIX = re.compile(r"^(?:us-gov|us|eu|apac|au|ca|global|in|jp)\.")
+
+# models.dev names a routing profile after its region (``Kimi K3 (US)``), which describes the offering.
+_ROUTING_QUALIFIER = re.compile(r"\s*\([^()]*\)$")
+
 # Provider-side path prefixes that say where a model is hosted, not what it is.
 _PATH_PREFIXES = (
     re.compile(r"^accounts/[^/]+/(?:models|routers)/"),  # Fireworks
-    re.compile(r"^(?:us|eu|apac|global|jp)\."),  # Bedrock region routing
+    _ROUTING_PREFIX,
     re.compile(r"^TEE/"),  # nano-gpt's confidential-compute variants
 )
 
@@ -302,6 +308,11 @@ def clean_model_id(model_id: str) -> CleanedId:
     return CleanedId(model=text, vendor_hint=vendor_hint, quantization=quantization)
 
 
+def _model_name(model_id: str, name: str) -> str:
+    """The models.dev name of the model an offering serves, without a routing profile's region."""
+    return _ROUTING_QUALIFIER.sub("", name) if _ROUTING_PREFIX.match(model_id) else name
+
+
 def _name_key(name: str) -> str:
     # A reseller sometimes puts the org into the display name too
     # (``deepseek-ai/DeepSeek-V4-Pro``), or the vendor's name in front of the
@@ -325,7 +336,7 @@ def identity_key(provider_type: str, model_id: str, name: str | None) -> str:
     if override is not None:
         return override
     if name:
-        key = _name_key(name)
+        key = _name_key(_model_name(model_id, name))
         if key:
             return key
     key = normalize(clean_model_id(model_id).model)
@@ -412,8 +423,8 @@ def _vote_name(seeds: list[OfferingSeed], vendor: str | None) -> str:
         own = _VENDOR_PROVIDERS.get(vendor, frozenset())
         for seed in seeds:
             if seed.name and seed.provider_type in own:
-                return _display_name(seed.name)
-    spellings = [_display_name(seed.name) for seed in seeds if seed.name]
+                return _display_name(_model_name(seed.model_id, seed.name))
+    spellings = [_display_name(_model_name(seed.model_id, seed.name)) for seed in seeds if seed.name]
     if spellings:
         counts = Counter(spellings)
         return max(spellings, key=lambda name: (counts[name], -spellings.index(name)))
