@@ -1414,7 +1414,7 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
 
   it("keeps a deployment-set ceiling visible to an organization owner", async () => {
     // A ceiling on a budget the organization does not own is enforcing, so the
-    // picker names it rather than showing "No ceiling" over it.
+    // picker names it rather than showing "No budget" over it.
     mockApi({
       members: [OWNER, ANALYST],
       workspaces: [workspace()],

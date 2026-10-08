@@ -571,7 +571,7 @@ function MemberEditor({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<unknown>(undefined)
 
-  // "No ceiling" first, then every budget. A workspace's own default is labelled
+  // "No budget" first, then every budget. A workspace's own default is labeled
   // so an admin can tell the inherited one from the rest without leaving the
   // form to look it up.
   const nameBudget = budgetLabeler(budgets)
@@ -579,7 +579,7 @@ function MemberEditor({
     fallback: WorkspaceBudgetDefault | undefined,
     current: string,
   ) => [
-    { value: "", label: "No ceiling" },
+    { value: "", label: "No budget" },
     // A ceiling on a budget this list does not hold (one set at the deployment
     // level, seen from the organization's surface) is kept as an option, so the
     // picker shows it rather than a blank, and picking another budget moves it.
