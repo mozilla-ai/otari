@@ -63,6 +63,11 @@ Four workflows react to the published Release:
   (`scripts/prepare_gitbook_site.py`) and commits it to the `gitbook-docs`
   branch, which GitBook syncs from. A pre-release does not publish. Dispatch the
   workflow with a tag to publish that release's docs again.
+  The site includes the OpenAPI spec at `api/openapi.json` and a generated
+  page per API tag. Those pages render from the spec registered in the
+  GitBook organization as `otari-openapi-spec`, by the URL
+  `https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json`,
+  so a renamed spec or a moved file breaks them.
 
 One step stays manual. The Railway template (`deploy/railway/`) is a
 platform object that no workflow writes. After a release that changes the
