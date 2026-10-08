@@ -106,19 +106,27 @@ describe("DataTable", () => {
   // The press sequence is dispatched raw rather than through userEvent.click,
   // which collapses the document selection on pointer down (as a browser does
   // when a click *starts* a new selection) and so cannot model the click that
-  // *ends* a drag, which is the case these tests are about.
-  const pressRaw = (element: Element) => {
+  // *ends* a drag, which is the case these tests are about. `travel` is how far
+  // the pointer moves between press and release, and `detail` the click count.
+  const pressRaw = (
+    element: Element,
+    { travel = 0, detail = 1 }: { travel?: number; detail?: number } = {},
+  ) => {
+    const start = { clientX: 10, clientY: 10 }
+    const end = { clientX: 10 + travel, clientY: 10 }
     fireEvent.pointerDown(element, {
       pointerId: 1,
       pointerType: "mouse",
       button: 0,
+      ...start,
     })
     fireEvent.pointerUp(element, {
       pointerId: 1,
       pointerType: "mouse",
       button: 0,
+      ...end,
     })
-    fireEvent.click(element)
+    fireEvent.click(element, { detail, ...end })
   }
 
   const selectContentsOf = (element: Element) => {
@@ -136,13 +144,38 @@ describe("DataTable", () => {
     render(<DataTable {...base({ onRowAction })} />)
 
     selectContentsOf(screen.getByText("Bravo"))
-    pressRaw(screen.getByText("Bravo"))
+    pressRaw(screen.getByText("Bravo"), { travel: 40 })
     expect(onRowAction).not.toHaveBeenCalled()
 
     // A plain click with nothing selected still activates the row.
     document.getSelection()?.removeAllRanges()
     pressRaw(screen.getByText("Charlie"))
     expect(onRowAction).toHaveBeenCalledWith("c")
+  })
+
+  it("drills in on a click that wobbled a pixel and selected a character", () => {
+    // A hand that drifts across a character boundary between press and release
+    // selects that character. That is still a click; treating the selection as
+    // a highlight is what made one click in several do nothing (#2072).
+    const onRowAction = vi.fn()
+    render(<DataTable {...base({ onRowAction })} />)
+
+    selectContentsOf(screen.getByText("Bravo"))
+    pressRaw(screen.getByText("Bravo"), { travel: 2 })
+
+    expect(onRowAction).toHaveBeenCalledWith("b")
+    document.getSelection()?.removeAllRanges()
+  })
+
+  it("does not drill in again on the second click of a double click that selected a word", () => {
+    const onRowAction = vi.fn()
+    render(<DataTable {...base({ onRowAction })} />)
+
+    selectContentsOf(screen.getByText("Bravo"))
+    pressRaw(screen.getByText("Bravo"), { detail: 2 })
+
+    expect(onRowAction).not.toHaveBeenCalled()
+    document.getSelection()?.removeAllRanges()
   })
 
   it("still activates a focused row on Enter while an id in the table is highlighted", async () => {
@@ -494,6 +527,118 @@ describe("DataTable", () => {
     )
     expect(onRowAction).toHaveBeenCalledWith("b")
     expect(screen.getByTestId("count")).toHaveTextContent("1")
+  })
+
+  describe("opening a row from the keyboard (#2073)", () => {
+    function SelectableHarness({
+      onRowAction,
+      initial = [],
+    }: {
+      onRowAction: (key: string) => void
+      initial?: string[]
+    }) {
+      const [selected, setSelected] = useState<Selection>(new Set(initial))
+      return (
+        <>
+          <span data-testid="count">
+            {selected === "all" ? "all" : selected.size}
+          </span>
+          <DataTable
+            {...base({
+              onRowAction,
+              selectionMode: "multiple",
+              selectedKeys: selected,
+              onSelectionChange: setSelected,
+            })}
+          />
+        </>
+      )
+    }
+
+    it("opens a focused row on Enter exactly once", async () => {
+      const user = userEvent.setup()
+      const onRowAction = vi.fn()
+      render(<SelectableHarness onRowAction={onRowAction} />)
+
+      screen.getByRole("row", { name: /Bravo/ }).focus()
+      await user.keyboard("{Enter}")
+
+      expect(onRowAction).toHaveBeenCalledTimes(1)
+      expect(onRowAction).toHaveBeenCalledWith("b")
+    })
+
+    it("opens a focused row on Enter while another row is selected", async () => {
+      // react-aria's toggle behavior drops Enter once anything is selected.
+      const user = userEvent.setup()
+      const onRowAction = vi.fn()
+      render(<SelectableHarness onRowAction={onRowAction} initial={["a"]} />)
+
+      screen.getByRole("row", { name: /Bravo/ }).focus()
+      await user.keyboard("{Enter}")
+
+      expect(onRowAction).toHaveBeenCalledWith("b")
+      expect(screen.getByTestId("count")).toHaveTextContent("1")
+    })
+
+    it("opens the row on Enter from its checkbox, and leaves Space to select", async () => {
+      const user = userEvent.setup()
+      const onRowAction = vi.fn()
+      render(<SelectableHarness onRowAction={onRowAction} />)
+      const checkbox = within(
+        screen.getByRole("row", { name: /Bravo/ }),
+      ).getByRole("checkbox")
+
+      // Clicking a checkbox is what leaves focus on one.
+      await user.click(checkbox)
+      expect(checkbox).toHaveFocus()
+      expect(screen.getByTestId("count")).toHaveTextContent("1")
+
+      await user.keyboard("{Enter}")
+      expect(onRowAction).toHaveBeenCalledWith("b")
+      expect(screen.getByTestId("count")).toHaveTextContent("1")
+
+      await user.keyboard(" ")
+      expect(onRowAction).toHaveBeenCalledTimes(1)
+      expect(screen.getByTestId("count")).toHaveTextContent("0")
+    })
+
+    it("keeps row checkboxes out of the tab order", () => {
+      render(<SelectableHarness onRowAction={vi.fn()} />)
+      for (const name of [/Alpha/, /Bravo/, /Charlie/]) {
+        const checkbox = within(screen.getByRole("row", { name })).getByRole(
+          "checkbox",
+        )
+        expect(checkbox).toHaveAttribute("tabindex", "-1")
+      }
+    })
+
+    it("leaves Enter alone in a table without a row action", async () => {
+      const user = userEvent.setup()
+      function Harness() {
+        const [selected, setSelected] = useState<Selection>(new Set())
+        return (
+          <>
+            <span data-testid="count">
+              {selected === "all" ? "all" : selected.size}
+            </span>
+            <DataTable
+              {...base({
+                selectionMode: "multiple",
+                selectedKeys: selected,
+                onSelectionChange: setSelected,
+              })}
+            />
+          </>
+        )
+      }
+      render(<Harness />)
+
+      screen.getByRole("row", { name: /Bravo/ }).focus()
+      await user.keyboard("{Enter}")
+
+      // react-aria's own Enter: with no action to fire, it selects the row.
+      expect(screen.getByTestId("count")).toHaveTextContent("1")
+    })
   })
 
   it("reports sort changes from a sortable column header", async () => {

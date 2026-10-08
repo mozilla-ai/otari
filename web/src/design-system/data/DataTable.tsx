@@ -1,5 +1,6 @@
 import { Spinner, Table } from "@heroui/react"
 import type {
+  KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   ReactNode,
   PointerEvent as ReactPointerEvent,
@@ -22,11 +23,22 @@ import { CheckboxVisual } from "@/design-system/forms/Checkbox"
 // `slot="selection"`. HeroUI's Checkbox splits the control across subcomponents
 // and does not cleanly forward the selection slot, so the selection box is a
 // small styled react-aria Checkbox that matches the --otari tokens.
-function SelectionCheckbox({ ariaLabel }: { ariaLabel: string }) {
+//
+// A row's checkbox stays out of the Tab order: the grid is one tab stop, and a
+// tabbable checkbox in every row gave Tab a second stop inside the row it had
+// just entered. Space on a focused row still selects it.
+function SelectionCheckbox({
+  ariaLabel,
+  excludeFromTabOrder,
+}: {
+  ariaLabel: string
+  excludeFromTabOrder?: boolean
+}) {
   return (
     <AriaCheckbox
       slot="selection"
       aria-label={ariaLabel}
+      excludeFromTabOrder={excludeFromTabOrder}
       className="group inline-flex items-center"
     >
       {({ isSelected, isIndeterminate, isDisabled }) => (
@@ -111,10 +123,14 @@ const SELECTION_COLUMN_WIDTH = 44
 // which opens nothing does not leave a row lit indefinitely.
 const DETAIL_OPENING_BACKSTOP_MS = 1500
 
+// How far the pointer may travel between press and release and still count as a
+// click. Cells are selectable, so a hand that drifts a pixel across a character
+// boundary selects that character; this is the margin that keeps such a click a
+// click, and it is far shorter than any deliberate highlight of an id.
+const CLICK_SLOP_PX = 5
+
 // Whether the document's text selection is a real (non-empty) one anchored inside
-// `root`. Used to tell "the operator was highlighting an id" from "the operator
-// clicked the row": a plain click leaves a collapsed selection, and a selection
-// made elsewhere on the page is not anchored here.
+// `root`. A selection made elsewhere on the page is not anchored here.
 function hasTextSelectionIn(root: HTMLElement | null): boolean {
   if (!root) return false
   const selection = document.getSelection()
@@ -313,20 +329,22 @@ export function DataTable<Row extends object>({
     [onRowAction, renderDetail, detailKey, clearOpening],
   )
 
-  // The row key for an event on an ordinary data cell, or null when the event
-  // belongs to something else: checkboxes, buttons, links, inputs, and the detail
-  // panel pass through untouched. Only meaningful for tables with a row action.
-  const dataCellRowKey = useCallback(
-    (event: { target: EventTarget | null }): string | null => {
-      if (!onRowAction) return null
-      const target = event.target instanceof Element ? event.target : null
-      if (!target) return null
-      if (
-        target.closest(
-          "label[slot=selection], button, a, input, select, textarea, .otari-detail-row",
-        )
+  // The row key an event activates, or null when the event belongs to something
+  // else: buttons, links, inputs, and the detail panel pass through untouched. A
+  // row's checkbox passes a pointer through, which toggles it, but not Enter,
+  // which a checkbox has no use for. Only meaningful for tables with a row action.
+  const activatedRowKey = useCallback(
+    (
+      target: EventTarget | null,
+      via: "pointer" | "keyboard",
+    ): string | null => {
+      if (!onRowAction || !(target instanceof Element)) return null
+      const control = target.closest(
+        "label[slot=selection], button, a, input, select, textarea, .otari-detail-row",
       )
-        return null
+      const isRowCheckbox =
+        control?.closest("tbody label[slot=selection]") != null
+      if (control && !(via === "keyboard" && isRowCheckbox)) return null
       return (
         target.closest("tbody tr[data-key]")?.getAttribute("data-key") ?? null
       )
@@ -334,25 +352,31 @@ export function DataTable<Row extends object>({
     [onRowAction],
   )
 
-  // Where rows have a drill-in action, this component owns the pointer sequence on
-  // data cells instead of react-aria's row press, for three reasons:
+  // Where rows have a drill-in action, this component owns activation on data
+  // cells instead of react-aria's row press, for three reasons:
   //
-  //   1. Its toggle selection behavior repurposes row clicks once the selection is
-  //      non-empty: they extend the selection instead of firing the action
-  //      (useSelectableItem's hasPrimaryAction requires an empty selection
-  //      manager). For these tables the checkbox owns selection and a row click
-  //      keeps opening the drill-in (the Gmail convention).
+  //   1. Its toggle selection behavior stops activating rows once the selection
+  //      is non-empty (useSelectableItem's hasPrimaryAction requires an empty
+  //      selection manager): a click extends the selection instead, and Enter
+  //      does nothing at all. Here the checkbox owns selection and a row keeps
+  //      opening its drill-in by click or Enter (the Gmail convention).
   //   2. The press toggles selection on pointer *down*, and the re-render that
   //      causes lands mid-drag and discards a nascent text selection, so no id in
   //      a row could be highlighted by hand (issue #478).
-  //   3. Taking pointer down and the click together keeps the action firing
-  //      exactly once: react-aria never sees a press to fire it a second time.
+  //   3. Taking the whole sequence keeps the action firing exactly once:
+  //      react-aria never sees a press to fire it a second time.
   //
-  // Checkboxes, buttons, links, inputs, and the detail panel pass through, so
-  // selection, row actions, and the panel's own controls behave normally.
-  // Keyboard activation is untouched: Enter still routes through Table.Content's
-  // onRowAction. Tables with no row action keep react-aria's press as-is; there,
-  // only a CopyableValue (which stops the press on itself) is drag-selectable.
+  // Tables with no row action keep react-aria's press as-is; there, only a
+  // CopyableValue (which stops the press on itself) is drag-selectable.
+  const pressOrigin = useRef<{ x: number; y: number } | undefined>(undefined)
+
+  const startPress = (event: ReactPointerEvent | ReactMouseEvent) => {
+    if (activatedRowKey(event.target, "pointer") == null) return
+    // react-aria falls back to mouse events where PointerEvent is unavailable,
+    // so both are stopped; the press (and its selection toggle) starts there.
+    event.stopPropagation()
+    pressOrigin.current = { x: event.clientX, y: event.clientY }
+  }
 
   // Rows render through react-aria's items-collection path so each row element
   // is cached per row object: a selection toggle re-renders only the affected
@@ -380,7 +404,7 @@ export function DataTable<Row extends object>({
         <Table.Row key={key} id={key} className={className}>
           {showSelection ? (
             <Table.Cell>
-              <SelectionCheckbox ariaLabel="Select row" />
+              <SelectionCheckbox ariaLabel="Select row" excludeFromTabOrder />
             </Table.Cell>
           ) : null}
           {columns.map((col) => (
@@ -403,27 +427,48 @@ export function DataTable<Row extends object>({
     <Table.Root ref={rootRef} className="otari-table">
       <Container
         className="overflow-x-auto"
-        onPointerDownCapture={(event: ReactPointerEvent) => {
-          if (dataCellRowKey(event) != null) event.stopPropagation()
-        }}
-        onMouseDownCapture={(event: ReactMouseEvent) => {
-          // react-aria falls back to mouse events where PointerEvent is
-          // unavailable; the press (and its selection toggle) starts here.
-          if (dataCellRowKey(event) != null) event.stopPropagation()
-        }}
+        onPointerDownCapture={startPress}
+        onMouseDownCapture={startPress}
         onClickCapture={(event: ReactMouseEvent) => {
-          const key = dataCellRowKey(event)
+          const key = activatedRowKey(event.target, "pointer")
           if (key == null) return
           // Swallowed either way, so react-aria's row press never fires a second
           // action. A click that ended a text drag inside the table is a
           // selection, not an activation: cells are selectable by design (see
-          // design-system.css), and drilling in mid-highlight both loses the selection
-          // and moves the page under the operator, so the action is skipped for
-          // that click only. Deliberately scoped to the click path: the same
-          // check in fireRowAction would also swallow Enter on a focused row,
-          // which is a deliberate activation even with an id still highlighted.
+          // design-system.css), and drilling in mid-highlight both loses the
+          // selection and moves the page under the operator. A drag is a press
+          // that travelled, or a double or triple click selecting a word or a
+          // line; the selection alone does not say, since a click that wobbles
+          // across a character boundary selects that character too.
           event.stopPropagation()
-          if (!hasTextSelectionIn(rootRef.current)) fireRowAction(key)
+          const origin = pressOrigin.current
+          pressOrigin.current = undefined
+          const travelled =
+            origin != null &&
+            Math.hypot(event.clientX - origin.x, event.clientY - origin.y) >
+              CLICK_SLOP_PX
+          const dragged = travelled || event.detail > 1
+          if (!(dragged && hasTextSelectionIn(rootRef.current)))
+            fireRowAction(key)
+        }}
+        onKeyDownCapture={(event: ReactKeyboardEvent) => {
+          // Enter opens the row from the row, any of its cells, or its checkbox,
+          // whatever is selected. No selection check here: Enter is deliberate
+          // even with an id still highlighted.
+          if (
+            event.key !== "Enter" ||
+            event.repeat ||
+            event.altKey ||
+            event.ctrlKey ||
+            event.metaKey ||
+            event.shiftKey
+          )
+            return
+          const key = activatedRowKey(event.target, "keyboard")
+          if (key == null) return
+          event.preventDefault()
+          event.stopPropagation()
+          fireRowAction(key)
         }}
       >
         <Table.Content
