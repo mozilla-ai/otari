@@ -409,6 +409,24 @@ def rerank_estimate(pricing: ModelPricing | None, *, prompt_chars: int) -> Decim
     return estimate_cost(pricing, prompt_chars=prompt_chars, max_output_tokens=None, default_output_tokens=0)
 
 
+async def _build_ceiling_refusal(
+    db: AsyncSession,
+    refused: ApplicableBudget,
+    *,
+    amount: Decimal | None,
+    tokens: int,
+    requests: int,
+    new_request: bool,
+) -> HTTPException:
+    """The 403 for a request a scoped ceiling has no room for, naming the limit it ran out of."""
+    axis = await blocked_axis(db, refused, amount=amount, tokens=tokens, requests=requests, new_request=new_request)
+    return HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"{refused.subject} has exceeded {axis} limit",
+        headers=error_codes.error_headers(error_codes.BUDGET_EXCEEDED, budget_scope=refused.scope_type),
+    )
+
+
 async def _held_handle(
     db: AsyncSession,
     *,
@@ -694,18 +712,8 @@ async def reserve_budget(
         )
         if refused is not None:
             BUDGET_EXCEEDED.inc()
-            axis = await blocked_axis(
-                db,
-                refused,
-                amount=usd,
-                tokens=held_tokens,
-                requests=held_requests,
-                new_request=new_request,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"{refused.subject} has exceeded {axis} limit",
-                headers=error_codes.error_headers(error_codes.BUDGET_EXCEEDED, budget_scope=refused.scope_type),
+            raise await _build_ceiling_refusal(
+                db, refused, amount=usd, tokens=held_tokens, requests=held_requests, new_request=new_request
             )
 
     if budget is None:
@@ -1110,18 +1118,8 @@ async def increase_reservation(
         )
         if refused is not None:
             BUDGET_EXCEEDED.inc()
-            axis = await blocked_axis(
-                db,
-                refused,
-                amount=additional,
-                tokens=grown_tokens,
-                requests=0,
-                new_request=False,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"{refused.subject} has exceeded {axis} limit",
-                headers=error_codes.error_headers(error_codes.BUDGET_EXCEEDED, budget_scope=refused.scope_type),
+            raise await _build_ceiling_refusal(
+                db, refused, amount=additional, tokens=grown_tokens, requests=0, new_request=False
             )
         # Recorded here, next to the hold it describes, and before the per-user
         # call below can refuse: what the caller's refund releases is what the
