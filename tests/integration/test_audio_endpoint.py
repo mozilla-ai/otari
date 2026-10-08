@@ -69,6 +69,7 @@ def test_transcription_forwards_file_name(
             headers=api_key_header,
         )
     assert resp.status_code == 200
+    assert mock.await_args is not None
     sent = mock.await_args.kwargs["file"]
     assert sent.name == "clip.m4a"
     assert sent.read() == b"audio-data"
