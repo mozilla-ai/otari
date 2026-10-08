@@ -116,13 +116,16 @@ export function turnStatus(turn: TraceTurn): { tone: ChipTone; label: string } {
   }
 }
 
+// A row of the activity list is a session (requests that named one) or a single
+// request that named none; both are traces, so they share one list.
+export function traceKind(summary: TraceSummary): "Session" | "Request" {
+  return summary.session_source === "none" ? "Request" : "Session"
+}
+
 // What a session is called in the list: the agent that ran it, and a short id
 // to tell two runs of one agent apart.
 export function sessionName(summary: TraceSummary): string {
-  return (
-    summary.harness ??
-    (summary.session_source === "none" ? "Request" : "Session")
-  )
+  return summary.harness ?? traceKind(summary)
 }
 
 export function shortId(traceId: string): string {
