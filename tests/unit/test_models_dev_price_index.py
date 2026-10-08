@@ -257,7 +257,10 @@ def test_malformed_catalog_entries_are_skipped() -> None:
         {
             "a": "nope",
             "b": {"id": "b", "models": []},
-            "c": {"id": "c", "models": {"m": {"id": "m", "cost": {"input": "x", "output": -1, "tiers": "bad"}}, "n": 3}},
+            "c": {
+                "id": "c",
+                "models": {"m": {"id": "m", "cost": {"input": "x", "output": -1, "tiers": "bad"}}, "n": 3},
+            },
         }
     )
     price = index.resolve("c", "m")
