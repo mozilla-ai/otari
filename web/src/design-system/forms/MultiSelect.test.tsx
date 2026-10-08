@@ -91,6 +91,48 @@ describe("MultiSelect", () => {
     expect(screen.queryByRole("list", { name: /selected/ })).toBeNull()
   })
 
+  it("lists a disabled option but will not pick it, by pointer or by keyboard", async () => {
+    const user = userEvent.setup()
+    function Spoken({ initial = [] }: { initial?: string[] }) {
+      const [value, setValue] = useState<string[]>(initial)
+      return (
+        <MultiSelect
+          label={LABEL}
+          options={[
+            {
+              id: "taken",
+              label: "Taken",
+              hint: "On another budget",
+              isDisabled: true,
+            },
+            ...PEOPLE,
+          ]}
+          value={value}
+          onChange={setValue}
+        />
+      )
+    }
+    const { unmount } = render(<Spoken />)
+
+    await user.click(field())
+    const taken = screen.getByRole("option", { name: /Taken/ })
+    expect(taken).toHaveAttribute("aria-disabled", "true")
+    await user.click(taken)
+    expect(taken).toHaveAttribute("aria-selected", "false")
+    // The first row is the active one, so Enter is aimed straight at it.
+    await user.keyboard("{Enter}")
+    expect(screen.getByRole("option", { name: /Taken/ })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    )
+    unmount()
+
+    // Picked before it was spoken for: the chip still removes it.
+    render(<Spoken initial={["taken"]} />)
+    await user.click(screen.getByRole("button", { name: "Remove Taken" }))
+    expect(screen.queryByRole("list", { name: /selected/ })).toBeNull()
+  })
+
   it("closes the popover on Escape without letting the key travel further", async () => {
     // Inside a FormDialog, an Escape that reaches the dialog arms its
     // unsaved-changes guard. Dismissing a list must not do that, so the handler
@@ -110,6 +152,19 @@ describe("MultiSelect", () => {
     await user.keyboard("{Escape}")
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
     expect(onKeyDown).not.toHaveBeenCalled()
+  })
+
+  it("reopens on a press after Escape closed it, with focus never having left", async () => {
+    const user = userEvent.setup()
+    render(<Live />)
+
+    await user.click(field())
+    await user.keyboard("{Escape}")
+    expect(field()).toHaveAttribute("aria-expanded", "false")
+    expect(field()).toHaveFocus()
+
+    await user.click(field())
+    expect(field()).toHaveAttribute("aria-expanded", "true")
   })
 
   it("swallows Enter while the list is open with nothing to toggle", async () => {
@@ -249,6 +304,37 @@ describe("MultiSelect", () => {
     expect(screen.getByText(/0 of 2 selected here/)).toBeInTheDocument()
     // Singular, which is the whole reason the noun is a pair.
     expect(screen.getAllByText(/1 person assigned/).length).toBeGreaterThan(0)
+  })
+
+  it("matches the id only where the caller says it is something people type", async () => {
+    const options = [
+      { id: '["workspace","a1"]', label: "Platform" },
+      { id: '["workspace","b2"]', label: "Research" },
+    ]
+    const user = userEvent.setup()
+    const { rerender } = render(
+      <MultiSelect
+        label={LABEL}
+        options={options}
+        value={[]}
+        onChange={() => {}}
+        searchesId={false}
+      />,
+    )
+
+    await user.click(field())
+    await user.type(field(), "workspace")
+    expect(screen.queryAllByRole("option")).toHaveLength(0)
+
+    rerender(
+      <MultiSelect
+        label={LABEL}
+        options={options}
+        value={[]}
+        onChange={() => {}}
+      />,
+    )
+    expect(screen.getAllByRole("option")).toHaveLength(2)
   })
 
   it("removes the last chip on Backspace with an empty query", async () => {

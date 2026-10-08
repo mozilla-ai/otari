@@ -63,8 +63,8 @@ export const ORGANIZATIONS = "organizations"
 // The caller's standing in the organization they are acting in. Composed here
 // rather than spelled at the hook, because two things outside that hook address
 // this one read: switching organization writes the context it was answered with
-// straight into it, and the spend-ceilings read binds its role gate to whatever
-// object is cached under it.
+// straight into it, and an owners-and-admins read binds its role gate to
+// whatever object is cached under it.
 export const ORGANIZATION_CONTEXT = [ORGANIZATIONS, "context"] as const
 // Deliberately its own key rather than a child of ORGANIZATIONS: switching
 // organizations invalidates both, but a role change invalidates only the roster,
@@ -80,7 +80,6 @@ export const ORGANIZATION_PRICING = "organization-pricing"
 // to a tenant, so one key for both would serve a cached operator answer to an
 // admin and invalidate reads neither caller can make.
 export const ORGANIZATION_BUDGETS = "organization-budgets"
-export const ORGANIZATION_SPEND_CEILINGS = "organization-spend-ceilings"
 export const ORGANIZATION_GUARDRAILS = "organization-guardrails"
 // What each guardrail is, apart from where it runs. No mandate field changes
 // when a definition does, so a definition write leaves the mandates alone.

@@ -9,7 +9,7 @@
  * and the provider never.
  */
 
-import type { AppliedEntity } from "@/client"
+import type { NamedAppliedEntity } from "@/client"
 
 /** The phrases, in the order an admin scans them: widest scope first. */
 const GROUP_ORDER = [
@@ -25,7 +25,7 @@ const GROUP_ORDER = [
 type GroupKey = (typeof GROUP_ORDER)[number]
 
 /** What an entity counts as: the model or provider it narrows to, else its scope. */
-function findGroup(entity: AppliedEntity): GroupKey {
+function findGroup(entity: NamedAppliedEntity): GroupKey {
   if (entity.model) return "model"
   if (entity.provider_key_id) return "provider"
   return GROUP_ORDER.includes(entity.scope_type as GroupKey)
@@ -47,7 +47,7 @@ function formatCount(count: number, singular: string, plural: string): string {
  */
 function describeGroup(
   group: GroupKey,
-  entities: readonly AppliedEntity[],
+  entities: readonly NamedAppliedEntity[],
 ): string {
   const count = entities.length
   switch (group) {
@@ -83,7 +83,7 @@ export const APPLIED_TO_NOTHING = "Not applied yet"
  * or an admin reads a budget covering a dozen workspaces as covering four.
  */
 export function formatAppliedTo(
-  entities: readonly AppliedEntity[],
+  entities: readonly NamedAppliedEntity[],
   maxPhrases = 3,
 ): string {
   if (entities.length === 0) return APPLIED_TO_NOTHING

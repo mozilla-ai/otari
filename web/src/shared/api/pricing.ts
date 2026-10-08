@@ -92,9 +92,8 @@ export function useOrganizationPricing(
     // carries it implicitly: the server scopes this read by the session's
     // active organization, so without it two organizations share one cache
     // entry and the second reads the first's rows until its own land.
-    // `useOrganizationSpendCeilings` keys itself the same way and says more
-    // about why. `invalidateOrganizationPricing` matches on the head, so the
-    // extra segment costs it nothing.
+    // `invalidateOrganizationPricing` matches on the head, so the extra segment
+    // costs it nothing.
     queryKey: [
       ORGANIZATION_PRICING,
       context?.organization?.id ?? null,
@@ -109,8 +108,9 @@ export function useOrganizationPricing(
         }`,
       ),
     staleTime: 60_000,
-    // Kept across a page change and dropped across an organization change, for
-    // the reason `useOrganizationSpendCeilings` gives.
+    // Kept across a page change and dropped across an organization change:
+    // `keepPreviousData` alone would answer the new organization's key with the
+    // old one's rows until the fetch lands.
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[1] === (context?.organization?.id ?? null)
         ? previous

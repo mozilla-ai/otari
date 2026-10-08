@@ -100,10 +100,10 @@ If you find yourself writing one of the three above, the base already says it an
 
 Two consequences worth knowing. Sixteen consumers overriding a default with no
 exceptions is not a default: it is a base value that was wrong, and the fix is
-to move it rather than to keep overriding. And the cards that render a bare
-`DataTable` with no wrapper class (`SpendCeilingsCard`,
-`OrganizationRosterCard`) were the ones still showing the old treatment, so correcting the base is what converted them: their headers lose
-a teal tint and their row separators move to the faint tier.
+to move it rather than to keep overriding. And a card that renders a bare
+`DataTable` with no wrapper class (`OrganizationRosterCard`) takes the base
+directly, so correcting the base is what converted it: its header lost a teal
+tint and its row separators moved to the faint tier.
 The lane does the aligning; see [layout.md](layout.md).
 
 **`TableScrollFrame`'s `className` is a declared place, not a free label.** It

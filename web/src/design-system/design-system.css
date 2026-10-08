@@ -452,10 +452,9 @@
   /* Told from the rows by a rule and by weight, not by a fill. This was
      `--color-primary-subtle`, a teal tint, which is the accent spent as
      decoration: colors.md gives it five jobs and a table header is none of
-     them. Every converted table already overrode it back to transparent; the
-     cards that render a bare DataTable (SpendCeilingsCard,
-     OrganizationRosterCard) are the ones that were still showing the tint,
-     and this is what converts them. */
+     them. Every converted table already overrode it back to transparent; a
+     card that renders a bare DataTable (OrganizationRosterCard) takes this
+     directly. */
   background-color: transparent;
   border-bottom: 1px solid var(--color-border);
 }

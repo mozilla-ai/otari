@@ -30,11 +30,10 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
  * into a package, this belongs with the application.
  */
 const CONTEXTS: { place: string; keys: string[] }[] = [
-  // No wrapper class, which is a real case rather than a control: three feature
-  // cards (OrganizationBudgetsCard, SpendCeilingsCard, OrganizationRosterCard)
-  // render a bare DataTable, so they take whatever the base `.otari-table`
-  // rules say. Measured here so a change to that base shows up as drift instead
-  // of arriving unseen on three surfaces.
+  // No wrapper class, which is a real case rather than a control: a feature
+  // card (OrganizationRosterCard) renders a bare DataTable, so it takes
+  // whatever the base `.otari-table` rules say. Measured here so a change to
+  // that base shows up as drift instead of arriving unseen.
   { place: "", keys: ["name", "value", "actions"] },
   {
     place: "otari-accounts-table",
