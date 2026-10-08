@@ -85,14 +85,17 @@ class ExaProvider(AnyFetch):
     )
 
     async def _fetch(self, url: str, *, max_chars: int | None, options: dict[str, Any]) -> FetchedPage:
-        text_options = options.get("text") or {}
+        # The text is always asked for, so true means Exa's defaults, and a value that is not an object is refused.
+        text_options = options.get("text")
+        if text_options is None or text_options is True:
+            text_options = {}
         if not isinstance(text_options, dict):
             raise ProviderError(self.METADATA.name, None, "invalid_option")
         if "maxCharacters" in text_options:
             raise UnsupportedParameterError(self.METADATA.name, "text.maxCharacters")
         limit = max_chars or DEFAULT_MAX_CHARS
-        text_request = {**text_options, "maxCharacters": min(limit + 1, MAX_CHARACTERS)}
-        payload: dict[str, Any] = {"urls": [url], "text": text_request}
+        requested = min(limit + 1, MAX_CHARACTERS)
+        payload: dict[str, Any] = {"urls": [url], "text": {**text_options, "maxCharacters": requested}}
         payload.update({name: options[name] for name in _PASSED_THROUGH if name in options})
 
         endpoint = f"{(self._api_base or '').rstrip('/')}/contents"
@@ -106,6 +109,10 @@ class ExaProvider(AnyFetch):
         cost_source: Literal["reported", "none"] = "none" if cost is None else "reported"
 
         error = _page_error(statuses)
+        item = next((result for result in results if isinstance(result, dict)), None)
+        if error is None and item is None and not _empty_content(statuses):
+            # No page and no reason: nothing says the page was fetched, so it is not an empty page.
+            error = FetchError(tag="no_result")
         if error is not None:
             return FetchedPage(
                 url=url,
@@ -117,7 +124,7 @@ class ExaProvider(AnyFetch):
                 error=error,
                 raw=body,
             )
-        item = next((result for result in results if isinstance(result, dict)), {})
+        item = item or {}
         text = item.get("text")
         text = text if isinstance(text, str) else ""
         title = item.get("title")
@@ -132,7 +139,8 @@ class ExaProvider(AnyFetch):
             published=_published(item.get("publishedDate")),
             cost=cost,
             cost_source=cost_source,
-            text_truncated=len(text) > limit,
+            # At Exa's own limit there is no character to spare, so text that fills it counts as cut.
+            text_truncated=len(text) >= requested,
             raw=body,
         )
 
@@ -153,6 +161,16 @@ def _body(response: httpx.Response) -> dict[str, Any]:
 
 def _tag(value: Any) -> str | None:
     return value if isinstance(value, str) and _TAG.fullmatch(value) else None
+
+
+def _empty_content(statuses: Any) -> bool:
+    """Whether Exa reported the page as fetched with no text."""
+    return isinstance(statuses, list) and any(
+        isinstance(status, dict)
+        and isinstance(status.get("error"), dict)
+        and status["error"].get("tag") == EMPTY_CONTENT
+        for status in statuses
+    )
 
 
 def _page_error(statuses: Any) -> FetchError | None:

@@ -99,9 +99,16 @@ async def test_api_base_replaces_the_endpoint() -> None:
 async def test_the_text_length_is_max_chars_only() -> None:
     with pytest.raises(UnsupportedParameterError, match="text.maxCharacters"):
         await _fetch(text={"maxCharacters": 50})
-    with pytest.raises(ProviderError) as raised:
-        await _fetch(text="full")
-    assert raised.value.tag == "invalid_option"
+
+
+@pytest.mark.asyncio
+async def test_text_true_is_exas_defaults_and_another_value_is_refused() -> None:
+    _, request = await _fetch(text=True, max_chars=5)
+    assert _payload(request)["text"] == {"maxCharacters": 6}
+    for value in (False, "full"):
+        with pytest.raises(ProviderError) as raised:
+            await _fetch(text=value)
+        assert raised.value.tag == "invalid_option"
 
 
 @pytest.mark.asyncio
@@ -132,6 +139,19 @@ async def test_a_page_exa_could_not_fetch_is_an_error_inside_the_answer() -> Non
     assert page.error == FetchError(tag="CRAWL_NOT_FOUND", status=404)
     assert (page.text, page.final_url) == ("", URL)
     assert (page.cost, page.cost_source) == (Decimal(0), "reported")
+
+
+@pytest.mark.asyncio
+async def test_text_that_fills_exas_own_limit_counts_as_cut() -> None:
+    page, _ = await _fetch(_page(text="x" * MAX_CHARACTERS), max_chars=MAX_CHARACTERS)
+    assert (len(page.text), page.text_truncated) == (MAX_CHARACTERS, True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("statuses", [[], [{"id": URL, "status": "success"}], None])
+async def test_no_page_and_no_reason_is_an_error_not_an_empty_page(statuses: Any) -> None:
+    page, _ = await _fetch(httpx.Response(200, json={"results": [], "statuses": statuses}))
+    assert page.error == FetchError(tag="no_result")
 
 
 @pytest.mark.asyncio

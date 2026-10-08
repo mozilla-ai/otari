@@ -112,8 +112,9 @@ any-search exa "latest stable python release" -o 'contents={"highlights": true}'
 | `published` | `publishedDate`, a date or a date-time; UTC when it has no zone |
 
 The cost is `costDollars.total`. `max_results` becomes `numResults`, at most 100; the `numResults`
-option applies only when `max_results` is not passed. `time_range` becomes `startPublishedDate`
-and wins over that option. The other native options are `type`, `category`, `includeDomains`,
+option, capped the same way, applies only when `max_results` is not passed. `time_range` becomes
+`startPublishedDate`, at the start of that day in UTC, since Exa often dates a page by its day
+alone, and wins over that option. The other native options are `type`, `category`, `includeDomains`,
 `excludeDomains`, `endPublishedDate`, `userLocation`, `moderation` and `additionalQueries`.
 
 A failure raises `ProviderError` with Exa's HTTP status and its `tag`, such as `INVALID_API_KEY`

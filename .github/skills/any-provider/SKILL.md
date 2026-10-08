@@ -67,8 +67,9 @@ The four cases a fixture can record:
 - `METADATA`: `max_results` is the provider's own limit; `query_in_url` and `key_in_url` say
   whether either travels in the URL. When one does, build the URL yourself and never pass it to a
   logger.
-- Map `max_results`, and also cut the hits to it, since a replayed fixture does not honor it.
-  Map `time_range` (`day`, `week`, `month`, `year`) to the provider's recency filter.
+- Map `max_results`, and also cut the hits to it, since a replayed fixture does not honor it. A
+  native count option that stands in for it gets the same cap. Map `time_range` (`day`, `week`,
+  `month`, `year`) to the provider's recency filter, rounded to the precision of its dates.
 - A hit needs a URL; drop items without one. `title` and `snippet` are strings, never `None`.
   `snippet` is the provider's short text; `text` is page text, when it came back.
 - `raw` holds the provider's item and its whole response, untouched.
@@ -82,29 +83,31 @@ The four cases a fixture can record:
   reading the response.
 - `url` is the URL asked for, `final_url` the one the provider answered for. `content_type` is
   the type the page was served as, or empty when the provider does not say.
-- A page the provider fetched with no text is empty: `text` is `""` and `error` is `None`.
+- A page the provider fetched with no text is empty: `text` is `""` and `error` is `None`. An
+  answer with neither a page nor a reason is an error, not an empty page.
 - `builtin` is not added here: the host registers it (`AnyFetch.register_builtin`).
 
 ## Learnings
 
 ### 2026-10-08, Exa (iteration one, both libraries)
 
-- Exa's API and its SDK differ. With no `contents`, `POST /search` returns only `id`, `title` and
-  `url`, while the SDKs ask for page text up to 10,000 characters. The adapters follow the SDK,
-  hence step 2's rule. Highlights fill `snippet` only when a caller asks for them;
-  `highlights: true` gave up to about 3,400 characters per hit.
-- `/search` reports no error inside a 200 (Exa's error-codes page says so), so any-search has
-  three Exa fixtures and any-fetch four.
-- `/contents` reports a page with no text as a page error, `CRAWL_EMPTY_CONTENT`, with
-  `httpStatusCode` 500. The adapter reads it as an empty page. A page error can come with an
-  empty `error` object; it becomes the tag `fetch_error`.
-- Exa's `text.maxCharacters` is exact, which is what makes asking for one more character work.
-- Exa reported a cost of 0 for a search with no results and for a page it could not fetch.
-- Exa's `type` enum is `instant`, `fast`, `auto`, `deep-lite`, `deep` and `deep-reasoning`;
-  `neural` and `keyword` are gone. Left out of the options: the deprecated fields, the synthesis
-  fields (`outputSchema`, `systemPrompt`, and `stream`, whose server-sent events the adapter
-  cannot read) and the enterprise `compliance` mode.
-- Exa has no environment variable for its base URL, so `env_api_base` is `None`.
+What each adapter does is in its library's README; these are the lessons for the procedure.
+
+- A provider's API and its SDK can differ in what they send by default. Exa's API returns only
+  titles and URLs unless asked for more, while its SDKs ask for page text. Hence step 2's rule:
+  follow the SDK.
+- Not every provider has an in-body error: Exa's `/search` has none, so it has three fixtures.
+- A provider can report an empty page as a page error (Exa's `CRAWL_EMPTY_CONTENT`); read that
+  one as an empty page. A page error can also come with no tag at all.
+- Check whether the provider's length cap is exact before relying on it. Exa's is, which is what
+  makes asking for one character more work.
+- Exa dates many pages by their day alone, as midnight, which is why a `time_range` start is
+  rounded down to the day.
+- A provider can report a cost of 0: Exa did for a search with no results and for a page it could
+  not fetch. The host bills the reported cost first.
+- Leave out of the options what the envelope cannot carry or the provider has deprecated. For
+  Exa: the synthesis fields (`outputSchema`, `systemPrompt`, and `stream`, whose server-sent
+  events the adapter cannot read), the enterprise `compliance` mode, and the deprecated fields.
 - Fixture recipes: an empty search with `includeDomains` set to a domain that does not exist; an
   in-body fetch error with a page that does not exist; an empty page with a zero-byte file.
 - The recorder reads the key from its own environment. When the key is set only in an

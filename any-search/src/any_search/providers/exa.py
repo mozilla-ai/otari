@@ -13,8 +13,9 @@ API: https://exa.ai/docs/reference/search. Pricing, read 2026-10-08:
 https://exa.ai/docs/admin/pricing.
 """
 
+import copy
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -87,7 +88,7 @@ class ExaProvider(AnySearch):
             OptionSpec(
                 name="contents",
                 type="object",
-                default=DEFAULT_CONTENTS,
+                default=copy.deepcopy(DEFAULT_CONTENTS),
                 description=(
                     "What to return of each page: text, highlights, summary, extras. Sent as given; false "
                     "sends none. Highlights become the hit's snippet and text its text."
@@ -134,7 +135,11 @@ class ExaProvider(AnySearch):
         options: dict[str, Any],
     ) -> SearchResult:
         payload: dict[str, Any] = {"query": query, "type": options.get("type") or "auto"}
-        count: Any = min(max_results, MAX_RESULTS) if max_results is not None else options.get("numResults")
+        count: Any = max_results if max_results is not None else options.get("numResults")
+        # A count Exa cannot take is sent as it is, for Exa to refuse; only a usable one caps the hits.
+        limit = count if isinstance(count, int) and not isinstance(count, bool) and count >= 1 else None
+        if limit is not None:
+            count = limit = min(limit, MAX_RESULTS)
         if count is not None:
             payload["numResults"] = count
         payload.update({name: options[name] for name in _PASSED_THROUGH if name in options})
@@ -142,19 +147,19 @@ class ExaProvider(AnySearch):
             payload["startPublishedDate"] = _since(time_range)
         contents = options.get("contents")
         if contents is None:
-            payload["contents"] = DEFAULT_CONTENTS
+            payload["contents"] = copy.deepcopy(DEFAULT_CONTENTS)
         elif contents is not False:
             payload["contents"] = contents
 
-        url = f"{(self._api_base or '').rstrip('/')}/search"
-        response = await self._http.request("POST", url, json=payload, headers={"x-api-key": self._api_key or ""})
+        endpoint = f"{(self._api_base or '').rstrip('/')}/search"
+        response = await self._http.request("POST", endpoint, json=payload, headers={"x-api-key": self._api_key or ""})
         body = _body(response)
         results = body.get("results")
         if not isinstance(results, list):
             raise ProviderError(self.METADATA.name, response.status_code, "invalid_response")
-        hits = [_hit(item) for item in results if isinstance(item, dict) and _url(item)]
-        if isinstance(count, int) and not isinstance(count, bool):
-            hits = hits[:count]
+        hits = [_hit(item, url) for item in results if isinstance(item, dict) and (url := _url(item))]
+        if limit is not None:
+            hits = hits[:limit]
         cost = _cost(body)
         return SearchResult(
             provider=self.METADATA.name,
@@ -166,7 +171,12 @@ class ExaProvider(AnySearch):
 
 
 def _since(time_range: TimeRange) -> str:
-    start = datetime.now(UTC) - _TIME_RANGE[time_range]
+    """The start of the day the range begins on, in UTC.
+
+    Exa often dates a page by its day alone, as midnight, so a start taken to
+    the second would leave out pages from the range's first day.
+    """
+    start = datetime.combine((datetime.now(UTC) - _TIME_RANGE[time_range]).date(), time(), UTC)
     return start.isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
@@ -193,7 +203,7 @@ def _url(item: dict[str, Any]) -> str | None:
     return url if isinstance(url, str) and url else None
 
 
-def _hit(item: dict[str, Any]) -> SearchHit:
+def _hit(item: dict[str, Any], url: str) -> SearchHit:
     title = item.get("title")
     text = item.get("text")
     highlights = item.get("highlights")
@@ -201,7 +211,7 @@ def _hit(item: dict[str, Any]) -> SearchHit:
     if isinstance(highlights, list):
         snippet = " ".join(part.strip() for part in highlights if isinstance(part, str) and part.strip())
     return SearchHit(
-        url=_url(item) or "",
+        url=url,
         title=title if isinstance(title, str) else "",
         snippet=snippet,
         text=text if isinstance(text, str) and text else None,

@@ -1,7 +1,7 @@
 """The Exa adapter: the request it sends, and how it reads Exa's recorded answers."""
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -87,6 +87,26 @@ async def test_the_num_results_option_applies_without_max_results() -> None:
 
 
 @pytest.mark.asyncio
+async def test_the_num_results_option_is_capped_too() -> None:
+    _, request = await _search(numResults=500)
+    assert _payload(request)["numResults"] == MAX_RESULTS
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("count", [0, -1, "3"])
+async def test_a_num_results_exa_cannot_take_is_left_for_exa_to_refuse(count: Any) -> None:
+    result, request = await _search(numResults=count)
+    assert _payload(request)["numResults"] == count
+    assert len(result.hits) == len(_recorded("normal").json()["results"])
+
+
+def test_the_default_contents_are_never_shared() -> None:
+    option = next(option for option in AnySearch.get_provider_metadata("exa").options if option.name == "contents")
+    assert option.default == DEFAULT_CONTENTS
+    assert option.default is not DEFAULT_CONTENTS
+
+
+@pytest.mark.asyncio
 async def test_contents_are_sent_as_given_and_false_sends_none() -> None:
     contents = {"highlights": {"maxCharacters": 300}}
     _, request = await _search(contents=contents)
@@ -115,7 +135,8 @@ async def test_native_options_pass_through_under_their_own_names() -> None:
 async def test_time_range_sets_the_start_date_and_wins_over_the_option() -> None:
     _, request = await _search(time_range="week", startPublishedDate="2000-01-01T00:00:00Z")
     start = datetime.fromisoformat(_payload(request)["startPublishedDate"])
-    assert abs(datetime.now(UTC) - timedelta(weeks=1) - start) < timedelta(minutes=1)
+    # The start of that day, so pages Exa dates by their day alone, as midnight, stay in.
+    assert start == datetime.combine((datetime.now(UTC) - timedelta(weeks=1)).date(), time(), UTC)
 
 
 @pytest.mark.asyncio

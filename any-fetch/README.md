@@ -108,8 +108,8 @@ with the key in the `x-api-key` header, read from `EXA_API_KEY` when not passed.
 It always asks for the page text, up to `max_chars`, or up to 10,000 characters, what Exa's own
 Python SDK asks for, when `max_chars` is not passed. A longer page is cut there and marked
 `text_truncated`. The `text` option shapes the extraction (`verbosity`, `includeHtmlTags`,
-`includeSections`, `excludeSections`); its length is `max_chars` only, so `text.maxCharacters` is
-refused. The other native options are `highlights`, `summary` and `extras`, whose answers stay in
+`includeSections`, `excludeSections`), and `true` keeps Exa's defaults; its length is `max_chars`
+only, so `text.maxCharacters` is refused. The other native options are `highlights`, `summary` and `extras`, whose answers stay in
 `raw`, and `maxAgeHours`, `livecrawlTimeout` and `snapshotAsOf`.
 
 `final_url` is the URL Exa answered for, `published` its `publishedDate`, and the cost
@@ -117,7 +117,8 @@ refused. The other native options are `highlights`, `summary` and `extras`, whos
 
 A page Exa could not fetch comes back as `FetchedPage.error`, with Exa's tag, such as
 `CRAWL_NOT_FOUND`, and the page's HTTP status. A page with no text, which Exa reports as
-`CRAWL_EMPTY_CONTENT`, comes back empty rather than as an error. A failed call raises
+`CRAWL_EMPTY_CONTENT`, comes back empty rather than as an error. An answer with no page and no
+reason comes back as the error `no_result`. A failed call raises
 `ProviderError` with Exa's HTTP status and its `tag`, such as `INVALID_API_KEY`.
 
 ## The fake provider
