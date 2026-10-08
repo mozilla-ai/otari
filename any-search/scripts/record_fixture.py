@@ -1,6 +1,9 @@
 """Record a provider's live answer as a test fixture, with the API key redacted.
 
-    uv run python any-search/scripts/record_fixture.py exa normal "latest stable python release" -o type=auto
+    uv run python any-search/scripts/record_fixture.py <provider> <case> "<query>" [-o NAME=VALUE ...]
+
+No provider that calls HTTP ships yet (`fake` makes no request), so there is
+nothing to record until the first one lands.
 
 Runs one search against the live API, with the key from the environment
 variable the provider's metadata names, and writes the last HTTP response to

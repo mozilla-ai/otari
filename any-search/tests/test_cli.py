@@ -46,6 +46,13 @@ def test_an_error_exits_1_without_the_query(option: str, capsys: pytest.CaptureF
     assert "sentinel-query" not in captured.err
 
 
+def test_a_provider_bug_exits_1_without_the_query(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["fake", "sentinel-query", "-o", "leak_query=true"]) == 1
+    captured = capsys.readouterr()
+    assert captured.err.strip() == "error: fake failed unexpectedly (RuntimeError)"
+    assert "sentinel-query" not in captured.err
+
+
 def test_an_unknown_option_exits_1(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["fake", "q", "-o", "color=red"]) == 1
     assert "'color'" in capsys.readouterr().err

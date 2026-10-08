@@ -1,7 +1,7 @@
 """``any-search``: run one search from the command line, keys from the environment.
 
 any-search fake "latest stable python release" --max-results 2
-any-search exa "latest stable python release" --json
+any-search fake "latest stable python release" --json
 """
 
 import argparse
@@ -97,6 +97,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     except AnySearchError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        # A provider bug, not a reported failure: its text may carry the query, so only its type is shown.
+        print(f"error: {args.provider} failed unexpectedly ({type(exc).__name__})", file=sys.stderr)
         return 1
     if result.error is not None:
         status = "" if result.error.status is None else f", HTTP {result.error.status}"

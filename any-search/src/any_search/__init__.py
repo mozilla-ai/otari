@@ -2,9 +2,9 @@
 
 from any_search import AnySearch, asearch
 
-result = await asearch("exa", "latest stable python release", max_results=5)
-async with AnySearch.create("exa", timeout=15.0) as exa:
-    result = await exa.search("latest stable python release", max_results=5, type="auto")
+result = await asearch("fake", "latest stable python release", max_results=5)
+async with AnySearch.create("fake", timeout=15.0) as provider:
+    result = await provider.search("latest stable python release", max_results=5)
 """
 
 from any_search._api import DEFAULT_TIMEOUT, AnySearch, asearch
