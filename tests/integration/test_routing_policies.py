@@ -256,7 +256,10 @@ def test_all_candidates_failing_is_a_generic_502(client: TestClient) -> None:
 
 
 def test_a_provider_400_burns_the_chain(client: TestClient) -> None:
-    """Provider failures fall through before a response is committed."""
+    """Provider failures fall through before a response is committed.
+
+    Every candidate rejected the request alike, so the caller gets that rejection.
+    """
     _create_user(client)
     calls: list[str] = []
 
@@ -267,7 +270,7 @@ def test_a_provider_400_burns_the_chain(client: TestClient) -> None:
     with patch("gateway.api.routes.chat.acompletion", new=bad_request):
         resp = _chat(client, "fast")
 
-    assert resp.status_code == 502
+    assert resp.status_code == 400
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
 
 

@@ -12,8 +12,9 @@ lock-in semantics, and the terminal all-failed status mapping uniformly.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Iterator
-from typing import Any, Literal, NamedTuple, TypeVar
+from collections.abc import Awaitable, Callable, Iterator, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Literal, TypeVar
 
 import httpx
 from anthropic import APIConnectionError as _AnthropicAPIConnectionError
@@ -26,6 +27,7 @@ from openai import APITimeoutError as _OpenAIAPITimeoutError
 from pydantic import BaseModel, Field, ValidationError
 
 from gateway.core.config import ATTEMPT_ID_HEADER, GatewayConfig
+from gateway.core.error_codes import ALL_CANDIDATES_REJECTED, CONTEXT_LENGTH_EXCEEDED, error_code_of, error_headers
 from gateway.core.retry_after import bounded_retry_after
 from gateway.core.usage import (
     cache_read_tokens_of,
@@ -190,11 +192,13 @@ class ResolvedRoute(BaseModel):
     organization_id: str | None = None
 
 
-class _AttemptFailure(NamedTuple):
+@dataclass(frozen=True)
+class _AttemptFailure:
     position: int
     provider: str
     model: str
     error_class: str
+    error: BaseException = field(repr=False)
 
 
 def build_attempt_client_args(attempt: ResolvedAttempt) -> dict[str, Any] | None:
@@ -305,6 +309,49 @@ def _provider_failure_http_exc(
     )
 
 
+def all_attempts_rejected_detail(tried: int) -> str:
+    """400 detail for a request every attempt rejected as invalid."""
+    return f"No model accepted the request ({tried} attempts). Check the request parameters."
+
+
+def prompt_too_long_for_every_attempt_detail(tried: int) -> str:
+    """400 detail for a prompt every attempt rejected as too long."""
+    return f"The prompt is too long for every model tried ({tried} attempts)."
+
+
+def no_attempt_served_detail(tried: int) -> str:
+    """502 detail for a request no attempt could serve, because none of them knew the model."""
+    return f"No model could serve the request ({tried} attempts)."
+
+
+def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | None:
+    """The answer for attempts that all rejected the request alike, or ``None`` when they failed differently.
+
+    The detail is the gateway's own, because one provider's message does not explain why the whole plan failed.
+    """
+    if len(errors) < 2:
+        return None
+    answers = [_provider_failure_http_exc(error, fallback_detail="") for error in errors]
+    statuses = {answer.status_code for answer in answers}
+    if statuses == {status.HTTP_404_NOT_FOUND}:
+        return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=no_attempt_served_detail(len(errors)))
+    if statuses != {status.HTTP_400_BAD_REQUEST}:
+        return None
+    if {error_code_of(answer.headers) for answer in answers} == {CONTEXT_LENGTH_EXCEEDED}:
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=prompt_too_long_for_every_attempt_detail(len(errors)),
+            headers=error_headers(CONTEXT_LENGTH_EXCEEDED),
+        )
+    # NOTE: Some 400s are the gateway's fault, such as a provider rejecting a model ID it does not serve.
+    # The status cannot tell them apart, so such a plan blames the request.
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=all_attempts_rejected_detail(len(errors)),
+        headers=error_headers(ALL_CANDIDATES_REJECTED),
+    )
+
+
 async def run_platform_attempts(
     *,
     route: ResolvedRoute,
@@ -344,9 +391,10 @@ async def run_platform_attempts(
     If every attempt fails the runner raises 504 on timeout. Otherwise a
     single-attempt failure is classified into a specific safe status
     (400/404/429/...) when the upstream error carries one (via
-    ``_provider_failure_http_exc``), falling back to a generic 502; a
-    multi-attempt fallthrough keeps the generic 502 "All upstream providers
-    failed" rather than attributing one provider's status to the whole set.
+    ``_provider_failure_http_exc``), falling back to a generic 502.
+    When every attempt rejected the request alike,
+    a multi-attempt fallthrough answers as :func:`get_shared_rejection` says.
+    Any other multi-attempt fallthrough keeps the generic 502 "All upstream providers failed".
 
     Callers are expected to hand a non-empty ``attempts`` list — the platform
     resolve endpoint guarantees one. Passing an empty list is a caller
@@ -456,7 +504,7 @@ async def run_platform_attempts(
                 raise _provider_failure_http_exc(
                     exc, fallback_detail="LLM provider error", attempt_id=attempt.attempt_id
                 ) from exc
-            failures.append(_AttemptFailure(attempt.position, attempt.provider, attempt.model, error_class))
+            failures.append(_AttemptFailure(attempt.position, attempt.provider, attempt.model, error_class, exc))
             continue
 
         # Success on this attempt.
@@ -477,13 +525,12 @@ async def run_platform_attempts(
             HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=detail),
             attempts[-1].attempt_id,
         ) from last_exc
-    # A single attempt has one identifiable upstream failure we can classify;
-    # a multi-attempt fallthrough aggregates heterogeneous failures, so it keeps
-    # the generic 502 rather than attributing one provider's status to the set.
     if is_single_attempt and last_exc is not None:
         raise _provider_failure_http_exc(
             last_exc, fallback_detail="LLM provider error", attempt_id=attempts[-1].attempt_id
         ) from last_exc
+    if (rejection := get_shared_rejection([failure.error for failure in failures])) is not None:
+        raise with_attempt_id(rejection, attempts[-1].attempt_id) from last_exc
     raise with_attempt_id(
         HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="All upstream providers failed"),
         attempts[-1].attempt_id,

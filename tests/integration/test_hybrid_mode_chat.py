@@ -19,8 +19,10 @@ from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
 from conftest import InstallControlPlane, TaskGroupMcpTransport
 from gateway.api.deps import reset_config
+from gateway.api.routes._platform import all_attempts_rejected_detail
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
+from gateway.core.error_codes import ALL_CANDIDATES_REJECTED
 
 from .conftest import app_for
 
@@ -2732,8 +2734,8 @@ def test_hybrid_mode_streaming_falls_through_on_provider_400(
         headers={"Authorization": "Bearer user_test_token"},
     )
 
-    assert response.status_code == 502
-    assert response.json() == {"detail": "All upstream providers failed"}
+    assert response.status_code == 400
+    assert response.json() == {"detail": all_attempts_rejected_detail(2), "code": ALL_CANDIDATES_REJECTED}
     assert len(calls) == 2
     assert sorted((r["correlation_id"], r["is_final_attempt"], r.get("error_class")) for r in usage_reports) == [
         ("att-a", False, "http_400"),

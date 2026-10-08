@@ -91,6 +91,7 @@ from gateway.api.routes._platform import (
     _classify_upstream_error,
     _report_platform_usage,
     _resolve_platform_credentials,
+    get_shared_rejection,
     is_provider_billing_error,
     record_abandoned_attempt,
     run_platform_attempts,
@@ -4949,8 +4950,10 @@ async def run_streaming_with_fallback(
     # also stash the error reports so they can be flushed inline on the
     # all-failed path below.
     pending_error_reports: list[_PendingUsageReport] = []
+    attempt_errors: list[BaseException] = []
 
     async def _on_attempt_failed(attempt: ResolvedAttempt, failure: StreamingAttemptFailure) -> None:
+        attempt_errors.append(failure.exception)
         background_tasks.add_task(
             _report_platform_usage,
             config,
@@ -5006,6 +5009,10 @@ async def run_streaming_with_fallback(
         # Only this frame knows which attempt was tried last, so the terminal
         # error is mapped here.
         last_attempt_id = pending_error_reports[-1].attempt_id if pending_error_reports else None
+        if (rejection := get_shared_rejection(attempt_errors)) is not None:
+            kind = error_kind_for_status(rejection.status_code)
+            shared = adapter.error(rejection.status_code, str(rejection.detail), kind, dict(rejection.headers or {}))
+            raise with_attempt_id(shared, last_attempt_id) from exc
         raise_all_streaming_attempts_failed(adapter, exc, route, last_attempt_id)
 
     if tool_mode:

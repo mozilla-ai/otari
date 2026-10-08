@@ -352,6 +352,7 @@ reworded.
 | `invalid_model` | 400 | The model selector names no configured provider | |
 | `model_not_allowed` | 403 | The key may not use the model | |
 | `context_length_exceeded` | 400 | The prompt is too long for the model | |
+| `all_candidates_rejected` | 400 | Every model a routing policy, a catalog ID or the control plane tried rejected the request as invalid | |
 | `pricing_required` | 402 | `require_pricing` is on and the model has no price | |
 | `end_user_budget_not_allowed` | 403 | A service key named an end-user budget that is not on its `end_user_budget_ids` | |
 

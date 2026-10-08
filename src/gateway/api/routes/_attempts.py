@@ -32,12 +32,14 @@ from __future__ import annotations
 import asyncio
 import math
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Any, NamedTuple, TypeVar
+from dataclasses import dataclass, field
+from typing import Any, TypeVar
 
 from fastapi import HTTPException, status
 
 from gateway.api.routes._platform import (
     _provider_failure_http_exc,
+    get_shared_rejection,
     is_provider_billing_error,
     record_abandoned_attempt,
     upstream_exception_shape,
@@ -80,13 +82,15 @@ class CandidateCannotServe(Exception):
         self.refusal = refusal
 
 
-class AttemptFailure(NamedTuple):
-    """One failed attempt, for the exhaustion log line."""
+@dataclass(frozen=True)
+class AttemptFailure:
+    """One failed attempt: what the exhaustion log line names, and the error behind it."""
 
     position: int
     instance: str
     model: str
     error_class: str
+    error: BaseException = field(repr=False)
 
 
 def classify_local_attempt_error(exc: BaseException) -> tuple[bool, str]:
@@ -194,6 +198,7 @@ async def walk_attempts(
     exactly as naming that model directly would), and a generic 502 for a
     multi-candidate fallthrough, which aggregates heterogeneous failures and must
     not attribute one provider's status to the whole plan.
+    A fallthrough whose candidates all rejected the request alike answers as :func:`get_shared_rejection` says.
     """
     if not attempts:
         logger.error("Attempt plan was empty policy=%s", policy_name)
@@ -310,7 +315,7 @@ async def walk_attempts(
                 if on_terminal is not None:
                     on_terminal(attempt)
                 raise _provider_failure_http_exc(exc, fallback_detail="LLM provider error") from exc
-            failures.append(AttemptFailure(attempt.position, attempt.instance, attempt.model, error_class))
+            failures.append(AttemptFailure(attempt.position, attempt.instance, attempt.model, error_class, exc))
             unabsorbed = (attempt, exc)
             if drop_admission is not None:
                 await drop_admission(sent)
@@ -348,4 +353,6 @@ async def walk_attempts(
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=detail) from last_exc
     if single and last_exc is not None:
         raise _provider_failure_http_exc(last_exc, fallback_detail="LLM provider error") from last_exc
+    if (rejection := get_shared_rejection([failure.error for failure in failures])) is not None:
+        raise rejection from last_exc
     raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=ALL_ATTEMPTS_FAILED_DETAIL) from last_exc

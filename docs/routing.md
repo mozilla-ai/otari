@@ -302,6 +302,4 @@ A tool loop that has already produced assistant state cannot be replayed on
 another provider. Shared service failures, such as an unavailable mandatory
 guardrail or sandbox, also do not improve by changing candidates.
 
-If every candidate fails, Otari returns a gateway error based on the final
-failure. If caller restrictions remove every candidate, Otari returns 403
-without revealing the hidden targets.
+If every candidate fails, Otari returns a gateway error in its own words, never a provider's message. When every candidate rejected the request as invalid (400), Otari returns 400 with the code `all_candidates_rejected`, because the request is at fault. When every candidate found the prompt too long, the code is `context_length_exceeded`. When no candidate knew the model (404), Otari returns 502, because Otari chose the candidates. If caller restrictions remove every candidate, Otari returns 403 without revealing the hidden targets.

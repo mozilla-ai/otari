@@ -11,6 +11,7 @@ from typing import Any, Literal, cast
 import httpx
 import pytest
 from any_llm import LLMProvider
+from any_llm.exceptions import ContextLengthExceededError
 from fastapi import HTTPException
 
 from gateway.api.routes._attempts import (
@@ -21,6 +22,12 @@ from gateway.api.routes._attempts import (
     classify_local_attempt_error,
     walk_attempts,
 )
+from gateway.api.routes._platform import (
+    all_attempts_rejected_detail,
+    no_attempt_served_detail,
+    prompt_too_long_for_every_attempt_detail,
+)
+from gateway.core.error_codes import ALL_CANDIDATES_REJECTED, CONTEXT_LENGTH_EXCEEDED, error_code_of
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.sandbox_backend import SandboxNotReachableError, SandboxUnavailableError
 from gateway.types.attempt import Attempt
@@ -273,6 +280,81 @@ async def test_multi_attempt_exhaustion_is_a_generic_502() -> None:
     """Heterogeneous failures must not attribute one provider's status to the plan."""
     with pytest.raises(HTTPException) as exc_info:
         await _walk([_attempt(1, "a"), _attempt(2, "b")], [_http_error(503), _http_error(429)])
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail == ALL_ATTEMPTS_FAILED_DETAIL
+
+
+class _Rejection(Exception):
+    """A provider rejection that carries its status and its own message."""
+
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
+
+
+@pytest.mark.asyncio
+async def test_exhaustion_where_every_candidate_rejected_the_request_is_a_400_in_the_gateways_words() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk(
+            [_attempt(1, "a"), _attempt(2, "b")],
+            [_Rejection(400, "first rejection"), _Rejection(400, "max_tokens is too large")],
+        )
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == all_attempts_rejected_detail(2)
+    assert error_code_of(exc_info.value.headers) == ALL_CANDIDATES_REJECTED
+
+
+@pytest.mark.asyncio
+async def test_exhaustion_where_every_prompt_was_too_long_keeps_that_code() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk(
+            [_attempt(1, "a"), _attempt(2, "b")],
+            [
+                ContextLengthExceededError("too long for a", status_code=400),
+                ContextLengthExceededError("too long for b", status_code=400),
+            ],
+        )
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == prompt_too_long_for_every_attempt_detail(2)
+    assert error_code_of(exc_info.value.headers) == CONTEXT_LENGTH_EXCEEDED
+
+
+@pytest.mark.asyncio
+async def test_exhaustion_where_candidates_rejected_for_different_reasons_is_the_generic_rejection() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk(
+            [_attempt(1, "a"), _attempt(2, "b")],
+            [ContextLengthExceededError("too long for a", status_code=400), _Rejection(400, "bad temperature")],
+        )
+    assert exc_info.value.status_code == 400
+    assert error_code_of(exc_info.value.headers) == ALL_CANDIDATES_REJECTED
+
+
+@pytest.mark.asyncio
+async def test_exhaustion_where_no_candidate_knew_the_model_is_a_502() -> None:
+    """The gateway chose the candidates, so a model none of them serves is its fault, not the caller's."""
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk(
+            [_attempt(1, "a"), _attempt(2, "b")],
+            [_Rejection(404, "no such model a"), _Rejection(404, "no such model b")],
+        )
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail == no_attempt_served_detail(2)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failures",
+    [
+        [_Rejection(400, "bad request"), _Rejection(404, "no such model")],
+        [_Rejection(400, "bad request"), _http_error(503)],
+        [_Rejection(429, "slow down"), _Rejection(429, "slow down")],
+    ],
+)
+async def test_exhaustion_where_candidates_failed_differently_is_a_generic_502(failures: list[Exception]) -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk([_attempt(1, "a"), _attempt(2, "b")], failures)
     assert exc_info.value.status_code == 502
     assert exc_info.value.detail == ALL_ATTEMPTS_FAILED_DETAIL
 
