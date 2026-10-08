@@ -14,7 +14,7 @@ version = "0.0.0"
 description = "otari, an OpenAI-compatible LLM gateway"
 requires-python = ">=3.13"
 dependencies = [
-    "any-llm-sdk[all]>=1.32.0",
+    "any-llm-sdk[all]>=1.32.1",
     # The web search and web fetch libraries, workspace members at any-search/
     # and any-fetch/. Each may not import the gateway back.
     "any-fetch",
