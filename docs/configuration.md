@@ -474,10 +474,11 @@ file or environment, then to the built-in default.
 - `web_search_default_tool`: the search instance the in-loop tool uses when no
   organization key applies, and the one an unnamed direct call uses. It must be one
   whose provider the in-loop tool can search with; `none` turns in-loop search off.
-  When unset, the in-loop tool uses the backend `web_search_provider` or
-  `web_search_url` describes, else the only search instance, when there is exactly
-  one and the in-loop tool can search with its provider. Several search instances
-  with neither log a warning at startup.
+  When unset, the in-loop tool uses the search backend the legacy settings
+  describe (`web_search_provider` with its key, else `web_search_url`), else the
+  only search instance, when there is exactly one and the in-loop tool can search
+  with its provider. Several search instances with neither log a warning at
+  startup.
 - `web_fetch_default_tool`: the fetch instance for the fetch tool and for
   enrichment. Default `builtin_fetch`.
 - `web_search_max_calls`: how many search and fetch calls one request may make
@@ -486,16 +487,17 @@ file or environment, then to the built-in default.
 A default that names no instance, set in the file or earlier at runtime, is treated
 as unset, with a warning at startup.
 
-These settings are read and checked from this release, but take effect later:
-`web_fetch_default_tool` when web fetch moves onto the fetch instances,
-`web_search_default_tool` for unnamed direct calls when the direct endpoint does,
-and the in-loop parts of the other two, with a search instance's `fetch_tool`,
-when in-loop search does. The old in-loop
-backend serves some requests until it is removed. In that time
-`web_fetch_default_tool` governs every fetch tool call, while
-`web_search_max_calls` and `fetch_tool` apply only where the new backend serves the
-request: the old one keeps its fixed limit of 10 calls, its 422 past it, and its
-own enrichment through the built-in fetcher.
+In this release these settings are read and checked, and no request uses them yet.
+They take effect in later releases: `web_fetch_default_tool` when web fetch moves
+onto the fetch instances, `web_search_default_tool` for unnamed direct calls when
+the direct endpoint does, and the in-loop parts of the other two, with a search
+instance's `fetch_tool`, when in-loop search does.
+
+After that, the old in-loop backend still serves some requests until it is
+removed. In that period `web_fetch_default_tool` governs every fetch tool call,
+while `web_search_max_calls` and `fetch_tool` apply only where the new backend
+serves the request: the old one keeps its fixed limit of 10 calls, its 422 past
+it, and its own enrichment through the built-in fetcher.
 
 ## Decision providers
 
