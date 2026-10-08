@@ -2,9 +2,9 @@ name: Otari Docs
 
 # Publishes the documentation to GitBook. GitBook syncs from the gitbook-docs
 # branch, which holds only the site that scripts/prepare_gitbook_site.py builds
-# from docs/ at a release tag. Each publish replaces the branch's whole tree in
-# one commit, made through the Git Data API so no checkout of the branch is
-# needed.
+# from docs/ at a release tag, including the OpenAPI spec and the endpoint pages
+# generated from it. Each publish replaces the branch's whole tree in one
+# commit, made through the Git Data API so no checkout of the branch is needed.
 #
 # A release publishes the docs at its tag, so the site describes what shipped.
 # A pre-release does not publish. To publish a release again, dispatch this

@@ -1,6 +1,7 @@
 """The GitBook site build, run against the real docs so a page missing from the menu fails a PR."""
 
 import importlib.util
+import json
 import re
 import sys
 from pathlib import Path
@@ -13,6 +14,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT_PATH = _REPO_ROOT / "scripts" / "prepare_gitbook_site.py"
 _DOCS_DIR = _REPO_ROOT / "docs"
 _URL = "https://github.com/mozilla-ai/otari"
+_SPEC = {
+    "info": {"title": "otari", "version": "0.0.0-dev"},
+    "paths": {
+        "/api/v1/keys": {"get": {"tags": ["keys"]}},
+        "/api/v1/chat/completions": {"post": {"tags": ["chat"]}, "get": {"tags": ["chat"]}},
+    },
+}
 
 
 def _load() -> ModuleType:
@@ -33,11 +41,13 @@ def repo(tmp_path: Path) -> Path:
     (docs / "providers").mkdir(parents=True)
     (docs / "public").mkdir()
     (tmp_path / "deploy").mkdir()
-    for path in ("docs/index.md", "docs/guide.md", "docs/internal.md", "docs/providers/openai.md", "ARCHITECTURE.md"):
+    pages = ("index.md", "guide.md", "internal.md", "api-reference.md", "providers/openai.md")
+    for path in (*(f"docs/{page}" for page in pages), "ARCHITECTURE.md"):
         (tmp_path / path).write_text("# Page\n", encoding="utf-8")
-    (docs / "public" / "openapi.json").write_text("{}", encoding="utf-8")
+    (docs / "public" / "openapi.json").write_text(json.dumps(_SPEC), encoding="utf-8")
     (docs / "SUMMARY.md").write_text(
-        "# Summary\n\n* [Otari](index.md)\n\n## Guides\n\n* [Guide](guide.md)\n* [OpenAI](providers/openai.md)\n",
+        "# Summary\n\n* [Otari](index.md)\n\n## Guides\n\n* [Guide](guide.md)\n* [API](api-reference.md)\n"
+        "* [OpenAI](providers/openai.md)\n",
         encoding="utf-8",
     )
     (tmp_path / ".gitbook.yaml").write_text("root: ./\n", encoding="utf-8")
@@ -114,7 +124,108 @@ def test_build_writes_only_the_published_pages(repo: Path, site: Any) -> None:
     site.build(out)
 
     written = sorted(path.relative_to(out).as_posix() for path in out.rglob("*") if path.is_file())
-    assert written == [".gitbook.yaml", "README.md", "SUMMARY.md", "guide.md", "index.md", "providers/openai.md"]
+    assert written == [
+        ".gitbook.yaml",
+        "README.md",
+        "SUMMARY.md",
+        "api-endpoints/chat.md",
+        "api-endpoints/keys.md",
+        "api-reference.md",
+        "api/openapi.json",
+        "guide.md",
+        "index.md",
+        "providers/openai.md",
+    ]
+
+
+def test_build_nests_a_page_per_tag_under_the_api_reference(repo: Path, site: Any) -> None:
+    site.build(repo / "site")
+
+    assert (repo / "site" / "SUMMARY.md").read_text(encoding="utf-8") == (
+        "# Summary\n\n* [Otari](index.md)\n\n## Guides\n\n* [Guide](guide.md)\n* [API](api-reference.md)\n"
+        "  * [Chat](api-endpoints/chat.md)\n  * [Keys](api-endpoints/keys.md)\n* [OpenAI](providers/openai.md)\n"
+    )
+
+
+def test_endpoint_page_names_each_operation_by_path_then_method(repo: Path, site: Any) -> None:
+    site.build(repo / "site")
+
+    spec_url = "https://raw.githubusercontent.com/mozilla-ai/otari/gitbook-docs/api/openapi.json"
+    block = (
+        '{{% openapi-operation spec="otari-openapi-spec" path="/api/v1/chat/completions" method="{method}" %}}\n'
+        f"[OpenAPI otari-openapi-spec]({spec_url})\n"
+        "{{% endopenapi-operation %}}\n"
+    )
+    assert (repo / "site" / "api-endpoints" / "chat.md").read_text(encoding="utf-8") == (
+        f"# Chat\n\n{block.format(method='get')}\n{block.format(method='post')}"
+    )
+
+
+@pytest.mark.parametrize(("ref", "version"), [("v1.2.3", "1.2.3"), ("main", "0.0.0-dev")])
+def test_build_stamps_a_release_version_on_the_spec(repo: Path, ref: str, version: str) -> None:
+    gitbook.Site.from_summary(repo / "docs", ref).build(repo / "site")
+
+    published = json.loads((repo / "site" / "api" / "openapi.json").read_text(encoding="utf-8"))
+    assert published["info"]["version"] == version
+    assert published["paths"] == _SPEC["paths"]
+
+
+@pytest.mark.parametrize(
+    ("tags", "page"), [([], "other"), (["chat", "keys"], "chat"), (["Chat Completions"], "chat-completions")]
+)
+def test_operation_is_paged_under_its_first_tag(tags: list[str], page: str) -> None:
+    spec = {"paths": {"/api/v1/odd": {"get": {"tags": tags}}}}
+    assert gitbook.operations_by_page(spec) == {page: [("/api/v1/odd", "get")]}
+
+
+@pytest.mark.parametrize(
+    ("page", "title"),
+    [
+        ("chat", "Chat"),
+        ("organization-budgets", "Organization budgets"),
+        ("mcp-servers", "MCP servers"),
+        ("otel", "OTel"),
+    ],
+)
+def test_page_title_is_the_page_name_in_sentence_case(page: str, title: str) -> None:
+    assert gitbook.page_title(page) == title
+
+
+def test_operations_on_a_page_list_reads_before_writes() -> None:
+    methods = ("delete", "patch", "post", "put", "get")
+    spec = {"paths": {"/api/v1/keys": {method: {"tags": ["keys"]} for method in methods}}}
+    assert [method for _, method in gitbook.operations_by_page(spec)["keys"]] == [
+        "get",
+        "post",
+        "put",
+        "patch",
+        "delete",
+    ]
+
+
+def test_endpoint_pages_follow_the_api_reference_children() -> None:
+    summary = "* [API](api-reference.md)\n  * [Errors](errors.md)\n    * [Codes](codes.md)\n* [Guide](guide.md)"
+    assert gitbook.nest_endpoint_pages(summary, ["chat"]) == (
+        "* [API](api-reference.md)\n  * [Errors](errors.md)\n    * [Codes](codes.md)\n"
+        "  * [Chat](api-endpoints/chat.md)\n* [Guide](guide.md)"
+    )
+
+
+def test_build_fails_when_a_docs_page_is_in_the_endpoint_pages_directory(repo: Path) -> None:
+    (repo / "docs" / "api-endpoints").mkdir()
+    (repo / "docs" / "api-endpoints" / "chat.md").write_text("# Chat\n", encoding="utf-8")
+    summary = repo / "docs" / "SUMMARY.md"
+    summary.write_text(summary.read_text(encoding="utf-8") + "* [Chat](api-endpoints/chat.md)\n", encoding="utf-8")
+    site = gitbook.Site.from_summary(repo / "docs", "main")
+    with pytest.raises(ValueError, match="api-endpoints"):
+        site.build(repo / "site")
+
+
+def test_build_fails_when_the_menu_has_no_api_reference(repo: Path) -> None:
+    (repo / "docs" / "SUMMARY.md").write_text("* [Guide](guide.md)\n", encoding="utf-8")
+    site = gitbook.Site.from_summary(repo / "docs", "main")
+    with pytest.raises(ValueError, match="api-reference.md"):
+        site.build(repo / "site")
 
 
 def test_build_fails_when_the_menu_names_a_missing_page(repo: Path) -> None:
