@@ -54,6 +54,95 @@ platform-hosted search endpoint can authenticate the gateway. The token is sent
 only when that URL shares the platform origin (scheme/host/port, under the base
 path); it is never sent to a standalone or third-party search backend.
 
+## Grants
+
+> **Status.** Specified, not built. Otari sends and reads none of the fields in this section or in the two sections after it. Each capability adopts them when it ships, starting with files ([#1750](https://github.com/mozilla-ai/otari/issues/1750)). The rules behind them are in [ARCHITECTURE.md](../ARCHITECTURE.md#how-a-data-plane-reaches-what-it-does-not-own).
+
+The control plane never carries customer traffic. For each resource a request needs, it answers with one of three kinds of authority, and the data plane then goes to the resource directly.
+
+| Name | When | The answer carries |
+|---|---|---|
+| Workspace key | The workspace owns the credential | The credential, in the capability's own field |
+| Platform grant | The platform runs the resource, and the resource verifies a grant | A `grant` |
+| Platform key | The platform owns the credential, and the upstream cannot verify a grant | The credential, and only to a data plane the platform runs |
+
+The platform is whoever runs the control plane: otari.ai, or anyone who builds their own edition on Otari. The kind of authority depends on who runs the resource in that deployment, not on the capability. A resource that someone else runs, such as an operator's own sandbox backend or decision provider, never sees a grant and keeps its own API and credential. A data plane client therefore handles both: it sends a credential when it is given one, and it follows the obligations below when it is given a grant.
+
+### The grant object
+
+```json
+"grant": {
+  "url": "https://store.example/traces/ws_123/01JB...?X-Amz-Signature=...",
+  "method": "PUT",
+  "headers": { "Content-Type": "application/octet-stream", "Content-Length": "48213" },
+  "expires_at": "2026-10-08T14:03:00Z"
+}
+```
+
+A grant is a request recipe, and it is opaque to the data plane. The control plane chooses the encoding for each resource: an object store's own signed URL (S3, GCS, Azure Blob Storage and MinIO each have one), or a [front door token](#front-door-token) in `headers.Authorization`.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `url` | string | Required. The URL of the one request, or the base URL of a series. |
+| `method` | string | Present: the grant permits exactly one request, with this method, to `url`. Absent: `url` is a base URL, and the capability's own contract defines the operations under it. |
+| `headers` | object of strings | Required, and may be empty. Headers to send on every request the grant covers. |
+| `expires_at` | RFC 3339 timestamp | Required. The grant is void after this instant. |
+
+The one-request form serves files and traces. The series form serves a sandbox session, with one grant per session that expires at the session deadline.
+
+A grant covers one resource, only the operations named for it, and a short deadline. No grant permits listing or enumeration, because a grant that can enumerate breaks tenant isolation.
+
+### Data plane obligations
+
+1. Treat the grant as opaque. Never parse its URL or its headers.
+2. Send every header given, and add no `Authorization` header of its own.
+3. Follow no redirect.
+4. Use HTTPS only. Loopback is allowed for local development.
+5. Do not use a grant after `expires_at`. Ask for a new one with the same idempotency key.
+6. On `401` or `403` from the resource, ask for a new grant once, then fail.
+7. Never log a grant, store one, or send one to a client. A log line may name the host only.
+
+### Front door token
+
+Where the resource is a front door, the grant's `Authorization` header carries a bearer token that the control plane signs and the front door verifies. The data plane never reads it.
+
+- Format: a JWT (RFC 7519) in the access token profile of RFC 9068, with header `typ: at+jwt`, `alg: Ed25519` and `kid`.
+- Algorithm: `Ed25519`, the fully specified identifier of RFC 9864. The polymorphic `EdDSA` identifier is deprecated by that RFC and is not accepted. The signature is pure Ed25519, not the pre-hashed Ed25519ph.
+- Signing key: the control plane holds it in a key management service and never exports it.
+
+| Claim | Value |
+|---|---|
+| `iss` | The control plane |
+| `aud` | Exactly one front door |
+| `sub` | The workspace ID. The front door derives tenancy from this claim only. |
+| `client_id` | The data plane the grant was issued to |
+| `iat`, `exp` | A one-request grant lives at most 5 minutes. A series grant lives until the session deadline, at most 1 hour. |
+| `jti` | Unique per grant |
+| `authorization_details` (RFC 9396) | The operations and the resource, for example `{"type": "code_execution", "actions": [...], "tools": [...], "limits": {...}}` |
+
+A front door must, following RFC 8725:
+
+1. Verify the signature against a key in the control plane's published key set.
+2. Accept exactly one algorithm, `Ed25519`, and reject `none`, `EdDSA` and every HMAC algorithm.
+3. Check `typ`, that `aud` names itself, and `exp`.
+4. Serve only an `authorization_details` type it implements.
+5. Refuse replay. A one-request grant is single use by `jti`. A series grant binds to the first session it creates and refuses a second.
+
+Keys and rotation:
+
+- The control plane publishes its public keys as a JWK set (RFC 7517) at `/.well-known/jwks.json` on its own origin.
+- A front door caches the set, refetches it on an unknown `kid` with a rate limit, and verifies offline, so the control plane is not on the request path.
+- To rotate, the control plane publishes the new key, waits one cache period, signs with the new key, and keeps the old key published until the last token it signed expires.
+- Removing a key from the set invalidates every token it signed.
+
+Each front door has its own `aud` and its own `authorization_details` type, and each type's fields are specified with its capability. The types defined so far are `code_execution`, for a sandbox session, and `model_recommendation`, for a model recommender the platform runs. A service the platform runs can verify the token itself, with no separate front door in front of it. A new front door adds a type and changes nothing else.
+
+### Why this shape
+
+- A request recipe keeps the data plane free of storage vendors. It sends what it was given, so a new store or a new front door needs no data plane change. A typed grant per store would couple every data plane to every store.
+- One token for everything, with a storage proxy that verifies it, was rejected. The proxy would be a new service on the request path that carries every byte.
+- A signed token that a front door verifies offline keeps the control plane off the request path, and a published key set lets the control plane rotate keys without a deploy anywhere else.
+
 ## Resolve
 
 ### Request
