@@ -60,7 +60,7 @@ from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.services.files import StagedFile
-from gateway.services.inference import call_responses, serves_responses
+from gateway.services.inference import REASONING_ITEM_ID_PREFIX, call_responses, serves_responses
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_responses import (
@@ -238,7 +238,9 @@ def _strip_gateway_minted_items(input_data: Any) -> Any:
     apart by their id prefix so a provider's own survives. A gateway-run search is
     dropped, which loses nothing the model needs because its results are already in
     the transcript. A gateway-run interpreter call is folded into a message instead
-    (:func:`_code_interpreter_call_as_message`).
+    (:func:`_code_interpreter_call_as_message`). The reasoning item the chat bridge
+    makes, and any ``item_reference`` to it, is dropped: no upstream stored it, so a
+    native provider would answer 404 for the id.
     """
     if not isinstance(input_data, list):
         return input_data
@@ -248,7 +250,10 @@ def _strip_gateway_minted_items(input_data: Any) -> Any:
         if _is_gateway_minted(item, "code_interpreter_call", CODE_INTERPRETER_CALL_ID_PREFIX):
             kept.append(_code_interpreter_call_as_message(item))
             touched += 1
-        elif _is_gateway_minted(item, "web_search_call", WEB_SEARCH_CALL_ID_PREFIX):
+        elif _is_gateway_minted(item, "web_search_call", WEB_SEARCH_CALL_ID_PREFIX) or (
+            _is_gateway_minted(item, "reasoning", REASONING_ITEM_ID_PREFIX)
+            or _is_gateway_minted(item, "item_reference", REASONING_ITEM_ID_PREFIX)
+        ):
             touched += 1
         else:
             kept.append(item)

@@ -24,6 +24,7 @@ from gateway.services.inference._idempotency import (
 )
 from gateway.services.inference._lease import keep_claim_alive
 from gateway.services.inference._responses_bridge import (
+    REASONING_ITEM_ID_PREFIX,
     aresponses_via_chat_completions,
     call_responses,
     serves_responses,
@@ -32,6 +33,7 @@ from gateway.services.inference._responses_bridge import (
 from gateway.services.inference._sweeper import run_idempotency_sweeper
 
 __all__ = [
+    "REASONING_ITEM_ID_PREFIX",
     "Admission",
     "BlockedCaller",
     "Claimed",

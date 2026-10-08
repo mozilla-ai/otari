@@ -23,7 +23,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
 from any_llm import AnyLLM, LLMProvider, acompletion
-from any_llm.exceptions import UnsupportedParameterError
+from any_llm.exceptions import AnyLLMError, UnsupportedParameterError
 from any_llm.types.completion import ChatCompletion, ChatCompletionChunk
 from any_llm.types.responses import Response, ResponseStreamEvent
 from openai.types.responses import (
@@ -86,6 +86,14 @@ _TRANSLATED_FIELDS = frozenset(
 # Meaningful only to a server that keeps state or runs work on its own.
 _REFUSED_FIELDS = ("previous_response_id", "conversation", "background", "context_management", "prompt")
 
+# Marks a reasoning item as gateway-made, so a client that echoes the turn back is not
+# taken for echoing a provider's own item: no upstream has an item by this id.
+_REASONING_ID_STEM = "otari_rs"
+REASONING_ITEM_ID_PREFIX = f"{_REASONING_ID_STEM}_"
+
+# An endpoint that answers these has no ``/responses`` route.
+_RESPONSES_ROUTE_MISSING = frozenset({404, 405, 501})
+
 _BRIDGE_NOTE = "This provider has no Responses API, so the gateway serves the request as a chat completion."
 
 _TEXT_PART_TYPES = frozenset({"input_text", "output_text", "text"})
@@ -133,15 +141,49 @@ def serves_responses(provider: str | LLMProvider) -> bool:
     )
 
 
+def _lacks_responses_route(provider: Any, kwargs: dict[str, Any], exc: AnyLLMError) -> bool:
+    """Whether ``exc`` says a custom ``api_base`` has no Responses endpoint.
+
+    Only a caller-chosen ``api_base`` qualifies: the vendor's own endpoint has the
+    API, so there a 404 is about the request (an unknown item or model) and a chat
+    completion would only hide it.
+    """
+    return (
+        bool(kwargs.get("api_base")) and exc.status_code in _RESPONSES_ROUTE_MISSING and _supports_completion(provider)
+    )
+
+
+def _supports_completion(provider: Any) -> bool:
+    try:
+        provider_class = AnyLLM.get_provider_class(LLMProvider(provider))
+    except (ValueError, ImportError):
+        return False
+    return bool(getattr(provider_class, "SUPPORTS_COMPLETION", False))
+
+
 async def call_responses(native: Callable[..., Awaitable[Any]], kwargs: dict[str, Any]) -> Any:
     """Run ``aresponses`` keyword arguments natively, or through the bridge for a provider without the API.
 
     ``native`` is the caller's ``aresponses``, taken as an argument so the
     caller's module global stays the one place a test replaces it.
+
+    An OpenAI-compatible server behind a custom ``api_base`` may not implement
+    ``/responses`` at all. When one answers 404, 405 or 501, the request is served
+    through the bridge instead. A request the bridge cannot translate re-raises the
+    original error, because that is the one that explains what the endpoint lacks.
     """
     if uses_chat_completions_bridge(kwargs.get("provider")):
         return await aresponses_via_chat_completions(**kwargs)
-    return await native(**kwargs)
+    try:
+        return await native(**kwargs)
+    except AnyLLMError as exc:
+        if not _lacks_responses_route(kwargs.get("provider"), kwargs, exc):
+            raise
+        logger.info("%s has no Responses endpoint at its api_base; serving as a chat completion", kwargs["provider"])
+        try:
+            return await aresponses_via_chat_completions(**kwargs)
+        except UnsupportedParameterError:
+            raise exc from None
 
 
 async def aresponses_via_chat_completions(**kwargs: Any) -> Response | AsyncIterator[ResponseStreamEvent]:
@@ -442,7 +484,7 @@ def _completion_to_response(completion: ChatCompletion, echo: _ResponseEcho) -> 
         message = choice.message
         reasoning = getattr(message, "reasoning", None)
         if reasoning is not None and reasoning.content:
-            output.append(_reasoning_item(_new_id("rs"), reasoning.content, "completed"))
+            output.append(_reasoning_item(_new_id(_REASONING_ID_STEM), reasoning.content, "completed"))
         if message.content or message.refusal:
             output.append(_message_item(_new_id("msg"), message.content or None, "completed", message.refusal))
         for call in message.tool_calls or []:
@@ -574,7 +616,7 @@ class _StreamTranslator:
     def _reasoning_delta(self, delta: str) -> list[ResponseStreamEvent]:
         events: list[ResponseStreamEvent] = []
         if self.reasoning is None:
-            item_id = _new_id("rs")
+            item_id = _new_id(_REASONING_ID_STEM)
             index, added = self._open_item(_reasoning_item(item_id, "", "in_progress"))
             self.reasoning = (index, item_id)
             events += [
