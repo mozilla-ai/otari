@@ -1,0 +1,21 @@
+{
+  "status": 200,
+  "body": {
+    "requestId": "db847946f71b30524f9b5ec6f299c894",
+    "results": [],
+    "statuses": [
+      {
+        "id": "https://www.python.org/no-such-page-any-fetch-fixture",
+        "status": "error",
+        "error": {
+          "httpStatusCode": 404,
+          "tag": "CRAWL_NOT_FOUND"
+        }
+      }
+    ],
+    "costDollars": {
+      "total": 0
+    },
+    "searchTime": 301.3670189999975
+  }
+}

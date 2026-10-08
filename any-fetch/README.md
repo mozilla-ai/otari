@@ -100,6 +100,26 @@ when it parses. `--json` prints the page as JSON without `raw`, `--raw` prints t
 response, and both together print the page with `raw` kept. `builtin` needs a host, so it fails
 from the command line.
 
+## Exa
+
+`exa` calls Exa's [`POST /contents`](https://exa.ai/docs/reference/get-contents) for the URL,
+with the key in the `x-api-key` header, read from `EXA_API_KEY` when not passed.
+
+It always asks for the page text, up to `max_chars`, or up to 10,000 characters, what Exa's own
+Python SDK asks for, when `max_chars` is not passed. A longer page is cut there and marked
+`text_truncated`. The `text` option shapes the extraction (`verbosity`, `includeHtmlTags`,
+`includeSections`, `excludeSections`); its length is `max_chars` only, so `text.maxCharacters` is
+refused. The other native options are `highlights`, `summary` and `extras`, whose answers stay in
+`raw`, and `maxAgeHours`, `livecrawlTimeout` and `snapshotAsOf`.
+
+`final_url` is the URL Exa answered for, `published` its `publishedDate`, and the cost
+`costDollars.total`. `content_type` is empty: Exa does not say what the page was served as.
+
+A page Exa could not fetch comes back as `FetchedPage.error`, with Exa's tag, such as
+`CRAWL_NOT_FOUND`, and the page's HTTP status. A page with no text, which Exa reports as
+`CRAWL_EMPTY_CONTENT`, comes back empty rather than as an error. A failed call raises
+`ProviderError` with Exa's HTTP status and its `tag`, such as `INVALID_API_KEY`.
+
 ## The fake provider
 
 `fake` is a provider like any other, in the `test` tier. It answers with a canned page and takes
@@ -128,3 +148,10 @@ From the repository root, `make test-libs` runs this package's tests and any-sea
 its scenarios there, and `builtin` is skipped while no factory is registered.
 `scripts/record_fixture.py` records a provider's live answer as a fixture under
 `tests/fixtures/<provider>/`, with the key redacted.
+
+`tests/test_live.py` calls every production provider whose key is in the environment, and is
+skipped unless `ANY_FETCH_LIVE=1`:
+
+```bash
+ANY_FETCH_LIVE=1 uv run pytest any-fetch/tests/test_live.py
+```

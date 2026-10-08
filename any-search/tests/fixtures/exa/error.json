@@ -1,0 +1,8 @@
+{
+  "status": 401,
+  "body": {
+    "requestId": "28015497ec94672ebed486f44a2ac430",
+    "error": "Invalid API key. Provide a valid key using 'Authorization: Bearer <key>' or 'x-api-key: <key>'. Create a key at https://dashboard.exa.ai/api-keys",
+    "tag": "INVALID_API_KEY"
+  }
+}

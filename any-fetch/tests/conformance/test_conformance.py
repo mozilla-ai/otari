@@ -7,10 +7,12 @@ while no factory is registered, and the host checks its own (in otari, the
 fetch backend's tests).
 """
 
+import json
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal, get_args
 
 import httpx
@@ -36,8 +38,30 @@ class Scenario:
     handler: Callable[[httpx.Request], httpx.Response] | None = None
 
 
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+
+
+def _replay(provider: str, case: str) -> Callable[[httpx.Request], httpx.Response]:
+    """Answer every request with the response recorded in ``fixtures/<provider>/<case>.json``."""
+    recorded = json.loads((FIXTURES / provider / f"{case}.json").read_text())
+    body = recorded["body"]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if isinstance(body, str):
+            return httpx.Response(recorded["status"], text=body)
+        return httpx.Response(recorded["status"], json=body)
+
+    return handler
+
+
 # A provider that signals no error inside a successful response leaves "in_body_error" out.
 SCENARIOS: dict[str, dict[Case, Scenario]] = {
+    "exa": {
+        "normal": Scenario(handler=_replay("exa", "normal")),
+        "empty": Scenario(handler=_replay("exa", "empty")),
+        "error": Scenario(handler=_replay("exa", "error")),
+        "in_body_error": Scenario(handler=_replay("exa", "in_body_error")),
+    },
     "fake": {
         "normal": Scenario(),
         "empty": Scenario({"text": ""}),
@@ -57,6 +81,15 @@ URL = "https://example.com/conformance"
 SENTINEL_URL = "https://sentinel-host.example/sentinel-path-3b8f"
 SENTINEL_KEY = "sentinel-key-9d4e7a"
 TIMEOUT = 7.5
+
+
+@pytest.fixture(autouse=True)
+def _keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give every provider that reads a key from the environment a fake one, never the developer's own."""
+    for provider in PROVIDERS:
+        env_key = AnyFetch.get_provider_metadata(provider).env_key
+        if env_key:
+            monkeypatch.setenv(env_key, "conformance-key")
 
 
 def _scenario(provider: str, case: Case) -> Scenario:

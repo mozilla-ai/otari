@@ -15,9 +15,10 @@ if TYPE_CHECKING:
 
 def _providers() -> dict[str, type["AnySearch"]]:
     # Imported on first use: each provider subclasses AnySearch, whose module imports this one.
+    from any_search.providers.exa import ExaProvider
     from any_search.providers.fake import FakeProvider
 
-    return {provider.METADATA.name: provider for provider in (FakeProvider,)}
+    return {provider.METADATA.name: provider for provider in (ExaProvider, FakeProvider)}
 
 
 def get_supported_providers() -> list[str]:

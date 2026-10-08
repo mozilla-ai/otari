@@ -1,0 +1,21 @@
+{
+  "status": 200,
+  "body": {
+    "requestId": "d89f9226b5d5518221736c98f70ff0c7",
+    "results": [],
+    "statuses": [
+      {
+        "id": "https://raw.githubusercontent.com/pydantic/pydantic/main/pydantic/py.typed",
+        "status": "error",
+        "error": {
+          "httpStatusCode": 500,
+          "tag": "CRAWL_EMPTY_CONTENT"
+        }
+      }
+    ],
+    "costDollars": {
+      "total": 0
+    },
+    "searchTime": 900.7404330000281
+  }
+}

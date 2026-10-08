@@ -84,6 +84,41 @@ Keys come from the environment. `-o NAME=VALUE` passes a native option, its valu
 when it parses. `--json` prints the result as JSON without `raw`, `--raw` prints the provider's
 own response, and both together print the result with `raw` kept.
 
+## Exa
+
+`exa` calls Exa's [`POST /search`](https://exa.ai/docs/reference/search), with the key in the
+`x-api-key` header, read from `EXA_API_KEY` when not passed.
+
+It sends what Exa's own Python SDK sends by default, so moving from the SDK changes nothing:
+`type` `auto`, and each page's text up to 10,000 characters when you pass no `contents`. That can
+be a large answer, about 100,000 characters for ten hits at the cap. To get less, or something
+else, pass `contents`, which is sent as given:
+
+```python
+await engine.search(query, contents={"text": {"maxCharacters": 2000}})  # less text per page
+await engine.search(query, contents={"highlights": True})  # excerpts as snippets, no page text
+await engine.search(query, contents=False)  # titles and URLs only
+```
+
+```bash
+any-search exa "latest stable python release" -o 'contents={"highlights": true}'
+```
+
+| `SearchHit` | From Exa |
+|---|---|
+| `url`, `title` | `url`, `title` |
+| `snippet` | `highlights`, joined; empty unless `contents` asks for highlights |
+| `text` | `text` |
+| `published` | `publishedDate`, a date or a date-time; UTC when it has no zone |
+
+The cost is `costDollars.total`. `max_results` becomes `numResults`, at most 100; the `numResults`
+option applies only when `max_results` is not passed. `time_range` becomes `startPublishedDate`
+and wins over that option. The other native options are `type`, `category`, `includeDomains`,
+`excludeDomains`, `endPublishedDate`, `userLocation`, `moderation` and `additionalQueries`.
+
+A failure raises `ProviderError` with Exa's HTTP status and its `tag`, such as `INVALID_API_KEY`
+or `RATE_LIMIT_EXCEEDED`. Exa signals no error inside a successful search.
+
 ## The fake provider
 
 `fake` is a provider like any other, in the `test` tier. It answers from canned data and takes its
@@ -109,3 +144,10 @@ From the repository root, `make test-libs` runs this package's tests and any-fet
 `tests/conformance/` holds the checks every provider must pass; a provider joins them by adding
 its scenarios there. `scripts/record_fixture.py` records a provider's live answer as a fixture
 under `tests/fixtures/<provider>/`, with the key redacted.
+
+`tests/test_live.py` calls every production provider whose key is in the environment, and is
+skipped unless `ANY_SEARCH_LIVE=1`:
+
+```bash
+ANY_SEARCH_LIVE=1 uv run pytest any-search/tests/test_live.py
+```
