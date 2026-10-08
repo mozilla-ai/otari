@@ -7408,7 +7408,15 @@
                 "refresh",
                 "confirm"
               ],
-              "raw": "{{baseUrl}}/api/v1/pricing/refresh/confirm"
+              "query": [
+                {
+                  "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
+                  "disabled": true,
+                  "key": "digest",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/pricing/refresh/confirm?digest="
             }
           }
         },
@@ -7450,7 +7458,15 @@
                 "refresh",
                 "reject"
               ],
-              "raw": "{{baseUrl}}/api/v1/pricing/refresh/reject"
+              "query": [
+                {
+                  "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
+                  "disabled": true,
+                  "key": "digest",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/pricing/refresh/reject?digest="
             }
           }
         },

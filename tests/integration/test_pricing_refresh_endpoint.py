@@ -38,6 +38,7 @@ def test_preview_pricing_refresh_reports_protected_custom_prices(
             removed_count=3,
             changes=[],
             changes_truncated=False,
+            digest="d" * 64,
         )
 
     monkeypatch.setattr(pricing_route, "prepare_price_refresh", preview)
@@ -52,6 +53,9 @@ def test_preview_pricing_refresh_reports_protected_custom_prices(
     assert data["protected_model_count"] == 1
     assert data["changes"] == []
     assert data["changes_truncated"] is False
+    assert data["digest"] == "d" * 64
+    assert data["needs_review"] is False
+    assert data["review_reason"] is None
 
 
 def test_confirm_pricing_refresh_requires_pending_preview(
@@ -117,9 +121,25 @@ def test_a_pending_update_is_previewed_without_fetching_and_accepting_it_is_reme
         # The bundled snapshot has no provider called "test", so its one model is an addition.
         assert pending.json()["added_count"] == 1
         assert pending.json()["removed_count"] > 0
+        assert pending.json()["needs_review"] is True
+        assert pending.json()["review_reason"]
 
         assert client.get(f"{API_ROOT}/pricing/snapshots", headers=master_key_header).json() == []
-        confirmed = client.post(f"{API_ROOT}/pricing/refresh/confirm", headers=master_key_header)
+        stale = client.post(
+            f"{API_ROOT}/pricing/refresh/confirm", params={"digest": "0" * 64}, headers=master_key_header
+        )
+        assert stale.status_code == 409, stale.text
+        assert client.get(f"{API_ROOT}/pricing/snapshots", headers=master_key_header).json() == []
+        rejected = client.post(
+            f"{API_ROOT}/pricing/refresh/reject", params={"digest": "0" * 64}, headers=master_key_header
+        )
+        assert rejected.status_code == 409, rejected.text
+        assert pending.json()["digest"]
+        confirmed = client.post(
+            f"{API_ROOT}/pricing/refresh/confirm",
+            params={"digest": pending.json()["digest"]},
+            headers=master_key_header,
+        )
         assert confirmed.status_code == 200, confirmed.text
 
         history = client.get(f"{API_ROOT}/pricing/snapshots", headers=master_key_header).json()

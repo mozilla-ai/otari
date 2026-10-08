@@ -18,6 +18,7 @@ from gateway.models.pricing_schemas import PricingTier
 from gateway.services.alias_service import all_alias_names, resolve_effective_alias
 from gateway.services.policy_store import all_policy_names, resolve_effective_policy
 from gateway.services.pricing_refresh_service import (
+    PendingSnapshotChanged,
     PricingRefreshError,
     PricingRefreshPreview,
     confirm_price_refresh,
@@ -54,6 +55,9 @@ catalog_router = APIRouter(
 )
 
 SURFACE = Surface("pricing")
+
+
+_PENDING_CHANGED_DETAIL = "The pending models.dev refresh changed since it was previewed"
 
 
 class SetPricingRequest(BaseModel):
@@ -350,11 +354,17 @@ async def list_pricing_drift(
 @operator_router.post("/refresh/confirm", response_model=PricingRefreshConfirmationResponse)
 async def confirm_pricing_refresh(
     db: Annotated[AsyncSession, Depends(get_db)],
+    digest: Annotated[
+        str | None,
+        Query(description="The `digest` of the previewed snapshot; 409 when the pending one differs."),
+    ] = None,
 ) -> PricingRefreshConfirmationResponse:
     """Activate the latest reviewed default-price snapshot."""
 
     try:
-        applied = await confirm_price_refresh(db)
+        applied = await confirm_price_refresh(db, digest=digest)
+    except PendingSnapshotChanged:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_PENDING_CHANGED_DETAIL) from None
     except PricingRefreshError:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -368,11 +378,17 @@ async def confirm_pricing_refresh(
 @operator_router.post("/refresh/reject", status_code=status.HTTP_204_NO_CONTENT)
 async def reject_pricing_refresh(
     db: Annotated[AsyncSession, Depends(get_db)],
+    digest: Annotated[
+        str | None,
+        Query(description="The `digest` of the previewed snapshot; 409 when the pending one differs."),
+    ] = None,
 ) -> None:
     """Discard a reviewed default-price snapshot without applying it."""
 
     try:
-        rejected = await reject_price_refresh(db)
+        rejected = await reject_price_refresh(db, digest=digest)
+    except PendingSnapshotChanged:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_PENDING_CHANGED_DETAIL) from None
     except PricingRefreshError:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

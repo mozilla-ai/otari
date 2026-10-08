@@ -280,3 +280,83 @@ async def test_a_poll_claim_is_honored_for_one_interval(session: AsyncSession) -
     assert await refresh.claim_poll_tick(session, 3600) is False
     row = await session.get(PricingSnapshot, refresh.MODELS_DEV_POLL_CLAIM_SOURCE)
     assert row is not None
+
+
+async def _accept_baseline(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+    upstream["catalog"] = _catalog(input_rate=9, extra=True)
+
+
+@pytest.mark.asyncio
+async def test_confirm_refuses_a_pending_snapshot_replaced_after_the_preview(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    await _accept_baseline(session, upstream)
+    reviewed = await refresh.prepare_price_refresh(session)
+    upstream["catalog"] = _catalog(input_rate=11, extra=True)
+    replacement = await refresh.prepare_price_refresh(session)
+    assert reviewed.digest != replacement.digest
+    before = current_index()
+
+    with pytest.raises(refresh.PendingSnapshotChanged):
+        await refresh.confirm_price_refresh(session, digest=reviewed.digest)
+
+    assert current_index() is before
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is not None
+    assert len((await session.execute(select(PricingSnapshotHistory))).scalars().all()) == 1
+
+
+@pytest.mark.asyncio
+async def test_confirm_accepts_the_snapshot_its_digest_names(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    await _accept_baseline(session, upstream)
+    reviewed = await refresh.prepare_price_refresh(session)
+
+    assert await refresh.confirm_price_refresh(session, digest=reviewed.digest) is True
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is None
+
+
+@pytest.mark.asyncio
+async def test_reject_refuses_a_replaced_pending_snapshot(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    await _accept_baseline(session, upstream)
+    reviewed = await refresh.prepare_price_refresh(session)
+    upstream["catalog"] = _catalog(input_rate=11, extra=True)
+    await refresh.prepare_price_refresh(session)
+
+    with pytest.raises(refresh.PendingSnapshotChanged):
+        await refresh.reject_price_refresh(session, digest=reviewed.digest)
+
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is not None
+
+
+@pytest.mark.asyncio
+async def test_the_stored_pending_row_matches_the_previewed_digest(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    preview = await refresh.prepare_price_refresh(session)
+    pending = await refresh.preview_pending_refresh(session)
+    assert pending is not None
+    assert pending.digest == preview.digest
+
+
+@pytest.mark.asyncio
+async def test_auto_applies_only_what_it_prepared(
+    session: AsyncSession, upstream: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _accept_baseline(session, upstream)
+    prepare = refresh.prepare_price_refresh
+
+    async def prepare_then_get_replaced(*args: Any, **kwargs: Any) -> Any:
+        preview = await prepare(*args, **kwargs)
+        pending = await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE)
+        assert pending is not None
+        pending.snapshot = _raw(input_rate=77, extra=True)
+        await session.commit()
+        return preview
+
+    monkeypatch.setattr(refresh, "prepare_price_refresh", prepare_then_get_replaced)
+
+    assert await refresh.poll_price_updates(session, "auto") == "pending"
+
+    assert len((await session.execute(select(PricingSnapshotHistory))).scalars().all()) == 1
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is not None

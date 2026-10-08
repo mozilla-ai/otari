@@ -21756,7 +21756,10 @@ export interface operations {
     };
     "pricing-confirm_pricing_refresh": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The `digest` of the previewed snapshot; 409 when the pending one differs. */
+                digest?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -21770,6 +21773,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PricingRefreshConfirmationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -21796,7 +21808,10 @@ export interface operations {
     };
     "pricing-reject_pricing_refresh": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The `digest` of the previewed snapshot; 409 when the pending one differs. */
+                digest?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -21809,6 +21824,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

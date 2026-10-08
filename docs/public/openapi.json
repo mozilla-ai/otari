@@ -33294,6 +33294,26 @@
       "post": {
         "description": "Activate the latest reviewed default-price snapshot.",
         "operationId": "pricing-confirm_pricing_refresh",
+        "parameters": [
+          {
+            "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
+            "in": "query",
+            "name": "digest",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
+              "title": "Digest"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -33304,6 +33324,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -33354,9 +33384,39 @@
       "post": {
         "description": "Discard a reviewed default-price snapshot without applying it.",
         "operationId": "pricing-reject_pricing_refresh",
+        "parameters": [
+          {
+            "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
+            "in": "query",
+            "name": "digest",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
+              "title": "Digest"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
