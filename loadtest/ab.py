@@ -31,7 +31,9 @@ GATEWAY = "http://otari:8000"
 MASTER_KEY = "loadtest-master-key"
 VARIANTS = ("base", "head")
 ROUNDS = 4  # turns per build, alternating base head head base ...
-SECONDS = 12
+# Per route per turn. A turn's p50 from 100 requests is already several times
+# steadier than the spread between turns, so the turns carry the signal.
+SECONDS = 6
 RPM = 1000
 # The fake provider's fixed timing (docker-compose.yml), subtracted from the client's.
 LATENCY_MS = int(os.environ["FAKE_LATENCY_MS"])

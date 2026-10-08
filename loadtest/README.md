@@ -42,7 +42,7 @@ base on a shared one. The builds take four turns each, alternating base, head,
 head, base, so drift in the machine's speed lands on both, and each turn starts
 a fresh replica (a process gets slower as it ages) and discards a warm-up.
 
-In each turn, each route gets 12 seconds at 1,000 requests a minute, open loop:
+In each turn, each route gets 6 seconds at 1,000 requests a minute, open loop:
 
 | route | what it sends |
 |---|---|
@@ -65,7 +65,10 @@ provider's 50 ms (its time to first token when streamed), as each turn's p50.
   mirror case an improvement, and anything else unchanged. Something else
   loading the machine during a turn can only blur the two builds together,
   never pull them apart, unless it hits every turn of one build and none of the
-  other's, which the alternating order makes unlikely.
+  other's, which the alternating order makes unlikely. Because the spread
+  between one build's turns adds to that margin, the slowdown it takes to fail
+  is larger than 10%: on a GitHub runner, about 12% on `direct` and up to 20%
+  on `pooled`. A smaller regression reads unchanged.
 - `test_no_extra_database_statements[direct|spill]` fails on a whole extra data
   statement per request. BEGIN, COMMIT and ROLLBACK are listed but not judged:
   background transactions land in their count as fractions.
