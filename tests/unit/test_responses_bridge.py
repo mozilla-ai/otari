@@ -232,8 +232,8 @@ async def test_hosted_tool_is_refused() -> None:
 
 @pytest.mark.asyncio
 async def test_input_item_without_chat_equivalent_is_refused() -> None:
-    with pytest.raises(UnsupportedParameterError, match="item_reference"):
-        await _call({}, _completion({"content": "ok"}), input_data=[{"type": "item_reference", "id": "msg_1"}])
+    with pytest.raises(UnsupportedParameterError, match="computer_call"):
+        await _call({}, _completion({"content": "ok"}), input_data=[{"type": "computer_call", "id": "cc_1"}])
 
 
 _IMAGE_PART = {"type": "input_image", "image_url": "data:image/png;base64,AA"}
@@ -658,3 +658,36 @@ async def test_streaming_request_falls_back_to_a_bridged_event_stream() -> None:
 
     assert types[0] == "response.created"
     assert types[-1] == "response.completed"
+
+
+def test_item_reference_resolves_to_a_minted_item_and_unknown_ones_are_dropped() -> None:
+    from gateway.services.inference import _responses_bridge as bridge
+
+    bridge._remember_minted_items(
+        [
+            bridge._message_item("msg_known", "earlier answer", "completed"),
+            bridge._function_call_item("fc_known", "call_1", "lookup", "{}", "completed"),
+        ]
+    )
+    messages = bridge._messages(
+        [
+            {"role": "user", "content": "hi"},
+            {"type": "item_reference", "id": "msg_known"},
+            {"type": "item_reference", "id": "fc_known"},
+            {"type": "item_reference", "id": "msg_unknown"},
+            {"type": "function_call_output", "call_id": "call_1", "output": "42"},
+        ],
+        None,
+        "bedrock",
+    )
+    assert [m["role"] for m in messages] == ["user", "assistant", "tool"]
+    assert messages[1]["tool_calls"][0]["id"] == "call_1"
+
+
+def test_tool_result_without_its_call_becomes_user_text() -> None:
+    from gateway.services.inference import _responses_bridge as bridge
+
+    messages = bridge._messages(
+        [{"type": "function_call_output", "call_id": "call_gone", "output": "42"}], None, "bedrock"
+    )
+    assert messages == [{"role": "user", "content": "[tool result]\n42"}]

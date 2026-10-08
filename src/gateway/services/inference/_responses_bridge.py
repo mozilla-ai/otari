@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
@@ -101,6 +102,12 @@ _NOT_A_MISSING_ROUTE = re.compile(r"\b(item|model)\b", re.IGNORECASE)
 _RESPONSES_ONLY_EXTRA_BODY = ("input", "client_metadata")
 
 _BRIDGE_NOTE = "This provider has no Responses API, so the gateway serves the request as a chat completion."
+
+# Clients that send ``store: true`` (the Vercel AI SDK behind n8n) replay a prior turn as
+# ``item_reference`` ids instead of the items. The bridge stores nothing upstream, so it
+# keeps the message and function-call items it minted, per process, to resolve them.
+_MINTED_ITEMS_MAX = 2048
+_minted_items: OrderedDict[str, dict[str, Any]] = OrderedDict()
 
 _TEXT_PART_TYPES = frozenset({"input_text", "output_text", "text"})
 
@@ -272,6 +279,46 @@ def _as_dict(value: Any) -> Any:
     return value.model_dump(exclude_none=True) if isinstance(value, BaseModel) else value
 
 
+def _remember_minted_items(output: list[dict[str, Any]]) -> None:
+    for item in output:
+        item_id = item.get("id")
+        if item.get("type") in ("message", "function_call") and isinstance(item_id, str):
+            _minted_items[item_id] = item
+            _minted_items.move_to_end(item_id)
+    while len(_minted_items) > _MINTED_ITEMS_MAX:
+        _minted_items.popitem(last=False)
+
+
+def _resolve_item_references(input_data: Any) -> list[Any]:
+    """Swap each ``item_reference`` for the item the bridge minted, and drop one it cannot find."""
+    resolved: list[Any] = []
+    for raw in input_data or []:
+        item = _as_dict(raw)
+        if isinstance(item, dict) and item.get("type") == "item_reference":
+            minted = _minted_items.get(str(item.get("id")))
+            if minted is not None:
+                resolved.append(minted)
+            else:
+                logger.debug("Dropped an item_reference the chat bridge cannot resolve")
+        else:
+            resolved.append(raw)
+    return resolved
+
+
+def _fold_orphan_tool_results(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Turn a tool result whose call is not in the transcript into user text, which chat providers refuse otherwise."""
+    known_calls: set[str] = set()
+    folded: list[dict[str, Any]] = []
+    for message in messages:
+        for call in message.get("tool_calls") or []:
+            known_calls.add(str(call.get("id")))
+        if message.get("role") == "tool" and str(message.get("tool_call_id")) not in known_calls:
+            folded.append({"role": "user", "content": f"[tool result]\n{message.get('content') or ''}"})
+        else:
+            folded.append(message)
+    return folded
+
+
 def _messages(input_data: Any, instructions: Any, provider: str) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
     if isinstance(instructions, str) and instructions:
@@ -279,7 +326,7 @@ def _messages(input_data: Any, instructions: Any, provider: str) -> list[dict[st
     if isinstance(input_data, str):
         messages.append({"role": "user", "content": input_data})
         return messages
-    for raw in input_data or []:
+    for raw in _resolve_item_references(input_data):
         item = _as_dict(raw)
         if not isinstance(item, dict):
             raise UnsupportedParameterError("input", provider, _BRIDGE_NOTE)
@@ -300,7 +347,7 @@ def _messages(input_data: Any, instructions: Any, provider: str) -> list[dict[st
             continue
         else:
             raise UnsupportedParameterError(f"input item type '{item_type}'", provider, _BRIDGE_NOTE)
-    return messages
+    return _fold_orphan_tool_results(messages)
 
 
 def _chat_message(item: dict[str, Any], provider: str) -> dict[str, Any]:
@@ -443,6 +490,8 @@ class _ResponseEcho:
         usage: Any = None,
     ) -> Response:
         incomplete = _INCOMPLETE_REASONS.get(finish_reason or "") if status != "in_progress" else None
+        if status != "in_progress":
+            _remember_minted_items(output)
         body: dict[str, Any] = {
             **self.fields,
             "id": response_id,
