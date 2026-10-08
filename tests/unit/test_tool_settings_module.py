@@ -89,6 +89,14 @@ def test_none_turns_in_loop_search_off_whatever_else_is_configured() -> None:
     assert in_loop_default(config) is None
 
 
+@pytest.mark.parametrize("spelled", ["None", "NONE", " none "])
+def test_none_is_read_in_any_case(spelled: str) -> None:
+    """YAML reads None as a string, and an operator who writes it means 'none'."""
+    config = GatewayConfig(search_tools={"exa": _EXA}, web_search_default_tool=spelled)
+    assert in_loop_default(config) is None
+    validate_default_tool(config, "web_search_default_tool", spelled)
+
+
 def test_the_legacy_settings_come_before_a_single_instance() -> None:
     """A search_tools entry never replaces the legacy settings by accident."""
     config = GatewayConfig(search_tools={"exa": _EXA}, web_search_url="http://searxng:8080")
@@ -307,6 +315,7 @@ def test_a_searxng_tool_with_its_own_api_base_is_not_reported() -> None:
         ({"exa:fetch": {"provider": "exa", "api_key": "k"}}, "its name contains ':'"),
         ({BUILTIN_FETCH: {"provider": "fake"}}, "its name is reserved"),
         ({"none": {"provider": "fake"}}, "its name is reserved"),
+        ({"Builtin_Fetch": {"provider": "fake"}}, "its name is reserved"),
         ({"a/b": {"provider": "fake"}}, "must not contain '/'"),
     ],
 )
@@ -403,6 +412,15 @@ def test_an_instance_is_hashable_and_cannot_change_the_configuration() -> None:
     with pytest.raises(TypeError):
         instance.provider_defaults["method"] = "post"  # type: ignore[index]
     assert config.search_tools["local"]["options"] == {"categories": "news"}
+
+
+def test_nested_option_values_are_not_shared_with_the_configuration() -> None:
+    entry = {**_EXA, "options": {"contents": {"text": True}, "includeDomains": ["a.example"]}}
+    config = GatewayConfig(search_tools={"exa": entry})
+    instance = effective_search_instances(config)["exa"]
+    instance.options["contents"]["text"] = False
+    instance.options["includeDomains"].append("b.example")
+    assert config.search_tools["exa"]["options"] == {"contents": {"text": True}, "includeDomains": ["a.example"]}
 
 
 def test_an_instance_keeps_its_key_and_base_out_of_its_repr() -> None:
@@ -527,7 +545,21 @@ def test_a_search_default_on_a_provider_without_adapter_warns(caplog: pytest.Log
 
 def test_several_instances_and_no_default_warn(caplog: pytest.LogCaptureFixture) -> None:
     logged = _warnings(caplog, GatewayConfig(search_tools={"exa": _EXA, "local": _SEARXNG}))
-    assert "There are 2 search instances and no web_search_default_tool" in logged
+    assert "There are 2 search instances and no usable web_search_default_tool" in logged
+
+
+def test_the_warning_names_the_instances_a_default_may_name(caplog: pytest.LogCaptureFixture) -> None:
+    logged = _warnings(
+        caplog, GatewayConfig(search_tools={"exa": _EXA, "other": {"provider": "fake"}, "local": _SEARXNG})
+    )
+    assert "Set web_search_default_tool to one of exa, other, or to 'none'" in logged
+
+
+def test_the_warning_with_no_usable_instance_says_so(caplog: pytest.LogCaptureFixture) -> None:
+    config = GatewayConfig(search_tools={"local": _SEARXNG, "other": {**_SEARXNG, "api_base": "http://other:8080"}})
+    logged = _warnings(caplog, config)
+    assert "None of them is on a provider the in-loop tool can use yet" in logged
+    assert "Set web_search_default_tool to one of" not in logged
 
 
 @pytest.mark.parametrize(

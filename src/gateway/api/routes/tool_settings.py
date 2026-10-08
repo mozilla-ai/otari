@@ -36,7 +36,6 @@ from typing import Annotated, Literal, cast
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
@@ -48,6 +47,7 @@ from gateway.api.deps import (
     verify_master_key,
 )
 from gateway.core.config import GatewayConfig
+from gateway.core.database import DATABASE_ERRORS
 from gateway.core.settings.tools import validate_default_tool
 from gateway.log_config import logger
 from gateway.models.tenancy import User as TenancyUser
@@ -331,11 +331,11 @@ async def update_tool_settings(
         except ValueError as exc:
             await db.rollback()
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from None
-        except SQLAlchemyError:
+        except DATABASE_ERRORS:
             await db.rollback()
             # Log for the operator debugging from logs; the client sees only a
             # generic message so no internals leak. Keys, not values, are logged.
-            logger.exception("Failed to persist tool settings: %s", sorted(updates))
+            logger.exception("Failed to read or persist tool settings: %s", sorted(updates))
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Database error",

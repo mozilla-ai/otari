@@ -23,6 +23,7 @@ option that breaks the rules, a default or ``fetch_tool`` that names nothing,
 and several search instances with no default between them.
 """
 
+import copy
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -67,9 +68,11 @@ SEARCH_PROVIDERS_WITHOUT_ADAPTER = ("searxng",)
 # ``builtin`` provider, which no declared instance may use.
 BUILTIN_FETCH = "builtin_fetch"
 BUILTIN_FETCH_PROVIDER = "builtin"
-# The value of ``web_search_default_tool`` that turns in-loop search off.
+# The value of ``web_search_default_tool`` that turns in-loop search off, in any
+# case: YAML reads ``None`` as a string, and an operator who writes it means this.
 NO_SEARCH_DEFAULT = "none"
-# Names no instance may take: each already means something to a default setting.
+# Names no instance may take, in any case: each already means something to a
+# default setting.
 RESERVED_INSTANCE_NAMES = frozenset({BUILTIN_FETCH, NO_SEARCH_DEFAULT})
 
 DEFAULT_WEB_SEARCH_MAX_CALLS = 10
@@ -163,7 +166,7 @@ def instance_name_problems(name: str) -> list[str]:
     problems: list[str] = []
     if ":" in name:
         problems.append("its name contains ':'")
-    if name in RESERVED_INSTANCE_NAMES:
+    if name.lower() in RESERVED_INSTANCE_NAMES:
         problems.append(f"its name is reserved ({', '.join(sorted(RESERVED_INSTANCE_NAMES))})")
     return problems
 
@@ -442,7 +445,8 @@ class ToolSettings(BaseModel):
             "applies, and the one an unnamed POST /api/v1/search call uses. One whose provider "
             "any-search serves, or 'none' to turn in-loop search off. When unset: the instance the "
             "legacy web_search_provider or web_search_url settings describe, else the only search "
-            "instance, if there is exactly one. Not in effect yet: see docs/configuration.md."
+            "instance, if there is exactly one and any-search serves its provider. Not in effect yet: see "
+            "docs/configuration.md."
         ),
     )
     web_fetch_default_tool: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
@@ -640,7 +644,7 @@ def _instance(kind: ToolKind, name: str, entry: Mapping[str, Any], *, library_ba
         api_key=entry.get("api_key") or None,
         api_base=entry.get("api_base") or None,
         timeout=float(timeout) if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) else None,
-        options=MappingProxyType(dict(options)),
+        options=MappingProxyType(copy.deepcopy(options)),
         dropped_options=frozenset(option_problems(kind, provider, options)),
         provider_defaults=PROVIDER_DEFAULT_OPTIONS.get(provider, _NO_OPTIONS),
         fetch_tool=fetch_tool.strip() if isinstance(fetch_tool, str) and fetch_tool.strip() else None,
@@ -696,7 +700,9 @@ def _runtime_or_env(settings: ToolSettings, key: str) -> Any:
 def configured_search_default(settings: ToolSettings) -> str | None:
     """``web_search_default_tool`` as set, whether it names an instance or not."""
     value = _runtime_or_env(settings, "web_search_default_tool")
-    return str(value) if value is not None else None
+    if value is None:
+        return None
+    return NO_SEARCH_DEFAULT if str(value).lower() == NO_SEARCH_DEFAULT else str(value)
 
 
 def configured_fetch_default(settings: ToolSettings) -> str:
@@ -724,7 +730,8 @@ def synthesized_search_instance(settings: ToolSettings) -> SynthesizedSearchInst
     read with the environment as a fallback, as the in-loop backend reads them.
     An empty value counts as unset.
     """
-    if settings.web_search_provider and settings.web_search_provider_api_key:
+    # The second test only narrows the type: a configured pair has a provider.
+    if settings.web_search_provider_configured() and settings.web_search_provider:
         provider = settings.web_search_provider
         return SynthesizedSearchInstance(
             provider=provider,
@@ -845,11 +852,15 @@ def warn_about_tool_instances(settings: ToolSettings) -> None:
             fetch_named,
         )
     if named != NO_SEARCH_DEFAULT and len(search) > 1 and in_loop_default(settings) is None:
+        usable = sorted(name for name, instance in search.items() if instance.library_backed)
         logger.warning(
-            "There are %d search instances and no web_search_default_tool naming one, so the in-loop "
-            "otari_web_search tool has no default to search with. Set web_search_default_tool to one of them, "
-            "or to 'none' to keep in-loop search off.",
+            "There are %d search instances and no usable web_search_default_tool, so the in-loop "
+            "otari_web_search tool has no default to search with. %s",
             len(search),
+            f"Set web_search_default_tool to one of {', '.join(usable)}, or to 'none' to keep in-loop search off."
+            if usable
+            else "None of them is on a provider the in-loop tool can use yet; set web_search_default_tool to "
+            "'none' to say in-loop search stays off.",
         )
 
 
@@ -865,7 +876,7 @@ def validate_default_tool(settings: ToolSettings, key: str, value: object) -> No
     if not isinstance(value, str) or not (value := value.strip()):
         return
     if key == "web_search_default_tool":
-        if value == NO_SEARCH_DEFAULT:
+        if value.lower() == NO_SEARCH_DEFAULT:
             return
         instance = effective_search_instances(settings).get(value)
         if instance is None:

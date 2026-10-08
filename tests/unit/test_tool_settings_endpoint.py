@@ -436,3 +436,20 @@ def test_patch_sees_a_search_tool_another_replica_stored(tmp_path: Path) -> None
         client.app.state.config.search_tools = {}  # type: ignore[attr-defined]
         resp = client.patch(f"{API_ROOT}/tool-settings", headers=AUTH, json={"web_search_default_tool": "stored"})
     assert resp.status_code == 200, resp.text
+
+
+def test_a_database_timeout_while_checking_a_default_is_a_clean_500(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bare TimeoutError from the reload is a database error like any other: rolled back, nothing stored."""
+
+    async def _times_out(*_args: Any) -> set[str]:
+        raise TimeoutError
+
+    monkeypatch.setattr(tool_settings, "refresh_search_tool_cache", _times_out)
+    with _client(tmp_path, search_tools={"exa": {"provider": "exa", "api_key": "k"}}) as client:
+        resp = client.patch(f"{API_ROOT}/tool-settings", headers=AUTH, json={"web_search_default_tool": "exa"})
+        assert resp.status_code == 500
+        assert resp.json()["detail"] == "Database error"
+        fields = _fields(client.get(f"{API_ROOT}/tool-settings", headers=AUTH).json())
+        assert fields["web_search_default_tool"]["value"] is None
