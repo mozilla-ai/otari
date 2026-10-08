@@ -17,6 +17,7 @@ from collections.abc import Generator
 import pytest
 from fastapi.testclient import TestClient
 
+from _routes import mounted_paths
 from gateway.api.routes.hosted_mode import DATA_PLANE_PREFIXES
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.main import create_app
@@ -175,7 +176,7 @@ def test_non_hosted_modes_keep_serving_inference(mode: str | None, postgres_url:
     """
     config = _config(postgres_url, mode)
     assert not config.is_hosted_mode
-    served = {route.path for route in create_app(config).routes if hasattr(route, "path")}
+    served = mounted_paths(create_app(config).routes)
 
     # Each path as the data plane spells it, with no prefix fallback: a looser
     # match would pass on a route that had moved out from under the caller.
@@ -204,7 +205,7 @@ def test_every_gated_router_has_a_stub_standing_in_for_it(postgres_url: str) -> 
 
     def mounted(mode: str) -> set[str]:
         app = create_app(_config(postgres_url, mode))
-        return {route.path for route in app.routes if hasattr(route, "path")}
+        return mounted_paths(app.routes)
 
     dropped = mounted("standalone") - mounted("hosted")
     assert dropped, "hosted mode dropped no routes at all, so the gate is not doing anything"

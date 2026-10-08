@@ -3,7 +3,7 @@
 import os
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from prometheus_client import generate_latest
 
@@ -12,6 +12,7 @@ from gateway.metrics import (
     REGISTRY,
     MetricsMiddleware,
     _endpoint_label,
+    _route_template,
     metrics_endpoint,
 )
 
@@ -163,6 +164,75 @@ def test_middleware_labels_parameterized_route_with_template() -> None:
     assert _sample("gateway_requests_total", unmatched_labels) - before_unmatched == 1.0
 
 
+def test_the_label_carries_every_prefix_an_included_router_is_mounted_under() -> None:
+    """The gateway mounts its routers as a tree, and the series is keyed on the full path.
+
+    FastAPI records only the route's own path on the request, so a label read
+    from it would drop the API root and fold every series into the unversioned
+    one. This mounts the way ``register_routers`` does: a prefixed aggregate
+    router that includes a prefixed resource router.
+    """
+    app = FastAPI()
+    api = APIRouter(prefix=API_ROOT)
+    chat = APIRouter(prefix="/chat")
+
+    @chat.post("/completions")
+    async def completions() -> dict[str, str]:
+        return {"ok": "yes"}
+
+    @chat.get("/{thread_id}")
+    async def thread(thread_id: str) -> dict[str, str]:
+        return {"id": thread_id}
+
+    @chat.api_route("/stub/{path:path}", methods=["GET", "POST"])
+    async def stub(path: str) -> dict[str, str]:
+        return {"path": path}
+
+    api.include_router(chat)
+    app.include_router(api)
+    app.add_middleware(MetricsMiddleware)
+    client = TestClient(app)
+
+    cases = {
+        ("POST", f"{API_ROOT}/chat/completions"): "/chat/completions",
+        ("GET", f"{API_ROOT}/chat/abc"): "/chat/{thread_id}",
+        ("POST", f"{API_ROOT}/chat/stub/deep/er/path"): "/chat/stub/{path:path}",
+    }
+    before = {
+        label: _sample("gateway_requests_total", {"method": m, "endpoint": label, "api_version": "v1", "status": "200"})
+        for (m, _), label in cases.items()
+    }
+    for method, path in cases:
+        assert client.request(method, path).status_code == 200
+    for (method, _), label in cases.items():
+        labels = {"method": method, "endpoint": label, "api_version": "v1", "status": "200"}
+        assert _sample("gateway_requests_total", labels) - before[label] == 1.0, label
+
+
+def test_the_route_template_is_recovered_from_the_request_path() -> None:
+    """The prefix is the request path up to the tail the route matched, chosen by its parameters."""
+    from starlette.routing import Route
+
+    def scope(route_path: str, path: str, params: dict[str, str] | None = None) -> dict[str, object]:
+        route = Route(route_path, endpoint=lambda request: None)
+        return {"route": route, "path": path, "path_params": params or {}}
+
+    # A fixed tail, and a tail with a parameter, each behind two prefixes.
+    assert _route_template(scope("/completions", "/api/v1/chat/completions")) == "/api/v1/chat/completions"
+    assert _route_template(scope("/{id}", "/api/v1/chat/abc", {"id": "abc"})) == "/api/v1/chat/{id}"
+    # A catch-all also matches from the root; the parsed parameter picks the real tail.
+    assert _route_template(scope("/{path:path}", "/api/v1/chat/a/b", {"path": "a/b"})) == "/api/v1/chat/{path:path}"
+    # A route with no prefix, as older FastAPI recorded every route.
+    unprefixed = scope("/api/v1/files/{file_id}", "/api/v1/files/x", {"file_id": "x"})
+    assert _route_template(unprefixed) == "/api/v1/files/{file_id}"
+    # The root path a proxy strips is not part of any template.
+    with_root = scope("/completions", "/gw/api/v1/chat/completions")
+    with_root["root_path"] = "/gw"
+    assert _route_template(with_root) == "/api/v1/chat/completions"
+    # No route recorded is no template, which the label reports as unmatched.
+    assert _route_template({"path": "/no/such/route"}) is None
+
+
 def test_the_endpoint_label_does_not_carry_the_api_root() -> None:
     """A metric series has to outlive the root moving, which is why the root is not in it.
 
@@ -172,10 +242,7 @@ def test_the_endpoint_label_does_not_carry_the_api_root() -> None:
     and two roots served side by side stay countable apart instead of summing
     into one.
     """
-    from starlette.routing import Route
-
-    def endpoint_for(path: str) -> tuple[str, str]:
-        return _endpoint_label({"route": Route(path, endpoint=lambda request: None)})
+    endpoint_for = _endpoint_label
 
     assert endpoint_for(f"{API_ROOT}/chat/completions") == ("/chat/completions", "v1")
     assert endpoint_for(f"{API_ROOT}/files/{{file_id}}") == ("/files/{file_id}", "v1")

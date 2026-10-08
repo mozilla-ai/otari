@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
+from _routes import mounted_paths
 from gateway.api.deps import reset_config
 from gateway.api.routes import bootstrap as bootstrap_route
 from gateway.api.routes.bootstrap import HOSTED_SURFACES, STANDALONE_SURFACES, published_surfaces
@@ -319,7 +320,7 @@ def test_both_editions_publish_the_organization_guardrail_surface(tmp_path: Path
     assert "organization_guardrails" in STANDALONE_SURFACES
     assert "organization_guardrails" in HOSTED_SURFACES
 
-    mounted = {getattr(route, "path", "") for route in create_app(_standalone(tmp_path)).routes}
+    mounted = mounted_paths(create_app(_standalone(tmp_path)).routes)
 
     assert any(path.startswith(f"{API_ROOT}/organizations/me/guardrails") for path in mounted)
     assert any(path.startswith(f"{API_ROOT}/organizations/me/guardrail-definitions") for path in mounted)
@@ -346,7 +347,7 @@ def test_every_surface_names_a_route_the_gateway_mounts(
     """
     config = build(tmp_path)
     app = create_app(config)
-    mounted = {getattr(route, "path", "") for route in app.routes}
+    mounted = mounted_paths(app.routes)
 
     # The fixed tuple and what the endpoint publishes, which adds each enabled
     # registry feature's surface: a feature whose route is not mounted fails here.

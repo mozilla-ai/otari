@@ -16,9 +16,9 @@ from typing import Any
 
 import pytest
 from fastapi import APIRouter
-from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
+from _routes import mounted_paths
 from gateway import features
 from gateway.api.deps import reset_config
 from gateway.api.routes.bootstrap import HOSTED_SURFACES, STANDALONE_SURFACES, published_surfaces
@@ -109,7 +109,7 @@ def test_a_feature_mounts_its_routers_only_when_enabled(
 ) -> None:
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=enabled),))
     app = create_app(_standalone(tmp_path))
-    mounted = {route.path for route in app.routes if isinstance(route, APIRoute)}
+    mounted = mounted_paths(app.routes)
     assert (f"{API_ROOT}/probe" in mounted) is enabled
 
 
@@ -136,7 +136,7 @@ def test_a_hybrid_gateway_mounts_no_feature_routers(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
     monkeypatch.setattr(features, "CORE_FEATURES", (_probe(enabled=True),))
     app = create_app(_hybrid())
-    mounted = {route.path for route in app.routes if isinstance(route, APIRoute)}
+    mounted = mounted_paths(app.routes)
     assert f"{API_ROOT}/probe" not in mounted
 
 
