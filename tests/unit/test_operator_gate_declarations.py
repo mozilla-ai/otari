@@ -118,6 +118,7 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "images.router": _DATA_PLANE,
     "mcp.router": _DATA_PLANE,
     "messages.router": _DATA_PLANE,
+    "models.hybrid_router": "the caller's key is forwarded to the control plane, which verifies it and scopes the list",
     "moderations.router": _DATA_PLANE,
     "otlp.router": _DATA_PLANE,
     "rerank.router": _DATA_PLANE,

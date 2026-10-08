@@ -54,6 +54,9 @@ It walks:
    frames reach the caller as ``text/event-stream``, and the usage report carries
    the ``ttft_ms`` that only a streamed attempt produces.
 
+11. ``GET /api/v1/models`` relays the control plane's model list for the
+   caller's token, and an unknown token is refused with the platform's 401.
+
 Standard library only, and no dev dependencies, for the same reason as
 ``oss_edition_smoke.py``: CI runs it against ``uv sync --frozen --no-dev``, so a
 dev-only import on a hybrid code path fails here.
@@ -122,6 +125,7 @@ OTARI_CREDENTIAL_HEADERS = ("otari-key", "x-gateway-token", "x-user-token")
 
 GATEWAY_TOKEN = f"gw_hybrid_smoke_{secrets.token_hex(8)}"
 # One user token per control-plane behavior the smoke needs.
+MODELS_LISTED = ("openai:smoke-model", "openai:smoke-model-2")
 USER_TOKEN_OK = f"tk_ok_{secrets.token_hex(8)}"
 USER_TOKEN_BROKE = f"tk_broke_{secrets.token_hex(8)}"
 USER_TOKEN_THROTTLED = f"tk_throttled_{secrets.token_hex(8)}"
@@ -455,6 +459,8 @@ class _ControlPlaneHandler(_RecordingHandler):
             )
         elif route == "code-execution/resolve":
             self._respond(200, code_execution_policy)
+        elif route == "models/resolve":
+            self._respond(200, {"models": [{"id": MODELS_LISTED[1]}, {"id": MODELS_LISTED[0], "created": 1}]})
         else:
             self._respond(404, {"detail": f"fake control plane has no route {route}"})
 
@@ -1370,6 +1376,20 @@ def check_platform_refusals(base_url: str, fakes: Fakes) -> None:
     log("Budget, rate-limit and authentication refusals are forwarded, and nothing is dispatched or reported")
 
 
+def run_models(base_url: str, fakes: Fakes) -> None:
+    """GET /models relays the control plane's list for the caller's token, and refuses an unknown one."""
+    status, body, _ = _request("GET", f"{base_url}{API_ROOT}/models", headers={KEY_HEADER: USER_TOKEN_OK})
+    _expect(status, 200, "listing models", body)
+    listed = [m.get("id") for m in body.get("data", [])]
+    _check(listed == sorted(MODELS_LISTED), f"model list was {listed!r}")
+    resolves = fakes.control_plane.recorder.all("models/resolve")
+    _check(len(resolves) == 1 and resolves[0].body == {}, f"models resolve: {[r.body for r in resolves]!r}")
+
+    status, body, _ = _request("GET", f"{base_url}{API_ROOT}/models", headers={KEY_HEADER: USER_TOKEN_UNKNOWN})
+    _expect(status, 401, "listing models with an unknown token", body)
+    log("GET /models relayed the control plane's list and forwarded its refusal")
+
+
 def run_web_search(base_url: str, fakes: Fakes) -> None:
     """Managed web search: resolve body, credential-free search query, and the result reaching the model."""
     chats_before = len(fakes.provider.recorder.all("chat"))
@@ -1807,6 +1827,7 @@ STEPS: tuple[Callable[[str, Fakes], None], ...] = (
     lambda base_url, fakes: check_health_and_edition(base_url),
     run_completion,
     check_platform_refusals,
+    run_models,
     run_web_search,
     check_web_fetch_is_off_by_default,
     run_mcp,

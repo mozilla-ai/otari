@@ -183,6 +183,9 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     # operator router goes first: its /discoverable and /metadata would
     # otherwise sit behind the catalog router's {model_id:path} catch-all.
     RouterMount(models.operator_router, Plane.CONTROL),
+    # A hybrid gateway has no catalog of its own, so it relays the control
+    # plane's list for the caller's key on the data plane.
+    RouterMount(models.hybrid_router, Plane.DATA, when=lambda config: config.is_hybrid_mode),
     RouterMount(models.catalog_router, Plane.CONTROL),
     # The same merged catalog, folded by model for a chooser rather than
     # listed flat for an SDK.

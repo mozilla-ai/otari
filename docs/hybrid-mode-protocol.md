@@ -17,6 +17,7 @@ Otari calls these endpoints, all rooted at the configured platform base URL:
 | `POST {base}/gateway/provider-keys/resolve` | Authorize a request and return one or more provider credentials to try |
 | `POST {base}/gateway/usage`                 | Report the outcome of an attempt back to the platform |
 | `POST {base}/gateway/mcp-servers/resolve`   | Authorize MCP access and swap workspace-scoped MCP server ids for inline server configs |
+| `POST {base}/gateway/models/resolve`        | List the models the caller's key may use, for `GET /api/v1/models` |
 | `POST {base}/gateway/web-search/resolve`    | Resolve the workspace's Web Access policy when a request uses `otari_web_search` or `otari_web_fetch` |
 | `POST {base}/gateway/code-execution/resolve` | Resolve the workspace's code-execution policy when a request declares `otari_code_execution` |
 
@@ -26,7 +27,7 @@ Otari calls these endpoints, all rooted at the configured platform base URL:
 
 Every endpoint requires `X-Gateway-Token: <gw_...>` in the request headers. This
 proves the caller is an Otari instance configured against this platform
-deployment. The three resolve endpoints additionally require `X-User-Token:
+deployment. The resolve endpoints additionally require `X-User-Token:
 <tk_...>`, which is the workspace API token forwarded opaquely from the end
 user's credential header (`Authorization: Bearer`, `Otari-Key`, or
 `x-api-key`). The usage endpoint sends only the gateway token.
@@ -313,6 +314,47 @@ or a stored server. Statuses remain meaningful: `401` becomes
 `misdirected_request` (without the host the platform's detail named), and `429`
 keeps its status and `Retry-After` as `rate_limit_exceeded`. Other platform resolution failures become
 `502 mcp_resolution_failed`. See [MCP](mcp.md#caller-orchestrated-mcp).
+
+## Model listing
+
+Called by `GET /api/v1/models` on a hybrid gateway, which holds no catalog of
+its own. The caller's key is forwarded as `X-User-Token`, like the other
+resolve endpoints.
+
+### Request
+
+```http
+POST /gateway/models/resolve
+X-Gateway-Token: gw_...
+X-User-Token: tk_...
+Content-Type: application/json
+
+{}
+```
+
+### Response
+
+```json
+{
+  "models": [
+    {"id": "openai:gpt-4o", "created": 1715367049, "owned_by": "openai"}
+  ]
+}
+```
+
+The peer returns only the models the key may use, so it owns entitlement: a
+managed model is listed only for a key entitled to it, and the key's
+`allowed_models` narrows the list. Otari relays the list, sorted by `id`, and
+filters nothing itself. It reads `id` (required, the selector to send as
+`model`), `created` (integer, `0` when absent) and `owned_by` (the provider
+prefix of `id` when absent). Every answer must carry the `models` key; an empty
+list means the key may use none.
+
+### Failure
+
+Refusals follow the MCP server resolution table above, with the fallback detail
+`"Model listing failed"`. A missing or malformed `models` list, or an entry
+without a string `id`, is mapped to `502 Bad Gateway`.
 
 ## Web Access resolution
 
