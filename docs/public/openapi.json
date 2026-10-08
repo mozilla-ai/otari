@@ -13123,10 +13123,22 @@
             "title": "Changes Truncated",
             "type": "boolean"
           },
+          "digest": {
+            "default": "",
+            "description": "Identity of the pending snapshot; send it to confirm or reject to act on exactly this one.",
+            "title": "Digest",
+            "type": "string"
+          },
           "fetched_at": {
             "format": "date-time",
             "title": "Fetched At",
             "type": "string"
+          },
+          "needs_review": {
+            "default": false,
+            "description": "True when the update is implausibly large; the scheduled `auto` policy leaves it pending.",
+            "title": "Needs Review",
+            "type": "boolean"
           },
           "protected_model_count": {
             "title": "Protected Model Count",
@@ -13135,6 +13147,18 @@
           "removed_count": {
             "title": "Removed Count",
             "type": "integer"
+          },
+          "review_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the update needs review.",
+            "title": "Review Reason"
           }
         },
         "required": [

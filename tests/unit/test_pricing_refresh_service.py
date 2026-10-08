@@ -141,6 +141,58 @@ async def test_a_catalog_without_models_is_not_stored(session: AsyncSession, ups
 
 
 @pytest.mark.asyncio
+async def test_a_catalog_pricing_no_model_is_not_stored(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    upstream["catalog"] = {"p": {"id": "p", "models": {"m": {"id": "m", "name": "M"}}}}
+    with pytest.raises(refresh.PricingRefreshError, match="prices no models"):
+        await refresh.prepare_price_refresh(session)
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rate", [-1, 2_000_000])
+async def test_an_implausible_rate_rejects_the_whole_catalog(
+    session: AsyncSession, upstream: dict[str, Any], rate: float
+) -> None:
+    upstream["catalog"]["test"]["models"]["other"] = {"id": "other", "cost": {"input": 1, "output": rate}}
+    with pytest.raises(refresh.PricingRefreshError, match="implausible"):
+        await refresh.prepare_price_refresh(session)
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is None
+
+
+@pytest.mark.asyncio
+async def test_an_implausible_tier_rate_rejects_the_whole_catalog(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    upstream["catalog"]["test"]["models"]["model"]["cost"]["tiers"] = [
+        {"tier": {"type": "context", "size": 100}, "input": float("inf")}
+    ]
+    with pytest.raises(refresh.PricingRefreshError):
+        await refresh.prepare_price_refresh(session)
+
+
+@pytest.mark.asyncio
+async def test_a_large_drop_is_stored_for_review_and_flagged(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    preview = await refresh.prepare_price_refresh(session)
+
+    assert preview.needs_review is True
+    assert preview.review_reason is not None and "priced models fall" in preview.review_reason
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is not None
+    assert await refresh.confirm_price_refresh(session) is True
+
+
+@pytest.mark.asyncio
+async def test_a_small_change_needs_no_review(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+    upstream["catalog"] = _catalog(input_rate=9, extra=True)
+
+    preview = await refresh.prepare_price_refresh(session)
+
+    assert preview.needs_review is False
+    assert preview.review_reason is None
+
+
+@pytest.mark.asyncio
 async def test_failed_persistence_keeps_the_active_generations(
     session: AsyncSession, upstream: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:

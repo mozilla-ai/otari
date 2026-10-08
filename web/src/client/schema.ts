@@ -12289,14 +12289,31 @@ export interface components {
             /** Changes Truncated */
             changes_truncated: boolean;
             /**
+             * Digest
+             * @description Identity of the pending snapshot; send it to confirm or reject to act on exactly this one.
+             * @default
+             */
+            digest: string;
+            /**
              * Fetched At
              * Format: date-time
              */
             fetched_at: string;
+            /**
+             * Needs Review
+             * @description True when the update is implausibly large; the scheduled `auto` policy leaves it pending.
+             * @default false
+             */
+            needs_review: boolean;
             /** Protected Model Count */
             protected_model_count: number;
             /** Removed Count */
             removed_count: number;
+            /**
+             * Review Reason
+             * @description Why the update needs review.
+             */
+            review_reason?: string | null;
         };
         /**
          * PricingResponse

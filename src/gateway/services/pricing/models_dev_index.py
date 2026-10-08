@@ -121,6 +121,27 @@ def parse_rate(value: object) -> Decimal | None:
     return rate
 
 
+def invalid_rate_count(catalog: Mapping[str, Any]) -> int:
+    """How many rates in a parsed ``api.json`` are present but not believable prices."""
+
+    def bad(raw: object) -> int:
+        if not isinstance(raw, dict):
+            return 0
+        return sum(1 for name in _RATE_FIELDS if raw.get(name) is not None and parse_rate(raw[name]) is None)
+
+    count = 0
+    for provider in catalog.values():
+        models = provider.get("models") if isinstance(provider, dict) else None
+        for model in models.values() if isinstance(models, dict) else ():
+            cost = model.get("cost") if isinstance(model, dict) else None
+            if not isinstance(cost, dict):
+                continue
+            count += bad(cost) + bad(cost.get("context_over_200k"))
+            tiers = cost.get("tiers")
+            count += sum(bad(tier) for tier in tiers) if isinstance(tiers, list) else 0
+    return count
+
+
 def _rates(raw: object) -> dict[str, Decimal]:
     if not isinstance(raw, dict):
         return {}

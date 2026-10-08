@@ -146,6 +146,15 @@ class PricingRefreshPreviewResponse(BaseModel):
     protected_model_count: int
     changes: list[PricingRefreshChangeResponse]
     changes_truncated: bool
+    digest: str = Field(
+        default="",
+        description="Identity of the pending snapshot; send it to confirm or reject to act on exactly this one.",
+    )
+    needs_review: bool = Field(
+        default=False,
+        description="True when the update is implausibly large; the scheduled `auto` policy leaves it pending.",
+    )
+    review_reason: str | None = Field(default=None, description="Why the update needs review.")
 
 
 class PricingRefreshConfirmationResponse(BaseModel):
@@ -200,6 +209,9 @@ def _preview_response(preview: PricingRefreshPreview, protected_model_count: int
             PricingRefreshChangeResponse(model_key=change.model_key, change=change.change) for change in preview.changes
         ],
         changes_truncated=preview.changes_truncated,
+        digest=preview.digest,
+        needs_review=preview.needs_review,
+        review_reason=preview.review_reason,
     )
 
 
