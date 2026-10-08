@@ -1,4 +1,4 @@
-"""The interface a domain implements to react to workspace membership changes.
+"""The interface a domain implements to react to membership changes.
 
 The domain that changes membership calls it and never imports the domain that implements it.
 """
@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Protocol
 
-from gateway.models.tenancy import WorkspaceMember
+from gateway.models.tenancy import OrganizationMember, WorkspaceMember
 
 
 class MembershipListener(Protocol):
@@ -25,6 +25,9 @@ class MembershipListener(Protocol):
 
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
         """A workspace and these memberships are about to be deleted."""
+
+    async def organization_member_removed(self, member: OrganizationMember) -> None:
+        """An organization membership is about to be suspended, its workspace memberships already removed."""
 
 
 __all__ = ["MembershipListener"]

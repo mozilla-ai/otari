@@ -44,6 +44,10 @@ class ApiKeyService:
         self._federation_rules = repositories.federation_rules
         self._users = users
 
+    async def delete_key(self, key: APIKey) -> None:
+        """Stage a key's deletion in the caller's Unit of Work block."""
+        await self._keys.delete(key)
+
     async def get_workspace_id_for_key(self, key_id: str) -> uuid.UUID | None:
         """Return the ID of the workspace that owns a key, or None when no key has that ID."""
         return await self._keys.get_workspace_id_for_key(key_id)

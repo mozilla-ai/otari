@@ -1,10 +1,12 @@
 import uuid
 from collections.abc import Collection, Sequence
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Never
 
-from sqlalchemy import ColumnElement, delete, func, or_, select, update
+from sqlalchemy import ColumnElement, case, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.budget_exceptions import BudgetStillReferencedError
@@ -21,8 +23,8 @@ def _in_reach_of(organization_id: uuid.UUID) -> ColumnElement[bool]:
 class BudgetRepository(BaseRepository[Budget, Never, Never]):
     """Query and stage budgets in the open block of a Unit of Work."""
 
-    def __init__(self, uow: UnitOfWork) -> None:
-        super().__init__(uow, Budget)
+    def __init__(self, db: AsyncSession | UnitOfWork) -> None:
+        super().__init__(db, Budget)
 
     async def add(self, budget: Budget) -> Budget:
         """Stage a new budget and return it with its generated values."""
@@ -50,12 +52,33 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
                 select(
                     func.count(),
                     # Decimal defaults: ``coalesce(numeric, double precision)`` would sum exact counters as floats.
-                    func.coalesce(func.sum(User.spend), Decimal(0)),
+                    func.coalesce(func.sum(User.spend_this_period()), Decimal(0)),
                     func.coalesce(func.sum(User.reserved), Decimal(0)),
                 ).where(User.budget_id == budget_id, User.deleted_at.is_(None))
             )
         ).one()
         return int(row[0]), float(row[1]), float(row[2])
+
+    async def retime_holders(
+        self, budget_id: str, *, period_start: datetime | None, period_end: datetime | None
+    ) -> None:
+        """Move every live user on this budget onto this window, rolling only counters whose period had ended.
+
+        A user with no window takes the fallback an assignment writes: started now, never resetting.
+        """
+        now = datetime.now(UTC)
+        await self.db.execute(
+            update(User)
+            .where(User.budget_id == budget_id, User.deleted_at.is_(None))
+            .values(
+                budget_started_at=period_start or now,
+                next_budget_reset_at=period_end,
+                spend=User.spend_this_period(now),
+                current_tokens=case((User.next_budget_reset_at <= now, 0), else_=User.current_tokens),
+                current_requests=case((User.next_budget_reset_at <= now, 0), else_=User.current_requests),
+            )
+            .execution_options(synchronize_session=False)
+        )
 
     async def count_by_organization(self, organization_id: uuid.UUID) -> int:
         """Count the organization's budgets."""
