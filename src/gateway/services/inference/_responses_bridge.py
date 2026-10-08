@@ -103,7 +103,7 @@ _RESPONSES_ONLY_EXTRA_BODY = ("input", "client_metadata")
 
 _BRIDGE_NOTE = "This provider has no Responses API, so the gateway serves the request as a chat completion."
 
-# Clients that send ``store: true`` (the Vercel AI SDK behind n8n) replay a prior turn as
+# Clients that send ``store: true`` (the Vercel AI SDK, for one) replay a prior turn as
 # ``item_reference`` ids instead of the items. The bridge stores nothing upstream, so it
 # keeps the message and function-call items it minted, per process, to resolve them.
 _MINTED_ITEMS_MAX = 2048
