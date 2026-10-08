@@ -17,6 +17,7 @@ no way to send them back.
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -91,8 +92,13 @@ _REFUSED_FIELDS = ("previous_response_id", "conversation", "background", "contex
 _REASONING_ID_STEM = "otari_rs"
 REASONING_ITEM_ID_PREFIX = f"{_REASONING_ID_STEM}_"
 
-# An endpoint that answers these has no ``/responses`` route.
+# 405 and 501 say the route is absent. A 404 also answers an unknown model or a
+# stored item that was never kept, so one that names either is not taken as a missing route.
 _RESPONSES_ROUTE_MISSING = frozenset({404, 405, 501})
+_NOT_A_MISSING_ROUTE = re.compile(r"\b(item|model)\b", re.IGNORECASE)
+
+# The route puts these Responses-only Codex fields in ``extra_body``; a chat request has no use for them.
+_RESPONSES_ONLY_EXTRA_BODY = ("input", "client_metadata")
 
 _BRIDGE_NOTE = "This provider has no Responses API, so the gateway serves the request as a chat completion."
 
@@ -141,16 +147,18 @@ def serves_responses(provider: str | LLMProvider) -> bool:
     )
 
 
-def _lacks_responses_route(provider: Any, kwargs: dict[str, Any], exc: AnyLLMError) -> bool:
+def _lacks_responses_route(kwargs: dict[str, Any], exc: AnyLLMError) -> bool:
     """Whether ``exc`` says a custom ``api_base`` has no Responses endpoint.
 
     Only a caller-chosen ``api_base`` qualifies: the vendor's own endpoint has the
     API, so there a 404 is about the request (an unknown item or model) and a chat
     completion would only hide it.
     """
-    return (
-        bool(kwargs.get("api_base")) and exc.status_code in _RESPONSES_ROUTE_MISSING and _supports_completion(provider)
-    )
+    if not kwargs.get("api_base") or exc.status_code not in _RESPONSES_ROUTE_MISSING:
+        return False
+    if exc.status_code == 404 and _NOT_A_MISSING_ROUTE.search(exc.message):
+        return False
+    return _supports_completion(kwargs.get("provider"))
 
 
 def _supports_completion(provider: Any) -> bool:
@@ -177,20 +185,30 @@ async def call_responses(native: Callable[..., Awaitable[Any]], kwargs: dict[str
     try:
         return await native(**kwargs)
     except AnyLLMError as exc:
-        if not _lacks_responses_route(kwargs.get("provider"), kwargs, exc):
+        if not _lacks_responses_route(kwargs, exc):
             raise
-        logger.info("%s has no Responses endpoint at its api_base; serving as a chat completion", kwargs["provider"])
         try:
-            return await aresponses_via_chat_completions(**kwargs)
+            plan = _plan_chat_completion(kwargs)
         except UnsupportedParameterError:
             raise exc from None
+        logger.info(
+            "%s answered %s on /responses at its api_base (%s); serving as a chat completion",
+            kwargs["provider"],
+            exc.status_code,
+            exc.message,
+        )
+        return await _run_chat_completion(*plan)
 
 
-async def aresponses_via_chat_completions(**kwargs: Any) -> Response | AsyncIterator[ResponseStreamEvent]:
-    """Run ``aresponses`` keyword arguments as a chat completion, answering in Responses shape."""
+def _plan_chat_completion(kwargs: dict[str, Any]) -> tuple[dict[str, Any], _ResponseEcho]:
+    """Translate ``aresponses`` keyword arguments, refusing what chat completions cannot carry."""
     provider = str(LLMProvider(kwargs["provider"]).value)
-    completion_kwargs = _completion_kwargs(kwargs, provider)
-    echo = _ResponseEcho.from_request(kwargs)
+    return _completion_kwargs(kwargs, provider), _ResponseEcho.from_request(kwargs)
+
+
+async def _run_chat_completion(
+    completion_kwargs: dict[str, Any], echo: _ResponseEcho
+) -> Response | AsyncIterator[ResponseStreamEvent]:
     if completion_kwargs.get("stream"):
         chunks = await acompletion(**completion_kwargs)
         assert not isinstance(chunks, ChatCompletion)
@@ -198,6 +216,11 @@ async def aresponses_via_chat_completions(**kwargs: Any) -> Response | AsyncIter
     completion = await acompletion(**completion_kwargs)
     assert isinstance(completion, ChatCompletion)
     return _completion_to_response(completion, echo)
+
+
+async def aresponses_via_chat_completions(**kwargs: Any) -> Response | AsyncIterator[ResponseStreamEvent]:
+    """Run ``aresponses`` keyword arguments as a chat completion, answering in Responses shape."""
+    return await _run_chat_completion(*_plan_chat_completion(kwargs))
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +234,12 @@ def _completion_kwargs(kwargs: dict[str, Any], provider: str) -> dict[str, Any]:
             raise UnsupportedParameterError(field, provider, _BRIDGE_NOTE)
 
     out: dict[str, Any] = {key: value for key, value in kwargs.items() if key in _SHARED_FIELDS}
+    if isinstance(extra_body := out.get("extra_body"), dict):
+        extra_body = {key: value for key, value in extra_body.items() if key not in _RESPONSES_ONLY_EXTRA_BODY}
+        if extra_body:
+            out["extra_body"] = extra_body
+        else:
+            del out["extra_body"]
     out["provider"] = kwargs["provider"]
     out["model"] = kwargs["model"]
     out["messages"] = _messages(kwargs.get("input_data"), kwargs.get("instructions"), provider)
