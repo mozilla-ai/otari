@@ -320,16 +320,17 @@ def test_validate_fetch_tools(fetch_tools: dict[str, Any], expected: str | None)
 
 
 @pytest.mark.parametrize(
-    "config",
+    "config,validate",
     [
-        GatewayConfig(search_tools={"mine": {"provider": "nope"}}),
-        GatewayConfig(fetch_tools={"mine": {"provider": "nope"}}),
+        (GatewayConfig(search_tools={"mine": {"provider": "nope"}}), GatewayConfig.validate_search_tools),
+        (GatewayConfig(fetch_tools={"mine": {"provider": "nope"}}), GatewayConfig.validate_fetch_tools),
     ],
 )
-def test_an_unknown_provider_is_refused_without_offering_the_test_one(config: GatewayConfig) -> None:
+def test_an_unknown_provider_is_refused_without_offering_the_test_one(
+    config: GatewayConfig, validate: Callable[[GatewayConfig], None]
+) -> None:
     with pytest.raises(ValueError, match="is not a supported") as refused:
-        config.validate_search_tools()
-        config.validate_fetch_tools()
+        validate(config)
     assert "exa" in str(refused.value)
     assert "fake" not in str(refused.value)
 
