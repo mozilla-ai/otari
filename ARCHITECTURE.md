@@ -62,6 +62,39 @@ flowchart LR
     class clients,providers plain;
 ```
 
+## How a data plane reaches what it does not own
+
+A data plane holds no database and no store of its own. That is the design, not a gap to work around. When a capability needs a remote service or leaves durable state, the data plane gets authority from the control plane and then acts directly. The two rules below apply to every capability on the seam: model inference, MCP, web search, code execution, files, and every capability added after them.
+
+### The narrowest authority that lets it go direct
+
+The control plane answers policy questions, and it never carries customer traffic. Completions, search queries, sandbox code, file bytes and captured content go from the data plane straight to where they are served or stored. The control plane returns the narrowest authority that lets the data plane do that, and there are three cases.
+
+| Case | The control plane returns | Examples |
+|---|---|---|
+| The workspace owns the credential | That credential | A workspace's own provider keys, its MCP servers, search with its own key |
+| The platform owns the resource and can mint a grant | A scoped grant | The code execution front door, the files bucket |
+| The platform owns the credential and the upstream cannot accept a grant | The credential, to the platform's own data plane only | Managed models, managed search |
+
+A **scoped grant** is one operation on one resource, with a short deadline. A read and a write need separate grants, and no grant permits listing, because a grant that can enumerate is a tenant isolation hole. The data plane receives grants and never mints them. A grant is never logged, never stored on a record, and never sent to a client.
+
+MCP is the reference shape. The resolve returns the server's own URL and the workspace's credential, and the data plane connects direct.
+
+### Durable state: Try-Confirm/Cancel
+
+Where the work leaves durable state, such as a stored file or a recorded run, the exchange is **Try-Confirm/Cancel (TCC)**. The model is Helland's tentative operations ("Life beyond Distributed Transactions: an Apostate's Opinion", CIDR 2007). The name is Pardon's (Atomikos, and Pardon and Pautasso, 2011).
+
+1. **Try.** The data plane asks the control plane to authorize the operation. The control plane checks policy and quota, allocates any identifier the operation needs, records the intent in a state that is not yet usable, and returns the identifier with a grant.
+2. The data plane does the work directly against the resource the grant names.
+3. **Confirm.** The data plane reports the outcome, and the control plane makes the record usable. Confirm carries an idempotency key, so a retry cannot create a second record. A Confirm that keeps failing is retried with backoff and then parked for reconciliation, never dropped.
+4. **Cancel.** A failure cancels explicitly where it can. Where it cannot, a sweep cancels each Try record that is past its deadline.
+
+The budget path already runs this inside one database (`services/budgets/`). `reserve_budget` is Try, `reconcile_reservation` is Confirm, `refund_reservation` is Cancel, and the reservation sweep reclaims a hold that nobody released. Across the plane boundary there is no shared transaction, so the idempotency key and the sweep are obligations, not options. Try comes first so that a record always exists before its side effect, which keeps the sweep a walk of stale Try records rather than a scan of the remote store.
+
+TCC is the wrong tool where one transaction already covers the work. There, use a listener that runs inside the caller's transaction, as `services/tenancy/membership_listener.py` does. Work that leaves nothing durable, such as a web search, needs only the authorization and the direct call.
+
+> **Where this stands.** The rules are decided, and the grant is not built yet. Files is the first capability to implement them ([#1750](https://github.com/mozilla-ai/otari/issues/1750)), and the code execution front door follows ([docs/code-execution-protocol.md](docs/code-execution-protocol.md)). Web search and code execution can still be configured to send traffic through the control plane, and [#1688](https://github.com/mozilla-ai/otari/issues/1688) removes that. Each capability's wire contract is written in [docs/hybrid-mode-protocol.md](docs/hybrid-mode-protocol.md) before its code.
+
 ## The extension seam: ports and adapters
 
 Otari's core defines interfaces called **ports**, and delegates the real work to **adapters** that implement them. Because the core depends only on the ports and never on a specific adapter, you change what a capability does by binding a different adapter, and the core itself does not change. That dependency line, with the core on one side and the adapters on the other, is the boundary between what Otari ships and what an overlay plugs in.
@@ -317,3 +350,5 @@ A recipe for an optional feature the core ships. [The modular monolith](#the-mod
 - **Composition root**: the single place that decides which adapter answers a port. Only it may name a concrete adapter.
 - **Container**: the process-level registry of `Port -> factory` bindings, built once at startup.
 - **Entitlement**: whether a capability is enabled for a deployment, at capability grain. The licensing axis.
+- **Scoped grant**: a short-lived authority for one operation on one resource, which the control plane mints and the data plane presents. See [How a data plane reaches what it does not own](#how-a-data-plane-reaches-what-it-does-not-own).
+- **Try-Confirm/Cancel (TCC)**: how a data plane with no database leaves durable state. The control plane records the intent, the data plane acts, and a Confirm or a Cancel settles the record.

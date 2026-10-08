@@ -4,55 +4,27 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from any_llm.types.rerank import RerankMeta, RerankResponse, RerankResult, RerankUsage
 from fastapi.testclient import TestClient
-from pydantic import BaseModel
 
 from gateway.core.config import API_ROOT
 
 
-class _RerankUsage(BaseModel):
-    """Mock RerankUsage for testing until SDK ships rerank types."""
-
-    total_tokens: int | None = None
-
-
-class _RerankResult(BaseModel):
-    """Mock RerankResult for testing."""
-
-    index: int
-    relevance_score: float
-
-
-class _RerankMeta(BaseModel):
-    """Mock RerankMeta for testing."""
-
-    billed_units: dict[str, float] | None = None
-    tokens: dict[str, int] | None = None
-
-
-class _RerankResponse(BaseModel):
-    """Mock RerankResponse for testing."""
-
-    id: str
-    results: list[_RerankResult]
-    meta: _RerankMeta | None = None
-    usage: _RerankUsage | None = None
-
-
-def _mock_rerank_response() -> _RerankResponse:
+def _mock_rerank_response() -> RerankResponse:
     """Create a mock RerankResponse for testing."""
-    return _RerankResponse(
+    return RerankResponse(
         id="rerank-test-123",
+        model="rerank-v3.5",
         results=[
-            _RerankResult(index=0, relevance_score=0.95),
-            _RerankResult(index=2, relevance_score=0.80),
-            _RerankResult(index=1, relevance_score=0.30),
+            RerankResult(index=0, relevance_score=0.95),
+            RerankResult(index=2, relevance_score=0.80),
+            RerankResult(index=1, relevance_score=0.30),
         ],
-        meta=_RerankMeta(
+        meta=RerankMeta(
             billed_units={"search_units": 1.0},
             tokens={"input_tokens": 100},
         ),
-        usage=_RerankUsage(total_tokens=100),
+        usage=RerankUsage(total_tokens=100),
     )
 
 
@@ -85,6 +57,7 @@ def test_rerank_with_api_key(
     assert "results" in data
     assert len(data["results"]) == 3
     assert data["results"][0]["relevance_score"] == 0.95
+    assert data["model"] == "rerank-v3.5"
 
 
 def test_rerank_master_key_requires_user(

@@ -267,15 +267,17 @@ def get_provider_kwargs(
             vertex_project = provider_config.get("project")
             vertex_location = provider_config.get("location")
 
-            kwargs.update(
-                setup_vertex_environment(
+            # Credentials, project and location configure the genai client, so they
+            # go in client_args: any-llm passes every other kwarg to the completion
+            # call, where GenerateContentConfig rejects them.
+            kwargs["client_args"] = {
+                **setup_vertex_environment(
                     credentials=vertex_creds,
                     project=vertex_project,
                     location=vertex_location,
-                )
-            )
-            if "client_args" in provider_config:
-                kwargs["client_args"] = provider_config["client_args"]
+                ),
+                **provider_config.get("client_args", {}),
+            }
         else:
             kwargs = {k: v for k, v in provider_config.items() if k != "client_args"}
             if "client_args" in provider_config:

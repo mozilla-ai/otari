@@ -679,23 +679,19 @@ class _StreamTranslator:
         if function is not None and function.name:
             state.name = state.name or function.name
         fragment = (function.arguments if function is not None else None) or ""
-        events: list[ResponseStreamEvent] = []
-        if state.output_index is None:
-            state.arguments += fragment
-            if state.name:
-                events += self._open_tool_call(state)
-            return events
         state.arguments += fragment
-        if fragment:
-            events.append(
-                self._event(
-                    "response.function_call_arguments.delta",
-                    item_id=state.item_id,
-                    output_index=state.output_index,
-                    delta=fragment,
-                )
+        if state.output_index is None:
+            return self._open_tool_call(state) if state.name else []
+        if not fragment:
+            return []
+        return [
+            self._event(
+                "response.function_call_arguments.delta",
+                item_id=state.item_id,
+                output_index=state.output_index,
+                delta=fragment,
             )
-        return events
+        ]
 
     def _open_tool_call(self, state: _ToolCallState) -> list[ResponseStreamEvent]:
         events = self._close_reasoning() + self._close_text()

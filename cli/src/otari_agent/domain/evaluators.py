@@ -659,6 +659,12 @@ def tokenize_commands(commands: tuple[str, ...]) -> dict[str, list[list[str]]]:
     return {command: _command_segments(command) for command in commands}
 
 
+def _cached_segments(command: str, segment_cache: dict[str, list[list[str]]]) -> list[list[str]]:
+    """Return `command`'s segments from the cache, tokenizing only on a miss; a command with no segments is a hit."""
+    segments = segment_cache.get(command)
+    return segments if segments is not None else _command_segments(command)
+
+
 def _contains_subsequence(segment: list[str], phrase: list[str]) -> bool:
     """Whether `phrase`'s tokens appear, in order and unbroken, inside `segment`.
 
@@ -762,7 +768,7 @@ def evaluate_command(
         for command in evidence.commands
         if any(
             _contains_subsequence(segment, phrase)
-            for segment in (segments_by_command.get(command) or _command_segments(command))
+            for segment in _cached_segments(command, segments_by_command)
             for phrase in forbidden_phrases
         )
     )
@@ -878,7 +884,7 @@ def evaluate_command_if_changed(
     satisfied = any(
         _contains_subsequence(segment, phrase)
         for command in command_evidence.commands
-        for segment in (segments_by_command.get(command) or _command_segments(command))
+        for segment in _cached_segments(command, segments_by_command)
         for phrase in required_phrases
     )
     if satisfied:
