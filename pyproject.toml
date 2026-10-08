@@ -55,7 +55,6 @@ dependencies = [
     # blocking resolver would hold the event loop for it.
     "dnspython>=2.7.0",
     "fastapi>=0.115.0",
-    "genai-prices>=0.1.0",
     # Direct dependency for gateway-managed HTTP clients and the public
     # transport API used by pinned web retrieval.
     "httpx>=0.28.1",
