@@ -25,6 +25,7 @@ from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute
 
 import gateway.api.routes
+from _routes import MountedRoute, mounted_api_routes
 from gateway.api.deps import (
     require_deployment_operator,
     verify_api_key_or_master_key,
@@ -172,22 +173,20 @@ def _resolves(dependant: Dependant, gate: Callable[..., Any]) -> bool:
     return any(sub.call is gate or _resolves(sub, gate) for sub in dependant.dependencies)
 
 
-def _route_id(name: str, route: APIRoute) -> str:
+def _route_id(name: str, route: MountedRoute) -> str:
     return f"{name} {'/'.join(sorted(route.methods))} {route.path or '/'}"
 
 
 def _routes(routers: list[tuple[str, APIRouter]]) -> Iterator[Any]:
     for name, router in routers:
-        for route in router.routes:
-            if isinstance(route, APIRoute):
-                yield pytest.param(route, id=_route_id(name, route))
+        for route in mounted_api_routes(router.routes):
+            yield pytest.param(route.route, id=_route_id(name, route))
 
 
 def _non_operator_routes() -> Iterator[Any]:
     for name, router, gate in _NON_OPERATOR_ROUTERS:
-        for route in router.routes:
-            if isinstance(route, APIRoute):
-                yield pytest.param(route, gate, id=_route_id(name, route))
+        for route in mounted_api_routes(router.routes):
+            yield pytest.param(route.route, gate, id=_route_id(name, route))
 
 
 @pytest.mark.parametrize(("name", "router"), _DEPLOYMENT_WIDE_ROUTERS, ids=[n for n, _ in _DEPLOYMENT_WIDE_ROUTERS])
@@ -250,8 +249,8 @@ def test_no_router_gates_some_of_its_routes_and_not_the_rest() -> None:
     """
     partly_gated: list[str] = []
     for name, router in _exposed_routers().items():
-        routes = [route for route in router.routes if isinstance(route, APIRoute)]
-        gated = [route for route in routes if _resolves(route.dependant, require_deployment_operator)]
+        routes = mounted_api_routes(router.routes)
+        gated = [route for route in routes if _resolves(route.route.dependant, require_deployment_operator)]
         if gated and len(gated) != len(routes):
             ungated = sorted({route.path for route in routes if route not in gated})
             partly_gated.append(f"{name}: ungated {ungated}")

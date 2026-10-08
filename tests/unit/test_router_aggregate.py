@@ -11,8 +11,8 @@ twice is a failure rather than a silent no-op.
 from collections import Counter
 
 from fastapi import APIRouter, FastAPI
-from fastapi.routing import APIRoute
 
+from _routes import mounted_api_routes
 from gateway.api.main import _register_contributed_routers, _register_core_routers, register_routers
 from gateway.api.routes import hosted_mode, otlp
 from gateway.container import RouterContribution, build_container
@@ -22,9 +22,7 @@ Operations = Counter[tuple[str, str]]
 
 
 def _operations(app: FastAPI) -> Operations:
-    return Counter(
-        (route.path, method) for route in app.routes if isinstance(route, APIRoute) for method in route.methods
-    )
+    return Counter((route.path, method) for route in mounted_api_routes(app.routes) for method in route.methods)
 
 
 def _standalone() -> GatewayConfig:
@@ -82,7 +80,7 @@ def _mount_order(config: GatewayConfig) -> list[str]:
     app.state.container = build_container(config.bootstrap, workspace_listener=None)
     app.state.enabled_features = ()
     register_routers(app, config)
-    return [route.path for route in app.routes if isinstance(route, APIRoute)]
+    return [route.path for route in mounted_api_routes(app.routes)]
 
 
 def test_a_fixed_route_is_matched_before_the_catch_all_that_would_swallow_it() -> None:
@@ -126,7 +124,7 @@ def test_a_contributed_route_is_matched_before_a_mode_stub() -> None:
     app.state.container = container
     app.state.enabled_features = ()
     register_routers(app, GatewayConfig(mode="hosted", bootstrap=None))
-    routes = [route for route in app.routes if isinstance(route, APIRoute)]
+    routes = mounted_api_routes(app.routes)
 
     # The probe sits under /chat, which the hosted stub claims with a catch-all.
     probe = next(i for i, route in enumerate(routes) if route.path.endswith("/chat/overlay-probe"))

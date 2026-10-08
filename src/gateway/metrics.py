@@ -160,24 +160,58 @@ _UNMATCHED_ENDPOINT = "unmatched"
 _NO_VERSION = ""
 
 
-def _endpoint_label(scope: Scope) -> tuple[str, str]:
+def _route_template(scope: Scope) -> str | None:
+    """Return the path template a request matched, with every prefix it was included under.
+
+    FastAPI records the matched route on the scope once routing finishes, but
+    since 0.137 an included router keeps its own routes, so that route carries
+    only the path declared on it: ``/completions`` for a request that matched
+    ``/api/v1/chat/completions``. FastAPI offers no public way to read the
+    mounted path, so the prefix is recovered from the request path instead. It
+    is whatever precedes the tail the route's own pattern matched, and the
+    tail is the one whose parameters agree with those FastAPI parsed, which
+    tells the catch-all ``/{path:path}`` apart from the shorter tails it would
+    also accept.
+    """
+    route = scope.get("route")
+    template = getattr(route, "path", None)
+    if not isinstance(template, str):
+        return None
+    pattern = getattr(route, "path_regex", None)
+    convertors = getattr(route, "param_convertors", None)
+    if pattern is None or convertors is None:
+        return template
+    path: str = scope["path"]
+    root_path: str = scope.get("root_path", "")
+    if root_path and path.startswith(root_path):
+        path = path[len(root_path) :]
+    path_params = scope.get("path_params", {})
+    for start in (index for index, char in enumerate(path) if char == "/"):
+        matched = pattern.match(path[start:])
+        if matched is None:
+            continue
+        values = matched.groupdict()
+        if all(convertors[name].convert(value) == path_params.get(name) for name, value in values.items()):
+            return path[:start] + template
+    return template
+
+
+def _endpoint_label(template: str | None) -> tuple[str, str]:
     """Return the resource a request matched and the API version it came in under.
 
     Labeling metrics with the raw ``scope["path"]`` mints a new Prometheus
     series per distinct path parameter value (file id, batch id, per-user
-    lookups, ...), which is unbounded label cardinality. FastAPI records the
-    matched route on the scope once routing finishes, so its ``path`` template
-    (for example ``/files/{file_id}``) collapses those into a single series.
-    Requests that match no route land in the ``unmatched`` bucket.
+    lookups, ...), which is unbounded label cardinality. The matched route's
+    path ``template`` (for example ``/files/{file_id}``) collapses those into a
+    single series. Requests that match no route land in the ``unmatched``
+    bucket.
 
     The API root is split off into its own label so a series survives the root
     moving, and so two versions served side by side stay distinguishable
     instead of summing into one. A path outside the root keeps its whole
     template: ``/metrics`` is ours to name, and an OTel signal path is not.
     """
-    route = scope.get("route")
-    template = getattr(route, "path", None)
-    if not isinstance(template, str) or not template:
+    if not template:
         return _UNMATCHED_ENDPOINT, _NO_VERSION
     if template == API_ROOT:
         return "/", API_VERSION
@@ -224,6 +258,6 @@ class MetricsMiddleware:
         finally:
             duration = time.monotonic() - start
             ACTIVE_REQUESTS.dec()
-            endpoint, api_version = _endpoint_label(scope)
+            endpoint, api_version = _endpoint_label(_route_template(scope))
             REQUESTS.labels(method=method, endpoint=endpoint, api_version=api_version, status=str(status_code)).inc()
             REQUEST_DURATION_SECONDS.labels(method=method, endpoint=endpoint, api_version=api_version).observe(duration)

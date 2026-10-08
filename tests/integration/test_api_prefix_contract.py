@@ -29,6 +29,7 @@ import pytest
 from fastapi import FastAPI
 
 import gateway
+from _routes import mounted_paths
 from gateway.api.routes import (
     _passthrough,
     audio,
@@ -81,9 +82,8 @@ def _config(postgres_url: str, mode: str | None, **overrides: Any) -> GatewayCon
 
 
 def _mounted(app: FastAPI) -> set[str]:
-    paths = {route.path for route in app.routes if hasattr(route, "path")}
-    # A newer FastAPI may stop flattening nested routers into app.routes; an
-    # empty set here would make every assertion below pass vacuously.
+    paths = mounted_paths(app.routes)
+    # An empty set here would make every assertion below pass vacuously.
     assert paths, "app.routes carried no paths"
     return paths
 

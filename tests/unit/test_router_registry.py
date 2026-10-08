@@ -6,6 +6,7 @@ paths each deployment answers are named here rather than left to be discovered.
 
 from fastapi import APIRouter
 
+from _routes import mounted_paths
 from gateway.api import main as api_main
 from gateway.core.config import GatewayConfig
 from gateway.core.deployment import Deployment, Plane, RouterMount, deployment_for
@@ -32,12 +33,7 @@ def _served(config: GatewayConfig) -> set[str]:
     """The paths ``config``'s deployment mounts, without path parameters."""
     api = APIRouter()
     api_main._register_core_routers(api, config, ())
-    served = set()
-    for route in api.routes:
-        path = getattr(route, "path", None)
-        if path is not None:
-            served.add(path.split("{")[0].rstrip("/") or path)
-    return served
+    return {path.split("{")[0].rstrip("/") or path for path in mounted_paths(api.routes)}
 
 
 def _standalone() -> set[str]:
