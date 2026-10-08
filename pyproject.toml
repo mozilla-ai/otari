@@ -57,7 +57,6 @@ dependencies = [
     # Below 0.137, where a request's matched route stops carrying the prefix it
     # is mounted under, which the metrics endpoint label reads.
     "fastapi>=0.115.0,<0.137",
-    "genai-prices>=0.1.0",
     # Direct dependency for gateway-managed HTTP clients and the public
     # transport API used by pinned web retrieval.
     "httpx>=0.28.1",
