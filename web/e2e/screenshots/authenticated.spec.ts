@@ -387,6 +387,69 @@ test.describe("organization admin", () => {
     await expect(page.getByText("Acme (organization), Platform")).toBeVisible()
     await captureScreenshot(page, "organization-budgets")
   })
+
+  test("organization budget detail", async ({ page }) => {
+    await login(page)
+    await stubAdminSpendView(page)
+    // This budget's own ceilings, with the spend each entity has drawn.
+    const ceiling = {
+      provider_key_id: null,
+      model: null,
+      budget_id: "11111111-1111-1111-1111-111111111111",
+      name: null,
+      max_budget: 2500,
+      reserved_spend: 0,
+      token_limit: null,
+      current_tokens: 0,
+      reserved_tokens: 0,
+      request_limit: null,
+      current_requests: 0,
+      reserved_requests: 0,
+      reset_cycle: "monthly",
+      reset_every_n: null,
+      reset_anchor_at: null,
+      reset_weekdays: null,
+      reset_month_day: 1,
+      reset_month: null,
+      period_start: "2026-08-01T00:00:00+00:00",
+      period_end: "2026-09-01T00:00:00+00:00",
+      manageable: true,
+      created_at: "2026-08-01T00:00:00+00:00",
+      updated_at: "2026-08-01T00:00:00+00:00",
+    }
+    await page.route(
+      "**/v1/organizations/me/spend-ceilings*",
+      async (route) => {
+        await route.fulfill({
+          json: {
+            data: [
+              {
+                ...ceiling,
+                id: "c-org",
+                scope_type: "organization",
+                scope_id: "22222222-2222-2222-2222-222222222222",
+                current_spend: 412.5,
+              },
+              {
+                ...ceiling,
+                id: "c-ws",
+                scope_type: "workspace",
+                scope_id: "44444444-4444-4444-4444-444444444444",
+                current_spend: 2140,
+              },
+            ],
+            count: 2,
+          },
+        })
+      },
+    )
+    await gotoRoute(page, "/budgets/11111111-1111-1111-1111-111111111111")
+    await expect(
+      page.getByRole("grid", { name: "Spend by entity" }),
+    ).toBeVisible()
+    await expect(page.getByText("Whole organization")).toBeVisible()
+    await captureScreenshot(page, "organization-budget-detail")
+  })
 })
 
 test.describe("the keys page's one-time secret", () => {

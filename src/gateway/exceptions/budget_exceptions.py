@@ -50,29 +50,24 @@ class OrganizationBudgetNotFoundError(TenancyNotFoundError):
 
 
 class OrganizationBudgetInUseError(TenancyConflictError):
-    """The budget still holds ceilings or workspace defaults.
+    """The budget is still a workspace's member default.
 
-    Both foreign keys are ``RESTRICT``, so the database refuses the delete anyway,
-    without naming what to change. Raised here so the refusal can say which rows
-    hold the budget and how many.
+    The foreign key is ``RESTRICT``, so the database refuses the delete anyway,
+    without naming what to change. Raised here so the refusal says what holds the
+    budget and how many.
     """
 
-    def __init__(self, budget_id: object, *, ceilings: int, defaults: int):
-        held = []
-        if ceilings:
-            held.append(f"{ceilings} spend {'ceiling' if ceilings == 1 else 'ceilings'}")
-        if defaults:
-            held.append(f"{defaults} workspace member {'default' if defaults == 1 else 'defaults'}")
-        super().__init__(
-            f"Budget {budget_id} is still used by {' and '.join(held)}. Remove or repoint them before deleting it."
-        )
+    def __init__(self, budget_id: object, *, defaults: int):
+        held = f"{defaults} workspace member {'default' if defaults == 1 else 'defaults'}"
+        super().__init__(f"Budget {budget_id} is still used by {held}. Remove or repoint them before deleting it.")
 
 
 class OrganizationBudgetHeldElsewhereError(TenancyConflictError):
     """Something outside this organization's own surface still names the budget.
 
-    ``users.budget_id``, which is not a tenant's to see, so the refusal does not
-    name the rows holding it.
+    A gateway user's ``users.budget_id``, or a ceiling the deployment operator
+    pointed at it from another organization. Neither is a tenant's to see, so the
+    refusal does not name the rows holding it.
     """
 
     def __init__(self, budget_id: object):

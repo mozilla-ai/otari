@@ -2585,6 +2585,11 @@ main {
   width: 6rem;
   min-width: 6rem;
 }
+/* One budget's detail table: the entity lane absorbs the slack, so the spend
+   columns stay together at the end. */
+.otari-budget-detail-table .table__column[data-key="entity"] {
+  min-width: 15rem;
+}
 
 .otari-budgets-table .table__row .table__cell {
   height: 3.625rem;

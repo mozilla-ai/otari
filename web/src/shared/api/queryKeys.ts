@@ -80,6 +80,7 @@ export const ORGANIZATION_PRICING = "organization-pricing"
 // to a tenant, so one key for both would serve a cached operator answer to an
 // admin and invalidate reads neither caller can make.
 export const ORGANIZATION_BUDGETS = "organization-budgets"
+export const ORGANIZATION_SPEND_CEILINGS = "organization-spend-ceilings"
 export const ORGANIZATION_GUARDRAILS = "organization-guardrails"
 // What each guardrail is, apart from where it runs. No mandate field changes
 // when a definition does, so a definition write leaves the mandates alone.

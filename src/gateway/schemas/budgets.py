@@ -549,9 +549,9 @@ class OrganizationBudgetPublic(BaseModel):
     read. What an organization's own spend is, is a question for Usage.
 
     ``ceiling_count`` is the organization-relevant fact instead: how many
-    ceilings name this budget, which is what makes a delete refuse. It counts
-    every one, including a ceiling the deployment operator pointed at this budget
-    from outside the organization, which ``applied_to`` leaves out.
+    ceilings name this budget. It counts every one, including a ceiling the
+    deployment operator pointed at this budget from outside the organization,
+    which ``applied_to`` leaves out and which is what makes a delete refuse.
     """
 
     budget_id: str

@@ -326,22 +326,31 @@ class _OrganizationSurface:
         return OrganizationScopedBudgetPublic.from_model(ceiling, budget, organization_id=organization.id)
 
     async def delete_budget(self, *, user: User, budget_id: str) -> None:
-        """Delete a budget of the organization's, refusing while anything names it.
+        """Delete a budget of the organization's and the ceilings applying it, in one step.
 
-        Ceilings and member policies are counted so the refusal can say which.
+        The entities it applied to stop being capped by it; the dashboard confirms that first.
+        Refused while a workspace member default names it, because that is managed on another page
+        and would re-create ceilings for new members.
         A gateway user's assignment is counted but not named, because the admin cannot act on gateway users,
         and without the count the ORM would null the assignment out silently.
         The budget's reset history goes with it, as it does on the deployment's delete.
+        A ceiling the deployment pointed at this budget from outside the organization refuses the delete,
+        rather than being removed, because uncapping another tenant's scope is not this admin's call.
         """
         organization = await self._get_managed_organization(user)
         budget = await self._require_own_budget(organization=organization, budget_id=budget_id)
-        ceilings = await self._repositories.ceilings.count_for_budget(budget.budget_id)
         defaults = await self._repositories.member_policies.count_for_budget(budget.budget_id)
-        if ceilings or defaults:
-            raise OrganizationBudgetInUseError(budget.budget_id, ceilings=ceilings, defaults=defaults)
+        if defaults:
+            raise OrganizationBudgetInUseError(budget.budget_id, defaults=defaults)
         if await self._repositories.budgets.count_users_for_budget(budget.budget_id):
             raise OrganizationBudgetHeldElsewhereError(budget.budget_id)
+        scopes = await self._scopes.get_scope_ids_in(organization.id)
+        own = await self._repositories.ceilings.count_in_scopes(scopes, budget_id=budget.budget_id)
+        if own != await self._repositories.ceilings.count_for_budget(budget.budget_id):
+            raise OrganizationBudgetHeldElsewhereError(budget.budget_id)
         await self._repositories.budgets.remove_reset_logs(budget.budget_id)
+        # Scoped too, so a foreign ceiling written after the count is left for the foreign key to refuse on.
+        await self._repositories.ceilings.delete_for_budget(budget.budget_id, scopes)
         try:
             await self._repositories.budgets.remove(budget)
         except BudgetStillReferencedError:
@@ -374,12 +383,14 @@ class _OrganizationSurface:
             count=count,
         )
 
-    async def list_ceilings(self, *, user: User, skip: int, limit: int) -> OrganizationScopedBudgetsPublic:
+    async def list_ceilings(
+        self, *, user: User, skip: int, limit: int, budget_id: str | None = None
+    ) -> OrganizationScopedBudgetsPublic:
         organization = await self._get_managed_organization(user)
         limit = min(limit, _MAX_LIST_LIMIT)
         scopes = await self._scopes.get_scope_ids_in(organization.id)
-        count = await self._repositories.ceilings.count_in_scopes(scopes)
-        rows = await self._repositories.ceilings.list_in_scopes(scopes, skip=skip, limit=limit)
+        count = await self._repositories.ceilings.count_in_scopes(scopes, budget_id=budget_id)
+        rows = await self._repositories.ceilings.list_in_scopes(scopes, skip=skip, limit=limit, budget_id=budget_id)
         return OrganizationScopedBudgetsPublic(
             data=[
                 OrganizationScopedBudgetPublic.from_model(ceiling, budget, organization_id=organization.id)

@@ -120,14 +120,15 @@ class BudgetService:
             return await self._organization.list_budgets(user=user, skip=skip, limit=limit)
 
     async def list_organization_ceilings(
-        self, *, user: User, skip: int = 0, limit: int = 100
+        self, *, user: User, skip: int = 0, limit: int = 100, budget_id: str | None = None
     ) -> OrganizationScopedBudgetsPublic:
         """Return a page of the ceilings capping identities inside the caller's organization.
 
         A ceiling on a deployment budget is included, because it caps this organization's spend.
+        ``budget_id`` narrows the page to the ceilings applying that budget.
         """
         async with self._uow:
-            return await self._organization.list_ceilings(user=user, skip=skip, limit=limit)
+            return await self._organization.list_ceilings(user=user, skip=skip, limit=limit, budget_id=budget_id)
 
     async def put_deployment_budget(self, budget_id: str, request: CreateBudgetRequest) -> tuple[BudgetResponse, bool]:
         """Create a deployment budget under an id the caller chose, or replace it; True when created."""

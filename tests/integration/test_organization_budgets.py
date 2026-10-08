@@ -369,6 +369,48 @@ def test_a_ceiling_is_created_listed_relabeled_and_deleted(
     assert client.get(_CEILINGS, headers=master_key_header).json()["count"] == 0
 
 
+def test_the_ceiling_list_narrows_to_one_budget(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """The budget detail page reads only its own budget's ceilings, counted on the server."""
+    whole_org = client.post(_BUDGETS, json=_budget_body(name="Whole org"), headers=master_key_header).json()
+    other = client.post(_BUDGETS, json=_budget_body(name="Other"), headers=master_key_header).json()
+    created = client.post(
+        _CEILINGS,
+        json={
+            "scope_type": "organization",
+            "scope_id": whole_org["organization_id"],
+            "budget_id": whole_org["budget_id"],
+        },
+        headers=master_key_header,
+    )
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+
+    mine = client.get(_CEILINGS, params={"budget_id": whole_org["budget_id"]}, headers=master_key_header).json()
+    none = client.get(_CEILINGS, params={"budget_id": other["budget_id"]}, headers=master_key_header).json()
+    unknown = client.get(_CEILINGS, params={"budget_id": "no-such-budget"}, headers=master_key_header).json()
+
+    assert (mine["count"], [row["id"] for row in mine["data"]]) == (1, [created.json()["id"]])
+    assert (none["count"], none["data"]) == (0, [])
+    assert (unknown["count"], unknown["data"]) == (0, [])
+
+
+def test_deleting_a_budget_another_organization_is_capped_by_answers_409(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The status a refusal reaches the client with, and a message naming no other tenant."""
+    budget = client.post(_BUDGETS, json=_budget_body(), headers=master_key_header).json()
+    created = client.post(
+        f"{API_ROOT}/scoped-budgets",
+        json={"scope_type": "workspace", "scope_id": str(uuid.uuid4()), "budget_id": budget["budget_id"]},
+        headers=master_key_header,
+    )
+    if created.status_code != status.HTTP_200_OK:
+        pytest.skip("the operator route refuses an unknown scope here; the service-level test covers this")
+
+    refused = client.delete(f"{_BUDGETS}/{budget['budget_id']}", headers=master_key_header)
+    assert refused.status_code == status.HTTP_409_CONFLICT, refused.text
+    assert "outside this organization" in refused.json()["detail"]
+
+
 def test_a_second_ceiling_on_one_scope_is_refused(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -496,11 +538,11 @@ def test_an_omitted_provider_narrowing_still_caps_every_provider(
     assert created.json()["provider_key_id"] is None
 
 
-def test_deleting_a_budget_a_ceiling_names_is_refused(
+def test_deleting_a_budget_removes_the_ceilings_applying_it(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """RESTRICT, reported as a 409 saying what to go and change."""
+    """One step: the dashboard confirms what stops being capped, and the delete does the rest."""
     budget = client.post(_BUDGETS, json=_budget_body(), headers=master_key_header).json()
     client.post(
         _CEILINGS,
@@ -512,13 +554,10 @@ def test_deleting_a_budget_a_ceiling_names_is_refused(
         headers=master_key_header,
     )
 
-    refused = client.delete(f"{_BUDGETS}/{budget['budget_id']}", headers=master_key_header)
-    assert refused.status_code == status.HTTP_409_CONFLICT, refused.text
-    assert "1 spend ceiling" in refused.json()["detail"]
-
-    # And the list reports the hold, so the page can say so before trying.
-    listed = client.get(_BUDGETS, headers=master_key_header).json()
-    assert listed["data"][0]["ceiling_count"] == 1
+    deleted = client.delete(f"{_BUDGETS}/{budget['budget_id']}", headers=master_key_header)
+    assert deleted.status_code == status.HTTP_200_OK, deleted.text
+    assert client.get(_CEILINGS, headers=master_key_header).json()["count"] == 0
+    assert client.get(_BUDGETS, headers=master_key_header).json()["count"] == 0
 
 
 def test_the_deployment_budget_list_is_not_this_one(
@@ -1231,6 +1270,25 @@ async def test_a_delete_is_refused_while_a_gateway_user_holds_the_budget(async_d
 
 
 @pytest.mark.asyncio
+async def test_a_refused_delete_leaves_the_ceilings_applying_the_budget(async_db: AsyncSession) -> None:
+    """A refused delete leaves the ceilings applying the budget where they were."""
+    organization = await _organization(async_db, slug="acme-delete-atomic")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+    budget = await service.create_organization_budget(
+        user=owner,
+        request=_create(applied_to=[AppliedEntity(scope_type="organization", scope_id=str(organization.id))]),
+    )
+    async_db.add(ApiUser(user_id="capped-elsewhere", budget_id=budget.budget_id))
+    await async_db.flush()
+
+    with pytest.raises(OrganizationBudgetHeldElsewhereError):
+        await service.delete_organization_budget(user=owner, budget_id=budget.budget_id)
+
+    assert len((await service.list_organization_ceilings(user=owner)).data) == 1
+
+
+@pytest.mark.asyncio
 async def test_a_delete_clears_the_budget_reset_history(async_db: AsyncSession) -> None:
     """A reset record outlives the assignment that produced it, and goes with the budget.
 
@@ -1579,3 +1637,30 @@ def test_the_routes_answer_a_refused_entity_with_its_status(
     unknown = {"scope_type": "workspace", "scope_id": str(uuid.uuid4())}
     refused = client.post(_BUDGETS, json=_budget_body(applied_to=[unknown]), headers=master_key_header)
     assert refused.status_code == status.HTTP_404_NOT_FOUND, refused.text
+
+
+@pytest.mark.asyncio
+async def test_a_delete_is_refused_while_another_organizations_ceiling_names_the_budget(
+    async_db: AsyncSession,
+) -> None:
+    """Deleting would uncap another tenant's scope, which is not this admin's to decide."""
+    organization = await _organization(async_db, slug="acme-delete-foreign")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    other = await _organization(async_db, slug="other-delete-foreign")
+    other_owner = await _member(async_db, other, role="owner", full_name="Other owner")
+    elsewhere = await _workspace(async_db, other, name="Elsewhere", owner=other_owner)
+    service = _service(async_db)
+    budget = await service.create_organization_budget(
+        user=owner,
+        request=_create(applied_to=[AppliedEntity(scope_type="organization", scope_id=str(organization.id))]),
+    )
+    budget_id = budget.budget_id
+    async_db.add(ScopedBudget(scope_type="workspace", scope_id=str(elsewhere.id), budget_id=budget_id))
+    await async_db.commit()
+
+    with pytest.raises(OrganizationBudgetHeldElsewhereError):
+        await service.delete_organization_budget(user=owner, budget_id=budget_id)
+
+    async_db.expire_all()
+    remaining = (await async_db.execute(select(ScopedBudget).where(ScopedBudget.budget_id == budget_id))).scalars()
+    assert len(list(remaining)) == 2

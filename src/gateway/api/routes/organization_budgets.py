@@ -89,7 +89,10 @@ async def delete_organization_budget(
     current_identity: CurrentIdentity,
     budget_id: str,
 ) -> Message:
-    """Delete a budget, refused with 409 while a ceiling or workspace default names it."""
+    """Delete a budget and stop it applying to every entity it applied to, in one step.
+
+    Refused with 409 while a workspace member default names it.
+    """
     await service.delete_organization_budget(user=current_identity, budget_id=budget_id)
     return Message(message="Budget deleted")
 
@@ -100,6 +103,7 @@ async def list_organization_spend_ceilings(
     current_identity: CurrentIdentity,
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
+    budget_id: Annotated[str | None, Query(description="Only the ceilings applying this budget")] = None,
 ) -> OrganizationScopedBudgetsPublic:
     """List the ceilings capping identities inside this organization. Owners and admins only.
 
@@ -107,7 +111,7 @@ async def list_organization_spend_ceilings(
     ``manageable`` false rather than omitted: it is enforcing against this
     organization's spend, so leaving it out would let the page read as uncapped.
     """
-    return await service.list_organization_ceilings(user=current_identity, skip=skip, limit=limit)
+    return await service.list_organization_ceilings(user=current_identity, skip=skip, limit=limit, budget_id=budget_id)
 
 
 @ceilings_router.post("", status_code=status.HTTP_201_CREATED)
