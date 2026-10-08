@@ -204,9 +204,13 @@ Requests must pass every applicable limit.
 Two budget forms exist:
 
 - A per-user budget limits each attached user independently.
-- A scoped budget limits an organization, workspace, membership, or API key and
-  can optionally narrow the limit to one provider, or to one model of a provider.
-  A model-narrowed limit is checked first, and its refusal names the model.
+- A scoped budget, which the dashboard calls an organization budget, is a limit,
+  a reset cycle, and the entities it applies to: the organization, workspaces,
+  organization members, workspace members, API keys, providers, and models. Any
+  entity can be narrowed to one provider, or to one model on a provider; the
+  dashboard offers providers and models as narrowings of the organization. Each
+  entity draws on its own allowance of the limit rather than sharing one pool,
+  and an entity carries at most one budget.
 
 A budget caps up to three things over its period, each set independently and
 each unlimited when left unset: spend in USD (`max_budget`), total tokens
@@ -226,15 +230,33 @@ A budget can also limit each user on it per minute: `rpm_limit` requests and
 hold across replicas, and tokens are counted on what each request used, as
 LiteLLM counts them: a request is admitted while the user's minute is under the
 limit. They apply to a user's own budget on chat completions, messages,
-responses and search, not to a scoped ceiling, and a refusal is a 429 naming the
-rule `budget`.
+responses and search, not to a scoped budget's entities, and a refusal is a 429
+naming the rule `budget`.
 
-A budget resets on a cycle: daily, weekly on chosen weekdays, monthly on a day
-from the 1st to the 28th, or yearly, each at 00:00 UTC; or every N hours or days
-counted from a start date, which keeps its phase however quiet the traffic. A
-budget with no cycle never resets. A key with
-`exclude_from_budget`, or a deployment with `budget_strategy: disabled`,
-bypasses enforcement.
+A budget's reset cycle is one of: never, every N hours, every N days, daily,
+weekly on chosen weekdays, monthly on a day of the month (1 to 28), or yearly on
+a date. Calendar cycles reset at 00:00 UTC; interval cycles count whole steps
+from the budget's anchor, so a quiet entity does not walk its reset forward.
+Changing a cycle moves every entity and user on the budget to the new boundary.
+Spend reads as zero once a period ends, even before the next request rolls the
+counters.
+
+A request is held to every budget covering it: its API key, its workspace, the
+member, the organization, and any provider or model entity matching where it is
+sent. A model entity is checked before the provider's, and its refusal names the
+model. A request that falls over to another model stays held to the budgets
+resolved for the first one. A Playground request is held to its workspace's
+budgets, as [Workspace-scoped spend](#workspace-scoped-spend) describes.
+
+Deleting an API key removes it from every budget applied to it. Deleting an
+organization budget removes it from every entity it applies to in the
+organization. It is refused while a workspace's member default names the budget,
+or while something outside the organization still holds it: another
+organization's entity, or a gateway user assigned to it. What suspending a
+member takes back is under [Invitations](#invitations).
+
+A key with `exclude_from_budget`, or a deployment with
+`budget_strategy: disabled`, bypasses enforcement.
 
 Imported usage is retrospective and never counts toward a budget. Batch cost is
 also settled after submission, so operators should not treat those paths as a

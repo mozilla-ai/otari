@@ -118,9 +118,19 @@ deployment. Budgets is the clearest case: an organization owner or
 admin manages their own organization's budgets, each a limit, a reset cycle and
 the entities it applies to (the organization, workspaces, members, API keys,
 providers and models), while a deployment operator gets the deployment-wide
-budgets and the gateway users assigned to them. Each organization budget has a
-page of its own showing what every entity has spent this cycle, and deleting a
-budget stops it capping everything it applies to.
+budgets and the gateway users assigned to them.
+
+The organization's budgets are one table. Its Usage column is a ring that starts
+full and empties as the budget is used, with the share left beside it; because
+each entity draws on its own allowance, the figure is the entity closest to its
+limit, named underneath when the budget applies to several and some has been
+spent. New Budget and Edit
+open one form holding the limit, the reset cycle and where the budget applies;
+an entity another budget already carries is listed but cannot be picked. A
+budget's name opens its page, with one row per entity and that entity's spend
+this period against the limit. Deleting a budget asks first, naming what stops
+being capped, and can be refused; [Access control](access-control.md#budgets)
+says when.
 
 Providers answers to the organization role rather than to deployment authority.
 Its owners and admins manage the keys, the models each key offers, and the rate
@@ -142,7 +152,7 @@ and never budget-exempt.
 
 Overview splits the same way. Everyone lands on their own spend, traffic and
 recent requests. An organization owner or admin also gets a budget-health
-figure, read from the spend ceilings holding their organization, while a
+figure, read from the budgets applied across their organization, while a
 deployment operator gets provider health and the deployment's own budgets
 instead.
 

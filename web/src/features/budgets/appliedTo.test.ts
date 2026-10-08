@@ -33,20 +33,26 @@ describe("formatAppliedTo", () => {
     expect(label).toBe("Acme (organization)")
   })
 
-  it("names a lone workspace and counts several", () => {
+  it("names every workspace", () => {
     expect(formatAppliedTo([entity({ scope_id: "ws-2" })])).toBe("Research")
     expect(
       formatAppliedTo([
         entity({ scope_id: "ws-1" }),
         entity({ scope_id: "ws-2" }),
       ]),
-    ).toBe("2 workspaces")
+    ).toBe("Platform, Research")
   })
 
-  it("falls back to a count for a workspace the server could not name", () => {
+  it("counts a workspace the server could not name", () => {
     expect(formatAppliedTo([entity({ scope_id: "ws-gone" })])).toBe(
       "1 workspace",
     )
+    expect(
+      formatAppliedTo([
+        entity({ scope_id: "ws-1" }),
+        entity({ scope_id: "ws-gone" }),
+      ]),
+    ).toBe("Platform, 1 other workspace")
   })
 
   it("reads a narrowed ceiling as its provider, not as its scope", () => {
@@ -124,7 +130,7 @@ describe("formatAppliedTo", () => {
     // Three phrases shown, covering four entities; the three behind the two
     // hidden phrases are what the overflow counts.
     expect(label).toBe(
-      "Acme (organization), 2 workspaces, 1 organization member, +3",
+      "Acme (organization), Platform, Research, 1 organization member, +3",
     )
   })
 })
