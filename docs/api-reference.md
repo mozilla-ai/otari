@@ -45,8 +45,12 @@ keys and management APIs are not used.
 | Chat, Messages, and Responses | Yes | No | Yes |
 | Caller-orchestrated MCP | Yes | No | Yes |
 | Other inference APIs | Yes | No | No |
-| `/api/v1/models` | Yes | Yes | No |
+| `/api/v1/models` | Yes | Yes | Yes |
 | Management APIs | Yes | Yes | No |
+
+In hybrid mode, `/api/v1/models` lists the models the platform reports for the
+caller's key, so it needs the platform's model-listing endpoint (see the
+[Hybrid mode protocol](hybrid-mode-protocol.md#model-listing)).
 
 Hosted mode is a control plane. Its inference paths return a descriptive `404`
 and, when configured, the data-plane URL to use instead. See [Modes](modes.md).
