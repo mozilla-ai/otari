@@ -26,6 +26,7 @@ from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from gateway.api.routes._pipeline import (
     _FORWARDED_PARAMS,
+    PROVIDER_ACCOUNT_QUOTA_DETAIL,
     PROVIDER_BAD_REQUEST_DETAIL,
     PROVIDER_BILLING_DETAIL,
     PROVIDER_CREDENTIALS_DETAIL,
@@ -918,6 +919,14 @@ def test_redaction_masks_only_the_arn(raw: str) -> None:
 
 def test_redaction_keeps_a_decimal_number() -> None:
     assert "0.123456789012" in redact_upstream_message("temperature 0.123456789012 is out of range")
+
+
+def test_bedrock_account_quota_is_the_gateways_fault() -> None:
+    exc = _bedrock_error(
+        "ServiceQuotaExceededException", "Your request exceeded the service quota for your account.", 400
+    )
+
+    assert classify_provider_error(exc) == (502, PROVIDER_ACCOUNT_QUOTA_DETAIL)
 
 
 def test_bedrock_access_denied_keeps_a_fixed_detail() -> None:

@@ -367,6 +367,10 @@ PROVIDER_BILLING_DETAIL = (
     "The upstream provider account is out of credit or over its billing limit. "
     "Top up the provider account, or route this model to a provider that has credit."
 )
+PROVIDER_ACCOUNT_QUOTA_DETAIL = (
+    "The upstream provider account is over one of its service quotas. "
+    "Raise the quota, or route this model to another provider."
+)
 PROVIDER_RATE_LIMITED_DETAIL = "The provider rate-limited this request"
 ALL_PROVIDERS_FAILED_DETAIL = "All upstream providers failed"
 ALL_PROVIDERS_TIMED_OUT_DETAIL = "All upstream providers timed out"
@@ -579,10 +583,23 @@ def _carried_message(exc: BaseException) -> str | None:
     """The message the provider put on one exception, without text the SDK adds, or ``None``."""
     message = getattr(exc, "message", None)
     if not isinstance(message, str):
-        response = getattr(exc, "response", None)
-        error = response.get("Error") if isinstance(response, Mapping) else None
-        message = error.get("Message") if isinstance(error, Mapping) else None
+        message = _error_response(exc).get("Message")
     return message if isinstance(message, str) else None
+
+
+def _error_response(exc: BaseException) -> Mapping[str, object]:
+    """The ``Error`` part of an AWS SDK error response, or an empty mapping."""
+    response = getattr(exc, "response", None)
+    error = response.get("Error") if isinstance(response, Mapping) else None
+    return error if isinstance(error, Mapping) else {}
+
+
+def _is_account_quota_error(exc: BaseException) -> bool:
+    """Whether the provider refused because the operator's account is over a service quota."""
+    return any(
+        _error_response(current).get("Code") == "ServiceQuotaExceededException"
+        for current in upstream_exception_chain(exc)
+    )
 
 
 def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
@@ -646,6 +663,9 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     # bad-request detail and the 402 fall-through to a bare 502.
     if is_provider_billing_error(exc):
         return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_BILLING_DETAIL)
+    # An account quota is the operator's limit, like billing, even where the provider answers 400.
+    if _is_account_quota_error(exc):
+        return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_ACCOUNT_QUOTA_DETAIL)
     if status_code in (400, 422):
         return ProviderErrorMapping(
             status.HTTP_400_BAD_REQUEST, _upstream_message_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
