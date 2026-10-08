@@ -18,6 +18,7 @@ import yaml
 
 from otari_agent.domain.evaluators import tokenize_phrase
 from otari_agent.domain.types import (
+    GATE_TYPES,
     PATH_EVIDENCE_SOURCES,
     CommandGate,
     CommandIfChangedGate,
@@ -28,6 +29,7 @@ from otari_agent.domain.types import (
     PolicySpec,
     RunsAt,
     VerifierGate,
+    WarningCode,
 )
 
 # A policy body is a developer-edited text file, not a data export; this bounds
@@ -72,7 +74,7 @@ _LEGAL_RUNS_BY_GATE_TYPE = {
     "judge": ("stop.session",),
     "verifier": ("stop.verifier",),
 }
-_SUPPORTED_GATE_TYPES = {"path", "command", "command_if_changed", "judge", "verifier"}
+_SUPPORTED_GATE_TYPES = frozenset(GATE_TYPES)
 _SUPPORTED_ENFORCEMENTS = {"required", "advisory"}
 
 # A model's verdict is not reproducible the way a glob or phrase match is, so
@@ -101,7 +103,7 @@ _MAX_DOUBLE_STAR_PER_GLOB = 1
 
 _TOP_LEVEL_FIELDS = {"schema_version", "policy", "gates"}
 _POLICY_FIELDS = {"id", "description"}
-_COMMON_GATE_FIELDS = {"id", "type", "enforcement", "message", "runs"}
+_COMMON_GATE_FIELDS = {"accept_warnings", "enforcement", "id", "message", "runs", "type"}
 # Each gate type accepts only the common fields plus its own: a
 # path gate submitting when_changed, or a command_if_changed gate
 # submitting forbidden, is an unknown-field error like any other, not a
@@ -298,6 +300,36 @@ def _parse_priority(gate_id: str, raw: dict[str, Any]) -> int:
     return value
 
 
+def _parse_accept_warnings(gate_id: str, gate_type: str, raw: dict[str, Any]) -> tuple[WarningCode, ...]:
+    """Validate the optional ``accept_warnings`` as warning codes this gate's own type can draw."""
+    if "accept_warnings" not in raw:
+        return ()
+    value = raw["accept_warnings"]
+    if not isinstance(value, list) or not value or not all(isinstance(item, str) for item in value):
+        raise PolicyError(f"Gate {gate_id!r}: 'accept_warnings' must be a non-empty list of warning codes.")
+    codes: list[WarningCode] = []
+    for item in dict.fromkeys(value):
+        try:
+            code = WarningCode(item)
+        except ValueError:
+            raise PolicyError(
+                f"Gate {gate_id!r}: {item!r} is not a warning code. "
+                f"A {gate_type!r} gate can draw: {_drawn_codes(gate_type)}."
+            ) from None
+        if gate_type not in code.gate_types:
+            raise PolicyError(
+                f"Gate {gate_id!r} (type {gate_type!r}) cannot draw the warning {item!r}. "
+                f"This type can draw: {_drawn_codes(gate_type)}."
+            )
+        codes.append(code)
+    return tuple(codes)
+
+
+def _drawn_codes(gate_type: str) -> str:
+    """List the warning codes a gate of this type can draw, for an error message."""
+    return ", ".join(sorted(code.value for code in WarningCode if gate_type in code.gate_types))
+
+
 def _parse_runs(gate_id: str, gate_type: str, raw: dict[str, Any]) -> list[str]:
     """Validate ``runs`` as the moments this gate's own type can actually run at.
 
@@ -381,6 +413,7 @@ def _parse_gate(raw: Any) -> GateSpec:
     # Parsed once here rather than per branch: every gate type carries it, and
     # the legal set is keyed on the already-validated gate_type.
     runs = tuple(cast(list[RunsAt], _parse_runs(gate_id, gate_type, raw)))
+    accept_warnings = _parse_accept_warnings(gate_id, gate_type, raw)
 
     if gate_type == "path":
         forbidden = _parse_glob_list(gate_id, "forbidden", _require_string_list(raw, "forbidden", gate_id, gate_type))
@@ -390,6 +423,7 @@ def _parse_gate(raw: Any) -> GateSpec:
             enforcement=enforcement_value,
             forbidden=tuple(forbidden),
             message=message,
+            accept_warnings=accept_warnings,
         )
 
     if gate_type == "command":
@@ -400,6 +434,7 @@ def _parse_gate(raw: Any) -> GateSpec:
             enforcement=enforcement_value,
             forbidden=tuple(forbidden),
             message=message,
+            accept_warnings=accept_warnings,
         )
 
     if gate_type == "command_if_changed":
@@ -418,6 +453,7 @@ def _parse_gate(raw: Any) -> GateSpec:
             when_changed=tuple(when_changed),
             require=tuple(require),
             message=message,
+            accept_warnings=accept_warnings,
         )
 
     if gate_type == "verifier":
@@ -446,6 +482,7 @@ def _parse_gate(raw: Any) -> GateSpec:
             when_changed=tuple(check_when_changed),
             priority=_parse_priority(gate_id, raw),
             message=message,
+            accept_warnings=accept_warnings,
         )
 
     # judge: the only gate type _SUPPORTED_GATE_TYPES admits left once every
@@ -504,6 +541,7 @@ def _parse_gate(raw: Any) -> GateSpec:
         judge_cli=judge_cli,
         priority=_parse_priority(gate_id, raw),
         message=message,
+        accept_warnings=accept_warnings,
     )
 
 

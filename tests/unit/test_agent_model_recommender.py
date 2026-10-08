@@ -1,18 +1,21 @@
 """Unit tests for the pure halves of the agent model recommender.
 
-The question it builds for the decision model, and how it reads the answer.
-The call in between is the decisions scaffold's, covered by the route tests.
+The question the core builds for the decision model, and how it reads the
+answer into the port's terms. The call in between is the adapter's, covered
+by ``test_agent_model_recommender_adapter.py``.
 """
+
+from decimal import Decimal
 
 import pytest
 
 from gateway.core.config import DEFAULT_AGENT_MODEL_CANDIDATES, validate_agent_recommender
+from gateway.exceptions.routing_exceptions import UnreadableRecommendationError
+from gateway.ports.agent_model_recommender_port import RecommendationUsage, SubagentSpawn
 from gateway.schemas.inference import DecisionResponse
-from gateway.schemas.routing import AgentModelRecommendationRequest
 from gateway.services.routing.recommend import (
     MAX_TASK_CHARS,
     RECOMMENDATION_QUESTION,
-    UnreadableRecommendationError,
     build_decision_request,
     recommendation_from_decision,
 )
@@ -20,7 +23,7 @@ from gateway.services.routing.recommend import (
 CANDIDATES = {"haiku": "small work", "sonnet": "medium work", "opus": "hard work"}
 
 
-def _request(**overrides: object) -> AgentModelRecommendationRequest:
+def _spawn(**overrides: object) -> SubagentSpawn:
     fields: dict[str, object] = {
         "harness": "claude-code",
         "session_id": "s1",
@@ -29,9 +32,10 @@ def _request(**overrides: object) -> AgentModelRecommendationRequest:
         "description": "List files",
         "prompt": "List the files under src/ and say what each module does.",
         "parent_model": "claude-opus-5",
+        "requested_model": None,
     }
     fields.update(overrides)
-    return AgentModelRecommendationRequest.model_validate(fields)
+    return SubagentSpawn(**fields)  # type: ignore[arg-type]
 
 
 def _answer(**fields: object) -> DecisionResponse:
@@ -41,9 +45,10 @@ def _answer(**fields: object) -> DecisionResponse:
 
 
 def test_builds_one_choice_question_over_the_candidates() -> None:
-    decision = build_decision_request(_request(), decision_model="typesafe:jev-latest", candidates=CANDIDATES)
+    decision = build_decision_request(_spawn(), decision_model="typesafe:jev-latest", candidates=CANDIDATES)
 
     assert decision.model == "typesafe:jev-latest"
+    assert decision.user is None
     assert list(decision.questions) == [RECOMMENDATION_QUESTION]
     question = decision.questions[RECOMMENDATION_QUESTION]
     assert question.type == "choice"
@@ -55,27 +60,18 @@ def test_builds_one_choice_question_over_the_candidates() -> None:
     assert "List the files under src/" in decision.state
 
 
-def test_the_callers_model_request_stays_out_of_the_state() -> None:
+def test_the_harnesss_model_request_stays_out_of_the_state() -> None:
     decision = build_decision_request(
-        _request(requested_model="requested-xyz"), decision_model="typesafe:jev-latest", candidates=CANDIDATES
+        _spawn(requested_model="requested-xyz"), decision_model="typesafe:jev-latest", candidates=CANDIDATES
     )
 
     assert "requested-xyz" not in str(decision.state)
 
 
-def test_the_user_rides_along_for_billing_only() -> None:
-    decision = build_decision_request(
-        _request(user="alice"), decision_model="typesafe:jev-latest", candidates=CANDIDATES
-    )
-
-    assert decision.user == "alice"
-    assert "alice" not in str(decision.state)
-
-
 def test_a_long_task_is_shortened_and_says_so() -> None:
     prompt = "x" * (MAX_TASK_CHARS + 500)
 
-    decision = build_decision_request(_request(prompt=prompt), decision_model="m", candidates=CANDIDATES)
+    decision = build_decision_request(_spawn(prompt=prompt), decision_model="m", candidates=CANDIDATES)
 
     state = str(decision.state)
     assert "x" * MAX_TASK_CHARS in state
@@ -99,6 +95,26 @@ def test_a_choice_without_probabilities_still_recommends() -> None:
     assert recommendation.model == "haiku"
     assert recommendation.reason == "jev-1.13.0 chose haiku"
     assert recommendation.probabilities is None
+
+
+def test_an_answer_without_usage_consumed_nothing_it_can_name() -> None:
+    recommendation = recommendation_from_decision(_answer(choice="haiku"), candidates=CANDIDATES)
+
+    assert recommendation.usage == RecommendationUsage()
+
+
+def test_what_the_answer_consumed_and_the_upstreams_own_charge_come_along() -> None:
+    response = DecisionResponse.model_validate(
+        {
+            "model": "jev-1.13.0",
+            "answers": {RECOMMENDATION_QUESTION: {"type": "choice", "choice": "opus"}},
+            "usage": {"input_tokens": 800, "output_tokens": 3, "cost": 0.0042},
+        }
+    )
+
+    recommendation = recommendation_from_decision(response, candidates=CANDIDATES)
+
+    assert recommendation.usage == RecommendationUsage(input_tokens=800, output_tokens=3, charge=Decimal("0.0042"))
 
 
 def test_an_answer_without_a_choice_is_unreadable() -> None:

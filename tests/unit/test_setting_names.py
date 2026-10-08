@@ -97,6 +97,7 @@ _SETTING_NAMES = frozenset(
         "oauth_google_client_id",
         "oauth_google_client_secret",
         "open_signup",
+        "passkeys_enabled",
         "password_reset_expiry_hours",
         "platform",
         "port",

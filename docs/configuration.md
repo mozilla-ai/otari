@@ -479,6 +479,8 @@ agent_recommender_candidates:
   opus: Hard reasoning, ambiguous goals, large or security-sensitive changes.
 ```
 
+These are a standalone deployment's settings. On otari.ai a managed
+recommender answers behind the same route, so neither applies there.
 `agent_recommender_model` is a `decision_providers` selector, resolved per
 request, so a deployment that never asks need not configure the provider.
 `agent_recommender_candidates` maps each model name, as the asking harness

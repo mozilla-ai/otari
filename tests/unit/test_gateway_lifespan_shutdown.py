@@ -35,7 +35,6 @@ from gateway.main import (
     _REFRESHER_STOP_TIMEOUT_SECONDS,
     _create_lifespan,
     _start_lifespan_workers,
-    _stop_refresher,
     _stop_refreshers,
 )
 
@@ -70,7 +69,7 @@ async def test_stop_refresher_returns_when_the_task_absorbs_its_cancellation() -
     await asyncio.sleep(0)  # let it reach its first await
 
     started = asyncio.get_running_loop().time()
-    await asyncio.wait_for(_stop_refresher(task, "test"), timeout=_REFRESHER_STOP_TIMEOUT_SECONDS + 2)
+    await asyncio.wait_for(_stop_refreshers([(task, "test")]), timeout=_REFRESHER_STOP_TIMEOUT_SECONDS + 2)
     elapsed = asyncio.get_running_loop().time() - started
 
     # It waited out the grace period rather than returning instantly, and it
@@ -117,7 +116,7 @@ async def test_stop_refresher_is_prompt_for_a_well_behaved_refresher() -> None:
     await asyncio.sleep(0)
 
     started = asyncio.get_running_loop().time()
-    await _stop_refresher(task, "test")
+    await _stop_refreshers([(task, "test")])
 
     assert asyncio.get_running_loop().time() - started < 1.0
     assert task.cancelled()
@@ -137,7 +136,7 @@ async def test_stop_refresher_logs_an_unexpected_error_instead_of_raising() -> N
     task = asyncio.create_task(explodes())
     await asyncio.sleep(0)
 
-    await _stop_refresher(task, "test")  # must not raise
+    await _stop_refreshers([(task, "test")])  # must not raise
 
     assert task.done()
 

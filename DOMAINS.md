@@ -141,7 +141,16 @@ It also owns `services/tenancy/organization_model_access.py`.
 
 ### routing
 
-Routing policies, their compiled plans and the router backends.
+Routing policies, their compiled plans and the router backends, and which
+model a coding agent's subagent should start on.
+
+It owns `ports/agent_model_recommender_port.py` and its adapter in
+`adapters/`, and `exceptions/routing_exceptions.py`. The port names who
+answers a subagent model recommendation and at what price. The core asks the
+decision model the deployment configured, which may be a local one, and a
+hosted build binds a recommender of its own, so the composition root binds
+the implementation and no caller reads a mode. Neither implementation meters
+the call; the decisions scaffold does.
 
 ### files
 

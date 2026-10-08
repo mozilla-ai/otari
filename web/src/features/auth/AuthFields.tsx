@@ -1,4 +1,7 @@
 import { Description, FieldError, Input, Label, TextField } from "@heroui/react"
+import { useState } from "react"
+import { FiEye, FiEyeOff } from "react-icons/fi"
+import { Button } from "@/design-system/actions/Button"
 import { FieldMessages } from "@/design-system/forms/FieldMessages"
 
 /**
@@ -17,6 +20,7 @@ export function AuthEmailField({
   onChange,
   description,
   isReadOnly = false,
+  autoFocus = false,
 }: {
   label?: string
   value: string
@@ -29,6 +33,12 @@ export function AuthEmailField({
    * credential it is being set beside against a username.
    */
   isReadOnly?: boolean
+  /**
+   * Only for a field that mounts because the visitor asked for it (a folded
+   * form they just opened). Never on a page load: that raises the soft keyboard
+   * over the page before anyone has asked to type.
+   */
+  autoFocus?: boolean
 }) {
   return (
     <TextField
@@ -57,6 +67,7 @@ export function AuthEmailField({
       <Input
         placeholder="you@example.com"
         autoComplete="username"
+        autoFocus={autoFocus}
         className="read-only:bg-surface-alt read-only:text-muted"
       />
       {description ? (
@@ -78,12 +89,19 @@ export function AuthPasswordField({
   autoComplete,
   description,
   errorMessage,
+  canReveal = false,
 }: {
   label: string
   value: string
   onChange: (next: string) => void
   autoComplete: "current-password" | "new-password"
   description?: string
+  /**
+   * Adds a toggle that shows what was typed. For a field whose value is chosen
+   * rather than recalled, where a mistyped password is the likelier error and
+   * there is no second field to catch it.
+   */
+  canReveal?: boolean
   /**
    * Why the password cannot be used yet, taking the description's line rather
    * than one of its own. The card these forms sit in is what the animated
@@ -93,17 +111,55 @@ export function AuthPasswordField({
    */
   errorMessage?: string
 }) {
+  const [isRevealed, setIsRevealed] = useState(false)
+  const input = (
+    <Input
+      autoComplete={autoComplete}
+      className={canReveal ? "w-full pr-10" : undefined}
+    />
+  )
   return (
     <TextField
       value={value}
       onChange={onChange}
-      type="password"
+      type={canReveal && isRevealed ? "text" : "password"}
       isRequired
       isInvalid={Boolean(errorMessage)}
       className="flex flex-col gap-1"
     >
       <Label className="text-body">{label}</Label>
-      <Input autoComplete={autoComplete} />
+      {canReveal ? (
+        <div className="relative">
+          {input}
+          {/* Centered on the field and inset 2px from its edge, so the glyph
+              reads as inside the input. 32px to the eye at every width; the
+              44px touch floor is the pseudo-element bleed, 7px from the padding
+              box (the button's 1px transparent border takes one of them, so
+              6px past its edge), which a 36px field can hold without the
+              target overlapping anything. The `!` is the
+              exception to the phone-width floor on `[data-slot="button"]`
+              (globals.css), which would otherwise make the visible button 44
+              and the bleed 56, into the label above. */}
+          <Button
+            type="button"
+            variant="ghost"
+            isIconOnly
+            size="sm"
+            aria-label={isRevealed ? "Hide password" : "Show password"}
+            aria-pressed={isRevealed}
+            onPress={() => setIsRevealed((shown) => !shown)}
+            className="absolute inset-y-0 right-0.5 my-auto size-8 min-h-8! min-w-8! text-muted before:absolute before:-inset-[7px]"
+          >
+            {isRevealed ? (
+              <FiEyeOff aria-hidden className="size-4" />
+            ) : (
+              <FiEye aria-hidden className="size-4" />
+            )}
+          </Button>
+        </div>
+      ) : (
+        input
+      )}
       {description || errorMessage ? (
         <FieldMessages>
           {/* `FieldError` renders through the field's error slot, so the

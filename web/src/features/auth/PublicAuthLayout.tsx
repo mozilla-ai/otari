@@ -9,6 +9,7 @@ export function PublicAuthLayout({
   description,
   children,
   footer,
+  isBusy = false,
 }: {
   title: string
   /** Optional subhead under the title. */
@@ -16,9 +17,11 @@ export function PublicAuthLayout({
   children: ReactNode
   /** Links below the divider: where to go next when this page is a dead end. */
   footer?: ReactNode
+  /** Whether a request of the page's own is in flight, for the header slot. */
+  isBusy?: boolean
 }) {
   return (
-    <LoginPageShell>
+    <LoginPageShell isBusy={isBusy}>
       <div className="flex flex-col gap-1.5 text-center">
         <h1 className="text-display">{title}</h1>
         {description ? (
@@ -57,14 +60,25 @@ export function PublicAuthLayout({
 export function PublicAuthLink({
   to,
   children,
+  isInline = false,
 }: {
   to: string
   children: ReactNode
+  /**
+   * For a link that shares a row with a label, where a 44px box would make the
+   * row 44 tall. The row keeps the line's own 20px and the target is a bleed of
+   * 16px above and 8px below, which stays clear of the field under it.
+   */
+  isInline?: boolean
 }) {
   return (
     <Link
       href={to}
-      className="inline-flex min-h-11 items-center text-sm font-medium text-link hover:text-link-hover"
+      className={`inline-flex items-center text-sm font-medium text-link hover:text-link-hover ${
+        isInline
+          ? "relative before:absolute before:inset-x-0 before:-top-4 before:-bottom-2"
+          : "min-h-11"
+      }`}
     >
       {children}
     </Link>

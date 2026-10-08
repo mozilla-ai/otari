@@ -77,10 +77,17 @@ in usage like a `POST /api/v1/decisions` call; nothing else is dispatched, and
 the harness acts on the answer with its own provider credentials. Like
 decisions, the route is standalone only: a hybrid gateway does not serve it.
 
-This needs a [decision provider](configuration.md#decision-providers) the
+Who answers depends on the build. A standalone deployment asks the decision
+model `agent_recommender_model` names, which may be a local one, and the call
+costs what that provider charges. On otari.ai a managed recommender answers
+behind the same route, which you never configure, at the price of one
+recommendation.
+
+A standalone deployment needs a
+[decision provider](configuration.md#decision-providers) the
 `agent_recommender_model` selector resolves to, `typesafe` with an API key by
-default. Without one, the route answers 400 and a mod falls back to the model
-the subagent would have had anyway.
+default. Without one, the route answers 400 and the plugin falls back to the
+model the subagent would have had anyway.
 
 ```bash
 curl "$OTARI_URL/api/v1/routing/recommend" \

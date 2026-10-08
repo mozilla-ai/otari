@@ -6,10 +6,10 @@ import { useTheme } from "@/shared/hooks/useTheme"
 import { withTheme } from "./theme"
 
 function ThemeConsumer() {
-  const { preference, resolved, setPreference } = useTheme()
+  const { resolved, setPreference } = useTheme()
   return (
     <button type="button" onClick={() => setPreference("light")}>
-      {preference}: {resolved}
+      {resolved}
     </button>
   )
 }
@@ -37,10 +37,10 @@ afterEach(() => {
 it("provides theme context and follows toolbar changes over a stored preference", async () => {
   localStorage.setItem("otari.dashboard.theme", "dark")
   const { rerender } = render(<Catalog theme="light" />)
-  expect(await screen.findByRole("button", { name: "light: light" })).toBeVisible()
+  expect(await screen.findByRole("button", { name: "light" })).toBeVisible()
 
   rerender(<Catalog theme="dark" />)
-  expect(await screen.findByRole("button", { name: "dark: dark" })).toBeVisible()
+  expect(await screen.findByRole("button", { name: "dark" })).toBeVisible()
   await waitFor(() => {
     expect(document.documentElement).toHaveAttribute("data-theme", "dark")
     expect(document.documentElement).toHaveClass("dark")
@@ -48,7 +48,7 @@ it("provides theme context and follows toolbar changes over a stored preference"
   })
 
   await userEvent.setup().click(screen.getByRole("button"))
-  expect(await screen.findByRole("button", { name: "light: light" })).toBeVisible()
+  expect(await screen.findByRole("button", { name: "light" })).toBeVisible()
   await waitFor(() => {
     expect(document.documentElement).toHaveAttribute("data-theme", "light")
     expect(document.documentElement).not.toHaveClass("dark")

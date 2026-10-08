@@ -1,7 +1,7 @@
 """The cost-math core: exact arithmetic, both cached-token conventions, one rounding.
 
-``tests/unit/test_compute_cost.py`` pins the request path's behavior through
-``_compute_cost``. This file tests the core underneath it directly, where the
+``tests/unit/test_compute_cost.py`` pins the request path's total, calling
+``calculate_metered_cost`` with a usage object. This file tests the core underneath it directly, where the
 cached-token convention is an argument rather than a property of a usage
 carrier, and where the guards against a corrupt rate live.
 """

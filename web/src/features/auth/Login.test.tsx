@@ -85,14 +85,14 @@ vi.mock("@/features/auth/overlayPublicAuthFields", () => ({
 }))
 
 describe("Login", () => {
-  it("renders the edition's own fields ahead of the credential, idle until a request is out", () => {
+  it("leaves the edition's region choice to the page's header, not the card", () => {
     render(
       <Mounted signInMethods={["password"]}>
         <Login />
       </Mounted>,
     )
 
-    expect(screen.getByText("fields for login, idle")).toBeInTheDocument()
+    expect(screen.queryByText(/fields for login/)).toBeNull()
   })
 
   afterEach(() => {
@@ -1077,7 +1077,12 @@ describe("Login with a passkey", () => {
         <Harness />
       </Mounted>,
     )
-    await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+    // The row that opens the form is disabled while a ceremony is open, so the
+    // form is opened first and the ceremony started with it in view.
+    await user.click(screen.getByRole("button", { name: "Sign in with email" }))
+    await user.click(
+      screen.getByRole("button", { name: "Sign in with a passkey" }),
+    )
     await waitFor(() => expect(get).toHaveBeenCalled())
 
     // The ceremony is open. Fill the form and submit it anyway.
@@ -1103,7 +1108,7 @@ describe("Login with a passkey", () => {
       </Mounted>,
     )
     expect(
-      screen.queryByRole("button", { name: "Use a passkey" }),
+      screen.queryByRole("button", { name: "Sign in with a passkey" }),
     ).not.toBeInTheDocument()
   })
 
@@ -1116,7 +1121,7 @@ describe("Login with a passkey", () => {
     )
     // Published by the gateway, but the button would be a dead end here.
     expect(
-      screen.queryByRole("button", { name: "Use a passkey" }),
+      screen.queryByRole("button", { name: "Sign in with a passkey" }),
     ).not.toBeInTheDocument()
     // The form it sits beside is unaffected.
     expect(screen.getByLabelText("Email")).toBeInTheDocument()
@@ -1139,9 +1144,14 @@ describe("Login with a passkey", () => {
       </Mounted>,
     )
 
-    // Additive: the passkey never replaces the credential form.
-    expect(screen.getByLabelText("Email")).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+    // Additive: the passkey never replaces the credential form, which is one
+    // row away rather than gone.
+    expect(
+      screen.getByRole("button", { name: "Sign in with email" }),
+    ).toBeInTheDocument()
+    await user.click(
+      screen.getByRole("button", { name: "Sign in with a passkey" }),
+    )
 
     expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
     expect(get).toHaveBeenCalled()
@@ -1159,7 +1169,9 @@ describe("Login with a passkey", () => {
       </Mounted>,
     )
 
-    await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+    await user.click(
+      screen.getByRole("button", { name: "Sign in with a passkey" }),
+    )
 
     expect(
       await screen.findByText("That passkey did not sign you in"),
@@ -1180,14 +1192,16 @@ describe("Login with a passkey", () => {
       </Mounted>,
     )
 
-    await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+    await user.click(
+      screen.getByRole("button", { name: "Sign in with a passkey" }),
+    )
 
     await waitFor(() => expect(get).toHaveBeenCalled())
     // Pressing Escape is a decision, not a refused credential, so the screen
     // returns to its resting state with nothing said.
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "Use a passkey" }),
+        screen.getByRole("button", { name: "Sign in with a passkey" }),
       ).toBeInTheDocument(),
     )
     expect(screen.queryByText(/did not sign you in/)).not.toBeInTheDocument()
@@ -1212,7 +1226,9 @@ describe("Login with a passkey", () => {
           <Harness />
         </Mounted>,
       )
-      await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+      await user.click(
+        screen.getByRole("button", { name: "Sign in with a passkey" }),
+      )
 
       expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
       expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
@@ -1233,7 +1249,9 @@ describe("Login with a passkey", () => {
           <Harness />
         </Mounted>,
       )
-      await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+      await user.click(
+        screen.getByRole("button", { name: "Sign in with a passkey" }),
+      )
 
       await waitFor(() =>
         expect(recordEvent).toHaveBeenCalledWith(
@@ -1261,7 +1279,9 @@ describe("Login with a passkey", () => {
           <Harness />
         </Mounted>,
       )
-      await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+      await user.click(
+        screen.getByRole("button", { name: "Sign in with a passkey" }),
+      )
 
       await waitFor(() =>
         expect(recordEvent).toHaveBeenCalledWith(
@@ -1331,7 +1351,9 @@ describe("Login with a passkey", () => {
         </Mounted>,
       )
       expect(
-        screen.getAllByRole("button", { name: /Sign in with/ }),
+        screen.getAllByRole("button", {
+          name: /^Sign in with (Google|GitHub|acme-oidc)$/,
+        }),
       ).toHaveLength(1)
     })
 
@@ -1402,6 +1424,9 @@ describe("Login with a passkey", () => {
         </Mounted>,
       )
       await user.click(
+        screen.getByRole("button", { name: "Sign in with email" }),
+      )
+      await user.click(
         screen.getByRole("button", { name: "Sign in with Google" }),
       )
       await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
@@ -1455,5 +1480,122 @@ describe("Login with a passkey", () => {
         ),
       )
     })
+  })
+})
+
+describe("Login, provider first", () => {
+  it("folds the typed credential behind a row while a provider is offered", () => {
+    render(
+      <Mounted signInMethods={["password"]} oauthProviders={["google"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.getByRole("button", { name: "Sign in with Google" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Sign in with email" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByLabelText("Email")).toBeNull()
+  })
+
+  it("opens it in place, focuses the address, and keeps the provider", async () => {
+    const user = userEvent.setup()
+    render(
+      <Mounted signInMethods={["password"]} oauthProviders={["google"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    await user.click(screen.getByRole("button", { name: "Sign in with email" }))
+
+    expect(screen.getByLabelText("Email")).toHaveFocus()
+    expect(
+      screen.queryByRole("button", { name: "Sign in with email" }),
+    ).toBeNull()
+    // Stacked, with the full label, as the card draws it: unlike sign-up, the
+    // sign-in card does not shrink its provider rows when the form opens.
+    expect(
+      screen.getByRole("button", { name: "Sign in with Google" }),
+    ).toHaveTextContent(/^Sign in with Google$/)
+  })
+
+  it("shows the form straight away, unfocused, when there is no other way in", () => {
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(screen.getByLabelText("Email")).toBeInTheDocument()
+    expect(screen.getByLabelText("Email")).not.toHaveFocus()
+    expect(
+      screen.queryByRole("button", { name: "Sign in with email" }),
+    ).toBeNull()
+  })
+
+  it("names the folded row for the credential it opens", () => {
+    render(
+      <Mounted signInMethods={["master_key"]} oauthProviders={["github"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.getByRole("button", { name: "Sign in with master key" }),
+    ).toBeInTheDocument()
+  })
+
+  it("says a provider could not start under the provider rows, not beside a field", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ detail: "Google sign-in is not configured." }, 503),
+    )
+    const user = userEvent.setup()
+    render(
+      <Mounted signInMethods={["password"]} oauthProviders={["google"]}>
+        <Harness />
+      </Mounted>,
+    )
+    await user.click(screen.getByRole("button", { name: "Sign in with email" }))
+
+    await user.click(
+      screen.getByRole("button", { name: "Sign in with Google" }),
+    )
+
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent("Google sign-in is not configured.")
+    // Not attached to the password field, which did nothing wrong.
+    expect(screen.getByLabelText("Password")).not.toHaveAttribute(
+      "aria-invalid",
+      "true",
+    )
+    const rows = screen.getByRole("button", { name: "Sign in with Google" })
+    expect(
+      rows.compareDocumentPosition(alert) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it("keeps the provider's fill while it redirects, and blocks a second press", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      () => new Promise<Response>(() => {}),
+    )
+    const user = userEvent.setup()
+    render(
+      <Mounted signInMethods={["password"]} oauthProviders={["google"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    await user.click(
+      screen.getByRole("button", { name: "Sign in with Google" }),
+    )
+
+    const pressed = await screen.findByRole("button", { name: "Redirecting…" })
+    // `isDisabled` would land on the product's refused treatment; a redirect in
+    // flight is working, so the press is blocked by hand and the group says so.
+    expect(pressed).not.toBeDisabled()
+    expect(pressed).toHaveClass("pointer-events-none")
+    expect(pressed.parentElement).toHaveAttribute("aria-busy", "true")
   })
 })

@@ -17,7 +17,7 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
  * connected sign-in providers (otari#651) are still to come.
  */
 export function AccountPage() {
-  const { session_type } = useDeployment()
+  const { session_type, passkeys_enabled } = useDeployment()
 
   return (
     <div className="flex flex-col">
@@ -30,7 +30,10 @@ export function AccountPage() {
         <>
           <ProfileCard />
           <PasswordCard />
-          <PasskeysCard />
+          {/* Absent where the deployment turned passkeys off: the card would
+              ask routes that are not there. A deployment that merely has not
+              set them up still shows it, saying so. */}
+          {passkeys_enabled ? <PasskeysCard /> : null}
         </>
       ) : (
         // A hosted session is minted by otari.ai and its credential is managed

@@ -22,3 +22,4 @@ gates:
       services/tenancy/ fails. This is layer and import rule 5 in ARCHITECTURE.md, "The
       modular monolith". The architecture check covers the packages named for a domain.
       Pass if the diff adds no such import.
+    accept_warnings: [judge-gate-cap]

@@ -155,7 +155,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
-from gateway.models.pricing import ModelPricing, PriceSource
+from gateway.models.pricing import PriceSource
 from gateway.models.tools import CodeExecutor, ResolvedCodeExecutionPolicy, WebSearchCredential
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH, UsageLog
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort, CodeExecutionPolicyScope
@@ -3307,12 +3307,6 @@ async def _require_tool_pricing(
 # ---------------------------------------------------------------------------
 # Usage logging and reservation settlement
 # ---------------------------------------------------------------------------
-
-
-def _compute_cost(pricing: ModelPricing, usage_data: CompletionUsage) -> Decimal:
-    """Compute standalone cost through the threshold-aware meter calculator."""
-    cost, _, _ = calculate_metered_cost(pricing, usage_data)
-    return cost
 
 
 def _elapsed_ms(started_at: float | None) -> int | None:

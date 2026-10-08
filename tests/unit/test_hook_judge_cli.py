@@ -400,7 +400,9 @@ def test_judge_gates_run_concurrently_not_sequentially(monkeypatch: pytest.Monke
     monkeypatch.setattr(hook_cli, "_hook_run_judge", fake_run_judge)
 
     results = hook_cli._hook_collect_judge_verdicts(
-        parse_policy(gates_yaml, source="test.yml"), hook_cli._JudgedChange(repo, []), hook_cli._JudgeSettings()
+        parse_policy(gates_yaml, source="test.yml"),
+        hook_cli._JudgedChange(repo, []),
+        hook_cli._JudgeSettings(max_gates=hook_cli._HOOK_JUDGE_DEFAULT_MAX_GATES),
     )
 
     assert [result.gate_id for result in results] == [f"g{i}" for i in range(gate_count)]

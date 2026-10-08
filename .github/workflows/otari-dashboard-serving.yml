@@ -22,6 +22,8 @@ on:
     paths:
       - 'src/gateway/**'
       - 'cli/**'
+      - 'any-search/**'
+      - 'any-fetch/**'
       - 'tests/unit/**'
       # The bundle these tests are served, and the guide bundled into it.
       - 'web/**'
@@ -34,6 +36,8 @@ on:
     paths:
       - 'src/gateway/**'
       - 'cli/**'
+      - 'any-search/**'
+      - 'any-fetch/**'
       - 'tests/unit/**'
       - 'web/**'
       - 'docs/dashboard.md'

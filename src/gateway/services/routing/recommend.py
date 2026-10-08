@@ -1,4 +1,4 @@
-"""Recommending which model a coding agent's subagent should run on.
+"""Recommending which model a coding agent's subagent should run on, by asking a decision model.
 
 A subagent starts with a prompt cache of its own, so the moment it is spawned is
 the one place a cheaper model costs nothing in cache misses: switching the model
@@ -9,15 +9,16 @@ subagent on the answer.
 The recommendation is one choice question to a decision model such as
 TypeSafe's Jev. The state is what the harness knows at spawn time, the options
 are the candidate models with what each is for, and the option the model picks
-is the recommendation. This module builds that question and reads the answer;
-the call itself runs through the decisions scaffold, which bills it to the
-caller like any other decision.
+is the recommendation. This module builds that question and reads the answer
+into the recommender port's own terms; the call in between is the adapter's.
 """
 
 from collections.abc import Mapping
 
+from gateway.exceptions.routing_exceptions import UnreadableRecommendationError
+from gateway.ports.agent_model_recommender_port import ModelRecommendation, RecommendationUsage, SubagentSpawn
 from gateway.schemas.inference import ChoiceQuestion, DecisionRequest, DecisionResponse
-from gateway.schemas.routing import AgentModelRecommendation, AgentModelRecommendationRequest
+from gateway.services.inference import reported_charge
 
 RECOMMENDATION_QUESTION = "model"
 """The one question's key, in the decision request and in its answer."""
@@ -37,28 +38,23 @@ _INSTRUCTIONS = (
 )
 
 
-class UnreadableRecommendationError(ValueError):
-    """The decision model's answer names no candidate."""
-
-
 def build_decision_request(
-    request: AgentModelRecommendationRequest,
+    spawn: SubagentSpawn,
     *,
     decision_model: str,
     candidates: Mapping[str, str | None],
 ) -> DecisionRequest:
     """Turn a spawn into the one choice question the decision model answers.
 
-    The caller's own model request is left out of the state on purpose: the
+    The model the harness asked for is left out of the state on purpose: the
     recommendation is the gateway's, and the orchestrator's guess would only
     pull the answer toward itself.
     """
     question = ChoiceQuestion(type="choice", instructions=_INSTRUCTIONS, criteria=dict(candidates))
     return DecisionRequest(
         model=decision_model,
-        state=_state_text(request),
+        state=_state_text(spawn),
         questions={RECOMMENDATION_QUESTION: question},
-        user=request.user,
     )
 
 
@@ -66,8 +62,8 @@ def recommendation_from_decision(
     response: DecisionResponse,
     *,
     candidates: Mapping[str, str | None],
-) -> AgentModelRecommendation:
-    """Read the chosen candidate out of the decision model's answer.
+) -> ModelRecommendation:
+    """Read the chosen candidate, and what choosing it consumed, out of the decision model's answer.
 
     Raises :class:`UnreadableRecommendationError` when the answer has no choice
     for the question or chooses something that is not a candidate.
@@ -83,21 +79,31 @@ def recommendation_from_decision(
     reason = f"{response.model} chose {answer.choice}"
     if share is not None:
         reason += f" with {share:.0%}"
-    return AgentModelRecommendation(model=answer.choice, reason=reason, probabilities=answer.probabilities)
+    usage = response.usage
+    return ModelRecommendation(
+        model=answer.choice,
+        reason=reason,
+        probabilities=answer.probabilities,
+        usage=RecommendationUsage(
+            input_tokens=usage.input_tokens if usage else 0,
+            output_tokens=usage.output_tokens if usage else 0,
+            charge=reported_charge(response),
+        ),
+    )
 
 
-def _state_text(request: AgentModelRecommendationRequest) -> str:
-    task = request.prompt
+def _state_text(spawn: SubagentSpawn) -> str:
+    task = spawn.prompt
     shortened = ""
     if len(task) > MAX_TASK_CHARS:
         task = task[:MAX_TASK_CHARS]
         shortened = f"\n(task shortened to its first {MAX_TASK_CHARS} characters)"
     lines = [
-        f"Harness: {request.harness}",
-        f"Subagent type: {request.agent_type}",
-        f"Parent model: {request.parent_model}",
+        f"Harness: {spawn.harness}",
+        f"Subagent type: {spawn.agent_type}",
+        f"Parent model: {spawn.parent_model}",
     ]
-    if request.description:
-        lines.append(f"Task description: {request.description}")
+    if spawn.description:
+        lines.append(f"Task description: {spawn.description}")
     lines.append(f"Task:\n{task}{shortened}")
     return "\n".join(lines)

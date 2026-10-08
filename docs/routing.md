@@ -225,9 +225,11 @@ effective weighted shares, and mandatory guardrails. The API equivalent is
 
 A policy decides the model of a request that reaches Otari. A coding agent that
 talks to its provider directly can still ask Otari which model a new subagent
-should run on, through `POST /api/v1/routing/recommend`. Otari puts one choice
-question to a decision model and recommends the candidate it picks. That
-decision is billed to the caller; nothing else is dispatched. See
+should run on, through `POST /api/v1/routing/recommend`. A standalone
+deployment puts one choice question to the decision model it configured and
+recommends the candidate it picks; on otari.ai a managed recommender answers
+instead. Either way the recommendation is billed to the caller, and nothing
+else is dispatched. See
 [Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model).
 
 ## Managing policies at runtime

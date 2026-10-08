@@ -1446,7 +1446,11 @@ def test_responses_endpoint_fails_over(client: TestClient) -> None:
             id="resp-1", object="response", created_at=0, model="claude-haiku-4-5", output=[], usage=None
         )
 
-    with patch("gateway.api.routes.responses.aresponses", new=flaky):
+    # Anthropic has no Responses API, so the fallback attempt goes through the chat completions bridge.
+    with (
+        patch("gateway.api.routes.responses.aresponses", new=flaky),
+        patch("gateway.services.inference._responses_bridge.aresponses_via_chat_completions", new=flaky),
+    ):
         resp = client.post(
             f"{API_ROOT}/responses",
             json={"model": "fast", "input": "hi", "user": "test-user"},

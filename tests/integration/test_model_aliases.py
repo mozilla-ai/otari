@@ -23,6 +23,7 @@ from any_llm.types.completion import (
     Embedding,
     Usage,
 )
+from any_llm.types.rerank import RerankResponse, RerankResult
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
@@ -516,6 +517,27 @@ async def test_embeddings_response_model_echoes_alias(client: TestClient) -> Non
     assert resp.status_code == 200
     # The caller sees the alias they sent, not the underlying model name.
     assert resp.json()["model"] == "housemodel"
+
+
+@pytest.mark.asyncio
+async def test_rerank_response_model_echoes_alias(client: TestClient) -> None:
+    _create_user(client)
+
+    mock_response = RerankResponse(
+        id="rerank-alias",
+        model="claude-opus-4",  # what the provider returns
+        results=[RerankResult(index=0, relevance_score=0.9)],
+    )
+
+    with patch("gateway.api.routes.rerank.arerank", new_callable=AsyncMock, return_value=mock_response):
+        resp = client.post(
+            f"{API_ROOT}/rerank",
+            json={"model": "myopusmodel", "query": "q", "documents": ["a"], "user": "test-user"},
+            headers=HEADERS,
+        )
+    assert resp.status_code == 200
+    # The caller sees the alias they sent, not the underlying model name.
+    assert resp.json()["model"] == "myopusmodel"
 
 
 @pytest.mark.asyncio

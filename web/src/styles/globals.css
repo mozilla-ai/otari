@@ -1438,6 +1438,19 @@ main {
   }
 }
 
+/* Text-field focus ring. HeroUI's `.input` is `outline-none` in the components
+   layer, which beats `@layer base`, so the utilities layer draws the ring.
+   Keyed on react-aria's `data-focus-visible` and not `:focus-visible`: the
+   browser matches the pseudo-class on a mouse click into a text field too, and
+   a click should not ring the field. */
+@layer utilities {
+  .input[data-focus-visible="true"],
+  .textarea[data-focus-visible="true"] {
+    outline: 2px solid var(--focus-ring-ink, var(--color-focus));
+    outline-offset: 2px;
+  }
+}
+
 /* Ring ink, chosen by the GROUND being ringed rather than by a list of
    variants. A control whose own fill is an accent or a status color takes the
    theme's ink; everything else keeps `--color-focus`, which is the fallback in
@@ -1843,9 +1856,20 @@ main {
 .otari-auth-actions .button--ghost:not(.button--sm):not(.button--icon-only) {
   min-height: 2.75rem;
   padding-inline: 0.75rem;
+  /* The 12px of padding is the target, not the look: pulled out by it plus the
+     row's own 1px so the label's right edge lines up with the card's content
+     edge instead of sitting 13px inside it. The target keeps its width. */
+  margin-inline-end: -13px;
   --button-fg: var(--color-link);
   --button-bg-hover: transparent;
   --button-bg-pressed: transparent;
+}
+/* The same pull on the leading side, for a ghost action that is the first item in
+   the row (a lone Help, where there is no link beside it): its label lines up with
+   the card's content edge as a link's does, and its target keeps its width. */
+.otari-auth-actions
+.button--ghost:not(.button--sm):not(.button--icon-only):first-child {
+  margin-inline-start: -13px;
 }
 .otari-auth-actions
   .button--ghost:not(.button--sm):not(.button--icon-only):is(
@@ -2038,12 +2062,13 @@ main {
    so a ring at a 2px offset draws around the chevron and overhangs the field's
    own edge on the trailing and block sides instead of following the control.
 
-   The control is the input group, and HeroUI already rings its
-   `[data-slot="input"]` on focus. That is the same moment: react-aria focuses
+   The control is the input group, and its `.input` wears the field ring
+   (`.input[data-focus-visible]`, above). That is the same moment: react-aria focuses
    the input when the trigger is pressed and keeps the trigger out of the tab
    order, so an open combo box always wears that ring and a keyboard user is
    never left without one. The rule below is the other half, and the two agree:
-   the overlay chevron draws no ring of its own in either state. */
+   the overlay chevron draws no ring of its own in either state. HeroUI draws
+   none for the input itself, which is why the ring is ours. */
 /* 6px, not 8: the menu belongs to the control, and the gap was wide enough to
    read as two unrelated things. Measured rather than derived: the offset is
    HeroUI's and it moved when the trigger lost 2px of height in a table row, so

@@ -840,17 +840,10 @@ _HOOK_JUDGE_MAX_UNTRACKED_FILE_CHARS = 10_000
 # unrelated to prompt size. Chosen with real headroom over that.
 _HOOK_JUDGE_TIMEOUT_SECONDS = 300
 
-# Each judge gate costs one model invocation, unlike the other gate types
-# (near-instant pattern matching), so an unbounded gate count means unbounded
-# resource use on a single Stop event: _hook_collect_judge_verdicts bounds
-# concurrency to _HOOK_GATE_MAX_WORKERS workers (see below), so N gates over
-# that count still queue in batches of the timeout above. Capped, with a
-# visible truncation message, the same "never let something scale unbounded
-# and silently" rule _bound_commands_for_submission and the evaluator's own
-# work-estimate budgets (otari_agent.domain.check) already follow.
-# Evaluated in declaration order, so the same gates run first every time
-# rather than an arbitrary subset.
-_HOOK_JUDGE_MAX_GATES_PER_RUN = 5
+# Each judge gate costs one model call, so one run evaluates only the
+# highest-priority applicable gates and skips the rest.
+_HOOK_JUDGE_DEFAULT_MAX_GATES = 5
+_HOOK_JUDGE_MAX_GATES_CEILING = 20
 
 # Shared by _hook_collect_judge_verdicts and _hook_collect_check_verdicts: how
 # many of one run's applicable gates that function invokes at once. Independent
@@ -860,9 +853,9 @@ _HOOK_JUDGE_MAX_GATES_PER_RUN = 5
 # subprocesses simultaneously.
 _HOOK_GATE_MAX_WORKERS = 8
 
-# A per-call cap does not bound the total: 5 gates at up to 300s each, each
-# with its own possible retry (_HOOK_JUDGE_PROMPT_TOO_LONG_MARKER), is up to
-# 3,000s of judge calls alone. Claude Code's own command-hook timeout
+# A per-call cap does not bound the total: every gate gets up to 300s, plus
+# its own possible retry (_HOOK_JUDGE_PROMPT_TOO_LONG_MARKER), so 20 gates at
+# the ceiling are up to 12,000s of judge calls alone. Claude Code's own command-hook timeout
 # defaults to 600s, after which it kills the hook and discards its output
 # entirely (see the hooks reference) -- meaning the policy check itself never
 # gets run at all, and every gate in the policy, mechanical and required
@@ -1583,8 +1576,13 @@ class _JudgedChange(NamedTuple):
 
 
 class _JudgeSettings(NamedTuple):
-    """One run of the judge gates uses a model, a dry-run flag, a transcript format and a CLI fallback order."""
+    """One judge run uses a gate cap, a model, a dry-run flag, a transcript format and a CLI fallback order.
 
+    `max_gates` is how many applicable gates the run evaluates.
+    It has no default, so a caller cannot drop the configured cap by accident.
+    """
+
+    max_gates: int
     model: str | None = None
     dry_run: bool = False
     harness: str = "claude-code"
@@ -1594,7 +1592,7 @@ class _JudgeSettings(NamedTuple):
 def _hook_collect_judge_verdicts(
     spec: PolicySpec, change: _JudgedChange, settings: _JudgeSettings
 ) -> list[JudgeVerdict]:
-    """Run every applicable judge gate in the local policy, one model-CLI call each,
+    """Run the highest-priority applicable judge gates, up to `settings.max_gates`, one model-CLI call each,
     up to `_HOOK_GATE_MAX_WORKERS` of them concurrently.
 
     Reads `rubric`/`when_changed` off the already-parsed policy the caller
@@ -1633,6 +1631,8 @@ def _hook_collect_judge_verdicts(
     The returned list keeps the order the gates run in:
     `ThreadPoolExecutor.map` yields results in the order its inputs were
     given, not completion order.
+    Each gate past `settings.max_gates` makes no model call.
+    Its `not_run` verdict names the cap, and comes after the verdicts of the gates that ran.
     """
     changed_paths_tuple = tuple(change.changed_paths)
     judge_gates = by_priority(
@@ -1645,14 +1645,24 @@ def _hook_collect_judge_verdicts(
     )
     if not judge_gates:
         return []
-    if len(judge_gates) > _HOOK_JUDGE_MAX_GATES_PER_RUN:
-        skipped = [gate.id for gate in judge_gates[_HOOK_JUDGE_MAX_GATES_PER_RUN:]]
+    skipped: list[JudgeVerdict] = []
+    overflow = judge_gates[settings.max_gates :]
+    if overflow:
+        over_the_cap = (
+            f"{len(judge_gates)} judge gates applied, over the limit of {settings.max_gates} one run evaluates."
+        )
+        if settings.max_gates < _HOOK_JUDGE_MAX_GATES_CEILING:
+            over_the_cap += (
+                f" Raise it with --max-judges or OTARI_HOOK_MAX_JUDGES, up to {_HOOK_JUDGE_MAX_GATES_CEILING}."
+            )
+        else:
+            over_the_cap += " That is the highest limit allowed."
+        skipped = [JudgeVerdict(gate_id=gate.id, outcome="not_run", reasoning=over_the_cap) for gate in overflow]
         click.echo(
-            f"otari: {len(judge_gates):,} judge gates in this guardrail, over the "
-            f"{_HOOK_JUDGE_MAX_GATES_PER_RUN:,} limit; skipping the lowest priority: {', '.join(skipped)}.",
+            f"otari: {over_the_cap} Skipping the lowest priority: {', '.join(gate.id for gate in overflow)}.",
             err=True,
         )
-        judge_gates = judge_gates[:_HOOK_JUDGE_MAX_GATES_PER_RUN]
+        judge_gates = judge_gates[: settings.max_gates]
 
     # None (collection genuinely failed: no HEAD, git missing, a timeout) is
     # kept distinct from "" (collected, and there is none) until the loop
@@ -1716,7 +1726,7 @@ def _hook_collect_judge_verdicts(
         return JudgeVerdict(gate_id=gate.id, outcome=cast(_VerdictOutcome, outcome), reasoning=reasoning)
 
     with ThreadPoolExecutor(max_workers=min(len(judge_gates), _HOOK_GATE_MAX_WORKERS)) as executor:
-        return list(executor.map(run_one, judge_gates))
+        return [*executor.map(run_one, judge_gates), *skipped]
 
 
 # A verifier script is expected to be fast and deterministic (a grep, a lint
@@ -1726,10 +1736,9 @@ def _hook_collect_judge_verdicts(
 # something is wrong, not a slow-but-normal case to accommodate.
 _HOOK_CHECK_TIMEOUT_SECONDS = 30
 
-# Mirrors _HOOK_JUDGE_MAX_GATES_PER_RUN's own reasoning: each verifier
-# gate costs one subprocess run, not a near-instant pattern match, so an
-# unbounded gate count must not turn one Stop event into unbounded
-# wall-clock.
+# Each verifier gate costs one subprocess run, not a near-instant pattern
+# match, so an unbounded gate count must not turn one Stop event into
+# unbounded wall-clock.
 _HOOK_CHECK_MAX_GATES_PER_RUN = 20
 
 # One shared elapsed-time budget across every verifier gate in one run,
@@ -2026,6 +2035,38 @@ def _stdin_is_a_terminal() -> bool:
         return False
 
 
+_JUDGE_GATE_CAP = click.IntRange(1, _HOOK_JUDGE_MAX_GATES_CEILING)
+
+_MAX_JUDGES_HELP = "Maximum judge gates one run evaluates, highest priority first. The rest are skipped."
+
+_max_judges_option = click.option(
+    "--max-judges",
+    envvar="OTARI_HOOK_MAX_JUDGES",
+    type=_JUDGE_GATE_CAP,
+    default=_HOOK_JUDGE_DEFAULT_MAX_GATES,
+    show_default=True,
+    help=_MAX_JUDGES_HELP,
+)
+
+
+def _hook_judge_gate_cap(raw: str | None) -> tuple[int, str | None]:
+    """Read the hook's judge gate cap, and a notice for the person when the value is not a valid cap.
+
+    A value outside the cap's range runs the default rather than failing,
+    because both harnesses read the hook's usage error as a block.
+    """
+    if raw is None:
+        return _HOOK_JUDGE_DEFAULT_MAX_GATES, None
+    try:
+        return int(_JUDGE_GATE_CAP.convert(raw, None, None)), None
+    except click.BadParameter as exc:
+        return (
+            _HOOK_JUDGE_DEFAULT_MAX_GATES,
+            f"ignored the judge gate cap {raw!r} ({exc.message.rstrip('.')}); "
+            f"running at most {_HOOK_JUDGE_DEFAULT_MAX_GATES}.",
+        )
+
+
 @click.group(
     name="hook",
     invoke_without_command=True,
@@ -2084,6 +2125,17 @@ def _stdin_is_a_terminal() -> bool:
         "run instead. For measuring how often a judge gate would fire before spending real model calls."
     ),
 )
+# A string, not the range `validate` and `check` enforce, for the same reason
+# as the ignored options above: Click exits 2 on a bad value.
+@click.option(
+    "--max-judges",
+    envvar="OTARI_HOOK_MAX_JUDGES",
+    default=None,
+    help=(
+        f"{_MAX_JUDGES_HELP} Defaults to {_HOOK_JUDGE_DEFAULT_MAX_GATES}, at most "
+        f"{_HOOK_JUDGE_MAX_GATES_CEILING}. Any other value runs the default, with a notice."
+    ),
+)
 @click.pass_context
 def hook(
     ctx: click.Context,
@@ -2091,6 +2143,7 @@ def hook(
     judge_model: str | None,
     judge_cli: tuple[str, ...] | None,
     judge_dry_run: bool,
+    max_judges: str | None,
 ) -> None:
     """The callback a coding agent invokes. Run `otari hook setup` to register it.
 
@@ -2153,9 +2206,9 @@ def hook(
         if moved is not None:
             _hook_not_enforcing(moved)
         return
-    # This holds a notice when only one side of the guardrail loaded. The
-    # verdict exits at the end report it. The other exits report nothing, or
-    # report that no gate is enforced at all.
+    # This holds a notice when only one side of the guardrail loaded, or a
+    # setting was ignored. The verdict exits at the end report it. The other
+    # exits report nothing, or report that no gate is enforced at all.
     load_notice: str | None = None
     try:
         guardrail = _hook_load_guardrail(guardrail_files, root)
@@ -2325,10 +2378,19 @@ def hook(
                 commands = [command[:_HOOK_MAX_COMMAND_LENGTH] for command in commands]
             commands = _bound_commands_for_submission(commands)
 
+        max_gates, cap_notice = _hook_judge_gate_cap(max_judges)
+        if cap_notice is not None:
+            load_notice = cap_notice if load_notice is None else f"{load_notice}; {cap_notice}"
         judge_results = _hook_collect_judge_verdicts(
             spec,
             _JudgedChange(repo_root=root, changed_paths=paths, transcript_path=transcript_path),
-            _JudgeSettings(model=judge_model, dry_run=judge_dry_run, harness=harness, cli_override=judge_cli),
+            _JudgeSettings(
+                model=judge_model,
+                dry_run=judge_dry_run,
+                harness=harness,
+                cli_override=judge_cli,
+                max_gates=max_gates,
+            ),
         )
         check_results = _hook_collect_check_verdicts(spec, root, paths, _verifier_scopes(guardrail.origins, root))
     else:
@@ -3472,15 +3534,17 @@ def _guardrails_repo_relative(repo_root: Path, path: str) -> tuple[str, str]:
     return _guardrails_relative_to(resolved, root_resolved) or working_tree, working_tree
 
 
-def _guardrails_dry_run(
-    spec: PolicySpec,
-    *,
-    heading: str,
-    paths: list[str],
-    path_source: RunsAt | None,
-    commands: list[str],
-    command_scope: EvidenceScope,
-) -> None:
+class _DryRunMoment(NamedTuple):
+    """One hypothetical moment of a session: a heading to print it under, and the evidence it offers."""
+
+    heading: str
+    paths: list[str]
+    path_source: RunsAt | None
+    commands: list[str]
+    command_scope: EvidenceScope
+
+
+def _guardrails_dry_run(spec: PolicySpec, moment: _DryRunMoment, *, judge_gate_limit: int) -> None:
     """Evaluate one hypothetical moment and print what each gate does there.
 
     The evidence shape mirrors, field for field, what the matching branch of
@@ -3495,23 +3559,24 @@ def _guardrails_dry_run(
     Both of those types carry a per-Stop cap, applied to the gates
     `when_changed` selected, highest `priority` first. The preview applies the
     same caps for the same reason it mirrors the evidence shape: a preview
-    that promises six model calls where the hook makes five is wrong about
+    that promises more model calls than the hook makes is wrong about
     exactly the number it exists to report.
+    `judge_gate_limit` is the judge cap the hook runs with.
     """
     try:
         check = check_policy(
             spec,
-            paths=paths,
-            commands=commands,
-            path_source=path_source,
-            command_scope=command_scope,
+            paths=moment.paths,
+            commands=moment.commands,
+            path_source=moment.path_source,
+            command_scope=moment.command_scope,
         )
     except PolicyCheckError as exc:
         raise click.ClickException(str(exc)) from exc
 
     click.echo()
-    click.echo(heading)
-    changed = tuple(paths)
+    click.echo(moment.heading)
+    changed = tuple(moment.paths)
 
     # Which gates survive each cap, resolved up front so the loop below can
     # report a gate `when_changed` selected but the cap then dropped. Mirrors
@@ -3522,15 +3587,15 @@ def _guardrails_dry_run(
 
     judges = by_priority([gate for gate in spec.gates if isinstance(gate, JudgeGate) and applies(gate)])
     verifiers = by_priority([gate for gate in spec.gates if isinstance(gate, VerifierGate) and applies(gate)])
-    running = {gate.id for gate in judges[:_HOOK_JUDGE_MAX_GATES_PER_RUN]} | {
+    running = {gate.id for gate in judges[:judge_gate_limit]} | {
         gate.id for gate in verifiers[:_HOOK_CHECK_MAX_GATES_PER_RUN]
     }
 
     elsewhere = 0
     for gate, result in zip(spec.gates, check.results, strict=True):
-        if isinstance(gate, JudgeGate | VerifierGate) and command_scope == "session":
+        if isinstance(gate, JudgeGate | VerifierGate) and moment.command_scope == "session":
             kind = "judge" if isinstance(gate, JudgeGate) else "verifier"
-            limit = _HOOK_JUDGE_MAX_GATES_PER_RUN if kind == "judge" else _HOOK_CHECK_MAX_GATES_PER_RUN
+            limit = judge_gate_limit if kind == "judge" else _HOOK_CHECK_MAX_GATES_PER_RUN
             if gate.when_changed and not matched_changed_paths(gate.when_changed, changed):
                 click.echo(f"  {'skipped':<{_VALIDATE_LABEL_WIDTH}}  {gate.id} ({kind}, when_changed does not match)")
             elif gate.id not in running:
@@ -3584,12 +3649,14 @@ def _guardrails_dry_run(
     help=f"Check this repo's guardrail alone, without your own in {GuardrailOrigin.USER.directory}.",
 )
 @click.option("--strict", is_flag=True, help="Exit non-zero on a warning too, not only on an error.")
+@_max_judges_option
 def guardrails_validate(
     guardrail_file_option: Path | None,
     dry_run_commands: tuple[str, ...],
     dry_run_paths: tuple[str, ...],
     repo_only: bool,
     strict: bool,
+    max_judges: int,
 ) -> None:
     """Check this repo's guardrail without running it, and try it against a command or a path.
 
@@ -3614,6 +3681,8 @@ def guardrails_validate(
     judge gates than one Stop event evaluates. A warning never fails on its
     own, since each has a legitimate exception; `--strict` is what makes one
     non-zero, for CI.
+    A gate whose design a warning describes names that warning's code in its own `accept_warnings`.
+    The warning is then printed as accepted, and `--strict` does not count it.
 
     `--command` and `--path` answer the other question, "does it say
     what I think it says", by evaluating the guardrail against evidence you
@@ -3657,7 +3726,7 @@ def guardrails_validate(
     origins = guardrail.origins
     findings = validate_policy(
         spec,
-        judge_gate_limit=_HOOK_JUDGE_MAX_GATES_PER_RUN,
+        judge_gate_limit=max_judges,
         verifier_gate_limit=_HOOK_CHECK_MAX_GATES_PER_RUN,
         probe_verifier=lambda gate: _guardrails_probe_verifier(root, gate.verifier, origins[gate.id]),
     )
@@ -3674,33 +3743,45 @@ def guardrails_validate(
     for finding in findings:
         in_file = spec.gate_sources.get(finding.gate_id or "")
         where = f"{finding.gate_id}{f' ({in_file})' if in_file else ''}: " if finding.gate_id is not None else ""
-        click.secho(
-            f"  {finding.severity}: {where}{finding.message}",
-            fg="red" if finding.severity == "error" else "yellow",
-        )
+        code = f"[{finding.code.value}]" if finding.code is not None else ""
+        if finding.accepted:
+            click.echo(f"  accepted{code}: {where}{finding.message}")
+        else:
+            click.secho(
+                f"  {finding.severity}{code}: {where}{finding.message}",
+                fg="red" if finding.severity == "error" else "yellow",
+            )
     errors = sum(1 for finding in findings if finding.severity == "error")
-    warnings = len(findings) - errors
-    click.echo(f"{errors} error(s), {warnings} warning(s).")
+    accepted = sum(1 for finding in findings if finding.accepted)
+    warnings = len(findings) - errors - accepted
+    accepted_count = f", {accepted} accepted" if accepted else ""
+    click.echo(f"{errors} error(s), {warnings} warning(s){accepted_count}.")
 
     for command in dry_run_commands:
         _guardrails_dry_run(
             spec,
-            heading=f"PreToolUse, Bash: {command}",
-            paths=[],
-            path_source="pre_tool_use.command",
-            commands=[command],
-            command_scope="call",
+            _DryRunMoment(
+                heading=f"PreToolUse, Bash: {command}",
+                paths=[],
+                path_source="pre_tool_use.command",
+                commands=[command],
+                command_scope="call",
+            ),
+            judge_gate_limit=max_judges,
         )
     checks_reads = _policy_checks_reads(spec)
     dry_run_targets = [_guardrails_repo_relative(root, path) for path in dry_run_paths]
     for edit_target, working_tree in dry_run_targets:
         _guardrails_dry_run(
             spec,
-            heading=f"PreToolUse, Edit/Write: {edit_target}",
-            paths=[edit_target],
-            path_source="pre_tool_use.edit_target",
-            commands=[],
-            command_scope="call",
+            _DryRunMoment(
+                heading=f"PreToolUse, Edit/Write: {edit_target}",
+                paths=[edit_target],
+                path_source="pre_tool_use.edit_target",
+                commands=[],
+                command_scope="call",
+            ),
+            judge_gate_limit=max_judges,
         )
         # Conditional, unlike the Edit/Write moment above, so a guardrail with
         # no read gate prints exactly what it printed before this moment
@@ -3710,22 +3791,29 @@ def guardrails_validate(
         if checks_reads:
             _guardrails_dry_run(
                 spec,
-                heading=f"PreToolUse, Read: {edit_target}",
-                paths=[edit_target],
-                path_source="pre_tool_use.read_target",
-                commands=[],
-                command_scope="call",
+                _DryRunMoment(
+                    heading=f"PreToolUse, Read: {edit_target}",
+                    paths=[edit_target],
+                    path_source="pre_tool_use.read_target",
+                    commands=[],
+                    command_scope="call",
+                ),
+                judge_gate_limit=max_judges,
             )
     if dry_run_commands or dry_run_paths:
         _guardrails_dry_run(
             spec,
-            heading=(
-                f"Stop, the finished turn: {len(dry_run_targets)} changed path(s), {len(dry_run_commands)} command(s)"
+            _DryRunMoment(
+                heading=(
+                    f"Stop, the finished turn: {len(dry_run_targets)} changed path(s), "
+                    f"{len(dry_run_commands)} command(s)"
+                ),
+                paths=[working_tree for _edit_target, working_tree in dry_run_targets],
+                path_source="stop.working_tree",
+                commands=list(dry_run_commands),
+                command_scope="session",
             ),
-            paths=[working_tree for _edit_target, working_tree in dry_run_targets],
-            path_source="stop.working_tree",
-            commands=list(dry_run_commands),
-            command_scope="session",
+            judge_gate_limit=max_judges,
         )
 
     if errors or (strict and warnings):
@@ -3957,6 +4045,7 @@ def _echo_check_report(
         "A gate's own judge_cli overrides this. Defaults to claude."
     ),
 )
+@_max_judges_option
 def guardrails_check(
     base: str,
     head: str | None,
@@ -3964,6 +4053,7 @@ def guardrails_check(
     guardrails_from: Path | None,
     judge_model: str | None,
     judge_cli: tuple[str, ...] | None,
+    max_judges: int,
 ) -> None:
     """Run this repo's gates against a change, the way a CI job checks a pull request.
 
@@ -4010,7 +4100,7 @@ def guardrails_check(
         judge_results = _hook_collect_judge_verdicts(
             spec,
             _JudgedChange(repo_root=root, changed_paths=paths, diff_range=diff_range),
-            _JudgeSettings(model=judge_model, cli_override=judge_cli),
+            _JudgeSettings(model=judge_model, cli_override=judge_cli, max_gates=max_judges),
         )
     check_results = None
     if _CheckedGateType.VERIFIER in gate_types and head is None:

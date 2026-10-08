@@ -55,6 +55,26 @@ def test_transcription_with_api_key(
     assert data["text"] == "Hello, world!"
 
 
+def test_transcription_forwards_file_name(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """The provider receives the upload's name and bytes, not anonymous bytes."""
+    mock = AsyncMock(return_value=_mock_transcription_response())
+    with patch("gateway.api.routes.audio.atranscription", mock):
+        resp = client.post(
+            f"{API_ROOT}/audio/transcriptions",
+            files={"file": ("clip.m4a", b"audio-data", "audio/mp4")},
+            data={"model": "openai:whisper-1"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+    assert mock.await_args is not None
+    sent = mock.await_args.kwargs["file"]
+    assert sent.name == "clip.m4a"
+    assert sent.read() == b"audio-data"
+
+
 def test_transcription_master_key_requires_user(
     client: TestClient,
     master_key_header: dict[str, str],

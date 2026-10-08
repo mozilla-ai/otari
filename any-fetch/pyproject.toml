@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=84.0.0", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# Web fetch providers behind one interface, built the way any-llm is: import
+# it, give it a key, call it. otari is its first consumer, not its owner, so it
+# may not import the gateway or its server stack (scripts/check_architecture.py
+# refuses it), and it does not import its sibling, any-search.
+name = "any-fetch"
+description = "One interface to web fetch providers"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dynamic = ["version"]
+# Providers are called over HTTP directly, with no vendor SDKs. The floors are
+# the gateway's: its httpx pin, and the pydantic its pydantic-settings needs.
+dependencies = [
+    "httpx>=0.28.1",
+    "pydantic>=2.7.0",
+]
+
+[project.scripts]
+any-fetch = "any_fetch.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["any_fetch*"]
+
+[tool.setuptools.package-data]
+any_fetch = ["py.typed"]
+
+# The version comes from the repository's Git tag, as cli/'s does, until the
+# package is published on its own.
+[tool.setuptools_scm]
+root = ".."
+# The Docker image copies the tree without .git.
+fallback_version = "0.0.0"

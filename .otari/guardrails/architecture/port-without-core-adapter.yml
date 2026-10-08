@@ -18,3 +18,4 @@ gates:
       src/gateway/ports/, and no working core adapter for it bound in build_container in
       src/gateway/container.py. A real lightweight adapter or an honest Null Object both
       count. This is cardinal rule 3 in ARCHITECTURE.md. Pass if the diff adds no port.
+    accept_warnings: [judge-gate-cap]

@@ -20,6 +20,7 @@ subagent should start on. That is put to a decision model, not compiled from
 a policy, and the harness acts on the answer itself.
 """
 
+from gateway.exceptions.routing_exceptions import UnreadableRecommendationError
 from gateway.services.routing.backends import (
     KNN_BACKEND,
     NOOP_BACKEND,
@@ -47,11 +48,7 @@ from gateway.services.routing.compiler import (
 )
 from gateway.services.routing.decide import RoutingSignal, decide_ordering, explain_router_ordering
 from gateway.services.routing.knn import KnnRoutingMemory, unpriced_router_candidates
-from gateway.services.routing.recommend import (
-    UnreadableRecommendationError,
-    build_decision_request,
-    recommendation_from_decision,
-)
+from gateway.services.routing.recommend import build_decision_request, recommendation_from_decision
 from gateway.types.budget_state import BudgetState
 
 __all__ = [

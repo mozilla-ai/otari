@@ -11,14 +11,17 @@ that upstream, and returns its answer unchanged.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from gateway.core.metered_pricing import quantize_cost
 from gateway.services.provider_kwargs import split_selector
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
+    from gateway.schemas.inference import DecisionRequest, DecisionResponse
 
 # Each provider's default root and the path under it. ``api_base`` replaces the
 # root, so it points a provider at a proxy or regional host without the path.
@@ -108,6 +111,21 @@ def resolve_decision_provider(config: GatewayConfig, selector: str) -> tuple[Dec
         ),
         model,
     )
+
+
+def decision_body(request: DecisionRequest, model: str) -> dict[str, Any]:
+    """The body ``request`` is sent upstream as, naming the bare ``model`` rather than its selector."""
+    questions = {name: question.model_dump(exclude_none=True) for name, question in request.questions.items()}
+    body: dict[str, Any] = {"model": model, "state": request.state, "questions": questions}
+    if request.images:
+        body["images"] = request.images
+    return body
+
+
+def reported_charge(response: DecisionResponse) -> Decimal | None:
+    """The charge the provider stated for the call, or ``None`` where it stated none."""
+    usage = response.usage
+    return quantize_cost(Decimal(str(usage.cost))) if usage is not None and usage.cost is not None else None
 
 
 async def request_decision(

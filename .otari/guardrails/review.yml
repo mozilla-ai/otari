@@ -24,6 +24,7 @@ gates:
       on a comment that explains a genuinely non-obvious invariant,
       constraint, or workaround (exactly what this rule still wants kept),
       and do not fail when this diff adds or changes no comments at all.
+    accept_warnings: [judge-gate-cap]
     message: >-
       This diff may add a comment that restates the code, narrates the
       change, or records prior behavior instead of explaining a non-obvious
@@ -50,6 +51,7 @@ gates:
       aria-labelledby, asyncio.CancelledError, GitHub's 'cancelled' job
       conclusion), a value that travels on the wire or into a database, or a
       third-party product's own name.
+    accept_warnings: [judge-gate-cap]
     message: 'AGENTS.md Writing style: avoid em dashes/double hyphens as prose separators,
       and spell prose in US English (identifiers, wire values, and third-party names
       borrowed from elsewhere keep their original spelling).'
@@ -66,6 +68,7 @@ gates:
       (stack traces, internal file paths, header contents) to a client. The one-time bootstrap
       key print is a deliberate, allowed exception; nothing else should log or return
       a raw credential.
+    accept_warnings: [judge-gate-cap]
     message: 'Possible secret/token/API-key leak in logs or an internal detail exposed
       in a public error response (AGENTS.md § Repository Conventions: ''Preserve security-relevant
       behavior ... never log secrets, tokens, or raw API keys'').'

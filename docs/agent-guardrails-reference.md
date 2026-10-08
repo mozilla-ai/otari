@@ -80,6 +80,21 @@ and declaring `priority` on one is an error rather than a no-op.
     message: Narration belongs in the commit message.
 ```
 
+### `accept_warnings`, on any gate
+
+Some `otari guardrails validate` warnings describe a design that is intended. A gate may name the codes of those warnings in an optional `accept_warnings` list. `validate` then prints each such warning as `accepted`, and `--strict` does not count it. See [Checking a guardrail before it runs](#checking-a-guardrail-before-it-runs) for the codes.
+
+```yaml
+  - id: no-agent-edited-policy
+    type: path
+    runs: [pre_tool_use.edit_target]   # a verifier covers the Stop half
+    enforcement: required
+    forbidden: [".otari/**"]
+    accept_warnings: [shell-write-unseen]
+```
+
+An acceptance covers every warning of that kind on the gate, not one glob or phrase. An unknown code is an error, and so is a code that the gate's type can never draw. A code that this gate does not draw now is not reported. The `judge-gate-cap` and `verifier-gate-cap` warnings are about the guardrail as a whole: each is accepted only when every gate it names as skipped accepts it. Which gates are skipped follows the cap, `priority` and then declaration order, so a lower `--max-judges`, a new gate or a changed priority can skip a gate that does not accept the warning. Name the cap code on every gate of that type to keep the acceptance stable. A gate inside the cap runs, so the code has no effect there.
+
 ## Composing several files
 
 These are about a guardrail made of several files. A single `guardrails.yml`
@@ -247,7 +262,7 @@ Three things this does not cover, all of them deliberate:
   Its reads go through the shell, where they are `pre_tool_use.command`
   evidence like everything else.
 
-`otari guardrails validate` warns about the second of those until some
+`otari guardrails validate` warns about the second of those (`shell-read-unseen`) until some
 `command` gate's own forbidden phrase names a path these globs match, which
 is the one mechanically checkable form of "the shell was considered here". It
 is not a coverage proof, and cannot be: the measured table below shows a
@@ -622,19 +637,30 @@ this is a local, otari-hook-only audit trail, never the rubric, diff,
 transcript, or model output, so counting matching lines is the source of
 truth for "how many times has this repo's judge gate actually run."
 
-Each `judge` gate costs one model invocation, not a near-instant pattern
-match like the other three gate types, so `otari hook` evaluates at most 5
-per `Stop` event (highest `priority` first, declaration order within a tie;
-the rest are skipped with a stderr message naming which) rather than letting one event's resource use grow
-without bound as a policy gains judge gates. Applicable gates run
-concurrently, not one after another (a bounded thread pool,
-`_HOOK_GATE_MAX_WORKERS` in `cli.py`, shared with `verifier`'s own
-verifier runs below): N applicable gates cost close to one gate's own
-wall-clock, not N times it.
+Each `judge` gate costs one model invocation, not a near-instant pattern match
+like the other three gate types, so `otari hook` caps how many it evaluates
+per `Stop` event (highest `priority` first, declaration order within a tie)
+rather than letting one event's resource use grow without bound as a policy
+gains judge gates. Each gate past the cap resolves `not_run`, and its line in
+`systemMessage` names the cap and how to raise it. The cap is 5 by default.
+`--max-judges` (or `OTARI_HOOK_MAX_JUDGES`) sets it to any value
+from 1 to 20. `otari guardrails validate` and `otari guardrails check` read
+the same option and variable, so a preview, a CI check and the hook agree on
+which gates run. Both refuse any other value. `otari hook` runs the default
+instead and says so in `systemMessage`, because the harness reads a refusal as
+a block. Set the variable in the
+environment the harness runs the hook in, such as the `env` block of a
+repository's `.claude/settings.json`, to apply it to one repository.
+Applicable gates run concurrently, not one after another, up to eight at a
+time (a bounded thread pool, `_HOOK_GATE_MAX_WORKERS` in `hook.py`, shared
+with `verifier`'s own verifier runs below): up to eight applicable gates cost
+close to one gate's own wall-clock, and each further eight add about one more.
+Raising the cap does not raise the shared budget below, so with slow judges a
+high cap leaves the last gates reporting `error`.
 
-A per-call timeout does not bound the total: 5 gates at up to 300s each,
-each with its own possible "prompt is too long" retry, is up to 3,000s of
-judge calls if they ever ran one after another. Claude Code's own
+A per-call timeout does not bound the total: 20 gates at the ceiling, at up to
+300s each, each with its own possible "prompt is too long" retry, are up to
+12,000s of judge calls if they ever ran one after another. Claude Code's own
 command-hook timeout defaults to 600s, past which it kills the hook and
 discards its output entirely, meaning nothing is evaluated at all for that
 `Stop` event, every gate in the guardrail going unchecked, not just the slow
@@ -837,7 +863,7 @@ load-bearing throughout.
 | --- | --- |
 | paths | Repo-relative paths this moment puts in scope: the single target a tool call is about to write or read, or what `git status` reported changed, together with which of those moments it was. |
 | commands | Shell commands observed running, or about to run. Its scope is either `call` (the single tool call about to run) or `session` (every command the session has run so far). `command` gates judge only `call` scope, `command_if_changed` only `session` scope. |
-| judge verdicts | One `pass`, `fail` or `error` per `judge` gate, from the model call `otari hook` made for it. `error` covers a CLI that was not found, a timeout, a launch failure, a nonzero exit, and output that could not be parsed as a verdict. |
+| judge verdicts | One `pass`, `fail` or `error` per `judge` gate, from the model call `otari hook` made for it. `error` covers a CLI that was not found, a timeout, a launch failure, a nonzero exit, and output that could not be parsed as a verdict. A gate past the judge gate cap gets `not_run` instead, and no model call. |
 | verifier verdicts | One `pass`, `fail` or `error` per `verifier` gate, from the script's exit status: 0, 1, and anything else respectively. |
 
 An empty list is not a missing one. Evidence collected and found empty resolves
@@ -1175,38 +1201,40 @@ more are added that a parser does not see:
   this repo's own guardrail.
 
 A **warning** is a gate that parses, runs, and may not mean what its author
-intended:
+intended. Each kind has a stable code, which `validate` prints beside it:
 
-- A `**` glob whose shallower depth nothing else in the same field covers.
+- `glob-misses-shallower-depth`: a `**` glob whose shallower depth nothing else in the same field covers.
   `**` must consume at least one path segment, so `**/CLAUDE.md` reaches
   `web/CLAUDE.md` and never the root file, and `src/**/conftest.py` never
   reaches `src/conftest.py`. Coverage, not an identical twin string: a list
   of `["*.md", "**/CLAUDE.md"]` already reaches the root file through `*.md`
   and is left alone. A trailing `**` is not warned about either, since its
   twin would name a bare directory, which Git never reports as a changed path.
-- A glob containing a backslash, which is a warning rather than an error
+- `backslash-in-glob`: a glob containing a backslash, which is a warning rather than an error
   because a POSIX filename may legally contain one; globs are matched against
   repo-relative POSIX paths split on `/`.
-- A single-token `forbidden` phrase on a `command` gate. A phrase matches a
+- `single-token-phrase`: a single-token `forbidden` phrase on a `command` gate. A phrase matches a
   token run in any position, so `npm` also refuses `grep -rn npm web/`. A
   single-token `require` phrase on a `command_if_changed` gate is left alone:
   over-matching there accepts a session sooner rather than refusing real work,
   and it is usually what the author wants, since a required command can be
   spelled several ways.
-- A `path` gate that runs only at `pre_tool_use.edit_target`. It sees the path
+- `shell-write-unseen`: a `path` gate that runs at `pre_tool_use.edit_target` without `stop.working_tree`. It sees the path
   an edit tool declares and nothing a shell command writes (a redirect,
   `sed -i`, a heredoc, `cp`, a script). Adding `stop.working_tree` is the
   backstop. A gate that runs only at `stop.working_tree` is not warned about:
   after the fact, but complete over the tree.
-- More `judge` or `verifier` gates than one `Stop` event evaluates (five and
-  twenty respectively), naming which ones fall past the cap. Both caps apply
-  after `when_changed` filtering, so this is the worst case: a session where
-  every one of them applies at once. This is the check a composed guardrail
+- `shell-read-unseen`: a `path` gate that runs at `pre_tool_use.read_target` while no `command` gate names any of its paths. It sees the `Read` tool and nothing a shell command reads, and nothing catches a shell read afterwards. See [Refusing a read](#refusing-a-read) above.
+- `judge-gate-cap` and `verifier-gate-cap`: more `judge` or `verifier` gates than one `Stop` event evaluates (the
+  `--max-judges` value, five by default, and twenty respectively), naming
+  which ones fall past the cap. Both caps apply after `when_changed` filtering,
+  so this is the worst case: a session where every one of them applies at once. This is the check a composed guardrail
   most needs and no single file can do: a directory is what makes the total
   invisible.
 
 None of these blocks on its own, because each has a legitimate exception.
 `--strict` makes a warning non-zero too, which is what a CI invocation wants.
+A gate whose design a warning describes accepts it with [`accept_warnings`](#accept_warnings-on-any-gate), and `--strict` then does not count it.
 
 `--command` and `--path` (both repeatable) answer the other question,
 "does it say what I think it says". Each is evaluated at every moment a real

@@ -34,7 +34,11 @@ vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
 // terms is the default, matching a deployment that configured neither.
 function renderPage(
   hash = "#/signup",
-  deployment: { openSignup?: boolean; termsUrl?: string | null } = {},
+  deployment: {
+    openSignup?: boolean
+    termsUrl?: string | null
+    oauthProviders?: string[]
+  } = {},
 ) {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false } },
@@ -45,6 +49,7 @@ function renderPage(
         value={bootstrap({
           open_signup: deployment.openSignup ?? false,
           terms_url: deployment.termsUrl ?? null,
+          oauth_providers: deployment.oauthProviders ?? [],
         })}
       >
         <ThemeProvider>
@@ -86,7 +91,6 @@ describe("SignupPage", () => {
 
     await user.type(screen.getByLabelText("Email"), "ada@example.com")
     await user.type(screen.getByLabelText("Password"), "correct-horse")
-    await user.type(screen.getByLabelText("Confirm password"), "correct-horse")
     await user.click(screen.getByRole("button", { name: "Claim account" }))
 
     await vi.waitFor(() => {
@@ -97,7 +101,6 @@ describe("SignupPage", () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       email: "ada@example.com",
       password: "correct-horse",
-      full_name: null,
     })
   })
 
@@ -114,7 +117,6 @@ describe("SignupPage", () => {
 
     await user.type(screen.getByLabelText("Email"), "ada@example.com")
     await user.type(screen.getByLabelText("Password"), "correct-horse")
-    await user.type(screen.getByLabelText("Confirm password"), "correct-horse")
     await user.click(screen.getByRole("button", { name: "Create account" }))
 
     await vi.waitFor(() => {
@@ -135,7 +137,6 @@ describe("SignupPage", () => {
 
     await user.type(screen.getByLabelText("Email"), "ada@example.com")
     await user.type(screen.getByLabelText("Password"), "correct-horse")
-    await user.type(screen.getByLabelText("Confirm password"), "correct-horse")
     const submit = screen.getByRole("button", { name: "Claim account" })
     expect(submit).toBeDisabled()
 
@@ -149,7 +150,6 @@ describe("SignupPage", () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       email: "ada@example.com",
       password: "correct-horse",
-      full_name: null,
       terms_accepted: true,
     })
   })
@@ -193,34 +193,41 @@ describe("SignupPage", () => {
     )
   })
 
-  it("keeps the button disabled until the two passwords agree", async () => {
-    const user = userEvent.setup()
-    renderPage()
-
-    const submit = screen.getByRole("button", { name: "Claim account" })
-    await user.type(screen.getByLabelText("Email"), "ada@example.com")
-    await user.type(screen.getByLabelText("Password"), "correct-horse")
-    await user.type(screen.getByLabelText("Confirm password"), "typo")
-
-    expect(
-      await screen.findByText("The two passwords do not match."),
-    ).toBeInTheDocument()
-    expect(submit).toBeDisabled()
-    expect(apiFetch).not.toHaveBeenCalled()
-  })
-
   it("refuses a password the gateway would refuse, without asking it", async () => {
     const user = userEvent.setup()
     renderPage()
 
     await user.type(screen.getByLabelText("Email"), "ada@example.com")
     await user.type(screen.getByLabelText("Password"), "short")
-    await user.type(screen.getByLabelText("Confirm password"), "short")
 
     expect(
       await screen.findByText("At least 8 characters."),
     ).toBeInTheDocument()
     expect(apiFetch).not.toHaveBeenCalled()
+  })
+
+  it("keeps its fill, blocks the press and says it is busy while the claim is out", async () => {
+    let release!: () => void
+    vi.mocked(apiFetch).mockReturnValue(
+      new Promise((resolve) => {
+        release = () => resolve({ message: "…" } as never)
+      }),
+    )
+    const user = userEvent.setup()
+    const { container } = renderPage()
+    await user.type(screen.getByLabelText("Email"), "ada@example.com")
+    await user.type(screen.getByLabelText("Password"), "correct-horse")
+
+    await user.click(screen.getByRole("button", { name: "Claim account" }))
+
+    const pending = await screen.findByRole("button", {
+      name: "Claiming account…",
+    })
+    // Not disabled, which would dim it to the refused treatment.
+    expect(pending).not.toBeDisabled()
+    expect(pending).toHaveClass("pointer-events-none")
+    expect(container.querySelector("form")).toHaveAttribute("aria-busy", "true")
+    release()
   })
 
   it("shows the gateway's own refusal and stays on the form", async () => {
@@ -232,7 +239,6 @@ describe("SignupPage", () => {
 
     await user.type(screen.getByLabelText("Email"), "ada@example.com")
     await user.type(screen.getByLabelText("Password"), "correct-horse")
-    await user.type(screen.getByLabelText("Confirm password"), "correct-horse")
     await user.click(screen.getByRole("button", { name: "Claim account" }))
 
     expect(
@@ -253,7 +259,6 @@ describe("the telemetry the signup page records", () => {
 
     await user.type(screen.getByLabelText("Email"), "ada@example.com")
     await user.type(screen.getByLabelText("Password"), "correct-horse")
-    await user.type(screen.getByLabelText("Confirm password"), "correct-horse")
     await user.click(screen.getByRole("button", { name: "Claim account" }))
 
     expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.SIGNUP_STARTED, {
@@ -278,7 +283,6 @@ describe("the telemetry the signup page records", () => {
 
     await user.type(screen.getByLabelText("Email"), "ada@example.com")
     await user.type(screen.getByLabelText("Password"), "correct-horse")
-    await user.type(screen.getByLabelText("Confirm password"), "correct-horse")
     await user.click(screen.getByRole("button", { name: "Claim account" }))
 
     await vi.waitFor(() => {
@@ -298,8 +302,7 @@ describe("the telemetry the signup page records", () => {
     renderPage()
 
     await user.type(screen.getByLabelText("Email"), "ada@example.com")
-    await user.type(screen.getByLabelText("Password"), "correct-horse")
-    await user.type(screen.getByLabelText("Confirm password"), "typo")
+    await user.type(screen.getByLabelText("Password"), "short")
     await user.click(screen.getByRole("button", { name: "Claim account" }))
 
     expect(recordEvent).not.toHaveBeenCalled()
@@ -318,7 +321,6 @@ describe("the telemetry the signup page records", () => {
     expect(emailField).toHaveAttribute("readonly")
 
     await user.type(screen.getByLabelText("Password"), "correct-horse")
-    await user.type(screen.getByLabelText("Confirm password"), "correct-horse")
     await user.click(screen.getByRole("button", { name: "Claim account" }))
 
     await vi.waitFor(() => {
@@ -347,5 +349,167 @@ describe("the telemetry the signup page records", () => {
     expect(
       screen.queryByRole("link", { name: "Claim a different address instead" }),
     ).toBeNull()
+  })
+})
+
+describe("OAuth first", () => {
+  function stubNavigation() {
+    const assign = vi.fn()
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...window.location, assign, hash: "" },
+    })
+    return assign
+  }
+
+  function jsonResponse(body: unknown, status = 200) {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    })
+  }
+
+  const open = { openSignup: true, oauthProviders: ["github", "google"] }
+
+  afterEach(() => {
+    window.sessionStorage.clear()
+  })
+
+  it("folds the address form behind a row while a provider is offered", () => {
+    renderPage("#/signup", open)
+
+    expect(
+      screen.getByRole("button", { name: "Sign up with GitHub" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Sign up with Google" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Sign up with email" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByLabelText("Email")).toBeNull()
+    expect(screen.queryByLabelText("Password")).toBeNull()
+  })
+
+  it("opens the form in place, keeps the providers, and focuses the address", async () => {
+    const user = userEvent.setup()
+    renderPage("#/signup", open)
+
+    await user.click(screen.getByRole("button", { name: "Sign up with email" }))
+
+    expect(screen.getByLabelText("Email")).toHaveFocus()
+    expect(screen.getByLabelText("Password")).toBeInTheDocument()
+    // The row that opened it is gone and the providers are still there, now as
+    // the two-up pair labelled with the provider alone.
+    expect(
+      screen.queryByRole("button", { name: "Sign up with email" }),
+    ).toBeNull()
+    expect(
+      screen.getByRole("button", { name: "Sign up with GitHub" }),
+    ).toHaveTextContent(/^GitHub$/)
+  })
+
+  it("offers neither the folded row nor a provider on a closed deployment", () => {
+    // OAuth on a closed deployment only admits an address already on the
+    // roster, so it is not a way to sign up and the page is the plain form.
+    renderPage("#/signup", { oauthProviders: ["github", "google"] })
+
+    expect(screen.queryByRole("button", { name: /Sign up with/ })).toBeNull()
+    expect(screen.getByLabelText("Email")).toBeInTheDocument()
+  })
+
+  it("shows the form straight away when no provider is configured", () => {
+    renderPage("#/signup", { openSignup: true })
+
+    expect(screen.queryByRole("button", { name: /Sign up with/ })).toBeNull()
+    expect(screen.getByLabelText("Email")).toBeInTheDocument()
+    expect(screen.getByLabelText("Email")).not.toHaveFocus()
+  })
+
+  it("opens the form for a link that names an invited address", () => {
+    renderPage("#/signup?email=ada%40example.com", open)
+
+    expect(screen.getByLabelText("Email")).toHaveValue("ada@example.com")
+    expect(screen.getByLabelText("Email")).not.toHaveFocus()
+  })
+
+  it("stores the state the gateway minted, then leaves for the provider", async () => {
+    const assign = stubNavigation()
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({
+        authorization_url: "https://github.com/login/oauth/authorize?x=1",
+        state: "the-state",
+      }),
+    )
+    const user = userEvent.setup()
+    renderPage("#/signup", open)
+
+    await user.click(
+      screen.getByRole("button", { name: "Sign up with GitHub" }),
+    )
+
+    await vi.waitFor(() => expect(assign).toHaveBeenCalled())
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/v1/auth/oauth/github/authorize",
+    )
+    expect(window.sessionStorage.getItem("otari.oauth.state")).toBe("the-state")
+    expect(assign).toHaveBeenCalledWith(
+      "https://github.com/login/oauth/authorize?x=1",
+    )
+    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.SIGNUP_STARTED, {
+      authentication_method: "github",
+    })
+    // Nothing has succeeded yet: the callback page records the outcome.
+    expect(recordEvent).not.toHaveBeenCalledWith(
+      TELEMETRY_EVENTS.SIGNUP_SUCCESS,
+      expect.anything(),
+    )
+  })
+
+  it("says so, and stays, when the gateway cannot start the sign-up", async () => {
+    const assign = stubNavigation()
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ detail: "Google sign-in is not configured." }, 503),
+    )
+    const user = userEvent.setup()
+    renderPage("#/signup", open)
+
+    await user.click(
+      screen.getByRole("button", { name: "Sign up with Google" }),
+    )
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument()
+    expect(assign).not.toHaveBeenCalled()
+    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.SIGNUP_FAILED, {
+      authentication_method: "google",
+      status: 503,
+    })
+    expect(
+      screen.getByRole("button", { name: "Sign up with Google" }),
+    ).toBeEnabled()
+  })
+})
+
+describe("the password reveal", () => {
+  it("shows what was typed on request, and hides it again", async () => {
+    const user = userEvent.setup()
+    renderPage()
+    const field = screen.getByLabelText("Password")
+    await user.type(field, "correct-horse")
+    expect(field).toHaveAttribute("type", "password")
+
+    // Guards, not checks: jsdom computes no cascade. The toggle is 32px at
+    // every width, exempt from the phone-width 44px floor that would otherwise
+    // widen the button and push its 44px bleed into the label above; the
+    // measured result is a 32px box with a 6px bleed on every side.
+    const toggle = screen.getByRole("button", { name: "Show password" })
+    expect(toggle).toHaveClass("min-h-8!", "min-w-8!", "before:-inset-[7px]")
+
+    await user.click(toggle)
+    expect(field).toHaveAttribute("type", "text")
+    expect(field).toHaveValue("correct-horse")
+
+    await user.click(screen.getByRole("button", { name: "Hide password" }))
+    expect(field).toHaveAttribute("type", "password")
   })
 })

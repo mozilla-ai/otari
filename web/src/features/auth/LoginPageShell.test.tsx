@@ -6,6 +6,7 @@ import type { DeploymentBootstrap } from "@/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { STORAGE_KEY, ThemeProvider } from "@/shared/hooks/useTheme"
 import { bootstrap } from "@/tests/fixtures"
+import { authShellPage } from "./authShellSlot"
 import { LoginPageShell } from "./LoginPageShell"
 
 function renderShell(
@@ -23,31 +24,37 @@ function renderShell(
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   localStorage.clear()
   document.documentElement.removeAttribute("data-theme")
   document.documentElement.classList.remove("dark")
   document.documentElement.style.removeProperty("color-scheme")
 })
 
-it("cycles through light, dark, and system without an animation control", async () => {
-  localStorage.setItem(STORAGE_KEY, "system")
+it("flips between light and dark with one control and no animation control", async () => {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn().mockReturnValue({
+      matches: false,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }),
+  )
   const user = userEvent.setup()
   renderShell()
   expect(
     screen.queryByRole("button", { name: /background animation/ }),
   ).not.toBeInTheDocument()
-  for (const [current, next] of [
-    ["system", "light"],
-    ["light", "dark"],
-    ["dark", "system"],
+  for (const [name, stored] of [
+    ["Switch to dark theme", "dark"],
+    ["Switch to light theme", "light"],
+    ["Switch to dark theme", "dark"],
   ]) {
-    await user.click(
-      screen.getByRole("button", {
-        name: `Appearance: ${current}. Switch to ${next}.`,
-      }),
-    )
-    expect(localStorage.getItem(STORAGE_KEY)).toBe(next)
+    await user.click(screen.getByRole("button", { name }))
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(stored)
   }
+  // Never a third state.
+  expect(screen.queryByRole("button", { name: /system/i })).toBeNull()
   expect(screen.getByRole("main")).toContainElement(
     screen.getByRole("heading", { name: "Sign in" }),
   )
@@ -58,13 +65,19 @@ it("cycles through light, dark, and system without an animation control", async 
 // and has the room. jsdom performs no layout, so the classes that cause the box
 // are the only thing a unit test can see (#1336).
 it("keeps the appearance toggle at the 44px touch floor", () => {
-  localStorage.setItem(STORAGE_KEY, "system")
   renderShell()
   const toggle = screen.getByRole("button", {
-    name: "Appearance: system. Switch to light.",
+    name: /^Switch to (dark|light) theme$/,
   })
   expect(toggle).toHaveClass("min-h-11", "min-w-11")
   expect(toggle.className).not.toContain("md:min-h-")
+})
+
+it("pins the card to the top instead of centering it", () => {
+  renderShell()
+  const main = screen.getByRole("main")
+  expect(main).not.toHaveClass("justify-center")
+  expect(main).toHaveClass("items-center", "md:pt-15")
 })
 
 describe("the header's logo", () => {
@@ -94,5 +107,31 @@ describe("the header's logo", () => {
     renderShell(undefined, { site_url: null, public_catalog: false })
     expect(screen.queryByRole("link")).not.toBeInTheDocument()
     expect(screen.getByText("Otari")).toBeInTheDocument()
+  })
+})
+
+describe("the header slot an edition fills", () => {
+  it("is empty in this build and leaves the theme control alone", () => {
+    renderShell()
+    const header = screen.getByRole("banner")
+    expect(header.querySelectorAll("button")).toHaveLength(1)
+  })
+})
+
+describe("authShellPage", () => {
+  it.each([
+    ["", "login"],
+    ["#/", "login"],
+    ["#/signup", "signup"],
+    ["#/signup?email=ada%40example.com", "signup"],
+    ["#/recover-password", "recover-password"],
+    ["#/resend-verification", "resend-verification"],
+    // A page that spends a token from a link names where it came from.
+    ["#/verify-email?token=t", null],
+    ["#/reset-password?token=t", null],
+    ["#/check-email?type=signup", null],
+    ["#/auth/google/callback?code=c", null],
+  ])("reads %j as %j", (hash, page) => {
+    expect(authShellPage(hash)).toBe(page)
   })
 })

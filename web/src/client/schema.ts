@@ -4367,10 +4367,13 @@ export interface paths {
          *
          *     The harness sends the facts it holds at spawn time: its own ids for the
          *     session and the spawning tool call, the subagent type, the task, the
-         *     parent's model and the model the caller asked for, if any. The gateway asks
-         *     the decision model named by `agent_recommender_model` to pick one of the
-         *     `agent_recommender_candidates`, and answers with that candidate, the
-         *     model's probability for each candidate, and a one-line reason.
+         *     parent's model and the model the caller asked for, if any. The recommender
+         *     this build binds picks one of the candidate models and the answer names it.
+         *     A standalone deployment asks the decision model `agent_recommender_model`
+         *     names to choose among `agent_recommender_candidates`; a hosted build may
+         *     bind a recommender of its own, which the caller never configures. Where
+         *     the recommender reports them, the answer also carries a one-line reason
+         *     and its probability for each candidate.
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and names who the decision is billed to.
@@ -8495,6 +8498,11 @@ export interface components {
              * @description Whether POST /api/v1/auth/signup creates an account for an address nobody has added yet, each with an organization of its own, or only lets an address an admin already put on the roster set its password. The signup page reads as registration or as claiming an invitation accordingly, and the sign-in screen links to it with the wording that matches. False for a hybrid gateway, which holds no identities.
              */
             open_signup: boolean;
+            /**
+             * Passkeys Enabled
+             * @description Whether this deployment offers passkeys at all (the passkeys_enabled setting). False means the passkey routes are not mounted and the dashboard hides its passkey page, which is a different answer from passkeys_ready: a deployment that merely has not configured a relying party is ready for nobody yet but still shows the page that says so. False for a hybrid gateway, which issues no session of its own.
+             */
+            passkeys_enabled: boolean;
             /**
              * Passkeys Ready
              * @description Whether this deployment can run a passkey ceremony at all: it has a relying-party ID (webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a registered passkey could sign somebody in *right now*: an operator with none yet needs this one, or the page that registers the first would be hidden from them. False for a hybrid gateway, which issues no session of its own.

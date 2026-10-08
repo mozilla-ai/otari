@@ -20,6 +20,7 @@ from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User as TenancyUser
+from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdirected
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
@@ -963,6 +964,18 @@ ContainerDep = Annotated[Container, Depends(get_container)]
 PortSessionDep = Annotated[AsyncSession | None, Depends(get_db_if_needed)]
 
 
+def get_agent_model_recommender_port(container: ContainerDep) -> AgentModelRecommenderPort:
+    """Resolve the subagent model recommender this build bound at startup.
+
+    No session: the adapter asks a model, not this database, and the call is
+    metered on the route's own session by the decisions scaffold.
+    """
+    return container.resolve(AgentModelRecommenderPort, None)
+
+
+AgentModelRecommenderPortDep = Annotated[AgentModelRecommenderPort, Depends(get_agent_model_recommender_port)]
+
+
 def get_api_key_format_port(db: PortSessionDep, container: ContainerDep) -> ApiKeyFormatPort:
     """Resolve the key-format adapter this build bound at startup."""
     return container.resolve(ApiKeyFormatPort, db)
@@ -1407,6 +1420,7 @@ async def get_feedback_service(
 
 
 __all__ = [
+    "AgentModelRecommenderPortDep",
     "BillingPortDep",
     "CodeExecutionPolicyPortDep",
     "ContainerDep",
@@ -1426,6 +1440,7 @@ __all__ = [
     "ToolPorts",
     "ToolPortsDep",
     "WebSearchPolicyPortDep",
+    "get_agent_model_recommender_port",
     "get_config",
     "get_container",
     "get_telemetry_storage_port",

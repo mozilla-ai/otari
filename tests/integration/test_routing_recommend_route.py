@@ -1,9 +1,11 @@
 """Integration tests for POST /api/v1/routing/recommend.
 
-The upstream decision call is stubbed at ``request_decision``, as the decisions
-tests do, so these cover the route's own job: who may ask, the question it puts
-to the decision model, how the answer comes back, the request's strictness, and
-that the decision is billed to the caller like any other decision.
+The upstream decision call is stubbed at ``request_decision`` where the core
+recommender adapter calls it, as the decisions tests do, so these cover the
+route's own job: who may ask, the question the core puts to the decision model,
+how the answer comes back, the request's strictness, and that the decision is
+billed to the caller like any other decision. A recommender an overlay binds in
+its place is covered by ``test_agent_model_recommender_rebound.py``.
 """
 
 from typing import Any
@@ -12,7 +14,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_ROOT, DEFAULT_AGENT_MODEL_CANDIDATES, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, API_ROOT, DEFAULT_AGENT_MODEL_CANDIDATES, GatewayConfig
 from gateway.services.inference import DecisionProviderError
 from gateway.services.routing.recommend import RECOMMENDATION_QUESTION
 
@@ -63,7 +65,7 @@ def _spawn(**overrides: Any) -> dict[str, Any]:
 
 def _mock_decision(answer: dict[str, Any] | None = None, *, side_effect: Exception | None = None) -> Any:
     mock = AsyncMock(return_value=answer if answer is not None else ANSWER, side_effect=side_effect)
-    return patch("gateway.api.routes._passthrough.request_decision", mock)
+    return patch("gateway.adapters.agent_model_recommender_adapter.request_decision", mock)
 
 
 def test_api_key_gets_the_decision_models_pick(client: TestClient, api_key_header: dict[str, str]) -> None:
@@ -169,3 +171,24 @@ def test_the_decision_is_recorded_as_the_callers_usage(
     assert rows.status_code == 200, rows.text
     models = {row["model"] for row in rows.json()}
     assert "jev-latest" in models
+
+
+def test_the_hold_is_sized_from_the_whole_question(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """A short prompt beside a long description reserves for the question as sent, not for the prompt alone."""
+    budget = client.post(f"{API_ROOT}/budgets", json={"token_limit": 100}, headers=master_key_header).json()
+    client.post(
+        f"{API_ROOT}/users",
+        json={"user_id": "token-capped", "budget_id": budget["budget_id"]},
+        headers=master_key_header,
+    )
+    key = client.post(
+        f"{API_ROOT}/keys", json={"key_name": "token-key", "user_id": "token-capped"}, headers=master_key_header
+    ).json()
+    spawn = _spawn(prompt="List files.", description="y" * 1000)
+
+    with _mock_decision() as mock:
+        response = client.post(PATH, json=spawn, headers={API_KEY_HEADER: f"Bearer {key['key']}"})
+
+    assert response.status_code == 403, response.text
+    assert "token" in response.json()["detail"]
+    mock.assert_not_awaited()

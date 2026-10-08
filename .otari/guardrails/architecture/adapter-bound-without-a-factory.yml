@@ -16,3 +16,4 @@ gates:
       adapter in build_container without a named factory function whose return type is
       the port. This is step 5 of "How to add a capability" in ARCHITECTURE.md. Pass if
       the diff binds no adapter.
+    accept_warnings: [judge-gate-cap]

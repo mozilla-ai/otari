@@ -2,10 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
   AliasResponse,
   CreateAliasRequest,
-  ExplainPolicyRequest,
-  ExplainPolicyResponse,
-  RankCandidatesRequest,
-  RankCandidatesResponse,
   RouterStatus,
   RoutingPolicyResponse,
   SetRoutingPolicyRequest,
@@ -220,20 +216,6 @@ export function useDeleteOrganizationAlias() {
   })
 }
 
-/** Compile a policy (saved or draft) without dispatching anything.
- *
- *  A mutation rather than a query: it is an explicit "check this now" action on
- *  inputs the operator is editing, not cacheable server state. */
-export function useExplainPolicy() {
-  return useMutation({
-    mutationFn: (body: ExplainPolicyRequest) =>
-      apiFetch<ExplainPolicyResponse>("/routing/policies/explain", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-  })
-}
-
 // --- Learned routing ------------------------------------------------------
 
 /** How warm a user's routing memory is.
@@ -252,23 +234,6 @@ export function useRouterStatus(userId: string | null) {
       ),
     enabled: userId !== null && userId !== "",
     staleTime: 30_000,
-  })
-}
-
-/** Record how well each candidate did, which is what the router later votes over. */
-export function useRankCandidates() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (body: RankCandidatesRequest) =>
-      apiFetch<RankCandidatesResponse>("/routing/preferences/rank", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-    onSuccess: () => {
-      // One more example may have crossed the seed count, which changes whether
-      // the policy routes at all.
-      void queryClient.invalidateQueries({ queryKey: [ROUTER_STATUS] })
-    },
   })
 }
 

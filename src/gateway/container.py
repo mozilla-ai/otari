@@ -29,6 +29,7 @@ from typing import Any, TypeVar, cast, get_protocol_members
 from fastapi import APIRouter
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.adapters.agent_model_recommender_adapter import DecisionProviderRecommender
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.code_execution_adapter import build_code_execution_port, verify_code_execution_ready
@@ -47,6 +48,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.deployment import Plane, deployment_for
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
+from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
@@ -418,6 +420,19 @@ def _rate_limit_store_port_factory(config: GatewayConfig | None) -> PortFactory[
     return factory
 
 
+def _agent_model_recommender_factory(config: GatewayConfig | None) -> PortFactory[AgentModelRecommenderPort]:
+    """The core ``AgentModelRecommenderPort`` factory, closed over this app's config.
+
+    Config rather than a session, because which decision model answers is a
+    deployment setting (``agent_recommender_model``) and not a per-request fact,
+    and the adapter holds nothing per request, so one serves every request.
+    A container built without config resolves this port only to raise.
+    """
+    if config is None:
+        return _requires_config(AgentModelRecommenderPort)
+    return _shared(DecisionProviderRecommender(config))
+
+
 def _requires_config(port: PortKey[T]) -> PortFactory[T]:
     """A factory that refuses every resolve, for a container built without config."""
 
@@ -580,6 +595,12 @@ def build_container(
     # Rate-limit counts: the base keeps them in this process, or in Redis
     # where ``rate_limit_store`` asks for one count shared by every replica.
     container.bind(RateLimitStorePort, _rate_limit_store_port_factory(config))
+    # A subagent's model: the base puts one choice question to the decision
+    # model ``agent_recommender_model`` names, which may be a local one. A
+    # hosted overlay binds a recommender of its own behind the same port, at a
+    # price of its own, and changes nothing above it: the call is metered and
+    # recorded here either way.
+    container.bind(AgentModelRecommenderPort, _agent_model_recommender_factory(config))
     if config is not None:
         # Asked once, at build, rather than per request: selecting a hosted
         # provider is itself what publishes code execution on ``/v1/tools``, in

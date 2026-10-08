@@ -40,6 +40,8 @@ RUN pip install --no-cache-dir --upgrade pip uv
 COPY pyproject.toml uv.lock ./
 COPY src ./src
 COPY cli ./cli
+COPY any-search ./any-search
+COPY any-fetch ./any-fetch
 # The e2b extra lets `sandbox_provider: e2b` work from the published image; the
 # adapter imports it only when that provider is selected. The metrics extra keeps
 # a Prometheus scrape one config flag away rather than a reinstall, and the redis
@@ -55,6 +57,8 @@ RUN useradd -m -u 1000 otari && chown otari:otari /app
 COPY --from=builder --chown=otari:otari /app/.venv /app/.venv
 COPY --chown=otari:otari src ./src
 COPY --chown=otari:otari cli ./cli
+COPY --chown=otari:otari any-search ./any-search
+COPY --chown=otari:otari any-fetch ./any-fetch
 COPY --from=web --chown=otari:otari /app/src/gateway/static/dashboard ./src/gateway/static/dashboard
 COPY --chown=otari:otari alembic ./alembic
 COPY --chown=otari:otari alembic.ini ./alembic.ini

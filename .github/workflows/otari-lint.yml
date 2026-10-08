@@ -6,6 +6,8 @@ on:
     paths:
       - 'src/gateway/**'
       - 'cli/**'
+      - 'any-search/**'
+      - 'any-fetch/**'
       - 'alembic/**'
       - 'tests/**'
       - 'scripts/**'
@@ -20,6 +22,8 @@ on:
     paths:
       - 'src/gateway/**'
       - 'cli/**'
+      - 'any-search/**'
+      - 'any-fetch/**'
       - 'alembic/**'
       - 'tests/**'
       - 'scripts/**'

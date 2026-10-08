@@ -127,4 +127,6 @@ def test_a_hybrid_gateway_serves_no_control_plane() -> None:
         "/messages",
         "/messages/count_tokens",
         "/responses",
+        # Discovery, answered from the platform's list for the caller's key.
+        "/models",
     }

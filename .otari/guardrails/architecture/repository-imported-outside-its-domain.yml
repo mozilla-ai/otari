@@ -27,3 +27,4 @@ gates:
       repository package of the same name nor src/gateway/api/deps.py. This is layer
       and import rule 4 in ARCHITECTURE.md, "The modular monolith". The architecture
       check covers every other import. Pass if the diff adds no such import.
+    accept_warnings: [judge-gate-cap]

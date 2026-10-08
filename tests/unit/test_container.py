@@ -15,6 +15,7 @@ import pytest
 from fastapi import APIRouter
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.adapters.agent_model_recommender_adapter import DecisionProviderRecommender
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.code_execution_policy_adapter import LocalCodeExecutionPolicy, RemoteCodeExecutionPolicy
@@ -38,6 +39,7 @@ from gateway.container import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
@@ -168,6 +170,24 @@ def test_file_storage_refuses_a_container_built_without_config() -> None:
 
     with pytest.raises(ContainerError, match="FileStoragePort"):
         container.resolve(FileStoragePort, NO_SESSION)
+
+
+def test_the_recommender_asks_the_configured_decision_model_and_is_shared() -> None:
+    """The core answers from the deployment's own decision provider, with one adapter for every request."""
+    container = build_container(config=GatewayConfig(), workspace_listener=None)
+
+    recommender = container.resolve(AgentModelRecommenderPort, NO_SESSION)
+
+    assert isinstance(recommender, DecisionProviderRecommender)
+    assert container.resolve(AgentModelRecommenderPort, NO_SESSION) is recommender
+
+
+def test_the_recommender_refuses_a_container_built_without_config() -> None:
+    """With no config there is no ``agent_recommender_model`` to ask, so resolving says so."""
+    container = build_container(workspace_listener=None)
+
+    with pytest.raises(ContainerError, match="AgentModelRecommenderPort"):
+        container.resolve(AgentModelRecommenderPort, NO_SESSION)
 
 
 def test_the_identity_provider_refuses_to_build_without_a_session() -> None:
