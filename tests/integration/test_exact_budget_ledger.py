@@ -148,7 +148,9 @@ async def test_many_reconciles_leave_no_residue(async_db: AsyncSession) -> None:
     await async_db.commit()
 
     amount = Decimal("0.000001")
-    handle = ReservationHandle(user_id="residue-user", estimate=Decimal(0), reserved=False, strategy="disabled")
+    handle = ReservationHandle(
+        scope=None, user_id="residue-user", estimate=Decimal(0), reserved=False, strategy="disabled"
+    )
     for _ in range(1_000):
         await reconcile_reservation(async_db, handle, amount)
 

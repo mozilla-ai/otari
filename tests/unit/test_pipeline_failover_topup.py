@@ -76,6 +76,7 @@ def _ctx(
         prices=None,
         reservation=reservation
         or ReservationHandle(
+            scope=None,
             user_id="user-1",
             estimate=estimate,
             reserved=True,

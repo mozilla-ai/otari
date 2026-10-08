@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal
@@ -325,11 +325,13 @@ class ReservationHandle:
     # it, so the ceiling loses that headroom for the rest of its window.
     token_estimate: int = 0
     scoped_token_estimate: int = 0
-    # Not split, because a request count never grows: a top-up belongs to a
-    # request already counted, so both legs hold what they held at admission.
     request_estimate: int = 0
+    scoped_request_estimate: int = 0
     # This is None when the request holds nothing: a free model, a budget-exempt key, or no budget and no ceiling.
     reservation_id: str | None = None
+    # A fallback to another provider resolves that provider's ceilings from this scope.
+    # It has no default, so a handle that holds ceilings cannot leave it out.
+    scope: BudgetScopeRequest | None = field(kw_only=True)
 
     @property
     def scoped_budget_ids(self) -> tuple[str, ...]:
@@ -418,7 +420,7 @@ async def _build_ceiling_refusal(
     requests: int,
     new_request: bool,
 ) -> HTTPException:
-    """The 403 for a request a scoped ceiling has no room for, naming the limit it ran out of."""
+    """Build the 403 for a request a scoped ceiling has no room for, naming the limit it ran out of."""
     axis = await blocked_axis(db, refused, amount=amount, tokens=tokens, requests=requests, new_request=new_request)
     return HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -442,6 +444,7 @@ async def _held_handle(
     request_estimate: int,
     ttl_seconds: int,
     record_reservation: bool,
+    scope: BudgetScopeRequest | None,
     user_hold_uncommitted: bool = False,
 ) -> ReservationHandle:
     """Build the handle for a hold that has been taken, and ledger it.
@@ -534,6 +537,7 @@ async def _held_handle(
                 token_estimate=token_estimate,
                 scoped_token_estimate=scoped_token_estimate,
                 request_estimate=request_estimate,
+                scoped_request_estimate=request_estimate,
                 ttl_seconds=ttl_seconds,
             )
         except SQLAlchemyError:
@@ -558,7 +562,9 @@ async def _held_handle(
         token_estimate=token_estimate,
         scoped_token_estimate=scoped_token_estimate,
         request_estimate=request_estimate,
+        scoped_request_estimate=request_estimate if scoped else 0,
         reservation_id=reservation_id,
+        scope=scope,
     )
 
 
@@ -636,6 +642,7 @@ async def reserve_budget(
     # downstream reconcile/refund site inherits it.
     if not counts_toward_budget:
         return ReservationHandle(
+            scope=None,
             user_id=user_id,
             estimate=ZERO,
             reserved=False,
@@ -643,7 +650,7 @@ async def reserve_budget(
             counts_toward_budget=False,
         )
 
-    no_reservation = ReservationHandle(user_id=user_id, estimate=ZERO, reserved=False, strategy=normalized)
+    no_reservation = ReservationHandle(user_id=user_id, estimate=ZERO, reserved=False, strategy=normalized, scope=scope)
 
     if normalized == "disabled":
         return no_reservation
@@ -721,6 +728,7 @@ async def reserve_budget(
         # returned above), so the user leg of the handle is deliberately empty.
         return await _held_handle(
             db,
+            scope=scope,
             user_id=user_id,
             estimate=ZERO,
             user_reserved=False,
@@ -752,6 +760,7 @@ async def reserve_budget(
         )
         return await _held_handle(
             db,
+            scope=scope,
             user_id=user_id,
             estimate=usd or ZERO,
             user_reserved=True,
@@ -844,6 +853,7 @@ async def reserve_budget(
 
     return await _held_handle(
         db,
+        scope=scope,
         user_id=user_id,
         estimate=usd or ZERO,
         user_reserved=True,
@@ -982,8 +992,8 @@ async def reconcile_reservation(
         held=ZERO if reclaimed_early else handle.scoped_estimate,
         actual_tokens=settled_tokens,
         held_tokens=0 if reclaimed_early else handle.scoped_token_estimate,
-        requests=handle.request_estimate,
-        held_requests=0 if reclaimed_early else handle.request_estimate,
+        requests=handle.scoped_request_estimate,
+        held_requests=0 if reclaimed_early else handle.scoped_request_estimate,
         counts_toward_budget=handle.counts_toward_budget,
         commit=False,
     )
@@ -1015,7 +1025,7 @@ async def record_external_spend(db: AsyncSession, user_id: str, cost: Decimal | 
     batch-heavy workloads in dollars. Moving that boundary means giving this path
     a window to count over, not passing a token count through it.
     """
-    handle = ReservationHandle(user_id=user_id, estimate=ZERO, reserved=False, strategy="disabled")
+    handle = ReservationHandle(scope=None, user_id=user_id, estimate=ZERO, reserved=False, strategy="disabled")
     await reconcile_reservation(db, handle, cost)
 
 
@@ -1056,7 +1066,7 @@ async def refund_reservation(db: AsyncSession, handle: ReservationHandle) -> Non
         handle.scoped_budget_ids,
         handle.scoped_estimate,
         tokens=handle.scoped_token_estimate,
-        requests=handle.request_estimate,
+        requests=handle.scoped_request_estimate,
         commit=False,
     )
     # One commit, for the reason given in :func:`reconcile_reservation`.
@@ -1163,6 +1173,7 @@ async def increase_reservation(
         db,
         handle.reservation_id,
         user_delta=delta.estimate if delta.reserved else ZERO,
+        user_grew=delta.reserved,
         scoped_delta=additional if handle.scoped_budgets else ZERO,
         token_delta=delta.token_estimate if delta.reserved else 0,
         scoped_token_delta=grown_tokens if handle.scoped_budgets else 0,
@@ -1192,3 +1203,168 @@ async def increase_reservation(
             await db.commit()
             handle.estimate -= delta.estimate
             handle.token_estimate -= delta.token_estimate
+
+
+async def move_reservation_to_provider(
+    db: AsyncSession,
+    handle: ReservationHandle,
+    provider_instance: str,
+    *,
+    estimate: Decimal | None = None,
+    tokens: int | None = None,
+    reservation_ttl_sec: int = DEFAULT_RESERVATION_TTL_SEC,
+) -> None:
+    """Hold a reservation on ``provider_instance``'s scoped ceilings instead of its previous provider's.
+
+    A ceiling both providers share keeps its hold, a ceiling only the new provider has takes the request's hold,
+    and a ceiling only the previous provider had gives its hold back.
+    ``estimate`` is the request's cost on the new provider, and each new ceiling must have room for it.
+    ``tokens`` is the request's token count, which a new ceiling holds when the handle held no ceiling.
+    Raises ``HTTPException`` 403 when a new ceiling has no room, and ``handle`` then holds what it held before.
+
+    NOTE: A new ceiling holds what the shared ones hold, so the caller must still grow the reservation to ``estimate``.
+    """
+    if handle.scope is None or not handle.counts_toward_budget or handle.strategy == "disabled":
+        return
+    if handle.scope.provider_instance == provider_instance:
+        return
+    scope = replace(handle.scope, provider_instance=provider_instance)
+    target = await applicable_budgets(db, user_id=handle.user_id, scope=scope)
+    held_ids = set(handle.scoped_budget_ids)
+    target_ids = {ceiling.budget_id for ceiling in target}
+    added = [ceiling for ceiling in target if ceiling.budget_id not in held_ids]
+    added_ids = [ceiling.budget_id for ceiling in added]
+    dropped_ids = [budget_id for budget_id in handle.scoped_budget_ids if budget_id not in target_ids]
+    if not added_ids and not dropped_ids:
+        handle.scope = scope
+        return
+    if handle.scoped_budgets:
+        holds = ledger.LineAmounts(
+            amount=handle.scoped_estimate,
+            tokens=handle.scoped_token_estimate,
+            requests=handle.scoped_request_estimate,
+        )
+    else:
+        # A request that held no ceiling counts once on each new one, as admission would have counted it.
+        holds = ledger.LineAmounts(
+            amount=handle.estimate,
+            tokens=handle.token_estimate if tokens is None else min(max(tokens, 0), MAX_COUNT_LIMIT),
+            requests=1,
+        )
+    # The top-up that follows adds this delta to every ceiling, so a new ceiling needs room for it as well.
+    growth = max(estimate - handle.estimate, ZERO) if estimate is not None else ZERO
+
+    # What the new ceilings hold that neither the handle nor the ledger names yet.
+    unrecorded: ledger.LineAmounts | None = None
+    if added:
+        checked = replace(holds, amount=holds.amount + growth)
+        refused = await reserve_scoped(
+            db, added, checked.amount, tokens=checked.tokens, requests=checked.requests, new_request=True
+        )
+        if refused is not None:
+            raise await _build_ceiling_refusal(
+                db,
+                refused,
+                amount=checked.amount,
+                tokens=checked.tokens,
+                requests=checked.requests,
+                new_request=True,
+            )
+        unrecorded = checked
+    try:
+        if unrecorded is not None and growth > ZERO:
+            # NOTE: A concurrent request can take this room before the top-up takes it again.
+            # The top-up then refuses, and that refusal stops the chain instead of skipping the candidate.
+            await release_scoped(db, added_ids, growth)
+            unrecorded = holds
+        if handle.reservation_id is not None and not await ledger.move(
+            db, handle.reservation_id, added=added_ids, dropped=dropped_ids, holds=holds
+        ):
+            # The sweep reclaimed this reservation and released every ceiling its row recorded.
+            # The new holds go back, and the handle names the new ceilings so a late settlement records the spend there.
+            logger.warning(
+                "Reservation %s was reclaimed as leaked before its fallback; returning the new holds. "
+                "Raise budget_reservation_ttl_sec above the slowest request served.",
+                handle.reservation_id,
+            )
+            if unrecorded is not None:
+                await release_scoped(db, added_ids, holds.amount, tokens=holds.tokens, requests=holds.requests)
+                unrecorded = None
+            _retarget_handle(handle, scope, target, holds)
+            return
+        if dropped_ids:
+            await release_scoped(
+                db,
+                dropped_ids,
+                handle.scoped_estimate,
+                tokens=handle.scoped_token_estimate,
+                requests=handle.scoped_request_estimate,
+                commit=False,
+            )
+        # One commit for the ledger's new lines and the released holds, so the sweep never sees one without the other.
+        await db.commit()
+    except BaseException:
+        with contextlib.suppress(*DATABASE_ERRORS):
+            await db.rollback()
+        if unrecorded is not None:
+            try:
+                await release_scoped(
+                    db, added_ids, unrecorded.amount, tokens=unrecorded.tokens, requests=unrecorded.requests
+                )
+            except DATABASE_ERRORS:
+                logger.warning(
+                    "Could not return the fallback holds on budgets %s. "
+                    "Their %s USD stays held, and no sweep releases it.",
+                    added_ids,
+                    unrecorded.amount,
+                    exc_info=True,
+                )
+        raise
+    _retarget_handle(handle, scope, target, holds)
+    if handle.reservation_id is None and target:
+        handle.reservation_id = await _record_moved(db, handle, reservation_ttl_sec)
+
+
+def _retarget_handle(
+    handle: ReservationHandle,
+    scope: BudgetScopeRequest,
+    target: tuple[ApplicableBudget, ...],
+    holds: ledger.LineAmounts,
+) -> None:
+    """Make ``handle`` name the ceilings it now holds against, and what each holds."""
+    handle.scope = scope
+    handle.scoped_budgets = target
+    handle.scoped_estimate = holds.amount if target else ZERO
+    handle.scoped_token_estimate = holds.tokens if target else 0
+    handle.scoped_request_estimate = holds.requests if target else 0
+
+
+async def _record_moved(db: AsyncSession, handle: ReservationHandle, reservation_ttl_sec: int) -> str | None:
+    """Write the ledger row for a handle whose first ceiling holds came from a move, or return ``None`` on failure.
+
+    NOTE: A failed write leaves the holds live and settled through the handle alone, as for any unledgered hold.
+    """
+    try:
+        return await ledger.record(
+            db,
+            user_id=handle.user_id,
+            estimate=handle.estimate,
+            user_reserved=handle.reserved,
+            scoped_budgets=handle.scoped_budgets,
+            scoped_estimate=handle.scoped_estimate,
+            token_estimate=handle.token_estimate,
+            scoped_token_estimate=handle.scoped_token_estimate,
+            request_estimate=handle.request_estimate,
+            scoped_request_estimate=handle.scoped_request_estimate,
+            ttl_seconds=reservation_ttl_sec,
+        )
+    except DATABASE_ERRORS:
+        with contextlib.suppress(*DATABASE_ERRORS):
+            await db.rollback()
+        logger.warning(
+            "Could not write the reservation ledger row for user %s after a fallback; the hold is live but "
+            "unledgered, so it settles through the handle and is not reclaimable by the sweep.",
+            handle.user_id,
+            exc_info=True,
+        )
+        return None

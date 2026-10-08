@@ -36,7 +36,9 @@ from gateway.models.budgets import (
 from gateway.models.users import User
 from gateway.services.budgets import _ledger as ledger
 from gateway.services.budgets import (
+    applicable_budgets,
     increase_reservation,
+    move_reservation_to_provider,
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
@@ -705,3 +707,105 @@ async def test_a_commit_that_reports_failure_gives_the_ceilings_back_only_if_it_
         assert rows[0].status == RESERVATION_RELEASED
         user = await _user(async_db, user_id)
         assert (user.reserved, user.reserved_requests) == (Decimal(0), 0)
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_after_a_move_returns_the_new_providers_hold(async_db: AsyncSession, tenancy: Fixture) -> None:
+    openai_cap = await _scoped(
+        async_db, scope_type="workspace", scope_id=str(tenancy.workspace_id), max_budget=5.0, provider_key_id="openai"
+    )
+    anthropic = await _scoped(
+        async_db,
+        scope_type="workspace",
+        scope_id=str(tenancy.workspace_id),
+        max_budget=5.0,
+        provider_key_id="anthropic",
+    )
+    async_db.add_all([openai_cap, anthropic])
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+    await move_reservation_to_provider(async_db, handle, "anthropic")
+    assert await _counters(async_db, anthropic.id) == (0.0, 3.0)
+    assert handle.reservation_id is not None
+    row = await async_db.get_one(BudgetReservation, handle.reservation_id)
+    row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    await async_db.commit()
+
+    assert await ledger.sweep_expired(async_db, batch_size=10) == 1
+
+    assert await _counters(async_db, anthropic.id) == (0.0, 0.0)
+    assert await _counters(async_db, openai_cap.id) == (0.0, 0.0)
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_returns_what_a_move_took_for_a_request_that_held_nothing(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    anthropic = await _scoped(
+        async_db,
+        scope_type="workspace",
+        scope_id=str(tenancy.workspace_id),
+        max_budget=5.0,
+        token_limit=1000,
+        request_limit=10,
+        provider_key_id="anthropic",
+    )
+    async_db.add(anthropic)
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+    assert handle.reservation_id is None
+    await move_reservation_to_provider(async_db, handle, "anthropic", estimate=Decimal(3), tokens=40)
+    await increase_reservation(async_db, handle, 3.0)
+    assert handle.reservation_id is not None
+    row = await async_db.get_one(BudgetReservation, handle.reservation_id)
+    row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    await async_db.commit()
+
+    assert await ledger.sweep_expired(async_db, batch_size=10) == 1
+
+    held = (
+        await async_db.execute(
+            select(ScopedBudget.reserved_spend, ScopedBudget.reserved_tokens, ScopedBudget.reserved_requests).where(
+                ScopedBudget.id == anthropic.id
+            )
+        )
+    ).one()
+    assert (float(held[0]), held[1], held[2]) == (0.0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_a_top_up_that_first_holds_the_user_leg_marks_its_row(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """A row written while the user leg held nothing records the leg once a top-up holds it."""
+    anthropic = await _scoped(
+        async_db,
+        scope_type="workspace",
+        scope_id=str(tenancy.workspace_id),
+        max_budget=5.0,
+        provider_key_id="anthropic",
+    )
+    async_db.add(anthropic)
+    await async_db.commit()
+    (ceiling,) = await applicable_budgets(async_db, user_id=tenancy.user_id, scope=tenancy.scope("anthropic"))
+    reservation_id = await ledger.record(
+        async_db,
+        user_id=tenancy.user_id,
+        estimate=Decimal(0),
+        user_reserved=False,
+        scoped_budgets=[ceiling],
+        scoped_estimate=Decimal(1),
+        ttl_seconds=60,
+    )
+    assert reservation_id is not None
+
+    assert await ledger.grow(
+        async_db,
+        reservation_id,
+        user_delta=Decimal(2),
+        user_grew=True,
+        scoped_delta=Decimal(2),
+        token_delta=30,
+    )
+
+    row = await async_db.get_one(BudgetReservation, reservation_id)
+    await async_db.refresh(row)
+    assert (row.user_reserved, row.estimate, row.token_estimate) == (True, Decimal(2), 30)

@@ -1566,6 +1566,7 @@ async def _bill_vision_side_call(
     await reconcile_reservation(
         db,
         ReservationHandle(
+            scope=None,
             user_id=user_id,
             estimate=ZERO,
             reserved=False,
