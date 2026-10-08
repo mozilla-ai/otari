@@ -8,32 +8,65 @@ tuple is replaced whole, never mutated.
 """
 
 from collections.abc import Iterable
+from dataclasses import replace
+from datetime import UTC, datetime
 
 from gateway.services.pricing.bundled import bundled_generation
-from gateway.services.pricing.models_dev_index import ModelsDevPriceIndex, PriceGeneration
+from gateway.services.pricing.models_dev_index import ModelsDevPriceIndex, PriceGeneration, PriceTimeline
 
 # Each generation is a parsed index of several thousand entries, so the window
 # held in memory is smaller than the history the database keeps.
 MAX_RESIDENT_GENERATIONS = 10
 
+_EARLIEST = datetime.min.replace(tzinfo=UTC)
+
 _accepted: tuple[PriceGeneration, ...] = ()
+# Whether ``_accepted`` starts at the first snapshot ever accepted. Only then
+# does the packaged snapshot price the dates before it; once older history was
+# pruned or left out of the window, those dates are unpriced rather than
+# answered with a later rate.
+_complete = True
+_timeline: PriceTimeline | None = None
 
 
-def set_accepted_generations(generations: Iterable[PriceGeneration]) -> None:
-    """Replace the accepted generations, keeping the newest ``MAX_RESIDENT_GENERATIONS``."""
-    global _accepted
+def set_accepted_generations(generations: Iterable[PriceGeneration], *, complete: bool = True) -> None:
+    """Replace the accepted generations, keeping the newest ``MAX_RESIDENT_GENERATIONS``.
+
+    ``complete`` says the oldest given one is the first ever accepted; dropping
+    any to fit the window clears it.
+    """
+    global _accepted, _complete, _timeline
     ordered = sorted(generations, key=lambda generation: generation.effective_at)
-    _accepted = tuple(ordered[-MAX_RESIDENT_GENERATIONS:])
+    if len(ordered) > MAX_RESIDENT_GENERATIONS:
+        ordered = ordered[-MAX_RESIDENT_GENERATIONS:]
+        complete = False
+    _accepted = tuple(ordered)
+    _complete = complete
+    _timeline = None
 
 
-def add_accepted_generation(generation: PriceGeneration) -> None:
+def add_accepted_generation(generation: PriceGeneration, *, history_pruned: bool = False) -> None:
     """Make ``generation`` the newest, as an accept on this worker does."""
-    set_accepted_generations((*_accepted, generation))
+    set_accepted_generations((*_accepted, generation), complete=_complete and not history_pruned)
+
+
+def active_timeline() -> PriceTimeline:
+    """The generations in effect, oldest first, ready for as-of lookups."""
+    global _timeline
+    if _timeline is None:
+        if not _accepted:
+            _timeline = PriceTimeline((bundled_generation(),))
+        elif _complete:
+            baseline = replace(bundled_generation(), effective_at=_EARLIEST)
+            _timeline = PriceTimeline((baseline, *_accepted))
+        else:
+            _timeline = PriceTimeline(_accepted)
+    return _timeline
 
 
 def active_generations() -> tuple[PriceGeneration, ...]:
     """Every generation in effect, oldest first; the packaged snapshot when none was accepted."""
-    return _accepted or (bundled_generation(),)
+    return active_timeline().generations
 
 
 def current_index() -> ModelsDevPriceIndex:
@@ -43,5 +76,7 @@ def current_index() -> ModelsDevPriceIndex:
 
 def reset_generations() -> None:
     """Forget every accepted generation (tests)."""
-    global _accepted
+    global _accepted, _complete, _timeline
     _accepted = ()
+    _complete = True
+    _timeline = None

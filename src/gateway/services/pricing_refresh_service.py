@@ -40,15 +40,14 @@ MODELS_DEV_PENDING_SOURCE = "models.dev-pending"
 # same table because a claim is exactly one row with a timestamp, and the table
 # already is that.
 MODELS_DEV_POLL_CLAIM_SOURCE = "models.dev-poll-claim"
-# Rebuilding the generations is cheap only when the accepted snapshot changed, so
-# the refresher compares against the raw snapshot it applied before parsing
-# anything. Matches the alias and provider refreshers' cadence.
+# Matches the alias and provider refreshers' cadence.
 PRICE_SNAPSHOT_REFRESH_TTL_SECONDS = 30.0
 
-# The raw snapshot this worker has applied in-memory. A confirm refreshes the
-# worker that served it; the refresher uses this to converge sibling workers and
-# replicas without rebuilding on every tick.
-_applied_snapshot_raw: str | None = None
+# When the active row this worker has applied was last written. A confirm
+# refreshes the worker that served it; the refresher compares this against the
+# row's timestamp alone, so converging sibling workers and replicas reads no
+# payload until the row has changed.
+_applied_updated_at: datetime | None = None
 
 
 def _parse_snapshot(raw_snapshot: str) -> ModelsDevPriceIndex:
@@ -286,16 +285,16 @@ async def confirm_price_refresh(
             snapshot=raw_snapshot,
         )
     )
-    await _prune_history(session)
+    pruned = await _prune_history(session)
     try:
         await session.commit()
     except SQLAlchemyError as exc:
         await session.rollback()
         raise PricingRefreshError("Unable to save the latest models.dev data") from exc
 
-    global _applied_snapshot_raw
-    add_accepted_generation(PriceGeneration(effective_at=accepted_at, index=index))
-    _applied_snapshot_raw = raw_snapshot
+    global _applied_updated_at
+    add_accepted_generation(PriceGeneration(effective_at=accepted_at, index=index), history_pruned=pruned)
+    _applied_updated_at = await _active_updated_at(session)
     return True
 
 
@@ -335,8 +334,11 @@ class AcceptedSnapshot:
 PRICING_SNAPSHOT_HISTORY_KEEP = 30
 
 
-async def _prune_history(session: AsyncSession) -> None:
-    """Drop the accepted snapshots older than the newest ``PRICING_SNAPSHOT_HISTORY_KEEP``."""
+async def _prune_history(session: AsyncSession) -> bool:
+    """Drop the accepted snapshots older than the newest ``PRICING_SNAPSHOT_HISTORY_KEEP``.
+
+    Returns whether the history is now at its limit, so older accepts may be gone.
+    """
     keep = (
         select(PricingSnapshotHistory.id)
         .where(PricingSnapshotHistory.source == MODELS_DEV_SOURCE)
@@ -345,13 +347,14 @@ async def _prune_history(session: AsyncSession) -> None:
     )
     kept = {row for row in (await session.execute(keep)).scalars()}
     if len(kept) < PRICING_SNAPSHOT_HISTORY_KEEP:
-        return
+        return False
     await session.execute(
         delete(PricingSnapshotHistory).where(
             PricingSnapshotHistory.source == MODELS_DEV_SOURCE,
             PricingSnapshotHistory.id.not_in(kept),
         )
     )
+    return True
 
 
 async def list_accepted_snapshots(session: AsyncSession, limit: int = 50) -> list[AcceptedSnapshot]:
@@ -513,24 +516,36 @@ def _build_generations(
     return generations
 
 
+async def _active_updated_at(session: AsyncSession) -> datetime | None:
+    """The active row's last write, read without its payload; ``None`` when absent or unreadable."""
+    try:
+        return (
+            await session.execute(select(PricingSnapshot.updated_at).where(PricingSnapshot.source == MODELS_DEV_SOURCE))
+        ).scalar_one_or_none()
+    except SQLAlchemyError:
+        return None
+
+
 async def _apply_persisted_snapshots(session: AsyncSession, active_row: PricingSnapshot) -> None:
     """Rebuild the process-wide generations from the history window and the active row."""
-    global _applied_snapshot_raw
+    global _applied_updated_at
     active = (active_row.updated_at, active_row.snapshot)
+    marker = active_row.updated_at
     rows = (
         await session.execute(
             select(PricingSnapshotHistory.accepted_at, PricingSnapshotHistory.snapshot)
             .where(PricingSnapshotHistory.source == MODELS_DEV_SOURCE)
             .order_by(PricingSnapshotHistory.accepted_at.desc())
-            .limit(MAX_RESIDENT_GENERATIONS)
+            .limit(MAX_RESIDENT_GENERATIONS + 1)
         )
     ).all()
+    # A full history window or a longer one means older accepts may be missing.
+    complete = len(rows) <= MAX_RESIDENT_GENERATIONS and len(rows) < PRICING_SNAPSHOT_HISTORY_KEEP
     history = [(row.accepted_at, row.snapshot) for row in rows]
     generations = await asyncio.to_thread(_build_generations, history, active)
-    if not generations:
-        return
-    set_accepted_generations(generations)
-    _applied_snapshot_raw = active_row.snapshot
+    _applied_updated_at = marker
+    if generations:
+        set_accepted_generations(generations, complete=complete)
 
 
 async def load_persisted_price_snapshot(session: AsyncSession) -> None:
@@ -547,11 +562,15 @@ async def refresh_price_snapshot(session: AsyncSession) -> None:
     """Re-apply the accepted snapshots when a confirm on another worker changed them.
 
     The active row only ever appears or advances via ``confirm_price_refresh``, so
-    a snapshot equal to what this worker already applied is skipped.
+    a timestamp equal to what this worker already applied is skipped, and only
+    that column is read until it differs.
     """
 
+    updated_at = await _active_updated_at(session)
+    if updated_at is None or updated_at == _applied_updated_at:
+        return
     active_row = await _get_active_snapshot_row(session)
-    if active_row is None or active_row.snapshot == _applied_snapshot_raw:
+    if active_row is None:
         return
     await _apply_persisted_snapshots(session, active_row)
     logger.info("Applied updated %s pricing snapshot accepted on another worker", MODELS_DEV_SOURCE)
@@ -583,7 +602,7 @@ async def run_price_snapshot_refresher(interval: float = PRICE_SNAPSHOT_REFRESH_
 def reset_price_refresh_state() -> None:
     """Restore the bundled snapshot for app tests."""
 
-    global _applied_snapshot_raw
+    global _applied_updated_at
     reset_generations()
     reset_price_cache()
-    _applied_snapshot_raw = None
+    _applied_updated_at = None

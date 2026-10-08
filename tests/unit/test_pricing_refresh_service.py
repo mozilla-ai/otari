@@ -1,7 +1,10 @@
 """Tests for explicit models.dev price snapshot refreshes."""
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -11,9 +14,16 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+import gateway.services.pricing.generations as generations
 import gateway.services.pricing_refresh_service as refresh
 from gateway.models.pricing import PricingSnapshot, PricingSnapshotHistory
-from gateway.services.pricing import active_generations, bundled_generation, current_index
+from gateway.services.pricing import (
+    active_generations,
+    active_timeline,
+    bundled_generation,
+    current_index,
+    resolve_as_of,
+)
 
 
 def _catalog(input_rate: float = 1, *, extra: bool = False) -> dict[str, Any]:
@@ -79,7 +89,8 @@ async def test_a_fetch_is_held_for_review_and_confirmation_activates_it(
     assert await refresh.confirm_price_refresh(session) is True
 
     assert current_index().get("test", "model") is not None
-    assert len(active_generations()) == 1
+    baseline, accepted = active_generations()
+    assert baseline.baseline and not accepted.baseline
     assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is None
     active = await session.get(PricingSnapshot, refresh.MODELS_DEV_SOURCE)
     assert active is not None and active.snapshot == pending.snapshot
@@ -221,8 +232,9 @@ async def test_startup_restores_the_accepted_history(session: AsyncSession, upst
     assert active_generations() == (bundled_generation(),)
     await refresh.load_persisted_price_snapshot(session)
 
-    generations = active_generations()
+    generations = active_generations()[1:]
     assert len(generations) == 2
+    assert active_generations()[0].baseline
     assert generations[0].effective_at < generations[1].effective_at
     old, new = (g.index.get("test", "model") for g in generations)
     assert old is not None and new is not None
@@ -241,12 +253,17 @@ async def test_refresher_applies_a_snapshot_accepted_on_another_worker(
     await refresh.refresh_price_snapshot(session)
 
     assert current_index().get("test", "model") is not None
-    assert refresh._applied_snapshot_raw == _raw()
+    assert refresh._applied_updated_at is not None
 
     monkeypatch.setattr(
         refresh,
         "_apply_persisted_snapshots",
         lambda *_: pytest.fail("an unchanged snapshot must not be re-applied"),
+    )
+    monkeypatch.setattr(
+        refresh,
+        "_get_active_snapshot_row",
+        lambda *_: pytest.fail("an unchanged snapshot's payload must not be read"),
     )
     await refresh.refresh_price_snapshot(session)
 
@@ -360,3 +377,47 @@ async def test_auto_applies_only_what_it_prepared(
 
     assert len((await session.execute(select(PricingSnapshotHistory))).scalars().all()) == 1
     assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is not None
+
+
+@pytest.mark.asyncio
+async def test_dates_before_the_first_acceptance_price_at_the_bundled_rate(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    before = datetime.now(UTC) - timedelta(days=1)
+    bundled = bundled_generation().index.resolve("openai", "gpt-4o")
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+    upstream["catalog"] = _catalog(input_rate=5)
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+    refresh.reset_price_refresh_state()
+    await refresh.load_persisted_price_snapshot(session)
+
+    assert bundled is not None
+    earlier = resolve_as_of(active_timeline(), before, "openai", "gpt-4o")
+    assert earlier is not None and earlier.input == bundled.input
+    assert resolve_as_of(active_timeline(), before, "test", "model") is None
+
+
+@pytest.mark.asyncio
+async def test_history_longer_than_the_resident_window_fails_closed_before_it(
+    session: AsyncSession, upstream: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(refresh, "MAX_RESIDENT_GENERATIONS", 2)
+    monkeypatch.setattr(generations, "MAX_RESIDENT_GENERATIONS", 2)
+    before = datetime.now(UTC) - timedelta(days=1)
+    for rate in (1, 2, 3):
+        upstream["catalog"] = _catalog(input_rate=rate)
+        await refresh.prepare_price_refresh(session)
+        await refresh.confirm_price_refresh(session)
+        await asyncio.sleep(0.01)
+    refresh.reset_price_refresh_state()
+    await refresh.load_persisted_price_snapshot(session)
+
+    timeline = active_timeline()
+    assert len(timeline.generations) == 2
+    assert not any(g.baseline for g in timeline.generations)
+    assert resolve_as_of(timeline, before, "test", "model") is None
+    assert resolve_as_of(timeline, before, "openai", "gpt-4o") is None
+    latest = resolve_as_of(timeline, datetime.now(UTC), "test", "model")
+    assert latest is not None and latest.input == Decimal(3)

@@ -1,6 +1,7 @@
 """The packaged models.dev snapshot and the rules that cut it."""
 
 import json
+from dataclasses import replace
 from importlib import resources
 
 from gateway.services.pricing import (
@@ -71,7 +72,11 @@ def test_the_generation_list_falls_back_to_the_bundled_snapshot() -> None:
     reset_generations()
     assert active_generations() == (bundled_generation(),)
 
-    generation = bundled_generation()
+    assert bundled_generation().baseline
+    generation = replace(bundled_generation(), baseline=False)
     set_accepted_generations([generation])
-    assert active_generations() == (generation,)
+    baseline, accepted = active_generations()
+    assert baseline.baseline
+    assert baseline.effective_at < accepted.effective_at
+    assert accepted == generation
     reset_generations()

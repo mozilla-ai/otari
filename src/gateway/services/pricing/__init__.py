@@ -19,6 +19,7 @@ from gateway.services.pricing.catalog_trim import (
 from gateway.services.pricing.generations import (
     MAX_RESIDENT_GENERATIONS,
     active_generations,
+    active_timeline,
     add_accepted_generation,
     current_index,
     reset_generations,
@@ -48,6 +49,7 @@ __all__ = [
     "PriceTimeline",
     "UsageCharge",
     "active_generations",
+    "active_timeline",
     "add_accepted_generation",
     "billed_search_units",
     "bundled_generation",

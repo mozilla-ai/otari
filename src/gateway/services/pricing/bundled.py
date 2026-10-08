@@ -25,6 +25,6 @@ def load_bundled_index() -> ModelsDevPriceIndex:
 
 
 def bundled_generation() -> PriceGeneration:
-    """The packaged snapshot as a generation, effective from the day it was generated."""
+    """The packaged snapshot as the baseline generation, effective from the day it was generated."""
     generated_at, index = _load()
-    return PriceGeneration(effective_at=generated_at, index=index)
+    return PriceGeneration(effective_at=generated_at, index=index, baseline=True)
