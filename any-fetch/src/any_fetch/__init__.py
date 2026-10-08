@@ -2,7 +2,7 @@
 
 from any_fetch import AnyFetch, afetch
 
-page = await afetch("exa", "https://www.python.org/downloads/")
+page = await afetch("fake", "https://www.python.org/downloads/")
 async with AnyFetch.create("builtin") as fetcher:  # once the host has registered it
     page = await fetcher.fetch("https://www.python.org/downloads/", max_chars=20_000)
 """

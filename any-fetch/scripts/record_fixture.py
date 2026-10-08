@@ -1,6 +1,10 @@
 """Record a provider's live answer as a test fixture, with the API key redacted.
 
-    uv run python any-fetch/scripts/record_fixture.py exa normal https://www.python.org/downloads/
+    uv run python any-fetch/scripts/record_fixture.py <provider> <case> <url> [-o NAME=VALUE ...]
+
+No provider that calls HTTP ships yet (`fake` makes no request, and
+`builtin` is the host's), so there is nothing to record until the first one
+lands.
 
 Runs one fetch against the live API, with the key from the environment
 variable the provider's metadata names, and writes the last HTTP response to

@@ -1,7 +1,7 @@
 """``any-fetch``: fetch one page from the command line, keys from the environment.
 
 any-fetch fake https://www.python.org/downloads/
-any-fetch exa https://www.python.org/downloads/ --max-chars 2000 --json
+any-fetch fake https://www.python.org/downloads/ --max-chars 2000 --json
 """
 
 import argparse
@@ -81,6 +81,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         page = asyncio.run(afetch(args.provider, args.url, max_chars=args.max_chars, **options))
     except AnyFetchError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        # A provider bug, not a reported failure: its text may carry the URL, so only its type is shown.
+        print(f"error: {args.provider} failed unexpectedly ({type(exc).__name__})", file=sys.stderr)
         return 1
     if page.error is not None:
         status = "" if page.error.status is None else f", HTTP {page.error.status}"

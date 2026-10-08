@@ -51,6 +51,13 @@ def test_an_error_exits_1_without_the_url(option: str, capsys: pytest.CaptureFix
     assert "sentinel-url" not in captured.err
 
 
+def test_a_provider_bug_exits_1_without_the_url(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["fake", "https://sentinel.example/", "-o", "leak_url=true"]) == 1
+    captured = capsys.readouterr()
+    assert captured.err.strip() == "error: fake failed unexpectedly (RuntimeError)"
+    assert "sentinel.example" not in captured.err
+
+
 def test_builtin_without_a_host_exits_1(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["builtin", "https://example.com/"]) == 1
     assert "register_builtin" in capsys.readouterr().err
