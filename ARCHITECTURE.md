@@ -225,8 +225,8 @@ This is the open-core line: for each capability, what Otari's core ships and wha
 | SSO | **Core base + overlay adapter** *(provisional)* | Social sign-in and passkeys in the core; enterprise SSO (for example SAML, enterprise OIDC, directory provisioning) from an overlay adapter. Split pending an open decision. |
 | Routing | **Core base + overlay adapter** *(provisional)* | Ordered fallback and policies in the core; a richer model-selection strategy from an overlay adapter. Split pending an open decision. |
 | Model inference | **Core port + hosted adapter** | Self-hosting your own backends is a first-class path in the core; a hosted, metered inference backend comes from an overlay. See the managed-models section of [docs/modes.md](docs/modes.md). |
-| Code execution | **Core port + hardened adapter** *(provisional)* | A basic local sandbox in the core; a hardened, managed sandbox from an overlay. Interface still provisional. |
-| Telemetry storage | **Core port + scale-out adapter** | The OTLP receiver's captured telemetry goes to this deployment's own database in the core; a store built for many tenants' retention and query volume comes from an overlay. The read endpoints resolve the same port, so binding one moves both halves. |
+| Code execution | **Core port and adapters, managed service from an overlay** *(provisional)* | The core adapters reach a sandbox backend through the published protocol or E2B. A hardened, managed sandbox is a service an overlay runs behind the published protocol, and the data plane reaches it with a platform grant. An overlay binds no adapter here, because the adapter sees the code. Interface still provisional. |
+| Telemetry storage | **Core port, store from an overlay** | Captured telemetry is content, so the data plane writes it: to this deployment's own database in the core, or with a platform grant to a store that an overlay runs for many tenants' retention and query volume. A person reads it back through the control plane. |
 | Billing (wallet/payments) | **Overlay-only** | A Null Object (no-op) adapter in the core; real billing exists only in an overlay. |
 
 The **provisional** rows (RBAC, SSO, routing) share one open question: how deep the core base goes before an overlay adapter takes over. That is an open design decision for the project maintainers, not settled yet and not a contributor's to assume; treat those lines as a working assumption until it is decided and recorded here.
@@ -263,7 +263,7 @@ These are the rules that keep the boundary from eroding. They apply to anyone ad
 4. **Ports live in the core, in domain terms.** Name the port for the domain (`RoutingPort`), never for an implementation.
 5. **Only the composition root names a concrete adapter.** Services, routers, and the frontend refer to ports; the composition root is the single place that binds a concrete one.
 6. **An overlay never edits an Otari source file.** It registers into the extension points Otari exposes (the container, the router list, the nav registry) and supplies configuration. If extending an overlay *requires* editing an Otari file, that is a missing seam, and the seam belongs in Otari. Supplying configuration or a bootstrap module is not editing the core.
-7. **Introduce a port only when it earns one.** A port that will only ever have one implementation is ceremony with no benefit. A capability earns a port only when a genuine second implementation is real, or a hard boundary (intellectual property, or a hosted service) runs through it. Plain CRUD and infrastructure (user, team, and trace management, and the bulk of orgs/workspaces management) stay concrete in the core. "Most of the management plane is core" and "most services are not ports" are the same statement.
+7. **Introduce a port only when it earns one.** A port that will only ever have one implementation is ceremony with no benefit. A capability earns a port only when a genuine second implementation is real, or a hard boundary (intellectual property, or a hosted service) runs through it. Where the adapter sees customer content, every adapter is in the core, and a hosted service sits behind a published protocol, not behind an overlay adapter. Plain CRUD and infrastructure (user, team, and trace management, and the bulk of orgs/workspaces management) stay concrete in the core. "Most of the management plane is core" and "most services are not ports" are the same statement.
 
 ### The patterns these rules are built from
 
@@ -299,14 +299,25 @@ A service imports its own domain's repositories, the services of other domains, 
 
 ## Where new code goes
 
-Choose the mechanism by what you are adding, not by the extension point you already know.
+Split a feature into its pieces of work before you choose a mechanism. One feature often has a piece in each plane, or a core piece beside an overlay piece. Ask these questions of each piece.
+
+1. **Does Otari need it to stand alone?** Yes: the core. No: an overlay.
+2. **Does it see customer content while it serves a caller's request?** Yes: the data plane. No: the control plane. Customer content is what a caller sends and receives: prompts, completions, tool inputs and outputs, search queries, sandbox code, file bytes and captured agent telemetry. A person who reads stored content is the one exception: the control plane decrypts it for them after an access check and an audit record, as [the protocol](docs/hybrid-mode-protocol.md#content-encryption) says.
+3. **Is it an overlay piece that sees content?** Then it is a service, not an adapter. An overlay loads into a control plane, and a data plane runs the core alone. So the adapter that sees the content is in the core and speaks a published protocol. The overlay runs a service behind that protocol, and its control-plane piece mints the grant that the data plane presents to it. The data plane goes direct to the service.
+
+Code execution is this shape. `CodeExecutionPort`'s core adapter speaks [the code execution protocol](docs/code-execution-protocol.md), and a platform runs a front door behind it. [How a data plane reaches what it does not own](#how-a-data-plane-reaches-what-it-does-not-own) gives the authority the control plane returns.
+
+A data-plane piece that reaches a remote resource takes one of the three authority cases, and one that leaves durable state uses [Try-Confirm/Cancel](#durable-state-try-confirmcancel).
+
+Then choose each piece's mechanism from the table below, by what you are adding, not by the extension point you already know.
 
 | You are adding | Home | Mechanism |
 |---|---|---|
 | An optional feature any deployment may run, with its own routes, tables, settings, worker or page | Core | An entry in `src/gateway/features.py`, switched by a startup setting. See [How to add a core feature](#how-to-add-a-core-feature). |
 | An always-on route or service with one implementation, such as a new endpoint in an existing domain | Core | The domain's own modules, with a new router registered in `register_routers` (`src/gateway/api/main.py`). No port and no registry entry. |
 | A second implementation of work the core hands off, such as billing, code execution or an identity policy | A port and its adapters | See [How to add a capability](#how-to-add-a-capability). |
-| An adapter, route or page that only an overlay ships | The overlay | `OTARI_BOOTSTRAP`: bind a port, or contribute a router gated on a capability. Pages register through the dashboard's overlay modules (see [Deployment and entitlements](#deployment-and-entitlements)). |
+| An adapter, route or page that only an overlay ships, and that sees no customer content | The overlay | `OTARI_BOOTSTRAP`: bind a port, or contribute a router gated on a capability. Pages register through the dashboard's overlay modules (see [Deployment and entitlements](#deployment-and-entitlements)). |
+| Work that only an overlay ships and that must see customer content | A service behind a published protocol | A core adapter speaks the protocol. The data plane calls the service with the authority the control plane returns, usually a [platform grant](#the-narrowest-authority-that-lets-it-go-direct). The overlay's control-plane piece owns the policy and mints the grant. |
 | A built-in tool the model calls inside the tool loop | Core | **Planned:** one built-in tool interface that the tool loop dispatches through. Today each built-in tool is wired by hand into the tool loop (`src/gateway/services/mcp_loop.py` and its per-dialect siblings). |
 | Code loaded at runtime from an installed package, a directory or a download | Not supported | None. The boundary check refuses `importlib.metadata`, `importlib_metadata` and `pkg_resources` under `src/gateway/`. |
 

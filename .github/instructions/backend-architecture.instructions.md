@@ -90,6 +90,24 @@ call to `deployment_for`, under `services/`. It does not catch the cases below.
 - Flag a mode read added to a module already on `SERVICE_MODE_READ_BASELINE`.
   The baseline lists modules, not reads.
 
+## Planes and overlays
+
+`ARCHITECTURE.md` places each piece of work with two questions. Does Otari need
+it to stand alone? Yes puts it in the core, and no in an overlay. Does it see
+customer content while it serves a caller's request? Yes puts it in the data
+plane, and no in the control plane. Customer content is prompts, completions,
+tool inputs and outputs, search queries, sandbox code, file bytes and captured
+agent telemetry.
+
+- Flag new control-plane code that receives customer content from a caller's
+  request or writes it to a store. Content goes from the data plane straight to
+  where it is served or stored. A person's read of stored content through the
+  control plane, after an access check and an audit record, is the exception.
+- Flag a design that needs an overlay adapter for a port whose adapter sees
+  customer content. An overlay loads into a control plane only. The core holds
+  every such adapter, and it speaks a published protocol. An overlay runs a
+  service behind that protocol, and the data plane reaches it with a grant.
+
 ## Table writers
 
 Each table has one writer: the repository module that `MODEL_ACCESS` names for
