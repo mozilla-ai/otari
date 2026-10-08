@@ -6,56 +6,68 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.core.config import API_ROOT
-from gateway.services.budgets import period_window
+from gateway.services.budgets import cycle_window
 
 from .conftest import MODEL_NAME
 
 _HAS_GEMINI_KEY = bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
 
 
-def test_a_rolling_period_ends_a_duration_after_it_starts() -> None:
-    """The rolling half of the one derivation both planes now share.
+def test_an_interval_period_counts_whole_steps_from_its_anchor() -> None:
+    """The interval half of the one derivation both planes share.
 
     ``calculate_next_reset`` used to own this and read only a duration, which is
     why a calendar-aligned budget never reset: every caller of it was blind to
-    the other cadence. `period_window` answers for both.
+    the other cadence. The window is now counted from the budget's anchor rather
+    than from whenever it was last asked, which is what stops a quiet workspace
+    walking its reset forward through the day.
     """
-    start = datetime(2025, 10, 1, 0, 0, 0, tzinfo=UTC)
+    anchor = datetime(2025, 10, 1, 0, 0, 0, tzinfo=UTC)
 
-    assert period_window(start, duration=86400, alignment=None) == (
-        start,
-        datetime(2025, 10, 2, 0, 0, 0, tzinfo=UTC),
-    )
-    assert period_window(start, duration=604800, alignment=None) == (
-        start,
+    assert cycle_window(
+        anchor,
+        cycle="every_n_days",
+        every_n=1,
+        anchor_at=anchor,
+        weekdays=None,
+        month_day=None,
+        month=None,
+    ) == (anchor, datetime(2025, 10, 2, 0, 0, 0, tzinfo=UTC))
+
+    # A week later, and asked about a moment mid-period: the window is still the
+    # one the anchor puts it in, not one starting at the question.
+    assert cycle_window(
+        datetime(2025, 10, 9, 13, 0, 0, tzinfo=UTC),
+        cycle="every_n_days",
+        every_n=7,
+        anchor_at=anchor,
+        weekdays=None,
+        month_day=None,
+        month=None,
+    ) == (
         datetime(2025, 10, 8, 0, 0, 0, tzinfo=UTC),
+        datetime(2025, 10, 15, 0, 0, 0, tzinfo=UTC),
     )
-    assert period_window(start, duration=60, alignment=None) == (
-        start,
-        datetime(2025, 10, 1, 0, 1, 0, tzinfo=UTC),
-    )
-    # No cadence at all is a budget that never refills, not a zero-length window.
-    assert period_window(start, duration=None, alignment=None) is None
 
 
-def test_create_budget_with_duration_sec(client: TestClient, master_key_header: dict[str, str]) -> None:
-    """Test creating a budget with duration in seconds."""
+def test_create_budget_with_a_reset_cycle(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """A budget is created with the reset cycle it names."""
     response = client.post(
         f"{API_ROOT}/budgets",
-        json={"max_budget": 100.0, "budget_duration_sec": 86400},
+        json={"max_budget": 100.0, "reset_cycle": "daily"},
         headers=master_key_header,
     )
     assert response.status_code == 200, f"Response: {response.json()}"
     data = response.json()
     assert data["max_budget"] == 100.0
-    assert data["budget_duration_sec"] == 86400
+    assert data["reset_cycle"] == "daily"
 
 
 def test_user_with_budget_gets_reset_fields_set(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Test that creating a user with a budget sets budget tracking fields."""
     budget_response = client.post(
         f"{API_ROOT}/budgets",
-        json={"max_budget": 50.0, "budget_duration_sec": 604800},
+        json={"max_budget": 50.0, "reset_cycle": "weekly", "reset_weekdays": 1},
         headers=master_key_header,
     )
     budget_id = budget_response.json()["budget_id"]
@@ -77,7 +89,7 @@ def test_updating_user_budget_sets_reset_fields(client: TestClient, master_key_h
     """Test that updating a user's budget sets budget tracking fields."""
     budget_response = client.post(
         f"{API_ROOT}/budgets",
-        json={"max_budget": 75.0, "budget_duration_sec": 86400},
+        json={"max_budget": 75.0, "reset_cycle": "daily"},
         headers=master_key_header,
     )
     budget_id = budget_response.json()["budget_id"]
@@ -143,7 +155,12 @@ def test_budget_actually_resets_when_duration_passes(
     """Test that budget actually resets when duration passes - THE CRITICAL TEST."""
     budget_response = client.post(
         f"{API_ROOT}/budgets",
-        json={"max_budget": 100.0, "budget_duration_sec": 60},
+        json={
+            "max_budget": 100.0,
+            "reset_cycle": "every_n_hours",
+            "reset_every_n": 1,
+            "reset_anchor_at": "2026-01-01T00:00:00Z",
+        },
         headers=master_key_header,
     )
     budget_id = budget_response.json()["budget_id"]
@@ -225,11 +242,16 @@ def test_budget_actually_resets_when_duration_passes(
     assert spend_after_reset < (spend_before_reset * 2)
 
 
-def test_per_user_reset_schedules_with_actual_reset(client: TestClient, master_key_header: dict[str, str]) -> None:
-    """Test that users on the same budget reset on independent schedules."""
+def test_users_on_one_budget_share_its_cycle(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """Users on one budget land on that budget's boundary, whenever they joined.
+
+    This used to assert the opposite, and the opposite was the bug: a duration
+    was counted from each user's own start, so two people on one weekly budget
+    reset on different days and neither on the day the budget named.
+    """
     budget_response = client.post(
         f"{API_ROOT}/budgets",
-        json={"max_budget": 100.0, "budget_duration_sec": 604800},
+        json={"max_budget": 100.0, "reset_cycle": "weekly", "reset_weekdays": 1},
         headers=master_key_header,
     )
     budget_id = budget_response.json()["budget_id"]
@@ -264,6 +286,6 @@ def test_per_user_reset_schedules_with_actual_reset(client: TestClient, master_k
     reset_a = datetime.fromisoformat(user_a_data["next_budget_reset_at"]).replace(tzinfo=UTC)
     reset_b = datetime.fromisoformat(user_b_data["next_budget_reset_at"]).replace(tzinfo=UTC)
 
-    assert reset_a == user_a_time + timedelta(seconds=604800)
-    assert reset_b == user_b_time + timedelta(seconds=604800)
-    assert reset_b > reset_a
+    # The Monday after each of them, which for these two is the same Monday.
+    assert reset_a == datetime(2025, 10, 6, 0, 0, 0, tzinfo=UTC)
+    assert reset_b == reset_a

@@ -75,6 +75,7 @@ for a component, not for those.
 | `forms/Toggle` | `Toggle` |
 | `forms/FieldMessages` | `FieldMessages`, `ControlField` |
 | `forms/Checkbox` | `Checkbox`, `CheckboxVisual` |
+| `forms/CheckboxGroup` | `CheckboxGroup`, and the `CheckboxOption` type |
 | `forms/inputClass` | `INPUT_CLASS` |
 | `forms/optionKey` | `optionKey`, `optionValue`. Internal to the two selects |
 | `actions/Button` | `Button`, and the `ButtonVariant` / `ButtonSize` / `ButtonProps` types |

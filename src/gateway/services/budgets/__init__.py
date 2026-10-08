@@ -2,7 +2,15 @@
 
 from gateway.services.budgets._ledger import run_reservation_sweeper
 from gateway.services.budgets._member_policies import BudgetMembershipListener
-from gateway.services.budgets._periods import budget_window, period_window
+from gateway.services.budgets._periods import (
+    CYCLE_FIELD_ORDER,
+    CYCLE_FIELDS,
+    CycleSettings,
+    budget_window,
+    cycle_window,
+    settle_cycle,
+    validate_cycle_settings,
+)
 from gateway.services.budgets._reservations import (
     ZERO,
     ReservationHandle,
@@ -35,7 +43,12 @@ __all__ = [
     "get_budget_state",
     "increase_reservation",
     "lock_workspace_for_scope",
-    "period_window",
+    "CYCLE_FIELDS",
+    "CYCLE_FIELD_ORDER",
+    "CycleSettings",
+    "cycle_window",
+    "settle_cycle",
+    "validate_cycle_settings",
     "reconcile_reservation",
     "record_external_spend",
     "refund_reservation",

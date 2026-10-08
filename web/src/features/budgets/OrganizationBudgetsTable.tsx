@@ -6,7 +6,8 @@ import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 
 import { formatAppliedTo } from "./appliedTo"
-import { limitLabel, periodLabel } from "./organizationBudget"
+import { limitLabel } from "./organizationBudget"
+import { cycleLabel } from "./resetCycle"
 
 // One row per budget. What each budget has spent is per applied entity, because
 // each entity draws on its own allowance of the limit, so there is no spend
@@ -48,7 +49,7 @@ export function OrganizationBudgetsTable({
     {
       id: "resets",
       header: "Reset cycle",
-      cell: (row) => periodLabel(row),
+      cell: (row) => cycleLabel(row),
     },
     {
       id: "actions",

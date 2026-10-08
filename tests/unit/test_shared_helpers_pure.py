@@ -199,8 +199,12 @@ def test_budget_response_from_model() -> None:
     budget.organization_id = None
     budget.name = "team-free"
     budget.max_budget = 100.0
-    budget.budget_duration_sec = 86400
-    budget.reset_alignment = None
+    budget.reset_cycle = "every_n_days"
+    budget.reset_every_n = 1
+    budget.reset_anchor_at = None
+    budget.reset_weekdays = None
+    budget.reset_month_day = None
+    budget.reset_month = None
     budget.created_at = datetime(2025, 1, 1, tzinfo=UTC)
     budget.updated_at = datetime(2025, 1, 2, tzinfo=UTC)
 
@@ -208,7 +212,8 @@ def test_budget_response_from_model() -> None:
     assert resp.budget_id == "budget-1"
     assert resp.name == "team-free"
     assert resp.max_budget == 100.0
-    assert resp.budget_duration_sec == 86400
+    assert resp.reset_cycle == "every_n_days"
+    assert resp.reset_every_n == 1
     assert resp.created_at == "2025-01-01T00:00:00+00:00"
     assert resp.updated_at == "2025-01-02T00:00:00+00:00"
     # A freshly serialized budget has no assigned users yet.
@@ -227,8 +232,12 @@ def test_budget_response_carries_the_owning_organization() -> None:
     budget.organization_id = organization_id
     budget.name = "Engineering monthly"
     budget.max_budget = 250.0
-    budget.budget_duration_sec = None
-    budget.reset_alignment = "calendar_month"
+    budget.reset_cycle = "monthly"
+    budget.reset_every_n = None
+    budget.reset_anchor_at = None
+    budget.reset_weekdays = None
+    budget.reset_month_day = 1
+    budget.reset_month = None
     budget.created_at = datetime(2025, 1, 1, tzinfo=UTC)
     budget.updated_at = datetime(2025, 1, 2, tzinfo=UTC)
 
@@ -241,15 +250,20 @@ def test_budget_response_from_model_nullable_fields() -> None:
     budget.organization_id = None
     budget.name = None
     budget.max_budget = None
-    budget.budget_duration_sec = None
-    budget.reset_alignment = None
+    budget.reset_cycle = None
+    budget.reset_every_n = None
+    budget.reset_anchor_at = None
+    budget.reset_weekdays = None
+    budget.reset_month_day = None
+    budget.reset_month = None
     budget.created_at = datetime(2025, 6, 15, tzinfo=UTC)
     budget.updated_at = datetime(2025, 6, 15, tzinfo=UTC)
 
     resp = BudgetResponse.from_model(budget)
     assert resp.name is None
     assert resp.max_budget is None
-    assert resp.budget_duration_sec is None
+    assert resp.reset_cycle is None
+    assert resp.reset_every_n is None
 
 
 def test_pricing_response_from_model() -> None:
@@ -284,8 +298,12 @@ def _organization_budget(owner: uuid.UUID | None) -> MagicMock:
     budget.max_budget = 250.0
     budget.token_limit = None
     budget.request_limit = None
-    budget.budget_duration_sec = None
-    budget.reset_alignment = "calendar_month"
+    budget.reset_cycle = "monthly"
+    budget.reset_every_n = None
+    budget.reset_anchor_at = None
+    budget.reset_weekdays = None
+    budget.reset_month_day = 1
+    budget.reset_month = None
     budget.created_at = datetime(2025, 1, 1, tzinfo=UTC)
     budget.updated_at = datetime(2025, 1, 2, tzinfo=UTC)
     return budget

@@ -6,7 +6,6 @@ import { Button, Chip, Spinner } from "@heroui/react"
 import {
   type ReactNode,
   type RefObject,
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -34,7 +33,6 @@ import { PageIntro } from "@/design-system/layout/PageIntro"
 import { Section } from "@/design-system/layout/Section"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
 import { SpendMeter, spendState } from "@/design-system/metrics/SpendMeter"
-import { Segmented } from "@/design-system/navigation/Segmented"
 import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { UserMultiSelect } from "@/features/users/UserMultiSelect"
 import { aliasesByUserId, userDisplay } from "@/features/users/userDisplay"
@@ -68,36 +66,16 @@ import {
 } from "./budgetLabel"
 import { OrganizationBudgetsPage } from "./OrganizationBudgetsPage"
 import { hasNoLimit, limitLabel } from "./organizationBudget"
+import { ResetCycleField } from "./ResetCycleField"
+import {
+  type CycleDraft,
+  cycleDraftFrom,
+  cycleFieldsFromDraft,
+  cycleLabel,
+  findCycleProblem,
+} from "./resetCycle"
 
-// ---------- formatting ----------
-
-const DAY = 86_400
-const HOUR = 3_600
-
-// Named periods the picker offers; `formatDuration` reuses them so an exact match
-// reads as "Daily" rather than "86400s".
-const PERIOD_PRESETS: { label: string; seconds: number | null }[] = [
-  { label: "No reset", seconds: null },
-  { label: "Daily", seconds: DAY },
-  { label: "Weekly", seconds: 7 * DAY },
-  { label: "Monthly", seconds: 30 * DAY },
-]
-
-function formatDuration(seconds: number | null): string {
-  if (seconds === null) return "No reset"
-  const preset = PERIOD_PRESETS.find((preset) => preset.seconds === seconds)
-  if (preset) return preset.label
-  if (seconds % DAY === 0) return `Every ${seconds / DAY} days`
-  if (seconds % HOUR === 0) return `Every ${seconds / HOUR} hours`
-  return `Every ${seconds}s`
-}
-
-// The segment that opens the custom-days field. A sentinel rather than a number,
-// because "custom" is not a duration and any real one it borrowed would collide
-// with a preset the day someone added it.
-const CUSTOM_PERIOD = "custom"
-
-// ---------- limit + period inputs ----------
+// ---------- limit input ----------
 
 // A non-negative dollar amount, empty for "unlimited". Parsed leniently; the
 // caller decides what an empty or invalid value means.
@@ -107,119 +85,6 @@ function parseLimit(raw: string): { value: number | null; isValid: boolean } {
   const n = Number(trimmed)
   if (!Number.isFinite(n) || n < 0) return { value: null, isValid: false }
   return { value: n, isValid: true }
-}
-
-// Whole-day string for a duration, or "" when it is not a whole number of days,
-// so the custom field speaks the same unit an operator thinks in.
-function daysString(seconds: number | null): string {
-  return seconds !== null && seconds % DAY === 0 ? String(seconds / DAY) : ""
-}
-
-function PeriodPicker({
-  value,
-  onChange,
-  onInvalidChange,
-}: {
-  value: number | null
-  onChange: (seconds: number | null) => void
-  // Reports whether the custom field currently holds an invalid entry, so the
-  // form can block Save (an invalid entry emits null, which would otherwise
-  // clear the committed period on save).
-  onInvalidChange?: (invalid: boolean) => void
-}) {
-  const isPreset = PERIOD_PRESETS.some((preset) => preset.seconds === value)
-  const [custom, setCustom] = useState(!isPreset)
-  // The custom field's own draft, so an in-progress, not-yet-valid entry (e.g.
-  // "1.5") stays on screen to be flagged rather than being coerced. It is seeded
-  // on mount and reset only by an explicit action here (a preset click), never
-  // from `value`: the only thing that changes `value` in place is this component's
-  // own onChange, so reseeding from it would wipe the invalid entry on the very
-  // null we emit for it, before the operator can read the error. Editing a
-  // different budget remounts the form (it is keyed), reseeding from the new value.
-  const [draft, setDraft] = useState(() => daysString(value))
-
-  const trimmedDays = draft.trim()
-  const daysValue = Number(trimmedDays)
-  // Whole days only: a fractional, non-positive, or non-finite entry is rejected
-  // outright (surfaced below and left unsaved) rather than silently rounded, so
-  // 1.5 never becomes 2. isSafeInteger also rules out an overflowing day count.
-  const invalidDays =
-    trimmedDays !== "" && (!Number.isSafeInteger(daysValue) || daysValue <= 0)
-
-  // Surface validity to the form so Save is gated on it (like the limit field).
-  useEffect(() => {
-    onInvalidChange?.(invalidDays)
-  }, [invalidDays, onInvalidChange])
-
-  return (
-    <div className="flex flex-col gap-2">
-      <span className="text-body">Reset period</span>
-      {/* A segmented control rather than a row of buttons. These are the
-          alternatives for one field, not five things to do, and filling the
-          chosen one primary said the opposite: it put the submit button's own
-          treatment on a value, two controls apart from the real submit button
-          wearing the same fill. */}
-      <Segmented
-        label="Reset period"
-        // `String(null)` rather than a blank: "No reset" IS a preset here, and
-        // its seconds are null, so collapsing null to "" would leave the group
-        // with nothing selected on a form that has always opened on it.
-        value={custom ? CUSTOM_PERIOD : String(value)}
-        options={[
-          ...PERIOD_PRESETS.map((preset) => ({
-            value: String(preset.seconds),
-            label: preset.label,
-          })),
-          { value: CUSTOM_PERIOD, label: "Custom" },
-        ]}
-        onChange={(next) => {
-          if (next === CUSTOM_PERIOD) {
-            setCustom(true)
-            return
-          }
-          setCustom(false)
-          // Keep the (hidden) custom draft in step, so reopening Custom shows
-          // the preset's day count rather than a stale earlier entry.
-          const seconds = next === "null" ? null : Number(next)
-          setDraft(daysString(seconds))
-          onChange(seconds)
-        }}
-      />
-      {custom ? (
-        <div className="flex items-end gap-2">
-          <Field
-            label="Every N days"
-            value={draft}
-            onChange={(raw) => {
-              setDraft(raw)
-              const n = Number(raw.trim())
-              // Reject a non-integer or non-positive value instead of rounding it;
-              // it is held as null (unsaved) until the operator types whole days.
-              onChange(
-                raw.trim() === "" || !Number.isSafeInteger(n) || n <= 0
-                  ? null
-                  : n * DAY,
-              )
-            }}
-            placeholder="14"
-            description={
-              invalidDays ? (
-                <span className="text-danger">
-                  Enter a whole number of days.
-                </span>
-              ) : (
-                "Whole days between resets."
-              )
-            }
-          />
-        </div>
-      ) : null}
-      <span className="text-caption">
-        Spend returns to zero each period. A user&rsquo;s clock starts when the
-        budget is assigned to them.
-      </span>
-    </div>
-  )
 }
 
 // ---------- create / edit forms (inline cards, matching KeysPage) ----------
@@ -250,7 +115,7 @@ function BudgetForm({
   initial: {
     name: string | null
     max_budget: number | null
-    budget_duration_sec: number | null
+    cycle: CycleDraft
   }
   // The caps this form does not edit, so the label it offers an unnamed budget
   // reads as the whole of what it caps rather than the dollar figure alone.
@@ -277,10 +142,7 @@ function BudgetForm({
   const [limit, setLimit] = useState(
     initial.max_budget === null ? "" : String(initial.max_budget),
   )
-  const [durationSec, setDurationSec] = useState<number | null>(
-    initial.budget_duration_sec,
-  )
-  const [periodInvalid, setPeriodInvalid] = useState(false)
+  const [cycle, setCycle] = useState(initial.cycle)
   const [userIds, setUserIds] = useState<string[]>(assignedUserIds ?? [])
 
   const parsed = parseLimit(limit)
@@ -288,7 +150,7 @@ function BudgetForm({
   // the form cannot be sent, and `submit` refuses while that OR a save is in
   // flight. Pending is not part of `blocked` because a request in flight is not
   // a reason to paint the button as refused.
-  const isBlocked = !parsed.isValid || periodInvalid
+  const isBlocked = !parsed.isValid || findCycleProblem(cycle) !== undefined
   const canSubmit = !isPending && !isBlocked
   // Everything the operator can change, in one snapshot. The people are sorted
   // into it because the picker appends in click order, and a guard that read
@@ -297,7 +159,7 @@ function BudgetForm({
   const { isDirty } = useDirtySnapshot({
     name,
     limit,
-    durationSec,
+    cycle,
     userIds: [...userIds].sort(),
   })
 
@@ -309,8 +171,7 @@ function BudgetForm({
     max_budget: parsed.isValid ? parsed.value : null,
     token_limit: uneditedLimits?.token_limit ?? null,
     request_limit: uneditedLimits?.request_limit ?? null,
-    reset_alignment: null,
-    budget_duration_sec: durationSec,
+    ...cycleFieldsFromDraft(cycle),
   })
 
   const submit = () => {
@@ -320,7 +181,7 @@ function BudgetForm({
       {
         name: name.trim() || null,
         max_budget: parsed.value,
-        budget_duration_sec: durationSec,
+        ...cycleFieldsFromDraft(cycle),
       },
       userIds,
     )
@@ -366,11 +227,7 @@ function BudgetForm({
           )
         }
       />
-      <PeriodPicker
-        value={durationSec}
-        onChange={setDurationSec}
-        onInvalidChange={setPeriodInvalid}
-      />
+      <ResetCycleField value={cycle} onChange={setCycle} />
       {assignUsers ? (
         <UserMultiSelect
           label="Assign to people (optional)"
@@ -719,9 +576,7 @@ function DeploymentBudgetsPage() {
         id: "reset",
         header: "Reset",
         cell: (budget) => (
-          <span className="text-muted">
-            {formatDuration(budget.budget_duration_sec)}
-          </span>
+          <span className="text-muted">{cycleLabel(budget)}</span>
         ),
       },
       {
@@ -1106,7 +961,7 @@ function EditBudgetDialog({
       initial={{
         name: row.name,
         max_budget: row.max_budget,
-        budget_duration_sec: row.budget_duration_sec,
+        cycle: cycleDraftFrom(row),
       }}
       uneditedLimits={row}
       error={updateBudget.error ?? assignmentError}
@@ -1217,7 +1072,12 @@ function CreateBudgetDialog({
       }}
       title="New budget"
       submitLabel={pendingAssignments ? "Retry assignments" : "Create budget"}
-      initial={{ name: null, max_budget: null, budget_duration_sec: null }}
+      // Opens on "never", as this form always has for an operator's new budget.
+      initial={{
+        name: null,
+        max_budget: null,
+        cycle: { ...cycleDraftFrom(undefined), cycle: "never" },
+      }}
       error={createBudget.error ?? assignmentError}
       isPending={createBudget.isPending || assigningUsers}
       returnFocusRef={returnFocusRef}

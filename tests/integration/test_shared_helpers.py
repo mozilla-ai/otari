@@ -35,13 +35,18 @@ def test_get_active_user_returns_none_for_nonexistent(client: TestClient, master
 def test_budget_from_model_roundtrip(client: TestClient, master_key_header: dict[str, str]) -> None:
     resp = client.post(
         f"{API_ROOT}/budgets",
-        json={"max_budget": 50.0, "budget_duration_sec": 3600},
+        json={
+            "max_budget": 50.0,
+            "reset_cycle": "every_n_hours",
+            "reset_every_n": 1,
+            "reset_anchor_at": "2026-01-01T00:00:00Z",
+        },
         headers=master_key_header,
     )
     assert resp.status_code == 200
     data = resp.json()
     assert data["max_budget"] == 50.0
-    assert data["budget_duration_sec"] == 3600
+    assert data["reset_cycle"] == "every_n_hours"
 
 
 def test_pricing_from_model_roundtrip(client: TestClient, master_key_header: dict[str, str]) -> None:
