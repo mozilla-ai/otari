@@ -2,7 +2,7 @@
 
 The write half of per-organization pricing. The read half is
 `services.pricing_service.find_model_pricing`, which consults these rows ahead
-of ``model_pricing`` and the genai-prices dataset when it is given an
+of ``model_pricing`` and the models.dev catalog when it is given an
 organization.
 
 Three rules live here rather than in the route, because each has to hold for

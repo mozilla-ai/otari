@@ -1,6 +1,6 @@
 """The merged catalog: every selector one caller may be shown, before presentation.
 
-Discovery, stored prices, the genai-prices defaults, aliases and routing
+Discovery, stored prices, the models.dev defaults, aliases and routing
 policies folded into one view, scoped to the caller who asked. Two surfaces
 read it and must not disagree about which selectors exist or which of them a
 caller may see: the flat, OpenAI-shaped listing, and the catalog grouped by
@@ -127,12 +127,12 @@ class ModelObject(BaseModel):
     owned_by: str
     pricing: ModelPricingInfo | None = None
     # Where ``pricing`` came from: "organization" (the caller's organization's
-    # own rate), "configured" (DB), "default" (genai-prices fallback, only when
+    # own rate), "configured" (DB), "default" (models.dev fallback, only when
     # default_pricing is enabled), "dynamic" (a policy priced per request), or "none".
     pricing_source: str = "none"
-    # Token limits (see ``model_limits``): the context window from models.dev,
-    # then genai-prices; the output limit from models.dev alone. Metadata only,
-    # independent of the default_pricing toggle; ``None`` where neither knows one.
+    # Token limits (see ``model_limits``): the context window from the live models.dev
+    # catalog, then the pricing snapshot; the output limit from the live catalog alone.
+    # Metadata only, independent of the default_pricing toggle; ``None`` where neither knows one.
     context_window: int | None = None
     max_output_tokens: int | None = None
     # True when the deployment pays the upstream bill for this model, so the organization may not set its own rate.
@@ -315,7 +315,7 @@ def normalized_pricing_lookup(config: GatewayConfig, pricing_map: dict[str, Mode
 
 
 def apply_default_pricing(obj: ModelObject, pricing_selector: str | None = None) -> None:
-    """Fill the genai-prices default rate for a model that has no DB price.
+    """Fill the models.dev default rate for a model that has no DB price.
 
     No-op when the fallback is disabled or the model already carries a price, so
     database pricing always takes precedence. Marks the source as "default".
@@ -699,7 +699,7 @@ async def build_merged_catalog(
     # while a policy decides where traffic goes among models the caller may name
     # directly anyway. Hiding its candidates cost more than it bought: one policy
     # naming a fallback chain could empty most of the catalog, a model priced by
-    # the genai-prices default then vanished from the dashboard along with its
+    # the models.dev default then vanished from the dashboard along with its
     # rate, and the single-model read served the same model with its price all
     # along, so nothing was actually kept off the wire.
     alias_targets = alias_target_keys(config, configured_aliases) if withhold_alias_targets else set()
@@ -788,7 +788,7 @@ async def build_merged_catalog(
             pricing_source="none",
         )
 
-    # Phase 3: fill the genai-prices default for unpriced models, so the catalog
+    # Phase 3: fill the models.dev default for unpriced models, so the catalog
     # shows the effective rate when the fallback is active, and every model's
     # token limits. Database pricing (phases 1-2) always wins; this only touches
     # models still without a price. Runs before aliases are added: this fills
@@ -894,7 +894,7 @@ def viewer_price(
 
     The order is settlement's, and is stated once in
     :func:`pricing_service.find_model_pricing`: the organization's own override,
-    then the deployment's stored row, then the genai-prices default. The merged
+    then the deployment's stored row, then the models.dev default. The merged
     catalog has already folded the last two into ``obj`` (phases 2 and 3), so
     what is left here is the override, resolved against the same key forms
     settlement offers, and naming which rung answered.

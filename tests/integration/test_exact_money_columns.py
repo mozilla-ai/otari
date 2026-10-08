@@ -39,7 +39,7 @@ from gateway.services.pricing_service import default_model_pricing
 _CATALOG_MODELS = (
     ("openai", "gpt-4o"),
     ("openai", "gpt-4o-mini"),
-    ("anthropic", "claude-3-5-sonnet-latest"),
+    ("anthropic", "claude-sonnet-4-5"),
     ("google", "gemini-2.5-pro"),
     ("deepseek", "deepseek-chat"),
 )
@@ -62,7 +62,7 @@ def _catalog_rates() -> list[tuple[str, Decimal]]:
     rates: list[tuple[str, Decimal]] = []
     for provider, model in _CATALOG_MODELS:
         pricing = default_model_pricing(provider, model, _TS)
-        assert pricing is not None, f"{provider}:{model} is no longer in the genai-prices catalog"
+        assert pricing is not None, f"{provider}:{model} is no longer in the models.dev catalog"
         for field in ("input_price_per_million", "output_price_per_million", "cache_read_price_per_million"):
             value = getattr(pricing, field)
             if value is not None:

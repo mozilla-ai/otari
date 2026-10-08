@@ -12,7 +12,6 @@ from gateway.core.config import API_ROOT
 from gateway.services.pricing_service import (
     configure_default_pricing,
     default_model_pricing,
-    reset_price_cache,
 )
 
 
@@ -529,12 +528,12 @@ def test_speech_unpriced_records_no_charge_lines(
     assert latest["pricing_breakdown"] is None
 
 
-def test_transcription_ignores_genai_prices_defaults(
+def test_transcription_ignores_models_dev_defaults(
     client: TestClient,
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """Default (genai-prices) rates never price audio, even with default_pricing on.
+    """Default (models.dev) rates never price audio, even with default_pricing on.
 
     Those rates are USD per million tokens, but audio bills per request, so
     honoring one would write a charge line at the wrong unit for a rate the
@@ -542,7 +541,6 @@ def test_transcription_ignores_genai_prices_defaults(
     case that would regress.
     """
     configure_default_pricing(True)
-    reset_price_cache()
     try:
         # Pin the premise: without a dataset entry to ignore, the assertions below
         # would pass for the wrong reason and stop guarding anything.
@@ -561,7 +559,6 @@ def test_transcription_ignores_genai_prices_defaults(
         assert resp.status_code == 200
     finally:
         configure_default_pricing(False)
-        reset_price_cache()
 
     usage_resp = client.get(
         f"{API_ROOT}/usage",

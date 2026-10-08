@@ -12,7 +12,6 @@ from gateway.core.config import API_ROOT
 from gateway.services.pricing_service import (
     configure_default_pricing,
     default_model_pricing,
-    reset_price_cache,
 )
 
 
@@ -269,24 +268,23 @@ def test_images_billing_meters_tracked_with_pricing(
     assert breakdown == [{"meter": "images", "units": 2, "unit_rate": 0.04, "cost": pytest.approx(0.08)}]
 
 
-def test_images_ignores_genai_prices_defaults(
+def test_images_ignores_models_dev_defaults(
     client: TestClient,
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
 ) -> None:
-    """Default (genai-prices) rates never price image generation.
+    """Default (models.dev) rates never price image generation.
 
     Those rates are USD per million tokens, but images bill per image at a raw
     per-image rate, so honoring one would charge dollars per image for a rate
-    quoted per million tokens: gpt-image-1 is in the dataset at 5.0, which would
+    quoted per million tokens: gpt-image-2 is in the dataset at 5.0 per million, which would
     bill $5.00 for one image (and reserve it before the call).
     """
     configure_default_pricing(True)
-    reset_price_cache()
     try:
         # Pin the premise: without a dataset entry to ignore, the assertions below
         # would pass for the wrong reason and stop guarding anything.
-        assert default_model_pricing("openai", "gpt-image-1", datetime.now(UTC)) is not None
+        assert default_model_pricing("openai", "gpt-image-2", datetime.now(UTC)) is not None
         with patch(
             "gateway.api.routes.images.aimage_generation",
             new_callable=AsyncMock,
@@ -294,19 +292,18 @@ def test_images_ignores_genai_prices_defaults(
         ):
             resp = client.post(
                 f"{API_ROOT}/images/generations",
-                json={"model": "openai:gpt-image-1", "prompt": "a cute cat"},
+                json={"model": "openai:gpt-image-2", "prompt": "a cute cat"},
                 headers=api_key_header,
             )
         assert resp.status_code == 200
     finally:
         configure_default_pricing(False)
-        reset_price_cache()
 
     usage_resp = client.get(
         f"{API_ROOT}/usage", params={"endpoint": "/v1/images/generations"}, headers=master_key_header
     )
     latest = usage_resp.json()[0]
-    assert latest["model"] == "gpt-image-1"
+    assert latest["model"] == "gpt-image-2"
     assert latest["cost"] is None
     assert latest["billing_meters"] is None
     assert latest["pricing_breakdown"] is None

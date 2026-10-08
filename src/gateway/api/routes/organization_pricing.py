@@ -14,7 +14,7 @@ administration is the overlay's to contribute.
 
 These rates sit *above* ``/api/v1/pricing``, which stays the deployment price list.
 A model with no override here prices exactly as it did before, and the resolution
-order (override, deployment row, genai-prices dataset) is
+order (override, deployment row, models.dev catalog) is
 `services.pricing_service.find_model_pricing`.
 """
 

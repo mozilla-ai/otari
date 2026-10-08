@@ -4,7 +4,7 @@ Every cost the gateway derives from a resolved rate row goes through this
 module: settlement, the reserve-time upper bound, repricing, and imported
 usage. It takes no database access and knows nothing about the pricing lookup
 chain (``services/pricing_service.py``), so one implementation of the
-arithmetic serves a stored rate, an organization override, a genai-prices
+arithmetic serves a stored rate, an organization override, a models.dev
 default, and a transient rate built in a test, and a second one cannot drift
 from it.
 

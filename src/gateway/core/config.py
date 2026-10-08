@@ -1113,8 +1113,8 @@ class GatewayConfig(
             "Enrich the model listing and the dashboard's model detail with metadata "
             "(token limits, modalities, capabilities, knowledge cutoff) fetched from "
             "the public models.dev catalog. Set false to disable the outbound call; "
-            "the gateway then falls back to the bundled genai-prices data, which "
-            "lists a context window for some models and no output limit."
+            "the gateway then reads the context window from the bundled or accepted "
+            "models.dev snapshot and lists no output limit. Pricing does not depend on it."
         ),
     )
     models_dev_cache_ttl_seconds: Annotated[int, Shown(SettingsGroup.MODELS)] = Field(

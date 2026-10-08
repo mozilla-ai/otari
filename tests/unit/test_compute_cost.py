@@ -1,6 +1,6 @@
 """Unit tests for the standalone-mode cost of a request, as ``calculate_metered_cost`` totals it.
 
-These pin the cache-token pricing model, which follows the genai-prices dataset
+These pin the cache-token pricing model, which follows the models.dev dataset
 this project already uses: the input/prompt token count is the grand total that
 *includes* cache reads and writes, and each physical token is charged once.
 

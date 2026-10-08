@@ -119,7 +119,8 @@ class UsageLog(Base):
 
     # Why ``cost`` is the amount it is, which the row cannot re-derive on its own:
     # ``pricing_source`` names the price list that settled it ("organization",
-    # "managed", "genai_prices"), ``pricing_reference`` identifies the entry in it
+    # "managed", "defaults"; older rows read "genai_prices"), ``pricing_reference``
+    # identifies the entry in it
     # (a pricing row's id, or a ``provider:model`` key), ``pricing_effective_at``
     # is when that rate took effect, and ``pricing_version`` pins the revision of
     # the list. ``calculated_at`` is when the amount was priced, which is not

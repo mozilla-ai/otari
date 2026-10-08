@@ -1101,7 +1101,7 @@ def test_model_detail_agrees_with_the_listing_on_a_stale_entry(
     sleeps its interval *after* each round, so an entry is expired from the moment
     the next round starts until its dials finish. A TTL-bounded peek in the detail
     endpoint would disagree with the listing for that whole window, for any
-    provider model with no pricing row and no genai-prices fallback.
+    provider model with no pricing row and no models.dev fallback.
     """
     _warm_cache_with_expired_entry("gpt-4o")
 
@@ -1139,7 +1139,7 @@ def test_model_detail_does_not_serve_a_cached_failure_as_a_model(
 
     resp = cached_discovery_client.get(f"{API_ROOT}/models/openai:never-seen", headers=discovery_master_header)
 
-    # Falls through to the pricing/genai-prices answer rather than inventing a
+    # Falls through to the pricing/models.dev answer rather than inventing a
     # discovered model out of a failed dial.
     assert resp.status_code in (200, 404)
     if resp.status_code == 200:

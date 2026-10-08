@@ -28,7 +28,7 @@ async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: Asy
 
     When community-maintained default pricing is enabled (opt-in), the dire "all
     requests rejected" warning no longer applies; a softer note is logged instead,
-    since models outside genai-prices coverage are still rejected.
+    since models outside models.dev coverage are still rejected.
     """
     if not config.require_pricing:
         return
@@ -52,7 +52,7 @@ async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: Asy
     else:
         logger.warning(
             "require_pricing is enabled with no configured pricing; relying on default_pricing "
-            "(genai-prices) for billing. Models outside its coverage are still rejected with HTTP 402."
+            "(models.dev) for billing. Models outside its coverage are still rejected with HTTP 402."
         )
 
 

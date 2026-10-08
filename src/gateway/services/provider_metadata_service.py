@@ -7,8 +7,8 @@ datasets, so no provider is contacted:
 
 - ``any_llm`` :class:`ProviderMetadata` (keyed by the provider *type*) supplies
   the capability flags, documentation URL, and credential env var.
-- ``genai-prices`` (keyed by the provider *id*) supplies the display name,
-  description, and pricing-doc URLs.
+- ``models.dev`` (keyed by the provider *id*) supplies the display name and
+  the provider's docs link, which doubles as its pricing link.
 
 Model *counts* are deliberately not computed here; those need a live discovery
 call, which the dashboard already has from GET /v1/models/discoverable and can
@@ -22,6 +22,7 @@ from any_llm import AnyLLM, LLMProvider
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
+from gateway.services.pricing import ModelsDevPrice, current_index
 
 
 @dataclass
@@ -68,17 +69,13 @@ def _any_llm_metadata(provider_type: str) -> object | None:
         return None
 
 
-def _genai_provider(provider_type: str) -> object | None:
-    """genai-prices provider record for a provider id, or ``None`` if unknown."""
+def _models_dev_provider(provider_type: str) -> ModelsDevPrice | None:
+    """A models.dev entry carrying the provider's name and doc link, or ``None`` if unknown."""
     try:
-        from genai_prices.data_snapshot import get_snapshot
-
-        for provider in get_snapshot().providers:
-            if provider.id == provider_type:
-                return provider
+        return current_index().provider_entry(provider_type)
     except Exception as exc:
-        logger.debug("genai-prices provider lookup failed for %r: %s", provider_type, exc)
-    return None
+        logger.debug("models.dev provider lookup failed for %r: %s", provider_type, exc)
+        return None
 
 
 def _capabilities(meta: object | None) -> ProviderCapabilities:
@@ -118,20 +115,20 @@ def provider_info(config: GatewayConfig, instance: str) -> ProviderInfo:
     """Assemble static metadata for one configured provider instance."""
     provider_type = config.provider_instance_type(instance)
     meta = _any_llm_metadata(provider_type)
-    gp = _genai_provider(provider_type)
+    gp = _models_dev_provider(provider_type)
 
-    # Prefer genai-prices' display name ("OpenAI") over any-llm's lowercase type
+    # Prefer models.dev' display name ("OpenAI") over any-llm's lowercase type
     # name ("openai"); fall back to the configured instance key.
-    name = _clean(getattr(gp, "name", None)) or _clean(getattr(meta, "name", None)) or instance
+    name = _clean(getattr(gp, "provider_name", None)) or _clean(getattr(meta, "name", None)) or instance
 
     return ProviderInfo(
         instance=instance,
         provider_type=provider_type,
         name=name,
         doc_url=_clean(getattr(meta, "doc_url", None)),
-        description=_clean(getattr(gp, "description", None)),
+        description=None,
         env_key=_clean(getattr(meta, "env_key", None)),
-        pricing_urls=list(getattr(gp, "pricing_urls", None) or []),
+        pricing_urls=[doc] if (doc := _clean(getattr(gp, "provider_doc", None))) else [],
         capabilities=_capabilities(meta),
     )
 
@@ -172,14 +169,14 @@ def list_known_provider_summaries() -> list[KnownProviderSummary]:
 
     Deliberately lightweight, so opening the picker does not lag: provider ids
     come from the any-llm registry and display names from the bundled
-    genai-prices dataset, so *no provider SDK is imported*. The per-provider
+    models.dev catalog, so *no provider SDK is imported*. The per-provider
     autofill hints (credential env var, default endpoint, whether a key is
     required) live on the provider class and are resolved lazily by
     :func:`known_provider_detail`, only for the provider an operator actually
-    selects. A provider absent from genai-prices falls back to its id as the name.
+    selects. A provider absent from models.dev falls back to its id as the name.
     """
     summaries = [
-        KnownProviderSummary(id=pid, name=_clean(getattr(_genai_provider(pid), "name", None)) or pid)
+        KnownProviderSummary(id=pid, name=_clean(getattr(_models_dev_provider(pid), "provider_name", None)) or pid)
         for pid in AnyLLM.get_supported_providers()
     ]
     return sorted(summaries, key=lambda summary: summary.name.lower())
@@ -204,8 +201,8 @@ def known_provider_detail(provider_id: str) -> KnownProvider | None:
     except Exception as exc:
         logger.debug("no provider detail for %r: %s", pid, exc)
         return None
-    gp = _genai_provider(pid)
-    name = _clean(getattr(gp, "name", None)) or _clean(getattr(meta, "name", None)) or pid
+    gp = _models_dev_provider(pid)
+    name = _clean(getattr(gp, "provider_name", None)) or _clean(getattr(meta, "name", None)) or pid
     raw_env = _clean(getattr(meta, "env_key", None))
     # any-llm uses the literal string "None" for keyless backends (Ollama, llama.cpp).
     env_key = None if raw_env in (None, "None") else raw_env
