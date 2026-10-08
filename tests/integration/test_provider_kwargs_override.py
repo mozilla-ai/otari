@@ -43,6 +43,36 @@ def client_with_model_in_provider(config_with_model_in_provider: GatewayConfig) 
     yield from build_test_client(config_with_model_in_provider)
 
 
+def test_vertex_client_settings_go_in_client_args() -> None:
+    """Vertex's project and location configure the genai client, not the completion call.
+
+    any-llm forwards only ``client_args`` to the provider's client; every other kwarg
+    reaches the completion call, where ``GenerateContentConfig`` rejects them.
+    """
+    config = GatewayConfig(
+        database_url="postgresql://localhost/test",
+        master_key="test",
+        require_pricing=False,
+        providers={
+            "vertexai": {
+                "project": "config-project",
+                "location": "us-south1",
+                "client_args": {"http_options": {"timeout": 30}},
+            },
+        },
+    )
+
+    kwargs = get_provider_kwargs(config, LLMProvider.VERTEXAI)
+
+    assert kwargs == {
+        "client_args": {
+            "project": "config-project",
+            "location": "us-south1",
+            "http_options": {"timeout": 30},
+        }
+    }
+
+
 def test_provider_kwargs_do_not_contain_model() -> None:
     """Test that provider kwargs from a typical config don't include request-level fields."""
     config = GatewayConfig(
