@@ -122,6 +122,7 @@ external content into system instructions as trusted text.
 
 A model change needs a migration. Review defaults and backfills for populated
 tables, foreign-key deletion behavior, downgrade safety, and tenant indexes.
+[schema-review](schema-review.instructions.md) says who signs off on one.
 
 New dependencies require lockfile review and a supply-chain check. Do not load
 untrusted pickle data, unsafe YAML, or shell commands built from request input.

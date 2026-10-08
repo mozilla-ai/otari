@@ -23,8 +23,9 @@ description: Review a pull request or diff for this repository against otari's p
      [backend-architecture](../../instructions/backend-architecture.instructions.md),
      [security-review](../../instructions/security-review.instructions.md),
      [performance-review](../../instructions/performance-review.instructions.md),
-     [frontend-standards](../../instructions/frontend-standards.instructions.md).
-     CodeRabbit loads all four as review guidance, through the directory glob in
+     [frontend-standards](../../instructions/frontend-standards.instructions.md),
+     [schema-review](../../instructions/schema-review.instructions.md).
+     CodeRabbit loads every file there as review guidance, through the directory glob in
      `.coderabbit.yaml` rather than through their `applyTo` frontmatter (its
      `path_instructions` is empty). No bot reviewing here reads that frontmatter now
      that Copilot is gone, so it is a note to a human reader and to you: glob it
