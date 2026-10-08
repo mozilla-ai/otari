@@ -299,7 +299,49 @@ def compile_policy(
 
     ordered: list[tuple[str, str]] = list(selected)
     ordered.extend((selector, "on_failure") for selector in spec.on_failure)
+    attempts, dropped = _resolve_candidates(
+        config, ordered, display_model=policy_name, allowlist=allowlist, workspace_id=workspace_id
+    )
 
+    if not attempts:
+        raise NoEligibleCandidatesError(policy_name, dropped)
+
+    if dropped:
+        logger.warning(
+            "Routing policy '%s' compiled to %d of %d candidates; dropped %s",
+            policy_name,
+            len(attempts),
+            len(ordered),
+            "; ".join(f"{item.selector} ({item.reason})" for item in dropped),
+        )
+
+    return CompiledPlan(
+        policy_name=policy_name,
+        attempts=attempts,
+        router_ordering=router_ordering if routed else None,
+        guardrails=[
+            GuardrailConfig(
+                profile=guardrail.profile,
+                url=guardrail.url,
+                mode=guardrail.mode,
+                on_unavailable=guardrail.on_unavailable,
+                validate_kwargs=guardrail.validate_kwargs,
+            )
+            for guardrail in spec.guardrails
+        ],
+        dropped=dropped,
+    )
+
+
+def _resolve_candidates(
+    config: GatewayConfig,
+    ordered: list[tuple[str, str]],
+    *,
+    display_model: str,
+    allowlist: list[str] | None,
+    workspace_id: uuid.UUID | None,
+) -> tuple[list[Attempt], list[DroppedCandidate]]:
+    """The attempts ``ordered`` resolves to for this caller, and every candidate dropped on the way."""
     attempts: list[Attempt] = []
     dropped: list[DroppedCandidate] = []
     seen: set[str] = set()
@@ -350,36 +392,9 @@ def compile_policy(
                 provider=resolved.provider,
                 model=resolved.model,
                 kwargs=resolved.kwargs,
-                display_model=policy_name,
+                display_model=display_model,
                 selection_reason=selection_reason,
             )
         )
 
-    if not attempts:
-        raise NoEligibleCandidatesError(policy_name, dropped)
-
-    if dropped:
-        logger.warning(
-            "Routing policy '%s' compiled to %d of %d candidates; dropped %s",
-            policy_name,
-            len(attempts),
-            len(ordered),
-            "; ".join(f"{item.selector} ({item.reason})" for item in dropped),
-        )
-
-    return CompiledPlan(
-        policy_name=policy_name,
-        attempts=attempts,
-        router_ordering=router_ordering if routed else None,
-        guardrails=[
-            GuardrailConfig(
-                profile=guardrail.profile,
-                url=guardrail.url,
-                mode=guardrail.mode,
-                on_unavailable=guardrail.on_unavailable,
-                validate_kwargs=guardrail.validate_kwargs,
-            )
-            for guardrail in spec.guardrails
-        ],
-        dropped=dropped,
-    )
+    return attempts, dropped
