@@ -82,8 +82,9 @@ class SetPricingRequest(BaseModel):
     unit: Literal["tokens", "requests", "images"] = Field(
         default="tokens",
         description=(
-            "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool or a "
-            "moderation call (USD per million requests), 'images' for image generation."
+            "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a "
+            "moderation call, or a completion model billed per call (USD per million requests), "
+            "'images' for image generation."
         ),
     )
 

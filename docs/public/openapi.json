@@ -11375,7 +11375,7 @@
           },
           "unit": {
             "default": "tokens",
-            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint.",
+            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call.",
             "enum": [
               "tokens",
               "requests",
@@ -11599,7 +11599,7 @@
           },
           "unit": {
             "default": "tokens",
-            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint.",
+            "description": "What the rates are per: tokens for a model, requests or images for a non-token endpoint. A completion model priced per requests is charged one request per successful call.",
             "enum": [
               "tokens",
               "requests",
@@ -16047,7 +16047,7 @@
           },
           "unit": {
             "default": "tokens",
-            "description": "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool or a moderation call (USD per million requests), 'images' for image generation.",
+            "description": "What the rates are per: 'tokens' for a model, 'requests' for a gateway-run tool, a moderation call, or a completion model billed per call (USD per million requests), 'images' for image generation.",
             "enum": [
               "tokens",
               "requests",

@@ -19,6 +19,8 @@ from gateway.core.metered_pricing import (
     effective_rates,
     estimate_metered_cost,
     price_billable_usage,
+    price_request,
+    priced_per_request,
     quantize_cost,
     to_decimal,
 )
@@ -319,3 +321,45 @@ def test_an_estimate_never_prices_below_the_input_rate() -> None:
     )
 
     assert estimate == Decimal("0.030000")
+
+
+def test_a_rate_priced_per_request_settles_one_request_whatever_the_tokens() -> None:
+    pricing = _pricing(input_price_per_million=Decimal("5000"), output_price_per_million=Decimal("0"), unit="requests")
+
+    cost, meters, lines = price_request(pricing)
+
+    assert priced_per_request(pricing)
+    assert cost == Decimal("0.005")
+    assert meters == {"requests": 1}
+    assert lines == [{"meter": "request", "units": 1, "unit_rate": 0.005, "cost": 0.005}]
+
+
+def test_a_free_per_request_rate_writes_no_charge_line() -> None:
+    cost, meters, lines = price_request(_pricing(input_price_per_million=Decimal("0"), unit="requests"))
+
+    assert (cost, meters, lines) == (Decimal("0"), {"requests": 1}, [])
+
+
+def test_a_per_request_rate_refuses_an_unusable_rate() -> None:
+    with pytest.raises(ValueError, match="no usable per-request rate"):
+        price_request(_pricing(input_price_per_million=None, unit="requests"))
+
+
+def test_a_per_request_rate_is_estimated_at_one_request() -> None:
+    """The reservation holds what the request settles at, not a token estimate."""
+    pricing = _pricing(input_price_per_million=Decimal("5000"), output_price_per_million=Decimal("0"), unit="requests")
+
+    estimate = estimate_metered_cost(pricing, estimated_input_tokens=1_000_000, estimated_output_tokens=4096)
+
+    assert estimate == Decimal("0.005")
+
+
+@pytest.mark.parametrize("unit", ["tokens", "images", None])
+def test_a_rate_not_priced_per_request_keeps_token_pricing(unit: str | None) -> None:
+    """``tokens`` (and a row with no unit) is priced exactly as before; ``images`` is not rerouted here."""
+    pricing = _pricing(unit=unit) if unit is not None else _pricing()
+
+    assert not priced_per_request(pricing)
+    assert estimate_metered_cost(
+        pricing, estimated_input_tokens=1_000_000, estimated_output_tokens=1_000_000
+    ) == Decimal("90")

@@ -117,7 +117,13 @@ from gateway.core.error_codes import (
     error_code_of,
     error_headers,
 )
-from gateway.core.metered_pricing import calculate_metered_cost, quantize_cost
+from gateway.core.metered_pricing import (
+    ChargeLine,
+    calculate_metered_cost,
+    price_request,
+    priced_per_request,
+    quantize_cost,
+)
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import (
@@ -3572,6 +3578,12 @@ async def record_usage(
             usage_data.completion_tokens,
         )
 
+    # A model priced per request owes its flat rate for a successful call whether
+    # or not the provider reported usage, and nothing for a failed one, so the
+    # rate is resolved for a success even without usage. A model priced per token
+    # is priced only from reported usage, as it always has been.
+    succeeded = error is None
+    if usage_data or succeeded:
         # The organization comes off the key, via the workspace already resolved
         # for the row above, so a settled cost uses the same rate the admission
         # gate estimated against. Both lookups are memoized on immutable columns,
@@ -3587,8 +3599,17 @@ async def record_usage(
                 as_of=usage_log.timestamp,
                 organization_id=await organization_for_workspace_id(db, usage_log.workspace_id),
             )
-        if resolved is not None:
-            cost, meters, breakdown = calculate_metered_cost(resolved.pricing, usage_data)
+        priced: tuple[Decimal, dict[str, int], list[ChargeLine]] | None = None
+        if resolved is not None and priced_per_request(resolved.pricing):
+            if succeeded:
+                priced = price_request(resolved.pricing)
+        elif usage_data:
+            if resolved is not None:
+                priced = calculate_metered_cost(resolved.pricing, usage_data)
+            else:
+                _warn_unpriced_model(f"{provider}:{model}" if provider else model)
+        if resolved is not None and priced is not None:
+            cost, meters, breakdown = priced
             pricing_source = resolved.source
             usage_log.cost = cost
             usage_log.billing_meters = meters
@@ -3602,8 +3623,6 @@ async def record_usage(
                 reference = None
             usage_log.pricing_reference = reference
             usage_log.pricing_effective_at = resolved.effective_at
-        else:
-            _warn_unpriced_model(f"{provider}:{model}" if provider else model)
 
     # When the caller bills a fixed amount without provider usage (e.g. the
     # stream-missing-usage estimate policy), record that amount on the log row
@@ -3632,6 +3651,35 @@ async def record_usage(
 
     await log_writer.put(usage_log)
     return LoggedUsage(usage_log.cost, pricing_source)
+
+
+async def bills_per_request(
+    db: AsyncSession,
+    *,
+    provider: str | None,
+    model: str,
+    api_key_id: str | None,
+    workspace_id: uuid.UUID | None,
+    prices: RequestPrices | None = None,
+) -> bool:
+    """Whether ``model`` is priced per request at the rate :func:`record_usage` will settle it at.
+
+    Such a model owes its flat rate for a successful call whether or not the
+    provider reported usage, so a caller deciding what to do about missing usage
+    asks this first.
+    """
+    if prices is not None:
+        resolved = await prices.resolve(db, provider, model)
+    else:
+        if workspace_id is None:
+            workspace_id = await workspace_for_key_id(db, api_key_id)
+        resolved = await resolve_model_pricing(
+            db,
+            provider,
+            model,
+            organization_id=await organization_for_workspace_id(db, workspace_id),
+        )
+    return resolved is not None and priced_per_request(resolved.pricing)
 
 
 def _cost_only(
@@ -4392,6 +4440,32 @@ def build_streaming_response(
                 record_inline_cost_settlement("unattached")
             return
         if db is None or log_writer is None or reservation is None:
+            return
+        # A model priced per request is billed by the request, not by the usage
+        # it reports, so a completed stream without usage is an ordinary success.
+        if await bills_per_request(
+            db, provider=provider, model=model, api_key_id=api_key_id, workspace_id=workspace_id, prices=prices
+        ):
+            logged = await record_usage(
+                db=db,
+                log_writer=log_writer,
+                api_key_id=api_key_id,
+                model=model,
+                provider=provider,
+                provider_type=provider_type,
+                endpoint=adapter.endpoint,
+                user_id=user_id,
+                latency_ms=_elapsed_ms(started_at),
+                ttft_ms=_ttft_ms(started_at, first_chunk_at),
+                counts_toward_budget=reservation.counts_toward_budget,
+                attribution=attribution,
+                tool_tally=tool_tally,
+                workspace_id=workspace_id,
+                request_id=request_id,
+                tags=tags,
+                prices=prices,
+            )
+            await reconcile_reservation(db, reservation, logged.cost or Decimal(0), actual_tokens=0)
             return
         policy = config.stream_missing_usage_policy
         if policy == "allow_free":
@@ -5590,7 +5664,20 @@ async def run_standalone_non_stream(
             # A request whose provider reported no usage still owes for the tool
             # calls it ran, so a non-empty tally forces the row that
             # ``log_success_without_usage = False`` would otherwise suppress.
-            if usage_data is not None or adapter.log_success_without_usage or not tool_ctx.tally.is_empty():
+            if (
+                usage_data is not None
+                or adapter.log_success_without_usage
+                or not tool_ctx.tally.is_empty()
+                # A model priced per request owes for the call whatever it reported.
+                or await bills_per_request(
+                    ctx.db,
+                    provider=provider,
+                    model=model,
+                    api_key_id=ctx.api_key_id,
+                    workspace_id=ctx.workspace_id,
+                    prices=ctx.prices,
+                )
+            ):
                 logged = await record_usage(
                     db=ctx.db,
                     log_writer=ctx.log_writer,

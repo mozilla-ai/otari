@@ -34,6 +34,10 @@ Rates are USD per million tokens. A rate of ``None`` means that meter is not
 priced separately, so its tokens stay in the fresh-input bucket and bill at the
 input rate: an absent cache rate is never a discount.
 
+A rate row whose ``unit`` is ``requests`` is the exception: its
+``input_price_per_million`` is USD per million requests, and a request costs
+that divided by a million whatever tokens it reported (:func:`price_request`).
+
 ``pricing`` is read structurally (``getattr``) rather than through a declared
 type, so a stored ``ModelPricing``, a transient rate row, and a test double all
 work without this module importing the ORM.
@@ -339,6 +343,49 @@ def _charge_line(meter: str, units: int, rate: Decimal, cost: Decimal) -> Charge
     return {"meter": meter, "units": units, "rate_per_million": float(rate), "cost": float(cost)}
 
 
+REQUESTS_UNIT = "requests"
+
+
+def priced_per_request(pricing: typing.Any) -> bool:
+    """Whether ``pricing`` charges a flat amount per request rather than per token.
+
+    A rate object without a ``unit`` (a transient row built for manual
+    repricing, a test double) reads as token pricing.
+    """
+    return getattr(pricing, "unit", None) == REQUESTS_UNIT
+
+
+def request_cost(pricing: typing.Any) -> Decimal:
+    """USD for one request at a per-request rate, exactly.
+
+    ``input_price_per_million`` is USD per million requests, so one request
+    costs a millionth of it.
+    """
+    rate = to_decimal(getattr(pricing, "input_price_per_million", None))
+    if rate is None:
+        raise ValueError("Pricing carries no usable per-request rate")
+    return meter_cost(1, rate)
+
+
+def request_charge_line(cost: Decimal) -> ChargeLine:
+    """The charge line for one request billed at ``cost``.
+
+    It carries ``unit_rate`` (USD per request) where a token line carries
+    ``rate_per_million``, which is what tells a reader which unit applies.
+    """
+    return {"meter": "request", "units": 1, "unit_rate": float(cost), "cost": float(cost)}
+
+
+def price_request(pricing: typing.Any) -> tuple[Decimal, dict[str, int], list[ChargeLine]]:
+    """Settle one request at a per-request rate: the cost, the meters, the charge lines.
+
+    A free request carries no charge line, so the breakdown never shows a
+    billed meter explaining a charge that did not happen.
+    """
+    cost = request_cost(pricing)
+    return quantize_cost(cost), {"requests": 1}, [request_charge_line(cost)] if cost else []
+
+
 def _price_meters(
     pricing: typing.Any,
     usage: BillableUsage,
@@ -480,7 +527,12 @@ def estimate_metered_cost(
     exceed it. Threshold rates are selected from the estimated input, which
     approximates the request's billable total. The estimate is reconciled to
     actual usage on completion.
+
+    A rate priced per request is estimated at exactly one request, which is
+    what it settles at.
     """
+    if priced_per_request(pricing):
+        return quantize_cost(request_cost(pricing))
     input_tokens = max(estimated_input_tokens, 0)
     output_tokens = max(estimated_output_tokens, 0)
     rates = effective_rates(pricing, input_tokens)

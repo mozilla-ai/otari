@@ -100,7 +100,8 @@ class ModelPricing(Base):
     # entire request once ``total_input_tokens`` reaches ``min_input_tokens``.
     pricing_tiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     # What ``input_price_per_million`` is a rate per: ``tokens`` for a model,
-    # ``requests`` for a gateway-run tool or a moderation call, ``images`` for
+    # ``requests`` for a gateway-run tool, a moderation call or a completion model
+    # billed per call, ``images`` for
     # image generation. The rate columns are shared by all three and a reader
     # cannot tell which from the number, so the row says (``PRICING_UNITS``).
     unit: Mapped[str] = mapped_column(String(16), default="tokens", server_default="tokens")

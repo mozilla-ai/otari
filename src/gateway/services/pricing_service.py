@@ -12,7 +12,7 @@ from sqlalchemy import case, distinct, func, inspect, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
-from gateway.core.metered_pricing import meter_cost, quantize_cost, to_decimal
+from gateway.core.metered_pricing import meter_cost, quantize_cost, request_charge_line, to_decimal
 from gateway.log_config import logger
 from gateway.models.pricing import ModelPricing, OrganizationModelPricing, PriceSource
 
@@ -870,15 +870,14 @@ def per_request_meters(cost: Decimal) -> PerRequestMeters | None:
     since they are exempt from ``require_pricing`` and an unset or ``0.0`` rate
     both settle at $0: a zero charge line would render in Activity as a billed
     meter explaining a charge that never happened. Shared by every route billing
-    per request (audio transcription, audio speech, moderations) so the shape
-    cannot drift between them, for the reason the unit conventions above are
+    per request (audio transcription, audio speech, moderations), and built from
+    the same charge line a chat model priced per request settles with, so the
+    shape cannot drift between them, for the reason the unit conventions above are
     named helpers rather than inline expressions.
     """
     if not cost:
         return None
-    # ``float`` because the breakdown is a JSON column; the exact amount is the
-    # row's ``cost``. See ``ChargeLine`` in the cost core.
-    return {"requests": 1}, [{"meter": "request", "units": 1, "unit_rate": float(cost), "cost": float(cost)}]
+    return {"requests": 1}, [request_charge_line(cost)]
 
 
 GATEWAY_TOOL_PRICING_PROVIDER = "otari"

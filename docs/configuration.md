@@ -405,11 +405,35 @@ Use `pricing_tiers` for a rate that applies to an entire request after an input
 token threshold. The OpenAPI pricing schemas and dashboard editor show the
 accepted shape.
 
-### Per-request pricing (audio and moderations)
+### Per-request pricing (audio, moderations, and completion models)
 
 Audio, moderations, and direct search do not use token pricing. They reuse
 `input_price_per_million` as USD per million requests. An unpriced request on
 these endpoints is served at zero cost.
+
+A model served over chat completions, the Responses API, or Messages can be
+priced the same way, for an upstream that bills per call and reports little or
+no token usage, such as an answer endpoint served through an OpenAI-compatible
+provider instance named `exa`. Give its pricing `unit: requests`:
+
+```yaml
+pricing:
+  exa:exa:
+    input_price_per_million: 5000   # $0.005 per request
+    output_price_per_million: 0
+    unit: requests
+```
+
+Such a model is charged `input_price_per_million / 1,000,000` for each
+successful call, streamed or not, whatever tokens it reports. The token counts
+are still recorded on the usage row, and still count toward a token budget, but
+they are not priced. A failed call, including a stream that errors or that the
+client abandons, costs nothing. The budget reservation holds that flat amount
+rather than a token estimate. A stream that ends without usage data is charged
+the flat amount too, so `stream_missing_usage_policy` does not apply to it.
+`require_pricing` treats the model like any other completion model, and the
+default-pricing fallback never supplies a per-request rate, so a per-request
+model needs its own pricing row.
 
 ### Per-image pricing (image generation)
 

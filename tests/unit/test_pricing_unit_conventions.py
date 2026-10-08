@@ -11,8 +11,10 @@ from decimal import Decimal
 
 import pytest
 
+from gateway.core.metered_pricing import price_request
 from gateway.models.pricing import ModelPricing
-from gateway.services.pricing_service import flat_request_cost, input_token_cost, per_image_cost
+from gateway.services.budgets import estimate_cost
+from gateway.services.pricing_service import flat_request_cost, input_token_cost, per_image_cost, per_request_meters
 
 
 def _pricing(rate: object) -> ModelPricing:
@@ -57,3 +59,31 @@ def test_the_per_request_convention_treats_an_unusable_rate_as_unpriced() -> Non
     """Its routes are exempt from ``require_pricing`` and settle unpriced at $0."""
     assert flat_request_cost(_pricing(float("nan"))) == Decimal(0)
     assert flat_request_cost(None) == Decimal(0)
+
+
+def test_a_per_request_route_and_a_per_request_model_write_the_same_charge_line() -> None:
+    """Audio and moderations build their line from the cost core's, so the shape cannot drift."""
+    pricing = ModelPricing(
+        model_key="exa:exa",
+        input_price_per_million=Decimal(5000),
+        output_price_per_million=Decimal(0),
+        unit="requests",
+    )
+
+    cost, meters, lines = price_request(pricing)
+
+    assert cost == flat_request_cost(pricing)
+    assert per_request_meters(cost) == (meters, lines)
+
+
+def test_the_budget_estimate_for_a_per_request_model_is_its_flat_price() -> None:
+    pricing = ModelPricing(
+        model_key="exa:exa",
+        input_price_per_million=Decimal(5000),
+        output_price_per_million=Decimal(0),
+        unit="requests",
+    )
+
+    estimate = estimate_cost(pricing, prompt_chars=40_000, max_output_tokens=None, default_output_tokens=4096)
+
+    assert estimate == Decimal("0.005")
