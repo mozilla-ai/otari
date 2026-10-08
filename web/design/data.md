@@ -119,8 +119,8 @@ tracks horizontal scroll so a first column can pin, and the per-page class is wh
 `otari-routing-table`, `otari-domains-table`, `otari-members-table`,
 `otari-provider-keys-table`, `otari-offered-models-table`,
 `otari-workspaces-table`, `otari-accounts-table`, `otari-activity-table`,
-`otari-budgets-table`, `otari-org-budgets-table`, `otari-mcp-table`,
-`otari-offerings-table`, `otari-sessions-table`. Inventing one
+`otari-budgets-table`, `otari-org-budgets-table`, `otari-budget-detail-table`,
+`otari-mcp-table`, `otari-offerings-table`, `otari-sessions-table`. Inventing one
 at the call site compiles and styles nothing.
 
 A new page adds its class to `src/styles/globals.css`, beside the others, and the

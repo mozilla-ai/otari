@@ -7,7 +7,9 @@ import type {
   CreateOrganizationSpendCeiling,
   CreateScopedBudgetRequest,
   OrganizationBudget,
+  OrganizationContext,
   OrganizationSpendCeiling,
+  OrganizationSpendCeilings,
   ScopedBudget,
   UpdateBudgetRequest,
   UpdateOrganizationBudget,
@@ -20,6 +22,7 @@ import { fetchAllPaged, fetchAllRows } from "@/shared/api/paging"
 import {
   BUDGETS,
   ORGANIZATION_BUDGETS,
+  ORGANIZATION_CONTEXT,
   ORGANIZATION_MEMBERS,
   ORGANIZATION_SPEND_CEILINGS,
   SCOPED_BUDGETS,
@@ -226,6 +229,36 @@ export function useOrganizationBudgets(enabled = true) {
       fetchAllPaged<OrganizationBudget>("/organizations/me/budgets"),
     staleTime: 60_000,
     enabled,
+  })
+}
+
+/**
+ * The ceilings applying one of the organization's budgets, with their spend.
+ *
+ * One page at the endpoint's maximum, which a budget cannot outgrow: its create
+ * and update bodies cap the entities it applies to at the same number. Keyed per
+ * organization, because the server scopes this by the session's active one.
+ */
+export function useOrganizationBudgetCeilings(budgetId: string) {
+  const queryClient = useQueryClient()
+  const context = useOrganizationContext().data
+  return useQuery({
+    queryKey: [
+      ORGANIZATION_SPEND_CEILINGS,
+      context?.organization?.id ?? null,
+      budgetId,
+    ],
+    queryFn: () =>
+      apiFetch<OrganizationSpendCeilings>(
+        `/organizations/me/spend-ceilings?budget_id=${encodeURIComponent(budgetId)}&limit=1000`,
+      ),
+    staleTime: 60_000,
+    // A callback, because this owners-and-admins-only read is opened by a role,
+    // and a role moves under a mounted query (otari#1300): resolved when the
+    // refetch is decided, it sees the context the switch has already written.
+    enabled: () =>
+      queryClient.getQueryData<OrganizationContext>(ORGANIZATION_CONTEXT) ===
+      context,
   })
 }
 

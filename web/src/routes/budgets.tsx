@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, Outlet } from "@tanstack/react-router"
 
-import { BudgetsPage } from "@/features/budgets/BudgetsPage"
-
+// A layout, not a page: the list lives in budgets.index.tsx and one budget in
+// budgets.$budgetId.tsx; this only nests them under one path.
 export const Route = createFileRoute("/budgets")({
-  component: BudgetsPage,
+  component: Outlet,
 })

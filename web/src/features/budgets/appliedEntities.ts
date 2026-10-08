@@ -266,3 +266,47 @@ export function describeEntity(
   if (entity.provider_key_id) return `${scope}, on ${entity.provider_key_id}`
   return scope
 }
+
+const KIND: Record<EntityGroupId, string> = {
+  workspace: "Workspace",
+  org_member: "Organization member",
+  workspace_member: "Workspace member",
+  api_token: "API key",
+  provider: "Provider",
+  model: "Model",
+}
+
+/**
+ * Each entity's name and kind, for a list of what a budget applies to.
+ *
+ * Names come from the same options the picker offers, so a row reads the way it
+ * was picked; anything no group offers falls back to `describeEntity`.
+ */
+export function entityNamer(
+  sources: EntitySources,
+  organizationName: string,
+): (key: string) => { name: string; kind: string } {
+  const named = new Map<string, { name: string; kind: string }>(
+    entityGroups(sources, new Map()).flatMap((group) =>
+      group.options.map((option) => [
+        option.id,
+        {
+          name: option.hint ? `${option.label} (${option.hint})` : option.label,
+          kind: KIND[group.id],
+        },
+      ]),
+    ),
+  )
+  named.set(
+    entityKey({ scope_type: "organization", scope_id: sources.organizationId }),
+    { name: organizationName, kind: "Whole organization" },
+  )
+  return (key) =>
+    named.get(key) ?? {
+      name: describeEntity(entityFromKey(key), {
+        organizationName,
+        workspaces: sources.workspaces,
+      }),
+      kind: "Narrowed",
+    }
+}

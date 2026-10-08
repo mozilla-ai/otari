@@ -2,16 +2,14 @@ import { useRef, useState } from "react"
 
 import type { OrganizationBudget, OrganizationContext } from "@/client"
 import { Button } from "@/design-system/actions/Button"
-import { ConfirmDialog } from "@/design-system/feedback/ConfirmDialog"
 import { EmptyState } from "@/design-system/feedback/EmptyState"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { PageIntro } from "@/design-system/layout/PageIntro"
-import {
-  useDeleteOrganizationBudget,
-  useOrganizationBudgets,
-} from "@/shared/api/budgets"
+import { useOrganizationBudgets } from "@/shared/api/budgets"
 
+import { formatAppliedTo } from "./appliedTo"
 import { budgetLabeler } from "./budgetLabel"
+import { DeleteBudgetDialog } from "./DeleteBudgetDialog"
 import { OrganizationBudgetDialog } from "./OrganizationBudgetDialog"
 import { OrganizationBudgetsTable } from "./OrganizationBudgetsTable"
 
@@ -24,7 +22,6 @@ export function OrganizationBudgetsPage({
   organization: OrganizationContext
 }) {
   const budgets = useOrganizationBudgets()
-  const remove = useDeleteOrganizationBudget()
   // Where focus lands after the first create, when the empty state that opened
   // the dialog is gone.
   const createButtonRef = useRef<HTMLButtonElement>(null)
@@ -120,25 +117,15 @@ export function OrganizationBudgetsPage({
       />
 
       {pendingDelete ? (
-        <ConfirmDialog
-          isOpen
+        <DeleteBudgetDialog
+          key={pendingDelete.budget_id}
+          budget={pendingDelete}
+          budgetName={nameBudget(pendingDelete)}
+          appliedTo={formatAppliedTo(pendingDelete.applied_to)}
           onOpenChange={(open) => {
             if (!open) setPendingDelete(undefined)
           }}
-          heading="Delete budget"
-          body={
-            pendingDelete.ceiling_count > 0
-              ? `${nameBudget(pendingDelete)} is applied to ${pendingDelete.ceiling_count} ${pendingDelete.ceiling_count === 1 ? "entity" : "entities"}, so this will be refused. Edit the budget to remove them, or ask a deployment operator about any you cannot see.`
-              : `${nameBudget(pendingDelete)} stops existing. It applies to nothing, so no cap changes.`
-          }
-          confirmLabel="Delete budget"
-          isPending={remove.isPending}
-          error={remove.error}
-          onConfirm={() => {
-            remove.mutate(pendingDelete.budget_id, {
-              onSuccess: () => setPendingDelete(undefined),
-            })
-          }}
+          onDeleted={() => setPendingDelete(undefined)}
         />
       ) : null}
     </div>

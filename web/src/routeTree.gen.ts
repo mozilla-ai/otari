@@ -32,6 +32,8 @@ import { Route as AdminAccountsRouteImport } from './routes/admin.accounts'
 import { Route as AdminCodeExecutionRouteImport } from './routes/admin.code-execution'
 import { Route as AdminHostedProvidersRouteImport } from './routes/admin.hosted-providers'
 import { Route as AdminWebSearchRouteImport } from './routes/admin.web-search'
+import { Route as BudgetsIndexRouteImport } from './routes/budgets.index'
+import { Route as BudgetsBudgetIdRouteImport } from './routes/budgets.$budgetId'
 import { Route as ModelsIndexRouteImport } from './routes/models.index'
 import { Route as ModelsSplatRouteImport } from './routes/models.$'
 import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
@@ -164,6 +166,16 @@ const AdminWebSearchRoute = AdminWebSearchRouteImport.update({
   path: '/admin/web-search',
   getParentRoute: () => rootRouteImport,
 } as any)
+const BudgetsIndexRoute = BudgetsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => BudgetsRoute,
+} as any)
+const BudgetsBudgetIdRoute = BudgetsBudgetIdRouteImport.update({
+  id: '/$budgetId',
+  path: '/$budgetId',
+  getParentRoute: () => BudgetsRoute,
+} as any)
 const ModelsIndexRoute = ModelsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -252,7 +264,7 @@ export interface FileRoutesByFullPath {
   '/account': typeof AccountRoute
   '/activity': typeof ActivityRoute
   '/aliases': typeof AliasesRoute
-  '/budgets': typeof BudgetsRoute
+  '/budgets': typeof BudgetsRouteWithChildren
   '/health-checks': typeof HealthChecksRoute
   '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
@@ -270,6 +282,7 @@ export interface FileRoutesByFullPath {
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/admin/web-search': typeof AdminWebSearchRoute
+  '/budgets/$budgetId': typeof BudgetsBudgetIdRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -282,6 +295,7 @@ export interface FileRoutesByFullPath {
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
+  '/budgets/': typeof BudgetsIndexRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
   '/routing/': typeof RoutingIndexRoute
@@ -293,7 +307,6 @@ export interface FileRoutesByTo {
   '/account': typeof AccountRoute
   '/activity': typeof ActivityRoute
   '/aliases': typeof AliasesRoute
-  '/budgets': typeof BudgetsRoute
   '/health-checks': typeof HealthChecksRoute
   '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
@@ -307,6 +320,7 @@ export interface FileRoutesByTo {
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/admin/web-search': typeof AdminWebSearchRoute
+  '/budgets/$budgetId': typeof BudgetsBudgetIdRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -319,6 +333,7 @@ export interface FileRoutesByTo {
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
+  '/budgets': typeof BudgetsIndexRoute
   '/models': typeof ModelsIndexRoute
   '/organization': typeof OrganizationIndexRoute
   '/routing': typeof RoutingIndexRoute
@@ -331,7 +346,7 @@ export interface FileRoutesById {
   '/account': typeof AccountRoute
   '/activity': typeof ActivityRoute
   '/aliases': typeof AliasesRoute
-  '/budgets': typeof BudgetsRoute
+  '/budgets': typeof BudgetsRouteWithChildren
   '/health-checks': typeof HealthChecksRoute
   '/invitations': typeof InvitationsRoute
   '/keys': typeof KeysRoute
@@ -349,6 +364,7 @@ export interface FileRoutesById {
   '/admin/code-execution': typeof AdminCodeExecutionRoute
   '/admin/hosted-providers': typeof AdminHostedProvidersRoute
   '/admin/web-search': typeof AdminWebSearchRoute
+  '/budgets/$budgetId': typeof BudgetsBudgetIdRoute
   '/models/$': typeof ModelsSplatRoute
   '/organization/domains': typeof OrganizationDomainsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
@@ -361,6 +377,7 @@ export interface FileRoutesById {
   '/tools/guardrails': typeof ToolsGuardrailsRoute
   '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
+  '/budgets/': typeof BudgetsIndexRoute
   '/models/': typeof ModelsIndexRoute
   '/organization/': typeof OrganizationIndexRoute
   '/routing/': typeof RoutingIndexRoute
@@ -392,6 +409,7 @@ export interface FileRouteTypes {
     | '/admin/code-execution'
     | '/admin/hosted-providers'
     | '/admin/web-search'
+    | '/budgets/$budgetId'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -404,6 +422,7 @@ export interface FileRouteTypes {
     | '/tools/guardrails'
     | '/tools/mcp-servers'
     | '/tools/web-search'
+    | '/budgets/'
     | '/models/'
     | '/organization/'
     | '/routing/'
@@ -415,7 +434,6 @@ export interface FileRouteTypes {
     | '/account'
     | '/activity'
     | '/aliases'
-    | '/budgets'
     | '/health-checks'
     | '/invitations'
     | '/keys'
@@ -429,6 +447,7 @@ export interface FileRouteTypes {
     | '/admin/code-execution'
     | '/admin/hosted-providers'
     | '/admin/web-search'
+    | '/budgets/$budgetId'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -441,6 +460,7 @@ export interface FileRouteTypes {
     | '/tools/guardrails'
     | '/tools/mcp-servers'
     | '/tools/web-search'
+    | '/budgets'
     | '/models'
     | '/organization'
     | '/routing'
@@ -470,6 +490,7 @@ export interface FileRouteTypes {
     | '/admin/code-execution'
     | '/admin/hosted-providers'
     | '/admin/web-search'
+    | '/budgets/$budgetId'
     | '/models/$'
     | '/organization/domains'
     | '/organization/guardrails'
@@ -482,6 +503,7 @@ export interface FileRouteTypes {
     | '/tools/guardrails'
     | '/tools/mcp-servers'
     | '/tools/web-search'
+    | '/budgets/'
     | '/models/'
     | '/organization/'
     | '/routing/'
@@ -494,7 +516,7 @@ export interface RootRouteChildren {
   AccountRoute: typeof AccountRoute
   ActivityRoute: typeof ActivityRoute
   AliasesRoute: typeof AliasesRoute
-  BudgetsRoute: typeof BudgetsRoute
+  BudgetsRoute: typeof BudgetsRouteWithChildren
   HealthChecksRoute: typeof HealthChecksRoute
   InvitationsRoute: typeof InvitationsRoute
   KeysRoute: typeof KeysRoute
@@ -677,6 +699,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminWebSearchRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/budgets/': {
+      id: '/budgets/'
+      path: '/'
+      fullPath: '/budgets/'
+      preLoaderRoute: typeof BudgetsIndexRouteImport
+      parentRoute: typeof BudgetsRoute
+    }
+    '/budgets/$budgetId': {
+      id: '/budgets/$budgetId'
+      path: '/$budgetId'
+      fullPath: '/budgets/$budgetId'
+      preLoaderRoute: typeof BudgetsBudgetIdRouteImport
+      parentRoute: typeof BudgetsRoute
+    }
     '/models/': {
       id: '/models/'
       path: '/'
@@ -792,6 +828,19 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface BudgetsRouteChildren {
+  BudgetsBudgetIdRoute: typeof BudgetsBudgetIdRoute
+  BudgetsIndexRoute: typeof BudgetsIndexRoute
+}
+
+const BudgetsRouteChildren: BudgetsRouteChildren = {
+  BudgetsBudgetIdRoute: BudgetsBudgetIdRoute,
+  BudgetsIndexRoute: BudgetsIndexRoute,
+}
+
+const BudgetsRouteWithChildren =
+  BudgetsRoute._addFileChildren(BudgetsRouteChildren)
+
 interface ModelsRouteChildren {
   ModelsSplatRoute: typeof ModelsSplatRoute
   ModelsIndexRoute: typeof ModelsIndexRoute
@@ -866,7 +915,7 @@ const rootRouteChildren: RootRouteChildren = {
   AccountRoute: AccountRoute,
   ActivityRoute: ActivityRoute,
   AliasesRoute: AliasesRoute,
-  BudgetsRoute: BudgetsRoute,
+  BudgetsRoute: BudgetsRouteWithChildren,
   HealthChecksRoute: HealthChecksRoute,
   InvitationsRoute: InvitationsRoute,
   KeysRoute: KeysRoute,
