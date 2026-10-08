@@ -570,29 +570,13 @@ def _log_refresher_stop(task: asyncio.Task[None], name: str) -> None:
         logger.warning("%s stopped with an unexpected error", name, exc_info=error)
 
 
-async def _wait_for_refresher_stop(task: asyncio.Task[None], name: str) -> None:
-    """Wait for a cancelled lifespan refresher, but never indefinitely.
+async def _stop_refreshers(refreshers: list[tuple[asyncio.Task[None], str]]) -> None:
+    """Cancel all refreshers, then give the group one shared shutdown bound.
 
     ``asyncio.wait`` rather than ``await task``: it takes a timeout, and it
     reports the outcome instead of re-raising it, so a refresher that died on an
-    unexpected error is logged here rather than aborting the rest of shutdown
-    (the log writer and the pooled search client still need closing).
+    unexpected error is logged here rather than aborting the rest of shutdown.
     """
-    done, _pending = await asyncio.wait({task}, timeout=_REFRESHER_STOP_TIMEOUT_SECONDS)
-    if not done:
-        _log_abandoned_refresher(name)
-        return
-    _log_refresher_stop(task, name)
-
-
-async def _stop_refresher(task: asyncio.Task[None], name: str) -> None:
-    """Cancel one lifespan refresher and wait for it, but never indefinitely."""
-    task.cancel()
-    await _wait_for_refresher_stop(task, name)
-
-
-async def _stop_refreshers(refreshers: list[tuple[asyncio.Task[None], str]]) -> None:
-    """Cancel all refreshers, then give the group one shared shutdown bound."""
     if not refreshers:
         return
     for task, _name in refreshers:

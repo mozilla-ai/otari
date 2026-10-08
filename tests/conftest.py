@@ -101,7 +101,7 @@ def _no_background_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     ``TestClient(create_app(...))``). Scoping this to ``tests/integration`` left
     every one of those making live models.dev fetches on CI, which is both wrong
     on its own terms and what surfaced the unbounded-shutdown bug that
-    ``_stop_refresher`` now guards against. A test that wants the real refresher
+    ``_stop_refreshers`` now guards against. A test that wants the real refresher
     calls it directly rather than through the lifespan.
     """
 

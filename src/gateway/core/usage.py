@@ -37,7 +37,7 @@ class GatewayUsage(CompletionUsage):
     re-priced discount). ``False`` for the Anthropic path, where ``input_tokens``
     excludes cache reads/writes and they are reported as separate additive buckets.
     The cost calculation reads this to normalize both shapes onto a single
-    convention (see ``_compute_cost`` in ``_pipeline.py``). Defaults to ``True`` so a
+    convention (see ``calculate_metered_cost`` in ``metered_pricing.py``). Defaults to ``True`` so a
     plain ``CompletionUsage`` and every OpenAI-style path need no change.
     """
     reasoning_tokens: int = 0
