@@ -192,10 +192,9 @@ async def call_responses(native: Callable[..., Awaitable[Any]], kwargs: dict[str
         except UnsupportedParameterError:
             raise exc from None
         logger.info(
-            "%s answered %s on /responses at its api_base (%s); serving as a chat completion",
+            "%s answered %s on /responses at its api_base; serving as a chat completion",
             kwargs["provider"],
             exc.status_code,
-            exc.message,
         )
         return await _run_chat_completion(*plan)
 
