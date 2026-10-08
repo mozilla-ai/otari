@@ -43,6 +43,9 @@ WEB_SEARCH_MAX_RESULTS = "web_search_max_results"
 WEB_SEARCH_EXTRACT = "web_search_extract"
 WEB_SEARCH_PURPOSE_HINT = "web_search_purpose_hint"
 WEB_SEARCH_INTERCEPT = "web_search_intercept"
+WEB_SEARCH_DEFAULT_TOOL = "web_search_default_tool"
+WEB_FETCH_DEFAULT_TOOL = "web_fetch_default_tool"
+WEB_SEARCH_MAX_CALLS = "web_search_max_calls"
 SANDBOX_URL = "sandbox_url"
 SANDBOX_PURPOSE_HINT = "sandbox_purpose_hint"
 SANDBOX_SESSION_IMAGE = "sandbox_session_image"
@@ -57,12 +60,15 @@ class _ToolSpec:
     ``type`` is one of ``"url" | "str" | "int" | "bool"``. Every field is
     nullable (an empty value clears the override); ``ge`` is an inclusive lower
     bound for ``int`` fields, mirroring the ``GatewayConfig`` field's constraint,
-    and ``options`` closes a ``str`` field to a fixed set of values.
+    ``options`` closes a ``str`` field to a fixed set of values, and ``is_name``
+    marks a ``str`` field that names something, stored without surrounding
+    whitespace as every read takes it.
     """
 
     type: str
     ge: int | None = None
     options: tuple[str, ...] | None = None
+    is_name: bool = False
 
 
 # The tool/guardrail config fields the dashboard may edit. These are the ``*_url``
@@ -75,10 +81,15 @@ _TOOL_SPECS: dict[str, _ToolSpec] = {
     GUARDRAILS_URL: _ToolSpec("url"),
     WEB_SEARCH_ENGINES: _ToolSpec("str"),
     WEB_SEARCH_PURPOSE_HINT: _ToolSpec("str"),
+    # Whether a default names an instance is checked by the route at write, not
+    # here: this also runs at startup, before stored search tools have loaded.
+    WEB_SEARCH_DEFAULT_TOOL: _ToolSpec("str", is_name=True),
+    WEB_FETCH_DEFAULT_TOOL: _ToolSpec("str", is_name=True),
     SANDBOX_PURPOSE_HINT: _ToolSpec("str"),
     SANDBOX_SESSION_IMAGE: _ToolSpec("str"),
     CODE_EXECUTION_EXECUTOR: _ToolSpec("str", options=tuple(executor.value for executor in CodeExecutor)),
     WEB_SEARCH_MAX_RESULTS: _ToolSpec("int", ge=1),
+    WEB_SEARCH_MAX_CALLS: _ToolSpec("int", ge=1),
     WEB_SEARCH_EXTRACT: _ToolSpec("bool"),
     WEB_SEARCH_INTERCEPT: _ToolSpec("bool"),
 }
@@ -93,6 +104,9 @@ _FIELD_SERVICE: dict[str, str] = {
     WEB_SEARCH_EXTRACT: "web_search",
     WEB_SEARCH_PURPOSE_HINT: "web_search",
     WEB_SEARCH_INTERCEPT: "web_search",
+    WEB_SEARCH_DEFAULT_TOOL: "web_search",
+    WEB_FETCH_DEFAULT_TOOL: "web_search",
+    WEB_SEARCH_MAX_CALLS: "web_search",
     SANDBOX_URL: "sandbox",
     SANDBOX_PURPOSE_HINT: "sandbox",
     SANDBOX_SESSION_IMAGE: "sandbox",
@@ -178,6 +192,8 @@ def validate_value(key: str, value: SettingValue) -> SettingValue:
             msg = f"{key} must be one of {', '.join(spec.options)}."
             raise ValueError(msg)
         return normalized
+    if spec.is_name:
+        return value.strip()
     return value
 
 

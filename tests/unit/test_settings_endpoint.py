@@ -232,6 +232,11 @@ def test_settings_includes_full_config_view(tmp_path: Path) -> None:
     ):
         assert by_key[name]["settable"] is False, name
 
+    # The web tools' runtime settings are shown here and edited through /tool-settings.
+    for name in ("web_search_default_tool", "web_fetch_default_tool", "web_search_max_calls"):
+        assert by_key[name]["settable"] is False, name
+        assert by_key[name]["group"] == "Tools & network access", name
+
     # Fields carry a group, description, and a display type.
     assert by_key["require_pricing"]["group"] == "Metering & budgets"
     assert by_key["require_pricing"]["description"]

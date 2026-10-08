@@ -83,3 +83,12 @@ def test_no_credential_is_shown_in_the_view() -> None:
     shown = {key for _, keys in derive_view(GatewayConfig).shown for key in keys}
 
     assert not shown & set(CREDENTIALS)
+
+
+def test_the_web_tools_settings_are_shown_and_their_instance_maps_hidden() -> None:
+    """The maps carry provider keys, so they stay out of the view as ``search_tools`` always has."""
+    layout = derive_view(GatewayConfig)
+    tools = dict(layout.shown)[SettingsGroup.TOOLS]
+    for name in ("web_search_url", "web_search_default_tool", "web_fetch_default_tool", "web_search_max_calls"):
+        assert name in tools, name
+    assert {"search_tools", "fetch_tools"} <= set(layout.hidden)

@@ -18,6 +18,8 @@ from starlette.datastructures import URL, MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+import any_fetch
+import any_search
 from gateway import features
 from gateway.api.deps import (
     build_file_service,
@@ -35,6 +37,7 @@ from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, 
 from gateway.core.database import create_session, dispose_db, init_db
 from gateway.core.error_codes import error_code_of, error_headers
 from gateway.core.feature import Worker
+from gateway.core.settings.tools import warn_about_tool_instances
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.exceptions import TenancyError
 from gateway.exceptions.control_plane_exceptions import ControlPlaneError
@@ -643,6 +646,8 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         feature_workers: list[tuple[asyncio.Task[None], str]] = []
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
+            # No stored search tools or tool settings to wait for on a hybrid gateway.
+            warn_about_tool_instances(config)
         else:
             init_db(config)
             async with create_session() as session:
@@ -675,6 +680,9 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
                         "OTARI_WEB_SEARCH_URL, or the dashboard's Tools page).",
                         ", ".join(sorted(missing_backend_url)),
                     )
+                # After the stored search tools and tool settings, for the same
+                # reason: a default set in the dashboard counts.
+                warn_about_tool_instances(config)
                 # Generate + persist a master key on first run when none is set,
                 # so the dashboard is reachable without hand-editing config, and
                 # the management API is never left unauthenticated.
@@ -869,6 +877,11 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # break provider-credential storage at request time. Fail fast here instead.
     validate_secret_key()
     set_config(config)
+    # The search and fetch libraries leave their log filters to the host, so a
+    # provider URL carrying a query or a key never reaches httpx's own logging.
+    # Before any route can make a provider call.
+    any_search.install_log_filter()
+    any_fetch.install_log_filter()
 
     app = FastAPI(
         title="otari",

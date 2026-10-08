@@ -22,6 +22,16 @@ from gateway.core.settings.budgets import BudgetSettings
 from gateway.core.settings.feedback import FeedbackSettings
 from gateway.core.settings.inference import InferenceSettings
 from gateway.core.settings.pricing import PricingSettings
+
+# Re-exported for the modules that import them from here. The settings module
+# never imports this one, so neither is read while the other is half-loaded.
+from gateway.core.settings.tools import SEARCH_PROVIDERS as SEARCH_PROVIDERS
+from gateway.core.settings.tools import SEARCH_PROVIDERS_REQUIRING_API_BASE as SEARCH_PROVIDERS_REQUIRING_API_BASE
+from gateway.core.settings.tools import SEARCH_PROVIDERS_REQUIRING_API_KEY as SEARCH_PROVIDERS_REQUIRING_API_KEY
+from gateway.core.settings.tools import WEB_SEARCH_PROVIDERS as WEB_SEARCH_PROVIDERS
+from gateway.core.settings.tools import ToolSettings
+from gateway.core.settings.tools import validate_search_tool_entry as validate_search_tool_entry
+from gateway.core.settings.tools import validate_search_tool_transport as validate_search_tool_transport
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
 from gateway.models.routing import RoutingConfig
@@ -145,6 +155,9 @@ ENV_BRIDGED_FIELDS = (
     "web_search_max_results",
     "web_search_extract",
     "web_search_allow_private_hosts",
+    "web_search_default_tool",
+    "web_fetch_default_tool",
+    "web_search_max_calls",
     "mcp_allow_loopback",
     "mcp_allow_private_hosts",
     "provider_allow_private_hosts",
@@ -158,100 +171,12 @@ ROUTER_GRANULARITIES = ("trace_sticky", "step")
 # even when it is. See GatewayConfig.mail_transport.
 MAIL_TRANSPORT_SETTINGS = ("auto", "smtp", "console", "none")
 
-# Search providers the standalone POST /api/v1/search endpoint can dispatch to.
-# Declared here rather than in the adapter module so startup validation can
-# reject an unknown ``search_tools.<name>.provider`` without the config layer
-# importing the service layer.
-SEARCH_PROVIDERS = ("exa", "searxng")
-# Licensed search APIs the in-loop ``otari_web_search`` backend can call
-# directly, as an alternative to pointing ``web_search_url`` at a SearXNG-shaped
-# service. Declared here for the same reason as SEARCH_PROVIDERS above: startup
-# validation rejects an unknown ``web_search_provider`` without the config layer
-# importing `gateway.services.web_search_providers`, which imports this name.
-WEB_SEARCH_PROVIDERS = ("tavily", "brave")
-# Providers that authenticate with an API key, so a tool declaring one of them
-# without a key is a misconfiguration. A SearXNG-shaped backend is normally
-# keyless (the bundled container, a self-hosted adapter), which is why the key
-# is per-provider rather than universally required.
-SEARCH_PROVIDERS_REQUIRING_API_KEY = ("exa",)
-# Providers with no endpoint of their own to default to, so the tool has to say
-# where the backend is. The only one today is ``searxng``, which speaks the same
-# wire contract as the in-loop otari_web_search backend and therefore inherits
-# ``web_search_url`` when the tool declares no ``api_base``.
-SEARCH_PROVIDERS_REQUIRING_API_BASE = ("searxng",)
-
-
-def validate_search_tool_transport(name: str, api_base: Any, api_key: Any) -> None:
-    """Require encrypted transport when a search tool carries a credential."""
-    if not api_key or not api_base:
-        return
-    try:
-        scheme = urlsplit(str(api_base).strip()).scheme.lower()
-    except ValueError:
-        scheme = ""
-    if scheme != "https":
-        msg = f"search_tools.{name}.api_base must use https when api_key is set."
-        raise ValueError(msg)
-
-
-def validate_search_tool_entry(name: str, entry: Any) -> None:
-    """Validate one ``search_tools`` entry, raising ``ValueError`` on any problem.
-
-    Module-level rather than a method so the runtime CRUD path
-    (``/api/v1/search-tools``) can hold a dashboard-written tool to the same rules
-    the config file is held to at startup, instead of restating them.
-
-    A tool on a provider that authenticates with an API key is rejected here
-    without one, rather than at request time as an opaque upstream 401; a keyless
-    provider (a self-hosted SearXNG or an adapter fronting one) is allowed to
-    declare none. The tool name doubles as a ``/api/v1/search/{tool}`` path segment,
-    so it must not contain a slash.
-
-    A missing backend URL is deliberately not fatal here; see
-    :meth:`GatewayConfig.search_tools_without_backend_url`.
-    """
-    if not name:
-        msg = "search tool name must not be empty."
-        raise ValueError(msg)
-    if "/" in name:
-        msg = f"search tool name '{name}' must not contain '/' (it is used as a URL path segment)."
-        raise ValueError(msg)
-    if not isinstance(entry, dict):
-        msg = f"search_tools.{name} must be a mapping."
-        raise ValueError(msg)
-    provider = entry.get("provider") or name
-    if provider not in SEARCH_PROVIDERS:
-        msg = (
-            f"search_tools.{name}.provider '{provider}' is not a supported search provider "
-            f"(one of: {', '.join(SEARCH_PROVIDERS)})."
-        )
-        raise ValueError(msg)
-    if provider in SEARCH_PROVIDERS_REQUIRING_API_KEY and not entry.get("api_key"):
-        msg = f"search_tools.{name}.api_key is required for provider '{provider}'."
-        raise ValueError(msg)
-    validate_search_tool_transport(name, entry.get("api_base"), entry.get("api_key"))
-    timeout = entry.get("timeout")
-    if timeout is not None:
-        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
-            msg = f"search_tools.{name}.timeout must be a number of seconds."
-            raise ValueError(msg)
-        # A negative timeout would reach httpx and fail at request time, and a
-        # zero is silently swapped for the default when the tool is resolved.
-        # Both are misconfigurations worth failing on here.
-        if timeout <= 0:
-            msg = f"search_tools.{name}.timeout must be greater than 0 seconds, got {timeout}."
-            raise ValueError(msg)
-    options = entry.get("options")
-    if options is not None and not isinstance(options, dict):
-        msg = f"search_tools.{name}.options must be a mapping."
-        raise ValueError(msg)
-
-
 # Upstreams POST /api/v1/decisions can dispatch to. All take TypeSafe's
 # question-and-answer shape, which OpenRouter's alpha Decisions API and
 # llama-server's /v1/systemone adopted, and none is an any-llm provider, so they
 # are declared under ``decision_providers`` rather than ``providers``. Declared
-# here for the same reason as SEARCH_PROVIDERS.
+# here, as the search providers are in ``core/settings/tools.py``, so startup
+# validation needs no service module.
 DECISION_PROVIDERS = ("typesafe", "openrouter", "llamacpp")
 # Self-hosted servers: no endpoint of their own to default to, and normally no key.
 DECISION_PROVIDERS_SELF_HOSTED = ("llamacpp",)
@@ -558,7 +483,7 @@ class RelyingParty(NamedTuple):
 
 # Gotcha: fields are ordered last base first, then this class's own.
 # The settings view keeps that order, so moving a base reorders it.
-class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, FeedbackSettings, BaseSettings):
+class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, FeedbackSettings, ToolSettings, BaseSettings):
     """Gateway configuration with support for YAML files and environment variables."""
 
     model_config = SettingsConfigDict(
@@ -1093,17 +1018,6 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             "Claude Code's haiku, sonnet and opus aliases."
         ),
     )
-    search_tools: Annotated[dict[str, dict[str, Any]], OMITTED] = Field(
-        default_factory=dict,
-        description=(
-            "Search tools served by POST /api/v1/search, keyed by the name callers pass as "
-            "'search_tool_name' (or in the /api/v1/search/{tool} path). Each entry may declare a "
-            "'provider' (one of: exa, searxng; defaults to the tool name), an 'api_key' "
-            "(required for exa), an 'api_base' (required for searxng unless web_search_url is "
-            "set, which it then inherits), a 'timeout' in seconds, and an 'options' mapping of "
-            "provider-native defaults. Standalone-mode only."
-        ),
-    )
     bootstrap_api_key: Annotated[bool, Shown(SettingsGroup.GENERAL)] = Field(
         default=True,
         description="Create a first-use API key on startup when no API keys exist",
@@ -1488,100 +1402,6 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             "The explicit otari_code_execution type is always run by the gateway."
         ),
     )
-    web_fetch_enabled: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
-        default=False,
-        description=(
-            "Whether Otari may execute the managed otari_web_fetch tool. Off by default because "
-            "enabling it permits model-directed outbound requests to public web destinations."
-        ),
-    )
-    web_search_url: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
-        default=None,
-        description=(
-            "Base URL of the web-search backend (SearXNG instance or a search adapter) for "
-            "otari_web_search tools. When unset, otari_web_search requests are rejected with 400. "
-            "docker-compose sets this to the bundled SearXNG container."
-        ),
-    )
-    web_search_provider: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
-        default=None,
-        description=(
-            "Licensed search API the web-search backend calls directly ('tavily' or 'brave'), "
-            "instead of the SearXNG-shaped service web_search_url names. Requires "
-            "web_search_provider_api_key. When both are set, web_search_url is not needed."
-        ),
-    )
-    web_search_provider_api_key: Annotated[str | None, SECRET] = Field(
-        default=None,
-        description=(
-            "Credential for web_search_provider. Held by whichever process runs the search: on a "
-            "hosted deployment that is the control plane, never the data plane."
-        ),
-    )
-    web_search_backend_token: Annotated[str | None, SECRET] = Field(
-        default=None,
-        description=(
-            "Shared secret GET /api/v1/web-search/search requires as X-Gateway-Token. Set on a hosted "
-            "control plane so its data-plane gateway can search through it; without it the route "
-            "is not served, because it spends the deployment's own search quota. The gateway "
-            "presents its platform token (OTARI_AI_TOKEN) and nothing else, so this must be that "
-            "token, and rotating it stops web search for that data plane until both are updated."
-        ),
-    )
-    web_search_purpose_hint: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
-        default=None,
-        description=(
-            "Default purpose hint for the web-search backend when an otari_web_search tool entry "
-            "does not supply its own."
-        ),
-    )
-    web_search_engines: Annotated[str | None, Shown(SettingsGroup.TOOLS)] = Field(
-        default=None,
-        description=(
-            "Comma-separated SearXNG engine list for the web-search backend (e.g. 'google,bing'). "
-            "When unset, the backend default engines are used."
-        ),
-    )
-    web_search_max_results: Annotated[int | None, Shown(SettingsGroup.TOOLS)] = Field(
-        default=None,
-        ge=1,
-        description=(
-            "Default cap on the number of hits returned by the web-search backend (a per-tool "
-            "max_results still overrides it)."
-        ),
-    )
-    web_search_extract: Annotated[bool | None, Shown(SettingsGroup.TOOLS)] = Field(
-        default=None,
-        description=(
-            "Whether the web-search backend extracts page content in-process (True) or returns "
-            "snippet-only results (False). When unset, the backend default (extraction on) applies."
-        ),
-    )
-    web_search_intercept: Annotated[bool | None, Shown(SettingsGroup.TOOLS)] = Field(
-        default=None,
-        description=(
-            "Whether a provider-named web-search declaration (bare 'web_search', Anthropic-native "
-            "'web_search_<date>') is run against the gateway's own backend instead of being forwarded "
-            "to the provider. Off when unset: the explicit otari_web_search type is always run by the "
-            "gateway, and every other keyword reaches the provider untouched. Requires web_search_url."
-        ),
-    )
-    web_search_allow_private_hosts: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
-        default=False,
-        description=(
-            "SSRF gate: allow the web-search backend to fetch private/loopback/reserved hosts. "
-            "Off by default. Only enable for unusual setups such as a private search index."
-        ),
-    )
-    web_retrieval_trust_env_proxy: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
-        default=False,
-        description=(
-            "Trust HTTP_PROXY, HTTPS_PROXY, and ALL_PROXY for web retrieval. The proxy must enforce "
-            "address safety when resolving and connecting to destinations. Local URL, domain, and "
-            "address checks remain enabled; direct requests, including NO_PROXY matches, remain IP-pinned. "
-            "Off by default. Only enable for an operator-controlled SSRF-filtering proxy."
-        ),
-    )
     mcp_allow_loopback: Annotated[bool, Shown(SettingsGroup.TOOLS)] = Field(
         default=True,
         description=(
@@ -1635,10 +1455,6 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
     # the config, not a module global, so it is per-config and cannot leak
     # between processes or tests.
     _provider_baseline: dict[str, dict[str, Any]] | None = PrivateAttr(default=None)
-
-    # The same idea for ``search_tools``: the config-file tools as loaded, before
-    # any dashboard-stored tool is overlaid by ``search_tool_store_service``.
-    _search_tool_baseline: dict[str, dict[str, Any]] | None = PrivateAttr(default=None)
 
     # The same idea for ``rate_limits``: the config-file rules, before the
     # dashboard's stored rules are added by the rate-limits service.
@@ -2212,61 +2028,6 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             return providers
         return {instance: ({} if entry is None else entry) for instance, entry in providers.items()}
 
-    def web_search_provider_configured(self) -> bool:
-        """Whether a licensed search API is configured for the in-loop tool.
-
-        Both halves, because either alone runs no search: a provider with no key
-        cannot authenticate, and a key with no provider names nothing to send it
-        to. When this is true the deployment can search without
-        ``web_search_url``, which is what lets it drop the adapter container that
-        used to sit between the two.
-        """
-        return bool(self.web_search_provider) and bool(self.web_search_provider_api_key)
-
-    def web_search_configured(self) -> bool:
-        """Whether this deployment can run ``otari_web_search`` at all.
-
-        The one question the request path, the per-workspace page and the tool
-        catalog all ask, so they cannot disagree about whether a workspace's
-        stored configuration governs anything.
-
-        ``web_search_url`` is read through ``otari_env`` as well as off the
-        field, matching every call site this replaces: the field is env-bridged,
-        so the two agree, and dropping the read here would quietly narrow what
-        counts as configured.
-        """
-        return bool(self.web_search_url or otari_env("WEB_SEARCH_URL")) or self.web_search_provider_configured()
-
-    def search_tool_providers(self) -> set[str]:
-        """The distinct providers backing the configured search tools.
-
-        These are prefixes of the ``<provider>:<tool>`` keys that search pricing,
-        usage, and per-key access lists are written against, so the allow-list
-        writer has to accept them alongside real provider instances.
-        """
-        return {str(entry.get("provider") or name) for name, entry in self.search_tools.items()}
-
-    def search_tools_without_backend_url(self) -> list[str]:
-        """Search tools whose provider needs an ``api_base`` and has none to inherit.
-
-        Reported as a startup warning rather than raised by
-        :meth:`validate_search_tools`, because ``web_search_url`` (which a
-        ``searxng`` tool inherits) can also come from a dashboard-stored
-        override, and those are applied to the config after it loads. Failing at
-        load time would refuse to boot a gateway the operator has in fact
-        configured. Enforcement is per request instead: ``resolve_search_tool``
-        refuses such a tool with a 400, and the rest of the gateway serves.
-        """
-        if self.web_search_url:
-            return []
-        return [
-            name
-            for name, entry in self.search_tools.items()
-            if isinstance(entry, dict)
-            and str(entry.get("provider") or name) in SEARCH_PROVIDERS_REQUIRING_API_BASE
-            and not entry.get("api_base")
-        ]
-
     def effective_code_executor(self) -> CodeExecutor:
         """The deployment's answer to who runs a provider-named code-execution tool.
 
@@ -2325,60 +2086,6 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
                 images.append(image)
         return tuple(images)
 
-    def warn_about_half_configured_web_search(self) -> None:
-        """Say so when a search provider was named but cannot be used.
-
-        Also when ``web_search_backend_token`` was set without one: the token
-        exists to gate the backend route, and that route is not mounted without
-        a provider to serve it, so the setting silently does nothing.
-
-        A warning rather than a refusal, for the reason
-        :meth:`warn_about_half_configured_oauth` gives: web search is one
-        optional tool, and refusing to boot would take a gateway offline over
-        it. A deployment naming a provider it has no key for is also the
-        ordinary state of one that has not filled the key in yet, and a compose
-        file can default the name without being able to default the secret.
-
-        But the failure is otherwise completely silent. Neither half is read
-        without the other, so ``web_search_configured`` falls through to
-        ``web_search_url``, and a deployment that named a provider precisely so
-        it would need no URL answers every ``otari_web_search`` request with the
-        not-configured 400 and says nowhere why.
-        """
-        if self.web_search_backend_token and not self.web_search_provider_configured():
-            logger.warning(
-                "web_search_backend_token is set but no web-search provider is configured, so "
-                "GET /api/v1/web-search/search is not served. Set web_search_provider and "
-                "web_search_provider_api_key on the process that holds the search key."
-            )
-        if bool(self.web_search_provider) == bool(self.web_search_provider_api_key):
-            return
-        missing, present = (
-            ("web_search_provider_api_key", f"web_search_provider is {self.web_search_provider!r}")
-            if self.web_search_provider
-            else ("web_search_provider", "web_search_provider_api_key is set")
-        )
-        logger.warning(
-            "Web search through a licensed provider is configured but will not run: %s, and %s is not set. "
-            "Set both, or neither and point web_search_url at a SearXNG-shaped backend instead.",
-            present,
-            missing,
-        )
-
-    def validate_search_tools(self) -> None:
-        """Validate the ``search_tools`` map at startup so misconfig fails fast.
-
-        Per-entry rules live in :func:`validate_search_tool_entry`, which the
-        runtime CRUD path applies to a dashboard-written tool as well.
-        """
-        for name, entry in self.search_tools.items():
-            validate_search_tool_entry(name, entry)
-            if not isinstance(entry, dict):
-                continue
-            provider = str(entry.get("provider") or name)
-            if provider in SEARCH_PROVIDERS_REQUIRING_API_BASE and not entry.get("api_base"):
-                validate_search_tool_transport(name, self.web_search_url, entry.get("api_key"))
-
     def validate_decision_providers(self) -> None:
         """Validate the ``decision_providers`` map at startup so misconfig fails fast."""
         for name, entry in self.decision_providers.items():
@@ -2429,19 +2136,6 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             msg = f"rate_limits names must be unique, repeated: {', '.join(duplicates)}"
             raise ValueError(msg)
         return rules
-
-    @field_validator("web_search_provider")
-    @classmethod
-    def _validate_web_search_provider(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized = value.strip().lower()
-        if not normalized:
-            return None
-        if normalized not in WEB_SEARCH_PROVIDERS:
-            msg = f"web_search_provider must be one of {sorted(WEB_SEARCH_PROVIDERS)}, got '{value}'"
-            raise ValueError(msg)
-        return normalized
 
     @field_validator("docs_url", "terms_url", "privacy_url", "site_url")
     @classmethod
@@ -2939,6 +2633,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.validate_aliases()
     config.validate_routing_policies()
     config.validate_search_tools()
+    config.validate_fetch_tools()
     config.validate_decision_providers()
     config.validate_mail_transport()
     config.validate_webauthn_relying_party()

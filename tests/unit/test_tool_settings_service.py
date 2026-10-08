@@ -48,7 +48,15 @@ def test_validate_value_url_field_structural() -> None:
 
 @pytest.mark.parametrize("blank", [None, "", "   "])
 def test_validate_value_blank_clears_any_field(blank: SettingValue) -> None:
-    for key in ("web_search_url", "web_search_engines", "web_search_max_results", "web_search_extract"):
+    for key in (
+        "web_search_url",
+        "web_search_engines",
+        "web_search_max_results",
+        "web_search_extract",
+        "web_search_default_tool",
+        "web_fetch_default_tool",
+        "web_search_max_calls",
+    ):
         assert validate_value(key, blank) is None
 
 
@@ -60,6 +68,22 @@ def test_validate_value_int_bounds_and_bool_rejection() -> None:
         validate_value("web_search_max_results", True)  # bool is not an int here
     with pytest.raises(ValueError):
         validate_value("web_search_max_results", "5")  # wrong type
+
+
+def test_validate_value_call_cap_has_a_lower_bound_of_one() -> None:
+    assert validate_value("web_search_max_calls", 1) == 1
+    with pytest.raises(ValueError):
+        validate_value("web_search_max_calls", 0)
+
+
+def test_validate_value_takes_any_default_name() -> None:
+    """Whether it names an instance is the route's check at write: this one also runs at startup."""
+    assert validate_value("web_search_default_tool", "not-yet-loaded") == "not-yet-loaded"
+    assert validate_value("web_fetch_default_tool", "builtin_fetch") == "builtin_fetch"
+    # Stored as every read takes it.
+    assert validate_value("web_search_default_tool", " exa ") == "exa"
+    with pytest.raises(ValueError):
+        validate_value("web_search_default_tool", 3)
 
 
 def test_validate_value_bool_field() -> None:
@@ -82,6 +106,9 @@ def test_validate_value_unknown_key() -> None:
         ("web_search_max_results", 7),
         ("web_search_extract", False),
         ("web_search_extract", True),
+        ("web_search_default_tool", "exa"),
+        ("web_fetch_default_tool", "builtin_fetch"),
+        ("web_search_max_calls", 12),
         ("sandbox_url", None),
     ],
 )

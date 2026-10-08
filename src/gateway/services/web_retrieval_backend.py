@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from opentelemetry import trace
 
+from gateway.core.settings.tools import DEFAULT_SEARXNG_ENGINES
 from gateway.models.tools import WebTool
 from gateway.services._tool_loop import MaxToolIterationsExceeded
 from gateway.services.tool_usage import ToolUsageTally
@@ -83,7 +84,7 @@ _EXTRACTION_TRUNCATION_NOTICE = "\n\n[Extracted content truncated at the parser-
 # for a licensed-API backend (Tavily, Brave API, Exa, Linkup, Serper) by
 # pointing OTARI_WEB_SEARCH_URL at any service exposing the same
 # /search?format=json shape.
-_DEFAULT_ENGINES = ("duckduckgo", "mojeek", "qwant", "wikipedia")
+_DEFAULT_ENGINES = DEFAULT_SEARXNG_ENGINES
 _CONTENT_TRUNCATE_CHARS = 1500
 # published_date is backend-controlled (whatever a search-API-fronting
 # adapter forwards from the provider); bound it as basic rendering hygiene, a

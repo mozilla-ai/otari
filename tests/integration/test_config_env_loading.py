@@ -335,6 +335,41 @@ def test_load_config_bridges_yaml_service_fields_into_env(tmp_path: Path, monkey
         assert otari_env("WEB_SEARCH_MAX_RESULTS") == "5"
 
 
+def test_the_web_tools_runtime_settings_load_from_env_and_bridge_from_yaml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Bridged so that clearing a runtime value falls back to the YAML one: the
+    # in-loop reads take the field, else the environment, else the built-in default.
+    names = ("WEB_SEARCH_DEFAULT_TOOL", "WEB_FETCH_DEFAULT_TOOL", "WEB_SEARCH_MAX_CALLS")
+    for name in names:
+        monkeypatch.delenv(f"OTARI_{name}", raising=False)
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text(
+        "search_tools:\n  exa: {provider: exa, api_key: k}\n"
+        "web_search_default_tool: exa\nweb_fetch_default_tool: builtin_fetch\nweb_search_max_calls: 4\n",
+        encoding="utf-8",
+    )
+    with mock.patch.dict(os.environ):
+        config = load_config(str(config_file))
+        assert (config.web_search_default_tool, config.web_fetch_default_tool, config.web_search_max_calls) == (
+            "exa",
+            "builtin_fetch",
+            4,
+        )
+        assert [otari_env(name) for name in names] == ["exa", "builtin_fetch", "4"]
+
+    empty = tmp_path / "empty.yml"
+    empty.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_DEFAULT_TOOL", "none")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_MAX_CALLS", "2")
+    config = load_config(str(empty))
+    assert (config.web_search_default_tool, config.web_fetch_default_tool, config.web_search_max_calls) == (
+        "none",
+        None,
+        2,
+    )
+
+
 def test_load_config_env_wins_over_yaml_for_bridged_fields(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # The bridge uses setdefault: an OTARI_ variable that is already set keeps
     # its value (and also wins in the field, via the env override machinery).

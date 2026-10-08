@@ -48,6 +48,7 @@ from gateway.api.deps import (
     verify_master_key,
 )
 from gateway.core.config import GatewayConfig
+from gateway.core.settings.tools import validate_default_tool
 from gateway.log_config import logger
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tools import SandboxProvider
@@ -58,11 +59,14 @@ from gateway.services.guardrail_catalog import (
     fetch_guardrail_catalog,
 )
 from gateway.services.runtime_settings_service import SettingValue
+from gateway.services.search_tool_store_service import refresh_search_tool_cache
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tool_settings_service import (
     GUARDRAILS_URL,
     SERVICE_URL_FIELD,
     TOOL_SETTABLE_KEYS,
+    WEB_FETCH_DEFAULT_TOOL,
+    WEB_SEARCH_DEFAULT_TOOL,
     apply_override,
     effective_value,
     effective_values,
@@ -154,6 +158,12 @@ class UpdateToolSettingsRequest(BaseModel):
     web_search_extract: bool | None = None
     web_search_purpose_hint: str | None = None
     web_search_intercept: bool | None = None
+    web_search_default_tool: str | None = Field(
+        default=None,
+        description="A search instance whose provider any-search serves, or 'none' to turn in-loop search off.",
+    )
+    web_fetch_default_tool: str | None = Field(default=None, description="A fetch instance, or 'builtin_fetch'.")
+    web_search_max_calls: int | None = Field(default=None, ge=1)
     sandbox_url: str | None = None
     sandbox_purpose_hint: str | None = None
     sandbox_session_image: str | None = None
@@ -307,7 +317,16 @@ async def update_tool_settings(
 
     if updates:
         try:
+            if WEB_SEARCH_DEFAULT_TOOL in updates:
+                # The search tool it names may have been stored through another
+                # replica since this worker's overlay last refreshed.
+                await refresh_search_tool_cache(db, config)
             normalized = {key: await stage_override(db, key, value) for key, value in updates.items()}
+            # Here rather than in the service's own check, which also runs at
+            # startup, before the stored search tools a default may name.
+            for key in (WEB_SEARCH_DEFAULT_TOOL, WEB_FETCH_DEFAULT_TOOL):
+                if key in normalized:
+                    validate_default_tool(config, key, normalized[key])
             await db.commit()
         except ValueError as exc:
             await db.rollback()

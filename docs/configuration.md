@@ -422,20 +422,77 @@ token price to a request-priced or image-priced endpoint.
 
 ## Search tools
 
-`search_tools` configures direct `POST /api/v1/search` calls. The same entries can
-be managed at runtime from Tools or `/api/v1/search-tools`.
+`search_tools` names the deployment's search instances. Direct `POST /api/v1/search`
+calls use them by name, and the in-loop `otari_web_search` tool uses the default
+one (below). The same entries can be managed at runtime from Tools or
+`/api/v1/search-tools`. `fetch_tools` names fetch instances, for the
+`otari_web_fetch` tool and for enriching search results.
 
 ```yaml
 search_tools:
   local:
     provider: searxng
     api_base: "http://searxng:8080"
+  exa:
+    provider: exa
+    api_key: "${EXA_API_KEY}"
+    options: {type: auto}
+    fetch_tool: exa-fetch
+fetch_tools:
+  exa-fetch:
+    provider: exa
+    api_key: "${EXA_API_KEY}"
+web_search_default_tool: exa
+web_fetch_default_tool: builtin_fetch
+web_search_max_calls: 10
 ```
 
 `GET /api/v1/search-tools/providers` publishes the supported providers and whether
 each requires an `api_key` or `api_base`. Provider options and request filters
 are covered in [Built-in tools](tools.md). A tool carrying an `api_key` must use
 an HTTPS `api_base`; a keyless local SearXNG endpoint may use HTTP.
+
+Rules for instances:
+
+- `builtin_fetch`, the built-in fetcher, is a fetch instance that always exists and
+  cannot be declared. A search instance's `fetch_tool` names the fetch instance that
+  enriches its results; without one, `web_fetch_default_tool` does.
+- A name contains no `/` or `:`, is not `builtin_fetch` or `none`, and is unique
+  across both maps.
+- `options` are checked against the provider's options.
+- A `search_tools` entry that breaks the name rules, or whose `options` carry a key
+  the provider does not know or a value it refuses, still loads, with a warning
+  that names the entry and the problem. Fix it: a later release refuses it, and
+  once the instances serve requests, the options named are left out of every call.
+  A `fetch_tools` entry that breaks the name rules, or reuses a configured search
+  instance's name, stops startup.
+
+The defaults and the call limit are runtime settings, also set from Tools or
+`/api/v1/tool-settings`. Clearing a runtime value falls back to the configuration
+file or environment, then to the built-in default.
+
+- `web_search_default_tool`: the search instance the in-loop tool uses when no
+  organization key applies, and the one an unnamed direct call uses. It must be one
+  whose provider the in-loop tool can search with; `none` turns in-loop search off.
+  When unset, the in-loop tool uses the backend `web_search_provider` or
+  `web_search_url` describes, else the only search instance when there is exactly
+  one. Several search instances with neither log a warning at startup.
+- `web_fetch_default_tool`: the fetch instance for the fetch tool and for
+  enrichment. Default `builtin_fetch`.
+- `web_search_max_calls`: how many search and fetch calls one request may make
+  together. Default 10.
+
+A default that names no instance, set in the file or earlier at runtime, is treated
+as unset, with a warning at startup.
+
+These settings are read and checked from this release, but take effect later:
+`web_fetch_default_tool` when web fetch moves onto the fetch instances, the other
+two and a search instance's `fetch_tool` when in-loop search does. The old in-loop
+backend serves some requests until it is removed. In that time
+`web_fetch_default_tool` governs every fetch tool call, while
+`web_search_max_calls` and `fetch_tool` apply only where the new backend serves the
+request: the old one keeps its fixed limit of 10 calls, its 422 past it, and its
+own enrichment through the built-in fetcher.
 
 ## Decision providers
 
@@ -535,6 +592,8 @@ and guardrail configuration. Common startup settings are:
 - `code_execution_executor`
 - `web_search_url`
 - `web_search_provider` and `web_search_provider_api_key`
+- `web_search_default_tool`, `web_fetch_default_tool` and `web_search_max_calls`
+  (see [Search tools](#search-tools))
 - `guardrails_url`
 - `guardrail_thread_pool_size`
 - `mcp_allow_loopback` and `mcp_allow_private_hosts`

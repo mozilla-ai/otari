@@ -17621,6 +17621,30 @@
             ],
             "title": "Sandbox Url"
           },
+          "web_fetch_default_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A fetch instance, or 'builtin_fetch'.",
+            "title": "Web Fetch Default Tool"
+          },
+          "web_search_default_tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A search instance whose provider any-search serves, or 'none' to turn in-loop search off.",
+            "title": "Web Search Default Tool"
+          },
           "web_search_engines": {
             "anyOf": [
               {
@@ -17653,6 +17677,18 @@
               }
             ],
             "title": "Web Search Intercept"
+          },
+          "web_search_max_calls": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Web Search Max Calls"
           },
           "web_search_max_results": {
             "anyOf": [

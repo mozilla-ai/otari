@@ -66,6 +66,7 @@ from gateway.core.config import (
     GatewayConfig,
     validate_search_tool_transport,
 )
+from gateway.core.settings.tools import default_api_base
 from gateway.services.web_search_providers import WebSearchProviderError, provider_search
 
 if TYPE_CHECKING:
@@ -74,7 +75,6 @@ if TYPE_CHECKING:
 EXA_PROVIDER = "exa"
 SEARXNG_PROVIDER = "searxng"
 
-_DEFAULT_API_BASE = {EXA_PROVIDER: "https://api.exa.ai"}
 _DEFAULT_TIMEOUT_S = 30.0
 
 # Query params the gateway owns on a SearXNG request, so a tool's ``options``
@@ -218,10 +218,11 @@ def resolve_search_tool(config: GatewayConfig, name: str | None) -> SearchTool:
     provider = str(entry.get("provider") or name)
     api_key = entry.get("api_key")
     api_base = str(entry.get("api_base") or default_api_base(config, provider) or "").strip().rstrip("/")
-    # Defense in depth: startup validation already guarantees all three, so this
-    # only fires for a config built in-process. Refusing here beats calling an
-    # unknown provider, calling a keyed one unauthenticated, or calling a backend
-    # whose address nothing supplied.
+    # Validation accepts every provider any-search serves, and this client calls
+    # only its own two; for those, it already guarantees the key and the address,
+    # so the rest of this only fires for a config built in-process. Refusing here
+    # beats calling an unknown provider, calling a keyed one unauthenticated, or
+    # calling a backend whose address nothing supplied.
     missing_key = provider in SEARCH_PROVIDERS_REQUIRING_API_KEY and not api_key
     if provider not in SEARCH_PROVIDERS or missing_key or not api_base:
         msg = f"Search tool '{name}' is not configured correctly."
@@ -249,22 +250,6 @@ def resolve_search_tool(config: GatewayConfig, name: str | None) -> SearchTool:
     )
 
 
-def default_api_base(config: GatewayConfig, provider: str) -> str | None:
-    """The base URL a tool inherits when it declares no ``api_base``.
-
-    A ``searxng`` tool falls back to ``web_search_url``, the backend the in-loop
-    ``otari_web_search`` tool already speaks to over the same contract, so a
-    deployment that runs one exposes it on ``POST /v1/search`` with a single
-    ``provider: searxng`` line.
-
-    Public because the dashboard's add-a-search-tool form shows the same value as
-    the placeholder for an omitted ``api_base``.
-    """
-    if provider == SEARXNG_PROVIDER:
-        return (config.web_search_url or "").strip() or None
-    return _DEFAULT_API_BASE.get(provider)
-
-
 async def run_search(tool: SearchTool, query: SearchQuery) -> SearchOutcome:
     """Dispatch one search against the tool's provider."""
     try:
@@ -277,7 +262,7 @@ async def run_search(tool: SearchTool, query: SearchQuery) -> SearchOutcome:
         return await _search_exa(tool, query)
     if tool.provider == SEARXNG_PROVIDER:
         return await _search_searxng(tool, query)
-    # Unreachable via config: startup validation rejects unknown providers.
+    # Unreachable through resolve_search_tool, which refuses a provider this client does not serve.
     msg = f"Unsupported search provider '{tool.provider}'."
     raise SearchProviderError(msg)
 

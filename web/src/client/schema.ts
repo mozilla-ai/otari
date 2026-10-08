@@ -14185,12 +14185,24 @@ export interface components {
             sandbox_session_image?: string | null;
             /** Sandbox Url */
             sandbox_url?: string | null;
+            /**
+             * Web Fetch Default Tool
+             * @description A fetch instance, or 'builtin_fetch'.
+             */
+            web_fetch_default_tool?: string | null;
+            /**
+             * Web Search Default Tool
+             * @description A search instance whose provider any-search serves, or 'none' to turn in-loop search off.
+             */
+            web_search_default_tool?: string | null;
             /** Web Search Engines */
             web_search_engines?: string | null;
             /** Web Search Extract */
             web_search_extract?: boolean | null;
             /** Web Search Intercept */
             web_search_intercept?: boolean | null;
+            /** Web Search Max Calls */
+            web_search_max_calls?: number | null;
             /** Web Search Max Results */
             web_search_max_results?: number | null;
             /** Web Search Purpose Hint */
