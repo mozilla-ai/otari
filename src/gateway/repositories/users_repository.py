@@ -1,8 +1,9 @@
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
-from sqlalchemy import String, and_, cast, func, or_, select
+from sqlalchemy import String, and_, case, cast, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -258,3 +259,25 @@ async def count_users(db: AsyncSession, organization_id: uuid.UUID, filters: Use
     """How many users :func:`page_users` would page through."""
     total = await db.scalar(select(func.count()).select_from(User).where(*_listed(organization_id, filters)))
     return int(total or 0)
+
+
+async def retime_budget_holders(
+    db: AsyncSession, budget_id: str, *, period_start: datetime | None, period_end: datetime | None
+) -> None:
+    """Move every live user on this budget onto this window, rolling only counters whose period had ended.
+
+    A user with no window takes the fallback an assignment writes: started now, never resetting.
+    """
+    now = datetime.now(UTC)
+    await db.execute(
+        update(User)
+        .where(User.budget_id == budget_id, User.deleted_at.is_(None))
+        .values(
+            budget_started_at=period_start or now,
+            next_budget_reset_at=period_end,
+            spend=User.spend_this_period(now),
+            current_tokens=case((User.next_budget_reset_at <= now, 0), else_=User.current_tokens),
+            current_requests=case((User.next_budget_reset_at <= now, 0), else_=User.current_requests),
+        )
+        .execution_options(synchronize_session=False)
+    )

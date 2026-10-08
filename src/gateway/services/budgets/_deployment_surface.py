@@ -48,7 +48,8 @@ class _DeploymentSurface:
         """Create the deployment budget ``budget_id`` or replace it, saying whether it was created.
 
         Every field takes the request's value, so a field left out is cleared, and a budget a concurrent request
-        created first is replaced like any other. A replaced budget's ceilings follow a change of reset period.
+        created first is replaced like any other. A replaced budget's ceilings and users follow a change of reset
+        period.
         """
         _require_valid_cycle(CycleSettings(*(getattr(request, name) for name in CYCLE_FIELD_ORDER)))
         budgets = self._repositories.budgets
@@ -73,6 +74,7 @@ class _DeploymentSurface:
             await self._repositories.ceilings.retime_for_budget(
                 budget_id, period_start=period_start, period_end=period_end
             )
+            await budgets.retime_holders(budget_id, period_start=period_start, period_end=period_end)
         user_count, total_spend, total_reserved = await budgets.usage(budget_id)
         return BudgetResponse.from_model(
             budget, user_count=user_count, total_spend=total_spend, total_reserved=total_reserved

@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Sequence
+from datetime import datetime
 from decimal import Decimal
 from typing import Never
 
@@ -11,6 +12,7 @@ from gateway.exceptions.budget_exceptions import BudgetStillReferencedError
 from gateway.models.budgets import Budget, BudgetResetLog
 from gateway.models.users import User
 from gateway.repositories.base_repository import BaseRepository
+from gateway.repositories.users_repository import retime_budget_holders
 
 
 class BudgetRepository(BaseRepository[Budget, Never, Never]):
@@ -45,12 +47,18 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
                 select(
                     func.count(),
                     # Decimal defaults: ``coalesce(numeric, double precision)`` would sum exact counters as floats.
-                    func.coalesce(func.sum(User.spend), Decimal(0)),
+                    func.coalesce(func.sum(User.spend_this_period()), Decimal(0)),
                     func.coalesce(func.sum(User.reserved), Decimal(0)),
                 ).where(User.budget_id == budget_id, User.deleted_at.is_(None))
             )
         ).one()
         return int(row[0]), float(row[1]), float(row[2])
+
+    async def retime_holders(
+        self, budget_id: str, *, period_start: datetime | None, period_end: datetime | None
+    ) -> None:
+        """Move the users on this budget onto this window, as the ceilings repository does ceilings."""
+        await retime_budget_holders(self.db, budget_id, period_start=period_start, period_end=period_end)
 
     async def count_by_organization(self, organization_id: uuid.UUID) -> int:
         """Count the organization's budgets."""

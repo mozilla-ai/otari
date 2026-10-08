@@ -24212,7 +24212,7 @@
         ]
       },
       "put": {
-        "description": "Create a budget under an id you choose, or replace the one with that id.\n\nEvery field takes the value in the body, and a field left out is cleared, so\nthe same request always leaves the same budget. Answers 201 when it created\nthe budget. Users on a budget it replaces stay on it, and its ceilings follow\na change of reset period. A budget an organization owns is not replaced.",
+        "description": "Create a budget under an id you choose, or replace the one with that id.\n\nEvery field takes the value in the body, and a field left out is cleared, so\nthe same request always leaves the same budget. Answers 201 when it created\nthe budget. Users on a budget it replaces stay on it, and they and its\nceilings follow a change of reset period. A budget an organization owns is\nnot replaced.",
         "operationId": "budgets-put_budget",
         "parameters": [
           {

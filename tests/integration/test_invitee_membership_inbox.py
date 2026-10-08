@@ -24,6 +24,7 @@ from gateway.exceptions.organizations_exceptions import (
     InvitationExpiredError,
     InvitationNotFoundError,
 )
+from gateway.models.budgets import ScopedBudget
 from gateway.models.tenancy import (
     Invitation,
     InviteOrganizationMemberRequest,
@@ -44,7 +45,7 @@ from gateway.repositories.tenancy import (
 from gateway.services.tenancy import OrganizationService
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
-from .tenancy_helpers import membership_writes
+from .tenancy_helpers import create_budget, membership_writes
 
 _TEST_CONFIG = GatewayConfig()
 
@@ -259,7 +260,7 @@ async def test_a_declined_address_can_be_invited_again(
     invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    service = OrganizationService(async_db, **membership_writes(async_db))
 
     first = await _invite(service, admin, email="invitee@example.com")
     await service.decline_pending_membership_for_user(
@@ -290,7 +291,7 @@ async def test_declining_an_owner_invitation_is_the_invitees_own_to_do(
     invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
     inviting = await _organization(async_db, slug="inviting")
     admin = await _owner(async_db, inviting, full_name="Admin")
-    service = OrganizationService(async_db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    service = OrganizationService(async_db, **membership_writes(async_db))
 
     issued = await _invite(service, admin, email="invitee@example.com", role="owner")
     await service.decline_pending_membership_for_user(
@@ -585,3 +586,30 @@ async def test_a_stale_pending_row_alongside_a_live_one_resolves_to_the_live_inv
     live = await InvitationRepository(async_db).get(issued.invitation_id)
     assert live is not None
     assert live.status == "accepted"
+
+
+@pytest.mark.parametrize("how", ["decline", "revoke"])
+async def test_ending_an_invitation_takes_the_invitee_s_budgets_with_it(async_db: AsyncSession, how: str) -> None:
+    """A pending invitee can already carry a budget, and ending the invitation suspends the membership it names."""
+    invitee, _ = await _identity_with_a_home(async_db, email="invitee@example.com")
+    inviting = await _organization(async_db, slug=f"inviting-{how}")
+    admin = await _owner(async_db, inviting, full_name="Admin")
+    service = OrganizationService(async_db, **membership_writes(async_db))
+    issued = await _invite(service, admin, email="invitee@example.com")
+    ceiling = ScopedBudget(
+        scope_type="org_member",
+        scope_id=str(issued.organization_member_id),
+        budget_id=await create_budget(async_db, max_budget=25.0),
+    )
+    async_db.add(ceiling)
+    await async_db.commit()
+    ceiling_id = ceiling.id
+
+    if how == "decline":
+        await service.decline_pending_membership_for_user(
+            user=invitee, organization_member_id=issued.organization_member_id
+        )
+    else:
+        await service.revoke_organization_member_invitation_for_user(user=admin, invitation_id=issued.invitation_id)
+
+    assert await async_db.get(ScopedBudget, ceiling_id) is None

@@ -247,7 +247,9 @@ attachment. Cap batch-heavy workloads in dollars rather than in tokens. See
 
 ## Workspace-scoped spend
 
-Usage is attributed to the workspace bound to the authenticating API key.
+Usage is attributed to the workspace bound to the authenticating API key. A
+Playground request, which runs on a dashboard session rather than a key, is
+attributed to the workspace it runs in and held to that workspace's budgets.
 Organization and workspace usage views then apply the signed-in identity's
 membership. Deployment operators can read the deployment-wide usage API.
 
@@ -390,6 +392,15 @@ declines one without a token: they are already authenticated as the addressee,
 so the membership is addressed by id instead. Declining cancels the invitation
 and suspends the paired membership, which is what stops the emailed link from
 reviving it; a later invitation to the same address revives the membership.
+
+Suspending a membership, by removing the member, setting their status to
+suspended, revoking their invitation or declining it, takes back what it
+granted: their workspace memberships in the organization are deleted, and so
+is every budget applied to those memberships or to their organization
+membership. Setting the status back to active, or inviting them again, does
+not restore either; assign workspaces and budgets again. Their API keys belong
+to the workspace, so they keep working and keep their budgets until the keys
+are deleted.
 
 ## Email-domain auto-join
 

@@ -50,6 +50,7 @@ class BudgetService:
     ) -> None:
         self._uow = uow
         self._budgets = repositories.budgets
+        self._ceilings = repositories.ceilings
         self._api_keys = api_keys
         self._organization = _OrganizationSurface(repositories, ScopeOwnership(organizations, api_keys), organizations)
         self._end_users = _EndUsers(repositories)
@@ -76,6 +77,14 @@ class BudgetService:
         """Cap one identity inside the caller's organization at one of its budgets."""
         async with self._uow:
             return await self._organization.create_ceiling(user=user, request=request)
+
+    async def delete_api_key_ceilings(self, key_id: str) -> None:
+        """Delete the ceilings on an API key the caller has staged for deletion, committing both.
+
+        ``scope_id`` is not a foreign key, so nothing cascades to them.
+        """
+        async with self._uow:
+            await self._ceilings.delete_for_api_key(key_id)
 
     async def delete_deployment_budget(self, budget_id: str) -> None:
         """Delete a budget the deployment owns, with its reset history, unless something still names it.

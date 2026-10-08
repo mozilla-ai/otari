@@ -18,12 +18,14 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.budgets import ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
+    ActiveOrganizationMemberUpdateRequest,
+    OrganizationMember,
     Workspace,
     WorkspaceAssignmentRequest,
     WorkspaceCreate,
     WorkspaceMember,
 )
-from gateway.repositories.tenancy import UserRepository, WorkspaceMemberRepository
+from gateway.repositories.tenancy import OrganizationMemberRepository, UserRepository, WorkspaceMemberRepository
 from gateway.services.budgets import BudgetMembershipListener
 from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.membership_listener import MembershipListener
@@ -119,6 +121,7 @@ class RecordingListener:
     joined: list[uuid.UUID] = field(default_factory=list)
     removed: list[uuid.UUID] = field(default_factory=list)
     deleted: list[tuple[uuid.UUID, list[uuid.UUID]]] = field(default_factory=list)
+    organization_removed: list[uuid.UUID] = field(default_factory=list)
 
     async def member_joined(self, member: WorkspaceMember) -> None:
         self.joined.append(member.id)
@@ -128,6 +131,9 @@ class RecordingListener:
 
     async def workspace_deleted(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
         self.deleted.append((workspace_id, sorted(member_ids)))
+
+    async def organization_member_removed(self, member: OrganizationMember) -> None:
+        self.organization_removed.append(member.id)
 
 
 async def _membership_id(db: AsyncSession, workspace_id: uuid.UUID, user_id: uuid.UUID) -> uuid.UUID:
@@ -262,3 +268,62 @@ async def test_bootstrap_provisioning_announces_the_operator_membership(async_db
         .all()
     )
     assert listener.joined == [membership.id for membership in memberships]
+
+
+# Removing someone from the organization suspends the membership rather than
+# deleting it, so nothing cascades: their workspace memberships and every budget
+# keyed on either have to be taken back explicitly, or they go on binding and
+# come back with a re-invite.
+
+
+@pytest.mark.parametrize("how", ["remove", "suspend"])
+async def test_leaving_the_organization_takes_workspaces_and_budgets_with_it(async_db: AsyncSession, how: str) -> None:
+    organization = await create_organization(async_db, slug=f"acme-leaving-{how}")
+    owner = await create_member(async_db, organization, role="owner", full_name="Owner")
+    leaver = await create_member(async_db, organization, role="member", full_name="Leaver")
+    workspace = await create_workspace(async_db, organization, name="Engineering", owner=owner)
+    placement = await WorkspaceMemberRepository(async_db).create(
+        workspace_id=workspace.id, user_id=leaver.id, role="member"
+    )
+    membership = await OrganizationMemberRepository(async_db).get_by_organization_and_user(organization.id, leaver.id)
+    assert membership is not None
+    budget_id = await create_budget(async_db, max_budget=25.0)
+    async_db.add_all(
+        [
+            ScopedBudget(scope_type="org_member", scope_id=str(membership.id), budget_id=budget_id),
+            ScopedBudget(scope_type="workspace_member", scope_id=str(placement.id), budget_id=budget_id),
+        ]
+    )
+    await async_db.flush()
+
+    service = OrganizationService(async_db, **membership_writes(async_db))
+    if how == "remove":
+        await service.remove_active_organization_member_for_user(user=owner, organization_member_id=membership.id)
+    else:
+        await service.update_active_organization_member_for_user(
+            user=owner,
+            organization_member_id=membership.id,
+            request=ActiveOrganizationMemberUpdateRequest(status="suspended"),
+        )
+
+    assert await _ceilings_for(async_db, membership.id) == []
+    assert await _ceilings_for(async_db, placement.id) == []
+    assert await WorkspaceMemberRepository(async_db).get_by_workspace_and_user(workspace.id, leaver.id) is None
+
+
+async def test_organization_member_removed_deletes_only_that_membership_s_ceiling(async_db: AsyncSession) -> None:
+    case = await _case(async_db, slug="acme-org-listener")
+    other = ScopedBudget(scope_type="workspace", scope_id=str(case.workspace.id), budget_id=case.default.budget_id)
+    org_ceiling = ScopedBudget(scope_type="org_member", scope_id=str(uuid.uuid4()), budget_id=case.default.budget_id)
+    async_db.add_all([other, org_ceiling])
+    await async_db.flush()
+    membership = OrganizationMember(
+        id=uuid.UUID(org_ceiling.scope_id), organization_id=uuid.uuid4(), user_id=uuid.uuid4()
+    )
+
+    writes = membership_writes(async_db)
+    async with writes["uow"]:
+        await writes["membership_listener"].organization_member_removed(membership)
+
+    remaining = (await async_db.execute(select(ScopedBudget))).scalars().all()
+    assert [ceiling.id for ceiling in remaining] == [other.id]

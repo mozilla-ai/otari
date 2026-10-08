@@ -41,6 +41,7 @@ from sqlalchemy.orm import Session
 
 from gateway.adapters.file_storage_adapter import LocalDirFileStore
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.models.budgets import Budget, ScopedBudget
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.models.tools import WorkspaceWebSearchConfig
 from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT, SERVED_HERE_SLUG, UsageLog
@@ -789,6 +790,44 @@ def test_a_completion_is_billed_to_the_caller_with_no_api_key(
     # cannot touch it: the surface it came from is a different question from
     # who served it.
     assert row.source == SERVED_HERE_SLUG
+
+
+def _workspace_ceiling(db_session: Session, workspace_id: uuid.UUID, **limits: Any) -> ScopedBudget:
+    budget = Budget(budget_id=str(uuid.uuid4()), **limits)
+    ceiling = ScopedBudget(scope_type="workspace", scope_id=str(workspace_id), budget_id=budget.budget_id)
+    db_session.add_all([budget, ceiling])
+    db_session.commit()
+    return ceiling
+
+
+def test_a_completion_is_held_to_the_budgets_of_the_workspace_it_runs_in(
+    client: TestClient,
+    world: _World,
+    db_session: Session,
+    _priced: None,
+) -> None:
+    """A session has no key, so the workspace it names is the one its budgets come from, not the default one."""
+    _workspace_ceiling(db_session, world.workspaces["alpha_one"], request_limit=0)
+
+    code, _ = _chat(client, world, "member")
+    assert code == status.HTTP_403_FORBIDDEN
+
+
+def test_a_completion_spends_against_the_workspace_it_runs_in(
+    client: TestClient,
+    world: _World,
+    db_session: Session,
+    _priced: None,
+) -> None:
+    ceiling = _workspace_ceiling(db_session, world.workspaces["alpha_one"], max_budget=10)
+
+    code, _ = _chat(client, world, "member")
+    assert code == status.HTTP_200_OK
+
+    db_session.expire_all()
+    held = db_session.get(ScopedBudget, ceiling.id)
+    assert held is not None
+    assert held.current_spend > 0
 
 
 def test_a_completion_cannot_be_billed_to_a_workspace_that_is_not_the_caller_s(

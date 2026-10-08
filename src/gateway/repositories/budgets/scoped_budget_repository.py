@@ -1,7 +1,7 @@
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Never
 
 from sqlalchemy import delete, func, or_, select, true, update
@@ -19,6 +19,7 @@ from gateway.models.budgets import (
     Budget,
     ScopedBudget,
     ScopeType,
+    ceiling_counters_rolled_if_ended,
 )
 from gateway.repositories.base_repository import BaseRepository
 
@@ -153,6 +154,21 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 ScopedBudget.scope_type == SCOPE_WORKSPACE_MEMBER,
                 ScopedBudget.scope_id == str(member_id),
             )
+        )
+
+    async def delete_for_organization_member(self, member_id: uuid.UUID) -> None:
+        """Delete every ceiling keyed on this organization membership."""
+        await self.db.execute(
+            delete(ScopedBudget).where(
+                ScopedBudget.scope_type == SCOPE_ORG_MEMBER,
+                ScopedBudget.scope_id == str(member_id),
+            )
+        )
+
+    async def delete_for_api_key(self, key_id: str) -> None:
+        """Delete every ceiling keyed on this API key."""
+        await self.db.execute(
+            delete(ScopedBudget).where(ScopedBudget.scope_type == SCOPE_API_TOKEN, ScopedBudget.scope_id == key_id)
         )
 
     async def delete_for_workspace(self, workspace_id: uuid.UUID, member_ids: Sequence[uuid.UUID]) -> None:
@@ -309,10 +325,14 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
     async def retime_for_budget(
         self, budget_id: str, *, period_start: datetime | None, period_end: datetime | None
     ) -> None:
-        """Set this window on every ceiling naming the budget, leaving each ceiling's counters as they are."""
+        """Set this window on every ceiling naming the budget, rolling only counters whose window had ended."""
         await self.db.execute(
             update(ScopedBudget)
             .where(ScopedBudget.budget_id == budget_id)
-            .values(period_start=period_start, period_end=period_end)
+            .values(
+                period_start=period_start,
+                period_end=period_end,
+                **ceiling_counters_rolled_if_ended(datetime.now(UTC)),
+            )
             .execution_options(synchronize_session=False)
         )

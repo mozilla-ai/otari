@@ -23,7 +23,7 @@ from gateway.services.budgets import (
     CYCLE_FIELDS,
     CycleSettings,
     cadence_of,
-    retime_ceilings_for_budget,
+    retime_for_budget,
     settle_cycle,
     validate_cycle_settings,
 )
@@ -68,7 +68,7 @@ async def _budget_usage(db: AsyncSession, budget_id: str) -> tuple[int, float, f
                 # ``coalesce(numeric, double precision)`` resolves the whole sum
                 # as double precision, which would roll exact counters up through
                 # a binary float on the way to a page that reports them.
-                func.coalesce(func.sum(User.spend), _ZERO),
+                func.coalesce(func.sum(User.spend_this_period()), _ZERO),
                 func.coalesce(func.sum(User.reserved), _ZERO),
             ).where(User.budget_id == budget_id, User.deleted_at.is_(None))
         )
@@ -134,7 +134,7 @@ async def list_budgets(
             select(
                 User.budget_id,
                 func.count(),
-                func.coalesce(func.sum(User.spend), _ZERO),
+                func.coalesce(func.sum(User.spend_this_period()), _ZERO),
                 func.coalesce(func.sum(User.reserved), _ZERO),
             )
             .where(User.budget_id.in_(page_ids), User.deleted_at.is_(None))
@@ -227,10 +227,10 @@ async def update_budget(
         for name, value in zip(CYCLE_FIELD_ORDER, settled, strict=True):
             setattr(budget, name, value)
 
-    # A ceiling holds its own window and reads the cadence through this budget, so
-    # changing the cadence without rewriting the windows leaves the two
-    # disagreeing. In one direction that is an enforcement bug rather than a
-    # cosmetic one: `_roll_expired_periods` only updates a row whose `period_end`
+    # A ceiling and a user each hold their own window and read the cadence
+    # through this budget, so changing the cadence without rewriting the windows
+    # leaves the two disagreeing. In one direction that is an enforcement bug
+    # rather than a cosmetic one: `_roll_expired_periods` only updates a row whose `period_end`
     # is not null, so a budget moved from "no reset" to a periodic cadence would
     # leave its ceilings with NULL windows that never roll, accumulating spend
     # forever. Since `b7e1c4a9d2f5` a budget can also belong to an organization
@@ -238,7 +238,7 @@ async def update_budget(
     # way may be a tenant's. Shared with the tenant-scoped surface rather than
     # written twice.
     if cadence_of(budget) != cadence_before:
-        await retime_ceilings_for_budget(db, budget, budget_id=budget.budget_id)
+        await retime_for_budget(db, budget, budget_id=budget.budget_id)
 
     try:
         await db.commit()
@@ -278,8 +278,9 @@ async def put_budget(
 
     Every field takes the value in the body, and a field left out is cleared, so
     the same request always leaves the same budget. Answers 201 when it created
-    the budget. Users on a budget it replaces stay on it, and its ceilings follow
-    a change of reset period. A budget an organization owns is not replaced.
+    the budget. Users on a budget it replaces stay on it, and they and its
+    ceilings follow a change of reset period. A budget an organization owns is
+    not replaced.
     """
     budget, created = await service.put_deployment_budget(budget_id, request)
     if created:
