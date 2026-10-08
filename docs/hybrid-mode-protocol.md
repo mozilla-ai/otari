@@ -143,6 +143,53 @@ Each front door has its own `aud` and its own `authorization_details` type, and 
 - One token for everything, with a storage proxy that verifies it, was rejected. The proxy would be a new service on the request path that carries every byte.
 - A signed token that a front door verifies offline keeps the control plane off the request path, and a published key set lets the control plane rotate keys without a deploy anywhere else.
 
+## Try-Confirm/Cancel
+
+Where a capability leaves durable state, such as a stored file or a recorded trace, the exchange is Try-Confirm/Cancel (TCC), as [ARCHITECTURE.md](../ARCHITECTURE.md#durable-state-try-confirmcancel) describes. Each capability keeps its own endpoints (for files, prepare, finalize and abandon), and there is no generic TCC endpoint. The rules below apply to every one of them.
+
+### Idempotency
+
+Every Try and every Confirm carries an `Idempotency-Key` header, as draft-ietf-httpapi-idempotency-key-header defines it. A repeat with the same key returns the first answer. A repeated Try whose grant has expired returns the same `id` with a fresh grant.
+
+| Status | Meaning |
+|---|---|
+| `400` | The request has no `Idempotency-Key` |
+| `409` | The first request with this key is still in flight |
+| `422` | The key was used before with a different body |
+
+### Try
+
+The data plane asks for the operation. The control plane checks policy and quota, allocates the identifier, records the intent in a state that is not yet usable, and answers:
+
+| Field | Meaning |
+|---|---|
+| `id` | The identifier of the record the operation will produce |
+| `expires_at` | The deadline. A Try that is not confirmed by then is canceled. |
+| `grant` | Present where the operation needs one. See [Grants](#grants). |
+| `data_key` | Present where the content is encrypted. See [Content encryption](#content-encryption). |
+
+Where the data plane has a list, such as the files attached to one completion or the agent sessions in one trace flush, the Try takes `items: [...]` and answers with one entry per item, in the same order. Each agent session is its own item, because each session has its own data key.
+
+The control plane derives tenancy from its own records of the request, never from a workspace ID the data plane sends.
+
+### Confirm
+
+The data plane reports the outcome, for example size, SHA-256 and counts, as each capability defines them. The control plane makes the record usable. Confirm carries its own `Idempotency-Key`, so a retry cannot create a second record.
+
+### Cancel and sweep
+
+The data plane cancels explicitly when it knows the work failed. Cancel is idempotent. The control plane's sweep cancels every Try that is past its deadline and removes what it left behind, so a data plane that disappears leaves no usable record.
+
+### Retries
+
+- The data plane retries a Try, a Confirm or a Cancel with exponential backoff and jitter on a network failure, a `5xx` or a `429`.
+- A Confirm that runs in the background, such as a trace flush or a usage report, is parked after its last retry and replayed later with the same key. It is never dropped ([#1729](https://github.com/mozilla-ai/otari/issues/1729)).
+- A Confirm that a caller waits on, such as a file upload, is not parked. The caller's request fails, and the sweep removes the Try.
+
+### Inference
+
+Resolve and the [usage report](#usage-report) are the Try and the Confirm of inference. Today the Try holds nothing: resolve claims no budget, and the usage report settles with overdraft allowed. A control plane that holds budget at resolve makes the usage report the Confirm, keyed by the attempt ID, and cancels with its sweep an attempt that never reports. The wire does not change.
+
 ## Resolve
 
 ### Request
