@@ -474,6 +474,26 @@ def _resolve_owned_endpoint(
     return (name, endpoint, model) if endpoint is not None else None
 
 
+def _claimed_target(
+    config: GatewayConfig, model_selector: str, user_id: str | None, workspace_id: uuid.UUID | None
+) -> str | None:
+    """The target an alias or a static routing policy gives a name, or ``None``."""
+    alias = resolve_effective_alias(config, model_selector, user_id, workspace_id=workspace_id)
+    if alias is not None:
+        return alias
+    # A *static* routing policy is an alias in everything but spelling: one
+    # name, one target. Resolving it here is what makes "an alias is a
+    # one-target policy" true on every model-taking surface (pricing, the
+    # catalog, embeddings, batches) and not only on the completion routes.
+    #
+    # A dynamic policy is deliberately left unresolved. Its candidate depends
+    # on request state that this synchronous path cannot see, so there is no
+    # honest answer to give; picking its default anyway would silently serve a
+    # different model than the policy describes. The completion routes compile
+    # it properly; everywhere else it surfaces as an unknown model.
+    return resolve_static_policy_target(config, model_selector, user_id, workspace_id=workspace_id)
+
+
 def resolve_provider_selector(
     config: GatewayConfig,
     model_selector: str,
@@ -517,19 +537,7 @@ def resolve_provider_selector(
     names neither a configured instance nor a known provider, mirroring the
     prior ``AnyLLM.split_model_provider`` behavior.
     """
-    alias = resolve_effective_alias(config, model_selector, user_id, workspace_id=workspace_id)
-    if alias is None:
-        # A *static* routing policy is an alias in everything but spelling: one
-        # name, one target. Resolving it here is what makes "an alias is a
-        # one-target policy" true on every model-taking surface (pricing, the
-        # catalog, embeddings, batches) and not only on the completion routes.
-        #
-        # A dynamic policy is deliberately left unresolved. Its candidate depends
-        # on request state that this synchronous path cannot see, so there is no
-        # honest answer to give; picking its default anyway would silently serve a
-        # different model than the policy describes. The completion routes compile
-        # it properly; everywhere else it surfaces as an unknown model.
-        alias = resolve_static_policy_target(config, model_selector, user_id, workspace_id=workspace_id)
+    alias = _claimed_target(config, model_selector, user_id, workspace_id)
     if alias is None:
         # The catalog's own spellings: a catalog id for the first of the model's
         # offerings, or ``instance:<catalog id>`` to pin the instance. Consulted last and only
