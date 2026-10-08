@@ -100,10 +100,9 @@ jobs:
       # no credentials.
       - name: Fetch PR head
         env:
-          PR: ${{ github.event.issue.number }}
           HEAD_SHA: ${{ needs.authorize.outputs.head_sha }}
         run: |
-          git fetch --no-tags origin "refs/pull/$PR/head"
+          git fetch --no-tags origin "$HEAD_SHA"
           git cat-file -e "$HEAD_SHA^{commit}"
 
       # Without a PID namespace, a scrubbed variable is still readable from
