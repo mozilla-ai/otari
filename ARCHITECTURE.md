@@ -68,13 +68,15 @@ A data plane holds no database and no store of its own. That is the design, not 
 
 ### The narrowest authority that lets it go direct
 
-The control plane answers policy questions, and it never carries customer traffic. Completions, search queries, sandbox code, file bytes and captured content go from the data plane straight to where they are served or stored. The control plane returns the narrowest authority that lets the data plane do that, and there are three cases.
+The control plane answers policy questions, and it never carries customer traffic. Completions, search queries, sandbox code, file bytes and captured content go from the data plane straight to where they are served or stored. The control plane returns the narrowest authority that lets the data plane do that, and there are three cases. Refer to a case by its name.
 
-| Case | The control plane returns | Examples |
-|---|---|---|
-| The workspace owns the credential | That credential | A workspace's own provider keys, its MCP servers, search with its own key |
-| The platform owns the resource and can mint a grant | A scoped grant | The code execution front door, the files bucket |
-| The platform owns the credential and the upstream cannot accept a grant | The credential, to the platform's own data plane only | Managed models, managed search |
+| Name | Case | The control plane returns | Examples |
+|---|---|---|---|
+| Workspace key | The workspace owns the credential | That credential | A workspace's own provider keys, its MCP servers, search with its own key |
+| Platform grant | The platform owns the resource and can mint a grant | A scoped grant | The code execution front door, the files bucket |
+| Platform key | The platform owns the credential and the upstream cannot accept a grant | The credential, to the platform's own data plane only | Managed models, managed search |
+
+The platform is whoever runs the control plane: otari.ai, or anyone who builds their own edition on Otari. The case depends on who runs the resource in that deployment, not on the seam. A resource that someone else runs, such as an operator's own sandbox backend, never sees a grant and keeps its own credential.
 
 A **scoped grant** is one operation on one resource, with a short deadline. A read and a write need separate grants, and no grant permits listing, because a grant that can enumerate is a tenant isolation hole. The data plane receives grants and never mints them. A grant is never logged, never stored on a record, and never sent to a client.
 
