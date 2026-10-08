@@ -929,6 +929,13 @@ def test_bedrock_account_quota_is_the_gateways_fault() -> None:
     assert classify_provider_error(exc) == (502, PROVIDER_ACCOUNT_QUOTA_DETAIL)
 
 
+def test_bedrock_throttling_forwards_its_retry_after() -> None:
+    exc = _bedrock_error("ThrottlingException", "Too many requests, please wait before trying again.", 429)
+    exc.response["ResponseMetadata"]["HTTPHeaders"] = {"retry-after": "7"}
+
+    assert upstream_retry_after(exc) == "7"
+
+
 def test_bedrock_access_denied_keeps_a_fixed_detail() -> None:
     exc = _bedrock_error("AccessDeniedException", f"User arn:aws:iam::123456789012:user/otari {_RAW}", 403)
 

@@ -710,11 +710,19 @@ def _error_status_code(exc: BaseException) -> int | None:
 
 def _response_metadata_status(response: object) -> int | None:
     """The HTTP status in an AWS SDK error response, or ``None``."""
-    if not isinstance(response, Mapping):
-        return None
-    metadata = response.get("ResponseMetadata")
-    status_code = metadata.get("HTTPStatusCode") if isinstance(metadata, Mapping) else None
+    status_code = _response_metadata(response).get("HTTPStatusCode")
     return status_code if isinstance(status_code, int) else None
+
+
+def _response_metadata_headers(response: object) -> Mapping[str, str] | None:
+    """The HTTP headers in an AWS SDK error response, or ``None``."""
+    headers = _response_metadata(response).get("HTTPHeaders")
+    return headers if isinstance(headers, Mapping) else None
+
+
+def _response_metadata(response: object) -> Mapping[str, object]:
+    metadata = response.get("ResponseMetadata") if isinstance(response, Mapping) else None
+    return metadata if isinstance(metadata, Mapping) else {}
 
 
 def upstream_exception_chain(exc: BaseException) -> Iterator[BaseException]:
@@ -838,10 +846,15 @@ def upstream_retry_after(exc: BaseException) -> str | None:
     whose own headers or response headers carry a usable one.
     """
     for current in upstream_exception_chain(exc):
-        for holder in (current, getattr(current, "response", None)):
+        response = getattr(current, "response", None)
+        for headers in (
+            getattr(current, "headers", None),
+            getattr(response, "headers", None),
+            _response_metadata_headers(response),
+        ):
             # Mapping-like but not necessarily a Mapping: httpx.Headers here, a
             # plain dict where an SDK copies them out.
-            get_header = getattr(getattr(holder, "headers", None), "get", None)
+            get_header = getattr(headers, "get", None)
             if not callable(get_header):
                 continue
             seconds = bounded_retry_after(get_header("retry-after") or get_header("Retry-After"))
