@@ -317,9 +317,10 @@ async def update_tool_settings(
 
     if updates:
         try:
-            if WEB_SEARCH_DEFAULT_TOOL in updates:
-                # The search tool it names may have been stored through another
-                # replica since this worker's overlay last refreshed.
+            if WEB_SEARCH_DEFAULT_TOOL in updates or WEB_FETCH_DEFAULT_TOOL in updates:
+                # A search tool stored through another replica since this worker's
+                # overlay last refreshed can be the one a search default names, or
+                # take a fetch default's name and so leave that fetch instance out.
                 await refresh_search_tool_cache(db, config)
             normalized = {key: await stage_override(db, key, value) for key, value in updates.items()}
             # Here rather than in the service's own check, which also runs at
