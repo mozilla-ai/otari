@@ -53,10 +53,10 @@ from gateway.models.tenancy import Workspace
 from gateway.models.usage import UsageLog
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.schemas.catalog import CatalogCapabilities, CatalogFacets, CatalogModelSummary, CatalogQuery
-from gateway.services.catalog import query_catalog
-from gateway.services.catalog_selectors import (
+from gateway.services.catalog import (
     current_selector_index,
     model_selector_for_slug,
+    query_catalog,
     short_selector_for,
 )
 from gateway.services.merged_catalog_service import (

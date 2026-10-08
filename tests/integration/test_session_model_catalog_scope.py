@@ -917,7 +917,7 @@ def test_an_unadvertised_model_is_not_indexed_as_an_offering(
     Otherwise a pinned spelling could land on the cheapest offering of a model
     the deployment has switched off, and the request it rewrote would be refused.
     """
-    from gateway.services import catalog_selectors as selectors
+    from gateway.services import catalog as selectors
 
     bind_model_provider(client, HostedModelProvider("openai", models=_OPENAI_ADVERTISED))
     try:
@@ -964,7 +964,7 @@ def test_an_offered_model_resolves_by_its_catalog_spellings_for_its_organization
 
     from fastapi import FastAPI
 
-    from gateway.services import catalog_selectors as selectors
+    from gateway.services import catalog as selectors
     from gateway.services.provider_kwargs import resolve_provider_selector
 
     raw = "nebius:deepseek-ai/DeepSeek-V4.1-Flash"

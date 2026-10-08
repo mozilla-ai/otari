@@ -58,7 +58,7 @@ from gateway.core.config import (
 from gateway.core.provider_params import FORBIDDEN_ENDPOINT_DEFAULTS
 from gateway.log_config import logger
 from gateway.services.alias_service import resolve_effective_alias
-from gateway.services.catalog_selectors import resolve_catalog_selector
+from gateway.services.catalog import resolve_catalog_selector
 from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.tenancy.org_provider_key_service import cached_org_provider_kwargs
 from gateway.types.provider_account import ProviderAccount, ResolvedCredential

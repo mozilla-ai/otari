@@ -1,6 +1,6 @@
 """Building the spelling index from the deployment's catalog view and each organization's offerings.
 
-``services.catalog_selectors`` holds the index and answers from it; this is
+``services.catalog`` holds the index and answers from it; this is
 what fills it. The two are split because the answer is on the dispatch path and
 must stay synchronous, while the build reads the database, models.dev and
 discovery.
@@ -22,7 +22,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session
 from gateway.log_config import logger
 from gateway.ports.model_provider_port import ModelProviderPort
-from gateway.services.catalog_selectors import (
+from gateway.services.catalog import (
     Identities,
     OfferingRow,
     OrganizationSelectors,

@@ -1014,7 +1014,6 @@ FLAT_MODULE_BASELINE = (
     "gateway/services/batch_service.py",
     "gateway/services/bedrock_gateway_auth.py",
     "gateway/services/bootstrap_service.py",
-    "gateway/services/catalog_selectors.py",
     "gateway/services/content_normalizer.py",
     "gateway/services/dashboard_session_service.py",
     "gateway/services/external_usage_service.py",

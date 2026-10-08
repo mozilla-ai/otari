@@ -50,7 +50,7 @@ from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
 from gateway.services.bootstrap_service import bootstrap_first_api_key
 from gateway.services.budgets import run_reservation_sweeper
-from gateway.services.catalog_selectors import reset_selector_index
+from gateway.services.catalog import reset_selector_index
 from gateway.services.code_execution.container_sweeper import run_sandbox_container_sweeper
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.feedback import new_feedback_rate_limiter

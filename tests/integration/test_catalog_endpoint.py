@@ -451,7 +451,7 @@ def test_the_catalog_names_the_short_spellings_the_gateway_accepts(
 
     from fastapi import FastAPI
 
-    from gateway.services import catalog_selectors as selectors
+    from gateway.services import catalog as selectors
     from gateway.services.provider_kwargs import resolve_provider_selector
 
     config = cast(FastAPI, priced.app).state.config

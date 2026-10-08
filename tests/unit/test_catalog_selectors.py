@@ -6,7 +6,7 @@ from collections.abc import Iterator
 import pytest
 
 from gateway.core.config import GatewayConfig
-from gateway.services import catalog_selectors as selectors
+from gateway.services import catalog as selectors
 from gateway.services.provider_kwargs import resolve_provider_selector
 
 _ROWS = [
