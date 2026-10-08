@@ -14,6 +14,7 @@ import hashlib
 import re
 import secrets
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -325,6 +326,16 @@ class OrganizationService:
     async def get_workspace_ids_in_organization(self, organization_id: uuid.UUID) -> list[uuid.UUID]:
         """Return the ID of every workspace in an organization."""
         return await self.workspace_rows.get_ids_by_organization(organization_id)
+
+    async def get_workspace_names_in_organization(
+        self, organization_id: uuid.UUID, workspace_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, str]:
+        """Return the name of each of these workspaces that sits in the organization, keyed by ID."""
+        return {
+            workspace.id: workspace.name
+            for workspace in await self.workspace_rows.get_by_ids(workspace_ids)
+            if workspace.organization_id == organization_id
+        }
 
     async def get_organization_member_ids(self, organization_id: uuid.UUID) -> list[uuid.UUID]:
         """Return the ID of every membership in an organization, whatever its status."""

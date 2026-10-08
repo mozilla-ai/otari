@@ -38,6 +38,7 @@ function organizationBudget(
     budget_duration_sec: null,
     reset_alignment: "calendar_month",
     ceiling_count: 0,
+    applied_to: [],
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: "2026-01-01T00:00:00+00:00",
     ...overrides,
@@ -167,7 +168,7 @@ describe("OrganizationBudgetsPage", () => {
     // the admin's to use.
     const requests = mockApi()
     renderPage()
-    await screen.findByRole("grid", { name: "Organization budgets" })
+    await screen.findByRole("grid", { name: "Budgets" })
 
     const read = requests.map((request) => request.url)
     expect(
@@ -184,12 +185,29 @@ describe("OrganizationBudgetsPage", () => {
     }
   })
 
-  it("lists a budget with its limit, period and how many ceilings hold it", async () => {
-    mockApi({ budgets: [organizationBudget({ ceiling_count: 2 })] })
+  it("lists a budget with its limit, cycle and what it applies to", async () => {
+    const entity = (scope_type: string, scope_id: string) => ({
+      scope_type,
+      scope_id,
+      provider_key_id: null,
+      name: null,
+    })
+    mockApi({
+      budgets: [
+        organizationBudget({
+          ceiling_count: 3,
+          applied_to: [
+            entity("org_member", "m-1"),
+            entity("org_member", "m-2"),
+            entity("api_token", "k-1"),
+          ],
+        }),
+      ],
+    })
     renderPage()
 
     const table = await screen.findByRole("grid", {
-      name: "Organization budgets",
+      name: "Budgets",
     })
     // Awaited: `DataTable` renders the grid with a loading row, so the grid
     // exists a beat before its rows do.
@@ -198,7 +216,19 @@ describe("OrganizationBudgetsPage", () => {
     ).toBeInTheDocument()
     expect(within(table).getByText(/250/)).toBeInTheDocument()
     expect(within(table).getByText(/1st at 00:00 UTC/)).toBeInTheDocument()
-    expect(within(table).getByText("2 ceilings")).toBeInTheDocument()
+    expect(
+      within(table).getByText("2 organization members, 1 API key"),
+    ).toBeInTheDocument()
+  })
+
+  it("says a budget applies to nothing when nothing holds it", async () => {
+    mockApi({ budgets: [organizationBudget({ ceiling_count: 0 })] })
+    renderPage()
+
+    const table = await screen.findByRole("grid", { name: "Budgets" })
+    expect(
+      await within(table).findByText("Not applied yet"),
+    ).toBeInTheDocument()
   })
 
   it("shows no spend column on a budget, because that figure is not the tenant's", async () => {
@@ -208,7 +238,7 @@ describe("OrganizationBudgetsPage", () => {
     renderPage()
 
     const table = await screen.findByRole("grid", {
-      name: "Organization budgets",
+      name: "Budgets",
     })
     expect(
       within(table).queryByRole("columnheader", { name: /spent/i }),
@@ -221,12 +251,16 @@ describe("OrganizationBudgetsPage", () => {
     const requests = mockApi({ budgets: [] })
     const user = userEvent.setup()
     renderPage()
-    await screen.findByRole("grid", { name: "Organization budgets" })
+    await screen.findByText("No budgets yet")
 
-    await user.click(screen.getByRole("button", { name: "Add budget" }))
+    await user.click(
+      screen.getAllByRole("button", { name: "Create budget" })[0],
+    )
     await user.type(screen.getByLabelText("Name"), "Design")
     await user.type(screen.getByLabelText("Limit (USD)"), "75")
-    const submit = screen.getAllByRole("button", { name: "Add budget" }).at(-1)
+    const submit = screen
+      .getAllByRole("button", { name: "Create budget" })
+      .at(-1)
     await user.click(submit as HTMLElement)
 
     await waitFor(() =>
@@ -257,9 +291,11 @@ describe("OrganizationBudgetsPage", () => {
     mockApi({ budgets: [] })
     const user = userEvent.setup()
     renderPage()
-    await screen.findByRole("grid", { name: "Organization budgets" })
+    await screen.findByText("No budgets yet")
 
-    await user.click(screen.getByRole("button", { name: "Add budget" }))
+    await user.click(
+      screen.getAllByRole("button", { name: "Create budget" })[0],
+    )
     await user.type(screen.getByLabelText("Limit (USD)"), "75")
     expect(
       screen.getByText(/Left blank, that is "\$75.00 \/ month"/),
@@ -270,12 +306,16 @@ describe("OrganizationBudgetsPage", () => {
     mockApi({ budgets: [] })
     const user = userEvent.setup()
     renderPage()
-    await screen.findByRole("grid", { name: "Organization budgets" })
+    await screen.findByText("No budgets yet")
 
-    await user.click(screen.getByRole("button", { name: "Add budget" }))
+    await user.click(
+      screen.getAllByRole("button", { name: "Create budget" })[0],
+    )
     await user.type(screen.getByLabelText("Limit (USD)"), "-5")
 
-    const submit = screen.getAllByRole("button", { name: "Add budget" }).at(-1)
+    const submit = screen
+      .getAllByRole("button", { name: "Create budget" })
+      .at(-1)
     expect(submit).toBeDisabled()
   })
 
@@ -284,7 +324,7 @@ describe("OrganizationBudgetsPage", () => {
     renderPage()
 
     const table = await screen.findByRole("grid", {
-      name: "Organization budgets",
+      name: "Budgets",
     })
     expect(await within(table).findByText("No limit")).toBeInTheDocument()
   })
@@ -298,11 +338,13 @@ describe("OrganizationBudgetsPage", () => {
     const user = userEvent.setup()
     renderPage()
 
-    await user.click(await screen.findByRole("button", { name: "Add budget" }))
+    await user.click(
+      (await screen.findAllByRole("button", { name: "Create budget" }))[0],
+    )
     await user.type(await screen.findByLabelText(/^Name/), "team-a")
     await user.click(
       within(screen.getByRole("dialog")).getByRole("button", {
-        name: "Add budget",
+        name: "Create budget",
       }),
     )
     expect(await screen.findByRole("alert")).toBeInTheDocument()
@@ -310,7 +352,9 @@ describe("OrganizationBudgetsPage", () => {
     await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "Discard" }))
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
-    await user.click(screen.getByRole("button", { name: "Add budget" }))
+    await user.click(
+      screen.getAllByRole("button", { name: "Create budget" })[0],
+    )
 
     const reopened = await screen.findByRole("dialog")
     expect(within(reopened).queryByRole("alert")).toBeNull()
@@ -384,16 +428,18 @@ describe("OrganizationBudgetsPage", () => {
     const user = userEvent.setup()
     renderPage()
     const table = await screen.findByRole("grid", {
-      name: "Organization budgets",
+      name: "Budgets",
     })
 
     await user.click(
-      await within(table).findByRole("button", { name: "Delete" }),
+      await within(table).findByRole("button", {
+        name: "Delete Engineering monthly",
+      }),
     )
 
     expect(
       await screen.findByText(
-        /held by 3 spend ceilings, so this will be refused/,
+        /is applied to 3 entities, so this will be refused/,
       ),
     ).toBeInTheDocument()
   })

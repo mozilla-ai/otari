@@ -322,7 +322,7 @@ const ORGANIZATION_NAV_SECTIONS = [
       // caller who manages the organization.
       {
         to: "/budgets",
-        label: "Spend & budgets",
+        label: "Budgets",
         surface: "budgets",
         icon: FiDollarSign,
       },

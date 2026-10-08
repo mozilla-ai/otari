@@ -191,6 +191,17 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
         )
         return list(result.tuples().all())
 
+    async def list_for_budgets_in_scopes(self, budget_ids: Sequence[str], scopes: ScopeIdSets) -> list[ScopedBudget]:
+        """Return the ceilings on these scopes that name one of these budgets, oldest first."""
+        if not budget_ids:
+            return []
+        result = await self.db.execute(
+            select(ScopedBudget)
+            .where(ScopedBudget.budget_id.in_(budget_ids), _in_scopes(scopes))
+            .order_by(ScopedBudget.created_at, ScopedBudget.id)
+        )
+        return list(result.scalars().all())
+
     async def member_ceiling(self, member_id: uuid.UUID, provider_key_id: str | None) -> ScopedBudget | None:
         """Return the ceiling capping this membership for this provider, where None means every provider."""
         result = await self.db.execute(

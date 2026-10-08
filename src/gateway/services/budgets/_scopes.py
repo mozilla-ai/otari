@@ -7,7 +7,7 @@ from gateway.services.api_keys import ApiKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
 
 
-def _uuid_or_none(value: str) -> uuid.UUID | None:
+def uuid_or_none(value: str) -> uuid.UUID | None:
     try:
         return uuid.UUID(value)
     except ValueError:
@@ -34,20 +34,20 @@ class ScopeOwnership:
         """
         match scope_type:
             case "organization":
-                organization_id = _uuid_or_none(scope_id)
+                organization_id = uuid_or_none(scope_id)
                 if organization_id is None or not await self._organizations.has_organization(organization_id):
                     return None
                 return organization_id
             case "workspace":
-                return await self._get_organization_id_for_workspace(_uuid_or_none(scope_id))
+                return await self._get_organization_id_for_workspace(uuid_or_none(scope_id))
             case "workspace_member":
-                member_id = _uuid_or_none(scope_id)
+                member_id = uuid_or_none(scope_id)
                 if member_id is None:
                     return None
                 workspace_id = await self._organizations.get_workspace_id_for_workspace_member(member_id)
                 return await self._get_organization_id_for_workspace(workspace_id)
             case "org_member":
-                member_id = _uuid_or_none(scope_id)
+                member_id = uuid_or_none(scope_id)
                 if member_id is None:
                     return None
                 return await self._organizations.get_organization_id_for_organization_member(member_id)
@@ -85,9 +85,9 @@ async def lock_workspace_for_scope(organizations: OrganizationService, scope_typ
     workspace_id: uuid.UUID | None
     match scope_type:
         case "workspace":
-            workspace_id = _uuid_or_none(scope_id)
+            workspace_id = uuid_or_none(scope_id)
         case "workspace_member":
-            member_id = _uuid_or_none(scope_id)
+            member_id = uuid_or_none(scope_id)
             workspace_id = (
                 None if member_id is None else await organizations.get_workspace_id_for_workspace_member(member_id)
             )

@@ -115,7 +115,7 @@ class BudgetService:
     async def list_organization_budgets(
         self, *, user: User, skip: int = 0, limit: int = 100
     ) -> OrganizationBudgetsPublic:
-        """Return a page of the caller's organization's budgets, with how many ceilings hold each."""
+        """Return a page of the caller's organization's budgets, each with the entities it applies to."""
         async with self._uow:
             return await self._organization.list_budgets(user=user, skip=skip, limit=limit)
 
