@@ -8,7 +8,14 @@ from typing import Any
 
 import pytest
 
-from gateway.services.pricing import ModelsDevPriceIndex, PriceGeneration, resolve_as_of, select_generation
+from gateway.services.pricing import (
+    ModelsDevPriceIndex,
+    PriceGeneration,
+    PriceTimeline,
+    parse_rate,
+    resolve_as_of,
+    select_generation,
+)
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "models_dev_mini.json"
 
@@ -90,7 +97,7 @@ def test_context_tiers_map_to_pricing_tiers_sorted(index: ModelsDevPriceIndex) -
     ]
 
 
-def test_non_context_tier_types_are_ignored_and_over_200k_ignored_beside_tiers(
+def test_non_context_tier_types_are_ignored_and_over_200k_ignored_beside_context_tiers(
     index: ModelsDevPriceIndex, raw: dict[str, Any]
 ) -> None:
     price = index.resolve("anthropic", "claude-haiku-5-5")
@@ -99,10 +106,12 @@ def test_non_context_tier_types_are_ignored_and_over_200k_ignored_beside_tiers(
     assert price.pricing_tiers()[0]["cache_write_price_per_million"] == 0.625
 
     raw = json.loads(json.dumps(raw))
-    raw["google"]["models"]["gemini-2.5-pro"]["cost"]["tiers"] = []
+    raw["google"]["models"]["gemini-2.5-pro"]["cost"]["tiers"] = [
+        {"tier": {"type": "context", "size": 100000}, "input": 9}
+    ]
     both = ModelsDevPriceIndex.from_catalog(raw).resolve("google", "gemini-2.5-pro")
     assert both is not None
-    assert both.pricing_tiers() == []
+    assert [t["min_input_tokens"] for t in both.pricing_tiers()] == [100000]
 
 
 def test_context_over_200k_alone_is_one_tier(index: ModelsDevPriceIndex) -> None:
@@ -278,25 +287,148 @@ def test_index_is_immutable(index: ModelsDevPriceIndex) -> None:
         index.extra = 1  # type: ignore[attr-defined]
 
 
-def _generation(day: int, input_rate: int) -> PriceGeneration:
+def _generation(day: int, input_rate: int, *, baseline: bool = False) -> PriceGeneration:
     catalog = {"p": {"id": "p", "models": {"m": {"id": "m", "cost": {"input": input_rate, "output": 1}}}}}
-    return PriceGeneration(datetime(2026, 1, day, tzinfo=UTC), ModelsDevPriceIndex.from_catalog(catalog))
+    return PriceGeneration(
+        datetime(2026, 1, day, tzinfo=UTC), ModelsDevPriceIndex.from_catalog(catalog), baseline=baseline
+    )
+
+
+def _rate_at(generations: list[PriceGeneration] | PriceTimeline, day: int) -> Decimal | None:
+    found = resolve_as_of(generations, datetime(2026, 1, day, 12, tzinfo=UTC), "p", "m")
+    return found.input if found else None
 
 
 def test_as_of_picks_the_generation_in_effect() -> None:
     generations = [_generation(20, 3), _generation(5, 1), _generation(10, 2)]
 
-    def rate(day: int) -> Decimal | None:
-        found = resolve_as_of(generations, datetime(2026, 1, day, 12, tzinfo=UTC), "p", "m")
-        return found.input if found else None
+    assert _rate_at(generations, 5) == Decimal(1)
+    assert _rate_at(generations, 9) == Decimal(1)
+    assert _rate_at(generations, 10) == Decimal(2)
+    assert _rate_at(generations, 25) == Decimal(3)
 
-    assert rate(1) == Decimal(1)
-    assert rate(5) == Decimal(1)
-    assert rate(9) == Decimal(1)
-    assert rate(10) == Decimal(2)
-    assert rate(25) == Decimal(3)
+
+def test_as_of_before_the_first_generation_is_unpriced() -> None:
+    generations = [_generation(5, 1), _generation(10, 2)]
+    assert _rate_at(generations, 1) is None
+    assert select_generation(generations, datetime(2026, 1, 1, tzinfo=UTC)) is None
+
+
+def test_baseline_generation_answers_every_earlier_date() -> None:
+    generations = [_generation(5, 1, baseline=True), _generation(10, 2)]
+    assert _rate_at(generations, 1) == Decimal(1)
+    assert _rate_at(generations, 12) == Decimal(2)
+
+
+def test_naive_datetimes_are_utc() -> None:
+    generations = [_generation(5, 1), _generation(10, 2)]
+    found = resolve_as_of(generations, datetime(2026, 1, 7), "p", "m")
+    assert found is not None
+    assert found.input == Decimal(1)
+
+
+def test_timeline_must_be_sorted() -> None:
+    with pytest.raises(ValueError, match="sorted"):
+        PriceTimeline((_generation(10, 2), _generation(5, 1)))
+    assert _rate_at(PriceTimeline.build([_generation(10, 2), _generation(5, 1)]), 11) == Decimal(2)
 
 
 def test_as_of_with_no_generations_is_none() -> None:
     assert select_generation([], datetime(2026, 1, 1, tzinfo=UTC)) is None
     assert resolve_as_of([], datetime(2026, 1, 1, tzinfo=UTC), "p", "m") is None
+
+
+def _bedrock(*models: tuple[str, int]) -> ModelsDevPriceIndex:
+    listing = {m: {"id": m, "cost": {"input": rate, "output": 1}} for m, rate in models}
+    return ModelsDevPriceIndex.from_catalog({"amazon-bedrock": {"id": "amazon-bedrock", "models": listing}})
+
+
+def test_bedrock_v2_is_never_priced_from_v1() -> None:
+    index = _bedrock(("anthropic.claude-x-v1:0", 3))
+    assert index.resolve("bedrock", "anthropic.claude-x-v2:0") is None
+    assert index.resolve("bedrock", "anthropic.claude-x-v2") is None
+    assert index.resolve("bedrock", "anthropic.claude-x") is not None
+
+
+def test_bedrock_geo_is_never_swapped_for_another() -> None:
+    index = _bedrock(("us.anthropic.claude-x-v1:0", 3))
+    assert index.resolve("bedrock", "eu.anthropic.claude-x-v1:0") is None
+    found = index.resolve("bedrock", "anthropic.claude-x-v1:0")
+    assert found is not None
+    assert found.model_id == "us.anthropic.claude-x-v1:0"
+
+
+def test_bedrock_geo_less_request_with_disagreeing_geo_listings_is_unpriced() -> None:
+    disagree = _bedrock(("us.anthropic.claude-x-v1:0", 3), ("eu.anthropic.claude-x-v1:0", 4))
+    assert disagree.resolve("bedrock", "anthropic.claude-x-v1:0") is None
+    agree = _bedrock(("us.anthropic.claude-x-v1:0", 3), ("eu.anthropic.claude-x-v1:0", 3))
+    assert agree.resolve("bedrock", "anthropic.claude-x-v1:0") is not None
+
+
+def test_bedrock_global_request_does_not_match_a_regional_listing() -> None:
+    index = _bedrock(("eu.anthropic.claude-x", 3))
+    assert index.resolve("bedrock", "global.anthropic.claude-x-v1:0") is None
+
+
+def test_vendor_walk_uses_only_a_head_that_is_a_provider() -> None:
+    index = ModelsDevPriceIndex.from_catalog(
+        {
+            "openai": {"id": "openai", "models": {"gpt-4.1": {"id": "gpt-4.1", "cost": {"input": 2, "output": 8}}}},
+            "other": {"id": "other", "models": {"x.gpt-4.1": {"id": "x.gpt-4.1", "cost": {"input": 9, "output": 9}}}},
+        }
+    )
+    assert index.resolve("agg", "openai.gpt-4.1") is not None
+    assert index.resolve("agg", "nobody.gpt-4.1") is None
+
+
+def test_agnostic_match_blocked_by_an_unpriced_listing() -> None:
+    catalog = {
+        "a": {"id": "a", "models": {"m": {"id": "m", "cost": {"input": 1, "output": 1}}}},
+        "b": {"id": "b", "models": {"m": {"id": "m"}}},
+    }
+    assert ModelsDevPriceIndex.from_catalog(catalog).resolve("x", "m") is None
+
+
+def test_agnostic_match_without_a_slash_in_the_canonical_id_is_one_candidate() -> None:
+    catalog = {"a": {"id": "a", "models": {"m": {"id": "m", "canonical_model_id": "m", "cost": {"input": 1}}}}}
+    found = ModelsDevPriceIndex.from_catalog(catalog).resolve("x", "m")
+    assert found is not None
+    assert found.provider_id == "a"
+
+
+def _tiers_for(cost: dict[str, Any]) -> list[dict[str, float | int]]:
+    catalog = {"p": {"id": "p", "models": {"m": {"id": "m", "cost": {"input": 1, "output": 1, **cost}}}}}
+    found = ModelsDevPriceIndex.from_catalog(catalog).resolve("p", "m")
+    assert found is not None
+    return found.pricing_tiers()
+
+
+def test_over_200k_is_used_when_no_context_tier_was_extracted() -> None:
+    over = {"input": 2, "output": 2}
+    assert _tiers_for({"tiers": [{"tier": {"type": "other", "size": 5}, "input": 3}], "context_over_200k": over}) == [
+        {"min_input_tokens": 200000, "input_price_per_million": 2.0, "output_price_per_million": 2.0}
+    ]
+    assert _tiers_for({"tiers": [], "context_over_200k": over})[0]["min_input_tokens"] == 200000
+
+
+@pytest.mark.parametrize("size", [0, -5, 1.5, True])
+def test_unusable_tier_sizes_are_ignored(size: object) -> None:
+    assert _tiers_for({"tiers": [{"tier": {"type": "context", "size": size}, "input": 3}]}) == []
+
+
+def test_integral_float_tier_size_is_accepted() -> None:
+    assert (
+        _tiers_for({"tiers": [{"tier": {"type": "context", "size": 32000.0}, "input": 3}]})[0]["min_input_tokens"]
+        == 32000
+    )
+
+
+@pytest.mark.parametrize("value", [-1, float("inf"), float("nan"), 1_000_000.5, 1e12, True, "3"])
+def test_implausible_rates_are_rejected(value: object) -> None:
+    assert parse_rate(value) is None
+
+
+def test_rates_inside_the_bounds_parse() -> None:
+    assert parse_rate(0) == Decimal(0)
+    assert parse_rate(0.3) == Decimal("0.3")
+    assert parse_rate(1_000_000) == Decimal(1_000_000)
