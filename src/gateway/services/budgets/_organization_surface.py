@@ -126,15 +126,7 @@ class _OrganizationSurface:
 
         applied: dict[str, list[AppliedEntityPublic]] = {budget_id: [] for budget_id in budget_ids}
         for ceiling in ceilings:
-            applied[ceiling.budget_id].append(
-                AppliedEntityPublic(
-                    scope_type=ceiling.scope_type,
-                    scope_id=ceiling.scope_id,
-                    provider_key_id=ceiling.provider_key_id,
-                    model=ceiling.model,
-                    name=name_of(ceiling),
-                )
-            )
+            applied[ceiling.budget_id].append(AppliedEntityPublic.of(ceiling, name=name_of(ceiling)))
         return applied
 
     async def _require_no_existing_ceiling(self, request: OrganizationScopedBudgetCreate) -> None:

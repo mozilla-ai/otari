@@ -6769,6 +6769,21 @@ export interface components {
          * @description One entity a budget applies to: the scope a ceiling caps, and the provider or model it narrows to.
          */
         AppliedEntityPublic: {
+            /**
+             * Current Requests
+             * @description Requests this period, zero once the period has ended
+             */
+            current_requests: number;
+            /**
+             * Current Spend
+             * @description Spend this period, zero once the period has ended
+             */
+            current_spend: number;
+            /**
+             * Current Tokens
+             * @description Tokens this period, zero once the period has ended
+             */
+            current_tokens: number;
             /** Model */
             model: string | null;
             /**
@@ -6778,6 +6793,21 @@ export interface components {
             name: string | null;
             /** Provider Key Id */
             provider_key_id: string | null;
+            /**
+             * Reserved Requests
+             * @description Requests held by requests still in flight
+             */
+            reserved_requests: number;
+            /**
+             * Reserved Spend
+             * @description Spend held by requests still in flight
+             */
+            reserved_spend: number;
+            /**
+             * Reserved Tokens
+             * @description Tokens held by requests still in flight
+             */
+            reserved_tokens: number;
             /** Scope Id */
             scope_id: string;
             /** Scope Type */

@@ -360,6 +360,22 @@ class UpdateScopedBudgetRequest(ScopedBudgetChanges):
     """Request model for updating a scoped budget."""
 
 
+def _counters_of(ceiling: ScopedBudget) -> dict[str, Any]:
+    """A ceiling's counters this period, zero once its period has ended.
+
+    The stored ones are last period's until the next request rolls the window. Holds are never zeroed.
+    """
+    ended = ceiling.period_has_ended
+    return {
+        "current_spend": 0.0 if ended else float(ceiling.current_spend),
+        "reserved_spend": float(ceiling.reserved_spend),
+        "current_tokens": 0 if ended else ceiling.current_tokens,
+        "reserved_tokens": ceiling.reserved_tokens,
+        "current_requests": 0 if ended else ceiling.current_requests,
+        "reserved_requests": ceiling.reserved_requests,
+    }
+
+
 class ScopedBudgetFigures(BaseModel):
     """One scoped ceiling: its identity, its live counters, and the limits and period of its budget."""
 
@@ -393,7 +409,6 @@ class ScopedBudgetFigures(BaseModel):
     @staticmethod
     def _figures_of(ceiling: ScopedBudget, budget: Budget) -> dict[str, Any]:
         """Return the value of every field here, read from a ceiling and the budget it names."""
-        ended = ceiling.period_has_ended
         return {
             "id": ceiling.id,
             "scope_type": ceiling.scope_type,
@@ -403,15 +418,9 @@ class ScopedBudgetFigures(BaseModel):
             "budget_id": ceiling.budget_id,
             "name": ceiling.name,
             "max_budget": as_float(budget.max_budget),
-            # Last period's figures until the next request rolls the window.
-            "current_spend": 0.0 if ended else float(ceiling.current_spend),
-            "reserved_spend": float(ceiling.reserved_spend),
             "token_limit": budget.token_limit,
-            "current_tokens": 0 if ended else ceiling.current_tokens,
-            "reserved_tokens": ceiling.reserved_tokens,
             "request_limit": budget.request_limit,
-            "current_requests": 0 if ended else ceiling.current_requests,
-            "reserved_requests": ceiling.reserved_requests,
+            **_counters_of(ceiling),
             "reset_cycle": budget.reset_cycle,
             "reset_every_n": budget.reset_every_n,
             "reset_anchor_at": budget.reset_anchor_at.isoformat() if budget.reset_anchor_at else None,
@@ -540,6 +549,24 @@ class AppliedEntityPublic(BaseModel):
     name: str | None = Field(
         description="The organization's or the workspace's name; null for a membership or an API key",
     )
+    current_spend: float = Field(description="Spend this period, zero once the period has ended")
+    reserved_spend: float = Field(description="Spend held by requests still in flight")
+    current_tokens: int = Field(description="Tokens this period, zero once the period has ended")
+    reserved_tokens: int = Field(description="Tokens held by requests still in flight")
+    current_requests: int = Field(description="Requests this period, zero once the period has ended")
+    reserved_requests: int = Field(description="Requests held by requests still in flight")
+
+    @classmethod
+    def of(cls, ceiling: ScopedBudget, *, name: str | None) -> Self:
+        """Describe the entity a ceiling caps, with its counters this period."""
+        return cls(
+            scope_type=ceiling.scope_type,
+            scope_id=ceiling.scope_id,
+            provider_key_id=ceiling.provider_key_id,
+            model=ceiling.model,
+            name=name,
+            **_counters_of(ceiling),
+        )
 
 
 class OrganizationBudgetPublic(BaseModel):

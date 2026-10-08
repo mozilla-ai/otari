@@ -10,6 +10,8 @@ Is it one number's change over a period?
  └── TrendChip                      (inside a KpiCell's meta line, or a table cell)
 Is it a value against a limit?
  └── SpendMeter (money against a ceiling) or Meter (a bare fraction)
+Is it what is left of a limit, in a table cell?
+ └── HeadroomRing
 Is it a status?
  └── SeverityMark, which ships the word beside the mark
 Is it a quantity over time?
@@ -90,6 +92,7 @@ the chip picks its own hue.
 ```ts
 SpendMeter: { spent, allocated, ariaLabel, nearLimitAt = 0.8, className? }
 Meter: { fraction, ariaLabel }
+HeadroomRing: { used, nearLimitAt = 0.8 }
 SeverityMark: { severity: { status: "ok" | "warn" | "alert", word: string } }
 Dot: { className }
 ```
@@ -103,6 +106,14 @@ whose only channel is hue.
 `on-track` (accent), `near-limit` (warning, from `nearLimitAt`, default 0.8),
 `over` (danger, bar full rather than overflowing). Never compute the color at the
 call site; use `spendState` if you need the word.
+
+`HeadroomRing` is the same classification read the other way: a ring that is
+full with nothing used and empties clockwise, with "N% left" beside it. `used` is
+a fraction and may pass 1. It is for a cell too narrow for a bar, and it prints
+its own figure, so it takes no `ariaLabel`: the ring is hidden from assistive
+technology and the words carry the reading. Over the limit the arc is gone, the
+track turns danger and the figure reads "Over limit", the one figure that changes
+color, as on `SpendMeter`.
 
 ## Charts
 

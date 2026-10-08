@@ -15,6 +15,7 @@ import type {
   CatalogResponse,
   DeploymentBootstrap,
   DeploymentUser,
+  NamedAppliedEntity,
   Organization,
   OrganizationContext,
   OrganizationDomain,
@@ -458,6 +459,29 @@ export function scopedBudget(
     period_end: null,
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: "2026-01-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+/**
+ * One entity a budget applies to, as the organization budget list names it: a
+ * workspace with nothing spent this period.
+ */
+export function namedAppliedEntity(
+  overrides: Partial<NamedAppliedEntity> = {},
+): NamedAppliedEntity {
+  return {
+    scope_type: "workspace",
+    scope_id: "ws-1",
+    provider_key_id: null,
+    model: null,
+    name: null,
+    current_spend: 0,
+    reserved_spend: 0,
+    current_tokens: 0,
+    reserved_tokens: 0,
+    current_requests: 0,
+    reserved_requests: 0,
     ...overrides,
   }
 }
