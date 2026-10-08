@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.17.0/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.18.0/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -479,6 +479,8 @@ agent_recommender_candidates:
   opus: Hard reasoning, ambiguous goals, large or security-sensitive changes.
 ```
 
+These are a standalone deployment's settings. On otari.ai a managed
+recommender answers behind the same route, so neither applies there.
 `agent_recommender_model` is a `decision_providers` selector, resolved per
 request, so a deployment that never asks need not configure the provider.
 `agent_recommender_candidates` maps each model name, as the asking harness
@@ -637,7 +639,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.17.0/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.18.0/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Product feedback

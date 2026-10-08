@@ -15,7 +15,7 @@ second, pool-backed backend for [otari.ai](https://otari.ai). Both implement thi
 contract, and Otari cannot tell which one answered.
 
 The contract is HTTP/JSON, described by OpenAPI. Its machine-readable form is
-[`public/code-execution-openapi.yaml`](https://github.com/mozilla-ai/otari/blob/v0.17.0/docs/public/code-execution-openapi.yaml),
+[`public/code-execution-openapi.yaml`](https://github.com/mozilla-ai/otari/blob/v0.18.0/docs/public/code-execution-openapi.yaml),
 which a backend implementer can generate a server stub or a client from
 directly. The two are normative in different registers, and neither is
 redundant: the OpenAPI document is normative for shapes, paths, and status
@@ -324,7 +324,7 @@ client MAY be configured to present a bearer credential on every operation, and
 a backend (or a front door in front of one) MAY require it. Otari presents none
 today, in either mode, so a backend it reaches must not depend on one.
 
-In hybrid mode that credential will be the grant the control plane issued for the request. The front door checks it, enforces its claims, and derives tenancy from the workspace it names, so the backend behind it never has to. A grant names one workspace, the tools it may use, and a deadline. Otari receives grants and never mints them, and it never logs a grant, stores one, or hands one to a client. The control plane issues a grant only to a workspace whose policy allows code execution. [#1603](https://github.com/mozilla-ai/otari/issues/1603) records the decision.
+In hybrid mode that credential will be the grant the control plane issued for the request. The front door checks it, enforces its claims, and derives tenancy from the workspace it names, so the backend behind it never has to. A grant names one workspace, the tools it may use, and a deadline. Otari receives grants and never mints them, and it never logs a grant, stores one, or hands one to a client. The control plane issues a grant only to a workspace whose policy allows code execution. The grant's format and the token a front door verifies are specified in [the hybrid-mode protocol](hybrid-mode-protocol.md#grants). [#1603](https://github.com/mozilla-ai/otari/issues/1603) records the decision.
 
 Tenancy, when a backend is multi-tenant, is injected by whichever component
 authenticates the caller. A backend that expects tenancy MUST fail closed when
@@ -419,7 +419,7 @@ this contract. `e2b` ships in the core (`uv sync --extra e2b`, then
 `E2B_API_KEY`). Everything above the seam is the same either way, including the
 per-workspace policy, the usage tally, and seeding and collecting files, so the
 choice is about what you run, not about what a request can do. The seam itself
-is `CodeExecutionPort` (see [ARCHITECTURE.md](https://github.com/mozilla-ai/otari/blob/v0.17.0/ARCHITECTURE.md)); a provider
+is `CodeExecutionPort` (see [ARCHITECTURE.md](https://github.com/mozilla-ai/otari/blob/v0.18.0/ARCHITECTURE.md)); a provider
 Otari does not ship is an adapter, and `scripts/check_code_execution_conformance.py`
 certifies a backend rather than an adapter.
 

@@ -491,7 +491,9 @@ A workspace web-access policy can:
 - provide a default purpose hint
 - supply provider options
 
-Manage it under `/api/v1/workspaces/{workspace_id}/web-search` or from Tools.
+Manage it under `/api/v1/workspaces/{workspace_id}/web-search`. The dashboard's
+Web search page sets `enabled`, `max_results` and the domain lists; the purpose
+hint and provider options are set through the API.
 `max_results`, the purpose hint, and provider options apply only to Search.
 Workspace values can narrow deployment policy but cannot enable a missing
 backend, enable deployment-disabled Fetch, or relax an operator limit. Fetch
@@ -499,7 +501,9 @@ remains available subject to deployment and workspace policy when no Search
 backend is configured.
 
 The policy also applies to direct search where relevant. In hybrid mode, the
-connected control plane supplies workspace search configuration.
+connected control plane supplies workspace search configuration. A hosted control
+plane reads a workspace with no policy as off, so web access is something a
+workspace turns on.
 
 ### Organization search keys
 

@@ -18,13 +18,7 @@ ollama:llama3
 The prefix selects a provider or named provider instance. Everything after the
 first colon is sent as the provider's model ID.
 
-A request may also name the model the way the catalog does. `vendor/model`
-(`deepseek/deepseek-v4.1-flash`) is the model's catalog id, and Otari picks the
-provider: the vendor's own where it serves the model, otherwise the cheapest
-offering the caller can reach, including one on the organization's own
-provider key. `provider:vendor/model` (`nebius:deepseek/deepseek-v4.1-flash`)
-pins the provider and lets Otari pick the model id that provider spells it
-under. See [Catalog spellings](#catalog-spellings) for the rules.
+A request may also name the model the way the catalog does. `vendor/model` (`deepseek/deepseek-v4.1-flash`) is the model's catalog id, and Otari picks the provider: among the priced offerings the caller can reach, the organization's own provider key where it offers the model, then the vendor's own provider where it serves the model, then the cheapest. `provider:vendor/model` (`nebius:deepseek/deepseek-v4.1-flash`) pins the provider and lets Otari pick the model id that provider spells it under. See [Catalog spellings](#catalog-spellings) for the rules.
 
 The legacy `provider/model` spelling is still honored where it names an
 offering the deployment serves (`openai/gpt-4o` while an `openai` instance
@@ -216,7 +210,8 @@ the genai-prices default. Both routes accept the same credentials as
 Grouping keys on the models.dev display name where the dataset knows the
 model, and on the provider's id with its path prefixes, org segment and version
 pins removed where it does not; a vendor's name written in front of its own
-model (`NVIDIA Nemotron 3 Ultra`, `openai-gpt-oss-120b`) is dropped from both. A
+model (`NVIDIA Nemotron 3 Ultra`, `openai-gpt-oss-120b`) is dropped from both.
+Bedrock's cross-region inference profiles of one model, such as `us.moonshotai.kimi-k3` and `global.moonshotai.kimi-k3`, are offerings of that one model: the profile prefix is dropped from the id, and the region models.dev puts in the profile's name, as in `Kimi K3 (US)`, is dropped from the name. A
 model's id is its vendor and its name, `z-ai/glm-5.3`, or the bare name where
 nobody could say the vendor. The vendor is the org of models.dev's
 `canonical_model_id` where the dataset has one, else the org segment of the
@@ -260,16 +255,8 @@ A provider's own id can be long, so the gateway also accepts the two spellings
 the catalog shows. Each is relabeled like an alias, so a response's `model` is
 what was sent, and pricing, budgets and usage key on the offering reached.
 
-- The model's catalog id (`z-ai/glm-5.3`, `deepseek/deepseek-v4.1-flash`)
-  resolves to the model's cheapest priced offering, at the caller's rates.
-  Where the id's vendor is also a provider (`openai/gpt-4o`), that provider's
-  own offerings win while it serves the model, because the caller who names
-  OpenAI's model while OpenAI is configured means OpenAI's price; where it
-  serves nothing, the model is reached through whoever resells it.
-- `instance:<catalog id>` (`nebius:deepseek/deepseek-v4.1-flash`) pins the
-  instance and resolves to the model's cheapest offering there, never
-  elsewhere. This is the spelling the catalog shows as an offering's
-  `short_selector`.
+- The model's catalog id (`z-ai/glm-5.3`, `deepseek/deepseek-v4.1-flash`) resolves to the first of the model's offerings in this order. Priced offerings come before unpriced ones, because a request an unpriced offering serves costs nothing and so escapes budgets. Among the priced ones, the organization's own provider key comes first, even where another offering is cheaper. Next is the vendor's own provider, where the id's vendor is also a provider (`openai/gpt-4o`), because the caller who names OpenAI's model while OpenAI is configured means OpenAI's price. Then come the other offerings, cheapest first at the caller's rates, with ties in A-Z order. To make an unpriced offering lead, such as an organization's own key or a local model, give it a price, even 0.
+- `instance:<catalog id>` (`nebius:deepseek/deepseek-v4.1-flash`) pins the instance and resolves to the model's first offering there by the same order, never elsewhere. This is the spelling the catalog shows as an offering's `short_selector`.
 
 A selector that already names an offering is never rewritten, so a provider's
 own id keeps working verbatim.
@@ -282,9 +269,9 @@ keys, priced at that organization's rates. An organization's view answers only
 its own callers: a model one tenant reaches through its key is never where
 another tenant's selector lands, and a model nobody offers to the caller
 resolves as the deployment's view says. A model's `selector` in the catalog is
-null where the caller has no such spelling for it. A key whose allow-list names
-some instances only should send one of those instances, a pinned spelling or
-an alias, since a bare catalog id resolves before the allow-list is consulted.
+null where the caller has no such spelling for it.
+
+In standalone mode, a request that names a catalog id with more than one offering falls back across them. When the first offering fails before it sends a response, the next one in the same order serves the request, as a routing policy's `on_failure` list does. The offerings a key may not use are left out first, so a key whose allow-list names one offering reaches it by the catalog id. A plan tries at most five offerings. Usage rows record the catalog id as `policy_name`, `catalog` as the first offering's `selection_reason`, and `on_failure` for the ones after it. In hybrid mode, the control plane decides which offerings a request may try.
 
 The dashboard's Models page is this catalog: one card per model, with a rail
 of filters beside it, and a page per model with its facts and every offering

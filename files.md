@@ -326,7 +326,7 @@ in order:
 
 ## Configuration
 
-See [config.example.yml](https://github.com/mozilla-ai/otari/blob/v0.17.0/config.example.yml) for the full list. Key knobs:
+See [config.example.yml](https://github.com/mozilla-ai/otari/blob/v0.18.0/config.example.yml) for the full list. Key knobs:
 
 - `files_enabled`, `files_backend`, `files_max_bytes`, `files_retention_hours`:
 upload storage (see [Storage backends](#storage-backends)). With `files_enabled`

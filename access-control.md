@@ -2,7 +2,7 @@
 
 Otari separates deployment administration, human identity, workload credentials,
 and spend limits. This page explains how those pieces relate. The generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.17.0/docs/public/openapi.json) is the source of truth for endpoint
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.18.0/docs/public/openapi.json) is the source of truth for endpoint
 schemas.
 
 ## Deployment-wide account administration
@@ -297,6 +297,16 @@ so without this the ceremony fails in the browser and nothing is logged here
 
 Changing the relying-party ID makes existing passkeys unusable. The dashboard
 continues listing unusable credentials so the owner can remove them.
+
+To turn passkeys off for a deployment, set `passkeys_enabled` to `false`
+(`OTARI_PASSKEYS_ENABLED=false`). It defaults to `true`, so a self-hosted
+gateway is unchanged. With it off, none of the passkey routes are mounted (they
+answer 404, not 503), no `passkey` sign-in method is published, the dashboard
+hides its passkeys page, and the `webauthn_*` settings are not checked at
+startup, so values left over from before are inert. Setting it is the only way
+to switch passkeys off while keeping `public_base_url`, which OAuth redirects
+and mail links need. Passkeys already registered stay in the database, and work
+again if the setting is turned back on.
 
 ### OAuth sign-in (Google and GitHub)
 

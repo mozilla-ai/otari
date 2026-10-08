@@ -2,8 +2,8 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.17.0/docs/public/openapi.json) and
-[Postman collection](https://github.com/mozilla-ai/otari/blob/v0.17.0/docs/public/otari.postman_collection.json). Those generated
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.18.0/docs/public/openapi.json) and
+[Postman collection](https://github.com/mozilla-ai/otari/blob/v0.18.0/docs/public/otari.postman_collection.json). Those generated
 artifacts are the source of truth for paths, parameters, and schemas.
 
 The default server address is `http://localhost:8000`. The API is mounted at
@@ -45,8 +45,12 @@ keys and management APIs are not used.
 | Chat, Messages, and Responses | Yes | No | Yes |
 | Caller-orchestrated MCP | Yes | No | Yes |
 | Other inference APIs | Yes | No | No |
-| `/api/v1/models` | Yes | Yes | No |
+| `/api/v1/models` | Yes | Yes | Yes |
 | Management APIs | Yes | Yes | No |
+
+In hybrid mode, `/api/v1/models` lists the models the platform reports for the
+caller's key, so it needs the platform's model-listing endpoint (see the
+[Hybrid mode protocol](hybrid-mode-protocol.md#model-listing)).
 
 Hosted mode is a control plane. Its inference paths return a descriptive `404`
 and, when configured, the data-plane URL to use instead. See [Modes](modes.md).
@@ -62,6 +66,38 @@ Otari implements three completion surfaces:
 Standalone mode also serves embeddings, images, audio, files, batches,
 moderations, rerank, search, and decisions. Provider support differs by endpoint, so use
 `GET /api/v1/models` and the OpenAPI document for the deployment you are calling.
+
+### Responses on providers without a Responses API
+
+`/api/v1/responses` also serves providers that only implement Chat Completions
+(Mistral, Anthropic, Bedrock, and most others). Otari translates the request into
+a chat completion and translates the answer back, streamed or not, so the client
+sees an ordinary Responses object or event stream. A provider with its own
+Responses API (OpenAI, Azure OpenAI, Gemini, Groq, and others) is called
+natively, as before.
+
+The translation covers text, image and file input, `instructions`, function
+tools and `tool_choice`, `max_output_tokens`, `reasoning.effort`, JSON output
+through `text.format`, and reasoning text a provider returns. Gateway-run tools
+(MCP, web search, code execution) work on top of it.
+
+Some requests have no chat equivalent and are refused with a `400` that names
+the field:
+
+- `previous_response_id`, `conversation`, `background`, `context_management`
+  and `prompt`, which need the provider to keep state. Send the full
+  conversation in `input` instead.
+- Hosted tools such as `file_search` or `computer_use`, and any tool type other
+  than `function`.
+- Input items other than messages, function calls and their outputs, such as
+  `item_reference`.
+- Image or file parts in a `system` or `developer` message or in a function
+  call output, where a chat completion only takes text.
+
+Fields that only control what a provider stores or adds to its answer
+(`store`, `metadata`, `include`, `truncation` and similar) are ignored, and
+reasoning items on an inbound `input` are dropped, because Chat Completions has
+no way to send them back.
 
 ### Request ID and inline cost
 
@@ -316,6 +352,7 @@ reworded.
 | `invalid_model` | 400 | The model selector names no configured provider | |
 | `model_not_allowed` | 403 | The key may not use the model | |
 | `context_length_exceeded` | 400 | The prompt is too long for the model | |
+| `all_candidates_rejected` | 400 | Every model a routing policy, a catalog ID or the control plane tried rejected the request as invalid | |
 | `pricing_required` | 402 | `require_pricing` is on and the model has no price | |
 | `end_user_budget_not_allowed` | 403 | A service key named an end-user budget that is not on its `end_user_budget_ids` | |
 

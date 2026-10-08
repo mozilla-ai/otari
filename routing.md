@@ -225,9 +225,11 @@ effective weighted shares, and mandatory guardrails. The API equivalent is
 
 A policy decides the model of a request that reaches Otari. A coding agent that
 talks to its provider directly can still ask Otari which model a new subagent
-should run on, through `POST /api/v1/routing/recommend`. Otari puts one choice
-question to a decision model and recommends the candidate it picks. That
-decision is billed to the caller; nothing else is dispatched. See
+should run on, through `POST /api/v1/routing/recommend`. A standalone
+deployment puts one choice question to the decision model it configured and
+recommends the candidate it picks; on otari.ai a managed recommender answers
+instead. Either way the recommendation is billed to the caller, and nothing
+else is dispatched. See
 [Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model).
 
 ## Managing policies at runtime
@@ -300,6 +302,4 @@ A tool loop that has already produced assistant state cannot be replayed on
 another provider. Shared service failures, such as an unavailable mandatory
 guardrail or sandbox, also do not improve by changing candidates.
 
-If every candidate fails, Otari returns a gateway error based on the final
-failure. If caller restrictions remove every candidate, Otari returns 403
-without revealing the hidden targets.
+If every candidate of a plan with more than one candidate fails, Otari returns a gateway error in its own words, never a provider's message. A plan with one candidate answers as naming that model directly would. When every candidate rejected the request as invalid (400), Otari returns 400 with the code `all_candidates_rejected`, because the request is at fault. When every candidate found the prompt too long, the code is `context_length_exceeded`. When no candidate knew the model (404), Otari returns 502, because Otari chose the candidates. If caller restrictions remove every candidate, Otari returns 403 without revealing the hidden targets.
