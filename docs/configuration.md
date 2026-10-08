@@ -81,7 +81,7 @@ the corresponding startup value after the database is available.
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
-| `rate_limit_store` | Where `rate_limit_rpm` is counted: `memory` (the default) or `redis`. See [Rate limits across replicas](#rate-limits-across-replicas). |
+| `rate_limit_store` | Where `rate_limit_rpm` and the `rate_limits` rules are counted: `memory` (the default) or `redis`. See [Rate limits across replicas](#rate-limits-across-replicas). |
 | `rate_limit_redis_url` | The Redis that the `redis` store counts in. |
 | `rate_limits` | Requests per minute, tokens per minute and requests in flight, per deployment, API key, user or model. Also managed from the dashboard. See [Rate limit rules](#rate-limit-rules). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
@@ -463,6 +463,31 @@ These entries are separate from `providers` because none of these upstreams serv
 chat: they never appear in `/api/v1/models` or provider health. Price a decision
 model like any other, as `<provider>:<model>` in `pricing`. Decisions are
 standalone-mode only.
+
+### Agent model recommendations
+
+`POST /api/v1/routing/recommend` asks a decision model which of a few
+candidate models a coding agent's subagent should run on (see
+[Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model)).
+Two settings shape the question:
+
+```yaml
+agent_recommender_model: typesafe:jev-latest
+agent_recommender_candidates:
+  haiku: Simple, well-specified, mechanical work. Little judgment needed.
+  sonnet: Moderate reasoning across a few files, contained code changes.
+  opus: Hard reasoning, ambiguous goals, large or security-sensitive changes.
+```
+
+These are a standalone deployment's settings. On otari.ai a managed
+recommender answers behind the same route, so neither applies there.
+`agent_recommender_model` is a `decision_providers` selector, resolved per
+request, so a deployment that never asks need not configure the provider.
+`agent_recommender_candidates` maps each model name, as the asking harness
+spells it, to what it is for; `null` is allowed when the name says enough. At
+least two are required, and at most 255, the limit a choice question has. The
+defaults are Claude Code's `haiku`, `sonnet` and `opus` aliases with
+descriptions along the lines above.
 
 ## Mail
 

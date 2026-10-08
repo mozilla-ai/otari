@@ -21,6 +21,7 @@ import gateway.api.routes._pipeline as pipeline
 from gateway.api.routes import chat
 from gateway.container import build_container
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
 from gateway.services.budgets import ReservationHandle, estimate_tokens
 from gateway.types.normalization_target import NormalizationTarget
 
@@ -110,7 +111,9 @@ async def _normalize_with_vision(target: NormalizationTarget) -> tuple[int, Comp
 
 
 async def _resolve(config: GatewayConfig) -> pipeline.RequestContext:
-    app = SimpleNamespace(state=SimpleNamespace(container=build_container(config=GatewayConfig())))
+    app = SimpleNamespace(
+        state=SimpleNamespace(container=build_container(config=GatewayConfig(), workspace_listener=None))
+    )
     request = Request(
         {
             "type": "http",
@@ -134,6 +137,7 @@ async def _resolve(config: GatewayConfig) -> pipeline.RequestContext:
         estimate_max_output_tokens=None,
         master_key_user_required_detail="user required",
         user_forbidden_detail="forbidden",
+        code_execution_policies=cast(CodeExecutionPolicyPort, object()),
         normalize_messages=_normalize_with_vision,
     )
 

@@ -58,6 +58,7 @@ export function RecoverPasswordPage() {
 
   return (
     <PublicAuthLayout
+      isBusy={request.isPending}
       title="Reset your password"
       description="Enter the address you sign in with and we will mail a link to set a new password."
       footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}

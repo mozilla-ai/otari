@@ -14,6 +14,8 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from any_llm import AnyLLM, LLMProvider
+from any_llm.types.completion import ChatCompletion, ChatCompletionChunk
 from any_llm.types.responses import Response, ResponseStreamEvent
 from fastapi.testclient import TestClient
 from openai.types.responses import (
@@ -272,6 +274,34 @@ def test_gateway_internal_fields_are_stripped_from_upstream_kwargs(
     assert resp.status_code == 200, resp.text
     for field in ("mcp_servers", "mcp_server_ids", "tools_header", "max_tool_iterations"):
         assert field not in captured, f"gateway-internal field {field!r} leaked to upstream"
+
+
+def test_client_cannot_smuggle_sdk_request_options(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """The provider SDK's per-request headers and query string stay the gateway's to set."""
+    captured: dict[str, Any] = {}
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        captured.update(kwargs)
+        return _response()
+
+    with patch("gateway.api.routes.responses.aresponses", new=fake_aresponses):
+        resp = client.post(
+            f"{API_ROOT}/responses",
+            json={
+                "model": _MODEL,
+                "input": "hi",
+                "extra_headers": {"OpenAI-Project": "proj_other"},
+                "extra_query": {"api-version": "preview"},
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert "extra_headers" not in captured
+    assert "extra_query" not in captured
 
 
 def test_user_supplied_chat_shape_tools_get_flattened_to_responses_shape(
@@ -1083,17 +1113,26 @@ def test_stream_sandbox_unreachable_returns_502(
     assert ("sandbox temporarily unavailable" if unavailable else "sandbox unreachable") in resp.json()["detail"]
 
 
-# ---------- provider-support guard (pre-existing behavior) ----------
+# ---------- provider-support guard ----------
 
 
-def test_provider_without_responses_support_returns_400(
+class _NoTextGeneration:
+    SUPPORTS_RESPONSES = False
+    SUPPORTS_COMPLETION = False
+
+
+def test_provider_without_responses_or_chat_support_returns_400(
     client: TestClient,
     api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The pre-existing SUPPORTS_RESPONSES check still works after the
-    wiring changes. Catches regressions where the provider-support guard
-    might be bypassed by the tool dispatch path.
-    """
+    """A provider that can serve neither API is refused before dispatch, tool path included."""
+    real = AnyLLM.get_provider_class
+
+    def get_provider_class(provider: Any) -> Any:
+        return _NoTextGeneration if LLMProvider(provider) == LLMProvider.ANTHROPIC else real(provider)
+
+    monkeypatch.setattr(AnyLLM, "get_provider_class", get_provider_class)
     resp = client.post(
         f"{API_ROOT}/responses",
         json={"model": "anthropic:claude-3-5-sonnet-20241022", "input": "hi"},
@@ -1101,3 +1140,126 @@ def test_provider_without_responses_support_returns_400(
     )
     assert resp.status_code == 400
     assert "does not support the Responses API" in resp.json()["detail"]
+
+
+# ---------- providers without a Responses API ----------
+
+_BRIDGED_MODEL = "mistral:mistral-small-latest"
+_ACOMPLETION = "gateway.services.inference._responses_bridge.acompletion"
+_CHAT_USAGE = {"prompt_tokens": 9, "completion_tokens": 4, "total_tokens": 13}
+
+
+def _chat_chunk(
+    delta: dict[str, Any] | None, finish_reason: str | None = None, usage: Any = None
+) -> ChatCompletionChunk:
+    return ChatCompletionChunk.model_validate(
+        {
+            "id": "cmpl-1",
+            "object": "chat.completion.chunk",
+            "created": 1700000000,
+            "model": "mistral-small-latest",
+            "choices": [] if delta is None else [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+            "usage": usage,
+        }
+    )
+
+
+def test_provider_without_responses_api_is_served_as_a_chat_completion(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        captured.update(kwargs)
+        return ChatCompletion.model_validate(
+            {
+                "id": "cmpl-1",
+                "object": "chat.completion",
+                "created": 1700000000,
+                "model": "mistral-small-latest",
+                "choices": [
+                    {"index": 0, "message": {"role": "assistant", "content": "Bonjour"}, "finish_reason": "stop"}
+                ],
+                "usage": _CHAT_USAGE,
+            }
+        )
+
+    native = AsyncMock()
+    with patch(_ACOMPLETION, new=fake_acompletion), patch("gateway.api.routes.responses.aresponses", new=native):
+        resp = client.post(
+            f"{API_ROOT}/responses",
+            json={"model": _BRIDGED_MODEL, "instructions": "Answer in French.", "input": "hello", "store": True},
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    native.assert_not_called()
+    assert captured["model"] == "mistral-small-latest"
+    assert captured["messages"] == [
+        {"role": "system", "content": "Answer in French."},
+        {"role": "user", "content": "hello"},
+    ]
+    assert "store" not in captured
+    body = resp.json()
+    assert body["object"] == "response"
+    assert body["status"] == "completed"
+    assert body["output"][0]["content"][0]["text"] == "Bonjour"
+    assert body["usage"]["input_tokens"] == 9
+    assert body["usage"]["output_tokens"] == 4
+
+
+def test_provider_without_responses_api_streams_responses_events(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    async def chunks() -> AsyncIterator[ChatCompletionChunk]:
+        for chunk in (
+            _chat_chunk({"role": "assistant", "content": "Bon"}),
+            _chat_chunk({"content": "jour"}, finish_reason="stop"),
+            _chat_chunk(None, usage=_CHAT_USAGE),
+        ):
+            yield chunk
+
+    async def fake_acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        assert kwargs["stream"] is True
+        return chunks()
+
+    with patch(_ACOMPLETION, new=fake_acompletion):
+        resp = client.post(
+            f"{API_ROOT}/responses",
+            json={"model": _BRIDGED_MODEL, "input": "hello", "stream": True},
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    events = [line.removeprefix("event: ") for line in resp.text.splitlines() if line.startswith("event: ")]
+    assert events[0] == "response.created"
+    assert "response.output_text.delta" in events
+    assert events[-1] == "response.completed"
+    completed = json.loads(
+        next(
+            line.removeprefix("data: ")
+            for line in reversed(resp.text.splitlines())
+            if line.startswith("data: ") and '"response.completed"' in line
+        )
+    )
+    assert completed["response"]["output"][0]["content"][0]["text"] == "Bonjour"
+    assert completed["response"]["usage"]["total_tokens"] == 13
+
+
+def test_provider_without_responses_api_refuses_server_state(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    acompletion = AsyncMock()
+    with patch(_ACOMPLETION, new=acompletion):
+        resp = client.post(
+            f"{API_ROOT}/responses",
+            json={"model": _BRIDGED_MODEL, "input": "hello", "previous_response_id": "resp_1"},
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 400, resp.text
+    assert "previous_response_id" in resp.json()["detail"]
+    acompletion.assert_not_called()

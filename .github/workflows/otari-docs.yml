@@ -1,0 +1,160 @@
+name: Otari Docs
+
+# Publishes the documentation to GitBook. GitBook syncs from the gitbook-docs
+# branch, which holds only the site that scripts/prepare_gitbook_site.py builds
+# from docs/ at a release tag. Each publish replaces the branch's whole tree in
+# one commit, made through the Git Data API so no checkout of the branch is
+# needed.
+#
+# A release publishes the docs at its tag, so the site describes what shipped.
+# A pre-release does not publish. To publish a release again, dispatch this
+# workflow with its tag.
+
+on:
+  release:
+    types: [published]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'scripts/prepare_gitbook_site.py'
+      - 'tests/unit/test_gitbook_site.py'
+      - 'tests/unit/test_docs_links.py'
+      - '.gitbook.yaml'
+      - '.gitbook-branch-readme.md'
+      - '.github/workflows/otari-docs.yml'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.16.0)"
+        required: true
+
+concurrency:
+  group: otari-docs-${{ github.event_name == 'pull_request' && github.ref || 'publish' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate the docs site
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          python-version: 3.14
+          activate-environment: true
+
+      - name: Install dependencies
+        run: uv sync --dev --frozen
+
+      - name: Run docs tests
+        run: uv run pytest tests/unit/test_gitbook_site.py tests/unit/test_docs_links.py -v
+
+      - name: Build the site
+        run: python3 scripts/prepare_gitbook_site.py
+
+  publish:
+    name: Publish to gitbook-docs
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'release' && !github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Validate tag
+        id: tag
+        env:
+          TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.tag }}
+        run: |
+          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::'$TAG' is not a release tag (vX.Y.Z)"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ steps.tag.outputs.tag }}
+
+      # Standard library only, so the runner's Python needs no project install.
+      - name: Build the site
+        env:
+          DOCS_REF: ${{ steps.tag.outputs.tag }}
+        run: python3 scripts/prepare_gitbook_site.py --ref "$DOCS_REF"
+
+      - name: Deploy to gitbook-docs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCS_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          REPO="${GITHUB_REPOSITORY}"
+          SOURCE_SHA=$(git rev-parse HEAD)
+          COMMIT_MSG="docs: publish GitBook site from ${DOCS_TAG} (${SOURCE_SHA})"
+
+          PARENT_SHA=""
+          PARENT_TREE=""
+          REF_ERR=$(mktemp)
+          if REF_DATA=$(gh api "repos/${REPO}/git/ref/heads/gitbook-docs" 2>"$REF_ERR"); then
+            PARENT_SHA=$(echo "$REF_DATA" | jq -r '.object.sha')
+            PARENT_TREE=$(gh api "repos/${REPO}/git/commits/${PARENT_SHA}" --jq '.tree.sha')
+          elif ! grep -q 'HTTP 404' "$REF_ERR"; then
+            cat "$REF_ERR" >&2
+            echo "::error::Failed to read the gitbook-docs ref"
+            exit 1
+          fi
+          rm -f "$REF_ERR"
+
+          cd site/
+          TREE_ENTRIES="[]"
+          while IFS= read -r -d '' file; do
+            REL_PATH="${file#./}"
+            # NOTE: The content goes through stdin because Linux caps one argument at 128 KiB.
+            BLOB_SHA=$(base64 -w 0 < "$file" | jq -Rs '{content: ., encoding: "base64"}' | \
+              gh api "repos/${REPO}/git/blobs" --input - --jq '.sha') \
+              || { echo "::error::Failed to create a blob for $REL_PATH"; exit 1; }
+            TREE_ENTRIES=$(echo "$TREE_ENTRIES" | jq \
+              --arg path "$REL_PATH" \
+              --arg sha "$BLOB_SHA" \
+              '. + [{"path": $path, "mode": "100644", "type": "blob", "sha": $sha}]')
+          done < <(find . -type f -print0)
+
+          TREE_SHA=$(jq -n --argjson tree "$TREE_ENTRIES" '{"tree": $tree}' | \
+            gh api "repos/${REPO}/git/trees" --input - --jq '.sha')
+
+          if [ -n "${PARENT_TREE}" ] && [ "${TREE_SHA}" = "${PARENT_TREE}" ]; then
+            echo "No changes to deploy"
+            exit 0
+          fi
+
+          DEPLOY_SHA=$(jq -n \
+            --arg message "$COMMIT_MSG" \
+            --arg tree "$TREE_SHA" \
+            --arg parent "$PARENT_SHA" \
+            'if $parent == "" then
+              {message: $message, tree: $tree}
+            else
+              {message: $message, tree: $tree, parents: [$parent]}
+            end' | \
+            gh api "repos/${REPO}/git/commits" --input - --jq '.sha')
+
+          if [ -n "$PARENT_SHA" ]; then
+            gh api "repos/${REPO}/git/refs/heads/gitbook-docs" \
+              -X PATCH -f sha="$DEPLOY_SHA" > /dev/null
+          else
+            gh api "repos/${REPO}/git/refs" \
+              -f ref="refs/heads/gitbook-docs" \
+              -f sha="$DEPLOY_SHA" > /dev/null
+          fi
+
+          echo "Deployed commit ${DEPLOY_SHA}"

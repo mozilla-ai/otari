@@ -39,9 +39,9 @@ _PATH_PREFIXES = (
 )
 
 # Bedrock and its imitators write the vendor into the id with a dot:
-# ``anthropic.claude-sonnet-5-v1:0``. The vendor is kept as a hint and the
-# segment is dropped from the key.
-_DOTTED_VENDOR = re.compile(r"^(anthropic|openai|meta|qwen|deepseek|mistral|cohere|amazon|google|ai21|writer|nvidia)\.")
+# ``anthropic.claude-sonnet-5-v1:0``. A segment ``_ORG_VENDORS`` names is kept
+# as a hint and dropped from the key.
+_DOTTED_PREFIX = re.compile(r"^([a-z0-9-]+)\.", re.IGNORECASE)
 
 # Suffixes that name a version pin or a tier of service on one provider.
 _SUFFIXES = (
@@ -282,9 +282,9 @@ def clean_model_id(model_id: str) -> CleanedId:
         org, _, text = text.rpartition("/")
         vendor_hint = _ORG_VENDORS.get(org.rsplit("/", 1)[-1].lower())
 
-    dotted = _DOTTED_VENDOR.match(text)
-    if dotted:
-        vendor_hint = vendor_hint or _ORG_VENDORS.get(dotted.group(1))
+    dotted = _DOTTED_PREFIX.match(text)
+    if dotted and (dotted_vendor := _ORG_VENDORS.get(dotted.group(1).lower())):
+        vendor_hint = vendor_hint or dotted_vendor
         text = text[dotted.end() :]
 
     text, prefixed = _strip_vendor_prefix(text)

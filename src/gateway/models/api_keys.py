@@ -99,6 +99,11 @@ class APIKey(Base):
     end_user_budget_id: Mapped[str | None] = mapped_column(
         ForeignKey("budgets.budget_id", ondelete="SET NULL"), index=True
     )
+    # The budgets a request on this key may start a new end user on, named per
+    # request with ``Otari-End-User-Budget``. NULL means the default alone. Kept
+    # as a list rather than a join table because it is read only when a request
+    # names a budget; deleting a budget removes it from every list.
+    end_user_budget_ids: Mapped[list[str] | None] = mapped_column(JSON)
 
     # Set only on a key this deployment mints for itself and has to present
     # again later, which today is the one the hosted Playground forwards with
@@ -113,6 +118,12 @@ class APIKey(Base):
 
     user = relationship("User", back_populates="api_keys")
     usage_logs = relationship("UsageLog", back_populates="api_key", passive_deletes=True)
+
+    def assignable_end_user_budgets(self) -> list[str]:
+        """The budgets this key may start an end user on: its list, or else its default alone."""
+        if self.end_user_budget_ids is not None:
+            return list(self.end_user_budget_ids)
+        return [self.end_user_budget_id] if self.end_user_budget_id else []
 
     def to_dict(self) -> dict[str, Any]:
         """Convert model to dictionary."""
@@ -132,5 +143,6 @@ class APIKey(Base):
             "allowed_models": self.allowed_models,
             "is_service_key": self.is_service_key,
             "end_user_budget_id": self.end_user_budget_id,
+            "end_user_budget_ids": self.assignable_end_user_budgets(),
             "metadata": self.metadata_,
         }

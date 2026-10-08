@@ -211,6 +211,9 @@ export function bootstrap(
     // Not frozen, because a fixture describes a deployment somebody can sign
     // in to; the maintenance-mode tests override it.
     maintenance_mode: false,
+    // On, the setting default: the tests about a deployment that switched
+    // passkeys off say so.
+    passkeys_enabled: true,
     // Off by default, matching a deployment that has not set public_base_url:
     // the passkey tests turn it on rather than every other test turning it off.
     passkeys_ready: false,
@@ -512,6 +515,7 @@ export function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
     reject_user_mismatch: null,
     is_service_key: false,
     end_user_budget_id: null,
+    end_user_budget_ids: [],
     metadata: {},
     ...overrides,
   }

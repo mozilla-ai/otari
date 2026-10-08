@@ -35,19 +35,23 @@ How a domain fits together:
   repository, so it cannot run a query.
 - **One Unit of Work per request or worker job.** Only a service opens a
   block.
-  [Who commits](../.github/skills/backend-standards/SKILL.md#who-commits) gives
+  [Who commits](.github/skills/backend-standards/SKILL.md#who-commits) gives
   the rules.
 - **Builders** live in `api/deps.py`. A worker job calls the same builder with a
   Unit of Work over its own session. Nothing under `services/` may import
   `api/`, so the code that starts a worker passes the builder in.
 - **Imports** follow the
-  [layer and import rules](../ARCHITECTURE.md#the-modular-monolith).
+  [layer and import rules](ARCHITECTURE.md#the-modular-monolith).
 - **Reacting to another domain.** Dependencies between domains run one way.
   When a domain must react to a change in a domain that does not depend on it,
   the domain where the change happens defines a listener interface and receives
   an implementation by constructor injection (Observer, and the Dependency
   Inversion Principle). The listener runs inside the caller's transaction and
-  never commits. A package root may export a listener it offers another domain.
+  never commits. The parameter that receives it has no default, so a caller
+  cannot skip the listener by leaving it out. A listener interface's name ends
+  in `Listener`, and the architecture check finds such a parameter by a type
+  name that contains `Listener`. A package root may export a listener it
+  offers another domain.
 - **Divider comments** that cut a module into sections mean the module splits
   along them.
 - **The domain test.** A domain that cannot offer a small public API is more
@@ -87,7 +91,13 @@ provisioning, the setup guide, and the gateway's billing users.
 It defines `MembershipListener`, the interface budgets implements to react to a
 membership change without organizations importing budgets. The listener writes
 through the caller's Unit of Work, so a service that changes membership is built
-with one and makes the change inside its block. It also owns
+with one and makes the change inside its block.
+
+It also defines `WorkspaceListener`, the interface another domain implements to
+set up a workspace in the transaction that creates it. Every service that
+creates a workspace takes one, with no default, and the binding is chosen per
+mode: a hosted control plane gets tools' `CodeExecutionWorkspaceDefaults`, and
+every other deployment `NullWorkspaceListener`. It also owns
 `models/users.py`, `repositories/users_repository.py` and
 `services/workspace_scope.py`.
 
@@ -131,7 +141,16 @@ It also owns `services/tenancy/organization_model_access.py`.
 
 ### routing
 
-Routing policies, their compiled plans and the router backends.
+Routing policies, their compiled plans and the router backends, and which
+model a coding agent's subagent should start on.
+
+It owns `ports/agent_model_recommender_port.py` and its adapter in
+`adapters/`, and `exceptions/routing_exceptions.py`. The port names who
+answers a subagent model recommendation and at what price. The core asks the
+decision model the deployment configured, which may be a local one, and a
+hosted build binds a recommender of its own, so the composition root binds
+the implementation and no caller reads a mode. Neither implementation meters
+the call; the decisions scaffold does.
 
 ### files
 
@@ -169,13 +188,19 @@ resolved server is connected to directly; neither implementation proxies MCP
 traffic.
 
 `web_search_policy_port.py` names where a workspace's web search policy comes
-from, in the same two ways. The policy says who may search and how far. A
+from, in the same two ways. The policy says who may search and how far, and
+carries the workspace's own search key where its organization brought one. A
 tools service applies it to a request with one rule on every plane, and
 neither implementation carries a search.
 
+It also owns an organization's web search keys and each workspace's choice
+among them (`org_web_search_keys`, `workspace_web_search_key_overrides`).
+
 `code_execution_policy_port.py` names where a workspace's code execution
 policy comes from, in the same two ways. The policy says who may run code and
-within which limits, and neither implementation runs code.
+within which limits, and neither implementation runs code. The local one reads
+the row through `WorkspaceCodeExecutionPolicies`, the same read the request
+path and the Playground make.
 
 **The tool test.** A tool is something the model calls during a request. The
 domain holds the registry, the loop and each tool's settings. A capability the

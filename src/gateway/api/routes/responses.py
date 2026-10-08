@@ -2,7 +2,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
-from any_llm import AnyLLM, LLMProvider, aresponses
+from any_llm import LLMProvider, aresponses
 from any_llm.types.completion import CompletionUsage
 from any_llm.types.responses import Response as ResponsesResponse
 from any_llm.types.responses import ResponsesParams, ResponseStreamEvent
@@ -50,6 +50,7 @@ from gateway.api.routes._pipeline import (
     scope_prompt_cache_key,
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost, build_attempt_client_args
+from gateway.api.routes._request_tags import RequestMetadata, forwarded_metadata, request_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
@@ -59,6 +60,7 @@ from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.services.files import StagedFile
+from gateway.services.inference import call_responses, serves_responses
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_responses import (
@@ -125,6 +127,7 @@ class ResponsesRequest(derive_request_base(ResponsesParams)):  # type: ignore[mi
     tools_header: str | None = None
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
     session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
+    metadata: RequestMetadata = None
 
 
 def _responses_input_text(value: Any) -> str:
@@ -293,8 +296,7 @@ def _usage_to_completion_usage(
 
 
 def _ensure_provider_supports_responses(provider: LLMProvider) -> None:
-    provider_class = AnyLLM.get_provider_class(provider)
-    if not getattr(provider_class, "SUPPORTS_RESPONSES", False):
+    if not serves_responses(provider):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Provider '{provider.value}' does not support the Responses API",
@@ -378,10 +380,10 @@ class _ResponsesAdapter:
         )
 
     async def call_provider(self, kwargs: dict[str, Any]) -> ResponsesResponse:
-        return await aresponses(**kwargs)  # type: ignore[return-value]
+        return await call_responses(aresponses, kwargs)  # type: ignore[no-any-return]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[ResponseStreamEvent]:
-        return await aresponses(**kwargs)  # type: ignore[return-value]
+        return await call_responses(aresponses, kwargs)  # type: ignore[no-any-return]
 
     def prepare_stream_kwargs(
         self,
@@ -588,7 +590,9 @@ async def create_response(
             ),
             normalize_messages=_normalize,
             tools=request_body.tools,
+            code_execution_policies=tool_ports.code_execution_policy,
             idempotency=None if bool(request_body.stream) else idempotency,
+            tags=request_tags(request_body.metadata),
         )
     except IdempotentReplay as replay:
         return replay.response()
@@ -685,6 +689,7 @@ async def create_response(
         remaining_user_tools=tool_ctx.remaining_user_tools,
         web_search_declared_name=tool_ctx.web_search_declared_name,
     )
+    forwarded_metadata(request_fields)
     scope_prompt_cache_key(request_fields, ctx)
     # This is an internal handoff populated below, never a client request field.
     # ``ResponsesRequest`` permits extra fields for OpenAI compatibility, so

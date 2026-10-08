@@ -64,6 +64,7 @@ test.describe("hybrid deployment", () => {
       // refuse. Its control plane owns that, as it owns the sign-in itself.
       maintenance_mode: false,
       // No session of its own to protect, so no ceremony to run either.
+      passkeys_enabled: false,
       passkeys_ready: false,
       oauth_providers: [],
       // Never offered here: feedback is a standalone gateway's route.

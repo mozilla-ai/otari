@@ -3,6 +3,7 @@
 import json
 import os
 from collections.abc import Iterator
+from enum import Enum
 from pathlib import Path
 from unittest import mock
 
@@ -17,6 +18,8 @@ _SETTING_NAMES = frozenset(
     {
         "accept_incoming_trace_context",
         "activation_guide",
+        "agent_recommender_candidates",
+        "agent_recommender_model",
         "aliases",
         "auto_migrate",
         "bootstrap",
@@ -94,6 +97,7 @@ _SETTING_NAMES = frozenset(
         "oauth_google_client_id",
         "oauth_google_client_secret",
         "open_signup",
+        "passkeys_enabled",
         "password_reset_expiry_hours",
         "platform",
         "port",
@@ -175,7 +179,10 @@ def _isolated_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> It
 
 def _default(name: str) -> object:
     value = GatewayConfig.model_fields[name].get_default(call_default_factory=True)
-    return value.model_dump(mode="json") if isinstance(value, BaseModel) else value
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    # As it is written in a config file, which holds the enum's value rather than the member.
+    return value.value if isinstance(value, Enum) else value
 
 
 def _environment_value(value: object) -> str:

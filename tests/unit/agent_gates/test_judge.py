@@ -51,6 +51,18 @@ def test_unknown_when_evidence_has_no_verdict_for_this_gate() -> None:
     assert result.outcome is Outcome.UNKNOWN
 
 
+def test_a_gate_the_caller_skipped_resolves_not_run_with_its_reason() -> None:
+    evidence = JudgeEvidence(
+        verdicts=(
+            JudgeVerdict(gate_id="follows-error-handling-pattern", outcome="not_run", reasoning="past the cap of 5"),
+        )
+    )
+    result = evaluate_judge(_gate(), None, evidence)
+    assert result.outcome is Outcome.NOT_RUN
+    assert "skipped" in result.message
+    assert result.detail == "past the cap of 5"
+
+
 def test_unconditional_gate_ignores_changed_path_evidence_entirely() -> None:
     """A gate with no `when_changed` (the default) always applies.
 

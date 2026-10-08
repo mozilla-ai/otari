@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, FastAPI
 from gateway.api.deps import require_capability
 from gateway.api.routes import (
     admin,
+    agent_routing,
     agent_telemetry,
     aliases,
     audio,
@@ -63,6 +64,7 @@ from gateway.api.routes import (
     usage,
     users,
     web_search_backend,
+    web_search_keys,
     workspace_activation,
     workspace_code_execution_policy,
     workspace_mcp_servers,
@@ -157,7 +159,9 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(auth_profile.router, Plane.CONTROL),
     RouterMount(auth_signup.router, Plane.CONTROL),
     RouterMount(auth_password_reset.router, Plane.CONTROL),
-    RouterMount(auth_webauthn.router, Plane.CONTROL),
+    # Absent rather than refusing where the deployment turned passkeys off: a
+    # ceremony route that answers 503 still says passkeys exist here.
+    RouterMount(auth_webauthn.router, Plane.CONTROL, when=lambda config: config.passkeys_enabled),
     RouterMount(auth_oauth.router, Plane.CONTROL),
     # Data-plane routes that also read a local control plane, because none of
     # them has hybrid handling. ``files`` is among them because an upload exists
@@ -168,6 +172,10 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(files.router, Plane.DATA | Plane.CONTROL),
     RouterMount(rerank.router, Plane.DATA | Plane.CONTROL),
     RouterMount(decisions.router, Plane.DATA | Plane.CONTROL),
+    # One decision call, billed here like a decisions call, so it needs both
+    # planes too. Open to any key, since the harness dispatches the subagent
+    # to its own provider.
+    RouterMount(agent_routing.router, Plane.DATA | Plane.CONTROL),
     RouterMount(search.router, Plane.DATA | Plane.CONTROL),
     RouterMount(batches.router, Plane.DATA | Plane.CONTROL),
     RouterMount(moderations.router, Plane.DATA | Plane.CONTROL),
@@ -217,6 +225,8 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(workspace_mcp_servers.router, Plane.CONTROL),
     RouterMount(workspace_code_execution_policy.router, Plane.CONTROL),
     RouterMount(workspace_web_search.router, Plane.CONTROL),
+    RouterMount(web_search_keys.org_router, Plane.CONTROL),
+    RouterMount(web_search_keys.workspace_router, Plane.CONTROL),
     RouterMount(org_provider_keys.org_router, Plane.CONTROL),
     RouterMount(org_provider_keys.workspace_router, Plane.CONTROL),
     RouterMount(budgets.router, Plane.CONTROL),

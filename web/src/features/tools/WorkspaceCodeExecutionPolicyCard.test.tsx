@@ -1,26 +1,18 @@
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import type { ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { WorkspaceCodeExecutionPolicy } from "@/client"
-import {
-  MAX_EXEC_TIMEOUT_S,
-  MAX_ITERATIONS,
-  WorkspaceCodeExecutionPolicyCard,
-} from "@/features/tools/WorkspaceCodeExecutionPolicyCard"
+import { WorkspaceCodeExecutionPolicyCard } from "@/features/tools/WorkspaceCodeExecutionPolicyCard"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import {
   organizationContext,
   workspaceCodeExecutionPolicy,
 } from "@/tests/fixtures"
-import { pickOption, selectTrigger } from "@/tests/select"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
-const STANCE = "Code execution for this workspace"
-const IMAGE = "Sandbox image for this workspace"
-const EXECUTOR = "Who runs provider code tools for this workspace"
+const SWITCH = "Allow code execution"
 
 function mockApi({
   memberships = [{ workspace_id: ALPHA, name: "Alpha", role: "admin" }],
@@ -54,7 +46,9 @@ function mockApi({
 // on before typing.
 async function renderLoaded() {
   renderCard()
-  await waitFor(() => expect(selectTrigger(STANCE)).toBeEnabled())
+  await waitFor(() =>
+    expect(screen.getByRole("switch", { name: SWITCH })).toBeEnabled(),
+  )
 }
 
 /** The one PUT body, once the write has gone out. */
@@ -65,14 +59,17 @@ async function putBody(calls: { method: string; body: unknown }[]) {
   return calls.filter((call) => call.method === "PUT").at(-1)?.body
 }
 
-function renderCard() {
+function renderCard(leading?: ReactNode, isHosted = false) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
       <SelectedWorkspaceProvider>
-        <WorkspaceCodeExecutionPolicyCard docsHref="https://docs.example/tools" />
+        <WorkspaceCodeExecutionPolicyCard
+          leading={leading}
+          isHosted={isHosted}
+        />
       </SelectedWorkspaceProvider>
     </QueryClientProvider>,
   )
@@ -84,42 +81,37 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     window.localStorage.clear()
   })
 
-  it("reads an unconfigured workspace as the deployment default, with nothing to narrow", async () => {
+  it("reads a workspace with no policy as allowed, with nothing else to set", async () => {
     mockApi()
     await renderLoaded()
 
-    expect(selectTrigger(STANCE)).toHaveTextContent("Deployment default")
-    // There is no stored policy, so the rows below have nothing to write.
-    expect(screen.getByLabelText("Max tool-loop iterations")).toBeDisabled()
-    expect(screen.getByLabelText("Prompt hint")).toBeDisabled()
+    expect(screen.getByRole("switch", { name: SWITCH })).toBeChecked()
+    expect(screen.queryByRole("textbox")).toBeNull()
+    expect(screen.queryByRole("button", { name: /Advanced/ })).toBeNull()
   })
 
-  it("shows a stored policy's stance and limits", async () => {
+  it("shows a blocked policy switched off", async () => {
     mockApi({
       policy: workspaceCodeExecutionPolicy({
         workspace_id: ALPHA,
         configured: true,
         enabled: false,
-        max_iterations: 3,
-        exec_timeout_s: 12,
       }),
     })
     await renderLoaded()
 
-    expect(selectTrigger(STANCE)).toHaveTextContent("Blocked")
-    expect(screen.getByLabelText("Max tool-loop iterations")).toHaveValue("3")
-    expect(screen.getByLabelText("Execution timeout")).toHaveValue("12")
+    expect(screen.getByRole("switch", { name: SWITCH })).not.toBeChecked()
   })
 
-  it("saves the stance the moment it changes, with no Save button anywhere", async () => {
+  it("blocks the moment the switch flips, with no Save button anywhere", async () => {
     const calls = mockApi()
     const user = userEvent.setup()
     await renderLoaded()
 
-    await pickOption(user, STANCE, "Allowed")
+    await user.click(screen.getByRole("switch", { name: SWITCH }))
 
     expect(await putBody(calls)).toEqual({
-      enabled: true,
+      enabled: false,
       default_purpose_hint: null,
       max_iterations: null,
       exec_timeout_s: null,
@@ -130,337 +122,27 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull()
   })
 
-  it("saves a limit when the field is left", async () => {
+  it("keeps fields set through the API when blocking", async () => {
     const calls = mockApi({
       policy: workspaceCodeExecutionPolicy({
         workspace_id: ALPHA,
         configured: true,
         enabled: true,
+        max_iterations: 3,
       }),
     })
     const user = userEvent.setup()
     await renderLoaded()
 
-    await user.type(screen.getByLabelText("Max tool-loop iterations"), "4")
-    await user.tab()
-
-    expect(await putBody(calls)).toMatchObject({ max_iterations: 4 })
-  })
-
-  it("offers the executor pin as a choice over the deployment default", async () => {
-    mockApi({
-      policy: workspaceCodeExecutionPolicy({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
-        executor: "otari",
-      }),
-    })
-    await renderLoaded()
-
-    expect(selectTrigger(EXECUTOR)).toHaveTextContent(
-      "Always here, on this sandbox",
-    )
-    await userEvent.setup().click(selectTrigger(EXECUTOR))
-    expect(
-      screen.getAllByRole("option").map((option) => option.textContent),
-    ).toEqual([
-      "Deployment default",
-      "Auto: provider when native, else here",
-      "Always here, on this sandbox",
-      "Always the provider",
-    ])
-  })
-
-  it("saves the executor pin", async () => {
-    const calls = mockApi({
-      policy: workspaceCodeExecutionPolicy({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
-      }),
-    })
-    const user = userEvent.setup()
-    await renderLoaded()
-
-    await pickOption(user, EXECUTOR, "Always the provider")
-    expect(await putBody(calls)).toMatchObject({
-      enabled: true,
-      executor: "provider",
-    })
-  })
-
-  it("clears the executor pin back to the deployment default as null, not an empty string", async () => {
-    const calls = mockApi({
-      policy: workspaceCodeExecutionPolicy({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
-        executor: "provider",
-      }),
-    })
-    const user = userEvent.setup()
-    await renderLoaded()
-    expect(selectTrigger(EXECUTOR)).toHaveTextContent("Always the provider")
-
-    await pickOption(user, EXECUTOR, "Deployment default")
-    // The service refuses "" (it is outside the vocabulary); null is the clear.
-    expect(await putBody(calls)).toMatchObject({ executor: null })
-  })
-
-  it("offers only the images the operator approved, plus the deployment default", async () => {
-    mockApi({
-      policy: workspaceCodeExecutionPolicy({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
-        allowed_images: ["mzdotai/otari-sandbox-container:latest"],
-      }),
-    })
-    await renderLoaded()
-
-    await userEvent.setup().click(selectTrigger(IMAGE))
-    expect(
-      screen.getAllByRole("option").map((option) => option.textContent),
-    ).toEqual(["Deployment default", "mzdotai/otari-sandbox-container:latest"])
-  })
-
-  it("says so rather than showing a picker when the operator approved no images", async () => {
-    mockApi()
-    await renderLoaded()
-
-    expect(
-      screen.queryByRole("button", { name: IMAGE }),
-    ).not.toBeInTheDocument()
-    expect(
-      screen.getByText(/runs whatever the sandbox runs/i),
-    ).toBeInTheDocument()
-  })
-
-  it("saves the image the operator chose", async () => {
-    const calls = mockApi({
-      policy: workspaceCodeExecutionPolicy({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
-        allowed_images: ["mzdotai/otari-sandbox-container:latest"],
-      }),
-    })
-    const user = userEvent.setup()
-    await renderLoaded()
-
-    await pickOption(user, IMAGE, "mzdotai/otari-sandbox-container:latest")
+    await user.click(screen.getByRole("switch", { name: SWITCH }))
 
     expect(await putBody(calls)).toMatchObject({
-      image: "mzdotai/otari-sandbox-container:latest",
-      tools: null,
+      enabled: false,
+      max_iterations: 3,
     })
   })
 
-  it("offers no tool checkboxes when the sandbox serves a single tool", async () => {
-    // Ticking and unticking one box would both mean "narrow nothing", so the
-    // card says what is served instead of rendering a control that cannot
-    // express anything.
-    mockApi()
-    await renderLoaded()
-
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
-    expect(screen.getByText("code_execution only")).toBeInTheDocument()
-  })
-
-  it("offers a checkbox per tool once the sandbox serves more than one", async () => {
-    mockApi({
-      policy: workspaceCodeExecutionPolicy({
-        workspace_id: ALPHA,
-        available_tools: ["code_execution", "bash_code_execution"],
-        configured: true,
-        enabled: true,
-        tools: ["code_execution"],
-      }),
-    })
-    await renderLoaded()
-
-    expect(
-      screen.getByRole("checkbox", { name: "code_execution" }),
-    ).toBeChecked()
-    expect(
-      screen.getByRole("checkbox", { name: "bash_code_execution" }),
-    ).not.toBeChecked()
-  })
-
-  it("normalizes a full tool selection back to no narrowing", async () => {
-    // Every tool ticked narrows nothing, and an empty list is refused by the
-    // server, so both ends save `null` rather than a list.
-    const calls = mockApi({
-      policy: workspaceCodeExecutionPolicy({
-        workspace_id: ALPHA,
-        available_tools: ["code_execution", "bash_code_execution"],
-        configured: true,
-        enabled: true,
-        tools: ["code_execution"],
-      }),
-    })
-    const user = userEvent.setup()
-    await renderLoaded()
-
-    await user.click(
-      screen.getByRole("checkbox", { name: "bash_code_execution" }),
-    )
-
-    expect(await putBody(calls)).toMatchObject({ tools: null })
-  })
-
-  it("preserves a stored tool policy this deployment no longer serves", async () => {
-    // The escalation this guards: admission refuses a policy naming only kinds
-    // the sandbox no longer serves, so silently dropping it on an unrelated
-    // save would turn that refusal into permission. Comparing list lengths read
-    // one stale entry against one served tool as "the full set" and sent null.
-    const calls = mockApi({
-      policy: workspaceCodeExecutionPolicy({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
-        available_tools: ["code_execution"],
-        tools: ["bash_code_execution"],
-      }),
-    })
-    const user = userEvent.setup()
-    await renderLoaded()
-
-    // The operator came here to change something else entirely.
-    await user.type(screen.getByLabelText("Max tool-loop iterations"), "4")
-    await user.tab()
-
-    expect(await putBody(calls)).toMatchObject({
-      max_iterations: 4,
-      tools: ["bash_code_execution"],
-    })
-  })
-
-  it("names a stale tool policy and offers a way out of it", async () => {
-    mockApi({
-      policy: workspaceCodeExecutionPolicy({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
-        available_tools: ["code_execution"],
-        tools: ["bash_code_execution"],
-      }),
-    })
-    await renderLoaded()
-
-    expect(
-      screen.getByRole("checkbox", {
-        name: "bash_code_execution (no longer served)",
-      }),
-    ).toBeChecked()
-    expect(
-      screen.getByRole("checkbox", { name: "code_execution" }),
-    ).not.toBeChecked()
-    expect(
-      screen.getByText(/no longer serves, so its requests are refused/i),
-    ).toBeInTheDocument()
-  })
-
-  it("clears the restriction once the stale tool is unticked and a served one is not", async () => {
-    const calls = mockApi({
-      policy: workspaceCodeExecutionPolicy({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
-        available_tools: ["code_execution"],
-        tools: ["bash_code_execution"],
-      }),
-    })
-    const user = userEvent.setup()
-    await renderLoaded()
-
-    await user.click(screen.getByRole("checkbox", { name: "code_execution" }))
-    await user.click(
-      screen.getByRole("checkbox", {
-        name: "bash_code_execution (no longer served)",
-      }),
-    )
-
-    // Everything served, nothing else: narrows nothing, so no list is stored.
-    expect(await putBody(calls)).toMatchObject({ tools: null })
-  })
-
-  it("names a withdrawn pin instead of showing it bare", async () => {
-    // The scenario the server guards twice: the operator dropped the image from
-    // the allow-list after the workspace pinned it. With no option matching it,
-    // the control would show the image bare, with nothing saying it is refused,
-    // and a save would earn a 400 over a value the screen presented as ordinary.
-    mockApi({
-      policy: workspaceCodeExecutionPolicy({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
-        allowed_images: ["mzdotai/otari-sandbox-container:latest"],
-        image: "ghcr.io/acme/withdrawn:1",
-      }),
-    })
-    await renderLoaded()
-
-    expect(selectTrigger(IMAGE)).toHaveTextContent(
-      "ghcr.io/acme/withdrawn:1 (no longer approved)",
-    )
-    expect(
-      screen.getByText(/no longer approves, so its requests are refused/i),
-    ).toBeInTheDocument()
-  })
-
-  it("offers the withdrawn pin even when the operator approved nothing else", async () => {
-    mockApi({
-      policy: workspaceCodeExecutionPolicy({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
-        allowed_images: [],
-        image: "ghcr.io/acme/withdrawn:1",
-      }),
-    })
-    await renderLoaded()
-
-    expect(selectTrigger(IMAGE)).toHaveTextContent(
-      "ghcr.io/acme/withdrawn:1 (no longer approved)",
-    )
-  })
-
-  it("lets the operator move a withdrawn pin back to the deployment default", async () => {
-    const calls = mockApi({
-      policy: workspaceCodeExecutionPolicy({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
-        allowed_images: ["mzdotai/otari-sandbox-container:latest"],
-        image: "ghcr.io/acme/withdrawn:1",
-      }),
-    })
-    const user = userEvent.setup()
-    await renderLoaded()
-
-    await pickOption(user, IMAGE, "Deployment default")
-
-    expect(await putBody(calls)).toMatchObject({ image: null })
-  })
-
-  it("shows a stored image", async () => {
-    mockApi({
-      policy: workspaceCodeExecutionPolicy({
-        workspace_id: ALPHA,
-        configured: true,
-        enabled: true,
-        allowed_images: ["ghcr.io/acme/sandbox:2"],
-        image: "ghcr.io/acme/sandbox:2",
-      }),
-    })
-    await renderLoaded()
-
-    expect(selectTrigger(IMAGE)).toHaveTextContent("ghcr.io/acme/sandbox:2")
-  })
-
-  it("clears the policy rather than storing one when set back to the deployment default", async () => {
+  it("drops a blocked policy that narrows nothing when allowed again", async () => {
     const calls = mockApi({
       policy: workspaceCodeExecutionPolicy({
         workspace_id: ALPHA,
@@ -471,7 +153,7 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     const user = userEvent.setup()
     await renderLoaded()
 
-    await pickOption(user, STANCE, "Deployment default")
+    await user.click(screen.getByRole("switch", { name: SWITCH }))
 
     await waitFor(() =>
       expect(calls.some((call) => call.method === "DELETE")).toBe(true),
@@ -479,34 +161,94 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     expect(calls.some((call) => call.method === "PUT")).toBe(false)
   })
 
-  it("refuses a limit the deployment could never honor without asking the server", async () => {
+  it("keeps a blocked policy's API-set limits when allowed again", async () => {
     const calls = mockApi({
       policy: workspaceCodeExecutionPolicy({
         workspace_id: ALPHA,
         configured: true,
-        enabled: true,
+        enabled: false,
+        max_iterations: 3,
+        executor: "provider",
       }),
     })
     const user = userEvent.setup()
     await renderLoaded()
 
-    await user.type(screen.getByLabelText("Execution timeout"), "600")
-    await user.tab()
+    await user.click(screen.getByRole("switch", { name: SWITCH }))
 
-    expect(
-      await screen.findByText(
-        `A whole number of seconds from 1 to ${MAX_EXEC_TIMEOUT_S}.`,
-      ),
-    ).toBeInTheDocument()
-    expect(calls.some((call) => call.method === "PUT")).toBe(false)
+    expect(await putBody(calls)).toMatchObject({
+      enabled: true,
+      max_iterations: 3,
+      executor: "provider",
+    })
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false)
   })
 
-  it("says code execution is unavailable when the deployment has no sandbox", async () => {
+  it("warns about a policy naming a tool no longer served, and clears only that", async () => {
+    // Admission refuses such a policy, so the switch alone would read "on"
+    // over a workspace whose every request fails.
+    const calls = mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+        available_tools: ["code_execution"],
+        tools: ["bash_code_execution"],
+        max_iterations: 3,
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    expect(
+      screen.getByText(/no longer offers, so its requests are refused/i),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Clear it" }))
+
+    expect(await putBody(calls)).toMatchObject({
+      enabled: true,
+      tools: null,
+      max_iterations: 3,
+    })
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false)
+  })
+
+  it("warns about a pin to an image the operator withdrew", async () => {
     mockApi({
       policy: workspaceCodeExecutionPolicy({
         workspace_id: ALPHA,
         configured: true,
         enabled: true,
+        allowed_images: ["mzdotai/otari-sandbox-container:latest"],
+        image: "ghcr.io/acme/withdrawn:1",
+      }),
+    })
+    await renderLoaded()
+
+    expect(
+      screen.getByText(/no longer offers, so its requests are refused/i),
+    ).toBeInTheDocument()
+  })
+
+  it("does not warn about a stale policy that is blocked anyway", async () => {
+    mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: false,
+        available_tools: ["code_execution"],
+        tools: ["bash_code_execution"],
+      }),
+    })
+    await renderLoaded()
+
+    expect(screen.queryByText(/no longer offers/i)).toBeNull()
+  })
+
+  it("switches off and explains when the deployment has no sandbox", async () => {
+    mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
         sandbox_configured: false,
       }),
     })
@@ -515,62 +257,175 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     expect(
       await screen.findByText(/no sandbox configured/i),
     ).toBeInTheDocument()
+    const toggle = screen.getByRole("switch", { name: SWITCH })
+    expect(toggle).not.toBeChecked()
+    expect(toggle).toBeDisabled()
   })
 
-  it("does not read the policy at all for a member who cannot manage the workspace", async () => {
-    // Reads take the management role server-side, so asking would earn a 403.
-    // The card says who can set it instead of rendering a form over an error.
-    const policyRequests: string[] = []
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input)
-      if (url.includes("/code-execution-policy")) {
-        policyRequests.push(url)
-        return new Response("forbidden", { status: 403 })
-      }
-      return Response.json(
-        organizationContext({
-          role: "member",
-          workspace_memberships: [
-            { workspace_id: ALPHA, name: "Alpha", role: "member" },
-          ],
-        }),
+  describe("on a hosted control plane", () => {
+    // There a workspace with no policy may not run code, and the sandbox is
+    // the platform's, so this process's `sandbox_configured` decides nothing.
+    async function renderHosted() {
+      renderCard(undefined, true)
+      await waitFor(() =>
+        expect(screen.getByRole("switch", { name: SWITCH })).toBeEnabled(),
       )
-    })
-    renderCard()
-
-    expect(
-      await screen.findByText(/set by an owner or admin/i),
-    ).toBeInTheDocument()
-    expect(screen.queryByLabelText("Max tool-loop iterations")).toBeNull()
-    expect(policyRequests).toEqual([])
-  })
-
-  it("keeps its ceilings equal to the ones the server enforces", () => {
-    // The two limits are duplicated here because `openapi-typescript` drops
-    // `maximum` when it generates `schema.ts`, so the spec is the only place
-    // both sides can be compared. Without this, raising the backend cap would
-    // leave the form quietly refusing values the server would take.
-    const spec = JSON.parse(
-      readFileSync(
-        join(import.meta.dirname, "../../../../docs/public/openapi.json"),
-        "utf8",
-      ),
-    ) as {
-      components: {
-        schemas: {
-          WorkspaceCodeExecutionPolicyUpdate: {
-            properties: Record<string, { anyOf?: { maximum?: number }[] }>
-          }
-        }
-      }
     }
-    const properties =
-      spec.components.schemas.WorkspaceCodeExecutionPolicyUpdate.properties
-    const ceiling = (field: string) =>
-      properties[field]?.anyOf?.find((arm) => arm.maximum !== undefined)
-        ?.maximum
 
-    expect(ceiling("max_iterations")).toBe(MAX_ITERATIONS)
-    expect(ceiling("exec_timeout_s")).toBe(MAX_EXEC_TIMEOUT_S)
+    it("reads no policy as off, and never locks the switch over a sandbox it does not own", async () => {
+      mockApi({
+        policy: workspaceCodeExecutionPolicy({
+          workspace_id: ALPHA,
+          sandbox_configured: false,
+        }),
+      })
+      await renderHosted()
+
+      expect(screen.getByRole("switch", { name: SWITCH })).not.toBeChecked()
+      expect(screen.queryByText(/no sandbox configured/i)).toBeNull()
+    })
+
+    it("turns on by storing an enabled policy, never by deleting one", async () => {
+      const calls = mockApi()
+      const user = userEvent.setup()
+      await renderHosted()
+
+      await user.click(screen.getByRole("switch", { name: SWITCH }))
+
+      expect(await putBody(calls)).toMatchObject({ enabled: true })
+      expect(calls.some((call) => call.method === "DELETE")).toBe(false)
+    })
+
+    it("turns off by storing a disabled policy", async () => {
+      const calls = mockApi({
+        policy: workspaceCodeExecutionPolicy({
+          workspace_id: ALPHA,
+          configured: true,
+          enabled: true,
+        }),
+      })
+      const user = userEvent.setup()
+      await renderHosted()
+
+      expect(screen.getByRole("switch", { name: SWITCH })).toBeChecked()
+      await user.click(screen.getByRole("switch", { name: SWITCH }))
+
+      expect(await putBody(calls)).toMatchObject({ enabled: false })
+      expect(calls.some((call) => call.method === "DELETE")).toBe(false)
+    })
+
+    it("does not call a pinned image withdrawn against the control plane's own list", async () => {
+      mockApi({
+        policy: workspaceCodeExecutionPolicy({
+          workspace_id: ALPHA,
+          configured: true,
+          enabled: true,
+          allowed_images: [],
+          image: "ghcr.io/acme/sandbox:2",
+        }),
+      })
+      await renderHosted()
+
+      expect(screen.queryByText(/no longer offers/i)).toBeNull()
+    })
+
+    it("shows a member the platform's answer for their workspace", async () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+        String(input).includes("/playground/tools")
+          ? Response.json({
+              code_execution: {
+                configured: true,
+                enabled: false,
+                reason: "Not turned on for this workspace.",
+              },
+            })
+          : Response.json(
+              organizationContext({
+                role: "member",
+                workspace_memberships: [
+                  { workspace_id: ALPHA, name: "Alpha", role: "member" },
+                ],
+              }),
+            ),
+      )
+      renderCard(<div>tool row</div>, true)
+
+      expect(await screen.findByText("Allowed in Alpha")).toBeInTheDocument()
+      expect(screen.getByText("No")).toBeInTheDocument()
+      expect(screen.queryByRole("switch")).toBeNull()
+    })
   })
+
+  it("renders nothing for a member when there is neither a tool row nor a sandbox", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).includes("/playground/tools")
+        ? Response.json({
+            code_execution: { configured: false, enabled: false, reason: null },
+          })
+        : Response.json(
+            organizationContext({
+              role: "member",
+              workspace_memberships: [
+                { workspace_id: ALPHA, name: "Alpha", role: "member" },
+              ],
+            }),
+          ),
+    )
+    const { container } = renderCard()
+
+    await waitFor(() => expect(container).toBeEmptyDOMElement())
+  })
+
+  it("names the workspace and its organization", async () => {
+    mockApi()
+    await renderLoaded()
+
+    expect(screen.getByText("Allow in Alpha")).toBeInTheDocument()
+    expect(screen.getByText(/^Workspace in /)).toBeInTheDocument()
+  })
+
+  it.each([
+    [true, "Yes"],
+    [false, "No"],
+  ])(
+    "shows a member whether their workspace allows it, without reading the policy (enabled %s)",
+    async (enabled, answer) => {
+      // Policy reads take the management role server-side, so asking would earn
+      // a 403. The playground's per-workspace answer is what a member may read.
+      const policyRequests: string[] = []
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const url = String(input)
+        if (url.includes("/code-execution-policy")) {
+          policyRequests.push(url)
+          return new Response("forbidden", { status: 403 })
+        }
+        if (url.includes("/playground/tools")) {
+          return Response.json({
+            web_search: { configured: false, enabled: false, reason: null },
+            code_execution: {
+              configured: true,
+              enabled,
+              reason: enabled ? null : "Turned off for this workspace.",
+            },
+            mcp_servers: [],
+          })
+        }
+        return Response.json(
+          organizationContext({
+            role: "member",
+            workspace_memberships: [
+              { workspace_id: ALPHA, name: "Alpha", role: "member" },
+            ],
+          }),
+        )
+      })
+      renderCard(<div>tool row</div>)
+
+      expect(await screen.findByText("Allowed in Alpha")).toBeInTheDocument()
+      expect(screen.getByText(answer)).toBeInTheDocument()
+      expect(screen.getByText("tool row")).toBeInTheDocument()
+      expect(screen.queryByRole("switch")).toBeNull()
+      expect(policyRequests).toEqual([])
+    },
+  )
 })

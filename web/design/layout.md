@@ -237,5 +237,5 @@ an opaque semantic surface. Do not extend these exceptions to dashboard pages.
 
 The Otari header and Mozilla AI footer are shared across these public pages,
 including standalone deployments, as intentional product branding. Use existing
-type roles and semantic tokens for both. The appearance control includes system,
-light, and dark preferences; reduced motion renders a static field.
+type roles and semantic tokens for both. The appearance control is one light/dark
+toggle; reduced motion renders a static field.

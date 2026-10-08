@@ -53,6 +53,9 @@ def test_normalize_folds_case_and_punctuation_only(text: str, expected: str) -> 
         ("gpt-oss:120b", "gpt-oss:120b", None, None),
         ("nemotron-3-ultra-550b-a55b:free", "nemotron-3-ultra-550b-a55b", None, None),
         ("nvidia.nemotron-nano-9b-v2", "nemotron-nano-9b-v2", "NVIDIA", None),
+        ("moonshotai.kimi-k2-thinking", "kimi-k2-thinking", "Moonshot AI", None),
+        # A dot after something that is not a vendor is part of the model.
+        ("gpt-4.1", "gpt-4.1", None, None),
         # A vendor's name in front of its own family is the vendor, not the model.
         ("nvidia-nemotron-3-super-120b-a12b", "nemotron-3-super-120b-a12b", "NVIDIA", None),
         ("openai-gpt-oss-120b", "gpt-oss-120b", "OpenAI", None),
@@ -227,6 +230,20 @@ def test_a_model_nobody_names_is_named_after_its_cleaned_id() -> None:
     assert identity.slug == "qwen3-32b"
     assert identity.vendor == "Alibaba"
     assert identity.id == "alibaba/qwen3-32b"
+
+
+def test_a_bedrock_dotted_vendor_groups_with_the_vendor_s_own_offering() -> None:
+    seeds = [
+        OfferingSeed("bedrock:moonshotai.kimi-k2-thinking", "bedrock", "moonshotai.kimi-k2-thinking", None),
+        OfferingSeed("moonshot:kimi-k2-thinking", "moonshot", "kimi-k2-thinking", None),
+    ]
+
+    groups = group_offerings(seeds)
+
+    assert set(groups) == {"kimik2thinking"}
+    assert groups["kimik2thinking"].id == "moonshotai/kimi-k2-thinking"
+    # Alone, the Bedrock offering still gets an id with its vendor in it.
+    assert group_offerings(seeds[:1])["kimik2thinking"].id == "moonshotai/kimi-k2-thinking"
 
 
 def test_slug_removes_to_the_key() -> None:

@@ -42,6 +42,8 @@ INFERENCE_PATHS = (
     # Discovery and execution both belong to the data plane: a hosted control
     # plane holds no MCP session and runs no tool.
     f"{API_ROOT}/mcp/execute",
+    # One decision call, billed here like /decisions.
+    f"{API_ROOT}/routing/recommend",
 )
 
 EXPECTED_DETAIL = (
@@ -137,12 +139,17 @@ def test_hosted_mode_still_serves_the_management_plane(hosted_client: TestClient
         f"{API_ROOT}/keys",
         f"{API_ROOT}/usage",
         f"{API_ROOT}/organizations/me/provider-keys",
+        # An organization's own web search keys, which its hybrid gateways search with.
+        f"{API_ROOT}/organizations/me/web-search-keys",
         # Discovery, not dispatch, and a surface bootstrap publishes for a
         # hosted deployment, so it stays mounted.
         f"{API_ROOT}/models",
         # The catalog that POST /api/v1/search dispatches against: management,
         # and the one prefix a careless /api/v1/search stub could shadow.
         f"{API_ROOT}/search-tools",
+        # The policy table beside the /routing/recommend stub, which must not
+        # reach it.
+        f"{API_ROOT}/routing/policies",
     ):
         response = hosted_client.get(path)
 

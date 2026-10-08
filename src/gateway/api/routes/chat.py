@@ -51,6 +51,7 @@ from gateway.api.routes._pipeline import (
     scope_prompt_cache_key,
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost
+from gateway.api.routes._request_tags import RequestMetadata, request_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
@@ -168,6 +169,9 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     )
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
     session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
+    # OpenAI's chat field, absent from ``CompletionParams``: read for request tags
+    # and never forwarded, since a provider other than OpenAI would reject it.
+    metadata: RequestMetadata = None
 
 
 class _ChatAdapter:
@@ -530,7 +534,9 @@ async def run_chat_completion(
             ),
             normalize_messages=_normalize,
             tools=request.tools,
+            code_execution_policies=tool_ports.code_execution_policy,
             idempotency=None if request.stream else idempotency,
+            tags=request_tags(request.metadata),
         )
     except IdempotentReplay as replay:
         return replay.response()
@@ -576,6 +582,7 @@ async def run_chat_completion(
         remaining_user_tools=tool_ctx.remaining_user_tools,
         web_search_declared_name=tool_ctx.web_search_declared_name,
     )
+    request_fields.pop("metadata", None)
     scope_prompt_cache_key(request_fields, ctx)
     # Dispatch one cap, under the name any-llm understands and knows how to map to
     # any provider (via BaseOpenAIProvider._convert_completion_params). Popped

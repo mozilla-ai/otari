@@ -22,7 +22,14 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import GrowthSignalPortDep, MembershipListenerDep, UnitOfWorkDep, get_config, get_db
+from gateway.api.deps import (
+    GrowthSignalPortDep,
+    MembershipListenerDep,
+    UnitOfWorkDep,
+    WorkspaceListenerDep,
+    get_config,
+    get_db,
+)
 from gateway.api.routes._public_auth import mail_unavailable, throttle_public_auth
 from gateway.core.config import GatewayConfig
 from gateway.models.tenancy import MAX_FULL_NAME_LENGTH
@@ -108,6 +115,7 @@ async def signup(
     growth: GrowthSignalPortDep,
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
+    workspace_listener: WorkspaceListenerDep,
 ) -> SignupResponse:
     """Claim a roster identity, register a new one, or do nothing: the response never says which.
 
@@ -127,6 +135,7 @@ async def signup(
             password=body.password,
             uow=uow,
             membership_listener=membership_listener,
+            workspace_listener=workspace_listener,
             full_name=body.full_name,
             terms_accepted=body.terms_accepted,
         )

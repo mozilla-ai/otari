@@ -58,6 +58,7 @@ export function ResendVerificationPage() {
 
   return (
     <PublicAuthLayout
+      isBusy={resend.isPending}
       title="Send a new verification link"
       description="Enter the address you signed up with and we will mail a fresh link."
       footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}

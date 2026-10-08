@@ -22,6 +22,11 @@ SENSITIVE_PARAM_FIELDS: frozenset[str] = frozenset(
         "client",
         "credentials",
         "extra_body",
+        # any-llm hands these to the provider SDK as per-request transport
+        # options, so a caller could add headers or query parameters to an
+        # upstream call made with the operator's credential.
+        "extra_headers",
+        "extra_query",
         "aws_access_key_id",
         "aws_secret_access_key",
         # any-llm's acompletion()/aresponses() forward this dict straight to

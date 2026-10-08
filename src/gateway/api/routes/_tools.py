@@ -28,6 +28,7 @@ from gateway.services.web_retrieval_policy import DomainPolicy
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
+    from gateway.models.tools import WebSearchCredential
 
 # Gateway-internal fields the provider SDKs (any-llm, anthropic, openai, …)
 # don't accept as ``acompletion`` kwargs. Strip these from the model_dump
@@ -148,6 +149,7 @@ def _build_web_retrieval_backend(
     fetch_policy: DomainPolicy | None = None,
     counter: WebRetrievalCounter | None = None,
     auth_token: str | None = None,
+    credential: WebSearchCredential | None = None,
     config: GatewayConfig | None = None,
     tally: ToolUsageTally | None = None,
 ) -> WebRetrievalBackend:
@@ -176,9 +178,13 @@ def _build_web_retrieval_backend(
         ),
     }
 
-    # A licensed provider this deployment holds the key for wins over the URL,
+    # A workspace's own key wins over the deployment's search, so its organization's account pays.
+    # Otherwise a licensed provider this deployment holds the key for wins over the URL,
     # and is how a deployment searches with no backend service in front of it.
-    if config is not None and config.web_search_provider_configured():
+    if credential is not None:
+        kwargs["provider"] = credential.provider
+        kwargs["provider_api_key"] = credential.api_key
+    elif config is not None and config.web_search_provider_configured():
         kwargs["provider"] = config.web_search_provider
         kwargs["provider_api_key"] = config.web_search_provider_api_key
 

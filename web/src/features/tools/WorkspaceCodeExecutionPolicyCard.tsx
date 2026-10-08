@@ -1,18 +1,17 @@
-import type { UpdateWorkspaceCodeExecutionPolicyRequest } from "@/client"
+import type { ReactNode } from "react"
+import type {
+  UpdateWorkspaceCodeExecutionPolicyRequest,
+  WorkspaceCodeExecutionPolicy,
+} from "@/client"
+import { Button } from "@/design-system/actions/Button"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
-import { InfoBanner } from "@/design-system/feedback/InfoBanner"
-import { Checkbox } from "@/design-system/forms/Checkbox"
+import { Toggle } from "@/design-system/forms/Toggle"
 import { SettingRow } from "@/design-system/layout/SettingRow"
 import { SettingsGroup } from "@/design-system/layout/SettingsGroup"
-import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { canManageWorkspace } from "@/features/organization/roles"
-import {
-  ceilingParser,
-  PolicyRow,
-  parsePhrase,
-} from "@/features/tools/PolicyRow"
 import { usePolicyWriter } from "@/features/tools/usePolicyWriter"
 import { useOrganizationContext } from "@/shared/api/organizations"
+import { usePlaygroundTools } from "@/shared/api/playground"
 import {
   useClearWorkspaceCodeExecutionPolicy,
   useSetWorkspaceCodeExecutionPolicy,
@@ -21,54 +20,102 @@ import {
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 import { useAutosave } from "@/shared/hooks/useAutosave"
 
-// The layer above the deployment-wide sandbox settings this group sits under:
-// the settings above say where code runs, this says which workspaces may ask
-// for it and how far. A policy can only narrow, so there is no control here
-// that turns anything on the deployment has not configured.
+// The stored policy has three states (allowed, blocked, none) and can also
+// narrow limits, the image and the tool kinds. The card shows only the switch;
+// the narrowing fields are set through the API.
 //
-// Three states, not two, which is why the first control is a select rather than
-// a toggle: a workspace can be allowed, blocked, or carry no policy at all.
-// "Deployment default" is the last of those and is a delete, not a saved
-// `enabled: true`. While it is chosen there is no policy to narrow, so the rows
-// below it have nothing to write and are disabled.
-//
-// The image and tool controls are built from `allowed_images` and
-// `available_tools` on the policy itself rather than from constants here. The
-// image list is the operator's supply-chain allow-list and the server refuses
-// anything outside it, so a free-text field would be offering what the write
-// rejects.
+// What "none" means depends on the deployment. Standalone, no policy narrows
+// nothing, so it reads as on, and switching on deletes a policy that narrows
+// nothing else. Hosted, the control plane's resolver treats a workspace with no
+// policy as off (code execution is something a workspace turns on), so the
+// switch reads the stored `enabled` alone and only ever writes it.
 
-type Stance = "default" | "allowed" | "blocked"
-
-// The sentinel for "no workspace image", which is a real choice and not an
-// absent one: the workspace runs whatever the deployment runs.
-const DEPLOYMENT_IMAGE = ""
-// The sentinel for "no workspace pin" on who runs a provider's code tool: the
-// deployment default, and the request's own header, decide.
-const DEPLOYMENT_EXECUTOR = ""
-const EXECUTOR_OPTIONS = [
-  { value: DEPLOYMENT_EXECUTOR, label: "Deployment default" },
-  { value: "auto", label: "Auto: provider when native, else here" },
-  { value: "otari", label: "Always here, on this sandbox" },
-  { value: "provider", label: "Always the provider" },
-]
-
-// The server's own ceilings (`workspace_code_execution_policy_service`): a value
-// above either could never take effect, so it is refused rather than stored.
-export const MAX_ITERATIONS = 25
-export const MAX_EXEC_TIMEOUT_S = 60
+/** Whether a stored policy narrows anything beyond allowing or blocking. */
+function narrowsAnything(policy: WorkspaceCodeExecutionPolicy): boolean {
+  return [
+    policy.default_purpose_hint,
+    policy.max_iterations,
+    policy.exec_timeout_s,
+    policy.image,
+    policy.tools,
+    policy.executor,
+  ].some((value) => value != null)
+}
 
 /**
- * Whether requests billed to this workspace may run generated code, and the
- * limits they run under.
+ * Which parts of a stored policy name an image or tool kind this deployment no
+ * longer offers. Admission refuses such a policy, so the switch alone would read
+ * "on" over a workspace whose requests all fail.
+ */
+function staleParts(policy: WorkspaceCodeExecutionPolicy, isHosted: boolean) {
+  return {
+    // Hosted, `allowed_images` is the control plane's own list, not the
+    // platform sandbox's, so it cannot say a pin was withdrawn.
+    image:
+      !isHosted &&
+      policy.image != null &&
+      !policy.allowed_images.includes(policy.image),
+    tools: (policy.tools ?? []).some(
+      (name) => !policy.available_tools.includes(name),
+    ),
+  }
+}
+
+/**
+ * Whether a member's workspace allows code execution, read-only.
+ *
+ * The policy itself is for owners and admins, so this reads the playground's
+ * per-workspace answer, which any member may and which reads "no policy" the
+ * way the deployment does (on standalone, off on a hosted control plane).
+ */
+function MemberStatus({
+  leading,
+  workspace,
+}: {
+  leading?: ReactNode
+  workspace: { workspace_id: string; name: string }
+}) {
+  const status = usePlaygroundTools(workspace.workspace_id).data?.code_execution
+  if (!leading && !status?.configured) return null
+  return (
+    <SettingsGroup isBounded>
+      {leading}
+      {status?.configured ? (
+        <SettingRow
+          label={`Allowed in ${workspace.name}`}
+          help={
+            status.enabled
+              ? "Set by an owner or admin."
+              : "An owner or admin can turn it on for this workspace."
+          }
+          control={
+            <span className="text-caption text-foreground">
+              {status.enabled ? "Yes" : "No"}
+            </span>
+          }
+        />
+      ) : null}
+    </SettingsGroup>
+  )
+}
+
+/**
+ * Whether requests billed to this workspace may run generated code.
  *
  * A policy can only narrow what the deployment above allows; it never grants a
  * sandbox the deployment has not configured.
  */
 export function WorkspaceCodeExecutionPolicyCard({
-  docsHref,
+  leading,
+  isHosted = false,
 }: {
-  docsHref: string
+  /** Rows above the switch, so the tool and its switch read as one card. */
+  leading?: ReactNode
+  /**
+   * A hosted control plane, where no policy means off and the sandbox is the
+   * platform's rather than this process's, so `sandbox_configured` says nothing.
+   */
+  isHosted?: boolean
 }) {
   const { selected, isLoading: workspaceLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
@@ -81,12 +128,9 @@ export function WorkspaceCodeExecutionPolicyCard({
   const query = useWorkspaceCodeExecutionPolicy(workspaceId)
   const setPolicy = useSetWorkspaceCodeExecutionPolicy()
   const clearPolicy = useClearWorkspaceCodeExecutionPolicy()
-  const stanceSave = useAutosave()
-  const imageSave = useAutosave()
-  const toolsSave = useAutosave()
-  const executorSave = useAutosave()
-  // One writer for the group: a PUT replaces the whole policy, so two rows
-  // saving at once would each carry the other's pre-save value.
+  const save = useAutosave()
+  // A PUT replaces the whole policy, so the switch writes through the same
+  // serialized writer the narrowing fields would, carrying them unchanged.
   const write = usePolicyWriter({
     server: query.data,
     resetKey: selected?.workspace_id ?? "",
@@ -108,295 +152,106 @@ export function WorkspaceCodeExecutionPolicyCard({
 
   if (!selected) {
     return (
-      <InfoBanner>
-        {workspaceLoading
-          ? "Reading the workspaces you belong to."
-          : "Per-workspace code execution is set on a workspace you belong to. An owner or admin can add you to one on the Workspaces page."}
-      </InfoBanner>
+      <SettingsGroup isBounded>
+        {leading}
+        <SettingRow
+          label="Workspace access"
+          help={
+            workspaceLoading
+              ? "Reading the workspaces you belong to."
+              : "Per-workspace code execution is set on a workspace you belong to. An owner or admin can add you to one on the Workspaces page."
+          }
+          control={null}
+        />
+      </SettingsGroup>
     )
   }
 
   if (!manages) {
-    return (
-      <InfoBanner>
-        Code execution for {selected.name} is set by an owner or admin of the
-        workspace, or of the organization.
-      </InfoBanner>
-    )
+    return <MemberStatus leading={leading} workspace={selected} />
   }
 
   const policy = query.data
-  const stance: Stance = !policy?.configured
-    ? "default"
-    : policy.enabled
-      ? "allowed"
-      : "blocked"
-
-  // Disabled until the read has succeeded. Without that the rows sit at
-  // "Deployment default" over a workspace that may well have a stored policy,
-  // and one change issues the write that drops it.
+  const isOn = isHosted
+    ? Boolean(policy?.configured && policy.enabled)
+    : !(policy?.configured && !policy.enabled)
+  const hasSandbox = isHosted || (policy?.sandbox_configured ?? true)
+  const organizationName = context.data?.organization.name
+  const stale = policy
+    ? staleParts(policy, isHosted)
+    : { image: false, tools: false }
+  const needsReset = isOn && (stale.image || stale.tools)
+  // Disabled until the read has succeeded. Without that the switch sits on over
+  // a workspace that may well have a stored policy, and one change issues the
+  // write that drops it.
   const isUnreadable = query.isLoading || query.isError || !policy
-  const narrowingDisabled = isUnreadable || stance === "default"
 
-  const allowedImages = policy?.allowed_images ?? []
-  const availableTools = policy?.available_tools ?? []
-  // A pin the operator has since withdrawn is still stored, and the server
-  // refuses it on the next request and on the next save. `FilterSelect` falls
-  // back to showing an unmatched value bare, so the pin would appear as its own
-  // image string with nothing saying it is refused, and a save would earn a 400
-  // naming a value the screen presented as ordinary. Carry it as an option
-  // instead, said out loud, so the withdrawal is visible and picking something
-  // else is one click.
-  const withdrawnImage =
-    policy?.image && !allowedImages.includes(policy.image) ? policy.image : null
-  // The same shape one field over: tool kinds the stored policy names that this
-  // deployment no longer serves. Admission is already refusing such a policy
-  // (`_pipeline` intersects against `SERVED_TOOL_NAMES`), so the card must show
-  // it rather than quietly drop it: a stale entry silently removed on an
-  // unrelated save turns a refusal into permission.
-  const staleTools = (policy?.tools ?? []).filter(
-    (name) => !availableTools.includes(name),
-  )
-  // What the checkboxes cover: what is served, plus whatever stale kinds the
-  // policy still names, so unticking one is how an operator retires it.
-  const listedTools = [...availableTools, ...staleTools]
-  const storedTools = policy?.tools
-
-  // `enabled` is the one field a patch always restates: the stance select is
-  // the only control that changes it, and every other row must not flip it.
-  const commitField = (
-    patch: Partial<UpdateWorkspaceCodeExecutionPolicyRequest>,
-  ) => write({ enabled: stance !== "blocked", ...patch })
-
-  // An unset list ticks every box, because that is what it means: the workspace
-  // gets whatever the backend serves. Unticking one is therefore a narrowing
-  // from the full set, not from nothing, and unticking the last leaves nothing
-  // to store, which the server refuses, so that end returns to unset.
-  //
-  // A stored list narrows nothing only when it covers everything served *and*
-  // names nothing else. Comparing lengths instead would read a stale
-  // `["bash_code_execution"]` against a served `["code_execution"]` as the full
-  // set, and save `null` over a policy admission is currently refusing, which
-  // would grant code execution to a workspace whose row denies it.
-  const toggleTool = (tool: string, isSelected: boolean) => {
-    const current = storedTools ?? availableTools
-    const next = isSelected
-      ? listedTools.filter((name) => current.includes(name) || name === tool)
-      : current.filter((name) => name !== tool)
-    const narrowsNothing =
-      next.length === 0 ||
-      (availableTools.every((name) => next.includes(name)) &&
-        next.every((name) => availableTools.includes(name)))
-    void toolsSave.run(() =>
-      commitField({ tools: narrowsNothing ? null : next }),
+  const setAllowed = (allowed: boolean) =>
+    save.run(() =>
+      isHosted || !allowed || (policy && narrowsAnything(policy))
+        ? write({ enabled: allowed })
+        : clearPolicy.mutateAsync({ workspaceId: selected.workspace_id }),
     )
-  }
+  // Drops only what is stale, so a valid limit beside it survives.
+  const clearStale = () =>
+    write({
+      enabled: true,
+      ...(stale.image ? { image: null } : {}),
+      ...(stale.tools ? { tools: null } : {}),
+    })
 
   return (
-    <SettingsGroup
-      isBounded
-      title="This workspace"
-      description={`Narrows what the deployment allows for requests billed to ${selected.name}. Never widens it, and grants no sandbox the deployment has not configured.`}
-      docsHref={docsHref}
-    >
+    <SettingsGroup isBounded>
+      {leading}
       {query.error ? (
         <div className="px-4 py-3">
           <ErrorBanner error={query.error} />
         </div>
       ) : null}
-      {policy && !policy.sandbox_configured ? (
-        <div className="px-4 py-3">
-          <InfoBanner>
-            This deployment has no sandbox configured, so code execution is
-            unavailable here whatever this workspace's policy says. The sandbox
-            URL is set above.
-          </InfoBanner>
-        </div>
-      ) : null}
 
       <SettingRow
-        label="Code execution"
-        help="Allow or block the otari_code_execution tool for requests billed here."
-        error={stanceSave.error}
-        control={
-          <FilterSelect
-            fullWidth
-            ariaLabel="Code execution for this workspace"
-            value={stance}
-            onChange={(next) =>
-              void stanceSave.run(() =>
-                next === "default"
-                  ? clearPolicy.mutateAsync({
-                      workspaceId: selected.workspace_id,
-                    })
-                  : commitField({ enabled: next === "allowed" }),
-              )
-            }
-            options={[
-              { value: "default", label: "Deployment default" },
-              { value: "allowed", label: "Allowed" },
-              { value: "blocked", label: "Blocked" },
-            ]}
-            disabled={isUnreadable || stanceSave.isSaving}
-          />
+        label={`Allow in ${selected.name}`}
+        help={
+          organizationName
+            ? `Workspace in ${organizationName}.`
+            : "This workspace's requests."
         }
-      />
-
-      <PolicyRow
-        key={`hint-${selected.workspace_id}`}
-        label="Prompt hint"
-        help="Used when a request declares otari_code_execution without a hint of its own."
-        placeholder="Show your working"
-        committed={policy?.default_purpose_hint ?? ""}
-        parse={parsePhrase}
-        commit={(default_purpose_hint) => commitField({ default_purpose_hint })}
-        disabled={narrowingDisabled}
-      />
-      <PolicyRow
-        key={`iterations-${selected.workspace_id}`}
-        label="Max tool-loop iterations"
-        help="Lowers the number of model-to-tool rounds. It never raises one."
-        placeholder="10"
-        isNumeric
-        committed={
-          policy?.max_iterations == null ? "" : String(policy.max_iterations)
-        }
-        parse={ceilingParser(MAX_ITERATIONS, "rounds")}
-        commit={(max_iterations) => commitField({ max_iterations })}
-        disabled={narrowingDisabled}
-      />
-      <PolicyRow
-        key={`timeout-${selected.workspace_id}`}
-        label="Execution timeout"
-        help="Lowers how long one execution may run, in seconds. It never raises it."
-        placeholder="30"
-        isNumeric
-        committed={
-          policy?.exec_timeout_s == null ? "" : String(policy.exec_timeout_s)
-        }
-        parse={ceilingParser(MAX_EXEC_TIMEOUT_S, "seconds")}
-        commit={(exec_timeout_s) => commitField({ exec_timeout_s })}
-        disabled={narrowingDisabled}
-      />
-
-      <SettingRow
-        label="Who runs provider code tools"
-        help="For requests billed here that declare a provider's own code tool. A pin here overrides the deployment default and refuses a request header that disagrees. It decides nothing until the deployment has a sandbox backend."
-        error={executorSave.error}
-        control={
-          <FilterSelect
-            fullWidth
-            ariaLabel="Who runs provider code tools for this workspace"
-            value={policy?.executor ?? DEPLOYMENT_EXECUTOR}
-            onChange={(next) =>
-              void executorSave.run(() =>
-                commitField({
-                  executor:
-                    next === DEPLOYMENT_EXECUTOR
-                      ? null
-                      : (next as UpdateWorkspaceCodeExecutionPolicyRequest["executor"]),
-                }),
-              )
-            }
-            options={EXECUTOR_OPTIONS}
-            disabled={narrowingDisabled || executorSave.isSaving}
-          />
-        }
-      />
-
-      <SettingRow
-        label="Sandbox image"
-        help="The image this workspace's code runs in, from the list the operator has approved."
-        error={imageSave.error}
+        error={save.error}
         note={
-          withdrawnImage ? (
-            <p className="text-caption text-warning">
-              This workspace is pinned to an image the operator no longer
-              approves, so its requests are refused. Pick another, or ask an
-              operator to restore it.
+          !hasSandbox ? (
+            <p className="text-caption text-subtle">
+              This deployment has no sandbox configured, so code execution is
+              off everywhere.
             </p>
+          ) : needsReset ? (
+            <div className="flex flex-col items-start gap-2">
+              <p className="text-caption text-warning">
+                This workspace's policy names an image or tool this deployment
+                no longer offers, so its requests are refused.
+              </p>
+              <Button
+                size="sm"
+                isPending={save.isSaving}
+                isDisabled={isUnreadable}
+                onPress={() => {
+                  // Never queued behind the switch's own write, whose
+                  // `enabled` this one would otherwise overwrite.
+                  if (save.isSaving || isUnreadable) return
+                  void save.run(clearStale)
+                }}
+              >
+                Clear it
+              </Button>
+            </div>
           ) : null
         }
         control={
-          allowedImages.length > 0 || withdrawnImage ? (
-            <FilterSelect
-              fullWidth
-              ariaLabel="Sandbox image for this workspace"
-              value={policy?.image ?? DEPLOYMENT_IMAGE}
-              onChange={(next) =>
-                void imageSave.run(() =>
-                  commitField({
-                    image: next === DEPLOYMENT_IMAGE ? null : next,
-                  }),
-                )
-              }
-              options={[
-                { value: DEPLOYMENT_IMAGE, label: "Deployment default" },
-                ...allowedImages.map((allowed) => ({
-                  value: allowed,
-                  label: allowed,
-                })),
-                ...(withdrawnImage
-                  ? [
-                      {
-                        value: withdrawnImage,
-                        label: `${withdrawnImage} (no longer approved)`,
-                      },
-                    ]
-                  : []),
-              ]}
-              disabled={narrowingDisabled || imageSave.isSaving}
-            />
-          ) : (
-            <span className="text-caption text-subtle">
-              None approved, so this workspace runs whatever the sandbox runs
-            </span>
-          )
-        }
-      />
-
-      <SettingRow
-        label="Code-execution tools"
-        help="Which of the tools this deployment's sandbox serves the workspace may use. All ticked narrows nothing."
-        error={toolsSave.error}
-        note={
-          staleTools.length > 0 ? (
-            <p className="text-caption text-warning">
-              This workspace's policy names {staleTools.join(", ")}, which this
-              deployment's sandbox no longer serves, so its requests are
-              refused. Untick it and pick what should be allowed, or set the
-              stance to Deployment default to drop the policy.
-            </p>
-          ) : null
-        }
-        control={
-          // With one tool served there is no subset to choose: ticking and
-          // unticking the single box would both mean "narrow nothing", and a
-          // control that cannot express anything is worse than a sentence
-          // saying so. The checkboxes appear the day a backend serves a second.
-          listedTools.length > 1 ? (
-            <fieldset className="flex flex-col gap-1.5">
-              <legend className="sr-only">Code-execution tools</legend>
-              {listedTools.map((tool) => (
-                <Checkbox
-                  key={tool}
-                  isSelected={storedTools == null || storedTools.includes(tool)}
-                  isDisabled={narrowingDisabled || toolsSave.isSaving}
-                  onChange={(isSelected) => toggleTool(tool, isSelected)}
-                >
-                  {staleTools.includes(tool)
-                    ? `${tool} (no longer served)`
-                    : tool}
-                </Checkbox>
-              ))}
-            </fieldset>
-          ) : (
-            <span className="text-caption text-subtle">
-              {availableTools.length === 1
-                ? `${availableTools[0]} only`
-                : "None served"}
-            </span>
-          )
+          <Toggle
+            label="Allow code execution"
+            isSelected={hasSandbox && isOn}
+            onChange={(next) => void setAllowed(next)}
+            isDisabled={isUnreadable || !hasSandbox || save.isSaving}
+          />
         }
       />
     </SettingsGroup>

@@ -1117,7 +1117,7 @@ describe("AppShell entitlement gating", () => {
     await user.click(screen.getByRole("button", { name: "Tools" }))
     expect(screen.getByRole("link", { name: "Web search" })).toBeInTheDocument()
     expect(
-      screen.getByRole("link", { name: "Code execution" }),
+      screen.getByRole("link", { name: "Code execution, Beta" }),
     ).toBeInTheDocument()
   })
 
@@ -1398,7 +1398,7 @@ describe("AppShell entitlement gating", () => {
       await screen.findByRole("link", { name: "Web search" }),
     ).toHaveAttribute("href", "/tools/web-search")
     expect(
-      screen.getByRole("link", { name: "Code execution" }),
+      screen.getByRole("link", { name: "Code execution, Beta" }),
     ).toBeInTheDocument()
   })
 

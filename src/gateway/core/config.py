@@ -25,13 +25,12 @@ from gateway.core.settings.pricing import PricingSettings
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
 from gateway.models.routing import RoutingConfig
-from gateway.models.tools import CodeExecutor
+from gateway.models.tools import CodeExecutor, SandboxProvider
 
 API_KEY_HEADER = "Otari-Key"
 # What may run a code-execution tool call. ``protocol`` is a backend of the
 # operator's own, reached over the published contract; the rest are hosted
 # providers this process drives itself (``adapters/code_execution_adapter.py``).
-SANDBOX_PROVIDERS = frozenset({"protocol", "e2b"})
 # Aliases accepted for a provider instance's ``provider_type`` that map onto a
 # real any-llm implementation. The "openai-compatible" spelling mirrors the
 # naming opencode / pi use for self-hosted OpenAI-compatible backends.
@@ -80,6 +79,9 @@ REQUEST_ID_HEADER = "Otari-Request-ID"
 # attempt ids, so this is the finer grained of the two. Hybrid mode only: a
 # standalone gateway resolves no attempts to name.
 ATTEMPT_ID_HEADER = "Otari-Attempt-ID"
+# Request header naming the budget a service key's new end user starts on, and
+# response header naming the budget that end user is on.
+END_USER_BUDGET_HEADER = "Otari-End-User-Budget"
 # The version this deployment's API is served under. The root is built from it
 # rather than parsed back out of it, so nothing has to guess where the version
 # segment sits in a path.
@@ -253,6 +255,50 @@ def validate_search_tool_entry(name: str, entry: Any) -> None:
 DECISION_PROVIDERS = ("typesafe", "openrouter", "llamacpp")
 # Self-hosted servers: no endpoint of their own to default to, and normally no key.
 DECISION_PROVIDERS_SELF_HOSTED = ("llamacpp",)
+
+
+DEFAULT_AGENT_MODEL_CANDIDATES: dict[str, str | None] = {
+    "haiku": (
+        "Simple, well-specified, mechanical work: find files or symbols, search, list, read and "
+        "report, summarize short material. Little judgment needed."
+    ),
+    "sonnet": (
+        "Moderate reasoning: explore several files and connect what they do, make a contained code "
+        "change, follow a plan with clear constraints, write tests for known behavior."
+    ),
+    "opus": (
+        "Hard reasoning: architecture or design choices, subtle or cross-cutting bugs, ambiguous or "
+        "underspecified goals, large refactors, security-sensitive changes."
+    ),
+}
+"""The models a subagent may be sent to unless ``agent_recommender_candidates`` says otherwise.
+
+Claude Code's own aliases, so each follows the current generation without an edit.
+"""
+
+MAX_AGENT_MODEL_CANDIDATES = 255
+"""The most options a choice question takes, so a longer list fails at startup, not per request."""
+
+
+def validate_agent_recommender(model: str, candidates: dict[str, str | None]) -> None:
+    """Validate the agent recommender's settings, raising ``ValueError`` on any problem.
+
+    The decision provider itself is resolved per request, so a deployment that
+    never asks for a recommendation need not configure one.
+    """
+    provider, _, bare_model = model.partition(":")
+    if not provider.strip() or not bare_model.strip():
+        msg = "agent_recommender_model must name a decision model as '<provider>:<model>'."
+        raise ValueError(msg)
+    if len(candidates) < 2:
+        msg = "agent_recommender_candidates needs at least two models to choose between."
+        raise ValueError(msg)
+    if len(candidates) > MAX_AGENT_MODEL_CANDIDATES:
+        msg = f"agent_recommender_candidates may name at most {MAX_AGENT_MODEL_CANDIDATES} models."
+        raise ValueError(msg)
+    if any(not name.strip() for name in candidates):
+        msg = "agent_recommender_candidates must not have an empty model name."
+        raise ValueError(msg)
 
 
 def validate_decision_provider_entry(name: str, entry: Any) -> None:
@@ -800,6 +846,17 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             "is being created, and files it under afterwards. Cosmetic: nothing verifies it."
         ),
     )
+    passkeys_enabled: Annotated[bool, OMITTED] = Field(
+        default=True,
+        description=(
+            "Whether this deployment offers passkeys at all. False takes every passkey route out of "
+            "the API (they answer 404, not 503), publishes no 'passkey' sign-in method, reports "
+            "passkeys_ready and passkeys_enabled as false so the dashboard hides its passkey page, "
+            "and skips the relying-party checks at startup, so leftover webauthn_* settings are "
+            "inert. Passkeys already registered stay in the database untouched and work again if "
+            "this is turned back on."
+        ),
+    )
     webauthn_allowed_origins: Annotated[list[str], OMITTED] = Field(
         default_factory=list,
         description=(
@@ -1018,6 +1075,22 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             "openrouter, llamacpp; defaults to the key), an 'api_key' (required except for llamacpp), "
             "an 'api_base' (required for llamacpp; https whenever a key is set), and a 'timeout' "
             "in seconds. Standalone-mode only."
+        ),
+    )
+    agent_recommender_model: Annotated[str, OMITTED] = Field(
+        default="typesafe:jev-latest",
+        description=(
+            "The decision model that recommends a subagent's model through POST /api/v1/routing/recommend, "
+            "as a decision_providers selector ('<provider>:<model>'). Resolved per request, so a deployment "
+            "that never asks need not configure the provider."
+        ),
+    )
+    agent_recommender_candidates: Annotated[dict[str, str | None], OMITTED] = Field(
+        default_factory=lambda: dict(DEFAULT_AGENT_MODEL_CANDIDATES),
+        description=(
+            "The models POST /api/v1/routing/recommend may send a subagent to, as the asking harness names "
+            "them, each with what it is for (or null when the name says enough). Two to 255. Defaults to "
+            "Claude Code's haiku, sonnet and opus aliases."
         ),
     )
     search_tools: Annotated[dict[str, dict[str, Any]], OMITTED] = Field(
@@ -1375,8 +1448,8 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             "provider names its workspaces its own way and ignores this."
         ),
     )
-    sandbox_provider: Annotated[str, Shown(SettingsGroup.TOOLS)] = Field(
-        default="protocol",
+    sandbox_provider: Annotated[SandboxProvider, Shown(SettingsGroup.TOOLS)] = Field(
+        default=SandboxProvider.PROTOCOL,
         description=(
             "What runs the code a code-execution tool call asks for: 'protocol' (the default) speaks the "
             "published code-execution protocol to the backend at sandbox_url, which is a container the "
@@ -1805,6 +1878,8 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
         the ID came from, so the common deployment configures one setting and
         gets a consistent pair rather than two settings it can put out of step.
         """
+        if not self.passkeys_enabled:
+            return None
         # Lowercased to match ``_host_of``, which returns what ``urlsplit``
         # already normalized. Without it a configured "Otari.Example.com" passes
         # validation (which compares against its own lowercased form) and then
@@ -2201,6 +2276,10 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
         configured = (self.code_execution_executor or "").strip() or otari_env("CODE_EXECUTION_EXECUTOR")
         return CodeExecutor.parse(configured) or CodeExecutor.AUTO
 
+    def effective_sandbox_provider(self) -> SandboxProvider:
+        """The deployment's ``sandbox_provider``: ``protocol`` when unset."""
+        return SandboxProvider.parse(self.sandbox_provider) or SandboxProvider.PROTOCOL
+
     def sandbox_configured(self) -> bool:
         """Whether this deployment can run ``otari_code_execution`` at all.
 
@@ -2209,7 +2288,7 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
 
         Gotcha: a cleared dashboard override leaves ``sandbox_url`` as ``None``, so the environment value still counts.
         """
-        if (self.sandbox_provider or "").strip().lower() not in ("", "protocol"):
+        if self.effective_sandbox_provider() is not SandboxProvider.PROTOCOL:
             return True
         return bool(self.sandbox_url or otari_env("SANDBOX_URL"))
 
@@ -2304,6 +2383,7 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
         """Validate the ``decision_providers`` map at startup so misconfig fails fast."""
         for name, entry in self.decision_providers.items():
             validate_decision_provider_entry(name, entry)
+        validate_agent_recommender(self.agent_recommender_model, self.agent_recommender_candidates)
 
     @model_validator(mode="after")
     def _validate_database_timeout_ordering(self) -> "GatewayConfig":
@@ -2509,14 +2589,15 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             raise ValueError(msg)
         return normalized
 
-    @field_validator("sandbox_provider")
+    @field_validator("sandbox_provider", mode="before")
     @classmethod
-    def _validate_sandbox_provider(cls, value: str) -> str:
-        normalized = (value or "protocol").strip().lower() or "protocol"
-        if normalized not in SANDBOX_PROVIDERS:
-            msg = f"sandbox_provider must be one of {sorted(SANDBOX_PROVIDERS)}, got '{value}'"
+    def _validate_sandbox_provider(cls, value: object) -> SandboxProvider:
+        provider = SandboxProvider.parse(value)
+        if provider is None:
+            allowed = sorted(member.value for member in SandboxProvider)
+            msg = f"sandbox_provider must be one of {allowed}, got '{value}'"
             raise ValueError(msg)
-        return normalized
+        return provider
 
     @field_validator("code_execution_executor")
     @classmethod
@@ -2692,6 +2773,9 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
         'https://otari.example.net' is a plausible pair of settings that can
         never complete a ceremony.
         """
+        if not self.passkeys_enabled:
+            return
+
         configured_id = (self.webauthn_rp_id or "").strip()
         if configured_id and _host_of(f"//{configured_id}") != configured_id.lower():
             # Two spellings reach here and neither parses under one form. A value

@@ -54,7 +54,7 @@ native shape happens here: the route never sees a provider payload.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import httpx
@@ -66,6 +66,10 @@ from gateway.core.config import (
     GatewayConfig,
     validate_search_tool_transport,
 )
+from gateway.services.web_search_providers import WebSearchProviderError, provider_search
+
+if TYPE_CHECKING:
+    from gateway.models.tools import WebSearchCredential
 
 EXA_PROVIDER = "exa"
 SEARXNG_PROVIDER = "searxng"
@@ -276,6 +280,35 @@ async def run_search(tool: SearchTool, query: SearchQuery) -> SearchOutcome:
     # Unreachable via config: startup validation rejects unknown providers.
     msg = f"Unsupported search provider '{tool.provider}'."
     raise SearchProviderError(msg)
+
+
+async def run_keyed_search(credential: WebSearchCredential, query: SearchQuery, *, timeout_s: float) -> SearchOutcome:
+    """Dispatch one search on a workspace's own provider key, in place of the named tool's backend.
+
+    ``timeout_s`` is the named tool's, so the key changes who pays and not how long a search may take.
+    The provider bills the key's owner directly, so no cost is reported and the tool's
+    configured flat rate is what the gateway records, as for the in-loop tool.
+    """
+    limit = _result_limit(query)
+    options: dict[str, Any] = {"max_results": limit}
+    if query.country:
+        options["country"] = query.country
+    try:
+        raw = await provider_search(
+            provider=credential.provider,
+            api_key=credential.api_key,
+            query=query.query,
+            options=options,
+            client=get_search_client(),
+            timeout_s=timeout_s,
+        )
+    except (WebSearchProviderError, ValueError) as exc:
+        msg = f"{credential.provider} search request failed: {exc}"
+        raise SearchProviderError(msg) from exc
+    # The hits come back SearXNG-shaped, so they are read and capped like a SearXNG answer.
+    max_chars = max(1, (query.max_tokens_per_page or DEFAULT_MAX_TOKENS_PER_PAGE) * _CHARS_PER_TOKEN)
+    hits = _apply_domain_filter(_searxng_hits({"results": raw}, max_chars), query.domain_filter)
+    return SearchOutcome(results=hits[:limit], cost_usd=None)
 
 
 # --------------------------------------------------------------------------- #

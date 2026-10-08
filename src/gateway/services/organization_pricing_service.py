@@ -66,6 +66,7 @@ from gateway.services.provider_kwargs import is_deployment_instance_key, split_s
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 
 @dataclass(frozen=True)
@@ -144,7 +145,9 @@ class OrganizationPricingService:
         """
         self.db = db
         self.config = config
-        self.organizations = OrganizationService(db, membership_listener=None)
+        self.organizations = OrganizationService(
+            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        )
         self.provider_keys = OrgProviderKeyService(db)
         self.model_provider = model_provider
         self.rows = OrganizationModelPricingRepository(db)

@@ -92,12 +92,16 @@ const FIELDS: ToolSettingField[] = [
   },
 ]
 
-const RESPONSE: ToolSettingsResponse = { fields: FIELDS }
+const RESPONSE: ToolSettingsResponse = {
+  fields: FIELDS,
+  sandbox_provider: "protocol",
+}
 
 // What the server hands a non-operator: the same fields with the three
 // service endpoints withheld rather than masked (otari-ai#1969).
 const TENANT_RESPONSE: ToolSettingsResponse = {
   fields: FIELDS.filter((field) => field.type !== "url"),
+  sandbox_provider: null,
 }
 
 // GET /v1/tools drives the "how to call this" card. `accepted_types` is what the
@@ -156,12 +160,15 @@ const WITHOUT_ORGANIZATION_GUARDRAILS = bootstrap({
   ),
 })
 
-function renderWithClient(ui: ReactElement) {
+function renderWithClient(
+  ui: ReactElement,
+  deployment = WITHOUT_ORGANIZATION_GUARDRAILS,
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    <DeploymentProvider value={WITHOUT_ORGANIZATION_GUARDRAILS}>
+    <DeploymentProvider value={deployment}>
       <QueryClientProvider client={client}>{ui}</QueryClientProvider>
     </DeploymentProvider>,
   )
@@ -241,7 +248,7 @@ const ENGINES = named("Engines", "web_search_engines")
 const MAX_RESULTS = named("Max results", "web_search_max_results")
 const EXTRACT = named("Extract page content", "web_search_extract")
 const INTERCEPT = named("Intercept provider web search", "web_search_intercept")
-const SANDBOX_URL = named("Backend URL", "sandbox_url")
+const SANDBOX_URL = named("Sandbox URL", "sandbox_url")
 const EXECUTOR = named(
   "Who runs provider code tools",
   "code_execution_executor",
@@ -290,7 +297,7 @@ describe("ToolsGuardrailsPage", () => {
       await screen.findByRole("heading", { name: "Web search · Backend" }),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("heading", { name: "Code execution · Backend" }),
+      screen.getByRole("heading", { name: "Code execution · Sandbox" }),
     ).toBeInTheDocument()
     expect(
       await screen.findByRole("heading", { name: "Guardrails · Backend" }),
@@ -574,11 +581,12 @@ describe("ToolsGuardrailsPage", () => {
     const user = userEvent.setup()
     renderWithClient(<ToolsGuardrailsPage only="sandbox" />)
     await screen.findByLabelText(SANDBOX_URL)
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
 
     expect(selectTrigger(EXECUTOR)).toHaveTextContent("Default (auto)")
     // No sandbox URL in the fixture, so the row says the setting is inert.
     expect(
-      screen.getByText(/Takes effect once a Backend URL is set/),
+      screen.getByText(/Takes effect once a sandbox is configured/),
     ).toBeInTheDocument()
     await pickOption(user, EXECUTOR, "Always here, on this sandbox")
 
@@ -587,6 +595,31 @@ describe("ToolsGuardrailsPage", () => {
         code_execution_executor: "otari",
       }),
     )
+  })
+
+  it("names a self-hosted sandbox and leaves the purpose hint to the API", async () => {
+    mockApi()
+    renderWithClient(<ToolsGuardrailsPage only="sandbox" />)
+    await screen.findByLabelText(SANDBOX_URL)
+
+    expect(screen.getByText("Self-hosted")).toBeInTheDocument()
+    expect(screen.queryByText("sandbox_purpose_hint")).not.toBeInTheDocument()
+  })
+
+  it("names E2B and drops the fields only a self-hosted sandbox reads", async () => {
+    mockApi({ settings: { ...RESPONSE, sandbox_provider: "e2b" } })
+    const user = userEvent.setup()
+    renderWithClient(<ToolsGuardrailsPage only="sandbox" />)
+
+    expect(await screen.findByText("E2B")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Advanced" }))
+    expect(screen.queryByLabelText(SANDBOX_URL)).not.toBeInTheDocument()
+    expect(screen.queryByText("sandbox_session_image")).not.toBeInTheDocument()
+    // E2B is a sandbox, so the executor is not inert.
+    expect(selectTrigger(EXECUTOR)).toBeInTheDocument()
+    expect(
+      screen.queryByText(/Takes effect once a sandbox is configured/),
+    ).not.toBeInTheDocument()
   })
 
   it("surfaces a failed boolean save inline (not silently)", async () => {
@@ -672,7 +705,7 @@ describe("ToolsGuardrailsPage tool status", () => {
     ).toBeInTheDocument()
     // The code-execution fixture has available: false.
     expect(
-      screen.getByRole("button", { name: /Unavailable · no backend/ }),
+      screen.getByRole("button", { name: /Unavailable · no sandbox/ }),
     ).toBeInTheDocument()
   })
 
@@ -957,6 +990,98 @@ describe("ToolsGuardrailsPage by caller role", () => {
       ),
     ).toBeInTheDocument()
     expect(screen.queryByLabelText(SANDBOX_URL)).not.toBeInTheDocument()
+  })
+
+  it("shows a non-operator the tool, and only that it is off when it is", async () => {
+    mockApi({
+      settings: TENANT_RESPONSE,
+      context: organizationContext({
+        deployment_operator: false,
+        role: "member",
+      }),
+    })
+    const user = userEvent.setup()
+    renderWithClient(<ToolsGuardrailsPage only="sandbox" />)
+
+    // The fixture's sandbox is unconfigured, so the tool reads as unavailable.
+    const card = await screen.findByRole("button", {
+      name: /otari_code_execution/,
+    })
+    expect(card).toHaveTextContent("Unavailable")
+    expect(card).not.toHaveTextContent("no backend")
+    await user.click(card)
+    expect(
+      screen.getByText("Not available on this deployment."),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /Set backend URL/ }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("leaves availability off the code-execution tool on a hosted control plane", async () => {
+    // Its sandbox is the platform's, so this process's own config, which says
+    // unavailable in the fixture, would be the wrong answer.
+    mockApi({
+      settings: TENANT_RESPONSE,
+      context: organizationContext({
+        deployment_operator: false,
+        role: "member",
+      }),
+    })
+    renderWithClient(<ToolsGuardrailsPage only="sandbox" />, {
+      ...WITHOUT_ORGANIZATION_GUARDRAILS,
+      deployment_type: "hosted",
+    })
+
+    const card = await screen.findByRole("button", {
+      name: /otari_code_execution/,
+    })
+    expect(card).not.toHaveTextContent(/available/i)
+  })
+
+  it("leaves the control plane's own sandbox settings off a hosted page, even for an operator", async () => {
+    // It serves no inference, so they run nothing; the platform's sandbox does.
+    mockApi()
+    renderWithClient(<ToolsGuardrailsPage only="sandbox" />, {
+      ...WITHOUT_ORGANIZATION_GUARDRAILS,
+      deployment_type: "hosted",
+    })
+
+    await screen.findByRole("button", { name: /otari_code_execution/ })
+    expect(screen.queryByLabelText(SANDBOX_URL)).not.toBeInTheDocument()
+    expect(screen.queryByText("Self-hosted")).not.toBeInTheDocument()
+  })
+
+  it("leaves availability off every tool on a hosted control plane", async () => {
+    mockApi()
+    renderWithClient(<ToolsGuardrailsPage only="web_search" />, {
+      ...WITHOUT_ORGANIZATION_GUARDRAILS,
+      deployment_type: "hosted",
+    })
+
+    const card = await screen.findByRole("button", { name: /otari_web_search/ })
+    expect(card).not.toHaveTextContent(/available/i)
+  })
+
+  it("shows a non-operator no deployment sandbox settings at all", async () => {
+    mockApi({
+      settings: TENANT_RESPONSE,
+      context: organizationContext({
+        deployment_operator: false,
+        role: "member",
+      }),
+    })
+    renderWithClient(<ToolsGuardrailsPage only="sandbox" />)
+
+    await screen.findByText(
+      /Per-workspace code execution is set on a workspace/,
+    )
+    expect(
+      screen.queryByRole("heading", { name: "Sandbox" }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByText("code_execution_executor"),
+    ).not.toBeInTheDocument()
   })
 
   it("still renders the operator forms alongside the workspace cards for an operator", async () => {

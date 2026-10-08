@@ -43,7 +43,7 @@ from gateway.services.web_retrieval_policy import (
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
-    from gateway.models.tools import ResolvedWebSearchConfig
+    from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential
 
 
 @dataclass(frozen=True)
@@ -52,6 +52,8 @@ class WebAccessGrant:
 
     search_tool_entry: dict[str, Any] | None
     fetch_policy: DomainPolicy
+    # The workspace's own search key, set only where it declared a search.
+    search_credential: WebSearchCredential | None = None
 
 
 def apply_web_access_policy(
@@ -94,7 +96,11 @@ def apply_web_access_policy(
             policy,
             baseline_max_results=web_search_max_results_baseline(config),
         )
-    return WebAccessGrant(search_tool_entry=search_tool_entry, fetch_policy=fetch_policy)
+    return WebAccessGrant(
+        search_tool_entry=search_tool_entry,
+        fetch_policy=fetch_policy,
+        search_credential=policy.credential if policy is not None and search_tool_entry is not None else None,
+    )
 
 
 def _fetch_policy(workspace_domains: DomainPolicy, search_tool_entry: dict[str, Any] | None) -> DomainPolicy:

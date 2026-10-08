@@ -20,6 +20,7 @@ from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User as TenancyUser
+from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort, Malformed, Misdirected
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
@@ -45,6 +46,11 @@ from gateway.repositories.tenancy import (
     OrgProviderKeyRepository,
     WorkspaceRepository,
 )
+from gateway.repositories.tools import (
+    OrgWebSearchKeyRepository,
+    WorkspaceCodeExecutionPolicyRepository,
+    WorkspaceWebSearchKeyOverrideRepository,
+)
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetMembershipListener, BudgetService
@@ -56,7 +62,8 @@ from gateway.services.inference import IdempotencyService
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.organization_pricing_service import OrganizationPricingService
-from gateway.services.overview.overview_service import OverviewService
+from gateway.services.overview import OverviewService
+from gateway.services.playground_service import ForwardedToolOffer, LocalToolOffer, PlaygroundToolOffer
 from gateway.services.providers import OrgProviderModelService, ProviderEndpointService, refresh_provider_endpoint_cache
 from gateway.services.rate_limits import RateLimitService
 from gateway.services.routing import clear_router_backend_cache
@@ -69,7 +76,15 @@ from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
 )
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener, WorkspaceListener
 from gateway.services.tenancy.workspace_service import WorkspaceService
+from gateway.services.tools import (
+    CodeExecutionWorkspaceDefaults,
+    WebSearchKeyService,
+    WorkspaceCodeExecutionPolicies,
+    WorkspaceCodeExecutionPolicyService,
+    WorkspaceSearchKeys,
+)
 from gateway.services.workspace_scope import default_workspace_id
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
@@ -804,12 +819,85 @@ def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:
 MembershipListenerDep = Annotated[MembershipListener, Depends(get_membership_listener)]
 
 
+def get_workspace_listener(
+    uow: UnitOfWorkDep, config: Annotated[GatewayConfig, Depends(get_config)]
+) -> WorkspaceListener:
+    """Return what sets up a workspace this request creates, bound per mode.
+
+    A hosted control plane reads a workspace with no code execution policy as off, so there each new workspace
+    starts with one that turns it on. Elsewhere no policy already means on, so nothing is staged.
+    It writes through the request's Unit of Work, so a service that creates workspaces must be built on the same one.
+    """
+    if config.is_hosted_mode:
+        return CodeExecutionWorkspaceDefaults(WorkspaceCodeExecutionPolicyRepository(uow))
+    return NullWorkspaceListener()
+
+
+WorkspaceListenerDep = Annotated[WorkspaceListener, Depends(get_workspace_listener)]
+
+
+def get_workspace_code_execution_policy_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> WorkspaceCodeExecutionPolicyService:
+    """Build the workspace code execution policy service on the request's Unit of Work.
+
+    ``sandbox_configured`` is the check ``GET /api/v1/tools`` makes before it advertises code
+    execution, so the page and discovery agree. ``allowed_images`` is the operator's curated list.
+    Both are properties of the running gateway, handed in rather than read by the service.
+    """
+    return WorkspaceCodeExecutionPolicyService(
+        uow,
+        WorkspaceCodeExecutionPolicyRepository(uow),
+        WorkspaceAccess(
+            db, OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+        ),
+        sandbox_configured=config.sandbox_configured(),
+        allowed_images=config.pinnable_sandbox_images(),
+    )
+
+
+WorkspaceCodeExecutionPolicyServiceDep = Annotated[
+    WorkspaceCodeExecutionPolicyService, Depends(get_workspace_code_execution_policy_service)
+]
+
+
+def get_workspace_code_execution_policies(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WorkspaceCodeExecutionPolicies:
+    """Build the request path's reader of a workspace's code execution policy, on the request's session.
+
+    Also the builder the container's stored code execution policy takes, which is why it takes a bare session.
+    """
+    return WorkspaceCodeExecutionPolicies(WorkspaceCodeExecutionPolicyRepository(db))
+
+
+WorkspaceCodeExecutionPoliciesDep = Annotated[
+    WorkspaceCodeExecutionPolicies, Depends(get_workspace_code_execution_policies)
+]
+
+
+def get_playground_tool_offer(config: Annotated[GatewayConfig, Depends(get_config)]) -> PlaygroundToolOffer:
+    """Return what this deployment offers a Playground message, bound per mode.
+
+    A hosted control plane forwards each completion to its data plane, whose sandbox and file store serve it.
+    """
+    if config.is_hosted_mode:
+        return ForwardedToolOffer(config)
+    return LocalToolOffer(config)
+
+
+PlaygroundToolOfferDep = Annotated[PlaygroundToolOffer, Depends(get_playground_tool_offer)]
+
+
 async def get_current_identity(
     db: Annotated[AsyncSession, Depends(get_db)],
     session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
     _master_key: Annotated[str | None, Depends(verify_master_key)],
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
+    workspace_listener: WorkspaceListenerDep,
 ) -> TenancyUser:
     """Resolve the tenancy identity acting on this request.
 
@@ -832,7 +920,12 @@ async def get_current_identity(
     """
     if session_identity is not None:
         return session_identity
-    return await ensure_bootstrap_identity(db, uow=uow, membership_listener=membership_listener)
+    return await ensure_bootstrap_identity(
+        db,
+        uow=uow,
+        membership_listener=membership_listener,
+        workspace_listener=workspace_listener,
+    )
 
 
 CurrentIdentity = Annotated[TenancyUser, Depends(get_current_identity)]
@@ -869,6 +962,18 @@ ContainerDep = Annotated[Container, Depends(get_container)]
 # for the first kind. A route that means to commit a port's writes with its own
 # must take its session from ``get_db_if_needed`` too.
 PortSessionDep = Annotated[AsyncSession | None, Depends(get_db_if_needed)]
+
+
+def get_agent_model_recommender_port(container: ContainerDep) -> AgentModelRecommenderPort:
+    """Resolve the subagent model recommender this build bound at startup.
+
+    No session: the adapter asks a model, not this database, and the call is
+    metered on the route's own session by the decisions scaffold.
+    """
+    return container.resolve(AgentModelRecommenderPort, None)
+
+
+AgentModelRecommenderPortDep = Annotated[AgentModelRecommenderPort, Depends(get_agent_model_recommender_port)]
 
 
 def get_api_key_format_port(db: PortSessionDep, container: ContainerDep) -> ApiKeyFormatPort:
@@ -985,6 +1090,7 @@ def get_overview_service(
     db: Annotated[AsyncSession, Depends(get_db)],
     uow: UnitOfWorkDep,
     membership_listener: MembershipListenerDep,
+    workspace_listener: WorkspaceListenerDep,
 ) -> OverviewService:
     """Build the dashboard overview's summary service on the request's session.
 
@@ -993,11 +1099,11 @@ def get_overview_service(
     """
     return OverviewService(
         OverviewRepository(db),
-        OrganizationService(db, membership_listener=None),
+        OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
         DeploymentUserService(db),
         # The listener is for writes; this service only reads, and the same
         # pairing is what `routes/workspaces.py` builds.
-        WorkspaceService(db, uow=uow, membership_listener=membership_listener),
+        WorkspaceService(db, uow=uow, membership_listener=membership_listener, workspace_listener=workspace_listener),
     )
 
 
@@ -1009,7 +1115,7 @@ def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Or
 
     It reads only. A membership write needs the listener this pairing leaves unset.
     """
-    return OrganizationService(db, membership_listener=None)
+    return OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
 
 
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
@@ -1020,7 +1126,7 @@ def get_budget_service(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> BudgetService:
     """Build the request's budget service on the request's Unit of Work."""
-    organizations = OrganizationService(db, membership_listener=None)
+    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
     return BudgetService(
         uow,
         BudgetRepositories.on(uow),
@@ -1055,7 +1161,7 @@ def get_organization_guardrail_definition_service(
     """
     return OrganizationGuardrailDefinitionService(
         definitions=OrganizationGuardrailDefinitionRepository(uow),
-        organizations=OrganizationService(db, membership_listener=None),
+        organizations=OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
         uow=uow,
         build_state=organization_guardrail_runner.build_state,
         rebuild=organization_guardrail_runner.rebuild_definition,
@@ -1093,7 +1199,7 @@ def get_org_provider_model_service(
     return OrgProviderModelService(
         uow,
         config=config,
-        organizations=OrganizationService(db, membership_listener=None),
+        organizations=OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
         provider_keys=OrgProviderKeyService(db),
         org_pricing=OrganizationPricingService(db, config, model_provider=model_provider),
         models=OrgProviderKeyModelRepository(uow),
@@ -1131,6 +1237,38 @@ def get_provider_endpoint_service(
 
 
 ProviderEndpointServiceDep = Annotated[ProviderEndpointService, Depends(get_provider_endpoint_service)]
+
+
+def get_web_search_key_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WebSearchKeyService:
+    """Build the organization web search key service on the request's Unit of Work."""
+    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    return WebSearchKeyService(
+        uow,
+        keys=OrgWebSearchKeyRepository(uow),
+        overrides=WorkspaceWebSearchKeyOverrideRepository(uow),
+        organizations=organizations,
+        workspaces=WorkspaceAccess(db, organizations),
+        lock_workspace=WorkspaceRepository(db).lock,
+    )
+
+
+WebSearchKeyServiceDep = Annotated[WebSearchKeyService, Depends(get_web_search_key_service)]
+
+
+def get_workspace_search_keys(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceSearchKeys:
+    """Build the resolver of the key a workspace searches with, on the request's session.
+
+    Also the builder the container's stored web search policy takes, which is why it takes a bare session.
+    """
+    return WorkspaceSearchKeys(
+        workspaces=WorkspaceRepository(db), overrides=WorkspaceWebSearchKeyOverrideRepository(db)
+    )
+
+
+WorkspaceSearchKeysDep = Annotated[WorkspaceSearchKeys, Depends(get_workspace_search_keys)]
 
 
 def get_rate_limit_service(
@@ -1262,7 +1400,11 @@ async def _caller_organization_id(
     so an operator running several organizations behind one gateway works in the
     one they are currently in rather than across all of them (otari#817).
     """
-    return (await OrganizationService(db, membership_listener=None).get_active_organization_for_user(identity)).id
+    return (
+        await OrganizationService(
+            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        ).get_active_organization_for_user(identity)
+    ).id
 
 
 CallerOrganization = Annotated[uuid.UUID, Depends(_caller_organization_id)]
@@ -1278,6 +1420,7 @@ async def get_feedback_service(
 
 
 __all__ = [
+    "AgentModelRecommenderPortDep",
     "BillingPortDep",
     "CodeExecutionPolicyPortDep",
     "ContainerDep",
@@ -1297,6 +1440,7 @@ __all__ = [
     "ToolPorts",
     "ToolPortsDep",
     "WebSearchPolicyPortDep",
+    "get_agent_model_recommender_port",
     "get_config",
     "get_container",
     "get_telemetry_storage_port",

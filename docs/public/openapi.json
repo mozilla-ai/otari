@@ -614,6 +614,156 @@
         "title": "ActiveOrganizationUpdateRequest",
         "type": "object"
       },
+      "AgentModelRecommendation": {
+        "description": "The model recommended for the subagent.",
+        "example": {
+          "model": "sonnet",
+          "probabilities": {
+            "haiku": 0.21,
+            "opus": 0.07,
+            "sonnet": 0.72
+          },
+          "reason": "jev-1.13.0 chose sonnet with 72%"
+        },
+        "properties": {
+          "model": {
+            "description": "A model alias or id the harness can start the subagent on.",
+            "title": "Model",
+            "type": "string"
+          },
+          "probabilities": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The decision model's probability for each candidate, when it reports them.",
+            "title": "Probabilities"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why, in one short sentence the harness may show.",
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "title": "AgentModelRecommendation",
+        "type": "object"
+      },
+      "AgentModelRecommendationRequest": {
+        "additionalProperties": false,
+        "description": "A coding agent about to start a subagent, asking which model it should run on.\n\nEvery field but ``user`` is a fact the harness already holds at spawn time.\nThe prompt is the task the subagent is given; it is read for the\nrecommendation and never stored or logged.",
+        "example": {
+          "agent_type": "Explore",
+          "description": "Find the budget reservation code",
+          "harness": "claude-code",
+          "parent_model": "claude-opus-5",
+          "prompt": "Find where budgets are reserved before dispatch and report the call chain.",
+          "session_id": "bf05abe2-5ff2-4eb0-8459-ab578d5c9468",
+          "tool_use_id": "toolu_01Ab3dEfGh"
+        },
+        "properties": {
+          "agent_type": {
+            "description": "The subagent type: a built-in such as `Explore` or `Plan`, or a custom agent's name.",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Agent Type",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "description": "The caller's short description of the task.",
+            "maxLength": 1024,
+            "title": "Description",
+            "type": "string"
+          },
+          "harness": {
+            "description": "The agent harness asking, such as `claude-code`.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Harness",
+            "type": "string"
+          },
+          "parent_model": {
+            "description": "The model the parent conversation runs on, as the harness names it.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Parent Model",
+            "type": "string"
+          },
+          "prompt": {
+            "description": "The task the subagent is given.",
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "requested_model": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The model the caller asked for, if any. Sent as a fact; the recommendation is the gateway's.",
+            "title": "Requested Model"
+          },
+          "session_id": {
+            "description": "The harness's own id for the session the spawn happens in.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Session Id",
+            "type": "string"
+          },
+          "tool_use_id": {
+            "description": "The harness's own id for the tool call that spawns the subagent.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Tool Use Id",
+            "type": "string"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "User ID the decision is billed to when asking with the master key; not sent upstream.",
+            "title": "User"
+          }
+        },
+        "required": [
+          "harness",
+          "session_id",
+          "tool_use_id",
+          "agent_type",
+          "prompt",
+          "parent_model"
+        ],
+        "title": "AgentModelRecommendationRequest",
+        "type": "object"
+      },
       "AgentTelemetryBehavior": {
         "description": "Counts from the behavioral events already captured on the logs signal.",
         "properties": {
@@ -3480,6 +3630,19 @@
             "title": "Messages",
             "type": "array"
           },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tags for cost attribution, recorded on the request's usage rows and filterable in the usage API: up to 16 string pairs, keys up to 64 characters and values up to 512. A null value is ignored. LiteLLM's nested `spend_logs_metadata` object is also read, and wins over a flat key of the same name; it is never forwarded to the provider.",
+            "title": "Metadata"
+          },
           "model": {
             "title": "Model",
             "type": "string"
@@ -4341,8 +4504,24 @@
                 "type": "null"
               }
             ],
-            "description": "Budget each end user this key creates is capped at. Null leaves end users capped only by this key's own ceiling.",
+            "description": "Budget each end user this key creates is capped at, unless the request names another with Otari-End-User-Budget. Null leaves end users capped only by this key's own ceiling.",
             "title": "End User Budget Id"
+          },
+          "end_user_budget_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Budgets a request may start a new end user on by naming one in Otari-End-User-Budget. Null allows end_user_budget_id alone. When both are set, end_user_budget_id must be on the list.",
+            "title": "End User Budget Ids"
           },
           "exclude_from_budget": {
             "default": false,
@@ -4471,6 +4650,13 @@
             ],
             "title": "End User Budget Id"
           },
+          "end_user_budget_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "End User Budget Ids",
+            "type": "array"
+          },
           "exclude_from_budget": {
             "title": "Exclude From Budget",
             "type": "boolean"
@@ -4579,6 +4765,7 @@
           "capture_agent_telemetry",
           "is_service_key",
           "end_user_budget_id",
+          "end_user_budget_ids",
           "metadata"
         ],
         "title": "CreateKeyResponse",
@@ -5360,6 +5547,11 @@
             "title": "Open Signup",
             "type": "boolean"
           },
+          "passkeys_enabled": {
+            "description": "Whether this deployment offers passkeys at all (the passkeys_enabled setting). False means the passkey routes are not mounted and the dashboard hides its passkey page, which is a different answer from passkeys_ready: a deployment that merely has not configured a relying party is ready for nobody yet but still shows the page that says so. False for a hybrid gateway, which issues no session of its own.",
+            "title": "Passkeys Enabled",
+            "type": "boolean"
+          },
           "passkeys_ready": {
             "description": "Whether this deployment can run a passkey ceremony at all: it has a relying-party ID (webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a registered passkey could sign somebody in *right now*: an operator with none yet needs this one, or the page that registers the first would be hidden from them. False for a hybrid gateway, which issues no session of its own.",
             "title": "Passkeys Ready",
@@ -5451,6 +5643,7 @@
           "site_url",
           "sign_in_methods",
           "maintenance_mode",
+          "passkeys_enabled",
           "passkeys_ready",
           "oauth_providers",
           "open_signup",
@@ -5862,6 +6055,144 @@
           "input"
         ],
         "title": "EmbeddingRequest",
+        "type": "object"
+      },
+      "EndUserPublic": {
+        "description": "An end user of a service key, addressed by the id the service named it by.",
+        "properties": {
+          "blocked": {
+            "title": "Blocked",
+            "type": "boolean"
+          },
+          "budget_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Id"
+          },
+          "budget_started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Started At"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_requests": {
+            "title": "Current Requests",
+            "type": "integer"
+          },
+          "current_tokens": {
+            "title": "Current Tokens",
+            "type": "integer"
+          },
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "next_budget_reset_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Budget Reset At"
+          },
+          "owner_user_id": {
+            "title": "Owner User Id",
+            "type": "string"
+          },
+          "reserved": {
+            "title": "Reserved",
+            "type": "number"
+          },
+          "spend": {
+            "title": "Spend",
+            "type": "number"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "external_id",
+          "owner_user_id",
+          "budget_id",
+          "blocked",
+          "spend",
+          "reserved",
+          "current_tokens",
+          "current_requests",
+          "budget_started_at",
+          "next_budget_reset_at",
+          "created_at"
+        ],
+        "title": "EndUserPublic",
+        "type": "object"
+      },
+      "EndUserPut": {
+        "description": "Create an end user ahead of its first request, or move one, onto a budget on the key's list.",
+        "properties": {
+          "budget_id": {
+            "description": "A budget on the key's end_user_budget_ids",
+            "minLength": 1,
+            "title": "Budget Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "budget_id"
+        ],
+        "title": "EndUserPut",
+        "type": "object"
+      },
+      "EndUserUpdate": {
+        "description": "Block, unblock or move an end user. An omitted field is left as it is.",
+        "properties": {
+          "blocked": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the end user is refused",
+            "title": "Blocked"
+          },
+          "budget_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A budget on the key's end_user_budget_ids to move the end user to",
+            "title": "Budget Id"
+          }
+        },
+        "title": "EndUserUpdate",
         "type": "object"
       },
       "ExecutionState": {
@@ -7149,6 +7480,13 @@
             ],
             "title": "End User Budget Id"
           },
+          "end_user_budget_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "End User Budget Ids",
+            "type": "array"
+          },
           "exclude_from_budget": {
             "title": "Exclude From Budget",
             "type": "boolean"
@@ -7269,6 +7607,7 @@
           "capture_agent_telemetry",
           "is_service_key",
           "end_user_budget_id",
+          "end_user_budget_ids",
           "workspace_id",
           "metadata"
         ],
@@ -8022,6 +8361,7 @@
                 "type": "null"
               }
             ],
+            "description": "Tags for cost attribution, recorded on the request's usage rows and filterable in the usage API: up to 16 string pairs, keys up to 64 characters and values up to 512. A null value is ignored. LiteLLM's nested `spend_logs_metadata` object is also read, and wins over a flat key of the same name; it is never forwarded to the provider. `user_id` names the billed user and is not a tag.",
             "title": "Metadata"
           },
           "model": {
@@ -9520,6 +9860,175 @@
           "count"
         ],
         "title": "OrgProviderModelsRefreshPublic",
+        "type": "object"
+      },
+      "OrgWebSearchKeyCreateRequest": {
+        "description": "What a caller sends to add a key. The service keeps only its ciphertext and ``last4``.",
+        "example": {
+          "api_key": "<your Tavily API key>",
+          "name": "production",
+          "provider": "tavily"
+        },
+        "properties": {
+          "api_key": {
+            "minLength": 1,
+            "title": "Api Key",
+            "type": "string"
+          },
+          "name": {
+            "description": "How the organization tells this key apart from its others.",
+            "maxLength": 255,
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "description": "The search provider the key is for: tavily or brave.",
+            "maxLength": 255,
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "name",
+          "api_key"
+        ],
+        "title": "OrgWebSearchKeyCreateRequest",
+        "type": "object"
+      },
+      "OrgWebSearchKeyPublic": {
+        "description": "One key as the API shows it: never the key itself, only ``last4``.",
+        "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_org_default": {
+            "title": "Is Org Default",
+            "type": "boolean"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "usable": {
+            "description": "False when this deployment cannot decrypt the stored key, so no search uses it. It is still listed, because replacing or deleting it is what fixes it.",
+            "title": "Usable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "provider",
+          "name",
+          "is_org_default",
+          "usable",
+          "created_at"
+        ],
+        "title": "OrgWebSearchKeyPublic",
+        "type": "object"
+      },
+      "OrgWebSearchKeyUpdateRequest": {
+        "description": "A partial update: only what is set is applied.",
+        "properties": {
+          "api_key": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "OrgWebSearchKeyUpdateRequest",
+        "type": "object"
+      },
+      "OrgWebSearchKeysPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/OrgWebSearchKeyPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "OrgWebSearchKeysPublic",
         "type": "object"
       },
       "OrganizationBudgetCreate": {
@@ -14415,15 +14924,14 @@
           "metadata": {
             "anyOf": [
               {
-                "additionalProperties": {
-                  "type": "string"
-                },
+                "additionalProperties": true,
                 "type": "object"
               },
               {
                 "type": "null"
               }
             ],
+            "description": "Tags for cost attribution, recorded on the request's usage rows and filterable in the usage API: up to 16 string pairs, keys up to 64 characters and values up to 512. A null value is ignored. LiteLLM's nested `spend_logs_metadata` object is also read, and wins over a flat key of the same name; it is never forwarded to the provider.",
             "title": "Metadata"
           },
           "model": {
@@ -14769,6 +15277,15 @@
         ],
         "title": "RouterStatus",
         "type": "object"
+      },
+      "SandboxProvider": {
+        "description": "What runs the code a code-execution tool call asks for, chosen per deployment.\n\nValues are read without regard to case or surrounding whitespace.",
+        "enum": [
+          "protocol",
+          "e2b"
+        ],
+        "title": "SandboxProvider",
+        "type": "string"
       },
       "ScopedBudgetResponse": {
         "description": "One scoped ceiling and its live counters.\n\nUnlike ``/api/v1/budgets``, the counters are the row's own: a scoped ceiling is\nenforced against ``current_spend + reserved_spend``, so there is no rollup\nover users to compute.\n\nEvery limit, along with ``budget_duration_sec`` and ``reset_alignment``, is\nread off the budget rather than stored here, and carried on the wire so a\ncaller can render a ceiling without fetching every budget to resolve one id.",
@@ -16188,6 +16705,17 @@
             },
             "title": "Fields",
             "type": "array"
+          },
+          "sandbox_provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SandboxProvider"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What runs generated code: 'protocol' (a sandbox at sandbox_url) or 'e2b'. Set at startup, not editable here. Null for a reader who does not operate the deployment."
           }
         },
         "required": [
@@ -16413,6 +16941,21 @@
               }
             ],
             "title": "End User Budget Id"
+          },
+          "end_user_budget_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End User Budget Ids"
           },
           "exclude_from_budget": {
             "anyOf": [
@@ -17726,6 +18269,20 @@
             ],
             "title": "Status Code"
           },
+          "tags": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          },
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
@@ -18499,6 +19056,14 @@
               "$ref": "#/components/schemas/UsageGroupRow"
             },
             "title": "By Source Label",
+            "type": "array"
+          },
+          "by_tag": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/UsageGroupRow"
+            },
+            "title": "By Tag",
             "type": "array"
           },
           "by_tool": {
@@ -20378,6 +20943,125 @@
           "enabled"
         ],
         "title": "WorkspaceWebSearchConfigUpdate",
+        "type": "object"
+      },
+      "WorkspaceWebSearchKeyOverrideRequest": {
+        "description": "Tri-state: an omitted flag keeps its value.\n\nPinning a key re-enables it and unpins any other key of the workspace, and turning a\nkey off unpins it. Sending both flags true is refused. Both false deletes the override.",
+        "example": {
+          "is_default": true
+        },
+        "properties": {
+          "disabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabled"
+          },
+          "is_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Default"
+          }
+        },
+        "title": "WorkspaceWebSearchKeyOverrideRequest",
+        "type": "object"
+      },
+      "WorkspaceWebSearchKeyPublic": {
+        "description": "One of the organization's keys, as one workspace sees it.",
+        "properties": {
+          "disabled": {
+            "description": "The workspace turned this key off.",
+            "title": "Disabled",
+            "type": "boolean"
+          },
+          "is_default": {
+            "description": "The workspace pinned this key as its own.",
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "is_effective": {
+            "description": "This is the key the workspace's searches use.",
+            "title": "Is Effective",
+            "type": "boolean"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "org_web_search_key_id": {
+            "format": "uuid",
+            "title": "Org Web Search Key Id",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "usable": {
+            "title": "Usable",
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "org_web_search_key_id",
+          "workspace_id",
+          "provider",
+          "name",
+          "is_default",
+          "disabled",
+          "is_effective",
+          "usable"
+        ],
+        "title": "WorkspaceWebSearchKeyPublic",
+        "type": "object"
+      },
+      "WorkspaceWebSearchKeysPublic": {
+        "properties": {
+          "count": {
+            "description": "Every live key of the organization, not only this page.",
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceWebSearchKeyPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "WorkspaceWebSearchKeysPublic",
         "type": "object"
       },
       "WorkspacesPublic": {
@@ -22690,7 +23374,7 @@
     },
     "/api/v1/budgets/{budget_id}": {
       "delete": {
-        "description": "Delete a budget the deployment owns.\n\nRefused with 409 for an organization's budget: the operator may edit one\n(``PATCH`` retimes its ceilings) but deleting it would take a budget the\ntenant defined out from under them.\n\nRefused with 409, too, while anything still names this budget: a workspace\nhanding it to its members, or a scoped ceiling enforcing it. The refusal says\nwhich, and where.\n\nGateway users assigned to the budget are left uncapped, as the dashboard's\nconfirmation says, and its reset history is deleted with it.",
+        "description": "Delete a budget the deployment owns.\n\nRefused with 409 for an organization's budget: the operator may edit one\n(``PATCH`` retimes its ceilings) but deleting it would take a budget the\ntenant defined out from under them.\n\nRefused with 409, too, while anything still names this budget: a workspace\nhanding it to its members, or a scoped ceiling enforcing it. The refusal says\nwhich, and where.\n\nGateway users assigned to the budget are left uncapped, as the dashboard's\nconfirmation says, its reset history is deleted with it, and it is taken off\nevery service key's ``end_user_budget_ids``. A budget that is a key's\n``end_user_budget_id`` is refused (409) until that key's default changes.",
         "operationId": "budgets-delete_budget",
         "parameters": [
           {
@@ -22835,6 +23519,78 @@
           }
         ],
         "summary": "Update Budget",
+        "tags": [
+          "budgets"
+        ]
+      },
+      "put": {
+        "description": "Create a budget under an id you choose, or replace the one with that id.\n\nEvery field takes the value in the body, and a field left out is cleared, so\nthe same request always leaves the same budget. Answers 201 when it created\nthe budget. Users on a budget it replaces stay on it, and its ceilings follow\na change of reset period. A budget an organization owns is not replaced.",
+        "operationId": "budgets-put_budget",
+        "parameters": [
+          {
+            "description": "An id you choose: up to 128 letters, digits, '.', '_' and '-', starting with a letter or digit",
+            "in": "path",
+            "name": "budget_id",
+            "required": true,
+            "schema": {
+              "description": "An id you choose: up to 128 letters, digits, '.', '_' and '-', starting with a letter or digit",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+              "title": "Budget Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBudgetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetResponse"
+                }
+              }
+            },
+            "description": "The budget was created"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Put Budget",
         "tags": [
           "budgets"
         ]
@@ -24530,6 +25286,218 @@
           }
         ],
         "summary": "Update Key",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys/{key_id}/end-users/{external_id}": {
+      "get": {
+        "description": "Get an end user of a service key by the id the service names it by.\n\nEnd users belong to the key's user, so every service key of one user reaches the same end users.",
+        "operationId": "keys-get_end_user",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The id the service names the end user by in a request's user field",
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field",
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get End User",
+        "tags": [
+          "keys"
+        ]
+      },
+      "patch": {
+        "description": "Block, unblock or move an end user of a service key.\n\nA move restarts the end user's period on the new budget but keeps what it has spent and used so far, as the users\nAPI does. The budget must be on the key's ``end_user_budget_ids``.",
+        "operationId": "keys-update_end_user",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The id the service names the end user by in a request's user field",
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field",
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update End User",
+        "tags": [
+          "keys"
+        ]
+      },
+      "put": {
+        "description": "Put an end user of a service key on a budget from the key's list, creating it if it does not exist yet.\n\nAnswers 201 when the end user was created, so one can be placed on a budget before its first request. An end\nuser already on the budget keeps its current period, so repeating the call changes nothing. A budget that is\nnot on the key's ``end_user_budget_ids`` is refused with 403 and ``end_user_budget_not_allowed``.",
+        "operationId": "keys-put_end_user",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The id the service names the end user by in a request's user field",
+            "in": "path",
+            "name": "external_id",
+            "required": true,
+            "schema": {
+              "description": "The id the service names the end user by in a request's user field",
+              "title": "External Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserPut"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndUserPublic"
+                }
+              }
+            },
+            "description": "The end user was created"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Put End User",
         "tags": [
           "keys"
         ]
@@ -29291,6 +30259,28 @@
             }
           },
           {
+            "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+              "title": "Tag"
+            }
+          },
+          {
             "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
             "in": "query",
             "name": "api_key_id",
@@ -29673,6 +30663,28 @@
             }
           },
           {
+            "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+              "title": "Tag"
+            }
+          },
+          {
             "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
             "in": "query",
             "name": "api_key_id",
@@ -30045,6 +31057,28 @@
             }
           },
           {
+            "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+              "title": "Tag"
+            }
+          },
+          {
             "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
             "in": "query",
             "name": "api_key_id",
@@ -30394,6 +31428,28 @@
             }
           },
           {
+            "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+              "title": "Tag"
+            }
+          },
+          {
             "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
             "in": "query",
             "name": "api_key_id",
@@ -30542,6 +31598,26 @@
               "description": "Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty.",
               "title": "Dimensions"
             }
+          },
+          {
+            "description": "A tag key to break spend down by, returned as `by_tag`. Rows that do not carry the tag group under a null key.",
+            "in": "query",
+            "name": "group_by_tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A tag key to break spend down by, returned as `by_tag`. Rows that do not carry the tag group under a null key.",
+              "title": "Group By Tag"
+            }
           }
         ],
         "responses": {
@@ -30577,6 +31653,396 @@
         "summary": "Organization Usage Summary",
         "tags": [
           "organization-usage"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/web-search-keys": {
+      "get": {
+        "description": "List the caller's organization's web search keys. Organization owners and admins only.",
+        "operationId": "web-search-keys-list_org_web_search_keys",
+        "parameters": [
+          {
+            "description": "Include archived keys.",
+            "in": "query",
+            "name": "include_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include archived keys.",
+              "title": "Include Archived",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgWebSearchKeysPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Org Web Search Keys",
+        "tags": [
+          "web-search-keys"
+        ]
+      },
+      "post": {
+        "description": "Add a web search key to the caller's organization. Organization owners and admins only.\n\nA workspace with a usable key searches with it rather than with the deployment's search.",
+        "operationId": "web-search-keys-create_org_web_search_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrgWebSearchKeyCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgWebSearchKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Org Web Search Key",
+        "tags": [
+          "web-search-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/web-search-keys/{key_id}": {
+      "delete": {
+        "description": "Delete an archived web search key. Organization owners and admins only.",
+        "operationId": "web-search-keys-delete_org_web_search_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Org Web Search Key",
+        "tags": [
+          "web-search-keys"
+        ]
+      },
+      "patch": {
+        "description": "Rename a web search key or replace its secret. Organization owners and admins only.",
+        "operationId": "web-search-keys-update_org_web_search_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrgWebSearchKeyUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgWebSearchKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Org Web Search Key",
+        "tags": [
+          "web-search-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/web-search-keys/{key_id}/archive": {
+      "post": {
+        "description": "Take a web search key out of use. Organization owners and admins only.",
+        "operationId": "web-search-keys-archive_org_web_search_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgWebSearchKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Archive Org Web Search Key",
+        "tags": [
+          "web-search-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/web-search-keys/{key_id}/default": {
+      "post": {
+        "description": "Make a web search key its provider's organization default. Organization owners and admins only.",
+        "operationId": "web-search-keys-set_org_default_web_search_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgWebSearchKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Org Default Web Search Key",
+        "tags": [
+          "web-search-keys"
+        ]
+      }
+    },
+    "/api/v1/organizations/me/web-search-keys/{key_id}/restore": {
+      "post": {
+        "description": "Put an archived web search key back in use. Organization owners and admins only.",
+        "operationId": "web-search-keys-restore_org_web_search_key",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgWebSearchKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Restore Org Web Search Key",
+        "tags": [
+          "web-search-keys"
         ]
       }
     },
@@ -33547,6 +35013,56 @@
         ]
       }
     },
+    "/api/v1/routing/recommend": {
+      "post": {
+        "description": "Recommend the model a subagent about to start should run on.\n\nThe harness sends the facts it holds at spawn time: its own ids for the\nsession and the spawning tool call, the subagent type, the task, the\nparent's model and the model the caller asked for, if any. The recommender\nthis build binds picks one of the candidate models and the answer names it.\nA standalone deployment asks the decision model `agent_recommender_model`\nnames to choose among `agent_recommender_candidates`; a hosted build may\nbind a recommender of its own, which the caller never configures. Where\nthe recommender reports them, the answer also carries a one-line reason\nand its probability for each candidate.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names who the decision is billed to.\n- API key: the decision is billed to the key's own user.",
+        "operationId": "routing-recommend_model_for_agent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentModelRecommendationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentModelRecommendation"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Recommend Model For Agent",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
     "/api/v1/routing/status": {
       "get": {
         "description": "Report how warm one user's routing memory is in one workspace, per pool.\n\n``user_id`` is required rather than optional because there is no aggregate\nanswer: warmth is per user, and a total across users would describe a pool\nthat no request ever votes over. The same holds across workspaces, which is\nwhy ``workspace_id`` narrows rather than aggregating; it merely defaults\ninstead of being required, because a single-workspace deployment has one\nanswer.",
@@ -33930,7 +35446,7 @@
     },
     "/api/v1/search": {
       "post": {
-        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use with the key's end-user budget, and is billed and\n  rate limited as that end user, as on chat completions.",
+        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use on the budget ``Otari-End-User-Budget`` names (or\n  the key's default), and is billed and rate limited as that end user, as\n  on chat completions.",
         "operationId": "search-create_search",
         "requestBody": {
           "content": {
@@ -34225,7 +35741,7 @@
     },
     "/api/v1/search/{search_tool_name}": {
       "post": {
-        "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /api/v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use with the key's end-user budget, and is billed and\n  rate limited as that end user, as on chat completions.",
+        "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /api/v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use on the budget ``Otari-End-User-Budget`` names (or\n  the key's default), and is billed and rate limited as that end user, as\n  on chat completions.",
         "operationId": "search-create_search_for_tool",
         "parameters": [
           {
@@ -35075,6 +36591,28 @@
             }
           },
           {
+            "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+              "title": "Tag"
+            }
+          },
+          {
             "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
             "in": "query",
             "name": "api_key_id",
@@ -35454,6 +36992,28 @@
               ],
               "description": "Filter to a single session/project label (the source_label carried by imported usage)",
               "title": "Source Label"
+            }
+          },
+          {
+            "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+              "title": "Tag"
             }
           },
           {
@@ -35961,6 +37521,28 @@
             }
           },
           {
+            "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+              "title": "Tag"
+            }
+          },
+          {
             "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
             "in": "query",
             "name": "api_key_id",
@@ -36360,6 +37942,28 @@
             }
           },
           {
+            "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by a request tag (what a request sent in its `metadata`), as `key:value`. Repeatable: values for the same key match any of them, and different keys must all match. At most 50 per call.",
+              "title": "Tag"
+            }
+          },
+          {
             "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
             "in": "query",
             "name": "api_key_id",
@@ -36507,6 +38111,26 @@
               ],
               "description": "Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty.",
               "title": "Dimensions"
+            }
+          },
+          {
+            "description": "A tag key to break spend down by, returned as `by_tag`. Rows that do not carry the tag group under a null key.",
+            "in": "query",
+            "name": "group_by_tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A tag key to break spend down by, returned as `by_tag`. Rows that do not carry the tag group under a null key.",
+              "title": "Group By Tag"
             }
           }
         ],
@@ -39090,6 +40714,217 @@
         "summary": "Set Workspace Web Search Config",
         "tags": [
           "workspace-web-search"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/web-search-keys": {
+      "get": {
+        "description": "The organization's web search keys as this workspace sees them, and which one it searches with.\n\nAny member of the workspace may read it. ``is_effective`` is decided across every key, not only this page.",
+        "operationId": "web-search-keys-list_workspace_web_search_keys",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceWebSearchKeysPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Workspace Web Search Keys",
+        "tags": [
+          "web-search-keys"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/web-search-keys/{key_id}": {
+      "delete": {
+        "description": "Return this workspace to inheriting the key. Idempotent. Answers with the list's first page.",
+        "operationId": "web-search-keys-reset_workspace_web_search_key_override",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceWebSearchKeysPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Reset Workspace Web Search Key Override",
+        "tags": [
+          "web-search-keys"
+        ]
+      },
+      "patch": {
+        "description": "Pin a web search key as this workspace's own, or turn it off for this workspace.\n\nOrganization owners and admins, or this workspace's owners and admins. Answers with the list's first page.",
+        "operationId": "web-search-keys-set_workspace_web_search_key_override",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceWebSearchKeyOverrideRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceWebSearchKeysPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Workspace Web Search Key Override",
+        "tags": [
+          "web-search-keys"
         ]
       }
     },

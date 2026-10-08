@@ -105,7 +105,10 @@ class BillingPort(Protocol):
         """Return a hold of ``amount`` to the organization's unheld funds.
 
         Not idempotent: whoever placed a hold decides once that it is over, and
-        calls this exactly once for it.
+        exactly one release lands for it. A release rolled back with the
+        caller's session never landed, and the caller releases that hold again,
+        so an adapter writes the release on the session and nowhere a rollback
+        cannot reach.
         """
         ...
 

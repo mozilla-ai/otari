@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import re
 import shlex
+from bisect import bisect_left
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from otari_agent.domain.types import (
     CheckEvidence,
@@ -57,6 +60,15 @@ _SEPARATOR_SCAN = re.compile(r"[\n|&;()]")
 # _command_segments, which is reached only by a command shlex could not parse
 # and is already documented as degraded.
 _BLIND_SEPARATOR_PAD = re.compile(r"&&|\|\||;|\||(?<![<>])&(?!>)|\(|\)")
+
+# The unquoted openers of the pairs `_NoRedirectionPairs` tracks, each with its closer, longest first.
+_NO_REDIRECTION_OPENERS = (("$((", "))"), ("((", "))"), ("$[", "]"), ("${", "}"), ("=(", ")"))
+
+# Every character that can open or close one of those pairs, so most characters skip the pair check.
+_PAIR_CHARACTERS = frozenset("$(=[)]}")
+
+# The characters a backslash escapes inside double quotes, where it is otherwise literal.
+_ESCAPED_IN_DOUBLE_QUOTES = frozenset('$`"\\\n')
 
 
 def _basename(token: str) -> str:
@@ -170,56 +182,170 @@ def matched_changed_paths(patterns: tuple[str, ...], changed_paths: tuple[str, .
     return tuple(sorted(path for path in changed_paths if _matches_any(path, patterns) is not None))
 
 
-def _strip_shell_comment(command: str) -> str:
-    """Remove every shell comment, at a real POSIX word boundary.
+@dataclass(frozen=True, slots=True)
+class _Heredoc:
+    """A heredoc that a command line opens, with its body on the lines after it.
 
-    A `#` starts a comment only at the start of a word (the start of the
-    command, or right after unquoted whitespace or one of Bash's own
-    metacharacters, `_METACHARACTERS`) and only outside any quoting. The
-    metacharacters matter as much as the whitespace: `ls;# npm install` is
-    entirely a comment to Bash, and treating only whitespace as ending a
-    word left the commented-out text to be matched as if it were a real
-    command. `shlex`'s own `comments=True` is not used here: it treats *any*
-    `#` as starting a comment, even mid-word, which is not what a shell does
-    (`echo a#b` prints `a#b`, not `a`) and is not safe for this purpose: a
-    URL fragment or a `--flag=value#123` mid-command would silently swallow
-    everything after it, including a genuinely separate, later command
-    joined by `&&`/`;`/`|`. `git commit -m "fix #123"` (a `#` inside a
-    quoted argument) is not a comment either way, POSIX or `comments=True`;
-    what differs is exactly this word-boundary rule.
+    `delimiter` is the terminator word after quote removal.
+    `strips_tabs` is true for `<<-`, where leading tabs on the terminator line do not count.
+    `joins_lines` is true for an unquoted delimiter, where Bash joins a body line that ends in a backslash to the next.
+    """
 
-    A comment extends only to the end of its own physical line, not to the
-    end of the whole string: a multi-line command's own earlier comment
-    (`# a note\nnpm install`) must not swallow a real, later command on the
-    next line. The newline itself is kept (shlex already treats it as
-    ordinary whitespace), so scanning continues normally right after it,
-    including into a comment of its own on that next line.
+    delimiter: str
+    strips_tabs: bool
+    joins_lines: bool
 
-    A backslash escapes the character right after it wherever it appears
-    outside single quotes (unquoted, or inside double quotes), so an
-    escaped double quote cannot end the quote it is inside, and an escaped
-    `#` cannot start a comment. This is a deliberate over-approximation of
-    the narrower real rule for what a backslash escapes inside double
-    quotes (`$`, `` ` ``, `"`, `\\`, or a newline): it only matters here for
-    whether a character is a real closing `"` or a real comment `#`, and
-    treating any other escaped character as "not that" changes nothing.
 
-    Bash's ANSI-C quoting, `$'...'`, is not a plain single-quoted string:
-    backslash escapes are active inside it, so an escaped apostrophe (`\\'`)
-    is literal content, not the closing quote, unlike a real `'...'`. Left
-    to `shlex` (which knows only POSIX quoting), a closing `\\'` reads as
-    real, and `shlex.split` then either raises on the now-unbalanced
-    trailing quote or, before that, this function treated it the same as a
-    plain single quote closing, mistaking whatever followed for a fresh,
-    unquoted word, `#` included. Rewritten here into an equivalent plain
-    `'...'` shlex can already tokenize (an embedded, escaped apostrophe
-    becomes close-quote, escaped-quote, reopen-quote, `'\\''`), so a
-    forbidden token inside a `$'...'` argument is found the same as inside
-    any other quoting.
+class _NoRedirectionPairs:
+    """The matched pairs open at a point in a command, inside which Bash reads `<<` as a shift, not a heredoc.
+
+    These are arithmetic, a parameter expansion, a subscript and a compound array assignment.
+    A pair that never closes stays open, so no later `<<` opens a heredoc.
+    """
+
+    def __init__(self) -> None:
+        self._closers: list[str] = []
+
+    @property
+    def any_open(self) -> bool:
+        """Whether any pair is open, which rules out a heredoc."""
+        return bool(self._closers)
+
+    def advance(self, command: str, index: int, at_word_start: bool) -> int:
+        """Open or close a pair at the unquoted `index`, and return how many characters that took, or 0."""
+        if self._closers and command.startswith(self._closers[-1], index):
+            return len(self._closers.pop())
+        for opener, closer in _NO_REDIRECTION_OPENERS:
+            if command.startswith(opener, index):
+                self._closers.append(closer)
+                return len(opener)
+        if command[index] == "[" and not at_word_start:
+            self._closers.append("]")
+            return 1
+        if command[index] == "(" and self._closers:
+            self._closers.append(")")
+            return 1
+        return 0
+
+
+def _read_heredoc_operator(command: str, index: int) -> tuple[_Heredoc, int] | None:
+    """Return the heredoc that a `<<` at `index` opens, and the index past its delimiter word.
+
+    Return None when there is no delimiter word, or when the word uses `$` or a backtick outside single quotes.
+    Bash gives `$'...'` and `$"..."` delimiters a meaning this reader does not model.
+
+    NOTE: Callers must pass the index of a `<<` that does not begin a `<<<` here-string.
+    """
+    position = index + 2
+    strips_tabs = command.startswith("-", position)
+    if strips_tabs:
+        position += 1
+    while position < len(command) and command[position] in " \t":
+        position += 1
+    word_start = position
+    delimiter: list[str] = []
+    quote: str | None = None
+    quoted = False
+    while position < len(command):
+        char = command[position]
+        if quote == "'":
+            if char == "'":
+                quote = None
+            else:
+                delimiter.append(char)
+        elif char in "$`":
+            return None
+        elif quote == '"':
+            if char == '"':
+                quote = None
+            elif char == "\\" and command[position + 1 : position + 2] in _ESCAPED_IN_DOUBLE_QUOTES:
+                position += 1
+                delimiter.append(command[position])
+            else:
+                delimiter.append(char)
+        elif char in "'\"":
+            quote = char
+            quoted = True
+        elif char == "\\" and position + 1 < len(command):
+            position += 1
+            quoted = True
+            delimiter.append(command[position])
+        elif char.isspace() or char in _METACHARACTERS:
+            break
+        else:
+            delimiter.append(char)
+        position += 1
+    if quote is not None or position == word_start:
+        return None
+    return _Heredoc("".join(delimiter), strips_tabs, joins_lines=not quoted), position
+
+
+class _HeredocTerminators:
+    """Find where heredoc bodies end in one command, in time linear in the command's length."""
+
+    def __init__(self, command: str) -> None:
+        self._command = command
+        self._line_starts: dict[str, list[int]] = {}
+        self._tab_stripped_line_starts: dict[str, list[int]] = {}
+        self._continuations: list[int] = []
+        position = 0
+        for line in command.split("\n"):
+            self._line_starts.setdefault(line, []).append(position)
+            self._tab_stripped_line_starts.setdefault(line.lstrip("\t"), []).append(position)
+            if line.endswith("\\"):
+                self._continuations.append(position + len(line))
+            position += len(line) + 1
+
+    def bodies_end(self, start: int, heredocs: Sequence[_Heredoc]) -> int:
+        """Return the index past the bodies of `heredocs`, which follow each other from the line at `start`.
+
+        Stop at the start of a body with no certain terminator line, so that body stays command text.
+        A body that Bash would join across a line continuation has no certain terminator line.
+        """
+        position = start
+        for heredoc in heredocs:
+            body_end = self._body_end(heredoc, position)
+            if body_end is None:
+                return position
+            position = body_end
+        return position
+
+    def _body_end(self, heredoc: _Heredoc, start: int) -> int | None:
+        """Return the index past the body of `heredoc` from the line at `start`, or None if its end is not certain."""
+        line_starts = (self._tab_stripped_line_starts if heredoc.strips_tabs else self._line_starts).get(
+            heredoc.delimiter, []
+        )
+        found = bisect_left(line_starts, start)
+        if found == len(line_starts):
+            return None
+        terminator_start = line_starts[found]
+        if heredoc.joins_lines and bisect_left(self._continuations, start) < bisect_left(
+            self._continuations, terminator_start
+        ):
+            return None
+        line_end = self._command.find("\n", terminator_start)
+        return len(self._command) if line_end == -1 else line_end + 1
+
+
+def _strip_comments_and_heredoc_bodies(command: str) -> str:
+    """Remove the text Bash does not read as command words: comments and heredoc bodies.
+
+    A `#` starts a comment only where it begins an unquoted word, after whitespace or one of `_METACHARACTERS`.
+    A comment ends with its own line.
+    A heredoc body is the data its command reads, so it is removed with its terminator line.
+    A heredoc with no certain terminator line is kept as command text.
+    A `<<` inside arithmetic, a parameter expansion, a subscript or a compound array assignment opens no heredoc.
+    A backslash outside single quotes escapes any next character, which is wider than Bash's rule inside double quotes.
+    Bash's ANSI-C quoting, `$'...'`, is rewritten into the equivalent plain `'...'`, which shlex can tokenize.
+
+    NOTE: `shlex`'s `comments=True` is not used, because it starts a comment at any `#`, mid-word included.
     """
     quote: str | None = None
     at_word_start = True
     escaped = False
+    pending_heredocs: list[_Heredoc] = []
+    terminators: _HeredocTerminators | None = None
+    pairs = _NoRedirectionPairs()
     result: list[str] = []
     index = 0
     length = len(command)
@@ -277,9 +403,39 @@ def _strip_shell_comment(command: str) -> str:
             newline_index = command.find("\n", index)
             if newline_index == -1:
                 break
-            result.append("\n")
-            index = newline_index + 1
+            index = newline_index
+            continue
+        if char == "\n":
+            result.append(char)
+            index += 1
+            if pending_heredocs:
+                if terminators is None:
+                    terminators = _HeredocTerminators(command)
+                index = terminators.bodies_end(index, pending_heredocs)
+                pending_heredocs = []
             at_word_start = True
+            continue
+        if char in _PAIR_CHARACTERS and (pair_length := pairs.advance(command, index, at_word_start)):
+            result.append(command[index : index + pair_length])
+            index += pair_length
+            # Only an opening parenthesis ends a word, so `$((1))#x` stays one word, as in Bash.
+            at_word_start = command[index - 1] == "("
+            continue
+        if char == "<" and command.startswith("<<", index):
+            is_here_string = command.startswith("<<<", index)
+            opened = None if is_here_string or pairs.any_open else _read_heredoc_operator(command, index)
+            if opened is None:
+                # NOTE: The whole operator is consumed, so its second `<` is never read as an operator of its own.
+                operator_length = 3 if is_here_string else 2
+                result.append(command[index : index + operator_length])
+                index += operator_length
+                at_word_start = True
+                continue
+            heredoc, word_end = opened
+            pending_heredocs.append(heredoc)
+            result.append(command[index:word_end])
+            index = word_end
+            at_word_start = False
             continue
         at_word_start = char.isspace() or char in _METACHARACTERS
         result.append(char)
@@ -322,26 +478,14 @@ def _normalize_separators(command: str) -> str:
     basename equivalence: `echo hi\\n/usr/bin/npm install`, unsplit, has
     `/usr/bin/npm` at a non-zero position, where that equivalence does not.
 
-    Meant to run on `_strip_shell_comment`'s own output, which has already
-    rewritten Bash's `$'...'` quoting into plain `'...'`, so this only needs
-    to track plain single/double quotes and backslash escaping, not ANSI-C
-    quoting a second time. A quoted newline (inside `'...'` or `"..."`) is
-    real content, not a boundary, and is left untouched. A backslash before
-    a newline, outside single quotes, is a line continuation: a real shell
-    deletes both characters, joining the two physical lines with nothing
-    between them, so this does too, rather than leaving the pair for shlex.
-    Left alone, shlex only treats that escaped newline as "not a word
-    break," not as deleted: `shlex.split("git \\\npush --force")` gives
-    `["git", "\\npush", "--force"]`, a literal newline still embedded in
-    the second token, which then never equals the plain word `push` a
-    forbidden phrase names, letting `git push --force` typed across two
-    continued lines pass a gate forbidding exactly that.
+    A quoted newline is content and stays.
+    A line continuation (a backslash before an unquoted newline) is deleted, as Bash deletes it.
+    shlex would otherwise keep that newline inside the next token, which then matches no phrase.
+
+    NOTE: Callers must pass the output of `_strip_comments_and_heredoc_bodies`, because this tracks only plain quotes.
     """
     if not _SEPARATOR_SCAN.search(command):
-        # A command with nothing to pad, cheap to rule out up front: one
-        # C-level scan, versus the character-by-character Python loop below
-        # running to the end of the string on top of `_strip_shell_comment`'s
-        # own pass over it.
+        # One C-level scan rules out a command with nothing to pad.
         return command
     quote: str | None = None
     result: list[str] = []
@@ -395,13 +539,8 @@ def _normalize_separators(command: str) -> str:
 def _command_segments(command: str) -> list[list[str]]:
     """Split a command into simple-command segments, each already tokenized.
 
-    Strips a trailing comment, pads every unquoted separator and bare newline
-    so shlex will isolate it (`_normalize_separators`), then tokenizes with
-    `shlex` (POSIX quoting rules), then splits the resulting token list on
-    any token that is exactly one of `COMMAND_SEPARATORS`: a quoted argument
-    that happens to contain that text, like `"a && b"`, survives as a single
-    token from shlex and is never mistaken for a separator, since this only
-    looks at whole tokens, never substrings of one.
+    Comments and heredoc bodies belong to no segment.
+    A separator in `COMMAND_SEPARATORS` or a bare newline ends a segment, and a quoted one such as `"a && b"` does not.
 
     Each segment's own first token, the command actually being invoked for
     that segment, is later compared by path basename rather than literally
@@ -411,14 +550,9 @@ def _command_segments(command: str) -> list[list[str]]:
     here: this function's own output is always the literal tokens a
     caller's command actually contained.
 
-    A command shlex cannot tokenize even after comment-stripping (an
-    unbalanced quote outside any comment) falls back to a plain whitespace
-    split. Keeping it as one opaque token instead was a silent fail-open:
-    `npm install "unterminated` never equals the single-token phrase `npm`,
-    so a required gate forbidding it reported `pass`. Reporting the command
-    as unreadable instead is worse: a Bash call carrying a heredoc of Python
-    or SQL is routinely unparseable to shlex, and an `unknown` there blocks
-    every ordinary tool call rather than the forbidden ones.
+    A command shlex cannot tokenize, such as one with an unbalanced quote, falls back to a whitespace split.
+    The split still finds a phrase spelled as bare words, which one opaque token would hide.
+    An `unknown` result instead would block every unparseable call, not only the forbidden ones.
 
     The whitespace split is deliberately degraded, not equivalent: it cannot
     tell a quoted argument from a bare word, so a forbidden phrase inside a
@@ -443,7 +577,7 @@ def _command_segments(command: str) -> list[list[str]]:
     separators and no real content, ";" * 500 against 500 forbidden
     phrases, measured ~25,000,000 such comparisons and ~1.1s before this.
     """
-    stripped = _strip_shell_comment(command)
+    stripped = _strip_comments_and_heredoc_bodies(command)
     try:
         tokens = shlex.split(_normalize_separators(stripped), posix=True)
     except ValueError:
@@ -476,7 +610,7 @@ def tokenize_phrase(phrase: str) -> list[str]:
     phrases; a caller that has not gone through that validation gets the
     same exception a raw `shlex.split` would.
     """
-    return shlex.split(_strip_shell_comment(phrase), posix=True)
+    return shlex.split(_strip_comments_and_heredoc_bodies(phrase), posix=True)
 
 
 def tokenize_phrase_with_separators(phrase: str) -> list[str]:
@@ -493,7 +627,7 @@ def tokenize_phrase_with_separators(phrase: str) -> list[str]:
     Quote-aware through `_normalize_separators`, so `echo "a && b"` keeps its
     argument whole and is not mistaken for a phrase spanning a boundary.
     """
-    return shlex.split(_normalize_separators(_strip_shell_comment(phrase)), posix=True)
+    return shlex.split(_normalize_separators(_strip_comments_and_heredoc_bodies(phrase)), posix=True)
 
 
 def tokenize_phrases(phrases: tuple[str, ...]) -> dict[str, list[str]]:
@@ -523,6 +657,12 @@ def tokenize_commands(commands: tuple[str, ...]) -> dict[str, list[list[str]]]:
     `evaluate_command` call for one request via `segment_cache`.
     """
     return {command: _command_segments(command) for command in commands}
+
+
+def _cached_segments(command: str, segment_cache: dict[str, list[list[str]]]) -> list[list[str]]:
+    """Return `command`'s segments from the cache, tokenizing only on a miss; a command with no segments is a hit."""
+    segments = segment_cache.get(command)
+    return segments if segments is not None else _command_segments(command)
 
 
 def _contains_subsequence(segment: list[str], phrase: list[str]) -> bool:
@@ -628,7 +768,7 @@ def evaluate_command(
         for command in evidence.commands
         if any(
             _contains_subsequence(segment, phrase)
-            for segment in (segments_by_command.get(command) or _command_segments(command))
+            for segment in _cached_segments(command, segments_by_command)
             for phrase in forbidden_phrases
         )
     )
@@ -744,7 +884,7 @@ def evaluate_command_if_changed(
     satisfied = any(
         _contains_subsequence(segment, phrase)
         for command in command_evidence.commands
-        for segment in (segments_by_command.get(command) or _command_segments(command))
+        for segment in _cached_segments(command, segments_by_command)
         for phrase in required_phrases
     )
     if satisfied:
@@ -856,9 +996,9 @@ def evaluate_judge(gate: JudgeGate, path_evidence: PathEvidence | None, evidence
     evaluated (see :class:`JudgeEvidence`); a gate whose id has no matching
     verdict here resolves ``unknown``: unlike ``evidence`` being absent
     outright, this caller did run judge gates for this event and is
-    genuinely missing one, most often ``_HOOK_JUDGE_MAX_GATES_PER_RUN``
-    (or, now, its own judge time budget) skipping a gate this run never got
-    to rather than it resolving cleanly.
+    genuinely missing one.
+
+    A ``"not_run"`` verdict resolves ``not_run``, with the caller's reason as its detail.
 
     The caller's own ``"error"`` outcome (its model call failed or returned
     something unparsable) maps to :class:`Outcome.ERROR`: this is
@@ -897,6 +1037,15 @@ def evaluate_judge(gate: JudgeGate, path_evidence: PathEvidence | None, evidence
             enforcement=gate.enforcement,
             outcome=Outcome.UNKNOWN,
             message="No model verdict was submitted for this gate.",
+        )
+
+    if verdict.outcome == "not_run":
+        return GateResult(
+            gate_id=gate.id,
+            enforcement=gate.enforcement,
+            outcome=Outcome.NOT_RUN,
+            message="This judge gate was skipped.",
+            detail=verdict.reasoning or None,
         )
 
     if verdict.outcome == "error":

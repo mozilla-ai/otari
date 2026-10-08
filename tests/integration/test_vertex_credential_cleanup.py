@@ -20,8 +20,10 @@ def test_setup_vertex_environment_returns_kwargs_without_env_mutation() -> None:
 
     try:
 
-        def _fake_from_info(info: dict[str, object]) -> object:
+        def _fake_from_info(info: dict[str, object], *, scopes: list[str]) -> object:
             assert info["project_id"] == "config-project"
+            # An unscoped service account token is refused by Vertex (invalid_scope).
+            assert scopes == ["https://www.googleapis.com/auth/cloud-platform"]
             return sentinel.credentials
 
         with pytest.MonkeyPatch.context() as mp:

@@ -68,6 +68,12 @@ from gateway.api.routes._platform import (
     upstream_exception_chain,
     upstream_exception_shape,
 )
+from gateway.api.routes._request_tags import (
+    ANTHROPIC_USER_KEY,
+    AnthropicRequestMetadata,
+    anthropic_metadata,
+    request_tags,
+)
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
@@ -204,6 +210,7 @@ class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc
     tools_header: str | None = None
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
     session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
+    metadata: AnthropicRequestMetadata = None
 
 
 class CountTokensRequest(BaseModel):
@@ -854,7 +861,9 @@ async def create_message(
             ),
             normalize_messages=_normalize,
             tools=request.tools,
+            code_execution_policies=tool_ports.code_execution_policy,
             idempotency=None if request.stream else idempotency,
+            tags=request_tags(request.metadata, ignore=frozenset({ANTHROPIC_USER_KEY})),
         )
     except IdempotentReplay as replay:
         return replay.response()
@@ -926,6 +935,7 @@ async def create_message(
         remaining_user_tools=tool_ctx.remaining_user_tools,
         web_search_declared_name=tool_ctx.web_search_declared_name,
     )
+    anthropic_metadata(request_fields)
     scope_prompt_cache_key(request_fields, ctx)
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])

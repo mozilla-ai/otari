@@ -1,0 +1,14 @@
+# GitBook Git Sync configuration for the gitbook-docs branch.
+#
+# scripts/prepare_gitbook_site.py copies this file to the root of the built
+# site, so `root` is that root and not this repository's docs/ directory.
+#
+# `readme` stays index.md rather than the conventional README.md: the file is
+# linked from the project README and from code comments, and renaming it would
+# break those references for no gain here.
+
+root: ./
+
+structure:
+  readme: index.md
+  summary: SUMMARY.md

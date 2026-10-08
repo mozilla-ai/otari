@@ -4,6 +4,7 @@ The surface errors carry the HTTP status each renders as.
 The repository errors are internal: a service translates each into a surface error and never renders it.
 """
 
+from gateway.core.error_codes import END_USER_BUDGET_NOT_ALLOWED
 from gateway.exceptions import (
     TenancyConflictError,
     TenancyForbiddenError,
@@ -96,6 +97,13 @@ class DeploymentBudgetOwnedByOrganizationError(TenancyConflictError):
         )
 
 
+class DeploymentBudgetNotReplaceableError(TenancyConflictError):
+    """A PUT named the id of an organization's budget, which only that organization replaces."""
+
+    def __init__(self, budget_id: str) -> None:
+        super().__init__(f"Budget '{budget_id}' belongs to an organization; change it on that organization's budgets")
+
+
 class DeploymentBudgetIsMemberDefaultError(TenancyConflictError):
     """A workspace hands the budget to its members, so the delete is refused by workspace name."""
 
@@ -103,6 +111,20 @@ class DeploymentBudgetIsMemberDefaultError(TenancyConflictError):
         super().__init__(
             f"This budget is the member default for {', '.join(workspaces)}. Change or remove that "
             "default on the workspace (Organization > Workspaces > Edit) before deleting it."
+        )
+
+
+class DeploymentBudgetIsEndUserDefaultError(TenancyConflictError):
+    """Service keys start their end users on the budget, so the delete is refused by key name.
+
+    Deleting it would leave every end user those keys create from then on uncapped.
+    """
+
+    def __init__(self, keys: list[str]):
+        shown = ", ".join(keys[:5]) + (f" and {len(keys) - 5} more" if len(keys) > 5 else "")
+        super().__init__(
+            f"This budget is the default end-user budget of {shown}. Change that default on the key "
+            "(Keys > Edit > Service key) before deleting it."
         )
 
 
@@ -190,11 +212,41 @@ class EndUserBudgetNotFoundError(TenancyNotFoundError):
         super().__init__(f"Budget with id '{budget_id}' not found")
 
 
+class EndUserBudgetNotAllowedError(TenancyForbiddenError):
+    """A service key named a budget that is not on its list of end-user budgets."""
+
+    error_code = END_USER_BUDGET_NOT_ALLOWED
+
+    def __init__(self, budget_id: str):
+        super().__init__(f"This key may not assign budget '{budget_id}' to its end users")
+
+
+class EndUserDefaultNotListedError(TenancyValidationError):
+    """A key's default end-user budget is not on its list of end-user budgets."""
+
+    def __init__(self) -> None:
+        super().__init__("end_user_budget_id must be one of end_user_budget_ids")
+
+
+class EndUserNotFoundError(TenancyNotFoundError):
+    """No end user of the key's owner goes by this id."""
+
+    def __init__(self, external_id: str):
+        super().__init__(f"End user '{external_id}' not found")
+
+
+class NotAServiceKeyError(TenancyValidationError):
+    """End users were addressed through a key that cannot have any."""
+
+    def __init__(self, key_id: str):
+        super().__init__(f"API key '{key_id}' is not a service key")
+
+
 class EndUserIdInvalidError(TenancyValidationError):
     """A service key named an end user by an id it cannot be stored under."""
 
-    def __init__(self, max_length: int):
-        super().__init__(f"'user' must be at most {max_length} characters to name an end user")
+    def __init__(self, requirement: str):
+        super().__init__(f"'user' {requirement} to name an end user")
 
 
 class EndUserOwnerUnavailableError(TenancyForbiddenError):
@@ -206,10 +258,14 @@ class EndUserOwnerUnavailableError(TenancyForbiddenError):
 
 __all__ = [
     "BudgetStillReferencedError",
+    "EndUserBudgetNotAllowedError",
     "EndUserBudgetNotFoundError",
+    "EndUserDefaultNotListedError",
     "EndUserIdInvalidError",
+    "EndUserNotFoundError",
     "EndUserOwnerUnavailableError",
     "MemberBudgetPolicyAlreadyExistsError",
+    "NotAServiceKeyError",
     "OrganizationBudgetHeldElsewhereError",
     "OrganizationBudgetInUseError",
     "OrganizationBudgetNotFoundError",

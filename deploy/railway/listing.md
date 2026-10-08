@@ -4,7 +4,7 @@
 
 ## About Hosting Otari
 
-This template runs two services and a storage bucket: the Otari gateway from its published Docker image (`mzdotai/otari:0.14.1`, pinned to a release), a managed PostgreSQL database, and a Railway bucket for uploaded files. Otari keeps no state on its own disk. Postgres holds your keys, users, budgets, and usage; the bucket holds the files you upload through the Files API, so they survive a redeploy and every replica reads the same files.
+This template runs two services and a storage bucket: the Otari gateway from its published Docker image (`mzdotai/otari:0.15.0`, pinned to a release), a managed PostgreSQL database, and a Railway bucket for uploaded files. Otari keeps no state on its own disk. Postgres holds your keys, users, budgets, and usage; the bucket holds the files you upload through the Files API, so they survive a redeploy and every replica reads the same files.
 
 On first boot Otari runs its database migrations and prints a first-use API key in the deploy logs, so the gateway is usable right away. The template generates the master key, the key that encrypts stored provider credentials, and the provider account pepper for you. The gateway listens on port `8000`, with a healthcheck at `/api/v1/health/readiness`, so a deploy that cannot reach its database does not go live.
 

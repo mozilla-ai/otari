@@ -45,6 +45,7 @@ from gateway.repositories.tenancy import (
 )
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy.membership_listener import MembershipListener
+from gateway.services.tenancy.workspace_listener import WorkspaceListener
 
 # Stored in runtime_settings, and deliberately not a SETTABLE_KEY, so
 # runtime_settings_service ignores it exactly as it ignores the master-key hash
@@ -69,9 +70,15 @@ class BootstrapIdentityUnavailableError(TenancyError):
 
 
 async def ensure_bootstrap_identity(
-    db: AsyncSession, *, uow: UnitOfWork, membership_listener: MembershipListener
+    db: AsyncSession,
+    *,
+    uow: UnitOfWork,
+    membership_listener: MembershipListener,
+    workspace_listener: WorkspaceListener,
 ) -> User:
     """Return the operator identity, provisioning the tenancy root on first call.
+
+    ``workspace_listener`` sets up a workspace this provisions, inside the same transaction.
 
     Idempotent: the marker row makes the common path a single indexed lookup and
     the provisioning path run once per deployment. Commits, because it is the
@@ -84,7 +91,12 @@ async def ensure_bootstrap_identity(
     await _refuse_to_shadow_existing_tenancy(db)
 
     try:
-        return await _provision(db, uow=uow, membership_listener=membership_listener)
+        return await _provision(
+            db,
+            uow=uow,
+            membership_listener=membership_listener,
+            workspace_listener=workspace_listener,
+        )
     except IntegrityError:
         # Two first requests raced. Whichever lost re-reads the winner's work:
         # the slug and the marker are both unique, so exactly one provisioned.
@@ -204,7 +216,13 @@ async def password_claims_deployment(db: AsyncSession, identity: User) -> bool:
     return operator is not None and operator.id == identity.id
 
 
-async def _provision(db: AsyncSession, *, uow: UnitOfWork, membership_listener: MembershipListener) -> User:
+async def _provision(
+    db: AsyncSession,
+    *,
+    uow: UnitOfWork,
+    membership_listener: MembershipListener,
+    workspace_listener: WorkspaceListener,
+) -> User:
     """Create the default organization, workspace, operator identity, and memberships.
 
     Ordered by the foreign keys: the organization exists before the identity that
@@ -244,6 +262,7 @@ async def _provision(db: AsyncSession, *, uow: UnitOfWork, membership_listener: 
                 organization_id=organization.id,
                 created_by_user_id=operator.id,
             )
+            await workspace_listener.workspace_created(workspace.id)
         # Serialized against a concurrent ``create_default`` on this workspace, via
         # the same lock ``WorkspaceService.add_member`` takes and for the reason
         # ``WorkspaceRepository.lock`` gives: this path reads the workspace's

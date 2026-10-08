@@ -1,7 +1,8 @@
 """The two places a workspace's web search policy comes from.
 
-``LocalWebSearchPolicy`` reads the row this deployment holds.
+``LocalWebSearchPolicy`` reads the rows this deployment holds.
 ``RemoteWebSearchPolicy`` asks a peer, speaking `docs/hybrid-mode-protocol.md`.
+Either answer carries the workspace's own search key, where its organization has one it may use.
 """
 
 from __future__ import annotations
@@ -12,9 +13,10 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import WEB_SEARCH_PROVIDERS, GatewayConfig
 from gateway.exceptions.tools_exceptions import WebSearchPolicyResolutionFailedError, WebSearchPolicyResolutionFailure
-from gateway.models.tools import ResolvedWebSearchConfig, WebTool
+from gateway.log_config import logger
+from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential, WebTool
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.services.control_plane import ResolveEndpoint, resolve
 from gateway.services.tenancy.workspace_web_search_service import (
@@ -22,25 +24,44 @@ from gateway.services.tenancy.workspace_web_search_service import (
     read_web_search_policy,
     resolve_workspace_web_search_config,
 )
+from gateway.services.tools import WorkspaceSearchKeys
+from gateway.services.web_search_providers import is_sendable_api_key
+
+# The policy of a workspace that holds no row, carrying only its search key.
+_NO_NARROWING = ResolvedWebSearchConfig(
+    enabled=True,
+    max_results=None,
+    purpose_hint=None,
+    allowed_domains=None,
+    blocked_domains=None,
+    provider_options=None,
+    authorized_tools=None,
+)
 
 
 class LocalWebSearchPolicy(WebSearchPolicyPort):
     """The policy stored in this deployment's own database."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, *, search_keys: WorkspaceSearchKeys) -> None:
         self._session = session
+        self._search_keys = search_keys
 
     async def resolve(
         self, scope: WebSearchPolicyScope, requested_tools: Sequence[WebTool]
     ) -> ResolvedWebSearchConfig | None:
-        # A stored row authorizes no tool by name, so the requested tools do not change the answer.
-        del requested_tools
+        # A stored row authorizes no tool by name, so the requested tools decide only whether a key is read.
         if scope.workspace_id is None:
             raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.NO_WORKSPACE)
         try:
-            return await resolve_workspace_web_search_config(self._session, scope.workspace_id)
+            policy = await resolve_workspace_web_search_config(self._session, scope.workspace_id)
         except InvalidStoredWebSearchDomainError:
             raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.STORED_POLICY_INVALID) from None
+        if WebTool.SEARCH not in requested_tools:
+            return policy
+        credential = await self._search_keys.credential_for(scope.workspace_id)
+        if credential is None:
+            return policy
+        return replace(policy or _NO_NARROWING, credential=credential)
 
 
 class RemoteWebSearchPolicy(WebSearchPolicyPort):
@@ -66,7 +87,27 @@ class RemoteWebSearchPolicy(WebSearchPolicyPort):
             policy = read_web_search_policy(answer)
         except ValueError:
             raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.ANSWER_UNREADABLE) from None
-        return replace(policy, authorized_tools=_authorized_tools(answer))
+        return replace(policy, authorized_tools=_authorized_tools(answer), credential=_credential(answer))
+
+
+def _credential(answer: dict[str, Any]) -> WebSearchCredential | None:
+    """The workspace's own search key, read strictly so a malformed answer fails closed.
+
+    A provider this deployment cannot call is ignored rather than refused, as an unknown
+    value from a peer is, so the workspace searches with the deployment's search instead.
+    """
+    raw = answer.get("credential")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.ANSWER_UNREADABLE)
+    provider, api_key = raw.get("provider"), raw.get("api_key")
+    if not isinstance(provider, str) or not isinstance(api_key, str) or not is_sendable_api_key(api_key):
+        raise WebSearchPolicyResolutionFailedError(WebSearchPolicyResolutionFailure.ANSWER_UNREADABLE)
+    if provider not in WEB_SEARCH_PROVIDERS:
+        logger.warning("Ignoring a workspace web search key for a provider this gateway cannot call: %s", provider)
+        return None
+    return WebSearchCredential(provider=provider, api_key=api_key)
 
 
 def _authorized_tools(answer: dict[str, Any]) -> frozenset[str]:

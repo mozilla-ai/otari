@@ -77,6 +77,7 @@ from gateway.repositories.tenancy.organization_domain_repository import Organiza
 from gateway.repositories.tenancy.organization_member_repository import OrganizationMemberRepository
 from gateway.services.tenancy.domain_verification import resolve_txt_records
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 # How long a verification token is, in bytes of entropy before hex encoding.
 # The token is the whole secret: anyone who can read it can publish the record
@@ -92,7 +93,9 @@ class OrganizationDomainService:
         self.db = db
         self.domains = OrganizationDomainRepository(db)
         self.members = OrganizationMemberRepository(db)
-        self.organizations = OrganizationService(db, membership_listener=None)
+        self.organizations = OrganizationService(
+            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        )
 
     # ------------------------------------------------------------------
     # The claim surface

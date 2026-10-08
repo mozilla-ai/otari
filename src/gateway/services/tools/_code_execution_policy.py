@@ -12,7 +12,8 @@ over the deployment default and the request's header. It is a choice rather than
 no sandbox the deployment has not configured.
 No row means no narrowing.
 Reads and writes both require an owner or admin of the organization or of the workspace.
-:func:`resolve_workspace_code_execution_policy` is a plain read with no identity, and the workspace comes from the key.
+The request path's read, with no identity and the workspace from the key, is
+:class:`WorkspaceCodeExecutionPolicies`.
 """
 
 from __future__ import annotations
@@ -22,20 +23,19 @@ from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.tools_exceptions import SandboxImageNotAllowedError, SandboxToolsUnrunnableError
 from gateway.models.tenancy import User, Workspace
 from gateway.models.tools import CodeExecutor, ResolvedCodeExecutionPolicy, WorkspaceCodeExecutionPolicy
-from gateway.services.mcp_loop import MAX_TOOL_ITERATIONS_CAP
+from gateway.repositories.tools import WorkspaceCodeExecutionPolicyRepository
 from gateway.services.sandbox_backend import (
     CODE_EXECUTION_TOOL_NAMES,
     DEFAULT_EXEC_TIMEOUT_S,
     SERVED_TOOL_NAMES,
 )
-from gateway.services.tenancy import authorization
-from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.authorization import WorkspaceAccess
+from gateway.services.tools._loop_limits import MAX_TOOL_ITERATIONS_CAP
 
 # A policy may only narrow, so a value above either ceiling would read as a
 # configured limit and change nothing. The write refuses it rather than clamping
@@ -239,31 +239,6 @@ class WorkspaceCodeExecutionPolicyPublic(BaseModel):
         )
 
 
-async def resolve_workspace_code_execution_policy(
-    db: AsyncSession,
-    workspace_id: uuid.UUID,
-) -> ResolvedCodeExecutionPolicy | None:
-    """The workspace's stored policy, or ``None`` when it has none.
-
-    ``None`` and "a row that narrows nothing" are deliberately the same outcome
-    for the caller; the distinction only matters to the management surface,
-    which reports it as ``configured``.
-    """
-    policy = await db.get(WorkspaceCodeExecutionPolicy, workspace_id)
-    if policy is None:
-        return None
-    return ResolvedCodeExecutionPolicy(
-        enabled=policy.enabled,
-        default_purpose_hint=policy.default_purpose_hint,
-        max_iterations=policy.max_iterations,
-        exec_timeout_s=policy.exec_timeout_s,
-        image=policy.image,
-        tools=frozenset(policy.tools) if policy.tools is not None else None,
-        # NOTE: a stored executor outside the vocabulary reads as no pin, so an old row does not fail every request.
-        executor=CodeExecutor.parse(policy.executor),
-    )
-
-
 def read_code_execution_policy(answer: Mapping[str, Any]) -> ResolvedCodeExecutionPolicy:
     """Read the control plane's answer for one workspace's code execution policy.
 
@@ -293,12 +268,52 @@ def read_code_execution_policy(answer: Mapping[str, Any]) -> ResolvedCodeExecuti
     )
 
 
-class WorkspaceCodeExecutionPolicyService:
-    """Read and upsert one workspace's code-execution policy."""
+class WorkspaceCodeExecutionPolicies:
+    """The policy each workspace's requests run under, read on the request path with no identity."""
 
-    def __init__(self, db: AsyncSession, *, sandbox_configured: bool, allowed_images: tuple[str, ...] = ()):
-        self.db = db
-        self.organizations = OrganizationService(db, membership_listener=None)
+    def __init__(self, policies: WorkspaceCodeExecutionPolicyRepository) -> None:
+        self._policies = policies
+
+    async def resolve(self, workspace_id: uuid.UUID) -> ResolvedCodeExecutionPolicy | None:
+        """The workspace's stored policy, or ``None`` when it has none.
+
+        ``None`` and "a row that narrows nothing" are deliberately the same outcome
+        for the caller; the distinction only matters to the management surface,
+        which reports it as ``configured``.
+        """
+        policy = await self._policies.get(workspace_id)
+        if policy is None:
+            return None
+        return ResolvedCodeExecutionPolicy(
+            enabled=policy.enabled,
+            default_purpose_hint=policy.default_purpose_hint,
+            max_iterations=policy.max_iterations,
+            exec_timeout_s=policy.exec_timeout_s,
+            image=policy.image,
+            tools=frozenset(policy.tools) if policy.tools is not None else None,
+            # NOTE: a stored executor outside the vocabulary reads as no pin, so an old row does not fail every request.
+            executor=CodeExecutor.parse(policy.executor),
+        )
+
+
+class WorkspaceCodeExecutionPolicyService:
+    """Read and upsert one workspace's code-execution policy.
+
+    Reads and writes run in a block of ``uow`` through ``policies``, so the block's end is the only commit.
+    """
+
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        policies: WorkspaceCodeExecutionPolicyRepository,
+        access: WorkspaceAccess,
+        *,
+        sandbox_configured: bool,
+        allowed_images: tuple[str, ...] = (),
+    ):
+        self._uow = uow
+        self._policies = policies
+        self._access = access
         # Passed in rather than read here: whether a sandbox is configured, and
         # which images an operator curated, are questions about the running
         # deployment's config, which the route layer already holds and a service
@@ -309,12 +324,11 @@ class WorkspaceCodeExecutionPolicyService:
     async def get_policy(self, *, user: User, workspace_id: uuid.UUID) -> WorkspaceCodeExecutionPolicyPublic:
         """The workspace's policy. Reading it takes the same role as setting it."""
         workspace = await self._resolve_manageable(user=user, workspace_id=workspace_id)
-        policy = await self.db.get(WorkspaceCodeExecutionPolicy, workspace.id)
-        if policy is None:
-            return self._unconfigured(workspace.id)
-        return WorkspaceCodeExecutionPolicyPublic.from_model(
-            policy, sandbox_configured=self.sandbox_configured, allowed_images=self.allowed_images
-        )
+        async with self._uow:
+            policy = await self._policies.get(workspace.id)
+            if policy is None:
+                return self._unconfigured(workspace.id)
+            return self._public(policy)
 
     async def set_policy(
         self,
@@ -325,48 +339,14 @@ class WorkspaceCodeExecutionPolicyService:
     ) -> WorkspaceCodeExecutionPolicyPublic:
         """Store the workspace's policy, replacing any existing one.
 
-        Read-then-insert with nothing locking the gap, so two writers can both
-        find no row and both insert; the primary key refuses the second. That
-        refusal is not a conflict anybody needs to hear about, because a ``PUT``
-        of the whole policy is idempotent: the loser re-reads the row the winner
-        created and applies its own values over it, which is the same outcome it
-        would have reached had it arrived a moment later. Narrower than
-        ``organization_pricing_service``'s handling of the same race, which has
-        to distinguish *which* period collided; here there is one row per
-        workspace and nothing to disambiguate.
+        Two writers may both find no row; the repository settles that race, so a
+        ``PUT`` of the whole policy lands whichever arrives first.
         """
         workspace = await self._resolve_manageable(user=user, workspace_id=workspace_id)
         self._require_allowed_image(request.image)
         _require_runnable_tools(request.tools)
-        # Read off the row once, here: a rollback below expires every instance in
-        # the session, so `workspace.id` after one is a lazy load in a place that
-        # cannot await it.
-        resolved_id = workspace.id
-
-        policy = await self.db.get(WorkspaceCodeExecutionPolicy, resolved_id)
-        if policy is None:
-            policy = WorkspaceCodeExecutionPolicy(workspace_id=resolved_id)
-            self.db.add(policy)
-        self._apply(policy, request)
-
-        try:
-            await self._commit()
-        except IntegrityError:
-            # `_commit` has already rolled back, which is what makes the reads
-            # below usable: a failed flush leaves the session unusable, so
-            # anything attempted before a rollback raises `PendingRollbackError`
-            # and masks this. The retry commits through the same helper, so a
-            # second failure rolls back too rather than leaving the caller a
-            # session it cannot use.
-            policy = await self.db.get(WorkspaceCodeExecutionPolicy, resolved_id)
-            if policy is None:
-                raise  # not the race: nothing is there to have collided with
-            self._apply(policy, request)
-            await self._commit()
-        await self.db.refresh(policy)
-        return WorkspaceCodeExecutionPolicyPublic.from_model(
-            policy, sandbox_configured=self.sandbox_configured, allowed_images=self.allowed_images
-        )
+        async with self._uow:
+            return self._public(await self._policies.put(workspace.id, **_stored_values(request)))
 
     def _require_allowed_image(self, image: str | None) -> None:
         """Refuse an image the operator has not curated.
@@ -393,35 +373,6 @@ class WorkspaceCodeExecutionPolicyService:
             f"Sandbox image {candidate!r} is not one this deployment allows. Allowed: {', '.join(self.allowed_images)}."
         )
 
-    async def _commit(self) -> None:
-        """Commit, rolling back before any failure escapes.
-
-        Every write path here goes through this rather than repeating the
-        pattern, because the rollback is required and not tidy: SQLAlchemy
-        leaves a session with a failed flush unusable, so a caller that skips it
-        gets `PendingRollbackError` from the next statement instead of the error
-        that actually happened.
-        """
-        try:
-            await self.db.commit()
-        except SQLAlchemyError:
-            await self.db.rollback()
-            raise
-
-    @staticmethod
-    def _apply(
-        policy: WorkspaceCodeExecutionPolicy,
-        request: WorkspaceCodeExecutionPolicyUpdate,
-    ) -> None:
-        """Write the whole request onto the row. Every field, since this is a ``PUT``."""
-        policy.enabled = request.enabled
-        policy.default_purpose_hint = _blank_to_none(request.default_purpose_hint)
-        policy.max_iterations = request.max_iterations
-        policy.exec_timeout_s = request.exec_timeout_s
-        policy.image = _blank_to_none(request.image)
-        policy.tools = request.tools
-        policy.executor = request.executor.value if request.executor is not None else None
-
     async def clear_policy(self, *, user: User, workspace_id: uuid.UUID) -> WorkspaceCodeExecutionPolicyPublic:
         """Drop the workspace's policy, returning it to the deployment's behavior.
 
@@ -429,12 +380,14 @@ class WorkspaceCodeExecutionPolicyService:
         asks for, so it answers with the unconfigured policy rather than a 404.
         """
         workspace = await self._resolve_manageable(user=user, workspace_id=workspace_id)
-
-        policy = await self.db.get(WorkspaceCodeExecutionPolicy, workspace.id)
-        if policy is not None:
-            await self.db.delete(policy)
-            await self._commit()
+        async with self._uow:
+            await self._policies.delete_for(workspace.id)
         return self._unconfigured(workspace.id)
+
+    def _public(self, policy: WorkspaceCodeExecutionPolicy) -> WorkspaceCodeExecutionPolicyPublic:
+        return WorkspaceCodeExecutionPolicyPublic.from_model(
+            policy, sandbox_configured=self.sandbox_configured, allowed_images=self.allowed_images
+        )
 
     def _unconfigured(self, workspace_id: uuid.UUID) -> WorkspaceCodeExecutionPolicyPublic:
         return WorkspaceCodeExecutionPolicyPublic.unconfigured(
@@ -449,12 +402,8 @@ class WorkspaceCodeExecutionPolicyService:
         exist; the role check then answers 403 for a member who may read the
         policy but not set it.
         """
-        workspace = await authorization.resolve_visible_workspace(
-            self.db, user=user, workspace_id=workspace_id, organizations=self.organizations
-        )
-        await authorization.require_workspace_management_access(
-            self.db, user=user, workspace=workspace, organizations=self.organizations
-        )
+        workspace = await self._access.resolve_visible_workspace(user=user, workspace_id=workspace_id)
+        await self._access.require_workspace_management_access(user=user, workspace=workspace)
         return workspace
 
 
@@ -475,6 +424,19 @@ def _require_runnable_tools(tools: list[str] | None) -> None:
     if tools is None or set(tools) & set(SERVED_TOOL_NAMES):
         return
     raise SandboxToolsUnrunnableError(SERVED_TOOL_NAMES)
+
+
+def _stored_values(request: WorkspaceCodeExecutionPolicyUpdate) -> dict[str, Any]:
+    """The whole request as the row stores it. Every field, since this is a ``PUT``."""
+    return {
+        "enabled": request.enabled,
+        "default_purpose_hint": _blank_to_none(request.default_purpose_hint),
+        "max_iterations": request.max_iterations,
+        "exec_timeout_s": request.exec_timeout_s,
+        "image": _blank_to_none(request.image),
+        "tools": request.tools,
+        "executor": request.executor.value if request.executor is not None else None,
+    }
 
 
 def _answer_ceiling(answer: Mapping[str, Any], field: str) -> int | None:

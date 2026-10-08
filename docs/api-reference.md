@@ -63,6 +63,38 @@ Standalone mode also serves embeddings, images, audio, files, batches,
 moderations, rerank, search, and decisions. Provider support differs by endpoint, so use
 `GET /api/v1/models` and the OpenAPI document for the deployment you are calling.
 
+### Responses on providers without a Responses API
+
+`/api/v1/responses` also serves providers that only implement Chat Completions
+(Mistral, Anthropic, Bedrock, and most others). Otari translates the request into
+a chat completion and translates the answer back, streamed or not, so the client
+sees an ordinary Responses object or event stream. A provider with its own
+Responses API (OpenAI, Azure OpenAI, Gemini, Groq, and others) is called
+natively, as before.
+
+The translation covers text, image and file input, `instructions`, function
+tools and `tool_choice`, `max_output_tokens`, `reasoning.effort`, JSON output
+through `text.format`, and reasoning text a provider returns. Gateway-run tools
+(MCP, web search, code execution) work on top of it.
+
+Some requests have no chat equivalent and are refused with a `400` that names
+the field:
+
+- `previous_response_id`, `conversation`, `background`, `context_management`
+  and `prompt`, which need the provider to keep state. Send the full
+  conversation in `input` instead.
+- Hosted tools such as `file_search` or `computer_use`, and any tool type other
+  than `function`.
+- Input items other than messages, function calls and their outputs, such as
+  `item_reference`.
+- Image or file parts in a `system` or `developer` message or in a function
+  call output, where a chat completion only takes text.
+
+Fields that only control what a provider stores or adds to its answer
+(`store`, `metadata`, `include`, `truncation` and similar) are ignored, and
+reasoning items on an inbound `input` are dropped, because Chat Completions has
+no way to send them back.
+
 ### Request ID and inline cost
 
 Every Chat, Messages, and Responses response carries an `Otari-Request-ID`
@@ -89,6 +121,44 @@ A field a provider adds to a chat completion's message beyond the OpenAI schema
 (Exa's `citations`, for instance) is kept where the provider put it and copied
 under `message.provider_specific_fields` (`delta.provider_specific_fields` on a
 stream), where clients written against LiteLLM look for it.
+
+### Request tags
+
+A request can tag its spend through `metadata`, OpenAI's field for this, on all
+three surfaces:
+
+```json
+{"model": "openai:gpt-4o", "messages": [...], "metadata": {"purpose": "chat", "country": "DE"}}
+```
+
+A standalone gateway records the tags on every usage row the request writes:
+served, failed, streamed or not, refused by the gateway (a disallowed model,
+missing pricing, an exhausted budget), and the separate row billing an image
+description made for a text-only model. LiteLLM's
+nested form, `"metadata": {"spend_logs_metadata": {...}}`, is read as well, so a
+client moving off a LiteLLM proxy keeps its attribution unchanged; a nested key
+wins over a flat one of the same name. The limits are OpenAI's: up to 16 string
+pairs, keys up to 64 characters and values up to 512. A null value is ignored,
+and anything else is refused with a 422.
+
+What reaches the provider depends on the surface. Chat Completions never
+forwards `metadata`. Messages forwards only `metadata.user_id`, the one key
+Anthropic accepts there, which also names the billed user, as it always has, and
+is not a tag. Responses forwards `metadata` as before, minus
+`spend_logs_metadata`, because the Responses API stores it.
+
+The usage endpoints (`GET /api/v1/usage`, `/count`, `/summary`, `/series`, and
+their `/api/v1/organizations/me/usage` counterparts) filter by tag with a
+repeatable `tag=key:value`. Values for the same key match any of them, and
+different keys must all match. `/summary` also takes `group_by_tag=<key>` and
+returns spend by that tag's values as `by_tag`, with untagged rows under a null
+key:
+
+```
+GET /api/v1/usage/summary?group_by_tag=purpose&dimensions=none
+```
+
+Tags are recorded in standalone mode only.
 
 ### Cost of a failed or interrupted request
 
@@ -279,6 +349,7 @@ reworded.
 | `model_not_allowed` | 403 | The key may not use the model | |
 | `context_length_exceeded` | 400 | The prompt is too long for the model | |
 | `pricing_required` | 402 | `require_pricing` is on and the model has no price | |
+| `end_user_budget_not_allowed` | 403 | A service key named an end-user budget that is not on its `end_user_budget_ids` | |
 
 A failure after a stream has started arrives as an error event, which carries
 the code as `error.code` on Chat Completions and Responses:

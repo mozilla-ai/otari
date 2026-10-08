@@ -1,4 +1,4 @@
-"""Unit tests for ``_compute_cost``, the standalone-mode cost calculation.
+"""Unit tests for the standalone-mode cost of a request, as ``calculate_metered_cost`` totals it.
 
 These pin the cache-token pricing model, which follows the genai-prices dataset
 this project already uses: the input/prompt token count is the grand total that
@@ -29,7 +29,7 @@ import pytest
 from any_llm.types.completion import CompletionUsage
 from pydantic import ValidationError
 
-from gateway.api.routes._pipeline import _compute_cost
+from gateway.core.metered_pricing import calculate_metered_cost
 from gateway.core.settings.pricing import PricingConfig, PricingTierConfig
 from gateway.core.usage import GatewayUsage
 from gateway.models.pricing import ModelPricing
@@ -38,6 +38,12 @@ from gateway.models.pricing import ModelPricing
 def _usd(tokens: int, rate_per_million: str) -> Decimal:
     """One meter's exact charge: tokens at a USD-per-million rate."""
     return Decimal(tokens) * Decimal(rate_per_million) / Decimal(1_000_000)
+
+
+def _compute_cost(pricing: ModelPricing, usage: CompletionUsage) -> Decimal:
+    """The settled total, without the meters and breakdown that come with it."""
+    cost, _, _ = calculate_metered_cost(pricing, usage)
+    return cost
 
 
 def _pricing(**overrides: float | None) -> ModelPricing:

@@ -2,25 +2,18 @@
 
 The deployment-wide sandbox configuration (its URL, its purpose hint) stays on
 ``/api/v1/tool-settings``; this surface says which workspaces on that deployment may
-use it and within which limits. Thin composition over
-`gateway.services.tenancy.workspace_code_execution_policy_service`, following
+use it and within which limits. Thin composition over the tools service's
+`WorkspaceCodeExecutionPolicyService`, following
 `routes/workspace_member_budget_policies.py`'s shape (master key on the router,
 plus the caller's tenancy identity for the per-workspace role checks).
 """
 
 import uuid
-from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_config, get_db, verify_master_key
-from gateway.core.config import GatewayConfig
-from gateway.services.tenancy.workspace_code_execution_policy_service import (
-    WorkspaceCodeExecutionPolicyPublic,
-    WorkspaceCodeExecutionPolicyService,
-    WorkspaceCodeExecutionPolicyUpdate,
-)
+from gateway.api.deps import CurrentIdentity, WorkspaceCodeExecutionPolicyServiceDep, verify_master_key
+from gateway.services.tools import WorkspaceCodeExecutionPolicyPublic, WorkspaceCodeExecutionPolicyUpdate
 
 # Auth is declared on the router, matching `routes/workspace_member_budget_policies.py`:
 # every handler here needs the master key, and a future one that forgot the
@@ -30,33 +23,6 @@ router = APIRouter(
     tags=["workspace-code-execution-policy"],
     dependencies=[Depends(verify_master_key)],
 )
-
-
-def get_workspace_code_execution_policy_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    config: Annotated[GatewayConfig, Depends(get_config)],
-) -> WorkspaceCodeExecutionPolicyService:
-    """Build the service on the request's session.
-
-    The sandbox-presence check is the same one ``GET /api/v1/tools`` makes when it
-    decides whether to advertise code execution, so the page and the discovery
-    endpoint agree about whether this deployment can run any.
-
-    ``allowed_images`` is the operator's curated image list, read from the
-    deployment config here for the same reason: which images exist is a property
-    of the running gateway, not of the workspace, and the service is handed the
-    answer rather than reaching for the config itself.
-    """
-    return WorkspaceCodeExecutionPolicyService(
-        db,
-        sandbox_configured=config.sandbox_configured(),
-        allowed_images=config.pinnable_sandbox_images(),
-    )
-
-
-WorkspaceCodeExecutionPolicyServiceDep = Annotated[
-    WorkspaceCodeExecutionPolicyService, Depends(get_workspace_code_execution_policy_service)
-]
 
 
 @router.get("")

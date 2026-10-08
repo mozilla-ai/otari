@@ -25,6 +25,7 @@ from gateway.api.deps import build_idempotency_service, get_config, get_unit_of_
 from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
 from gateway.core.config import (
     CONVERSATION_HEADER,
+    END_USER_BUDGET_HEADER,
     REQUEST_ID_HEADER,
     ROUTER_HEADER,
     ROUTER_TASK_HEADER,
@@ -47,7 +48,13 @@ IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 IDEMPOTENT_REPLAYED_HEADER = "Otari-Idempotent-Replayed"
 # The response headers a replay repeats: the ones that describe this request
 # rather than the moment it was answered, which rate-limit headers do.
-_REPLAYED_HEADERS = (REQUEST_ID_HEADER, "Otari-Container-Id", "Otari-Container-Expires-At", GUARDRAILS_RESULT_HEADER)
+_REPLAYED_HEADERS = (
+    REQUEST_ID_HEADER,
+    "Otari-Container-Id",
+    "Otari-Container-Expires-At",
+    GUARDRAILS_RESULT_HEADER,
+    END_USER_BUDGET_HEADER,
+)
 # The request headers that change what a request does, so they count toward
 # whether a retry is the same request.
 _REQUEST_SHAPING_HEADERS = (
@@ -57,6 +64,7 @@ _REQUEST_SHAPING_HEADERS = (
     "anthropic-beta",
     ROUTER_TASK_HEADER,
     CONVERSATION_HEADER,
+    END_USER_BUDGET_HEADER,
 )
 
 INVALID_IDEMPOTENCY_KEY_DETAIL = (

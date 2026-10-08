@@ -29,6 +29,7 @@ from typing import Any, TypeVar, cast, get_protocol_members
 from fastapi import APIRouter
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.adapters.agent_model_recommender_adapter import DecisionProviderRecommender
 from gateway.adapters.api_key_format_adapter import DefaultApiKeyFormatAdapter
 from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.code_execution_adapter import build_code_execution_port, verify_code_execution_ready
@@ -47,6 +48,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.deployment import Plane, deployment_for
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
+from gateway.ports.agent_model_recommender_port import AgentModelRecommenderPort
 from gateway.ports.api_key_format_port import ApiKeyFormatPort
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort
@@ -61,10 +63,11 @@ from gateway.ports.provider_file_port import ProviderFilePort
 from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort
-from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import UserRepository
-from gateway.services.budgets import BudgetMembershipListener
+from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_listener import WorkspaceListener
+from gateway.services.tools import WorkspaceCodeExecutionPolicies, WorkspaceSearchKeys
 
 T = TypeVar("T")
 
@@ -86,6 +89,10 @@ PortFactory = Callable[[AsyncSession | None], T]
 # of Work, because the membership listener writes through its open block and only
 # ``get_unit_of_work`` may construct one.
 UnitOfWorkPortFactory = Callable[[AsyncSession | None, UnitOfWork | None], T]
+MembershipListenerBuilder = Callable[[UnitOfWork], MembershipListener]
+WorkspaceListenerBuilder = Callable[[UnitOfWork], WorkspaceListener]
+WorkspaceSearchKeysBuilder = Callable[[AsyncSession], WorkspaceSearchKeys]
+CodeExecutionPoliciesBuilder = Callable[[AsyncSession], WorkspaceCodeExecutionPolicies]
 Register = Callable[["Container"], None]
 
 
@@ -253,7 +260,11 @@ def _growth_signal_adapter(session: AsyncSession | None) -> GrowthSignalPort:
     return NullGrowthSignalAdapter(session)
 
 
-def _identity_provider_adapter_factory(config: GatewayConfig | None) -> UnitOfWorkPortFactory[IdentityProviderPort]:
+def _identity_provider_adapter_factory(
+    config: GatewayConfig | None,
+    membership_listener: MembershipListenerBuilder | None,
+    workspace_listener: WorkspaceListenerBuilder | None,
+) -> UnitOfWorkPortFactory[IdentityProviderPort]:
     """Build the core ``IdentityProviderPort`` factory, bound to this app's ``open_signup`` setting.
 
     An open signup creates a workspace membership, so the adapter needs the request's Unit of Work too.
@@ -263,10 +274,19 @@ def _identity_provider_adapter_factory(config: GatewayConfig | None) -> UnitOfWo
         if session is None or uow is None:
             msg = f"a session and a unit of work are required to build {_port_name(IdentityProviderPort)}"
             raise ContainerError(msg)
+        if membership_listener is None:
+            msg = f"a membership listener is required to build {_port_name(IdentityProviderPort)}"
+            raise ContainerError(msg)
+        if workspace_listener is None:
+            msg = f"a workspace listener is required to build {_port_name(IdentityProviderPort)}"
+            raise ContainerError(msg)
         return DeploymentIdentityProviderAdapter(
             UserRepository(session),
             OrganizationService(
-                session, membership_listener=BudgetMembershipListener(BudgetRepositories.on(uow)), uow=uow
+                session,
+                membership_listener=membership_listener(uow),
+                uow=uow,
+                workspace_listener=workspace_listener(uow),
             ),
             open_signup=bool(config and config.open_signup),
         )
@@ -400,6 +420,19 @@ def _rate_limit_store_port_factory(config: GatewayConfig | None) -> PortFactory[
     return factory
 
 
+def _agent_model_recommender_factory(config: GatewayConfig | None) -> PortFactory[AgentModelRecommenderPort]:
+    """The core ``AgentModelRecommenderPort`` factory, closed over this app's config.
+
+    Config rather than a session, because which decision model answers is a
+    deployment setting (``agent_recommender_model``) and not a per-request fact,
+    and the adapter holds nothing per request, so one serves every request.
+    A container built without config resolves this port only to raise.
+    """
+    if config is None:
+        return _requires_config(AgentModelRecommenderPort)
+    return _shared(DecisionProviderRecommender(config))
+
+
 def _requires_config(port: PortKey[T]) -> PortFactory[T]:
     """A factory that refuses every resolve, for a container built without config."""
 
@@ -431,7 +464,40 @@ def _with_session(port: PortKey[T], adapter: Callable[[AsyncSession], T]) -> Por
     return factory
 
 
-def _bind_workspace_ports(container: Container, config: GatewayConfig | None) -> None:
+def _local_web_search_policy(
+    search_keys: WorkspaceSearchKeysBuilder | None,
+) -> Callable[[AsyncSession], WebSearchPolicyPort]:
+    """Build the stored web search policy, which also reads the workspace's own search key."""
+
+    def build(session: AsyncSession) -> WebSearchPolicyPort:
+        if search_keys is None:
+            msg = f"a search key resolver is required to build {_port_name(WebSearchPolicyPort)}"
+            raise ContainerError(msg)
+        return LocalWebSearchPolicy(session, search_keys=search_keys(session))
+
+    return build
+
+
+def _local_code_execution_policy(
+    policies: CodeExecutionPoliciesBuilder | None,
+) -> Callable[[AsyncSession], CodeExecutionPolicyPort]:
+    """Build the stored code execution policy."""
+
+    def build(session: AsyncSession) -> CodeExecutionPolicyPort:
+        if policies is None:
+            msg = f"a code execution policy reader is required to build {_port_name(CodeExecutionPolicyPort)}"
+            raise ContainerError(msg)
+        return LocalCodeExecutionPolicy(policies(session))
+
+    return build
+
+
+def _bind_workspace_ports(
+    container: Container,
+    config: GatewayConfig | None,
+    search_keys: WorkspaceSearchKeysBuilder | None,
+    code_execution_policies: CodeExecutionPoliciesBuilder | None,
+) -> None:
     """Bind each workspace port to this deployment's own rows, or to its peer where a peer holds them.
 
     The planes a deployment serves are fixed for the life of the process, so they are read once, here.
@@ -441,21 +507,40 @@ def _bind_workspace_ports(container: Container, config: GatewayConfig | None) ->
         container.bind(McpServerPort, _requires_config(McpServerPort))
         container.bind(WebSearchPolicyPort, _requires_config(WebSearchPolicyPort))
     elif deployment_for(config).supports(Plane.CONTROL):
-        container.bind(CodeExecutionPolicyPort, _with_session(CodeExecutionPolicyPort, LocalCodeExecutionPolicy))
+        container.bind(
+            CodeExecutionPolicyPort,
+            _with_session(CodeExecutionPolicyPort, _local_code_execution_policy(code_execution_policies)),
+        )
         container.bind(McpServerPort, _with_session(McpServerPort, LocalMcpServers))
-        container.bind(WebSearchPolicyPort, _with_session(WebSearchPolicyPort, LocalWebSearchPolicy))
+        container.bind(WebSearchPolicyPort, _with_session(WebSearchPolicyPort, _local_web_search_policy(search_keys)))
     else:
         container.bind(CodeExecutionPolicyPort, _shared(RemoteCodeExecutionPolicy(config)))
         container.bind(McpServerPort, _shared(RemoteMcpServers(config)))
         container.bind(WebSearchPolicyPort, _shared(RemoteWebSearchPolicy(config)))
 
 
-def build_container(bootstrap_selector: str | None = None, config: GatewayConfig | None = None) -> Container:
+def build_container(
+    bootstrap_selector: str | None = None,
+    config: GatewayConfig | None = None,
+    *,
+    membership_listener: MembershipListenerBuilder | None = None,
+    workspace_listener: WorkspaceListenerBuilder | None,
+    search_keys: WorkspaceSearchKeysBuilder | None = None,
+    code_execution_policies: CodeExecutionPoliciesBuilder | None = None,
+) -> Container:
     """Build the composition-root container for this deployment.
 
     Binds the core adapters, then, if a selector is given, lets the bootstrap it
     names rebind ports and contribute routers. With no selector the core
     defaults stand and Otari boots standalone.
+
+    ``membership_listener`` builds the listener the OAuth sign-in adapter's
+    organization service notifies. It is a parameter because its builder lives
+    in the API layer, which this module cannot import. ``workspace_listener``
+    builds what sets up a workspace that adapter's open signup creates,
+    ``search_keys`` the resolver of a workspace's own web search key, and
+    ``code_execution_policies`` the reader of a workspace's code execution
+    policy, for the same reason.
 
     Raises:
         BootstrapError: If the selector is present but blank, or names a
@@ -484,7 +569,9 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
     # overlay binds a scale-out store behind the same port.
     container.bind(TelemetryStoragePort, _telemetry_storage_adapter)
     # OAuth sign-in: the base applies this deployment's `open_signup` setting.
-    container.bind_with_unit_of_work(IdentityProviderPort, _identity_provider_adapter_factory(config))
+    container.bind_with_unit_of_work(
+        IdentityProviderPort, _identity_provider_adapter_factory(config, membership_listener, workspace_listener)
+    )
     # API key format: the base mints the open-source shape and checks every
     # presented key against its own rows. A hosted overlay binds a format that
     # carries a region and a checksum, and routes a key minted elsewhere away.
@@ -504,10 +591,16 @@ def build_container(bootstrap_selector: str | None = None, config: GatewayConfig
     container.bind(ProviderFilePort, _provider_file_adapter)
     # A workspace's MCP servers and its web search and code execution policies.
     # An overlay binds a source of its own and changes nothing above the port.
-    _bind_workspace_ports(container, config)
+    _bind_workspace_ports(container, config, search_keys, code_execution_policies)
     # Rate-limit counts: the base keeps them in this process, or in Redis
     # where ``rate_limit_store`` asks for one count shared by every replica.
     container.bind(RateLimitStorePort, _rate_limit_store_port_factory(config))
+    # A subagent's model: the base puts one choice question to the decision
+    # model ``agent_recommender_model`` names, which may be a local one. A
+    # hosted overlay binds a recommender of its own behind the same port, at a
+    # price of its own, and changes nothing above it: the call is metered and
+    # recorded here either way.
+    container.bind(AgentModelRecommenderPort, _agent_model_recommender_factory(config))
     if config is not None:
         # Asked once, at build, rather than per request: selecting a hosted
         # provider is itself what publishes code execution on ``/v1/tools``, in

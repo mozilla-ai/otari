@@ -92,7 +92,7 @@ SERVED_TOOL_NAMES: tuple[str, ...] = (CODE_EXECUTION_TOOL_NAME,)
 # The execution budget one call gets when nothing narrows it. Public because a
 # workspace code-execution policy floors its own ceiling against this value
 # rather than carrying a second idea of the default (see
-# ``services/tenancy/workspace_code_execution_policy_service.py``).
+# ``services/tools/_code_execution_policy.py``).
 DEFAULT_EXEC_TIMEOUT_S = 60.0
 # Headroom on top of what the calls themselves may spend, for the lease a
 # session is opened with: seeding the uploads and collecting the outputs happen

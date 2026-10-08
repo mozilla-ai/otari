@@ -284,16 +284,6 @@ export type CatalogOfferingUsage = Schemas["OfferingUsage"]
 export type StoredPricingTier = NonNullable<
   ModelPricingInfo["pricing_tiers"]
 >[number]
-// A tier whose threshold is unreadable cannot take part in choosing a rate, and
-// it already could not: comparing against an absent `min_input_tokens` excluded
-// it anyway. Narrowing says so rather than leaving it to a false comparison.
-export function isPricingTier(tier: StoredPricingTier): tier is PricingTier {
-  return (
-    typeof tier === "object" &&
-    tier !== null &&
-    typeof (tier as PricingTier).min_input_tokens === "number"
-  )
-}
 // `unit` carries a schema default, so the generator emits it as required; the
 // callers that price a model omit it and the gateway reads tokens.
 export type SetPricingRequest = Defaulted<Schemas["SetPricingRequest"], "unit">

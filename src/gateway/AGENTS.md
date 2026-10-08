@@ -10,7 +10,7 @@ artifacts. [ARCHITECTURE.md](../../ARCHITECTURE.md) owns the extension boundary.
 [The modular monolith](../../ARCHITECTURE.md#the-modular-monolith) names the
 target shape and its import rules,
 [Layering](../../.github/skills/backend-standards/SKILL.md#layering) gives the
-rules for each layer, and [docs/domains.md](../../docs/domains.md) says what each
+rules for each layer, and [DOMAINS.md](../../DOMAINS.md) says what each
 domain owns.
 
 ## Ports and composition
@@ -181,6 +181,8 @@ outbound URL checks in `services/url_safety.py`.
 
 Deployment settings establish available backends. Workspace code-execution and
 web-search policy can disable or narrow those settings but cannot widen them.
+An organization's own web search key changes which account a workspace's
+searches bill to, not whether search is available (`services/tools/_web_search_keys.py`).
 MCP servers are workspace resources rather than a refinement of a deployment
 server list.
 

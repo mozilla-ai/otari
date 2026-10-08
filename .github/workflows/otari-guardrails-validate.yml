@@ -1,0 +1,34 @@
+name: Otari Guardrails Validate
+
+# NOTE: This workflow has no path filter. A change anywhere in the tree can remove
+# a script a verifier gate runs, and a filtered workflow cannot be a required check.
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: otari-guardrails-validate-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      with:
+        python-version: "3.14"
+
+    - name: Validate the guardrails
+      run: uv run --frozen --no-dev --package otari-agent otari guardrails validate --repo-only --strict

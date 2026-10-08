@@ -94,9 +94,8 @@ async def create_rerank(
             rerank_kwargs["max_tokens_per_doc"] = request.max_tokens_per_doc
         return await arerank(**rerank_kwargs)
 
-    # Rerank results are returned verbatim and some providers (Voyage, Jina)
-    # carry ``model``, which would echo the target an alias exists to hide. The
-    # relabeling is a no-op on results without the field.
+    # Rerank results are returned verbatim and carry ``model``, which would echo
+    # the target an alias exists to hide, so it is relabeled to the alias.
     outcome = await run_passthrough(
         endpoint=USAGE_ENDPOINT,
         raw_request=raw_request,

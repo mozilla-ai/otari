@@ -293,15 +293,3 @@ export function credentialLabel(
       return "deployment"
   }
 }
-
-/**
- * The offering a snippet should name: the cheapest priced one, else the first.
- *
- * The detail lists offerings cheapest first already, so this is its first row;
- * spelled out so the "use this model" panel and the table cannot disagree.
- */
-export function defaultOffering(
-  offerings: CatalogOffering[],
-): CatalogOffering | undefined {
-  return offerings[0]
-}

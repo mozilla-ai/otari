@@ -166,6 +166,7 @@ const BASE_NAV_SECTIONS = [
             to: "/tools/code-execution",
             label: "Code execution",
             icon: FiCode,
+            badge: "Beta",
           },
           { to: "/tools/mcp-servers", label: "MCP servers", icon: FiServer },
         ],

@@ -64,6 +64,7 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // WebAuthn relying-party ID and the account page offers no passkey form.
     // Distinct from `passkey` in sign_in_methods above, which additionally
     // needs a registered passkey; see docs/access-control.md.
+    passkeys_enabled: true,
     passkeys_ready: false,
     oauth_providers: [],
     // Off by default until the otari.ai intake delivers; see

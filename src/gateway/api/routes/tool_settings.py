@@ -50,6 +50,7 @@ from gateway.api.deps import (
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.tenancy import User as TenancyUser
+from gateway.models.tools import SandboxProvider
 from gateway.services.guardrail_catalog import (
     BuiltInGuardrailCatalog,
     GuardrailCatalog,
@@ -128,6 +129,13 @@ class ToolSettingsResponse(BaseModel):
     """The effective value of every editable tool/guardrail field."""
 
     fields: list[ToolSettingField]
+    sandbox_provider: SandboxProvider | None = Field(
+        default=None,
+        description=(
+            "What runs generated code: 'protocol' (a sandbox at sandbox_url) or 'e2b'. Set at startup, "
+            "not editable here. Null for a reader who does not operate the deployment."
+        ),
+    )
 
 
 class UpdateToolSettingsRequest(BaseModel):
@@ -192,7 +200,8 @@ def _current_fields(config: GatewayConfig, *, include_urls: bool = True) -> Tool
         )
         for key in keys
     ]
-    return ToolSettingsResponse(fields=fields)
+    provider = config.effective_sandbox_provider() if include_urls else None
+    return ToolSettingsResponse(fields=fields, sandbox_provider=provider)
 
 
 @reader_router.get("")

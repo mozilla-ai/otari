@@ -111,6 +111,7 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
         "privacy_url": None,
         "site_url": None,
         "maintenance_mode": False,
+        "passkeys_enabled": True,
         "passkeys_ready": False,
         "oauth_providers": [],
         "feedback_enabled": False,
@@ -191,6 +192,47 @@ def test_passkeys_ready_turns_on_with_an_address_alone(tmp_path: Path) -> None:
         assert answered["passkeys_ready"] is True
         # Still no registered passkey, so it is not offered as a sign-in yet.
         assert "passkey" not in answered["sign_in_methods"]
+
+
+def test_a_deployment_can_turn_passkeys_off_entirely(tmp_path: Path) -> None:
+    """The switch is the setting, not the absence of an address.
+
+    An address is also what OAuth redirects and mail links are built from, so a
+    deployment that serves those cannot switch passkeys off by leaving one out.
+    With the setting off the deployment says so, publishes no passkey sign-in,
+    and takes the ceremony and management routes out of the API altogether.
+    """
+    off = _standalone(tmp_path)
+    off.public_base_url = "https://otari.example.com"
+    off.passkeys_enabled = False
+
+    with TestClient(create_app(off)) as client:
+        answered = client.get(f"{API_ROOT}/bootstrap").json()
+        assert answered["passkeys_enabled"] is False
+        assert answered["passkeys_ready"] is False
+        assert "passkey" not in answered["sign_in_methods"]
+        # Not mounted, so a 404 rather than the 503 a missing relying party gives.
+        for method, path in (
+            ("post", "/auth/webauthn/authenticate/options"),
+            ("post", "/auth/webauthn/authenticate"),
+            ("post", "/auth/webauthn/register/options"),
+            ("get", "/auth/webauthn/credentials"),
+            ("delete", "/auth/webauthn/credentials/00000000-0000-0000-0000-000000000000"),
+        ):
+            response = getattr(client, method)(f"{API_ROOT}{path}")
+            assert response.status_code == 404, (method, path, response.status_code)
+
+
+def test_passkeys_stay_on_by_default_and_mounted(tmp_path: Path) -> None:
+    on = _standalone(tmp_path)
+    on.public_base_url = "https://otari.example.com"
+
+    with TestClient(create_app(on)) as client:
+        answered = client.get(f"{API_ROOT}/bootstrap").json()
+        assert answered["passkeys_enabled"] is True
+        assert answered["passkeys_ready"] is True
+        # Mounted: refused for want of a session, not for want of a route.
+        assert client.get(f"{API_ROOT}/auth/webauthn/credentials").status_code in {401, 403}
 
 
 def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Path) -> None:
@@ -436,6 +478,7 @@ def test_hybrid_reports_no_session_no_surfaces_and_the_hosted_url(monkeypatch: p
         "privacy_url": None,
         "site_url": None,
         "maintenance_mode": False,
+        "passkeys_enabled": False,
         "passkeys_ready": False,
         "oauth_providers": [],
         "feedback_enabled": False,

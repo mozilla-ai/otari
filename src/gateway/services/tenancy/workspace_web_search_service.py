@@ -29,13 +29,14 @@ from gateway.models.tenancy import User, Workspace
 from gateway.models.tools import ResolvedWebSearchConfig, WorkspaceWebSearchConfig
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.web_retrieval_backend import MAX_RESULTS_CAP
 from gateway.services.web_retrieval_policy import read_domain_list
 
 # The backend's own ceiling on returned hits. A stored value above it would read
 # as a configured limit and do nothing, since the backend clamps to this anyway,
 # so it is refused at the write rather than silently clamped at resolve time.
-# Same call as `workspace_code_execution_policy_service` makes for its two.
+# Same call as the code execution policy service makes for its two.
 _MAX_RESULTS = MAX_RESULTS_CAP
 # Bound the opaque bag so one workspace's row cannot grow without limit; the
 # same numbers the hosted `WorkspaceWebSearchConfigUpdate` uses, since this is
@@ -261,7 +262,9 @@ class WorkspaceWebSearchService:
 
     def __init__(self, db: AsyncSession, *, web_search_configured: bool):
         self.db = db
-        self.organizations = OrganizationService(db, membership_listener=None)
+        self.organizations = OrganizationService(
+            db, membership_listener=None, workspace_listener=NullWorkspaceListener()
+        )
         # Passed in rather than read here: whether a backend is configured is a
         # question about the running deployment's config, which the route layer
         # already holds and a service has no business reaching for.
@@ -290,7 +293,7 @@ class WorkspaceWebSearchService:
         of the whole configuration is idempotent: the loser re-reads the row the
         winner created and applies its own values over it, which is the same
         outcome it would have reached had it arrived a moment later. The same
-        handling as ``workspace_code_execution_policy_service``, for the same
+        handling as the code execution policy service, for the same
         reason: one row per workspace and nothing to disambiguate.
         """
         workspace = await self._resolve_manageable(user=user, workspace_id=workspace_id)

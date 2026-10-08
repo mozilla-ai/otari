@@ -173,3 +173,35 @@ def test_a_well_formed_configuration_passes_startup_validation() -> None:
     )
     config.validate_webauthn_relying_party()
     assert config.webauthn_enabled is True
+
+
+def test_passkeys_are_on_unless_the_deployment_turns_them_off() -> None:
+    assert _config(public_base_url="https://otari.example.com").passkeys_enabled is True
+
+
+def test_turning_passkeys_off_leaves_no_relying_party_whatever_else_is_set() -> None:
+    """The address stays (OAuth and mail need it); the ceremony does not."""
+    config = _config(
+        public_base_url="https://otari.example.com",
+        webauthn_rp_id="example.com",
+        passkeys_enabled=False,
+    )
+    assert config.webauthn_relying_party is None
+    assert config.webauthn_enabled is False
+
+
+def test_leftover_webauthn_settings_are_not_checked_when_passkeys_are_off() -> None:
+    """A deployment that switched them off must still boot with the old values."""
+    stale = _config(
+        public_base_url="https://otari.example.com",
+        webauthn_rp_id="https://not-a-domain.example",
+        passkeys_enabled=False,
+    )
+    stale.validate_webauthn_relying_party()
+
+    live = _config(
+        public_base_url="https://otari.example.com",
+        webauthn_rp_id="https://not-a-domain.example",
+    )
+    with pytest.raises(ValueError, match="webauthn_rp_id"):
+        live.validate_webauthn_relying_party()

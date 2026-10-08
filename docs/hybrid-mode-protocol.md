@@ -348,7 +348,8 @@ request.
   "purpose_hint": "Background research",
   "allowed_domains": ["example.com"],
   "blocked_domains": ["spam.example"],
-  "provider_options": { "engines": "google,bing" }
+  "provider_options": { "engines": "google,bing" },
+  "credential": { "provider": "tavily", "api_key": "tvly-..." }
 }
 ```
 
@@ -367,7 +368,9 @@ Every recognized field must have its documented type and stay within the limits 
 
 A workspace's `max_results`, `allowed_domains` and `blocked_domains` are a ceiling that a request may narrow and may not widen. The data plane applies the lower of the workspace's `max_results` and the request's own, or the deployment's default where the request names none. It applies the union of the two block-lists. Each allow-list entry is a domain suffix that also covers its subdomains, so the two allow-lists intersect by keeping the narrower entry of each overlapping pair: a request naming `docs.example.com` under a workspace allowing `example.com` keeps `docs.example.com`. A request whose allow-list overlaps the workspace's nowhere is refused with `403`. `purpose_hint` fills the request's hint only where it has none, and `provider_options` is shallow-merged with request keys winning.
 
-For Fetch, allowed and blocked domains form a mandatory policy that request-supplied Search filters may only narrow when both tools are declared. Fetch authorization does not depend on a Search provider, credential, or backend URL. `provider` is informational: the active Search backend is configured on the data plane itself.
+For Fetch, allowed and blocked domains form a mandatory policy that request-supplied Search filters may only narrow when both tools are declared. Fetch authorization does not depend on a Search provider, credential, or backend URL. `provider` is informational.
+
+`credential` is optional and is the search key the workspace's own organization brought, chosen by the platform: the workspace's pinned key, otherwise an organization default, otherwise its oldest key. When present, the data plane searches with it, calling that provider directly, so the organization's own search account pays. When absent or `null`, the data plane uses the Search backend configured on the data plane itself, as before. `provider` must be a search provider the gateway can call with a key (`tavily` or `brave`) and `api_key` a non-empty string. Any other shape fails closed with `502`. A `provider` the gateway does not know is ignored, so the request uses the data plane's own Search backend. The platform sends `credential` only in an answer that declares `web_search` in `requested_tools`, and the data plane never logs or returns it. A data plane that predates the field ignores it.
 
 ### Failure
 

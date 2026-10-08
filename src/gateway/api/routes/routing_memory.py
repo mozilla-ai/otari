@@ -56,8 +56,7 @@ from gateway.models.routing import RouterPreference, RoutingMemory
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.policy_store import effective_policies
 from gateway.services.provider_kwargs import resolve_provider_selector
-from gateway.services.routing import KNN_BACKEND, backend_pool_is_teachable, get_router_backend
-from gateway.services.routing.knn import KnnRoutingMemory
+from gateway.services.routing import KNN_BACKEND, KnnRoutingMemory, backend_pool_is_teachable, get_router_backend
 
 router = APIRouter(
     prefix="/routing",

@@ -18,5 +18,6 @@ gates:
       Judge only code this diff adds under src/gateway/. Fail if it gives a service's
       constructor a database session or another domain's repository, or if it constructs
       a service anywhere except a builder function in src/gateway/api/deps.py. This is
-      "Constructor injection" and "Builders" in docs/domains.md, "The target shape".
+      "Constructor injection" and "Builders" in DOMAINS.md, "The target shape".
       Pass if the diff constructs no service and changes no service constructor.
+    accept_warnings: [judge-gate-cap]

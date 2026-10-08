@@ -6,8 +6,6 @@
 
 from __future__ import annotations
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.tools_exceptions import (
     CodeExecutionPolicyResolutionFailedError,
@@ -16,23 +14,20 @@ from gateway.exceptions.tools_exceptions import (
 from gateway.models.tools import ResolvedCodeExecutionPolicy
 from gateway.ports.code_execution_policy_port import CodeExecutionPolicyPort, CodeExecutionPolicyScope
 from gateway.services.control_plane import ResolveEndpoint, resolve
-from gateway.services.tenancy.workspace_code_execution_policy_service import (
-    read_code_execution_policy,
-    resolve_workspace_code_execution_policy,
-)
+from gateway.services.tools import WorkspaceCodeExecutionPolicies, read_code_execution_policy
 
 
 class LocalCodeExecutionPolicy(CodeExecutionPolicyPort):
     """The policy stored in this deployment's own database."""
 
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
+    def __init__(self, policies: WorkspaceCodeExecutionPolicies) -> None:
+        self._policies = policies
 
     async def resolve(self, scope: CodeExecutionPolicyScope) -> ResolvedCodeExecutionPolicy | None:
         # NOTE: a missing workspace fails closed, because the policy is a veto and no answer must not read as no limit.
         if scope.workspace_id is None:
             raise CodeExecutionPolicyResolutionFailedError(CodeExecutionPolicyResolutionFailure.NO_WORKSPACE)
-        return await resolve_workspace_code_execution_policy(self._session, scope.workspace_id)
+        return await self._policies.resolve(scope.workspace_id)
 
 
 class RemoteCodeExecutionPolicy(CodeExecutionPolicyPort):

@@ -80,10 +80,9 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 
 ## Managed deployment templates
 
-- [Render](../deploy/render/README.md)
 - [Railway](../deploy/railway/README.md)
 
-Those pages own their current image tags, variables, platform limits, and
+That page owns its current image tag, variables, platform limits, and
 maintenance instructions.
 
 ## Connect a gateway to otari.ai
