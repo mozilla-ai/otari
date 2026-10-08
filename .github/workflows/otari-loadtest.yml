@@ -20,11 +20,6 @@ on:
       - 'Dockerfile'
       - 'loadtest/**'
       - '.github/workflows/otari-loadtest.yml'
-  workflow_dispatch:
-    inputs:
-      base:
-        description: 'Ref to compare the selected ref against'
-        default: main
 
 permissions:
   contents: read
@@ -38,7 +33,7 @@ jobs:
       contents: read
       pull-requests: read
     concurrency:
-      group: loadtest-${{ github.event.pull_request.number || github.ref }}
+      group: loadtest-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
       - name: Checkout repository
@@ -52,14 +47,7 @@ jobs:
       # is not that commit once main has moved, as on a later `labeled` run.
       - name: Resolve base
         id: base
-        env:
-          INPUT_BASE: ${{ inputs.base }}
-        run: |
-          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
-            echo "sha=$(git rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"
-          else
-            echo "sha=$INPUT_BASE" >> "$GITHUB_OUTPUT"
-          fi
+        run: echo "sha=$(git rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout base
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -90,7 +78,6 @@ jobs:
           cache-from: type=gha
 
       - name: Read the perf-accepted label
-        if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
