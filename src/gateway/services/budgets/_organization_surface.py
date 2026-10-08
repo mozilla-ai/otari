@@ -26,11 +26,19 @@ from gateway.exceptions.budget_exceptions import (
     OrganizationScopeNotFoundError,
     SpendCeilingAlreadyExistsError,
 )
-from gateway.models.budgets import SCOPE_ORGANIZATION, SCOPE_TYPES, SCOPE_WORKSPACE, Budget, ScopedBudget
+from gateway.models.budgets import (
+    SCOPE_ORGANIZATION,
+    SCOPE_TYPES,
+    SCOPE_WORKSPACE,
+    SCOPE_WORKSPACE_MEMBER,
+    Budget,
+    ScopedBudget,
+)
 from gateway.models.money import to_usd_or_none
 from gateway.models.tenancy import Organization, User
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.schemas.budgets import (
+    AppliedEntity,
     AppliedEntityPublic,
     OrganizationBudgetCreate,
     OrganizationBudgetPublic,
@@ -173,6 +181,80 @@ class _OrganizationSurface:
         if owner != organization.id:
             raise OrganizationScopeNotFoundError(scope_type, scope_id)
 
+    async def _replace_entities(
+        self, *, organization: Organization, budget: Budget, entities: list[AppliedEntity]
+    ) -> int:
+        """Make these entities exactly the ones this budget applies to, and return how many that is.
+
+        An entity the budget already applied to keeps its ceiling, and with it the spend this window has recorded:
+        dropping and re-adding it would hand back a budget already spent.
+        Runs in the caller's block, so a refusal part-way through rolls back the budget write as well.
+        A fixed number of queries however many entities there are: the workspaces are locked in one ordered
+        statement before anything is read or written, so two saves cannot deadlock each other or a workspace
+        deletion, and ownership is checked against the organization's scope IDs in memory.
+        """
+        scopes = await self._scopes.get_scope_ids_in(organization.id)
+        held = {
+            (ceiling.scope_type, ceiling.scope_id, ceiling.provider_key_id, ceiling.model): ceiling
+            for ceiling in await self._repositories.ceilings.list_for_budgets_in_scopes([budget.budget_id], scopes)
+        }
+        wanted = {entity.key() for entity in entities}
+        added = [entity for entity in entities if entity.key() not in held]
+        removed = [ceiling for key, ceiling in held.items() if key not in wanted]
+        if not added and not removed:
+            return len(wanted)
+
+        touched: list[tuple[str, str]] = [(entity.scope_type, entity.scope_id) for entity in added]
+        touched += [(ceiling.scope_type, ceiling.scope_id) for ceiling in removed]
+        await self._organizations.lock_workspaces(
+            {
+                workspace_id
+                for kind, scope_id in touched
+                if kind == SCOPE_WORKSPACE and (workspace_id := uuid_or_none(scope_id))
+            },
+            {
+                member_id
+                for kind, scope_id in touched
+                if kind == SCOPE_WORKSPACE_MEMBER and (member_id := uuid_or_none(scope_id))
+            },
+        )
+        # Re-read under the locks, so a workspace deleted while this waited is not still offered.
+        scopes = await self._scopes.get_scope_ids_in(organization.id)
+        # Membership in the organization's own ID strings, which is also what refuses a
+        # non-canonical spelling of a UUID: it would store a ceiling nothing matches.
+        for entity in added:
+            if entity.scope_id not in scopes.ids_of(entity.scope_type):
+                raise OrganizationScopeNotFoundError(entity.scope_type, entity.scope_id)
+        taken = {
+            (ceiling.scope_type, ceiling.scope_id, ceiling.provider_key_id, ceiling.model)
+            for ceiling in await self._repositories.ceilings.list_on_scope_ids([entity.scope_id for entity in added])
+            if ceiling.budget_id != budget.budget_id
+        }
+        for entity in added:
+            if entity.key() in taken:
+                raise OrganizationScopedBudgetAlreadyExistsError(entity.scope_type, entity.scope_id)
+
+        await self._repositories.ceilings.remove_many([ceiling.id for ceiling in removed])
+        period_start, period_end = _current_window(budget)
+        try:
+            await self._repositories.ceilings.add_many(
+                [
+                    ScopedBudget(
+                        scope_type=entity.scope_type,
+                        scope_id=entity.scope_id,
+                        provider_key_id=entity.provider_key_id,
+                        model=entity.model,
+                        budget_id=budget.budget_id,
+                        period_start=period_start,
+                        period_end=period_end,
+                    )
+                    for entity in added
+                ]
+            )
+        except SpendCeilingAlreadyExistsError:
+            raise OrganizationScopedBudgetAlreadyExistsError(added[0].scope_type, added[0].scope_id) from None
+        return len(wanted)
+
     async def create_budget(self, *, user: User, request: OrganizationBudgetCreate) -> OrganizationBudgetPublic:
         organization = await self._get_managed_organization(user)
         _require_valid_cycle(CycleSettings(*(getattr(request, name) for name in CYCLE_FIELD_ORDER)))
@@ -191,8 +273,16 @@ class _OrganizationSurface:
                 reset_month=request.reset_month,
             )
         )
+        if not request.applied_to:
+            return OrganizationBudgetPublic.from_model(
+                budget, organization_id=organization.id, ceiling_count=0, applied_to=[]
+            )
+        applied = await self._replace_entities(organization=organization, budget=budget, entities=request.applied_to)
         return OrganizationBudgetPublic.from_model(
-            budget, organization_id=organization.id, ceiling_count=0, applied_to=[]
+            budget,
+            organization_id=organization.id,
+            ceiling_count=applied,
+            applied_to=(await self._applied_to(organization, [budget.budget_id]))[budget.budget_id],
         )
 
     async def create_ceiling(
@@ -314,7 +404,7 @@ class _OrganizationSurface:
         organization = await self._get_managed_organization(user)
         budget = await self._require_own_budget(organization=organization, budget_id=budget_id)
         cadence_before = cadence_of(budget)
-        changes: dict[str, Any] = request.model_dump(exclude_unset=True)
+        changes: dict[str, Any] = request.model_dump(exclude_unset=True, exclude={"applied_to"})
         if "max_budget" in changes:
             changes["max_budget"] = to_usd_or_none(changes["max_budget"])
         # The resulting set is what the CHECK constraints refuse, and no submitted
@@ -333,6 +423,8 @@ class _OrganizationSurface:
             await self._repositories.ceilings.retime_for_budget(
                 budget.budget_id, period_start=period_start, period_end=period_end
             )
+        if request.applied_to is not None:
+            await self._replace_entities(organization=organization, budget=budget, entities=request.applied_to)
         return OrganizationBudgetPublic.from_model(
             budget,
             organization_id=organization.id,

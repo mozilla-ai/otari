@@ -17,7 +17,7 @@ tenant's.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -54,6 +54,7 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.schemas.budgets import (
+    AppliedEntity,
     OrganizationBudgetCreate,
     OrganizationBudgetUpdate,
     OrganizationScopedBudgetCreate,
@@ -1339,3 +1340,242 @@ async def test_an_unknown_scope_type_reaching_the_service_is_a_validation_error(
             scope_type="galaxy",
             scope_id=str(organization.id),
         )
+
+
+# =============================================================================
+# One save for a budget and the entities it applies to
+# =============================================================================
+
+
+async def _applied(service: BudgetService, owner: User) -> set[tuple[str, str, str | None, str | None]]:
+    ceilings = (await service.list_organization_ceilings(user=owner)).data
+    return {(c.scope_type, c.scope_id, c.provider_key_id, c.model) for c in ceilings}
+
+
+@pytest.mark.asyncio
+async def test_a_budget_is_created_with_its_entities_in_one_step(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db, slug="acme-applied-create")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, name="Platform", owner=owner)
+    service = _service(async_db)
+
+    created = await service.create_organization_budget(
+        user=owner,
+        request=_create(
+            applied_to=[
+                AppliedEntity(scope_type="workspace", scope_id=str(workspace.id)),
+                AppliedEntity(
+                    scope_type="organization", scope_id=str(organization.id), provider_key_id="openai", model="gpt-4o"
+                ),
+            ]
+        ),
+    )
+
+    assert created.ceiling_count == 2
+    assert await _applied(service, owner) == {
+        ("workspace", str(workspace.id), None, None),
+        ("organization", str(organization.id), "openai", "gpt-4o"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_an_update_replaces_the_entities_and_keeps_the_spend_of_those_it_keeps(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db, slug="acme-applied-update")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, name="Platform", owner=owner)
+    service = _service(async_db)
+    whole_org = AppliedEntity(scope_type="organization", scope_id=str(organization.id))
+    platform = AppliedEntity(scope_type="workspace", scope_id=str(workspace.id))
+    budget = await service.create_organization_budget(user=owner, request=_create(applied_to=[whole_org, platform]))
+    kept = (await async_db.execute(select(ScopedBudget).where(ScopedBudget.scope_type == "organization"))).scalar_one()
+    kept.current_spend = Decimal("7.5")
+    await async_db.flush()
+
+    on_openai = AppliedEntity(scope_type="workspace", scope_id=str(workspace.id), provider_key_id="openai")
+    updated = await service.update_organization_budget(
+        user=owner, budget_id=budget.budget_id, request=OrganizationBudgetUpdate(applied_to=[whole_org, on_openai])
+    )
+
+    assert updated.ceiling_count == 2
+    assert await _applied(service, owner) == {
+        ("organization", str(organization.id), None, None),
+        ("workspace", str(workspace.id), "openai", None),
+    }
+    still = await async_db.get(ScopedBudget, kept.id)
+    assert still is not None
+    assert still.current_spend == Decimal("7.5")
+
+
+@pytest.mark.asyncio
+async def test_an_update_without_entities_leaves_them_alone(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db, slug="acme-applied-omitted")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+    whole_org = AppliedEntity(scope_type="organization", scope_id=str(organization.id))
+    budget = await service.create_organization_budget(user=owner, request=_create(applied_to=[whole_org]))
+
+    await service.update_organization_budget(
+        user=owner, budget_id=budget.budget_id, request=OrganizationBudgetUpdate(name="Renamed")
+    )
+
+    assert await _applied(service, owner) == {("organization", str(organization.id), None, None)}
+
+
+@pytest.mark.asyncio
+async def test_a_refused_entity_refuses_the_whole_create(async_db: AsyncSession) -> None:
+    """No budget is left behind applying to part of what was asked."""
+    organization = await _organization(async_db, slug="acme-applied-atomic")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+
+    with pytest.raises(OrganizationScopeNotFoundError):
+        await service.create_organization_budget(
+            user=owner,
+            request=_create(
+                applied_to=[
+                    AppliedEntity(scope_type="organization", scope_id=str(organization.id)),
+                    AppliedEntity(scope_type="workspace", scope_id=str(uuid.uuid4())),
+                ]
+            ),
+        )
+
+    assert (await service.list_organization_budgets(user=owner)).count == 0
+    assert await _applied(service, owner) == set()
+
+
+@pytest.mark.asyncio
+async def test_an_entity_another_budget_carries_refuses_the_whole_update(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db, slug="acme-applied-taken")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = _service(async_db)
+    whole_org = AppliedEntity(scope_type="organization", scope_id=str(organization.id))
+    await service.create_organization_budget(user=owner, request=_create(name="First", applied_to=[whole_org]))
+    second = await service.create_organization_budget(user=owner, request=_create(name="Second"))
+
+    with pytest.raises(OrganizationScopedBudgetAlreadyExistsError):
+        await service.update_organization_budget(
+            user=owner,
+            budget_id=second.budget_id,
+            request=OrganizationBudgetUpdate(name="Renamed", applied_to=[whole_org]),
+        )
+
+    names = {budget.name for budget in (await service.list_organization_budgets(user=owner)).data}
+    assert names == {"First", "Second"}
+
+
+def test_an_entity_named_twice_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
+    entity = {"scope_type": "workspace", "scope_id": "w1"}
+    refused = client.post(_BUDGETS, json=_budget_body(applied_to=[entity, entity]), headers=master_key_header)
+    assert refused.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, refused.text
+
+
+@pytest.mark.asyncio
+async def test_a_non_canonical_scope_id_is_refused(async_db: AsyncSession) -> None:
+    """An uppercase UUID parses, but it would store a ceiling that nothing matches and nothing can remove."""
+    organization = await _organization(async_db, slug="acme-applied-canonical")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, name="Platform", owner=owner)
+
+    with pytest.raises(OrganizationScopeNotFoundError):
+        await _service(async_db).create_organization_budget(
+            user=owner,
+            request=_create(applied_to=[AppliedEntity(scope_type="workspace", scope_id=str(workspace.id).upper())]),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ["workspace", "org_member", "workspace_member", "api_token"])
+async def test_an_update_naming_another_organizations_scope_changes_nothing(
+    async_db: AsyncSession, scope_type: str
+) -> None:
+    """The refusal also takes back the removals made before it, with their spend."""
+    organization = await _organization(async_db, slug=f"acme-applied-foreign-{scope_type}")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    other = await _organization(async_db, slug=f"other-applied-foreign-{scope_type}")
+    other_owner = await _member(async_db, other, role="owner", full_name="Other owner")
+    foreign_workspace = await _workspace(async_db, other, name="Elsewhere", owner=other_owner)
+    key = APIKey(
+        id=f"sk-foreign-{scope_type}", key_hash=f"hash-foreign-{scope_type}", workspace_id=foreign_workspace.id
+    )
+    async_db.add(key)
+    await async_db.commit()
+    other_owner_id = other_owner.id
+    foreign_ids = {
+        "workspace": str(foreign_workspace.id),
+        "org_member": str(
+            (
+                await async_db.execute(
+                    select(col(OrganizationMember.id)).where(col(OrganizationMember.user_id) == other_owner_id)
+                )
+            ).scalar_one()
+        ),
+        "workspace_member": str(
+            (
+                await async_db.execute(
+                    select(col(WorkspaceMember.id)).where(col(WorkspaceMember.workspace_id) == foreign_workspace.id)
+                )
+            ).scalar_one()
+        ),
+        "api_token": key.id,
+    }
+    service = _service(async_db)
+    whole_org = AppliedEntity(scope_type="organization", scope_id=str(organization.id))
+    budget = await service.create_organization_budget(user=owner, request=_create(applied_to=[whole_org]))
+    held = (await async_db.execute(select(ScopedBudget).where(ScopedBudget.budget_id == budget.budget_id))).scalar_one()
+    held.current_spend = Decimal("7.5")
+    held_id = held.id
+    await async_db.commit()
+
+    with pytest.raises(OrganizationScopeNotFoundError):
+        await service.update_organization_budget(
+            user=owner,
+            budget_id=budget.budget_id,
+            request=OrganizationBudgetUpdate(
+                applied_to=[AppliedEntity(scope_type=scope_type, scope_id=foreign_ids[scope_type])]  # type: ignore[arg-type]
+            ),
+        )
+
+    async_db.expire_all()
+    still = await async_db.get(ScopedBudget, held_id)
+    assert still is not None
+    assert still.current_spend == Decimal("7.5")
+
+
+@pytest.mark.asyncio
+async def test_an_update_changing_the_cycle_and_the_entities_puts_both_on_the_new_window(
+    async_db: AsyncSession,
+) -> None:
+    organization = await _organization(async_db, slug="acme-applied-cycle")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, name="Platform", owner=owner)
+    service = _service(async_db)
+    whole_org = AppliedEntity(scope_type="organization", scope_id=str(organization.id))
+    platform = AppliedEntity(scope_type="workspace", scope_id=str(workspace.id))
+    budget = await service.create_organization_budget(user=owner, request=_create(applied_to=[whole_org]))
+
+    await service.update_organization_budget(
+        user=owner,
+        budget_id=budget.budget_id,
+        request=OrganizationBudgetUpdate(reset_cycle="daily", applied_to=[whole_org, platform]),
+    )
+
+    async_db.expire_all()
+    ends = {
+        ceiling.scope_type: ceiling.period_end
+        for ceiling in (
+            await async_db.execute(select(ScopedBudget).where(ScopedBudget.budget_id == budget.budget_id))
+        ).scalars()
+    }
+    tomorrow = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    assert {key: end.astimezone(UTC) if end else None for key, end in ends.items()} == {
+        "organization": tomorrow,
+        "workspace": tomorrow,
+    }
+
+
+def test_the_routes_answer_a_refused_entity_with_its_status(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    unknown = {"scope_type": "workspace", "scope_id": str(uuid.uuid4())}
+    refused = client.post(_BUDGETS, json=_budget_body(applied_to=[unknown]), headers=master_key_header)
+    assert refused.status_code == status.HTTP_404_NOT_FOUND, refused.text

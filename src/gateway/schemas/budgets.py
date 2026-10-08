@@ -85,7 +85,7 @@ _NarrowingId = Annotated[str, Field(min_length=1, max_length=255, pattern=r"^\S+
 
 
 class _ModelNarrowing(BaseModel):
-    """The resource axes of a ceiling's create body: a provider, and optionally one of its models."""
+    """The resource axes a ceiling or an applied entity narrows to: a provider, and optionally one of its models."""
 
     provider_key_id: _NarrowingId | None = None
     model: _NarrowingId | None = Field(
@@ -473,14 +473,53 @@ class OrganizationBudgetRates(_RefusesRemovedPeriodFields):
     reset_month: int | None = Field(default=None, ge=1, le=12, description=_MONTH_DESCRIPTION)
 
 
-class OrganizationBudgetCreate(OrganizationBudgetRates):
-    """Create one budget owned by the caller's organization."""
+# Bounded so one save cannot stage an unbounded number of rows; matches the list routes' page ceiling.
+MAX_APPLIED_ENTITIES = 1000
 
 
-class OrganizationBudgetUpdate(OrganizationBudgetRates):
-    """Replace a budget's label, figure and period.
+class AppliedEntity(_ModelNarrowing):
+    """One entity a budget applies to: a scope inside the organization, optionally narrowed to a provider or model."""
 
-    Every field is optional and keyed on ``model_fields_set``, matching
+    scope_type: ScopeType = Field(description="Which kind of identity the budget caps")
+    scope_id: str = Field(min_length=1, max_length=255, description="Id of the capped identity")
+
+    def key(self) -> tuple[str, str, str | None, str | None]:
+        """The entity's identity, which the unique index allows one budget per."""
+        return (self.scope_type, self.scope_id, self.provider_key_id, self.model)
+
+
+class _AppliedTo(BaseModel):
+    """The entity list a budget save carries, so the budget and where it applies are written in one step."""
+
+    applied_to: list[AppliedEntity] | None = Field(
+        default=None,
+        max_length=MAX_APPLIED_ENTITIES,
+        description=(
+            "Every entity the budget applies to, as a whole set. On update, entities missing from it stop "
+            "carrying the budget and entities already in it keep their spend; omit it or send null to leave the "
+            "entities as they are, and send an empty list to remove them all"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _no_repeated_entity(self) -> Self:
+        keys = [entity.key() for entity in self.applied_to or ()]
+        if len(keys) != len(set(keys)):
+            raise ValueError("applied_to names the same entity twice")
+        return self
+
+
+class OrganizationBudgetCreate(_AppliedTo, OrganizationBudgetRates):
+    """Create one budget owned by the caller's organization, and apply it to its entities in the same step."""
+
+
+class OrganizationBudgetUpdate(_AppliedTo, OrganizationBudgetRates):
+    """Replace a budget's label, figure, reset cycle and the entities it applies to.
+
+    ``applied_to`` is the exception to the rule below: null means the same as
+    omitting it, because "apply to nothing" is the empty list.
+
+    Every other field is optional and keyed on ``model_fields_set``, matching
     the deployment-wide budget update's own: an *omitted* field is left alone, and an
     explicit null clears it, so sending ``max_budget: null`` takes a budget back
     to uncapped, which is what the dashboard's dialog does. A cycle's settings
@@ -509,8 +548,10 @@ class OrganizationBudgetPublic(BaseModel):
     and has no tenancy column, so the same figure here would be a cross-tenant
     read. What an organization's own spend is, is a question for Usage.
 
-    ``ceiling_count`` is the organization-relevant fact instead: how many of its
-    ceilings this budget currently holds, which is what makes a delete refuse.
+    ``ceiling_count`` is the organization-relevant fact instead: how many
+    ceilings name this budget, which is what makes a delete refuse. It counts
+    every one, including a ceiling the deployment operator pointed at this budget
+    from outside the organization, which ``applied_to`` leaves out.
     """
 
     budget_id: str

@@ -166,16 +166,14 @@ class OrganizationScopedBudgetNotFoundError(TenancyNotFoundError):
 
 
 class OrganizationScopedBudgetAlreadyExistsError(TenancyConflictError):
-    """One ceiling per scope, provider and model.
+    """One budget per entity: a scope, and per scope a provider or one of its models.
 
     The unique index ``uq_scoped_budgets_entity`` is the enforcement. This reports
     the same rule in words a caller can act on, because an index name does not.
     """
 
     def __init__(self, scope_type: object, scope_id: object):
-        super().__init__(
-            f"A spend ceiling already exists for this {scope_type}, provider and model. Edit that ceiling instead."
-        )
+        super().__init__(f"This {scope_type} is already covered by another budget. Remove it from that budget first.")
 
 
 class BudgetStillReferencedError(Exception):

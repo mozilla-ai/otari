@@ -33,6 +33,17 @@ class ScopeIdSets:
     workspace_member_ids: tuple[str, ...]
     api_key_ids: tuple[str, ...]
 
+    def ids_of(self, scope_type: str) -> tuple[str, ...]:
+        """The IDs of this kind of scope, or none for a kind this build does not know."""
+        by_type: dict[str, tuple[str, ...]] = {
+            SCOPE_ORGANIZATION: self.organization_ids,
+            SCOPE_WORKSPACE: self.workspace_ids,
+            SCOPE_ORG_MEMBER: self.organization_member_ids,
+            SCOPE_WORKSPACE_MEMBER: self.workspace_member_ids,
+            SCOPE_API_TOKEN: self.api_key_ids,
+        }
+        return by_type.get(scope_type, ())
+
 
 def _in_scopes(scopes: ScopeIdSets) -> ColumnElement[bool]:
     """Match a ceiling whose scope ID is in the set for its own scope kind, so an ID never matches across kinds."""
@@ -235,6 +246,37 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
         """Report whether any ceiling matches this predicate."""
         result = await self.db.execute(select(func.count()).select_from(ScopedBudget).where(match))
         return result.scalar_one() > 0
+
+    async def list_on_scope_ids(self, scope_ids: Sequence[str]) -> list[ScopedBudget]:
+        """Return every ceiling on any of these scope IDs, whatever budget it names."""
+        if not scope_ids:
+            return []
+        result = await self.db.execute(select(ScopedBudget).where(ScopedBudget.scope_id.in_(scope_ids)))
+        return list(result.scalars().all())
+
+    async def add_many(self, ceilings: Sequence[ScopedBudget]) -> None:
+        """Stage these ceilings in one flush.
+
+        Raises:
+            SpendCeilingAlreadyExistsError: one of them caps a scope, provider and model another ceiling caps.
+        """
+        if not ceilings:
+            return
+        self.db.add_all(ceilings)
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            # Another writer took one of these between the caller's check and this flush.
+            raise SpendCeilingAlreadyExistsError(ceilings[0].scope_type, ceilings[0].scope_id) from None
+
+    async def remove_many(self, ceiling_ids: Sequence[str]) -> None:
+        """Stage the deletion of these ceilings in one statement."""
+        if ceiling_ids:
+            await self.db.execute(
+                delete(ScopedBudget)
+                .where(ScopedBudget.id.in_(ceiling_ids))
+                .execution_options(synchronize_session=False)
+            )
 
     async def remove(self, ceiling: ScopedBudget) -> None:
         """Stage the deletion of a ceiling."""
