@@ -14,12 +14,11 @@ into the recommender port's own terms; the call in between is the adapter's.
 """
 
 from collections.abc import Mapping
-from decimal import Decimal
 
-from gateway.core.metered_pricing import quantize_cost
 from gateway.exceptions.routing_exceptions import UnreadableRecommendationError
 from gateway.ports.agent_model_recommender_port import ModelRecommendation, RecommendationUsage, SubagentSpawn
 from gateway.schemas.inference import ChoiceQuestion, DecisionRequest, DecisionResponse
+from gateway.services.inference import reported_charge
 
 RECOMMENDATION_QUESTION = "model"
 """The one question's key, in the decision request and in its answer."""
@@ -88,7 +87,7 @@ def recommendation_from_decision(
         usage=RecommendationUsage(
             input_tokens=usage.input_tokens if usage else 0,
             output_tokens=usage.output_tokens if usage else 0,
-            charge=quantize_cost(Decimal(str(usage.cost))) if usage is not None and usage.cost is not None else None,
+            charge=reported_charge(response),
         ),
     )
 

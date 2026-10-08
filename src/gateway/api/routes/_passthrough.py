@@ -74,6 +74,8 @@ from gateway.services.inference import (
     DecisionProvider,
     DecisionProviderError,
     UnknownDecisionProviderError,
+    decision_body,
+    reported_charge,
     request_decision,
     resolve_decision_provider,
 )
@@ -686,10 +688,10 @@ def decision_input_chars(request: DecisionRequest) -> int:
 
     The state and the questions as they are sent, plus a fixed allowance per image.
     """
-    questions = {name: question.model_dump(exclude_none=True) for name, question in request.questions.items()}
+    body = decision_body(request, request.model)
     return (
-        len(json.dumps(request.state))
-        + len(json.dumps(questions))
+        len(json.dumps(body["state"]))
+        + len(json.dumps(body["questions"]))
         + _ESTIMATED_CHARS_PER_IMAGE * len(request.images or ())
     )
 
@@ -700,9 +702,8 @@ class SelectorDecision:
     def __init__(self, config: GatewayConfig, request: DecisionRequest) -> None:
         self._config = config
         self._request = request
-        self._questions = {name: question.model_dump(exclude_none=True) for name, question in request.questions.items()}
         self.prompt_chars = decision_input_chars(request)
-        self.default_output_tokens = ESTIMATED_OUTPUT_TOKENS_PER_QUESTION * len(self._questions)
+        self.default_output_tokens = ESTIMATED_OUTPUT_TOKENS_PER_QUESTION * len(request.questions)
         self._provider: DecisionProvider | None = None
         self._model = ""
 
@@ -717,9 +718,7 @@ class SelectorDecision:
         if self._provider is None:
             msg = "dispatch() before resolve()"
             raise RuntimeError(msg)
-        body: dict[str, Any] = {"model": self._model, "state": self._request.state, "questions": self._questions}
-        if self._request.images:
-            body["images"] = self._request.images
+        body = decision_body(self._request, self._model)
         try:
             result = DecisionResponse.model_validate(await request_decision(self._provider, body))
         except DecisionProviderError as exc:
@@ -738,7 +737,7 @@ class SelectorDecision:
             result=result,
             input_tokens=usage.input_tokens if usage else 0,
             output_tokens=usage.output_tokens if usage else 0,
-            charge=quantize_cost(Decimal(str(usage.cost))) if usage is not None and usage.cost is not None else None,
+            charge=reported_charge(result),
         )
 
 

@@ -5,6 +5,8 @@ from gateway.services.inference._decisions import (
     DecisionProviderError,
     UnknownDecisionProviderError,
     close_decision_client,
+    decision_body,
+    reported_charge,
     request_decision,
     resolve_decision_provider,
 )
@@ -46,7 +48,9 @@ __all__ = [
     "aresponses_via_chat_completions",
     "call_responses",
     "close_decision_client",
+    "decision_body",
     "keep_claim_alive",
+    "reported_charge",
     "request_decision",
     "resolve_decision_provider",
     "run_idempotency_sweeper",

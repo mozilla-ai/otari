@@ -7,7 +7,6 @@ its usage reports the charge the upstream itself stated, where it stated one.
 """
 
 from collections.abc import Mapping
-from typing import Any
 
 from pydantic import ValidationError
 
@@ -28,6 +27,7 @@ from gateway.services.inference import (
     DecisionProvider,
     DecisionProviderError,
     UnknownDecisionProviderError,
+    decision_body,
     request_decision,
     resolve_decision_provider,
 )
@@ -52,10 +52,8 @@ class DecisionProviderRecommender(AgentModelRecommenderPort):
         request = build_decision_request(
             spawn, decision_model=self._config.agent_recommender_model, candidates=candidates
         )
-        questions = {name: question.model_dump(exclude_none=True) for name, question in request.questions.items()}
-        body: dict[str, Any] = {"model": model, "state": request.state, "questions": questions}
         try:
-            answer = DecisionResponse.model_validate(await request_decision(provider, body))
+            answer = DecisionResponse.model_validate(await request_decision(provider, decision_body(request, model)))
         except DecisionProviderError as exc:
             raise RecommendationFailedError(str(exc), upstream_status=exc.status_code) from exc
         except ValidationError as exc:
