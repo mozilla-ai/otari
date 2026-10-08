@@ -186,10 +186,10 @@ class PricingDriftRow(BaseModel):
     input_price_per_million: float
     output_price_per_million: float
     default_input_price_per_million: float | None = Field(
-        description="What genai-prices would meter this key at today. Null when the dataset does not know it."
+        description="What models.dev would meter this key at today. Null when the dataset does not know it."
     )
     default_output_price_per_million: float | None
-    default_reference: str | None = Field(description="The genai-prices entry the default came from.")
+    default_reference: str | None = Field(description="The models.dev entry the default came from.")
     input_delta_percent: float | None = Field(description="(stored - default) / default, as a percentage.")
     output_delta_percent: float | None
 
@@ -315,7 +315,7 @@ async def list_pricing_drift(
 ) -> list[PricingDriftRow]:
     """Every stored deployment rate in force today, beside today's default for it.
 
-    A stored row shadows the genai-prices default silently and forever, whether
+    A stored row shadows the models.dev default silently and forever, whether
     it was a deliberate override or a copy of a then-current default. This is
     what makes the difference visible: a row that matches the default is a row
     that could be deleted, and a row far from it is one worth a second look.

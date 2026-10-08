@@ -212,7 +212,7 @@ def test_drift_puts_a_stored_rate_beside_todays_default(client: TestClient, mast
         row = rows[0]
         assert row["origin"] == "api"
         assert row["default_input_price_per_million"] == 0.15
-        assert row["default_reference"] == "openai:gpt-4o-mini"
+        assert row["default_reference"] == "models.dev:openai/gpt-4o-mini"
         assert row["input_delta_percent"] == 100.0
         assert row["output_delta_percent"] == 100.0
     finally:

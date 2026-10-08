@@ -196,7 +196,7 @@ async def run_passthrough(
             Audio resolves it for per-request charge lines but the reservation
             estimate stays 0 (no measurable cost unit yet, so no pre-call spend).
         pricing_use_defaults: Whether the pricing lookup may fall back to the
-            genai-prices dataset. A route whose billable unit is not a token
+            models.dev catalog. A route whose billable unit is not a token
             passes False for the reason :func:`find_model_pricing` documents:
             those rates are USD per million *tokens*, so a per-request route
             would charge them as USD per million *requests* and a per-image route

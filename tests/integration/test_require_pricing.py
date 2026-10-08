@@ -26,7 +26,7 @@ def strict_pricing_client(postgres_url: str) -> Generator[TestClient]:
     """TestClient for a gateway with require_pricing=True (fail-closed).
 
     Default pricing is disabled so these tests exercise the missing-pricing gate
-    in isolation: otherwise genai-prices would price well-known models (gpt-4o)
+    in isolation: otherwise models.dev would price well-known models (gpt-4o)
     and the 402 branch would never be reached.
     """
     config = GatewayConfig(

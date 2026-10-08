@@ -70,7 +70,7 @@ async def create_moderation(
     # and is intentionally treated as $0 when unpriced (no "No pricing
     # configured" warning). Pricing, when present, is a flat per-request rate
     # (see flat_request_cost); moderation has no token usage. Only an explicitly
-    # configured rate counts (pricing_use_defaults=False below): genai-prices
+    # configured rate counts (pricing_use_defaults=False below): models.dev
     # quotes per million tokens, so a moderation model whose name matches a chat
     # model in that dataset would otherwise bill a token rate per request.
     def compute_cost(result: ModerationResponse, pricing: ModelPricing | None) -> Decimal:

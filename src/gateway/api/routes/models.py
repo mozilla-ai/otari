@@ -340,7 +340,7 @@ async def get_model(
     # expired when the next round starts and stays expired until that round's
     # dials complete. A TTL-bounded peek here would 404 a model that GET
     # /api/v1/models is listing in the same instant, for any provider model with no
-    # pricing row and no genai-prices fallback. This endpoint never dials, so
+    # pricing row and no models.dev fallback. This endpoint never dials, so
     # serving the last known answer is the only way to agree with the listing.
     discovered_model = None
     discovered_provider = None
@@ -361,7 +361,7 @@ async def get_model(
 
     if not pricing and not discovered_model:
         # Neither priced nor discoverable, yet the gateway may still serve this
-        # model and bill it at the genai-prices default: request-time lookup
+        # model and bill it at the models.dev default: request-time lookup
         # consults the same fallback. Reporting 404 for a model that is being
         # charged for is the lie phase 3 of the listing exists to avoid, so
         # answer with the effective rate when there is one.

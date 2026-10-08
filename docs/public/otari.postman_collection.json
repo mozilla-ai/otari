@@ -1627,7 +1627,7 @@
         {
           "name": "List Catalog",
           "request": {
-            "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the genai-prices default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances and the hosted\nmodels at the deployment's rates, and nothing that belongs to a tenant.",
+            "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the models.dev default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances and the hosted\nmodels at the deployment's rates, and nothing that belongs to a tenant.",
             "header": [],
             "method": "GET",
             "url": {
@@ -7346,7 +7346,7 @@
         {
           "name": "List Pricing Drift",
           "request": {
-            "description": "Every stored deployment rate in force today, beside today's default for it.\n\nA stored row shadows the genai-prices default silently and forever, whether\nit was a deliberate override or a copy of a then-current default. This is\nwhat makes the difference visible: a row that matches the default is a row\nthat could be deleted, and a row far from it is one worth a second look.\nTool rows (``otari:``) are per request and have no default to drift from,\nso they are left out.",
+            "description": "Every stored deployment rate in force today, beside today's default for it.\n\nA stored row shadows the models.dev default silently and forever, whether\nit was a deliberate override or a copy of a then-current default. This is\nwhat makes the difference visible: a row that matches the default is a row\nthat could be deleted, and a row far from it is one worth a second look.\nTool rows (``otari:``) are per request and have no default to drift from,\nso they are left out.",
             "header": [],
             "method": "GET",
             "url": {
@@ -7806,7 +7806,7 @@
         {
           "name": "List Providers",
           "request": {
-            "description": "List static metadata for every configured provider.\n\nOperator-facing: reports each provider's capabilities, documentation and\npricing links, and display name from the bundled any-llm and genai-prices\ndatasets. No provider is contacted, so this is cheap and always available.",
+            "description": "List static metadata for every configured provider.\n\nOperator-facing: reports each provider's capabilities, documentation and\npricing links, and display name from the bundled any-llm and models.dev\ndatasets. No provider is contacted, so this is cheap and always available.",
             "header": [],
             "method": "GET",
             "url": {
@@ -7825,7 +7825,7 @@
         {
           "name": "Provider Catalog",
           "request": {
-            "description": "List every known provider for the add-provider picker: id and name only.\n\nLightweight by design so the picker never lags: provider ids come from the\nany-llm registry and names from the bundled genai-prices dataset, so no\nprovider SDK is imported. The autofill hints for a chosen provider come from\nGET /api/v1/providers/catalog/{provider_id}, which imports only that one SDK.",
+            "description": "List every known provider for the add-provider picker: id and name only.\n\nLightweight by design so the picker never lags: provider ids come from the\nany-llm registry and names from the models.dev catalog, so no\nprovider SDK is imported. The autofill hints for a chosen provider come from\nGET /api/v1/providers/catalog/{provider_id}, which imports only that one SDK.",
             "header": [],
             "method": "GET",
             "url": {

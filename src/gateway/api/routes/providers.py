@@ -146,7 +146,7 @@ async def list_providers(
     """List static metadata for every configured provider.
 
     Operator-facing: reports each provider's capabilities, documentation and
-    pricing links, and display name from the bundled any-llm and genai-prices
+    pricing links, and display name from the bundled any-llm and models.dev
     datasets. No provider is contacted, so this is cheap and always available.
     """
     return ProvidersResponse(providers=[_to_schema(info) for info in list_provider_info(config)])
@@ -193,7 +193,7 @@ async def provider_catalog() -> list[KnownProviderSummarySchema]:
     """List every known provider for the add-provider picker: id and name only.
 
     Lightweight by design so the picker never lags: provider ids come from the
-    any-llm registry and names from the bundled genai-prices dataset, so no
+    any-llm registry and names from the models.dev catalog, so no
     provider SDK is imported. The autofill hints for a chosen provider come from
     GET /api/v1/providers/catalog/{provider_id}, which imports only that one SDK.
     """

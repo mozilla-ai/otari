@@ -248,7 +248,7 @@ async def _load_pricing_index(
     A Claude Code batch carries a few models but a distinct timestamp per event, so
     a per-event ``find_model_pricing`` would issue ~one query per event (an N+1). We
     instead pull the full history for every model key in a fixed handful of queries
-    and pick what applies per timestamp below; the genai default fallback is
+    and pick what applies per timestamp below; the models.dev default fallback is
     memoized in pricing_service and hits no database.
 
     ``organization_id`` is the importing workspace's organization, resolved from
@@ -287,7 +287,7 @@ def _resolve_pricing(
     """Effective pricing at the event timestamp, resolved from the preloaded index.
 
     Mirrors ``find_model_pricing``, whole: the importing organization's own
-    override, then the canonical key, then the legacy key, then the genai default
+    override, then the canonical key, then the legacy key, then the models.dev default
     (when enabled). Stored rows win over the default, and the newest row effective
     at or before the timestamp is chosen, so historical rates are honored.
 

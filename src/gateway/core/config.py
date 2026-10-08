@@ -1086,8 +1086,9 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
         description=(
             "Enrich the dashboard's model detail with metadata (modalities, "
             "capabilities, knowledge cutoff) fetched from the public models.dev "
-            "catalog. Set false to disable the outbound call; the gateway then "
-            "falls back to the bundled genai-prices data."
+            "catalog. Set false to disable the outbound call and the enrichment. "
+            "Pricing and context windows do not depend on it: they come from the bundled or "
+            "accepted models.dev snapshot."
         ),
     )
     models_dev_cache_ttl_seconds: Annotated[int, Shown(SettingsGroup.MODELS)] = Field(

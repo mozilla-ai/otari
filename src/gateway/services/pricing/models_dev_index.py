@@ -283,6 +283,13 @@ class ModelsDevPriceIndex:
         """The exact catalog entry, with no matching rules applied."""
         return self._by_provider.get(provider_id, {}).get(model_id)
 
+    def provider_entry(self, provider_id: str) -> ModelsDevPrice | None:
+        """Any one entry of ``provider_id``, which carries the provider's name and doc link."""
+        for candidate in dict.fromkeys((models_dev_provider_id(provider_id), provider_id)):
+            if models := self._by_provider.get(candidate):
+                return next(iter(models.values()))
+        return None
+
     def resolve(self, provider: str | None, model: str, implementation: str | None = None) -> ModelsDevPrice | None:
         """The entry pricing ``model`` served by ``provider``, or ``None``.
 

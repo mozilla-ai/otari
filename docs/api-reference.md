@@ -115,8 +115,8 @@ unreported request carries neither.
 In standalone mode the amount is the one the gateway wrote to its own usage
 record, including any gateway-run tool charges, and `pricing_source` names the
 rate that priced the model: `organization` (an organization's override),
-`deployment` (a rate stored on this gateway), or `defaults` (the bundled
-genai-prices dataset). Hybrid mode attaches the platform's settlement instead;
+`deployment` (a rate stored on this gateway), or `defaults` (the bundled or
+accepted models.dev snapshot). Hybrid mode attaches the platform's settlement instead;
 see [Hybrid mode protocol](hybrid-mode-protocol.md#inline-response-fields).
 
 ### Provider-specific fields

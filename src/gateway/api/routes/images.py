@@ -102,7 +102,7 @@ async def create_image(
     # Only an explicitly configured rate counts (pricing_use_defaults=False), for
     # the same unit mismatch audio, moderations, and search avoid: images bill per
     # image (per_image_cost reads input_price_per_million as raw USD per image)
-    # while genai-prices quotes USD per million tokens. gpt-image-1 is in that
+    # while models.dev quotes USD per million tokens. gpt-image-1 is in that
     # dataset at 5.0, which would bill $5.00 for one image and, because this route
     # reserves its estimate, hold that $5.00 against the budget before the call.
     outcome = await run_passthrough(

@@ -68,7 +68,7 @@ export const CONTEXT_OPTIONS = [
 ]
 
 // Which price list a model's offerings draw on. "custom" is a rate somebody
-// here set, the deployment's or the organization's; "default" is genai-prices.
+// here set, the deployment's or the organization's; "default" is models.dev.
 export const PRICING_OPTIONS = [
   { value: "all", label: "Any pricing" },
   { value: "custom", label: "Custom price" },

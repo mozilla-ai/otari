@@ -214,7 +214,7 @@ export function ProviderComboBox({
           .filter((provider) => !excludeIds?.includes(provider.id))
           .map((provider) => ({
             id: provider.id,
-            // The catalog falls back to the bare id when genai-prices has no
+            // The catalog falls back to the bare id when models.dev has no
             // name for a provider (`xai`), so spell it as the rest of the
             // dashboard does.
             name:

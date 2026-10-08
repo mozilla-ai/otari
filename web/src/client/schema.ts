@@ -986,7 +986,7 @@ export interface paths {
          * @description The models this caller may use, one entry each however many providers serve it.
          *
          *     Prices are the caller's: an organization's override where one applies, else
-         *     the deployment's row, else the genai-prices default. Aliases and routing
+         *     the deployment's row, else the models.dev default. Aliases and routing
          *     policies are not models and are not listed; see Routing. A visitor, where
          *     the catalog is public, sees the configured instances and the hosted
          *     models at the deployment's rates, and nothing that belongs to a tenant.
@@ -3691,7 +3691,7 @@ export interface paths {
          * List Pricing Drift
          * @description Every stored deployment rate in force today, beside today's default for it.
          *
-         *     A stored row shadows the genai-prices default silently and forever, whether
+         *     A stored row shadows the models.dev default silently and forever, whether
          *     it was a deliberate override or a copy of a then-current default. This is
          *     what makes the difference visible: a row that matches the default is a row
          *     that could be deleted, and a row far from it is one worth a second look.
@@ -4043,7 +4043,7 @@ export interface paths {
          * @description List static metadata for every configured provider.
          *
          *     Operator-facing: reports each provider's capabilities, documentation and
-         *     pricing links, and display name from the bundled any-llm and genai-prices
+         *     pricing links, and display name from the bundled any-llm and models.dev
          *     datasets. No provider is contacted, so this is cheap and always available.
          */
         get: operations["providers-list_providers"];
@@ -4067,7 +4067,7 @@ export interface paths {
          * @description List every known provider for the add-provider picker: id and name only.
          *
          *     Lightweight by design so the picker never lags: provider ids come from the
-         *     any-llm registry and names from the bundled genai-prices dataset, so no
+         *     any-llm registry and names from the models.dev catalog, so no
          *     provider SDK is imported. The autofill hints for a chosen provider come from
          *     GET /api/v1/providers/catalog/{provider_id}, which imports only that one SDK.
          */
@@ -7330,7 +7330,7 @@ export interface components {
             context_window?: number | null;
             /**
              * Default Pricing
-             * @description Whether an unpriced model is metered at the genai-prices default.
+             * @description Whether an unpriced model is metered at the models.dev default.
              */
             default_pricing: boolean;
             /**
@@ -7538,19 +7538,19 @@ export interface components {
             max_output_tokens?: number | null;
             /**
              * Metadata Input Price Per Million
-             * @description What models.dev lists this provider charging, for a cross-check. Not billed from: two independent datasets disagreeing is the cheapest stale-price detector there is.
+             * @description What the live models.dev catalog lists this provider charging. The default is billed from the accepted models.dev snapshot, which can lag the live catalog, so a difference means a price update is waiting for review.
              */
             metadata_input_price_per_million?: number | null;
             /** Metadata Output Price Per Million */
             metadata_output_price_per_million?: number | null;
             /**
              * Price Reference
-             * @description For a default, the genai-prices `provider:model` entry that matched; the selector otherwise.
+             * @description For a default, the `models.dev:<provider>/<model>` entry that matched; the selector otherwise.
              */
             price_reference?: string | null;
             /**
              * Price Source
-             * @description Which price list `pricing` came from, for this viewer: the organization's own override, the deployment's stored row, or the genai-prices defaults. Null when nothing prices it.
+             * @description Which price list `pricing` came from, for this viewer: the organization's own override, the deployment's stored row, or the models.dev defaults. Null when nothing prices it.
              */
             price_source?: ("organization" | "deployment" | "defaults") | null;
             pricing?: components["schemas"]["ModelPricingInfo"] | null;
@@ -7593,12 +7593,12 @@ export interface components {
             count: number;
             /**
              * Default Pricing
-             * @description Whether an unpriced model is metered at the genai-prices default.
+             * @description Whether an unpriced model is metered at the models.dev default.
              */
             default_pricing: boolean;
             /**
              * Defaults As Of
-             * @description When the accepted genai-prices snapshot was taken. Null while the bundled dataset serves.
+             * @description When the accepted models.dev snapshot, which the defaults are billed from, was taken. Null while the bundled snapshot serves.
              */
             defaults_as_of: string | null;
             /** @description Present when include_facets is requested. */
@@ -10417,7 +10417,7 @@ export interface components {
          *
          *     ``price_source`` says which rung of ``services.pricing_service`` answered:
          *     ``organization`` for a rate an admin set, ``defaults`` for the
-         *     community-maintained rate this surface seeded or the genai-prices fallback,
+         *     community-maintained rate this surface seeded or the models.dev fallback,
          *     ``deployment`` for the deployment's own price list, and None when nothing
          *     prices the model yet. ``pricing_id`` names the organization's own row where
          *     there is one, so a client can edit that rate without re-deriving the key.
@@ -12224,14 +12224,14 @@ export interface components {
         PricingDriftRow: {
             /**
              * Default Input Price Per Million
-             * @description What genai-prices would meter this key at today. Null when the dataset does not know it.
+             * @description What models.dev would meter this key at today. Null when the dataset does not know it.
              */
             default_input_price_per_million: number | null;
             /** Default Output Price Per Million */
             default_output_price_per_million: number | null;
             /**
              * Default Reference
-             * @description The genai-prices entry the default came from.
+             * @description The models.dev entry the default came from.
              */
             default_reference: string | null;
             /** Effective At */

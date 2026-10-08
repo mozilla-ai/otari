@@ -178,18 +178,19 @@ class CatalogOffering(BaseModel):
         default=None,
         description=(
             "Which price list `pricing` came from, for this viewer: the organization's own override, the "
-            "deployment's stored row, or the genai-prices defaults. Null when nothing prices it."
+            "deployment's stored row, or the models.dev defaults. Null when nothing prices it."
         ),
     )
     price_reference: str | None = Field(
         default=None,
-        description="For a default, the genai-prices `provider:model` entry that matched; the selector otherwise.",
+        description="For a default, the `models.dev:<provider>/<model>` entry that matched; the selector otherwise.",
     )
     metadata_input_price_per_million: float | None = Field(
         default=None,
         description=(
-            "What models.dev lists this provider charging, for a cross-check. Not billed from: two "
-            "independent datasets disagreeing is the cheapest stale-price detector there is."
+            "What the live models.dev catalog lists this provider charging. The default is billed from the "
+            "accepted models.dev snapshot, which can lag the live catalog, so a difference means a price "
+            "update is waiting for review."
         ),
     )
     metadata_output_price_per_million: float | None = None
@@ -207,7 +208,7 @@ class CatalogModelDetail(CatalogModelSummary):
     """One model with everything the detail page shows."""
 
     default_pricing: bool = Field(
-        description="Whether an unpriced model is metered at the genai-prices default.",
+        description="Whether an unpriced model is metered at the models.dev default.",
     )
     offerings: list[CatalogOffering]
     also_available_from: list[CatalogElsewhere]
@@ -216,9 +217,10 @@ class CatalogModelDetail(CatalogModelSummary):
 class CatalogResponse(BaseModel):
     """The grouped catalog, and the facts a reader needs to interpret its prices."""
 
-    default_pricing: bool = Field(description="Whether an unpriced model is metered at the genai-prices default.")
+    default_pricing: bool = Field(description="Whether an unpriced model is metered at the models.dev default.")
     defaults_as_of: datetime | None = Field(
-        description="When the accepted genai-prices snapshot was taken. Null while the bundled dataset serves.",
+        description="When the accepted models.dev snapshot, which the defaults are billed from, was taken. "
+        "Null while the bundled snapshot serves.",
     )
     metadata_available: bool = Field(
         description="False when models.dev could not be read; descriptions are then absent."
@@ -592,7 +594,7 @@ async def list_catalog(
     """The models this caller may use, one entry each however many providers serve it.
 
     Prices are the caller's: an organization's override where one applies, else
-    the deployment's row, else the genai-prices default. Aliases and routing
+    the deployment's row, else the models.dev default. Aliases and routing
     policies are not models and are not listed; see Routing. A visitor, where
     the catalog is public, sees the configured instances and the hosted
     models at the deployment's rates, and nothing that belongs to a tenant.

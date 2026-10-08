@@ -1,6 +1,6 @@
 """Unit tests for provider metadata and model context-window lookups.
 
-These read only the bundled any-llm and genai-prices datasets, so they need no
+These read only the bundled any-llm and models.dev datasets, so they need no
 database or network.
 """
 
@@ -9,7 +9,9 @@ import os
 import subprocess
 import sys
 import textwrap
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 from any_llm import AnyLLM
@@ -29,13 +31,14 @@ def _config(providers: dict[str, dict[str, object]]) -> GatewayConfig:
 
 
 def test_context_window_known_model() -> None:
-    """A model genai-prices knows reports its context window."""
+    """A model models.dev knows reports its context window."""
     assert model_context_window("openai", "gpt-4o") == 128000
 
 
-def test_context_window_bare_name_resolves() -> None:
+def test_context_window_bare_name_resolves(install_models_dev: Callable[[dict[str, Any] | None], object]) -> None:
     """A provider-agnostic name still resolves when it is unambiguous."""
-    assert model_context_window(None, "gpt-4o") == 128000
+    install_models_dev(None)
+    assert model_context_window(None, "gpt-4.1") == 1_047_576
 
 
 def test_context_window_unknown_model_is_none() -> None:
@@ -51,7 +54,7 @@ def test_provider_info_openai_metadata() -> None:
     assert info.provider_type == "openai"
     assert info.name == "OpenAI"
     assert info.doc_url is not None and info.doc_url.startswith("http")
-    assert info.pricing_urls  # genai-prices lists OpenAI pricing pages
+    assert info.pricing_urls  # models.dev links OpenAI's docs page
     assert info.env_key == "OPENAI_API_KEY"
     # any-llm reports OpenAI as vision-capable and able to list models.
     assert info.capabilities.vision is True
@@ -95,7 +98,7 @@ def test_provider_summaries_import_no_provider_sdks(monkeypatch: pytest.MonkeyPa
     """Listing the picker's providers must not import any provider SDK module.
 
     This is the whole point of the lazy split (issue #365): the picker list is
-    built from the any-llm registry plus the bundled genai-prices names, so it
+    built from the any-llm registry plus the bundled models.dev names, so it
     stays cheap. get_provider_class is what pulls in a provider SDK, so it must
     never be called while building the summary list.
     """

@@ -69,7 +69,7 @@ function Stat({ label, value }: { label: string; value: ReactNode }) {
  * Which price list an offering's rate came from, as a dot and a word.
  *
  * The organization's own rate is the one deliberate choice on the row and takes
- * the accent dot; a custom deployment rate and a genai-prices default are facts
+ * the accent dot; a custom deployment rate and a models.dev default are facts
  * about the deployment and read muted; unpriced is the absence and reads
  * subtle. The accent is data ink, not a way to say "look here".
  */
@@ -115,9 +115,10 @@ function rate(value: number | null | undefined): string {
 }
 
 // How far the metered rate may sit from the provider's published list price
-// before the row says so. models.dev and genai-prices round differently, so a
-// hair's width of disagreement is noise; a real gap is a stale stored price or
-// a deliberate markup, and either is worth a glance.
+// before the row says so. The listed price is the live models.dev catalog's and
+// the default is billed from the accepted snapshot, so a hair's width of
+// disagreement is rounding; a real gap is a stale stored price, a deliberate
+// markup or a snapshot update awaiting review, and each is worth a glance.
 const LIST_PRICE_TOLERANCE = 0.02
 
 /** The provider's list price, where it disagrees with what is metered. */
@@ -643,7 +644,7 @@ export function ModelDetailView({
           {unpriced > 0 && defaultPricing === false ? (
             <p className="text-caption">
               Default pricing is off, so an offering with no stored rate is
-              unpriced here even where genai-prices publishes one.
+              unpriced here even where models.dev publishes one.
               {isOperator ? " Both switches live on Settings." : ""}
             </p>
           ) : null}

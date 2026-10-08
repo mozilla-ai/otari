@@ -1,6 +1,6 @@
 """The identity rules, pinned on the ids that motivated them.
 
-Every example here is a real spelling from models.dev or genai-prices. The two
+Every example here is a real spelling from models.dev. The two
 Fireworks cases are the ones the rules were designed against: a path prefix
 around the id, and ``p`` where the version has a point.
 """

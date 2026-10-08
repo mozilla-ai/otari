@@ -1,15 +1,16 @@
 """Model metadata from the public models.dev catalog, fetched and cached.
 
-models.dev (https://models.dev, MIT licensed) publishes per-model metadata the
-bundled genai-prices data does not carry: input/output modalities, reasoning and
+models.dev (https://models.dev, MIT licensed) publishes per-model metadata beyond
+what pricing needs: input/output modalities, reasoning and
 tool-calling flags, structured-output and attachment support, knowledge cutoff,
 release date, and open-weights status. This module fetches its ``api.json`` once,
 caches it in-memory with a long TTL, and degrades to "no metadata" on any failure
 so an offline or unreachable models.dev never breaks the dashboard.
 
 The outbound call is gated by ``GatewayConfig.models_dev_metadata``; when that is
-false, or when the fetch fails, callers simply get an empty map and the UI falls
-back to what genai-prices already provides.
+false, or when the fetch fails, callers simply get an empty map and the UI shows
+the model without that enrichment. Prices and context windows come from the
+bundled or accepted snapshot (``services/pricing``), not from this fetch.
 """
 
 import asyncio
