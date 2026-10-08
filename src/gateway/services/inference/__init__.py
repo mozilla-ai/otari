@@ -30,6 +30,7 @@ from gateway.services.inference._responses_bridge import (
     serves_responses,
     uses_chat_completions_bridge,
 )
+from gateway.services.inference._responses_input import strip_gateway_minted_items
 from gateway.services.inference._sweeper import run_idempotency_sweeper
 
 __all__ = [
@@ -57,5 +58,6 @@ __all__ = [
     "resolve_decision_provider",
     "run_idempotency_sweeper",
     "serves_responses",
+    "strip_gateway_minted_items",
     "uses_chat_completions_bridge",
 ]

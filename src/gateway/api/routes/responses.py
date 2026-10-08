@@ -56,11 +56,10 @@ from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.core.usage import GatewayUsage
-from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.services.files import StagedFile
-from gateway.services.inference import REASONING_ITEM_ID_PREFIX, call_responses, serves_responses
+from gateway.services.inference import call_responses, serves_responses, strip_gateway_minted_items
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_responses import (
@@ -72,8 +71,6 @@ from gateway.services.provider_kwargs import apply_endpoint_defaults
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
 from gateway.services.tools import (
     CODE_EXECUTION_HEADER,
-    CODE_INTERPRETER_CALL_ID_PREFIX,
-    WEB_SEARCH_CALL_ID_PREFIX,
     WEB_SEARCH_HEADER,
     Dialect,
     ToolUseBudget,
@@ -197,74 +194,9 @@ def _split_codex_input_metadata(value: Any) -> tuple[Any, bool]:
     return value, False
 
 
-# Output items the gateway mints itself to describe work it did server-side are
-# stripped back off an inbound ``input`` before the provider sees it: the
-# documented way to continue a Responses conversation is to append the previous
-# ``response.output`` to the next ``input``, and the gateway has no
-# ``previous_response_id`` support to do that server-side, so an echoed turn would
-# otherwise ship a ``web_search_call`` to a provider that never declared a
-# web-search tool. Each is recognized only by its id's gateway prefix, because
-# OpenAI's own items are legitimately echoed to OpenAI and must survive.
-def _is_gateway_minted(item: Any, item_type: str, id_prefix: str) -> bool:
-    if not isinstance(item, dict) or item.get("type") != item_type:
-        return False
-    return str(item.get("id") or "").startswith(id_prefix)
-
-
-def _code_interpreter_call_as_message(item: dict[str, Any]) -> dict[str, Any]:
-    """Fold a gateway-minted ``code_interpreter_call`` into an assistant message item.
-
-    Unlike a search, whose results are already in the transcript, an execution's
-    logs exist nowhere else, so dropping the item would make the model forget
-    what its code printed on the previous turn. The Messages route folds its pair
-    the same way (``messages._code_execution_pair_as_text``).
-    """
-    code = str(item.get("code") or "")
-    parts = [f"[code executed]\n```\n{code}\n```"] if code else ["[code executed]"]
-    parts.extend(
-        f"logs:\n{output['logs']}"
-        for output in item.get("outputs") or []
-        if isinstance(output, dict) and output.get("type") == "logs" and output.get("logs")
-    )
-    if item.get("status") == "failed":
-        parts.append("status: failed")
-    return {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "\n".join(parts)}]}
-
-
-def _strip_gateway_minted_items(input_data: Any) -> Any:
-    """Take gateway-minted server-tool items back off an inbound ``input``.
-
-    Only touches a list input, and only the items the gateway itself emits, told
-    apart by their id prefix so a provider's own survives. A gateway-run search is
-    dropped, which loses nothing the model needs because its results are already in
-    the transcript. A gateway-run interpreter call is folded into a message instead
-    (:func:`_code_interpreter_call_as_message`). The reasoning item the chat bridge
-    makes, and any ``item_reference`` to it, is dropped: no upstream stored it, so a
-    native provider would answer 404 for the id.
-    """
-    if not isinstance(input_data, list):
-        return input_data
-    kept: list[Any] = []
-    touched = 0
-    for item in input_data:
-        if _is_gateway_minted(item, "code_interpreter_call", CODE_INTERPRETER_CALL_ID_PREFIX):
-            kept.append(_code_interpreter_call_as_message(item))
-            touched += 1
-        elif _is_gateway_minted(item, "web_search_call", WEB_SEARCH_CALL_ID_PREFIX) or (
-            _is_gateway_minted(item, "reasoning", REASONING_ITEM_ID_PREFIX)
-            or _is_gateway_minted(item, "item_reference", REASONING_ITEM_ID_PREFIX)
-        ):
-            touched += 1
-        else:
-            kept.append(item)
-    if touched:
-        logger.debug("Rewrote %d gateway-minted output item(s) on the inbound input", touched)
-    return kept
-
-
 def _codex_extra_body(input_data: Any, client_metadata: Any | None) -> tuple[Any, dict[str, Any] | None]:
     """Prepare Codex metadata for OpenAI's raw Responses request body."""
-    input_data = _strip_gateway_minted_items(input_data)
+    input_data = strip_gateway_minted_items(input_data)
     cleaned_input, input_has_codex_metadata = _split_codex_input_metadata(input_data)
     extra_body: dict[str, Any] = {}
     if input_has_codex_metadata:

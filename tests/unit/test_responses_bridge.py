@@ -12,11 +12,11 @@ from any_llm.exceptions import AnyLLMError, ModelNotFoundError, UnsupportedParam
 from any_llm.types.completion import ChatCompletion, ChatCompletionChunk
 from any_llm.types.responses import Response
 
-from gateway.api.routes.responses import _strip_gateway_minted_items
 from gateway.services.inference import (
     REASONING_ITEM_ID_PREFIX,
     aresponses_via_chat_completions,
     call_responses,
+    strip_gateway_minted_items,
     uses_chat_completions_bridge,
 )
 from gateway.services.mcp_loop_responses import responses_tool_loop, responses_tool_loop_stream
@@ -303,7 +303,7 @@ def test_echoed_bridge_reasoning_is_stripped_but_a_providers_own_survives() -> N
     own_reference = {"type": "item_reference", "id": "rs_68a1b2c3"}
     message = {"role": "user", "content": "hi"}
 
-    result = _strip_gateway_minted_items([message, minted, minted_reference, own, own_reference])
+    result = strip_gateway_minted_items([message, minted, minted_reference, own, own_reference])
 
     assert result == [message, own, own_reference]
 

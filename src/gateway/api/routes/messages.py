@@ -330,7 +330,7 @@ def _strip_gateway_minted_blocks(messages: Any) -> Any:
     A gateway-minted ``web_search_tool_result`` carries an ``encrypted_content`` the
     gateway cannot sign, while a gateway-minted MCP pair describes execution the
     internal loop already consumed. Neither should be shipped to a provider on the
-    next request. Mirrors ``responses._strip_gateway_minted_items``, but where
+    next request. Mirrors ``inference.strip_gateway_minted_items``, but where
     Responses has no way to tell its own minted items from a provider's, here it can:
     both web search and MCP mint an Otari-prefixed call id a provider cannot produce.
     Genuine provider-run pairs therefore round-trip untouched. Each use is removed

@@ -3,7 +3,7 @@
 Continuing an Anthropic conversation means echoing the previous assistant turn
 back. Gateway-minted web-search and MCP activity blocks describe work Otari
 already consumed, so they must not reach the provider on the next request.
-Mirrors ``responses._strip_gateway_minted_items``.
+Mirrors ``inference.strip_gateway_minted_items``.
 """
 
 from __future__ import annotations
@@ -447,7 +447,7 @@ def test_anthropics_own_code_execution_pair_survives() -> None:
 
 
 def test_a_gateway_interpreter_call_becomes_a_message_the_model_can_still_read() -> None:
-    from gateway.api.routes.responses import _strip_gateway_minted_items
+    from gateway.services.inference import strip_gateway_minted_items
     from gateway.services.tools import CODE_INTERPRETER_CALL_ID_PREFIX
 
     items: list[dict[str, Any]] = [
@@ -463,7 +463,7 @@ def test_a_gateway_interpreter_call_becomes_a_message_the_model_can_still_read()
         {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "It is 42."}]},
     ]
 
-    out = _strip_gateway_minted_items(items)
+    out = strip_gateway_minted_items(items)
 
     assert len(out) == 3
     folded = out[1]
@@ -475,7 +475,7 @@ def test_a_gateway_interpreter_call_becomes_a_message_the_model_can_still_read()
 
 
 def test_a_failed_gateway_interpreter_call_folds_its_status() -> None:
-    from gateway.api.routes.responses import _strip_gateway_minted_items
+    from gateway.services.inference import strip_gateway_minted_items
     from gateway.services.tools import CODE_INTERPRETER_CALL_ID_PREFIX
 
     item = {
@@ -484,20 +484,20 @@ def test_a_failed_gateway_interpreter_call_folds_its_status() -> None:
         "code": "1/0",
         "status": "failed",
     }
-    (folded,) = _strip_gateway_minted_items([item])
+    (folded,) = strip_gateway_minted_items([item])
     assert "status: failed" in folded["content"][0]["text"]
 
 
 def test_openais_own_interpreter_call_survives_untouched() -> None:
-    from gateway.api.routes.responses import _strip_gateway_minted_items
+    from gateway.services.inference import strip_gateway_minted_items
 
     item = {"type": "code_interpreter_call", "id": "ci_123", "code": "x", "status": "completed"}
-    assert _strip_gateway_minted_items([item]) == [item]
+    assert strip_gateway_minted_items([item]) == [item]
 
 
 def test_a_gateway_search_is_dropped_and_a_providers_own_survives() -> None:
     """Only the item the gateway minted is its to take back; OpenAI's own search is echoed to OpenAI."""
-    from gateway.api.routes.responses import _strip_gateway_minted_items
+    from gateway.services.inference import strip_gateway_minted_items
     from gateway.services.tools import WEB_SEARCH_CALL_ID_PREFIX
 
     providers: dict[str, Any] = {
@@ -514,4 +514,4 @@ def test_a_gateway_search_is_dropped_and_a_providers_own_survives() -> None:
     }
     message = {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "done"}]}
 
-    assert _strip_gateway_minted_items([providers, gateways, message]) == [providers, message]
+    assert strip_gateway_minted_items([providers, gateways, message]) == [providers, message]
