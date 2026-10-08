@@ -67,6 +67,25 @@ describe("ActivityHub", () => {
     )
   })
 
+  it("names a single request's panel as a request", async () => {
+    const request = traceSummary({
+      trace_id: "req-9",
+      session_source: "none",
+      harness: null,
+    })
+    mockApi({
+      traces: [request],
+      traceDetail: traceDetail({ summary: request }),
+    })
+
+    renderPage(<ActivityHub />, "/activity?trace=req-9", WITH_TRACES)
+
+    const panel = await screen.findByRole("dialog", { name: "Request" })
+    expect(
+      within(panel).getByRole("button", { name: "Copy request ID" }),
+    ).toBeInTheDocument()
+  })
+
   it("switches to the request log and keeps the switch", async () => {
     mockApi({ traces: [] })
 

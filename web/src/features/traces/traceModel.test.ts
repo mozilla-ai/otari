@@ -4,6 +4,7 @@ import {
   sessionName,
   spanLabel,
   spanTone,
+  traceKind,
   turnStatus,
 } from "@/features/traces/traceModel"
 import { traceDetail, traceSpan, traceSummary } from "@/tests/traceFixtures"
@@ -79,5 +80,14 @@ describe("labels", () => {
       tone: "success",
       label: "Completed",
     })
+  })
+})
+
+describe("traceKind", () => {
+  it("calls a trace that named a session a session, and one that named none a request", () => {
+    expect(traceKind(traceSummary({ session_source: "harness" }))).toBe(
+      "Session",
+    )
+    expect(traceKind(traceSummary({ session_source: "none" }))).toBe("Request")
   })
 })

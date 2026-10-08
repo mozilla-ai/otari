@@ -18,6 +18,7 @@ import {
   sessionFailed,
   sessionName,
   shortId,
+  traceKind,
 } from "@/features/traces/traceModel"
 import {
   type TraceFilters,
@@ -54,8 +55,15 @@ const COLUMNS: DataTableColumn<TraceSummary>[] = [
     minWidth: 170,
   },
   {
+    id: "type",
+    header: "Type",
+    cell: (summary) => (
+      <span className="text-caption">{traceKind(summary)}</span>
+    ),
+  },
+  {
     id: "name",
-    header: "Session",
+    header: "Name",
     isRowHeader: true,
     cell: (summary) => (
       <span className="flex min-w-0 items-center gap-2">
@@ -183,6 +191,9 @@ export function TracesPage({ viewSwitch }: { viewSwitch: ReactNode }) {
     position >= 0 && position < items.length - 1
       ? items[position + 1]
       : undefined
+  // From the row on screen, or from the read when the URL opened one off this page.
+  const selected = items[position] ?? trace.data?.summary
+  const kind = selected ? traceKind(selected) : "Session"
 
   let detail: ReactNode = null
   if (trace.isError && !trace.data) {
@@ -249,17 +260,17 @@ export function TracesPage({ viewSwitch }: { viewSwitch: ReactNode }) {
         rowClassName={(summary) =>
           summary.trace_id === traceId ? "bg-primary-subtle" : undefined
         }
-        emptyContent="No sessions in this window. A client's requests are grouped into one session when it sends a session id."
+        emptyContent="Nothing in this window. Each request appears here, on its own or grouped into a session when its client sends a session id."
       />
       <SidePanel
         isOpen={traceId !== ""}
         onClose={() => url.patch({ trace: "", trace_workspace: "" })}
-        label="Session"
+        label={kind}
         heading={
           <>
-            <span className="text-overline">Session</span>
+            <span className="text-overline">{kind}</span>
             <span className="truncate font-mono text-caption">{traceId}</span>
-            <CopyButton value={traceId} label="Copy session ID" />
+            <CopyButton value={traceId} label={`${kind.toLowerCase()} ID`} />
           </>
         }
         onPrevious={before ? () => open(before.trace_id) : undefined}
