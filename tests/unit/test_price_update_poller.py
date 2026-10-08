@@ -19,6 +19,7 @@ def _preview(changed: int, *, needs_review: bool = False) -> PricingRefreshPrevi
         removed_count=0,
         changes=[],
         changes_truncated=False,
+        digest="abc",
         needs_review=needs_review,
         review_reason="priced models fall from 10 to 1" if needs_review else None,
     )
@@ -52,7 +53,7 @@ async def test_auto_applies_an_update_and_says_who_did(stubs: dict[str, AsyncMoc
 
     assert await refresh.poll_price_updates(session, "auto") == "applied"
 
-    stubs["confirm"].assert_awaited_once_with(session, accepted_by="schedule")
+    stubs["confirm"].assert_awaited_once_with(session, accepted_by="schedule", digest="abc")
 
 
 @pytest.mark.asyncio
@@ -75,7 +76,7 @@ async def test_an_unchanged_fetch_leaves_nothing_pending(stubs: dict[str, AsyncM
 
     assert await refresh.poll_price_updates(session, "auto") == "unchanged"
 
-    stubs["reject"].assert_awaited_once_with(session)
+    stubs["reject"].assert_awaited_once_with(session, digest="abc")
     stubs["confirm"].assert_not_awaited()
 
 
