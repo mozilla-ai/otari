@@ -214,6 +214,17 @@ def _full_spec_stub() -> dict[str, Any]:
     }
 
 
+def test_enrich_keeps_multipart_content_parts_free_form() -> None:
+    """Nested part unions generate wrappers that serialize every part as null."""
+    schemas = generate.enrich_spec(_full_spec_stub())["components"]["schemas"]
+    user_content = schemas["MSG_ChatCompletionUserMessageParam"]["properties"]["content"]["anyOf"]
+    array = next(member for member in user_content if member.get("type") == "array")
+    assert array["items"] == {"$ref": "#/components/schemas/FreeFormObject"}
+    assert schemas["FreeFormObject"] == {"type": "object", "additionalProperties": True}
+    assistant = schemas["MSG_ChatCompletionAssistantMessageParam"]["properties"]["content"]["anyOf"]
+    assert {"$ref": "#/components/schemas/FreeFormObject"} in [m.get("items") for m in assistant]
+
+
 def test_enrich_types_otari_owned_inference_endpoints() -> None:
     spec = generate.enrich_spec(_full_spec_stub())
     schemas = spec["components"]["schemas"]
