@@ -400,6 +400,12 @@ its own tenant.
 
 A `421 Misdirected Request` only ever refers to `X-User-Token`: the user token belongs to another regional deployment, and the `detail` names the host that serves it. Otari forwards both the status and the detail unchanged so the end user can send the request there. A gateway token from the wrong region is not a `421`: that is the operator's configuration, which the end user cannot act on, so the platform answers it the way it answers any other bad gateway token. The region a token carries is a routing hint only: the platform still hashes the whole token and looks it up, and a token with a bad checksum, an unknown region, or the wrong kind for its header gets a `401` with no lookup (otari-ai#1665). The Web Access resolve below shares this ladder and forwards a `421` the same way. The MCP endpoints publish their own error contract and do not forward the detail: a `421` there becomes `misdirected_request` with the fixed safe message and no host (see below).
 
+### Decision models
+
+> **Status.** Specified, not built. Decision calls (`POST /api/v1/decisions` and `POST /api/v1/routing/recommend`) are standalone-only today.
+
+A hybrid data plane will mount both routes. Resolve accepts a decision model in `model`, as it accepts a completion model, and answers with attempts for a decision provider. Each attempt carries either the provider's key or, for a decision provider the platform runs, a [grant](#grants) in the one-request form whose token has the `model_recommendation` type. The [usage report](#usage-report) bills a decision call as it bills a completion attempt. The prompt goes from the data plane to the decision provider directly, never through the control plane.
+
 ## MCP server resolution
 
 Called when a request references workspace-scoped MCP server ids (a
