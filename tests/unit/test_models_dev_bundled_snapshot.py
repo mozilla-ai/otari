@@ -60,7 +60,9 @@ def test_trim_keeps_prices_and_drops_the_rest() -> None:
         "p": {
             "id": "p",
             "name": "P",
-            "models": {"m": {"name": "M", "cost": {"input": 1, "tiers": []}, "limit": {"context": 10}, "status": "beta"}},
+            "models": {
+                "m": {"name": "M", "cost": {"input": 1, "tiers": []}, "limit": {"context": 10}, "status": "beta"}
+            },
         }
     }
 
