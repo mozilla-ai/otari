@@ -2467,7 +2467,12 @@ async def resolve_request_context(
     # (every hybrid request) records nothing here yet.
     session = resolve_session(raw_request.headers, session_label=session_label, tags=tags)
     trace: RequestTrace | None = None
-    if config.trace_capture_enabled and workspace_id is not None:
+    # A hybrid gateway holds no tenancy of its own: the resolve answer names the
+    # workspace and user, and the trace is filed under those.
+    trace_workspace_id, trace_user_id = workspace_id, user_id
+    if hybrid_mode and route is not None:
+        trace_workspace_id, trace_user_id = _platform_tenant(route), route.user_id
+    if config.trace_capture_enabled and trace_workspace_id is not None:
         # Budget is already reserved here, and only the code below hands it to the
         # settlement paths, so a trace that cannot be opened means no trace rather
         # than an error.
@@ -2477,14 +2482,14 @@ async def resolve_request_context(
                 harness=harness_of(raw_request.headers),
                 turn=turn() if turn is not None else None,
                 request_id=request_id,
-                workspace_id=workspace_id,
-                user_id=user_id,
+                workspace_id=trace_workspace_id,
+                user_id=trace_user_id,
                 api_key_id=api_key_id,
                 endpoint=adapter.endpoint,
                 started_at=datetime.now(UTC) - timedelta(seconds=time.monotonic() - started_at),
                 max_spans=config.trace_max_spans_per_request,
             )
-            await _apply_content_capture(raw_request, trace, workspace_id, content)
+            await _apply_content_capture(raw_request, trace, trace_workspace_id, content)
             begin_request_trace(raw_request, trace)
         except Exception:  # noqa: BLE001
             trace = None
@@ -2523,6 +2528,14 @@ async def resolve_request_context(
         session_label=session_label
         or (session.label() if session is not None and config.trace_capture_enabled else None),
     )
+
+
+def _platform_tenant(route: ResolvedRoute) -> uuid.UUID | None:
+    """The workspace a resolve answer names, or None when it names none or not a UUID."""
+    try:
+        return uuid.UUID(route.workspace_id) if route.workspace_id else None
+    except ValueError:
+        return None
 
 
 # A cache miss reads one row; past this the request goes on capturing nothing.
@@ -4286,6 +4299,10 @@ def _inline_settlement_timeout_seconds(config: GatewayConfig) -> float:
     return int(config.platform.get("usage_inline_timeout_ms", 1500)) / 1000
 
 
+def _status_class_of(exc: BaseException) -> str:
+    return f"status_{failure_status_code(exc)}"
+
+
 async def _await_usage_report(
     coro: Coroutine[Any, Any, SettledCost | None],
     correlation_id: str,
@@ -4341,6 +4358,8 @@ def build_streaming_response(
     extra_headers: dict[str, str] | None = None,
     rate_limit_grant: RateLimitGrant | None = None,
     tags: dict[str, str] | None = None,
+    trace: RequestTrace | None = None,
+    attempt_position: int = 0,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
 
@@ -4370,6 +4389,19 @@ def build_streaming_response(
     a cost look it up by ``Otari-Request-ID`` afterwards.
     """
     platform_active = platform_correlation_id is not None
+
+    def _trace_platform_attempt(*, ok: bool, usage: CompletionUsage | None, error_class: str | None = None) -> None:
+        # A hybrid gateway writes no usage row, so the attempt is traced where it is reported.
+        if trace is not None:
+            trace.record_attempt(
+                model=model,
+                provider=str(provider),
+                position=attempt_position,
+                ok=ok,
+                usage=usage,
+                error_class=error_class,
+            )
+
     # Both modes settle before the terminal suffix so its usage object can carry
     # the cost: hybrid from the platform's report, standalone from its own row.
     settles_inline = platform_active or (db is not None and log_writer is not None)
@@ -4397,6 +4429,7 @@ def build_streaming_response(
             await rate_limit_grant.settle(_settled_tokens(usage_data))
         if platform_active:
             assert platform_correlation_id is not None
+            _trace_platform_attempt(ok=True, usage=usage_data)
             return await _await_usage_report(
                 _report_platform_usage(
                     config=config,
@@ -4443,6 +4476,7 @@ def build_streaming_response(
         # reservation per stream_missing_usage_policy instead of billing $0.
         if platform_active:
             assert platform_correlation_id is not None
+            _trace_platform_attempt(ok=True, usage=None)
             settlement = await _await_usage_report(
                 _report_platform_usage(
                     config=config,
@@ -4527,6 +4561,7 @@ def build_streaming_response(
             await rate_limit_grant.settle(_settled_tokens(reported_usage))
         if platform_active:
             assert platform_correlation_id is not None
+            _trace_platform_attempt(ok=False, usage=None, error_class=_status_class_of(exc))
             _schedule_usage_report(
                 _report_platform_usage(
                     config=config,
@@ -5069,6 +5104,14 @@ async def run_streaming_with_fallback(
 
     async def _on_attempt_failed(attempt: ResolvedAttempt, failure: StreamingAttemptFailure) -> None:
         attempt_errors.append(failure.exception)
+        if tool_ctx.trace is not None:
+            tool_ctx.trace.record_attempt(
+                model=attempt.model,
+                provider=attempt.provider,
+                position=attempt.position,
+                ok=False,
+                error_class=failure.error_class,
+            )
         background_tasks.add_task(
             _report_platform_usage,
             config,
@@ -5159,6 +5202,8 @@ async def run_streaming_with_fallback(
         request_id=route.request_id,
         session_label=session_label,
         started_at=started_at,
+        trace=tool_ctx.trace,
+        attempt_position=chosen.position,
     )
 
 
@@ -5278,6 +5323,15 @@ async def run_platform_non_stream(
         is_final_attempt: bool,
     ) -> None:
         nonlocal successful_report
+        if tool_ctx.trace is not None:
+            tool_ctx.trace.record_attempt(
+                model=attempt.model,
+                provider=attempt.provider,
+                position=attempt.position,
+                ok=outcome == "success",
+                usage=usage,
+                error_class=error_class,
+            )
         if outcome == "success":
             successful_report = (attempt, usage)
             return

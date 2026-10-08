@@ -61,6 +61,17 @@ counted in `gateway_trace_spans_dropped`. The export itself, and its usage, are
 never refused for this. Spans sent with an API key that has no
 user are grouped per key, so two such keys never share a session.
 
+## Hybrid gateways
+
+A hybrid data plane has no database of its own, so it files each request's trace
+under the workspace and user its control plane's resolve answer names, and
+records each provider attempt it reports upstream as an LLM call (without a
+cost, which the control plane computes). A request whose resolve answer names
+no workspace is not traced. Where the spans go is the deployment's choice: by
+default a hybrid data plane binds a store that keeps nothing, and a deployment
+that wants its data plane's traces binds its own `TraceStoragePort`. Content is
+never captured on a hybrid gateway.
+
 ## Reading traces
 
 | Endpoint | Who |

@@ -10,7 +10,7 @@ because its trace could not be recorded.
 
 import hashlib
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -183,6 +183,50 @@ class RequestTrace:
                     attributes={"otari.tool_loop.round": index},
                 )
             )
+
+    def record_attempt(
+        self,
+        *,
+        model: str,
+        provider: str,
+        position: int,
+        ok: bool,
+        usage: object = None,
+        error_class: str | None = None,
+    ) -> None:
+        """One provider attempt on a hybrid gateway, which writes no usage row of its own.
+
+        Where a gateway settles usage itself, the row becomes the span (``record_llm_call``).
+        A hybrid gateway reports usage upstream instead, so the attempt is recorded where it
+        is reported. Cost is the control plane's to compute, so the span carries none. A
+        success marks the attempts that failed before it as recovered.
+        """
+        if ok:
+            self.spans = [
+                replace(span, recovered=True) if span.kind == "llm" and span.outcome == "error" else span
+                for span in self.spans
+            ]
+        span_id = _span_id()
+        self._add(
+            SpanRecord(
+                span_id=span_id,
+                parent_span_id=self.request_id,
+                kind="llm",
+                origin="gateway",
+                name="chat",
+                operation="chat",
+                outcome="ok" if ok else "error",
+                error_class=None if ok else (identifier_or_none(error_class) or "provider_error"),
+                end_time=datetime.now(UTC),
+                model=identifier_or_none(model),
+                provider=identifier_or_none(provider),
+                input_tokens=_token_count(usage, "prompt_tokens", "input_tokens"),
+                output_tokens=_token_count(usage, "completion_tokens", "output_tokens"),
+                request_id=self.request_id,
+                attributes={"otari.routing.attempt_position": position},
+            )
+        )
+        self._flush_rounds(span_id)
 
     def record_tool_call(
         self,
@@ -368,6 +412,15 @@ class RequestTrace:
                 )
             )
         return spans
+
+
+def _token_count(usage: object, *names: str) -> int | None:
+    """A token count off whichever usage shape a format reports, clamped to a stored integer."""
+    for name in names:
+        value = getattr(usage, name, None)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return min(value, 2_147_483_647)
+    return None
 
 
 def _elapsed_ms(started: datetime, ended: datetime) -> int:
