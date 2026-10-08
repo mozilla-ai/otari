@@ -54,7 +54,6 @@ export function providerHealthStatus(
 // >=80% of allocation amber, >=100% red, for either signal below; the gateway
 // applies both thresholds. What an allocation *is* differs between them, and
 // each says so.
-
 export interface BudgetHealth {
   status: Health
   label: string
