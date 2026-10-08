@@ -95,6 +95,53 @@ def test_a_slug_whose_vendor_is_a_provider_prefers_that_provider() -> None:
     assert both.models["openai/gpt-4o"] == "openai-eu:gpt-4o"
 
 
+def test_a_catalog_id_orders_its_offerings_cheapest_first(index: selectors.SelectorIndex) -> None:
+    assert index.offerings["z-ai/glm-5.3"] == (
+        "nebius:zai-org/GLM-5.3",
+        "fireworks:accounts/fireworks/models/glm-5p3-fp8",
+        "fireworks:accounts/fireworks/models/glm-5p3",
+    )
+
+
+def test_a_catalog_id_orders_the_vendors_provider_first_then_unpriced_last_then_a_to_z() -> None:
+    rows = [
+        selectors.OfferingRow("together:gpt-4o", "together", "together", None),
+        selectors.OfferingRow("groq:gpt-4o", "groq", "groq", 2.5),
+        selectors.OfferingRow("azure:gpt-4o", "azure", "azure", 2.5),
+        selectors.OfferingRow("openai-eu:gpt-4o", "openai-eu", "openai", 3.0),
+    ]
+    identities: dict[str, tuple[str, tuple[str, ...]]] = {
+        "openai/gpt-4o": ("gpt-4o", tuple(row.selector for row in rows))
+    }
+
+    built = selectors.build_selector_index(rows, identities)
+
+    assert built.offerings["openai/gpt-4o"] == ("openai-eu:gpt-4o", "azure:gpt-4o", "groq:gpt-4o", "together:gpt-4o")
+    assert built.models["openai/gpt-4o"] == "openai-eu:gpt-4o"
+
+
+def test_a_priced_reseller_comes_before_the_vendors_unpriced_provider() -> None:
+    rows = [
+        selectors.OfferingRow("openai-eu:gpt-4o", "openai-eu", "openai", None),
+        selectors.OfferingRow("azure:gpt-4o", "azure", "azure", 2.5),
+    ]
+    identities: dict[str, tuple[str, tuple[str, ...]]] = {
+        "openai/gpt-4o": ("gpt-4o", tuple(row.selector for row in rows))
+    }
+
+    built = selectors.build_selector_index(rows, identities)
+
+    assert built.offerings["openai/gpt-4o"] == ("azure:gpt-4o", "openai-eu:gpt-4o")
+
+
+def test_offerings_answer_only_a_catalog_id(index: selectors.SelectorIndex) -> None:
+    assert selectors.resolve_catalog_offerings("Z-AI/GLM-5.3") == index.offerings["z-ai/glm-5.3"]
+    assert selectors.resolve_catalog_offerings("fireworks:z-ai/glm-5.3") == ()
+    assert selectors.resolve_catalog_offerings("nebius:zai-org/GLM-5.3") == ()
+    assert selectors.resolve_catalog_offerings("cerebras/gpt-oss-120b") == ()
+    assert selectors.resolve_catalog_offerings("nope") == ()
+
+
 def test_a_vendor_is_matched_to_its_own_provider_by_the_identity_table() -> None:
     """``moonshotai`` is the vendor's id segment; ``moonshot`` is the provider it publishes on."""
     rows = [
@@ -192,6 +239,31 @@ def test_an_offering_on_one_organizations_key_resolves_for_nobody_else(
     assert selectors.model_selector_for_slug("deepseek/deepseek-v4.1-flash", organization_id=_ORG_B) is None
 
 
+def test_offerings_come_from_the_callers_organization_view(organization_index: selectors.SelectorIndex) -> None:
+    assert selectors.resolve_catalog_offerings("deepseek/deepseek-v4.1-flash", workspace_id=_WORKSPACE_A) == (
+        _BYO_DEEPSEEK,
+    )
+    assert selectors.resolve_catalog_offerings("deepseek/deepseek-v4.1-flash", workspace_id=_WORKSPACE_B) == ()
+    assert (
+        selectors.resolve_catalog_offerings("z-ai/glm-5.3", organization_id=_ORG_A)
+        == (organization_index.offerings["z-ai/glm-5.3"])
+    )
+
+
+def test_an_organizations_unpriced_key_follows_the_priced_offerings() -> None:
+    """An unpriced offering would settle at no cost, so a priced one answers first."""
+    own = [selectors.OfferingRow("together:zai-org/GLM-5.3", "together", "together", None)]
+    identities = {
+        **_IDENTITIES,
+        "z-ai/glm-5.3": ("glm-5.3", (*_IDENTITIES["z-ai/glm-5.3"][1], "together:zai-org/GLM-5.3")),
+    }
+
+    view = selectors.build_organization_selectors(_ROWS, own, identities)
+
+    assert view.models["z-ai/glm-5.3"] == "nebius:zai-org/GLM-5.3"
+    assert view.offerings["z-ai/glm-5.3"][-1] == "together:zai-org/GLM-5.3"
+
+
 def test_an_organizations_view_is_narrowed_to_what_its_offerings_touch() -> None:
     """A model the organization offers nothing of stays the deployment's to resolve."""
     own = [selectors.OfferingRow(_BYO_DEEPSEEK, "nebius", "nebius", 0.3)]
@@ -203,15 +275,20 @@ def test_an_organizations_view_is_narrowed_to_what_its_offerings_touch() -> None
     assert "cerebras:gpt-oss-120b" not in view.model_selectors
 
 
-def test_an_organizations_cheaper_offering_wins_its_own_catalog_id() -> None:
-    """The organization's rate decides the pick, so its own key answers where it is cheapest."""
-    own = [selectors.OfferingRow("together:zai-org/GLM-5.3", "together", "together", 0.2)]
+def test_an_organizations_own_key_leads_its_catalog_id_even_when_it_costs_more() -> None:
+    own = [selectors.OfferingRow("together:zai-org/GLM-5.3", "together", "together", 0.9)]
     identities = {
         **_IDENTITIES,
         "z-ai/glm-5.3": ("glm-5.3", (*_IDENTITIES["z-ai/glm-5.3"][1], "together:zai-org/GLM-5.3")),
     }
     view = selectors.build_organization_selectors(_ROWS, own, identities)
     assert view.models["z-ai/glm-5.3"] == "together:zai-org/GLM-5.3"
+    assert view.offerings["z-ai/glm-5.3"] == (
+        "together:zai-org/GLM-5.3",
+        "nebius:zai-org/GLM-5.3",
+        "fireworks:accounts/fireworks/models/glm-5p3-fp8",
+        "fireworks:accounts/fireworks/models/glm-5p3",
+    )
     assert view.pinned["together:z-ai/glm-5.3"] == "together:zai-org/GLM-5.3"
     # A pin on an instance the organization has no key for stays the deployment's to answer.
     assert "nebius:z-ai/glm-5.3" not in view.pinned

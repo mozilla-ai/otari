@@ -155,8 +155,8 @@ class CatalogOffering(BaseModel):
         default=None,
         description=(
             "The pinned spelling the gateway also accepts for this offering: the instance with the model's catalog "
-            "id (`fireworks:openai/gpt-oss-120b`), which pins the instance and reaches the model's cheapest offering "
-            "on it. Null for a dearer sibling on the same instance, or until the gateway has indexed the catalog."
+            "id (`fireworks:openai/gpt-oss-120b`), which pins the instance and reaches the model's best offering "
+            "on it. Null for another build on the same instance, or until the gateway has indexed the catalog."
         ),
     )
     provider: str = Field(description="The provider instance the selector names.")

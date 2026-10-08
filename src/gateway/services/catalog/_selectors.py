@@ -6,13 +6,14 @@ The catalog groups such ids by the model they name, and this index lets a
 caller send what the catalog shows:
 
 - a **model selector**, the catalog's id (``deepseek/deepseek-v4.1-flash``, or
-  the bare slug where the vendor is unknown), which resolves to the cheapest
-  offering of that model the caller can reach. The vendor's own provider wins
-  where it serves the model, so ``openai/gpt-4o`` reaches OpenAI while OpenAI is
-  configured and the cheapest reseller otherwise;
+  the bare slug where the vendor is unknown), which resolves to the best
+  offering of that model the caller can reach.
+  Priced offerings come first, and among them the caller's organization's own key,
+  then the vendor's own provider, then the cheapest.
+  The other offerings follow in the same order;
 - a **pinned selector**, ``instance:<catalog id>``
   (``nebius:deepseek/deepseek-v4.1-flash``), which resolves to that model's
-  cheapest offering on that instance and never leaves it.
+  best offering on that instance by the same order and never leaves it.
 
 The index is process-wide and rebuilt at startup and on a schedule from the
 deployment's own catalog view (the configured instances, priced from the
@@ -59,6 +60,7 @@ class _Maps:
     full: frozenset[str]
     pinned: dict[str, str]
     models: dict[str, str]
+    offerings: dict[str, tuple[str, ...]]
     model_selectors: dict[str, str]
 
 
@@ -78,6 +80,7 @@ class OrganizationSelectors:
 
     pinned: dict[str, str] = field(default_factory=dict)
     models: dict[str, str] = field(default_factory=dict)
+    offerings: dict[str, tuple[str, ...]] = field(default_factory=dict)
     model_selectors: dict[str, str] = field(default_factory=dict)
 
 
@@ -89,10 +92,13 @@ class SelectorIndex:
     """Every selector the deployment serves, verbatim."""
 
     pinned: dict[str, str] = field(default_factory=dict)
-    """``instance:<catalog id>``, lowercased, to the model's cheapest offering on that instance."""
+    """``instance:<catalog id>``, lowercased, to the model's best offering on that instance."""
 
     models: dict[str, str] = field(default_factory=dict)
     """Catalog id, lowercased, to the offering it resolves to."""
+
+    offerings: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    """Catalog ID, lowercased, to every offering of the model, best first, led by the one it resolves to."""
 
     model_selectors: dict[str, str] = field(default_factory=dict)
     """Full selector to the pinned spelling the catalog shows for it, where it is the offering that spelling reaches."""
@@ -147,14 +153,7 @@ def resolve_catalog_selector(
     """
     index = _index
     view = _organization_view(index, workspace_id, organization_id)
-    org_full = view.full if view is not None else frozenset()
-    if model_selector in index.full or model_selector in org_full:
-        return None
-    # ``openai/gpt-4o`` is both the legacy spelling of an offering on the
-    # ``openai`` instance and, read as vendor/model, a catalog id. Where the
-    # instance really serves that id, the caller meant the offering.
-    prefix, slash, rest = model_selector.partition("/")
-    if slash and (f"{prefix}:{rest}" in index.full or f"{prefix}:{rest}" in org_full):
+    if _names_an_offering(index, view, model_selector):
         return None
     # Spellings are case-insensitive: they are the catalog's, not the
     # provider's, and a provider's own casing is the thing they leave behind.
@@ -165,6 +164,39 @@ def resolve_catalog_selector(
         if (hit := getattr(index, attr).get(spelling)) is not None:
             return str(hit)
     return None
+
+
+def resolve_catalog_offerings(
+    model_selector: str,
+    *,
+    workspace_id: uuid.UUID | None = None,
+    organization_id: uuid.UUID | None = None,
+) -> tuple[str, ...]:
+    """Every offering a catalog ID stands for, best first, or an empty tuple.
+
+    The first is the one :func:`resolve_catalog_selector` answers.
+    Empty for a pinned spelling, for a selector that already names an offering, and for one the index does not know.
+    """
+    index = _index
+    view = _organization_view(index, workspace_id, organization_id)
+    if _names_an_offering(index, view, model_selector):
+        return ()
+    spelling = model_selector.lower()
+    if view is not None and (offerings := view.offerings.get(spelling)) is not None:
+        return offerings
+    return index.offerings.get(spelling, ())
+
+
+def _names_an_offering(index: SelectorIndex, view: OrganizationSelectors | None, model_selector: str) -> bool:
+    """Whether ``model_selector`` already names an offering, so no catalog spelling applies to it."""
+    org_full = view.full if view is not None else frozenset()
+    if model_selector in index.full or model_selector in org_full:
+        return True
+    # ``openai/gpt-4o`` is both the legacy spelling of an offering on the
+    # ``openai`` instance and, read as vendor/model, a catalog id. Where the
+    # instance really serves that id, the caller meant the offering.
+    prefix, slash, rest = model_selector.partition("/")
+    return bool(slash) and (f"{prefix}:{rest}" in index.full or f"{prefix}:{rest}" in org_full)
 
 
 def short_selector_for(full_selector: str, *, organization_id: uuid.UUID | None = None) -> str | None:
@@ -183,39 +215,56 @@ def model_selector_for_slug(slug: str, *, organization_id: uuid.UUID | None = No
     return _index.models.get(slug)
 
 
-def _cheapest(selectors: Sequence[str], rates: Mapping[str, float | None]) -> str:
-    """The cheapest priced selector, ties to the first; the first when none is priced."""
-    priced = [selector for selector in selectors if rates.get(selector) is not None]
-    if not priced:
-        return selectors[0]
-    return min(priced, key=lambda selector: (rates[selector], selectors.index(selector)))
+def _ranked(
+    selectors: Sequence[str], rates: Mapping[str, float | None], preferred: tuple[frozenset[str], ...]
+) -> tuple[str, ...]:
+    """Sort ``selectors`` best first: priced before unpriced, each ``preferred`` set in turn, cheapest, then A-Z.
+
+    An unpriced offering comes after every priced one, because a request it serves settles at no cost.
+    """
+
+    def key(selector: str) -> tuple[bool | float | str, ...]:
+        rate = rates.get(selector)
+        return (
+            rate is None,
+            *(selector not in chosen for chosen in preferred),
+            0.0 if rate is None else rate,
+            selector,
+        )
+
+    return tuple(sorted(selectors, key=key))
 
 
-def _build_maps(offerings: Sequence[OfferingRow], identities: Identities) -> _Maps:
+def _build_maps(
+    offerings: Sequence[OfferingRow], identities: Identities, *, own: frozenset[str] = frozenset()
+) -> _Maps:
     full = frozenset(row.selector for row in offerings)
     rates = {row.selector: row.input_rate for row in offerings}
     serves = {row.selector: {row.instance.lower(), row.provider_type.lower()} for row in offerings}
     instance_of = {row.selector: row.instance for row in offerings}
     pinned: dict[str, str] = {}
-    models: dict[str, str] = {}
+    ranked: dict[str, tuple[str, ...]] = {}
     for slug, (_key, members) in identities.items():
         selectors = tuple(selector for selector in members if selector in full)
         if not selectors:
             continue
         vendor, slash, _rest = slug.partition("/")
-        candidates = selectors
-        if slash:
-            own = {vendor.lower()} | own_providers_for_vendor_slug(vendor)
-            by_vendor = tuple(selector for selector in selectors if own & serves[selector])
-            candidates = by_vendor or selectors
-        models[slug] = _cheapest(candidates, rates)
+        vendor_providers = ({vendor.lower()} | own_providers_for_vendor_slug(vendor)) if slash else set()
+        by_vendor = frozenset(selector for selector in selectors if vendor_providers & serves[selector])
+        ranked[slug] = _ranked(selectors, rates, (own, by_vendor))
         by_instance: dict[str, list[str]] = {}
         for selector in selectors:
             by_instance.setdefault(instance_of[selector], []).append(selector)
         for instance, siblings in by_instance.items():
-            pinned[f"{instance}:{slug}".lower()] = _cheapest(siblings, rates)
+            pinned[f"{instance}:{slug}".lower()] = _ranked(siblings, rates, (own,))[0]
     model_selectors = {target: spelling for spelling, target in pinned.items()}
-    return _Maps(full=full, pinned=pinned, models=models, model_selectors=model_selectors)
+    return _Maps(
+        full=full,
+        pinned=pinned,
+        models={slug: ranked_selectors[0] for slug, ranked_selectors in ranked.items()},
+        offerings=ranked,
+        model_selectors=model_selectors,
+    )
 
 
 def build_selector_index(
@@ -227,23 +276,20 @@ def build_selector_index(
 ) -> SelectorIndex:
     """Fold the deployment's offerings and the grouped identities into an index.
 
-    A catalog id resolves to its cheapest priced offering, ties to the first,
-    and to the first offering when none is priced; a pinned spelling applies
-    the same rule to one instance's offerings of the model (two builds of a
-    model on one provider are one model by the catalog's grouping), and is
-    what the catalog advertises for the offering it lands on.
+    A catalog ID lists its priced offerings cheapest first, then its unpriced ones, and A-Z where they tie.
+    A pinned spelling resolves to the first of one instance's offerings of the model by the same rule
+    (two builds of a model on one provider are one model by the catalog's grouping),
+    and is what the catalog advertises for the offering it lands on.
 
-    A catalog id whose vendor is also a provider (``openai/gpt-4o``) is
-    answered from that provider's own offerings where it has any, because the
-    caller who names OpenAI's model while OpenAI serves it means OpenAI's price,
-    and from every offering otherwise, so the model is reached through whoever
-    resells it.
+    A catalog ID whose vendor is also a provider (``openai/gpt-4o``) lists that provider's priced offerings first,
+    because the caller who names OpenAI's model while OpenAI serves it means OpenAI's price.
     """
     maps = _build_maps(offerings, identities)
     return SelectorIndex(
         full=maps.full,
         pinned=maps.pinned,
         models=maps.models,
+        offerings=maps.offerings,
         model_selectors=maps.model_selectors,
         organizations=dict(organizations or {}),
         workspace_organization=dict(workspace_organization or {}),
@@ -257,13 +303,13 @@ def build_organization_selectors(
 ) -> OrganizationSelectors:
     """One organization's view: the union of both offering sets, kept where the organization's touch it.
 
-    ``identities`` groups the union, and every row carries the rate this
-    organization pays, so a catalog id the organization offers a cheaper
-    offering of resolves to its own key, and one it offers nothing of is left
-    to the deployment's view.
+    ``identities`` groups the union, and every row carries the rate this organization pays.
+    A catalog ID the organization offers at a price resolves to its own key first,
+    even where another offering is cheaper.
+    One it offers nothing of is left to the deployment's view.
     """
-    maps = _build_maps([*deployment, *organization], identities)
     own = frozenset(row.selector for row in organization)
+    maps = _build_maps([*deployment, *organization], identities, own=own)
     instances = {row.instance.lower() for row in organization}
     touched = {slug for slug, (_key, members) in identities.items() if own.intersection(members)}
     touched_selectors = {selector for slug in touched for selector in identities[slug][1]} | own
@@ -273,6 +319,7 @@ def build_organization_selectors(
             spelling: target for spelling, target in maps.pinned.items() if spelling.partition(":")[0] in instances
         },
         models={slug: target for slug, target in maps.models.items() if slug in touched},
+        offerings={slug: offerings for slug, offerings in maps.offerings.items() if slug in touched},
         model_selectors={
             selector: spelling for selector, spelling in maps.model_selectors.items() if selector in touched_selectors
         },

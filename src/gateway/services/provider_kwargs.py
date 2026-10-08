@@ -531,8 +531,8 @@ def resolve_provider_selector(
         # it properly; everywhere else it surfaces as an unknown model.
         alias = resolve_static_policy_target(config, model_selector, user_id, workspace_id=workspace_id)
     if alias is None:
-        # The catalog's own spellings: a catalog id for the model's cheapest
-        # offering, or ``instance:<catalog id>`` to pin the instance. Consulted last and only
+        # The catalog's own spellings: a catalog id for the first of the model's
+        # offerings, or ``instance:<catalog id>`` to pin the instance. Consulted last and only
         # for a selector that names no offering already, so nothing a caller
         # sends verbatim is ever rewritten; the workspace picks which
         # organization's own offerings may answer. Relabeled like an alias: the

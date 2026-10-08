@@ -7402,7 +7402,7 @@ export interface components {
             resolves_to?: string | null;
             /**
              * Selector
-             * @description The id as a selector: send it as `model` and the model's cheapest offering the caller can reach answers, the vendor's own provider first where it serves the model. Null until the gateway has indexed the catalog.
+             * @description The id as a selector: send it as `model` and the best offering the caller can reach answers. Priced offerings come first, and among them the organization's own key, then the vendor's own provider, then the cheapest. Null until the gateway has indexed the catalog.
              */
             selector?: string | null;
             /**
@@ -7500,7 +7500,7 @@ export interface components {
             resolves_to?: string | null;
             /**
              * Selector
-             * @description The id as a selector: send it as `model` and the model's cheapest offering the caller can reach answers, the vendor's own provider first where it serves the model. Null until the gateway has indexed the catalog.
+             * @description The id as a selector: send it as `model` and the best offering the caller can reach answers. Priced offerings come first, and among them the organization's own key, then the vendor's own provider, then the cheapest. Null until the gateway has indexed the catalog.
              */
             selector?: string | null;
             /**
@@ -7572,7 +7572,7 @@ export interface components {
             selector: string;
             /**
              * Short Selector
-             * @description The pinned spelling the gateway also accepts for this offering: the instance with the model's catalog id (`fireworks:openai/gpt-oss-120b`), which pins the instance and reaches the model's cheapest offering on it. Null for a dearer sibling on the same instance, or until the gateway has indexed the catalog.
+             * @description The pinned spelling the gateway also accepts for this offering: the instance with the model's catalog id (`fireworks:openai/gpt-oss-120b`), which pins the instance and reaches the model's best offering on it. Null for another build on the same instance, or until the gateway has indexed the catalog.
              */
             short_selector?: string | null;
             usage_30d?: components["schemas"]["OfferingUsage"] | null;

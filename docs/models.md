@@ -18,13 +18,7 @@ ollama:llama3
 The prefix selects a provider or named provider instance. Everything after the
 first colon is sent as the provider's model ID.
 
-A request may also name the model the way the catalog does. `vendor/model`
-(`deepseek/deepseek-v4.1-flash`) is the model's catalog id, and Otari picks the
-provider: the vendor's own where it serves the model, otherwise the cheapest
-offering the caller can reach, including one on the organization's own
-provider key. `provider:vendor/model` (`nebius:deepseek/deepseek-v4.1-flash`)
-pins the provider and lets Otari pick the model id that provider spells it
-under. See [Catalog spellings](#catalog-spellings) for the rules.
+A request may also name the model the way the catalog does. `vendor/model` (`deepseek/deepseek-v4.1-flash`) is the model's catalog id, and Otari picks the provider: among the priced offerings the caller can reach, the organization's own provider key where it offers the model, then the vendor's own provider where it serves the model, then the cheapest. `provider:vendor/model` (`nebius:deepseek/deepseek-v4.1-flash`) pins the provider and lets Otari pick the model id that provider spells it under. See [Catalog spellings](#catalog-spellings) for the rules.
 
 The legacy `provider/model` spelling is still honored where it names an
 offering the deployment serves (`openai/gpt-4o` while an `openai` instance
@@ -260,16 +254,8 @@ A provider's own id can be long, so the gateway also accepts the two spellings
 the catalog shows. Each is relabeled like an alias, so a response's `model` is
 what was sent, and pricing, budgets and usage key on the offering reached.
 
-- The model's catalog id (`z-ai/glm-5.3`, `deepseek/deepseek-v4.1-flash`)
-  resolves to the model's cheapest priced offering, at the caller's rates.
-  Where the id's vendor is also a provider (`openai/gpt-4o`), that provider's
-  own offerings win while it serves the model, because the caller who names
-  OpenAI's model while OpenAI is configured means OpenAI's price; where it
-  serves nothing, the model is reached through whoever resells it.
-- `instance:<catalog id>` (`nebius:deepseek/deepseek-v4.1-flash`) pins the
-  instance and resolves to the model's cheapest offering there, never
-  elsewhere. This is the spelling the catalog shows as an offering's
-  `short_selector`.
+- The model's catalog id (`z-ai/glm-5.3`, `deepseek/deepseek-v4.1-flash`) resolves to the first of the model's offerings in this order. Priced offerings come before unpriced ones, because a request an unpriced offering serves costs nothing and so escapes budgets. Among the priced ones, the organization's own provider key comes first, even where another offering is cheaper. Next is the vendor's own provider, where the id's vendor is also a provider (`openai/gpt-4o`), because the caller who names OpenAI's model while OpenAI is configured means OpenAI's price. Then come the other offerings, cheapest first at the caller's rates, with ties in A-Z order. To make an unpriced offering lead, such as an organization's own key or a local model, give it a price, even 0.
+- `instance:<catalog id>` (`nebius:deepseek/deepseek-v4.1-flash`) pins the instance and resolves to the model's first offering there by the same order, never elsewhere. This is the spelling the catalog shows as an offering's `short_selector`.
 
 A selector that already names an offering is never rewritten, so a provider's
 own id keeps working verbatim.
