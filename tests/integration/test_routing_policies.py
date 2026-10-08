@@ -15,6 +15,7 @@ The invariants worth defending, and why:
 * A policy never routes a caller to a model their key is not allowed to use.
 """
 
+import asyncio
 import json
 from collections.abc import Generator
 from typing import Any, cast
@@ -38,6 +39,7 @@ from sqlalchemy import create_engine, text
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.models.routing import RoutingConfig
+from gateway.services import catalog as selectors
 
 from .conftest import build_test_client
 
@@ -1637,3 +1639,92 @@ def test_a_locked_in_tool_loop_cannot_fail_over_and_still_owes_for_its_searches(
     # And the money is in the ledger, not only on the row.
     user = client.get(f"{API_ROOT}/users/test-user", headers=HEADERS).json()
     assert user["spend"] == pytest.approx(0.01)
+
+
+# ---------------------------------------------------------------------------
+# A catalog ID falls back across its offerings
+# ---------------------------------------------------------------------------
+
+_CATALOG_ID = "acme/m1"
+
+
+@pytest.fixture
+def catalog_client(routing_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
+    """A client whose selector index holds two offerings of one catalog ID, and is not rebuilt under the test."""
+
+    async def _idle(*_args: Any, **_kwargs: Any) -> None:
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr("gateway.main.run_selector_index_refresher", _idle)
+    rows = [
+        selectors.OfferingRow("anthropic:m1-b", "anthropic", "anthropic", 2.0),
+        selectors.OfferingRow("openai:m1-a", "openai", "openai", 1.0),
+    ]
+    identities = {_CATALOG_ID: (_CATALOG_ID, tuple(row.selector for row in rows))}
+    for client in build_test_client(routing_config):
+        selectors.set_selector_index(selectors.build_selector_index(rows, identities))
+        yield client
+    selectors.reset_selector_index()
+
+
+def test_a_catalog_id_falls_back_to_its_next_offering(catalog_client: TestClient) -> None:
+    _create_user(catalog_client)
+    calls: list[str] = []
+
+    async def flaky(**kwargs: Any) -> ChatCompletion:
+        calls.append(kwargs["model"])
+        if kwargs["model"] == "openai:m1-a":
+            raise _http_error(503)
+        return _completion("m1-b")
+
+    with patch("gateway.api.routes.chat.acompletion", new=flaky):
+        resp = _chat(catalog_client, _CATALOG_ID)
+
+    assert resp.status_code == 200, resp.text
+    assert calls == ["openai:m1-a", "anthropic:m1-b"]
+    assert resp.json()["model"] == _CATALOG_ID
+    rows = _usage_rows(catalog_client)
+    served = [r for r in rows if r["status"] == "success"]
+    absorbed = [r for r in rows if r["status"] == "absorbed"]
+    assert [(r["provider"], r["model"], r["attempt_position"], r["selection_reason"]) for r in served] == [
+        ("anthropic", "m1-b", 2, "on_failure")
+    ]
+    assert served[0]["policy_name"] == _CATALOG_ID
+    assert [(r["provider"], r["model"], r["attempt_position"]) for r in absorbed] == [("openai", "m1-a", 1)]
+
+
+def test_a_catalog_id_every_offering_rejects_returns_the_rejection(catalog_client: TestClient) -> None:
+    _create_user(catalog_client)
+    calls: list[str] = []
+
+    async def bad_request(**kwargs: Any) -> ChatCompletion:
+        calls.append(kwargs["model"])
+        raise _http_error(400)
+
+    with patch("gateway.api.routes.chat.acompletion", new=bad_request):
+        resp = _chat(catalog_client, _CATALOG_ID)
+
+    assert resp.status_code == 400
+    assert calls == ["openai:m1-a", "anthropic:m1-b"]
+
+
+def test_a_catalog_id_reaches_the_offering_a_key_may_use(catalog_client: TestClient) -> None:
+    _create_user(catalog_client)
+    key_resp = catalog_client.post(
+        f"{API_ROOT}/keys",
+        json={"user_id": "test-user", "allowed_models": ["anthropic:m1-b"]},
+        headers=HEADERS,
+    )
+    assert key_resp.status_code == 200, key_resp.text
+    scoped = {API_KEY_HEADER: f"Bearer {key_resp.json()['key']}"}
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("m1-b"))) as mock:
+        resp = catalog_client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": _CATALOG_ID, "messages": [{"role": "user", "content": "hi"}]},
+            headers=scoped,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert _awaited_model(mock) == "anthropic:m1-b"
+    assert [(r["model"], r["selection_reason"]) for r in _usage_rows(catalog_client)] == [("m1-b", "catalog")]

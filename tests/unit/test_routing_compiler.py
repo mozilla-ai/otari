@@ -22,11 +22,13 @@ import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger as gateway_logger
-from gateway.models.routing import PolicySpec
+from gateway.models.routing import MAX_CANDIDATES, PolicySpec
+from gateway.services.catalog import OfferingRow, build_selector_index, reset_selector_index, set_selector_index
 from gateway.services.routing import (
     BudgetState,
     NoEligibleCandidatesError,
     RouterOrdering,
+    compile_catalog_plan,
     compile_policy,
     selection_consults_router,
 )
@@ -262,3 +264,124 @@ def test_a_policy_with_no_router_never_consults_one() -> None:
 
 def test_a_bare_router_policy_always_consults_it() -> None:
     assert selection_consults_router(_router_spec())
+
+
+# ---------------------------------------------------------------------------
+# A catalog ID compiles to a failover plan over its offerings
+# ---------------------------------------------------------------------------
+
+_CATALOG_ID = "acme/m1"
+
+
+@pytest.fixture
+def catalog_config() -> GatewayConfig:
+    return GatewayConfig(
+        master_key="test-master-key",
+        model_discovery=False,
+        providers={"openai": {"api_key": "sk-openai"}, "anthropic": {"api_key": "sk-ant"}},
+    )
+
+
+def _install_catalog(*rows: OfferingRow) -> None:
+    identities: dict[str, tuple[str, tuple[str, ...]]] = {}
+    for row in rows:
+        slug = "acme/solo" if row.selector.endswith("solo") else _CATALOG_ID
+        key, members = identities.get(slug, (slug, ()))
+        identities[slug] = (key, (*members, row.selector))
+    set_selector_index(build_selector_index(rows, identities))
+
+
+@pytest.fixture(autouse=True)
+def _clean_selector_index() -> Iterator[None]:
+    yield
+    reset_selector_index()
+
+
+def test_a_catalog_id_compiles_to_its_offerings_in_order(catalog_config: GatewayConfig) -> None:
+    _install_catalog(
+        OfferingRow("anthropic:m1-b", "anthropic", "anthropic", 2.0),
+        OfferingRow("openai:m1-c", "openai", "openai", None),
+        OfferingRow("openai:m1-a", "openai", "openai", 1.0),
+    )
+
+    plan = compile_catalog_plan(catalog_config, _CATALOG_ID)
+
+    assert plan is not None
+    assert plan.policy_name == _CATALOG_ID
+    assert [(attempt.instance, attempt.model) for attempt in plan.attempts] == [
+        ("openai", "m1-a"),
+        ("anthropic", "m1-b"),
+        ("openai", "m1-c"),
+    ]
+    assert [attempt.selection_reason for attempt in plan.attempts] == ["catalog", "on_failure", "on_failure"]
+    assert {attempt.display_model for attempt in plan.attempts} == {_CATALOG_ID}
+
+
+def test_a_catalog_plan_drops_an_offering_the_caller_may_not_use(catalog_config: GatewayConfig) -> None:
+    _install_catalog(
+        OfferingRow("openai:m1-a", "openai", "openai", 1.0),
+        OfferingRow("anthropic:m1-b", "anthropic", "anthropic", 2.0),
+    )
+
+    plan = compile_catalog_plan(catalog_config, _CATALOG_ID, allowlist=["anthropic:m1-b"])
+
+    assert plan is not None
+    assert [(attempt.instance, attempt.model) for attempt in plan.attempts] == [("anthropic", "m1-b")]
+    assert [attempt.selection_reason for attempt in plan.attempts] == ["catalog"]
+    assert [(item.selector, item.reason) for item in plan.dropped] == [("openai:m1-a", "not_allowed")]
+
+
+def test_a_catalog_plan_is_capped(catalog_config: GatewayConfig) -> None:
+    _install_catalog(*(OfferingRow(f"openai:m1-{n}", "openai", "openai", float(n)) for n in range(MAX_CANDIDATES + 1)))
+
+    plan = compile_catalog_plan(catalog_config, _CATALOG_ID)
+
+    assert plan is not None
+    assert len(plan.attempts) == MAX_CANDIDATES
+    assert [item.reason for item in plan.dropped] == ["over_cap"]
+
+
+@pytest.mark.parametrize(
+    ("model_selector", "allowlist"),
+    [
+        ("openai:m1-a", None),
+        ("nope", None),
+        ("acme/solo", None),
+        (_CATALOG_ID, ["openai:something-else"]),
+    ],
+)
+def test_a_name_with_no_offering_to_fall_back_to_compiles_to_nothing(
+    catalog_config: GatewayConfig, model_selector: str, allowlist: list[str] | None
+) -> None:
+    """``None`` leaves the request to resolve as a plain model does, with the same answers."""
+    _install_catalog(
+        OfferingRow("openai:m1-a", "openai", "openai", 1.0),
+        OfferingRow("anthropic:m1-b", "anthropic", "anthropic", 2.0),
+        OfferingRow("openai:m1-solo", "openai", "openai", 1.0),
+    )
+
+    assert compile_catalog_plan(catalog_config, model_selector, allowlist=allowlist) is None
+
+
+def test_an_alias_claims_its_name_before_the_catalog(catalog_config: GatewayConfig) -> None:
+    _install_catalog(
+        OfferingRow("openai:m1-a", "openai", "openai", 1.0),
+        OfferingRow("anthropic:m1-b", "anthropic", "anthropic", 2.0),
+    )
+    catalog_config.aliases = {_CATALOG_ID: "anthropic:m1-b"}
+
+    assert compile_catalog_plan(catalog_config, _CATALOG_ID) is None
+
+
+def test_a_catalog_offering_with_no_stored_credential_leaves_the_plain_path(
+    catalog_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The plain path asks the hosted-credential port for that offering, and a plan does not."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    catalog_config.providers["anthropic"] = {}
+    _install_catalog(
+        OfferingRow("openai:m1-a", "openai", "openai", 1.0),
+        OfferingRow("anthropic:m1-b", "anthropic", "anthropic", 2.0),
+    )
+
+    assert compile_catalog_plan(catalog_config, _CATALOG_ID) is None

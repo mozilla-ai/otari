@@ -230,6 +230,7 @@ from gateway.services.routing import (
     CompiledPlan,
     NoEligibleCandidatesError,
     RoutingSignal,
+    compile_catalog_plan,
     compile_policy,
     decide_ordering,
     needs_budget_state,
@@ -1631,7 +1632,7 @@ async def _compile_request_plan(
     request_id: str | None = None,
     tags: dict[str, str] | None = None,
 ) -> CompiledPlan | None:
-    """Compile ``model`` into a plan when it names a routing policy, else ``None``.
+    """Compile ``model`` into a plan when it names a policy or a catalog ID with several offerings, else ``None``.
 
     Budget numbers are fetched only when a condition in the policy actually reads
     them, so a plain failover policy costs no extra query. A policy naming a
@@ -1645,7 +1646,7 @@ async def _compile_request_plan(
     """
     spec = resolve_effective_policy(config, model, user_id, workspace_id=workspace_id)
     if spec is None:
-        return None
+        return compile_catalog_plan(config, model, user_id=user_id, allowlist=allowlist, workspace_id=workspace_id)
 
     budget = BudgetState()
     if needs_budget_state(spec) and user_id is not None:
@@ -2034,10 +2035,8 @@ async def resolve_request_context(
         # capability detection needs the underlying implementation, so keep both.
         gate_instance: str | None
         gate_impl: LLMProvider | None
-        # A policy name resolves to a plan rather than to one selector. The head
-        # candidate is what everything below keys on (allow-list, pricing,
-        # reservation), exactly as a plain model would be, so a one-candidate
-        # policy behaves identically to naming its target directly.
+        # A policy name, or a catalog ID with several offerings, resolves to a plan.
+        # Everything below keys on the plan's head candidate, as it would on a plain model.
         plan = await _compile_request_plan(
             adapter=adapter,
             db=db,

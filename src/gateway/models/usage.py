@@ -162,7 +162,7 @@ class UsageLog(Base):
     #
     # `policy_name` is the name the caller sent. `selection_reason` says why this
     # candidate was chosen ("default", "condition:<keys>", "on_failure",
-    # "router:<name>"). `attempt_position` and `attempt_count` locate the row in
+    # "router:<name>", "catalog"). `attempt_position` and `attempt_count` locate the row in
     # the plan, so "served on attempt 2 of 3" is a query rather than a log grep.
     # `request_group_id` ties a request's rows together, which is what makes the
     # absorbed attempts findable from the row that served. The gateway writes the

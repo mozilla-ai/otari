@@ -1,4 +1,4 @@
-"""Compile a routing policy into an ordered plan of attempts.
+"""Compile a routing policy, or a catalog ID's offerings, into an ordered plan of attempts.
 
 Pure and synchronous. Everything it needs about the request arrives as arguments
 (:class:`BudgetState` and the allow-list), so it takes no database session, is
@@ -24,8 +24,9 @@ silently compiled down to one attempt is the failure mode this exists to prevent
 
 from __future__ import annotations
 
+import logging
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from any_llm.exceptions import AnyLLMError
 
@@ -34,7 +35,11 @@ from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.routing import MAX_CANDIDATES, PolicySpec, WhenClause
 from gateway.services.model_access import is_model_allowed
-from gateway.services.provider_kwargs import resolve_provider_selector
+from gateway.services.provider_kwargs import (
+    credential_ladder_exhausted,
+    resolve_catalog_fallback,
+    resolve_provider_selector,
+)
 from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
 from gateway.types.attempt import Attempt
 from gateway.types.budget_state import BudgetState
@@ -45,6 +50,7 @@ __all__ = [
     "DroppedCandidate",
     "NoEligibleCandidatesError",
     "RouterOrdering",
+    "compile_catalog_plan",
     "compile_policy",
     "needs_budget_state",
     "selection_consults_router",
@@ -333,6 +339,46 @@ def compile_policy(
     )
 
 
+def compile_catalog_plan(
+    config: GatewayConfig,
+    model_selector: str,
+    *,
+    user_id: str | None = None,
+    allowlist: list[str] | None = None,
+    workspace_id: uuid.UUID | None = None,
+) -> CompiledPlan | None:
+    """Turn a catalog ID into a failover plan over its offerings, best first, or ``None``.
+
+    Each offering is filtered as a policy candidate is.
+    ``None`` leaves the request to resolve as a plain model does: for a name an alias or a static policy claims,
+    for a name with fewer than two offerings, when the filters leave no offering,
+    and when an offering has no stored credential.
+    """
+    offerings = resolve_catalog_fallback(config, model_selector, user_id, workspace_id=workspace_id)
+    if len(offerings) < 2:
+        return None
+    ordered = [(selector, "catalog") for selector in offerings]
+    attempts, dropped = _resolve_candidates(
+        config, ordered, display_model=model_selector, allowlist=allowlist, workspace_id=workspace_id
+    )
+    if dropped and logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "Catalog ID '%s' compiled to %d of %d offerings; dropped %s",
+            model_selector,
+            len(attempts),
+            len(offerings),
+            "; ".join(f"{item.selector} ({item.reason})" for item in dropped),
+        )
+    if not attempts:
+        return None
+    # NOTE: Only the plain path asks the hosted-credential port, so an offering that needs it leaves the plan.
+    if any(credential_ladder_exhausted(attempt.provider, attempt.kwargs) for attempt in attempts):
+        return None
+    # The first offering that survives the filters is the catalog's choice, and the rest follow it.
+    attempts = [attempts[0], *(replace(attempt, selection_reason="on_failure") for attempt in attempts[1:])]
+    return CompiledPlan(policy_name=model_selector, attempts=attempts, dropped=dropped)
+
+
 def _resolve_candidates(
     config: GatewayConfig,
     ordered: list[tuple[str, str]],
@@ -347,6 +393,9 @@ def _resolve_candidates(
     seen: set[str] = set()
 
     for selector, selection_reason in ordered:
+        if len(attempts) >= MAX_CANDIDATES:
+            dropped.append(DroppedCandidate(selector, "over_cap", f"exceeds the {MAX_CANDIDATES}-candidate cap"))
+            continue
         try:
             resolved = resolve_provider_selector(config, selector, workspace_id=workspace_id)
         except (ValueError, AnyLLMError) as exc:
@@ -380,10 +429,6 @@ def _resolve_candidates(
                     )
                 )
                 continue
-        if len(attempts) >= MAX_CANDIDATES:
-            dropped.append(DroppedCandidate(selector, "over_cap", f"exceeds the {MAX_CANDIDATES}-candidate cap"))
-            continue
-
         seen.add(canonical)
         attempts.append(
             Attempt(
