@@ -32,7 +32,8 @@ def test_genai_prices_rows_are_deleted_and_models_dev_rows_kept(tmp_path: Path) 
             for source in ("genai-prices", "models.dev"):
                 conn.execute(
                     text(
-                        "INSERT INTO pricing_snapshot_history (id, source, accepted_at, accepted_by, model_count, snapshot)"
+                        "INSERT INTO pricing_snapshot_history"
+                        " (id, source, accepted_at, accepted_by, model_count, snapshot)"
                         " VALUES (:i, :s, :t, 'schedule', 1, '{}')"
                     ),
                     {"i": uuid.uuid4().hex, "s": source, "t": now},
