@@ -44,14 +44,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 2
           persist-credentials: false
 
-      # A PR's checkout is its merge commit, against the base it was merged onto;
-      # the difference is the PR alone.
+      # A PR's checkout is its merge commit, and its first parent is the base it
+      # was merged onto, so the difference is the PR alone. The event's base.sha
+      # is not that commit once main has moved, as on a later `labeled` run.
+      - name: Resolve base
+        id: base
+        env:
+          INPUT_BASE: ${{ inputs.base }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            echo "sha=$(git rev-parse HEAD^1)" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=$INPUT_BASE" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout base
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha || inputs.base }}
+          ref: ${{ steps.base.outputs.sha }}
           path: base
           persist-credentials: false
 
@@ -89,7 +102,7 @@ jobs:
 
       - name: Compare base and head
         env:
-          BASE_REF: ${{ github.event.pull_request.base.sha || inputs.base }}
+          BASE_REF: ${{ steps.base.outputs.sha }}
           HEAD_REF: ${{ github.sha }}
         run: ./loadtest/run.sh otari:base otari:head
 

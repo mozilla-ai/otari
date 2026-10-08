@@ -117,7 +117,11 @@ def create_tenant(name: str, pooled: bool) -> Tenant:
 
 
 def wait_for_drain(tenant: Tenant, db: str, timeout: float = 30) -> None:
-    """Wait until none of the tenant's budget reservations is still active."""
+    """Wait until none of the tenant's budget reservations is still active.
+
+    Raises on timeout: statements counted with requests still in flight would
+    undercount this build and read as a change between the two.
+    """
     deadline = time.time() + timeout
     with psycopg.connect(dsn(db), autocommit=True) as conn:
         while time.time() < deadline:
@@ -129,6 +133,7 @@ def wait_for_drain(tenant: Tenant, db: str, timeout: float = 30) -> None:
             if not active:
                 return
             time.sleep(1)
+    raise TimeoutError(f"{active} budget reservations still active after {timeout:.0f}s")
 
 
 # Load

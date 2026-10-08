@@ -93,17 +93,23 @@ services:
 
   # Measures and checks from inside the network, so latency is not measured
   # through Docker Desktop's port forwarding.
+  # The repository is mounted for its lock: run.sh installs the `loadtest`
+  # dependency group from it, into an environment outside the mount.
   tools:
     <<: *others
     image: ghcr.io/astral-sh/uv:python3.14-bookworm-slim
-    working_dir: /work
+    working_dir: /work/loadtest
     volumes:
-      - ./:/work
+      - ../:/work
       - uv-cache:/root/.cache/uv
     environment:
       <<: *provider
       UV_LINK_MODE: copy
+      UV_PROJECT_ENVIRONMENT: /venv
     entrypoint: ["sleep", "infinity"]
 
+# External, so the `down -v` that clears the stack's databases keeps the cache.
 volumes:
   uv-cache:
+    name: otari-loadtest-uv-cache
+    external: true

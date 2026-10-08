@@ -18,7 +18,7 @@ tool() {
   local env=()
   while [[ $1 != -- ]]; do env+=(-e "$1"); shift; done
   shift
-  dc exec -T ${env[@]+"${env[@]}"} tools uv run --quiet --no-project --with-requirements requirements.txt "$@"
+  dc exec -T ${env[@]+"${env[@]}"} tools uv run --quiet --frozen --only-group loadtest "$@"
 }
 # use VARIANT IMAGE: IMAGE as the replica under test, on database ab_VARIANT, freshly started.
 use() {
@@ -28,6 +28,7 @@ use() {
 }
 
 trap 'dc down -v >/dev/null 2>&1' EXIT
+docker volume create otari-loadtest-uv-cache >/dev/null
 dc up -d --wait postgres redis fakeprovider tools >/dev/null 2>&1
 # A database per build: a migration in head would break base on a shared one.
 for variant in base head; do

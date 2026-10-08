@@ -180,6 +180,14 @@ dev = [
     "s3fs>=2026.3.0",
     "testcontainers[postgres,redis]>=4.0.0",
 ]
+# The load test's tools container (loadtest/run.sh), which installs this group
+# alone from the lock, so a dependency release cannot move the gate between runs.
+loadtest = [
+    "httpx>=0.27",
+    "psycopg[binary]>=3.2",
+    "pytest>=8",
+    "redis>=5",
+]
 
 [tool.uv]
 # Otari is deployed as a Linux server and developed on Linux / macOS; it is
