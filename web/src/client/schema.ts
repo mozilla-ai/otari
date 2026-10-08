@@ -5998,7 +5998,7 @@ export interface components {
         };
         /**
          * AcceptedSnapshotResponse
-         * @description One accepted genai-prices snapshot in the history.
+         * @description One accepted models.dev snapshot in the history.
          */
         AcceptedSnapshotResponse: {
             /**
@@ -12266,7 +12266,7 @@ export interface components {
         };
         /**
          * PricingRefreshConfirmationResponse
-         * @description Result of activating a reviewed genai-prices refresh.
+         * @description Result of activating a reviewed models.dev refresh.
          */
         PricingRefreshConfirmationResponse: {
             /**
@@ -12277,7 +12277,7 @@ export interface components {
         };
         /**
          * PricingRefreshPreviewResponse
-         * @description Reviewable summary of a pending genai-prices refresh.
+         * @description Reviewable summary of a pending models.dev refresh.
          */
         PricingRefreshPreviewResponse: {
             /** Added Count */

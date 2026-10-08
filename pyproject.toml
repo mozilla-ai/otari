@@ -258,6 +258,7 @@ gateway = [
     "static/dashboard/assets/*",
     "static/dashboard/pwa/*",
     "static/dashboard/fonts/*",
+    "data/*.json",
 ]
 
 [tool.ruff]

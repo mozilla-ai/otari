@@ -9,7 +9,7 @@ spelling.
 
 import re
 from bisect import bisect_right
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -99,7 +99,7 @@ class ModelsDevPrice:
             for tier in self.tiers
         ]
 
-    def _price_signature(self) -> tuple[object, ...]:
+    def price_signature(self) -> tuple[object, ...]:
         return (self.input, self.output, self.cache_read, self.cache_write, self.tiers)
 
 
@@ -253,6 +253,11 @@ class ModelsDevPriceIndex:
     def __len__(self) -> int:
         return sum(len(models) for models in self._by_provider.values())
 
+    def entries(self) -> Iterator[ModelsDevPrice]:
+        """Every catalog entry."""
+        for models in self._by_provider.values():
+            yield from models.values()
+
     def get(self, provider_id: str, model_id: str) -> ModelsDevPrice | None:
         """The exact catalog entry, with no matching rules applied."""
         return self._by_provider.get(provider_id, {}).get(model_id)
@@ -333,7 +338,7 @@ class ModelsDevPriceIndex:
     def _agreed(candidates: list[ModelsDevPrice]) -> ModelsDevPrice | None:
         if not candidates or not all(c.priced for c in candidates):
             return None
-        if len({c._price_signature() for c in candidates}) != 1:
+        if len({c.price_signature() for c in candidates}) != 1:
             return None
         vendor = (candidates[0].canonical_model_id or "").partition("/")[0]
         return min(candidates, key=lambda c: (c.provider_id != vendor, c.provider_id, c.model_id))

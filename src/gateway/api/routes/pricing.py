@@ -137,7 +137,7 @@ class PricingRefreshChangeResponse(BaseModel):
 
 
 class PricingRefreshPreviewResponse(BaseModel):
-    """Reviewable summary of a pending genai-prices refresh."""
+    """Reviewable summary of a pending models.dev refresh."""
 
     fetched_at: datetime
     added_count: int
@@ -149,13 +149,13 @@ class PricingRefreshPreviewResponse(BaseModel):
 
 
 class PricingRefreshConfirmationResponse(BaseModel):
-    """Result of activating a reviewed genai-prices refresh."""
+    """Result of activating a reviewed models.dev refresh."""
 
     applied: bool = True
 
 
 class AcceptedSnapshotResponse(BaseModel):
-    """One accepted genai-prices snapshot in the history."""
+    """One accepted models.dev snapshot in the history."""
 
     id: str
     accepted_at: datetime
@@ -240,15 +240,16 @@ def _candidate_model_keys(raw_key: str) -> list[str]:
 @operator_router.post("/refresh", response_model=PricingRefreshPreviewResponse)
 async def preview_pricing_refresh(
     db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> PricingRefreshPreviewResponse:
     """Fetch the latest defaults and hold them for operator review."""
 
     try:
-        preview = await prepare_price_refresh(db)
+        preview = await prepare_price_refresh(db, config)
     except PricingRefreshError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Unable to fetch the latest genai-prices data",
+            detail="Unable to fetch the latest models.dev data",
         ) from None
 
     protected_model_count = (await db.execute(select(func.count(distinct(ModelPricing.model_key))))).scalar_one()
@@ -269,10 +270,10 @@ async def get_pending_pricing_refresh(
     except PricingRefreshError:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="The pending genai-prices data is invalid",
+            detail="The pending models.dev data is invalid",
         ) from None
     if preview is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending genai-prices refresh")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending models.dev refresh")
     protected_model_count = (await db.execute(select(func.count(distinct(ModelPricing.model_key))))).scalar_one()
     return _preview_response(preview, protected_model_count)
 
@@ -345,10 +346,10 @@ async def confirm_pricing_refresh(
     except PricingRefreshError:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to save the latest genai-prices data",
+            detail="Unable to save the latest models.dev data",
         ) from None
     if not applied:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending genai-prices refresh to apply")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending models.dev refresh to apply")
     return PricingRefreshConfirmationResponse()
 
 
@@ -363,10 +364,10 @@ async def reject_pricing_refresh(
     except PricingRefreshError:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to discard the pending genai-prices data",
+            detail="Unable to discard the pending models.dev data",
         ) from None
     if not rejected:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending genai-prices refresh to reject")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending models.dev refresh to reject")
 
 
 async def _get_effective_pricing(

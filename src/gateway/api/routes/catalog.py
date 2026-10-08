@@ -79,7 +79,7 @@ from gateway.services.model_identity import (
     group_offerings,
     identity_key,
 )
-from gateway.services.pricing_refresh_service import GENAI_PRICES_SOURCE
+from gateway.services.pricing_refresh_service import MODELS_DEV_SOURCE
 from gateway.services.pricing_service import (
     default_pricing_enabled,
     load_organization_override_index,
@@ -323,7 +323,7 @@ async def _usage_by_selector(
 
 
 async def _defaults_as_of(db: AsyncSession) -> datetime | None:
-    stmt = select(PricingSnapshot.updated_at).where(PricingSnapshot.source == GENAI_PRICES_SOURCE)
+    stmt = select(PricingSnapshot.updated_at).where(PricingSnapshot.source == MODELS_DEV_SOURCE)
     taken = (await db.execute(stmt)).scalar_one_or_none()
     return normalize_effective_at(taken) if taken is not None else None
 

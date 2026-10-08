@@ -1,4 +1,4 @@
-"""Integration tests for the reviewable genai-prices refresh API."""
+"""Integration tests for the reviewable models.dev refresh API."""
 
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -30,7 +30,7 @@ def test_preview_pricing_refresh_reports_protected_custom_prices(
     )
     assert configured.status_code == 200
 
-    async def preview(_: object) -> PricingRefreshPreview:
+    async def preview(*_: object) -> PricingRefreshPreview:
         return PricingRefreshPreview(
             fetched_at=datetime.now(UTC),
             added_count=1,
@@ -85,8 +85,8 @@ def test_pricing_refresh_requires_master_key(client: TestClient) -> None:
 
 
 _RAW_SNAPSHOT = (
-    '[{"id":"test","name":"Test","api_pattern":"","models":['
-    '{"id":"model","match":{"equals":"model"},"prices":{"input_mtok":"1","output_mtok":"2"}}]}]'
+    '{"test":{"id":"test","name":"Test","models":'
+    '{"model":{"id":"model","cost":{"input":1,"output":2},"limit":{"context":8}}}}}'
 )
 
 
@@ -102,11 +102,11 @@ def test_a_pending_update_is_previewed_without_fetching_and_accepting_it_is_reme
 ) -> None:
     """What the scheduled refresh leaves behind under the review policy."""
     from gateway.models.pricing import PricingSnapshot
-    from gateway.services.pricing_refresh_service import GENAI_PRICES_PENDING_SOURCE, reset_price_refresh_state
+    from gateway.services.pricing_refresh_service import MODELS_DEV_PENDING_SOURCE, reset_price_refresh_state
 
     session = db_session_factory()
     try:
-        session.add(PricingSnapshot(source=GENAI_PRICES_PENDING_SOURCE, snapshot=_RAW_SNAPSHOT))
+        session.add(PricingSnapshot(source=MODELS_DEV_PENDING_SOURCE, snapshot=_RAW_SNAPSHOT))
         session.commit()
     finally:
         session.close()
@@ -114,8 +114,9 @@ def test_a_pending_update_is_previewed_without_fetching_and_accepting_it_is_reme
     try:
         pending = client.get(f"{API_ROOT}/pricing/refresh/pending", headers=master_key_header)
         assert pending.status_code == 200, pending.text
-        # The bundled dataset has no provider called "test", so its one model is an addition.
+        # The bundled snapshot has no provider called "test", so its one model is an addition.
         assert pending.json()["added_count"] == 1
+        assert pending.json()["removed_count"] > 0
 
         assert client.get(f"{API_ROOT}/pricing/snapshots", headers=master_key_header).json() == []
         confirmed = client.post(f"{API_ROOT}/pricing/refresh/confirm", headers=master_key_header)
@@ -146,7 +147,7 @@ def test_the_history_keeps_only_the_newest_snapshots(
     def accept() -> None:
         session = db_session_factory()
         try:
-            session.add(PricingSnapshot(source=refresh.GENAI_PRICES_PENDING_SOURCE, snapshot=_RAW_SNAPSHOT))
+            session.add(PricingSnapshot(source=refresh.MODELS_DEV_PENDING_SOURCE, snapshot=_RAW_SNAPSHOT))
             session.commit()
         finally:
             session.close()

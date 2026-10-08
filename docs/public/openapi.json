@@ -72,7 +72,7 @@
         "type": "object"
       },
       "AcceptedSnapshotResponse": {
-        "description": "One accepted genai-prices snapshot in the history.",
+        "description": "One accepted models.dev snapshot in the history.",
         "properties": {
           "accepted_at": {
             "format": "date-time",
@@ -13090,7 +13090,7 @@
         "type": "object"
       },
       "PricingRefreshConfirmationResponse": {
-        "description": "Result of activating a reviewed genai-prices refresh.",
+        "description": "Result of activating a reviewed models.dev refresh.",
         "properties": {
           "applied": {
             "default": true,
@@ -13102,7 +13102,7 @@
         "type": "object"
       },
       "PricingRefreshPreviewResponse": {
-        "description": "Reviewable summary of a pending genai-prices refresh.",
+        "description": "Reviewable summary of a pending models.dev refresh.",
         "properties": {
           "added_count": {
             "title": "Added Count",

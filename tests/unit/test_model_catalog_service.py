@@ -166,3 +166,33 @@ def test_background_catalog_requires_caching_and_enrichment() -> None:
     assert (
         mcs.background_catalog_enabled(GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=60)) is True
     )
+
+
+@pytest.mark.asyncio
+async def test_the_shared_fetch_fills_the_metadata_cache_and_is_reused() -> None:
+    mcs.clear_catalog_cache()
+    with patch.object(mcs, "_download", new=AsyncMock(return_value={"openai": {}})) as download:
+        assert await mcs.fetch_models_dev_document(fill_cache=True) == {"openai": {}}
+        assert await mcs.fetch_models_dev_document(reuse_within=60) == {"openai": {}}
+        assert download.await_count == 1
+
+        # A catalog refresher tick right after reuses it too, instead of fetching again.
+        config = GatewayConfig(master_key="k", models_dev_metadata=True)
+        assert await mcs.load_models_dev_catalog(config, force=True, reuse_within=60) == {"openai": {}}
+        assert download.await_count == 1
+    mcs.clear_catalog_cache()
+
+
+@pytest.mark.asyncio
+async def test_the_shared_fetch_leaves_the_cache_alone_unless_asked_and_raises_on_failure() -> None:
+    mcs.clear_catalog_cache()
+    with patch.object(mcs, "_download", new=AsyncMock(return_value={"openai": {}})):
+        await mcs.fetch_models_dev_document()
+    assert mcs._cache.ok is False
+
+    with (
+        patch.object(mcs, "_download", new=AsyncMock(side_effect=mcs.ModelsDevFetchError("down"))),
+        pytest.raises(mcs.ModelsDevFetchError),
+    ):
+        await mcs.fetch_models_dev_document()
+    mcs.clear_catalog_cache()
