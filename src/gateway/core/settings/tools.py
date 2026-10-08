@@ -1,4 +1,9 @@
-"""Web search and fetch settings: the fields, the named instances and the defaults.
+"""The tools domain's settings.
+
+Only the web search and fetch settings have moved here so far: the fields, the
+named instances and the defaults. The rest of the domain's settings, the code
+execution sandbox's among them, are still on ``GatewayConfig`` in
+``core/config.py``.
 
 A deployment names its search and fetch backends as instances: ``search_tools``
 and ``fetch_tools`` in the configuration file, and search instances stored
@@ -308,7 +313,11 @@ class SynthesizedSearchInstance:
 
 
 class ToolSettings(BaseModel):
-    """The web tools: named search and fetch instances, the legacy in-loop settings, and the limits."""
+    """The tools domain's settings, mixed into ``GatewayConfig``. So far only the web tools' have moved here.
+
+    For web search and fetch: the named instances, the legacy in-loop settings,
+    the defaults and the call limit.
+    """
 
     search_tools: Annotated[dict[str, dict[str, Any]], OMITTED] = Field(
         default_factory=dict,
