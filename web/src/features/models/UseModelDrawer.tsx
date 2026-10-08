@@ -7,12 +7,15 @@ import { CopyField } from "@/design-system/actions/CopyField"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { formatRate } from "@/shared/helpers/format"
+import { providerDisplayName } from "@/shared/helpers/providers"
 import {
   buildCurlSnippet,
   buildPythonSnippet,
   resolveSnippetBaseUrl,
 } from "@/shared/helpers/requestSnippets"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+
+import { providerModelId } from "./modelKey"
 
 // The way in to a model, beside the page rather than over it: a drawer from
 // the right, so the offerings it talks about stay in view. Three steps: which
@@ -57,7 +60,7 @@ export function UseModelDrawer({
   const sendAs = pinned ? selectorFor(pinned) : (model.selector ?? "")
   const offeringOptions = model.offerings.map((offering) => ({
     value: offering.selector,
-    label: `${offering.provider} · ${rate(offering.pricing?.input_price_per_million)} in / ${rate(offering.pricing?.output_price_per_million)} out`,
+    label: `${providerDisplayName(offering.provider)} · ${providerModelId(offering.selector)} · ${rate(offering.pricing?.input_price_per_million)} in / ${rate(offering.pricing?.output_price_per_million)} out`,
   }))
   const options = model.selector
     ? [
@@ -110,7 +113,7 @@ export function UseModelDrawer({
                   {model.selector ? (
                     <>
                       With the model id alone, the gateway sends the request to
-                      the cheapest offering it serves
+                      the first offering in the catalog's order
                       {cheapest ? (
                         <>
                           , today{" "}

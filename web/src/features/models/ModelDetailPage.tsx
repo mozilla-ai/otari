@@ -39,6 +39,7 @@ import {
 } from "@/shared/helpers/format"
 import { providerDisplayName } from "@/shared/helpers/providers"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+import { providerModelId } from "./modelKey"
 
 // One model, on a page of its own: the header with its facts, then every
 // offering of the model this viewer may call, cheapest first, with the price
@@ -213,8 +214,8 @@ function offeringColumns({
       isRowHeader: true,
       allowsSorting: true,
       cell: ({ offering: row }) => (
-        // One line: the selector, which is as long as the provider makes it,
-        // opens under the row instead of setting every row's height.
+        // The provider's own model ID sits on a second line, so two offerings on
+        // one provider (Bedrock's regional profiles) read apart at a glance.
         <span className="text-body flex items-center gap-2 whitespace-nowrap">
           {/* Keyed on the type rather than the instance, which is what the
               instance is named after until an operator renames it. The name
@@ -224,16 +225,21 @@ function offeringColumns({
             providerId={row.provider_type || row.provider}
             label={providerDisplayName(row.provider)}
           />
-          <span>
-            {providerDisplayName(row.provider)}
-            <span className="text-caption">
-              {" · "}
-              {row.provider_type !== row.provider
-                ? `${providerDisplayName(row.provider_type)} · `
-                : ""}
-              {credentialLabel(row.credential)}
-              {row.quantization ? ` · ${row.quantization}` : ""}
+          <span className="flex flex-col">
+            <span>
+              {providerDisplayName(row.provider)}
+              <span className="text-caption">
+                {" · "}
+                {row.provider_type !== row.provider
+                  ? `${providerDisplayName(row.provider_type)} · `
+                  : ""}
+                {credentialLabel(row.credential)}
+                {row.quantization ? ` · ${row.quantization}` : ""}
+              </span>
             </span>
+            <code className="text-caption font-mono">
+              {providerModelId(row.selector)}
+            </code>
           </span>
         </span>
       ),

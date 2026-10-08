@@ -252,6 +252,48 @@ describe("ModelDetailPage", () => {
     })
   })
 
+  it("names each offering's model ID under its provider", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.includes(`${API_ROOT}/catalog/models/z-ai/glm-5.3`)) {
+        return jsonResponse({
+          ...GLM_DETAIL,
+          offerings: [
+            offering({}),
+            offering({
+              selector: "bedrock:global.zai.glm-5.3",
+              short_selector: null,
+              provider: "bedrock",
+              provider_type: "bedrock",
+            }),
+            offering({
+              selector: "bedrock:us.zai.glm-5.3",
+              short_selector: null,
+              provider: "bedrock",
+              provider_type: "bedrock",
+            }),
+          ],
+        })
+      }
+      if (url.includes(`${API_ROOT}/catalog/models`))
+        return jsonResponse(CATALOG)
+      if (url.includes(`${API_ROOT}/organizations/me`))
+        return jsonResponse(organizationContext())
+      return jsonResponse([])
+    })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+
+    const offerings = await screen.findByRole("grid", {
+      name: "Offerings of GLM-5.3",
+    })
+    const headers = within(offerings).getAllByRole("rowheader")
+    const byText = (id: string) =>
+      headers.filter((header) => within(header).queryByText(id) !== null)
+    expect(byText("global.zai.glm-5.3")).toHaveLength(1)
+    expect(byText("us.zai.glm-5.3")).toHaveLength(1)
+    expect(byText("zai-org/GLM-5.3")).toHaveLength(1)
+  })
+
   it("opens the drawer with the request to send, to the gateway's pick or a pinned provider", async () => {
     mockApi()
     renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
@@ -262,9 +304,9 @@ describe("ModelDetailPage", () => {
     )
 
     const drawer = await screen.findByRole("dialog", { name: "Use this model" })
-    // The model id first: the gateway picks the cheapest offering.
+    // The model id first: the gateway picks the first offering in the catalog's order.
     expect(
-      within(drawer).getByText(/cheapest offering it serves/),
+      within(drawer).getByText(/first offering in the catalog's order/),
     ).toBeInTheDocument()
     const curl = within(drawer).getByLabelText("cURL") as HTMLTextAreaElement
     expect(curl.value).toContain('"model": "z-ai/glm-5.3"')
@@ -276,12 +318,59 @@ describe("ModelDetailPage", () => {
     await user.click(
       within(drawer).getByRole("button", { name: /Let the gateway choose/ }),
     )
-    await user.click(screen.getByRole("option", { name: /^fireworks/ }))
+    await user.click(screen.getByRole("option", { name: /^Fireworks/ }))
     await waitFor(() =>
       expect(
         (within(drawer).getByLabelText("cURL") as HTMLTextAreaElement).value,
       ).toContain('"model": "fireworks:z-ai/glm-5.3"'),
     )
+  })
+
+  it("names each offering's model ID among the drawer's providers", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.includes(`${API_ROOT}/catalog/models/z-ai/glm-5.3`)) {
+        return jsonResponse({
+          ...GLM_DETAIL,
+          offerings: [
+            offering({
+              selector: "bedrock:global.zai.glm-5.3",
+              short_selector: null,
+              provider: "bedrock",
+              provider_type: "bedrock",
+            }),
+            offering({
+              selector: "bedrock:us.zai.glm-5.3",
+              short_selector: null,
+              provider: "bedrock",
+              provider_type: "bedrock",
+            }),
+          ],
+        })
+      }
+      if (url.includes(`${API_ROOT}/catalog/models`))
+        return jsonResponse(CATALOG)
+      if (url.includes(`${API_ROOT}/organizations/me`))
+        return jsonResponse(organizationContext())
+      return jsonResponse([])
+    })
+    renderPage(<ModelDetailPage modelId="z-ai/glm-5.3" />)
+    const user = userEvent.setup()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Use this model" }),
+    )
+    const drawer = await screen.findByRole("dialog", { name: "Use this model" })
+    await user.click(
+      within(drawer).getByRole("button", { name: /Let the gateway choose/ }),
+    )
+
+    expect(
+      screen.getByRole("option", { name: /global\.zai\.glm-5\.3/ }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("option", { name: /us\.zai\.glm-5\.3/ }),
+    ).toBeInTheDocument()
   })
 
   it("offers a deployment operator no rate link on a deployment-supplied offering", async () => {
