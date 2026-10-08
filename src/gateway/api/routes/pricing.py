@@ -68,9 +68,6 @@ class SetPricingRequest(BaseModel):
     cache_write_price_per_million: float | None = Field(
         default=None, ge=0, description="Price per 1M cache-write (creation) tokens"
     )
-    cache_write_1h_price_per_million: float | None = Field(
-        default=None, ge=0, description="Price per 1M Anthropic 1-hour cache-write tokens"
-    )
     pricing_tiers: list[PricingTier] | None = Field(
         default=None,
         description="Whole-request context thresholds. Fields omitted by a tier inherit the base rate.",
@@ -106,7 +103,6 @@ class PricingResponse(BaseModel):
     output_price_per_million: float
     cache_read_price_per_million: float | None
     cache_write_price_per_million: float | None
-    cache_write_1h_price_per_million: float | None
     pricing_tiers: list[PricingTier]
     unit: str = Field(description="What the rates are per: tokens, requests, or images.")
     origin: str | None = Field(
@@ -125,7 +121,6 @@ class PricingResponse(BaseModel):
             output_price_per_million=float(pricing.output_price_per_million),
             cache_read_price_per_million=as_float(pricing.cache_read_price_per_million),
             cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
-            cache_write_1h_price_per_million=as_float(pricing.cache_write_1h_price_per_million),
             pricing_tiers=[PricingTier.model_validate(tier) for tier in pricing.pricing_tiers or []],
             unit=pricing.unit or "tokens",
             origin=pricing.origin,
@@ -478,10 +473,9 @@ async def set_pricing(
     # explicit null still clears the rate.
     cache_read_set = "cache_read_price_per_million" in request.model_fields_set
     cache_write_set = "cache_write_price_per_million" in request.model_fields_set
-    cache_write_1h_set = "cache_write_1h_price_per_million" in request.model_fields_set
     tiers_set = "pricing_tiers" in request.model_fields_set
     latest: ModelPricing | None = None
-    if not (cache_read_set and cache_write_set and cache_write_1h_set and tiers_set):
+    if not (cache_read_set and cache_write_set and tiers_set):
         latest = (
             await db.execute(
                 select(ModelPricing)
@@ -503,11 +497,6 @@ async def set_pricing(
         if cache_write_set
         else (latest.cache_write_price_per_million if latest else None)
     )
-    cache_write_1h = to_usd_or_none(
-        request.cache_write_1h_price_per_million
-        if cache_write_1h_set
-        else (latest.cache_write_1h_price_per_million if latest else None)
-    )
     pricing_tiers = (
         [tier.model_dump(exclude_none=True) for tier in request.pricing_tiers]
         if request.pricing_tiers is not None
@@ -527,7 +516,6 @@ async def set_pricing(
         pricing.output_price_per_million = to_usd(request.output_price_per_million)
         pricing.cache_read_price_per_million = cache_read
         pricing.cache_write_price_per_million = cache_write
-        pricing.cache_write_1h_price_per_million = cache_write_1h
         pricing.pricing_tiers = pricing_tiers
         pricing.unit = request.unit
         pricing.origin = API_ORIGIN
@@ -539,7 +527,6 @@ async def set_pricing(
             output_price_per_million=to_usd(request.output_price_per_million),
             cache_read_price_per_million=cache_read,
             cache_write_price_per_million=cache_write,
-            cache_write_1h_price_per_million=cache_write_1h,
             pricing_tiers=pricing_tiers,
             unit=request.unit,
             origin=API_ORIGIN,

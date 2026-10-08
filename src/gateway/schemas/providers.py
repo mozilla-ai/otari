@@ -212,7 +212,6 @@ class OrgProviderKeyModelPublic(SQLModel):
     output_price_per_million: float | None = None
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
-    cache_write_1h_price_per_million: float | None = None
     price_source: PriceSource | None = None
     pricing_id: uuid.UUID | None = None
     unit: str = "tokens"

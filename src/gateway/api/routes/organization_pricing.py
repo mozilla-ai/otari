@@ -87,9 +87,6 @@ class OrganizationModelPricingRates(BaseModel):
     cache_write_price_per_million: float | None = Field(
         default=None, ge=0, description="Price per 1M cache-write (creation) tokens"
     )
-    cache_write_1h_price_per_million: float | None = Field(
-        default=None, ge=0, description="Price per 1M Anthropic 1-hour cache-write tokens"
-    )
     pricing_tiers: list[PricingTier] | None = Field(
         default=None,
         description="Whole-request context thresholds. Fields omitted by a tier inherit the base rate.",
@@ -168,7 +165,6 @@ class OrganizationModelPricingPublic(BaseModel):
     output_price_per_million: float
     cache_read_price_per_million: float | None
     cache_write_price_per_million: float | None
-    cache_write_1h_price_per_million: float | None
     pricing_tiers: list[PricingTier]
     unit: str
     effective_from: datetime
@@ -189,7 +185,6 @@ class OrganizationModelPricingPublic(BaseModel):
             output_price_per_million=float(override.output_price_per_million),
             cache_read_price_per_million=as_float(override.cache_read_price_per_million),
             cache_write_price_per_million=as_float(override.cache_write_price_per_million),
-            cache_write_1h_price_per_million=as_float(override.cache_write_1h_price_per_million),
             pricing_tiers=[PricingTier.model_validate(tier) for tier in override.pricing_tiers or []],
             unit=override.unit or "tokens",
             effective_from=override.effective_from,
@@ -236,7 +231,6 @@ def _to_input(body: OrganizationModelPricingRates) -> PricingOverrideInput:
         output_price_per_million=body.output_price_per_million,
         cache_read_price_per_million=body.cache_read_price_per_million,
         cache_write_price_per_million=body.cache_write_price_per_million,
-        cache_write_1h_price_per_million=body.cache_write_1h_price_per_million,
         pricing_tiers=[tier.model_dump(exclude_none=True) for tier in body.pricing_tiers or []],
         effective_from=body.effective_from or datetime.now(tz=UTC),
         effective_to=body.effective_to,

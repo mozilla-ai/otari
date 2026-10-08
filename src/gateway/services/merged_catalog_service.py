@@ -76,7 +76,6 @@ class ModelPricingInfo(BaseModel):
     output_price_per_million: float
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
-    cache_write_1h_price_per_million: float | None = None
     # The same tiers SetPricingRequest accepts, so the response says what the
     # request already promised. The permissive arm stays for the same reason as
     # the billing shapes on a usage row, with one addition specific to here:
@@ -107,7 +106,6 @@ def pricing_info(pricing: ModelPricing) -> ModelPricingInfo:
         output_price_per_million=float(pricing.output_price_per_million),
         cache_read_price_per_million=as_float(pricing.cache_read_price_per_million),
         cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
-        cache_write_1h_price_per_million=as_float(pricing.cache_write_1h_price_per_million),
         pricing_tiers=pricing.pricing_tiers or [],
         # A transient row (a default, an override) is built without the column
         # default that an insert would apply, so it reads back None here.

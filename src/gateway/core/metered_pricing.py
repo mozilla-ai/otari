@@ -66,7 +66,6 @@ RATE_FIELDS: tuple[str, ...] = (
     "output_price_per_million",
     "cache_read_price_per_million",
     "cache_write_price_per_million",
-    "cache_write_1h_price_per_million",
 )
 
 # Key naming the lower bound of a threshold tier in a ``pricing_tiers`` entry.
@@ -109,11 +108,6 @@ class BillableUsage:
     cache_write_tokens: int
     cache_write_1h_tokens: int
 
-    @property
-    def cache_write_base_tokens(self) -> int:
-        """Cache writes on the default TTL, i.e. every write that is not a 1h write."""
-        return self.cache_write_tokens - self.cache_write_1h_tokens
-
 
 @dataclass(frozen=True)
 class Rates:
@@ -123,7 +117,6 @@ class Rates:
     output_price_per_million: Decimal
     cache_read_price_per_million: Decimal | None
     cache_write_price_per_million: Decimal | None
-    cache_write_1h_price_per_million: Decimal | None
 
 
 def to_decimal(value: typing.Any) -> Decimal | None:
@@ -325,7 +318,6 @@ def effective_rates(pricing: typing.Any, total_input_tokens: int) -> Rates:
         output_price_per_million=output_rate,
         cache_read_price_per_million=values["cache_read_price_per_million"],
         cache_write_price_per_million=values["cache_write_price_per_million"],
-        cache_write_1h_price_per_million=values["cache_write_1h_price_per_million"],
     )
 
 
@@ -396,26 +388,17 @@ def _price_meters(
     sub-amounts into one row can sum them exactly and round the row once.
 
     Each input token bills exactly once, under whichever meter it belongs to: a
-    cache read, a cache write on either TTL, or fresh input. A meter with no
+    cache read, a cache write on either TTL (one rate), or fresh input. A meter with no
     configured rate leaves its tokens in the fresh-input bucket, so an unpriced
     cache meter costs the input rate instead of nothing.
     """
     rates = effective_rates(pricing, usage.total_input_tokens)
 
-    # A 1h write with no dedicated rate bills as an ordinary cache write.
-    write_1h_rate = (
-        rates.cache_write_1h_price_per_million
-        if rates.cache_write_1h_price_per_million is not None
-        else rates.cache_write_price_per_million
-    )
-
     fresh_input_tokens = usage.total_input_tokens
     if rates.cache_read_price_per_million is not None:
         fresh_input_tokens -= usage.cache_read_tokens
     if rates.cache_write_price_per_million is not None:
-        fresh_input_tokens -= usage.cache_write_base_tokens
-    if write_1h_rate is not None:
-        fresh_input_tokens -= usage.cache_write_1h_tokens
+        fresh_input_tokens -= usage.cache_write_tokens
 
     meters = {
         "total_input_tokens": usage.total_input_tokens,
@@ -440,9 +423,7 @@ def _price_meters(
     if rates.cache_read_price_per_million is not None:
         charge("cache_read", usage.cache_read_tokens, rates.cache_read_price_per_million)
     if rates.cache_write_price_per_million is not None:
-        charge("cache_write_5m", usage.cache_write_base_tokens, rates.cache_write_price_per_million)
-    if write_1h_rate is not None:
-        charge("cache_write_1h", usage.cache_write_1h_tokens, write_1h_rate)
+        charge("cache_write", usage.cache_write_tokens, rates.cache_write_price_per_million)
     return cost, meters, lines
 
 
@@ -537,14 +518,7 @@ def estimate_metered_cost(
     output_tokens = max(estimated_output_tokens, 0)
     rates = effective_rates(pricing, input_tokens)
 
-    if cache_write_ttl == "1h":
-        cache_write_rate = rates.cache_write_1h_price_per_million
-        if cache_write_rate is None:
-            cache_write_rate = rates.cache_write_price_per_million
-    elif cache_write_ttl == "5m":
-        cache_write_rate = rates.cache_write_price_per_million
-    else:
-        cache_write_rate = None
+    cache_write_rate = rates.cache_write_price_per_million if cache_write_ttl is not None else None
 
     # An unpriced meter bills at the input rate (its tokens stay in the fresh
     # bucket), so the input rate is the floor and every configured rate a prompt

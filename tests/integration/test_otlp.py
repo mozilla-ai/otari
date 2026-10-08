@@ -84,15 +84,11 @@ def _seed_pricing(client: TestClient, master_key_header: dict[str, str]) -> None
             "output_price_per_million": 75.0,
             "cache_read_price_per_million": 1.5,
             "cache_write_price_per_million": 18.75,
-            "cache_write_1h_price_per_million": 30.0,
             "effective_at": "2020-01-01T00:00:00Z",
         },
         headers=master_key_header,
     )
     assert resp.status_code == 200, resp.text
-    # The 1h rate must land distinct from the 5m one: if it fell back to the 5m rate,
-    # a cache write booked in the wrong bucket would cost the same and go unnoticed.
-    assert resp.json()["cache_write_1h_price_per_million"] == 30.0
 
 
 def test_otlp_api_request_is_ingested_and_priced(
