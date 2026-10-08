@@ -190,6 +190,49 @@ The data plane cancels explicitly when it knows the work failed. Cancel is idemp
 
 Resolve and the [usage report](#usage-report) are the Try and the Confirm of inference. Today the Try holds nothing: resolve claims no budget, and the usage report settles with overdraft allowed. A control plane that holds budget at resolve makes the usage report the Confirm, keyed by the attempt ID, and cancels with its sweep an attempt that never reports. The wire does not change.
 
+## Content encryption
+
+Captured content, such as prompts, tool inputs and outputs, and file bytes, is encrypted by default before it leaves the data plane. The control plane holds the keys and never sees the plaintext on the write path.
+
+### The data key
+
+A Try for a write, and the answer to a data plane read, carry a data key beside the grant:
+
+```json
+"data_key": {
+  "key_id": "dek_01J...",
+  "key": "<base64, 32 bytes>",
+  "encryption_context": {
+    "organization_id": "org_...",
+    "workspace_id": "ws_...",
+    "context_type": "trace_session",
+    "context_id": "..."
+  }
+}
+```
+
+The data plane encrypts with `key` and puts `encryption_context` into the message unchanged, with the object's `id` added as `object_id`. It treats the data key as it treats a grant: in memory only, never logged, never stored and never sent to a client. Holding the key gives the data plane no access it did not have, because it already handled the plaintext.
+
+### Content format
+
+Content is written in the AWS Encryption SDK message format, version 2, with the algorithm suite `AES_256_GCM_HKDF_SHA512_COMMIT_KEY` (key commitment, no signature), framed, using a raw AES keyring that holds the data key. The SDK's format specification is public and has implementations in several languages, and a raw keyring needs no AWS account.
+
+- Framed, so a large file streams in bounded memory.
+- Key-committing, so one ciphertext cannot decrypt to two plaintexts under two keys.
+- The message's encryption context binds the organization, the workspace, the context and the object, so a ciphertext cannot be moved into another record.
+
+Tink's streaming AEAD was rejected because it has no key commitment and makes a raw key awkward to import. A format of Otari's own was rejected because a published one exists.
+
+### Control plane obligations
+
+- One data key per context. The context types are `trace_session`, one key per agent session, and `file`, one key per file.
+- Each data key is wrapped under a key-encryption key held in a key management service that never exports it. Only the control plane stores the wrapped key, with the owner's user ID beside it.
+- Each wrap is bound to the context `{organization_id, workspace_id, context_type, context_id}`, so every unwrap is attributable to a tenant and a context. The context holds immutable facts only, because an unwrap needs an exact match.
+- The store's own server-side encryption stays on as a second layer.
+- A person reads content through the control plane only, after an access check. The control plane writes an audit record before it decrypts, and without the record there is no read. The data plane decrypts only to serve a request.
+- The owner, the user whose request produced the content, may read it. An organization admin may read it only where an organization setting allows it, and the owner can see each such read. The platform operator may read it only through a separate break-glass role, which is time-boxed, audited, and the only principal besides the control plane that may unwrap.
+- Deletion is crypto-shredding. Deleting a wrapped key makes its content unreadable, including old object versions and backups. When content is deleted, for retention, erasure on request, or a legal hold, is not decided yet.
+
 ## Resolve
 
 ### Request
