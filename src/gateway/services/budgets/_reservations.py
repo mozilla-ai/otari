@@ -468,11 +468,29 @@ async def _held_handle(
             await db.commit()
         except DATABASE_ERRORS:
             # A commit can land and still report failure, a lost connection say,
-            # and then the sweep returns these holds through the ledger row, so
-            # giving the ceilings back here would release them twice. They are
-            # left as a failed commit always left them.
+            # and the sweep then returns the ceilings through the ledger row, so
+            # they are given back here only once the row is known not to exist.
             with contextlib.suppress(*DATABASE_ERRORS):
                 await db.rollback()
+            if scoped and reservation_id is not None:
+                try:
+                    await ledger.release_unrecorded(
+                        db,
+                        reservation_id,
+                        user_id=user_id,
+                        scoped_budget_ids=[item.budget_id for item in scoped],
+                        amount=scoped_estimate,
+                        tokens=scoped_token_estimate,
+                        requests=request_estimate,
+                    )
+                except DATABASE_ERRORS:
+                    with contextlib.suppress(*DATABASE_ERRORS):
+                        await db.rollback()
+                    logger.error(
+                        "Could not tell whether reservation %s committed; its scoped budget holds are left in place.",
+                        reservation_id,
+                        exc_info=True,
+                    )
             raise
     elif record_reservation:
         try:

@@ -629,9 +629,13 @@ async def test_every_ending_writes_the_user_before_the_ceiling(
 
 
 @pytest.mark.asyncio
-async def test_a_commit_that_reports_failure_leaves_the_ceilings_held(async_db: AsyncSession, tenancy: Fixture) -> None:
-    """A commit can land and still report failure, and the sweep would then return the
-    ceilings through the ledger row, so they are not given back a second time here."""
+@pytest.mark.parametrize("landed", [False, True])
+async def test_a_commit_that_reports_failure_gives_the_ceilings_back_only_if_it_did_not_land(
+    async_db: AsyncSession, tenancy: Fixture, landed: bool
+) -> None:
+    """A commit can land and still report failure. Landed, the sweep returns the ceilings
+    through the ledger row, so they stay held; not landed, nothing ever would, so they
+    are given back here."""
     await _with_budget(async_db, tenancy)
     cap = await _scoped(async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=10.0)
     async_db.add(cap)
@@ -645,6 +649,8 @@ async def test_a_commit_that_reports_failure_leaves_the_ceilings_held(async_db: 
         commits += 1
         # The first commit is the ceiling's own hold; the second is the user's hold with its row.
         if commits == 2:
+            if landed:
+                await real_commit()
             raise OperationalError("COMMIT", None, Exception("connection lost"))
         await real_commit()
 
@@ -655,4 +661,13 @@ async def test_a_commit_that_reports_failure_leaves_the_ceilings_held(async_db: 
         await reserve_budget(async_db, user_id, 2.0, scope=scope)
 
     _, reserved = await _counters(async_db, cap_id)
-    assert reserved == pytest.approx(2.0)
+    rows = await _rows(async_db, user_id)
+    assert len(rows) == 1
+    if landed:
+        assert reserved == pytest.approx(2.0)
+        assert rows[0].status == RESERVATION_ACTIVE
+    else:
+        assert reserved == pytest.approx(0.0)
+        assert rows[0].status == RESERVATION_RELEASED
+        user = await _user(async_db, user_id)
+        assert (user.reserved, user.reserved_requests) == (Decimal(0), 0)

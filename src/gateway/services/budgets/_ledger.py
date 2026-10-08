@@ -18,6 +18,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import case, delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped
 
 from gateway.core.database import create_session
@@ -126,6 +127,41 @@ async def record(
     if commit:
         await db.commit()
     return reservation_id
+
+
+async def release_unrecorded(
+    db: AsyncSession,
+    reservation_id: str,
+    *,
+    user_id: str,
+    scoped_budget_ids: Sequence[str],
+    amount: Decimal,
+    tokens: int,
+    requests: int,
+) -> bool:
+    """Give back the ceilings' holds of a row whose commit reported failure, unless it landed.
+
+    A released row under the same id fences the two outcomes. If the row
+    committed, this insert is a duplicate and the sweep owns the holds; if its
+    transaction is still resolving, the insert waits for it. The fence commits
+    with the release, so the holds are given back at most once. Returns whether
+    this call gave them back.
+    """
+    db.add(
+        BudgetReservation(
+            id=reservation_id,
+            user_id=user_id,
+            status=RESERVATION_RELEASED,
+            expires_at=datetime.now(UTC),
+        )
+    )
+    try:
+        await release_scoped(db, scoped_budget_ids, amount, tokens=tokens, requests=requests, commit=False)
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        return False
+    return True
 
 
 async def grow(
