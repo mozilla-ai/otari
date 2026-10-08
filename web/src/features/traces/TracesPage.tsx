@@ -1,16 +1,20 @@
 import type { ReactNode } from "react"
+import type { TraceSummary } from "@/client"
+import { CopyButton } from "@/design-system/actions/CopyButton"
+import { DataTable, type DataTableColumn } from "@/design-system/data/DataTable"
 import { TablePagination } from "@/design-system/data/TablePagination"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
 import { SearchField } from "@/design-system/forms/SearchField"
 import { Chip } from "@/design-system/indicators/Chip"
-import { ListDetail, ListDetailRow } from "@/design-system/layout/ListDetail"
 import { PageIntro } from "@/design-system/layout/PageIntro"
+import { SidePanel } from "@/design-system/layout/SidePanel"
 import { Segmented } from "@/design-system/navigation/Segmented"
 import { Tab, TabRow } from "@/design-system/navigation/TabRow"
 import { TraceDetailPanel } from "@/features/traces/TraceDetailPanel"
 import { TracesChart } from "@/features/traces/TracesChart"
 import {
+  sessionDurationMs,
   sessionFailed,
   sessionName,
   shortId,
@@ -22,7 +26,12 @@ import {
   useTraceSeries,
   useTraces,
 } from "@/shared/api/traces"
-import { formatCost, formatDateTime } from "@/shared/helpers/format"
+import {
+  formatCost,
+  formatDateTime,
+  formatLatency,
+  formatTokens,
+} from "@/shared/helpers/format"
 import {
   ACTIVITY_DEFAULT_KEY,
   ACTIVITY_PRESETS,
@@ -32,6 +41,81 @@ import { useUrlState } from "@/shared/helpers/urlState"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 const PAGE_SIZE = 50
+
+const COLUMNS: DataTableColumn<TraceSummary>[] = [
+  {
+    id: "last_activity_at",
+    header: "Last activity",
+    cell: (summary) => (
+      <span className="font-mono tabular-nums">
+        {formatDateTime(summary.last_activity_at)}
+      </span>
+    ),
+    minWidth: 170,
+  },
+  {
+    id: "name",
+    header: "Session",
+    isRowHeader: true,
+    cell: (summary) => (
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="truncate">{sessionName(summary)}</span>
+        <span className="shrink-0 font-mono text-caption">
+          {shortId(summary.trace_id)}
+        </span>
+      </span>
+    ),
+    minWidth: 220,
+  },
+  {
+    id: "steps",
+    header: "Requests",
+    align: "end",
+    cell: (summary) => (
+      <span className="tabular-nums">{summary.step_count}</span>
+    ),
+  },
+  {
+    id: "duration",
+    header: "Duration",
+    align: "end",
+    cell: (summary) => (
+      <span className="tabular-nums">
+        {formatLatency(sessionDurationMs(summary))}
+      </span>
+    ),
+  },
+  {
+    id: "tokens",
+    header: "Tokens",
+    align: "end",
+    cell: (summary) => (
+      <span className="tabular-nums">
+        {formatTokens(summary.input_tokens + summary.output_tokens)}
+      </span>
+    ),
+  },
+  {
+    id: "cost",
+    header: "Cost",
+    align: "end",
+    cell: (summary) => (
+      <span className="tabular-nums">{formatCost(summary.cost)}</span>
+    ),
+  },
+  {
+    id: "status",
+    header: "Status",
+    cell: (summary) =>
+      sessionFailed(summary) ? (
+        <Chip tone="danger" size="sm">
+          Failed
+        </Chip>
+      ) : (
+        <span className="text-caption">Completed</span>
+      ),
+  },
+]
 const STATUS_OPTIONS = [
   { value: "", label: "All" },
   { value: "failed", label: "Failed" },
@@ -55,8 +139,8 @@ function windowStart(seconds: number | null): string {
   ).toISOString()
 }
 
-// Every agent session the gateway recorded, newest activity first, beside the one
-// that is open. The page owns the URL state and the queries; its parts take data.
+// Every agent session the gateway recorded, newest activity first; one opens in a
+// panel over the page. The page owns the URL state and the queries; its parts take data.
 export function TracesPage({ viewSwitch }: { viewSwitch: ReactNode }) {
   const url = useUrlState(URL_DEFAULTS)
   const preset =
@@ -84,42 +168,22 @@ export function TracesPage({ viewSwitch }: { viewSwitch: ReactNode }) {
   const trace = useTrace(traceId)
 
   const items = traces.data?.items ?? []
-  const list = items.map((summary) => (
-    <ListDetailRow
-      key={summary.trace_id}
-      isSelected={summary.trace_id === traceId}
-      onSelect={() => url.patch({ trace: summary.trace_id })}
-      label={
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate">{sessionName(summary)}</span>
-          <span className="shrink-0 text-caption font-mono">
-            {shortId(summary.trace_id)}
-          </span>
-          {sessionFailed(summary) ? (
-            <Chip tone="danger" size="sm" className="shrink-0">
-              Failed
-            </Chip>
-          ) : null}
-        </span>
-      }
-    >
-      <span className="flex flex-wrap gap-x-3 text-caption tabular-nums">
-        <span>{formatDateTime(summary.last_activity_at)}</span>
-        <span>{summary.step_count} requests</span>
-        <span>{formatCost(summary.cost)}</span>
-      </span>
-    </ListDetailRow>
-  ))
+  const open = (id: string) => url.patch({ trace: id })
+  // Previous and next walk the page of sessions on screen.
+  const position = items.findIndex((summary) => summary.trace_id === traceId)
+  const before = position > 0 ? items[position - 1] : undefined
+  const after =
+    position >= 0 && position < items.length - 1
+      ? items[position + 1]
+      : undefined
 
-  let detail: ReactNode
-  if (traceId === "") {
+  let detail: ReactNode = null
+  if (trace.isError && !trace.data) {
     detail = (
-      <EmptyMessage>
-        Open a session to see its turns, LLM calls and tool calls.
-      </EmptyMessage>
+      <div className="p-5">
+        <ErrorBanner error={trace.error} />
+      </div>
     )
-  } else if (trace.isError && !trace.data) {
-    detail = <ErrorBanner error={trace.error} />
   } else if (trace.isPending && !trace.data) {
     detail = <EmptyMessage>Loading the session…</EmptyMessage>
   } else if (trace.data) {
@@ -169,23 +233,34 @@ export function TracesPage({ viewSwitch }: { viewSwitch: ReactNode }) {
           size="sm"
         />
       </div>
-      <ListDetail
-        listLabel="Sessions"
-        list={list}
-        isEmpty={items.length === 0}
-        empty={
-          <EmptyMessage>
-            {isFirstLoad
-              ? "Loading sessions…"
-              : "No sessions in this window. A client's requests are grouped into one session when it sends a session id."}
-          </EmptyMessage>
+      <DataTable
+        ariaLabel="Sessions"
+        columns={COLUMNS}
+        rows={items}
+        getRowKey={(summary) => summary.trace_id}
+        isLoading={isFirstLoad}
+        onRowAction={open}
+        rowClassName={(summary) =>
+          summary.trace_id === traceId ? "bg-primary-subtle" : undefined
         }
-        detail={detail}
-        detailLabel="Session"
-        isDetailShown={traceId !== ""}
-        onShowList={() => url.patch({ trace: "" })}
-        backLabel="Back to the sessions"
+        emptyContent="No sessions in this window. A client's requests are grouped into one session when it sends a session id."
       />
+      <SidePanel
+        isOpen={traceId !== ""}
+        onClose={() => url.patch({ trace: "" })}
+        label="Session"
+        heading={
+          <>
+            <span className="text-overline">Session</span>
+            <span className="truncate font-mono text-caption">{traceId}</span>
+            <CopyButton value={traceId} label="Copy session ID" />
+          </>
+        }
+        onPrevious={before ? () => open(before.trace_id) : undefined}
+        onNext={after ? () => open(after.trace_id) : undefined}
+      >
+        {detail}
+      </SidePanel>
       <TablePagination
         page={page}
         pageSize={PAGE_SIZE}

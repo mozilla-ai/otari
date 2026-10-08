@@ -50,4 +50,17 @@ describe("TraceDetailPanel", () => {
     const log = screen.getByRole("list", { name: "Spans in order" })
     expect(within(log).getAllByRole("button")).toHaveLength(5)
   })
+
+  it("collapses a request to hide what ran inside it", async () => {
+    render(<TraceDetailPanel detail={traceDetail()} />)
+    const turn = screen.getByRole("region", { name: "Turn 1" })
+    expect(within(turn).getByText("Bash")).toBeInTheDocument()
+
+    const [collapse] = within(turn).getAllByRole("button", {
+      name: /^Collapse/,
+    })
+    await userEvent.click(collapse)
+
+    expect(within(turn).queryByText("Bash")).not.toBeInTheDocument()
+  })
 })
