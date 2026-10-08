@@ -2,7 +2,8 @@
 
 Compares two builds of Otari under load on one machine, route by route, and
 fails when the second one got slower or does more database work per request.
-CI runs it on every PR that changes what a request does, against the PR's base.
+CI runs it on every PR that changes what a request does, against the PR's base,
+once the PR is out of draft.
 
 ```bash
 docker build -t otari:base /path/to/base-checkout
@@ -78,6 +79,11 @@ provider's 50 ms (its time to first token when streamed), as each turn's p50.
 For a cost that is deliberate, `LOADTEST_ACCEPT_REGRESSION=1` turns a
 regression into an expected failure; in CI, add the `perf-accepted` label,
 which re-runs the job.
+
+In CI the report is the job summary. On a PR from this repository it is also
+posted as one comment, edited on each run, once a run has something to say: a
+route or a statement count changed, or a check failed. A PR where everything
+reads unchanged gets no comment.
 
 ## Limits
 

@@ -4,11 +4,13 @@ name: Otari Load Test
 # loadtest/run.sh (see loadtest/README.md). The checks fail on a regression;
 # adding the `perf-accepted` label re-runs the job and lets a deliberate cost
 # pass (the label is read when the job runs, so a manual re-run sees it too).
+# A draft is skipped until it is marked ready for review. On a PR from this
+# repository, a result worth reading is also posted as a comment.
 
 on:
   pull_request:
     branches: [ main ]
-    types: [ opened, synchronize, reopened, labeled ]
+    types: [ opened, synchronize, reopened, ready_for_review, labeled ]
     paths:
       - 'src/**'
       - 'cli/src/**'
@@ -26,12 +28,16 @@ permissions:
 
 jobs:
   compare:
-    if: github.event.action != 'labeled' || github.event.label.name == 'perf-accepted'
+    if: >-
+      !github.event.pull_request.draft &&
+      (github.event.action != 'labeled' || github.event.label.name == 'perf-accepted')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
-      pull-requests: read
+      # The results comment. A fork PR's token stays read-only, so it gets the
+      # job summary alone.
+      pull-requests: write
     concurrency:
       group: loadtest-${{ github.event.pull_request.number }}
       cancel-in-progress: true
@@ -88,6 +94,7 @@ jobs:
           fi
 
       - name: Compare base and head
+        id: compare
         env:
           BASE_REF: ${{ steps.base.outputs.sha }}
           HEAD_REF: ${{ github.sha }}
@@ -107,3 +114,45 @@ jobs:
           name: loadtest
           path: loadtest/results/
           if-no-files-found: ignore
+
+      # One comment per PR, edited on every run once it exists. It is created only
+      # when a run has something to say (a route or a statement count changed, or
+      # a check failed), so a PR where everything reads unchanged gets none. It
+      # names the commit it describes, because a run that dies before writing a
+      # report leaves the previous one in place.
+      - name: Post the results on the pull request
+        if: always() && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          OUTCOME: ${{ steps.compare.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          report=$(ls loadtest/results/ab-*/report.md 2>/dev/null | head -n 1)
+          if [[ -z "$report" ]]; then exit 0; fi
+          marker='<!-- otari-loadtest -->'
+          body="$RUNNER_TEMP/loadtest-comment.md"
+          {
+            echo "$marker"
+            echo "Load test of PR commit \`$HEAD_SHA\` against its base."
+            if [[ "$OUTCOME" == failure ]]; then
+              echo
+              echo "**A check failed.** The run's log names it."
+            elif [[ "${LOADTEST_ACCEPT_REGRESSION:-}" == 1 ]]; then
+              echo
+              echo "Any regression below is accepted with the \`perf-accepted\` label."
+            fi
+            echo
+            cat "$report"
+            echo "[View the run]($RUN_URL); \`perf.json\` is in its \`loadtest\` artifact."
+          } > "$body"
+          existing=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id")
+          existing=${existing%%$'\n'*}
+          if [[ -n "$existing" ]]; then
+            gh api --method PATCH "repos/$REPO/issues/comments/$existing" -F "body=@$body" > /dev/null
+          elif [[ "$OUTCOME" == failure ]] || grep -qE '🔴|🟢' "$report"; then
+            gh api --method POST "repos/$REPO/issues/$PR/comments" -F "body=@$body" > /dev/null
+          fi

@@ -243,7 +243,7 @@ def turn(directory: Path, variant: str, number: int) -> None:
         store.flushdb()  # rate-limit windows start empty, so every turn sees Model 1's cap the same
         tenant = tenants[scenario.pooled]
         if scenario.fill_model1:
-            send(tenant.key, Scenario(model=MODEL1), rpm=1200, seconds=5)
+            send(tenant.key, Scenario(model=MODEL1), rpm=6000, seconds=1)  # its 100 requests, in a burst
         before = cpu_seconds()
         results = send(tenant.key, scenario)
         cpu = cpu_seconds() - before
