@@ -18,7 +18,7 @@ dynamic = ["version"]
 # the gateway's: its httpx pin, and the pydantic its pydantic-settings needs.
 dependencies = [
     "httpx>=0.28.1",
-    "pydantic>=2.7.0",
+    "pydantic>=2.13.5",
 ]
 
 [project.scripts]
