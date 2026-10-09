@@ -567,7 +567,6 @@ def test_normalized_address_refuses_the_edge_shapes() -> None:
 
 
 def test_normalized_address_is_linear_on_a_long_run_of_dots() -> None:
-    """A run of ``.`` after the ``@`` is the input a single pattern backtracked quadratically on."""
     started = time.perf_counter()
     assert normalized_address("!@!." + "!." * 50_000 + "@") is None
     assert time.perf_counter() - started < 0.5
