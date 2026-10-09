@@ -179,11 +179,47 @@ def _endpoint_label(scope: Scope) -> tuple[str, str]:
     template = getattr(route, "path", None)
     if not isinstance(template, str) or not template:
         return _UNMATCHED_ENDPOINT, _NO_VERSION
+    template = _mount_prefix(scope, route) + template
     if template == API_ROOT:
         return "/", API_VERSION
     if template.startswith(f"{API_ROOT}/"):
         return template[len(API_ROOT) :], API_VERSION
     return template, _NO_VERSION
+
+
+def _mount_prefix(scope: Scope, route: Any) -> str:
+    """Return the prefixes ``route`` is mounted under that its own ``path`` leaves out.
+
+    From FastAPI 0.137 an included router stays a tree, and the route it puts on
+    the scope carries only its own router's prefix, not the prefixes of the
+    routers above it (the API root, the OTLP root). Earlier releases copy each
+    route into the app with every prefix joined on, and this returns ``""``.
+
+    Mount prefixes are literal, so the dropped part is the leading run of the
+    request path before the route's own pattern matches the rest. The match has
+    to reproduce the path parameters routing recorded, or a catch-all such as
+    ``/{path:path}`` would claim the whole path and lose the prefix.
+    """
+    regex = getattr(route, "path_regex", None)
+    if regex is None:
+        return ""
+    path: str = scope.get("path", "")
+    root_path: str = scope.get("root_path", "")
+    if root_path and path.startswith(root_path):
+        path = path[len(root_path) :]
+    expected = scope.get("path_params", {})
+    convertors = getattr(route, "param_convertors", {})
+    for cut in [0, *(i for i, char in enumerate(path) if char == "/" and i)]:
+        match = regex.match(path[cut:])
+        if match is None:
+            continue
+        try:
+            params = {name: convertors[name].convert(value) for name, value in match.groupdict().items()}
+        except (KeyError, ValueError):
+            continue
+        if params == expected:
+            return path[:cut]
+    return ""
 
 
 async def metrics_endpoint(request: Request) -> Response:

@@ -5,6 +5,7 @@ paths each deployment answers are named here rather than left to be discovered.
 """
 
 from fastapi import APIRouter
+from fastapi.routing import iter_route_contexts
 
 from gateway.api import main as api_main
 from gateway.core.config import GatewayConfig
@@ -33,8 +34,8 @@ def _served(config: GatewayConfig) -> set[str]:
     api = APIRouter()
     api_main._register_core_routers(api, config, ())
     served = set()
-    for route in api.routes:
-        path = getattr(route, "path", None)
+    for route in iter_route_contexts(api.routes):
+        path = route.path
         if path is not None:
             served.add(path.split("{")[0].rstrip("/") or path)
     return served
