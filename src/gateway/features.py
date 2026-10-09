@@ -8,6 +8,7 @@ Whether a listed feature runs is that feature's own ``enabled`` setting.
 """
 
 from gateway.api.routes.feedback import FEATURE as FEEDBACK
+from gateway.api.routes.traces import FEATURE as TRACES
 from gateway.core.feature import CoreFeature
 
-CORE_FEATURES: tuple[CoreFeature, ...] = (FEEDBACK,)
+CORE_FEATURES: tuple[CoreFeature, ...] = (FEEDBACK, TRACES)

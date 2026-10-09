@@ -2838,6 +2838,7 @@ class _FakeSandboxBackend:
         image: str | None = None,
         allowed_tools: frozenset[str] | None = None,
         tally: Any = None,
+        trace: Any = None,
         files: Any = None,
         files_base_url: str | None = None,
         container: Any = None,

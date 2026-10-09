@@ -42,7 +42,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Coroutine, Iterable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import Enum, StrEnum, auto
 from typing import Any, Generic, Literal, NamedTuple, NoReturn, ParamSpec, Protocol, TypeVar, assert_never
@@ -107,6 +107,7 @@ from gateway.api.routes._platform import (
     default_attempt_kwargs as default_attempt_kwargs,  # explicit re-export for the route modules
 )
 from gateway.api.routes._tools import _build_web_retrieval_backend, _resolve_sandbox_purpose_hint
+from gateway.api.trace_capture import begin_request_trace
 from gateway.core.config import (
     ATTEMPT_COUNT_HEADER,
     ATTEMPT_ID_HEADER,
@@ -321,6 +322,7 @@ from gateway.services.tools import (
     read_web_search_max_uses,
     web_search_intercept_enabled,
 )
+from gateway.services.traces import RequestTrace
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.web_retrieval_backend import (
     WEB_FETCH_TOOL_NAME,
@@ -1218,8 +1220,11 @@ class RequestContext:
         end_user_budget_id: str | None = None,
         tags: dict[str, str] | None = None,
         upstream_user: str | None = None,
+        trace: RequestTrace | None = None,
     ) -> None:
         self.config = config
+        # The request's trace while it is served; None where nothing records one.
+        self.trace = trace
         # Sent to the client as ``Otari-Request-ID``: the platform's id in hybrid
         # mode, one minted by this gateway in standalone.
         self.request_id = request_id
@@ -2778,6 +2783,22 @@ async def resolve_request_context(
         policy_name=plan.policy_name if plan else None,
     )
 
+    # Opened beside the in-flight entry, for the same requests, and closed by the
+    # trace middleware once the response is sent. A request with no local workspace
+    # (every hybrid request) records nothing here yet.
+    trace: RequestTrace | None = None
+    if config.trace_capture_enabled and workspace_id is not None:
+        trace = RequestTrace(
+            request_id=request_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            api_key_id=api_key_id,
+            endpoint=adapter.endpoint,
+            started_at=datetime.now(UTC) - timedelta(seconds=time.monotonic() - started_at),
+            max_spans=config.trace_max_spans_per_request,
+        )
+        begin_request_trace(raw_request, trace)
+
     if rate_limit_grant is not None:
         rate_limit_grant.hand_over()
     return RequestContext(
@@ -2807,6 +2828,7 @@ async def resolve_request_context(
         end_user_budget_id=end_user_budget_id,
         tags=tags,
         upstream_user=upstream_user,
+        trace=trace,
     )
 
 
@@ -2839,6 +2861,7 @@ class ToolContext:
         remaining_user_tools: list[dict[str, Any]] | None,
         max_tool_iterations: int,
         tools_header: str | None,
+        trace: RequestTrace | None = None,
         config: GatewayConfig,
         use_web_fetch: bool = False,
         web_fetch_tool_entry: dict[str, Any] | None = None,
@@ -2897,6 +2920,8 @@ class ToolContext:
         # request shares one tally across attempts: every executed call was paid
         # for, whether or not its attempt won.
         self.tally = ToolUsageTally()
+        # The request's trace, handed to each backend beside the tally for the same reasons.
+        self.trace = trace
         # Successful Search calls spend the caller's cap across all routing attempts.
         cap = self.max_web_search_uses
         self.use_budget = ToolUseBudget(WEB_SEARCH_TOOL_NAME, cap) if cap is not None else None
@@ -2925,6 +2950,7 @@ class ToolContext:
             image=self.sandbox_session_image,
             allowed_tools=self.sandbox_allowed_tools,
             tally=self.tally,
+            trace=self.trace,
             files=self.sandbox_files,
             files_base_url=self.sandbox_files.base_url if self.sandbox_files is not None else None,
             container=self.sandbox_container_lease,
@@ -3038,6 +3064,7 @@ class ToolContext:
             credential=self.web_search_credential,
             config=self.config,
             tally=self.tally,
+            trace=self.trace,
         )
 
 
@@ -3349,6 +3376,7 @@ async def prepare_gateway_tools(
             code.max_iterations or MAX_TOOL_ITERATIONS_CAP,
         ),
         tools_header=declared.tools_header,
+        trace=ctx.trace,
         sandbox_files=backends.sandbox_files,
     )
 
@@ -3370,6 +3398,7 @@ async def _admit_guardrails(
         credentials=effective.credentials,
         mandated=effective.mandated,
         in_process=_in_process_guardrails(ctx, effective),
+        trace=ctx.trace,
     )
 
 
@@ -4384,7 +4413,7 @@ async def dispatch_non_stream(
         return await adapter.call_provider(call_kwargs)
 
     if tool_ctx.mcp_server_configs:
-        async with MCPClientPool(tool_ctx.mcp_server_configs, tally=tool_ctx.tally) as pool:
+        async with MCPClientPool(tool_ctx.mcp_server_configs, tally=tool_ctx.tally, trace=tool_ctx.trace) as pool:
             kwargs = adapter.inject_hints(call_kwargs, pool.purpose_hints(), header=tool_ctx.tools_header)
             return await adapter.run_tool_loop(kwargs, pool, tool_ctx.max_tool_iterations, on_first_response)
 
@@ -4467,7 +4496,9 @@ async def _lazy_mcp_stream(
     # The MCP pool is entered lazily inside the generator: a dial failure
     # surfaces once the client starts pulling events. Sandbox / web_search use
     # the eager-open path below for a pre-200 HTTP error instead.
-    async with _held_tool_backend(MCPClientPool(configs, tally=tool_ctx.tally), _ToolBackendKind.MCP) as pool:
+    async with _held_tool_backend(
+        MCPClientPool(configs, tally=tool_ctx.tally, trace=tool_ctx.trace), _ToolBackendKind.MCP
+    ) as pool:
         hinted = adapter.inject_hints(kwargs, pool.purpose_hints(), header=tool_ctx.tools_header)
         async for event in adapter.open_tool_loop_stream(hinted, pool, tool_ctx.max_tool_iterations):
             yield event
@@ -5408,7 +5439,7 @@ async def run_streaming_with_fallback(
     try:
         if tool_ctx.mcp_server_configs:
             pool_for_loop = await backend_stack.enter_async_context(
-                MCPClientPool(tool_ctx.mcp_server_configs, tally=tool_ctx.tally)
+                MCPClientPool(tool_ctx.mcp_server_configs, tally=tool_ctx.tally, trace=tool_ctx.trace)
             )
         elif tool_ctx.use_sandbox:
             pool_for_loop = await backend_stack.enter_async_context(tool_ctx.build_sandbox_backend())

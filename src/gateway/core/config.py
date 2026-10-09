@@ -24,6 +24,7 @@ from gateway.core.settings.feedback import FeedbackSettings
 from gateway.core.settings.inference import InferenceSettings
 from gateway.core.settings.pricing import PricingSettings
 from gateway.core.settings.tools import ToolSettings
+from gateway.core.settings.traces import TraceSettings
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
 from gateway.models.routing import RoutingConfig
@@ -485,7 +486,14 @@ class RelyingParty(NamedTuple):
 # Gotcha: fields are ordered last base first, then this class's own.
 # The settings view keeps that order, so moving a base reorders it.
 class GatewayConfig(
-    InferenceSettings, BudgetSettings, ApiKeySettings, PricingSettings, FeedbackSettings, ToolSettings, BaseSettings
+    InferenceSettings,
+    BudgetSettings,
+    ApiKeySettings,
+    PricingSettings,
+    FeedbackSettings,
+    ToolSettings,
+    TraceSettings,
+    BaseSettings,
 ):
     """Gateway configuration with support for YAML files and environment variables."""
 

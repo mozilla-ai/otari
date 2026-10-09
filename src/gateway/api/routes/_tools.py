@@ -19,6 +19,7 @@ from gateway.core.env import otari_env
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.tools import web_search_max_results_baseline
+from gateway.services.traces import RequestTrace
 from gateway.services.web_retrieval_backend import (
     WEB_SEARCH_TOOL_NAME,
     WebRetrievalBackend,
@@ -152,6 +153,7 @@ def _build_web_retrieval_backend(
     credential: WebSearchCredential | None = None,
     config: GatewayConfig | None = None,
     tally: ToolUsageTally | None = None,
+    trace: RequestTrace | None = None,
 ) -> WebRetrievalBackend:
     """Construct a WebRetrievalBackend honoring env-level + per-tool config.
 
@@ -171,6 +173,7 @@ def _build_web_retrieval_backend(
     kwargs: dict[str, Any] = {
         "base_url": base_url,
         "tally": tally,
+        "trace": trace,
         "trust_env_proxy": (
             config.web_retrieval_trust_env_proxy
             if config is not None

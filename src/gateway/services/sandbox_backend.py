@@ -30,6 +30,7 @@ import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack, aclosing
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 from opentelemetry import trace
@@ -43,7 +44,8 @@ from gateway.ports.code_execution_port import (
     SandboxUnavailableError,
 )
 from gateway.services.code_execution import CONTAINER_ID_PREFIX, ContainerLease, SandboxContainers, new_container_id
-from gateway.services.tool_usage import ToolUsageTally
+from gateway.services.tool_usage import ToolUsageTally, is_tool_error
+from gateway.services.traces import RequestTrace
 from gateway.types.code_execution import ResultBlock
 
 if TYPE_CHECKING:
@@ -247,6 +249,7 @@ class SandboxBackend:
         image: str | None = None,
         allowed_tools: frozenset[str] | None = None,
         tally: ToolUsageTally | None = None,
+        trace: RequestTrace | None = None,
         files: SandboxFiles | None = None,
         files_base_url: str | None = None,
         container: ContainerLease | None = None,
@@ -273,6 +276,8 @@ class SandboxBackend:
         # Per-request accounting, owned by the route and passed in. None when the
         # backend runs outside a billed request (tests, direct use).
         self._tally = tally
+        # The request's trace, which records each run. None outside a request.
+        self._trace = trace
         self._purpose_hint = purpose_hint or _DEFAULT_PURPOSE_HINT
         self._timeout_s = timeout_s
         # How long the lease has to last, as against what one call may spend.
@@ -311,6 +316,11 @@ class SandboxBackend:
         # resumed, else one minted here. Kept across resumes, so the same
         # sandbox has one name for as long as it lives.
         self.container_id = container.container_id if container is not None else new_container_id()
+
+    @property
+    def trace(self) -> RequestTrace | None:
+        """The request's trace, which the tool loop also records each model round on."""
+        return self._trace
 
     async def __aenter__(self) -> SandboxBackend:
         keep_alive_s = self._containers.keep_alive_s(self._resume) if self._containers is not None else None
@@ -533,17 +543,26 @@ class SandboxBackend:
         if not self.owns_tool(name):
             raise KeyError(f"SandboxBackend does not own tool {name!r}")
         code = str(arguments.get("code") or "")
+        started = datetime.now(UTC)
         try:
             result, block, file_ids = await self._exec_tool(code)
         except Exception:
             self._executions.append(CodeExecution(code=code, result=None))
             if self._tally is not None:
                 self._tally.record_failure(CODE_EXECUTION_TOOL_NAME)
+            self._record_span(started, ok=False)
             raise
         self._executions.append(CodeExecution(code=code, result=block, file_ids=file_ids))
         if self._tally is not None:
             self._tally.record_result(CODE_EXECUTION_TOOL_NAME, result)
+        self._record_span(started, ok=not is_tool_error(result))
         return result
+
+    def _record_span(self, started: datetime, *, ok: bool) -> None:
+        if self._trace is not None:
+            self._trace.record_tool_call(
+                tool_name=CODE_EXECUTION_TOOL_NAME, tool_type="otari_code_execution", started=started, ok=ok
+            )
 
     async def _exec_tool(self, code: str) -> tuple[str, ResultBlock, dict[str, str]]:
         if self._session is None:

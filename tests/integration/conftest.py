@@ -345,6 +345,8 @@ def _refresh_process_state(app: FastAPI, config: GatewayConfig) -> None:
     ``create_app`` built and finishes entries on it.
     """
     app.state.inflight.clear()
+    if app.state.request_traces is not None:
+        app.state.request_traces.clear()
     app.state.login_rate_limiter = (
         RateLimiter(config.dashboard_login_rate_limit_per_minute)
         if config.dashboard_login_rate_limit_per_minute is not None
