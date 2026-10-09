@@ -150,9 +150,12 @@ class OverviewService:
 
         budgets = None
         if is_deployment_operator:
+            # The deployment strip judges the deployment's own budgets only. A
+            # budget an organization owns is one of its spend ceilings, judged on
+            # that strip, so no row is counted twice.
             budgets = judge(
-                await self._repository.budget_allocations(),
-                total_count=await self._repository.count_budgets(),
+                await self._repository.budget_allocations(owner_organization_id=None),
+                total_count=await self._repository.count_budgets(owner_organization_id=None),
             )
 
         ceilings = None

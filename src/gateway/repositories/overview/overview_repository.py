@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -37,6 +37,13 @@ class Allocation:
     allocated: float
     scope_type: str | None = None
     scope_id: str | None = None
+
+
+def _owned_by(organization_id: uuid.UUID | None) -> ColumnElement[bool]:
+    """The budgets an organization owns, or the deployment's own when ``organization_id`` is ``None``."""
+    if organization_id is None:
+        return Budget.organization_id.is_(None)
+    return Budget.organization_id == organization_id
 
 
 class OverviewRepository:
@@ -83,8 +90,8 @@ class OverviewRepository:
         )
         return int(await self.db.scalar(stmt) or 0)
 
-    async def budget_allocations(self) -> list[Allocation]:
-        """The deployment's capped budgets, with the spend against each.
+    async def budget_allocations(self, *, owner_organization_id: uuid.UUID | None) -> list[Allocation]:
+        """Capped budgets and the spend against each.
 
         A deployment budget is enforced two ways, and both are judged here.
         Attached to users, ``max_budget`` is a per-user cap that its users
@@ -95,10 +102,8 @@ class OverviewRepository:
         the cap itself. A budget with no cap, or with neither users nor a
         scope, has no utilization to judge and is left out.
 
-        Only ceilings on a budget the deployment owns are read here: a budget
-        with an ``organization_id`` is that organization's, and its ceilings are
-        the organization's spend ceilings, judged by :meth:`ceiling_allocations`
-        so a row is never counted on both strips.
+        Scoped ceilings are read for the budgets ``owner_organization_id`` owns,
+        or for the deployment's own budgets when it is ``None``.
 
         One grouped pass rather than a count per budget: this runs on every
         overview load, and a query per row is what makes a summary cost more
@@ -139,7 +144,7 @@ class OverviewRepository:
         ceilings = (
             select(ScopedBudget, Budget.max_budget)
             .join(Budget, ScopedBudget.budget_id == Budget.budget_id)
-            .where(Budget.organization_id.is_(None), Budget.max_budget.is_not(None))
+            .where(_owned_by(owner_organization_id), Budget.max_budget.is_not(None))
         )
         scoped = [
             Allocation(
@@ -195,14 +200,9 @@ class OverviewRepository:
         )
         return int(await self.db.scalar(stmt) or 0)
 
-    async def count_budgets(self) -> int:
-        """Every deployment budget, capped or not, for the same distinction.
-
-        An organization's own budgets are counted by :meth:`count_ceilings`, as
-        :meth:`budget_allocations` leaves them to the ceilings strip.
-        """
-
-        stmt = select(func.count()).select_from(Budget).where(Budget.organization_id.is_(None))
+    async def count_budgets(self, *, owner_organization_id: uuid.UUID | None) -> int:
+        """Every budget ``owner_organization_id`` owns (the deployment's when ``None``), capped or not."""
+        stmt = select(func.count()).select_from(Budget).where(_owned_by(owner_organization_id))
         return int(await self.db.scalar(stmt) or 0)
 
     async def workspace_organization(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
