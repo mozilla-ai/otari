@@ -20,8 +20,9 @@ const rows = (page: Page) => tableRows(page, "Activity log")
 // Every assertion in this file is scoped to the fixture's own source. The log is
 // gateway-wide and the suite shares one database with the onboarding flows, so an
 // unscoped count would assert on whatever ran before it rather than on the
-// filter under test.
-const SCOPED = `/activity?source=${PARITY.source}`
+// filter under test. It names the request log because Activity opens on
+// sessions wherever traces are recorded.
+const SCOPED = `/activity?view=requests&source=${PARITY.source}`
 
 // Every fixture row, which is one page at the default size. Asserted with
 // `toHaveCount` rather than read with `count()`: the log is fetched after the

@@ -176,7 +176,10 @@ function SetupFlow({
         onDismiss={() => setIsFinished(true)}
         onOpenActivity={() => {
           setIsFinished(true)
-          void navigate({ to: "/activity", search: { source: "gateway" } })
+          void navigate({
+            to: "/activity",
+            search: { view: "requests", source: "gateway" },
+          })
         }}
       />
     ) : null

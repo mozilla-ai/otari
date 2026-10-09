@@ -146,7 +146,7 @@ export function pricingResponse(
 // The surface names a standalone gateway hosts, kept in step with
 // STANDALONE_SURFACES in src/gateway/api/routes/bootstrap.py. A test that wants
 // a surface hidden overrides `surfaces` rather than editing this.
-const STANDALONE_SURFACES = [
+export const STANDALONE_SURFACES = [
   "admin",
   "budgets",
   "keys",

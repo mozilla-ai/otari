@@ -144,6 +144,18 @@ export function formatDateTime(iso: string | null | undefined): string {
   return date.toLocaleString()
 }
 
+// The time of day alone, for rows that already sit under their date.
+export function formatTime(iso: string | null | undefined): string {
+  if (!iso) {
+    return "—"
+  }
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) {
+    return iso
+  }
+  return date.toLocaleTimeString()
+}
+
 // The heading a dated row sits under in a history list: "Today", "Yesterday",
 // or the date, with the year only when it is not the current one.
 //

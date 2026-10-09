@@ -937,7 +937,7 @@ function AttentionStrip({
     problems.push({
       text: `error rate ${formatPct(errRate)}`,
       to: "/activity",
-      search: { status: "error" },
+      search: { view: "requests", status: "error" },
     })
   }
 
@@ -1290,6 +1290,7 @@ function RecentActivity({
         <h2 className="text-title">Recent activity</h2>
         <Link
           to="/activity"
+          search={{ view: "requests" }}
           className="text-sm text-muted underline underline-offset-2 hover:text-foreground"
         >
           View all →
