@@ -662,7 +662,7 @@ export function ModelCatalogView({
               {defaultsAsOf
                 ? `Default rates as of ${formatRelative(defaultsAsOf)}.`
                 : catalog.data.default_pricing
-                  ? "Default rates come from the bundled genai-prices dataset."
+                  ? "Default rates come from the bundled models.dev snapshot."
                   : "Default pricing is off: a model with no stored rate is unpriced."}
             </>
           ) : (

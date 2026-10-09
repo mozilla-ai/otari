@@ -27,7 +27,7 @@ from gateway.services.pricing import (
     set_accepted_generations,
     trim_catalog,
 )
-from gateway.services.pricing_service import normalize_effective_at, reset_price_cache
+from gateway.services.pricing_service import normalize_effective_at
 
 _PREVIEW_CHANGE_LIMIT = 100
 # A candidate that loses more than this share of the active priced models, or
@@ -604,5 +604,4 @@ def reset_price_refresh_state() -> None:
 
     global _applied_updated_at
     reset_generations()
-    reset_price_cache()
     _applied_updated_at = None

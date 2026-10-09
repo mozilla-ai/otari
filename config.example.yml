@@ -14,7 +14,7 @@ port: 8000
 # on first boot and prints it once.
 # master_key: choose-a-strong-management-key
 
-# Common models use the bundled genai-prices snapshot when no stored price
+# Common models use the bundled models.dev snapshot when no stored price
 # exists. Explicit database pricing always wins.
 default_pricing: true
 require_pricing: true

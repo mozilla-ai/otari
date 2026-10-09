@@ -197,7 +197,7 @@ class OrgProviderKeyModelPublic(SQLModel):
 
     ``price_source`` says which rung of ``services.pricing_service`` answered:
     ``organization`` for a rate an admin set, ``defaults`` for the
-    community-maintained rate this surface seeded or the genai-prices fallback,
+    community-maintained rate this surface seeded or the models.dev fallback,
     ``deployment`` for the deployment's own price list, and None when nothing
     prices the model yet. ``pricing_id`` names the organization's own row where
     there is one, so a client can edit that rate without re-deriving the key.

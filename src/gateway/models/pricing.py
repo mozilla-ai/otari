@@ -140,7 +140,7 @@ class OrganizationModelPricing(Base):
     price the models it uses at its own negotiated rates while every other
     organization, and every model it has not overridden, keeps resolving exactly
     as before. Resolution order is override, then deployment row, then the
-    genai-prices dataset (`services.pricing_service.find_model_pricing`).
+    models.dev catalog (`services.pricing_service.find_model_pricing`).
 
     **Keyed on ``model_key``, not a split provider and model.** The platform's
     equivalent table (`otari-ai` ``organization_model_pricing``) carries

@@ -2791,7 +2791,7 @@
             "title": "Context Window"
           },
           "default_pricing": {
-            "description": "Whether an unpriced model is metered at the genai-prices default.",
+            "description": "Whether an unpriced model is metered at the models.dev default.",
             "title": "Default Pricing",
             "type": "boolean"
           },
@@ -3296,7 +3296,7 @@
                 "type": "null"
               }
             ],
-            "description": "What models.dev lists this provider charging, for a cross-check. Not billed from: two independent datasets disagreeing is the cheapest stale-price detector there is.",
+            "description": "What the live models.dev catalog lists this provider charging. The default is billed from the accepted models.dev snapshot, which can lag the live catalog, so a difference means a price update is waiting for review.",
             "title": "Metadata Input Price Per Million"
           },
           "metadata_output_price_per_million": {
@@ -3319,7 +3319,7 @@
                 "type": "null"
               }
             ],
-            "description": "For a default, the genai-prices `provider:model` entry that matched; the selector otherwise.",
+            "description": "For a default, the `models.dev:<provider>/<model>` entry that matched; the selector otherwise.",
             "title": "Price Reference"
           },
           "price_source": {
@@ -3336,7 +3336,7 @@
                 "type": "null"
               }
             ],
-            "description": "Which price list `pricing` came from, for this viewer: the organization's own override, the deployment's stored row, or the genai-prices defaults. Null when nothing prices it.",
+            "description": "Which price list `pricing` came from, for this viewer: the organization's own override, the deployment's stored row, or the models.dev defaults. Null when nothing prices it.",
             "title": "Price Source"
           },
           "pricing": {
@@ -3418,7 +3418,7 @@
             "type": "integer"
           },
           "default_pricing": {
-            "description": "Whether an unpriced model is metered at the genai-prices default.",
+            "description": "Whether an unpriced model is metered at the models.dev default.",
             "title": "Default Pricing",
             "type": "boolean"
           },
@@ -3432,7 +3432,7 @@
                 "type": "null"
               }
             ],
-            "description": "When the accepted genai-prices snapshot was taken. Null while the bundled dataset serves.",
+            "description": "When the accepted models.dev snapshot, which the defaults are billed from, was taken. Null while the bundled snapshot serves.",
             "title": "Defaults As Of"
           },
           "facets": {
@@ -9464,7 +9464,7 @@
         "type": "object"
       },
       "OrgProviderKeyModelPublic": {
-        "description": "One offered model, with the rate the caller's organization is charged for it.\n\n``price_source`` says which rung of ``services.pricing_service`` answered:\n``organization`` for a rate an admin set, ``defaults`` for the\ncommunity-maintained rate this surface seeded or the genai-prices fallback,\n``deployment`` for the deployment's own price list, and None when nothing\nprices the model yet. ``pricing_id`` names the organization's own row where\nthere is one, so a client can edit that rate without re-deriving the key.\n``unit`` says what the rates are per, as on a pricing row: tokens, requests\nor images, so a per-request rate is not read as a per-token one.",
+        "description": "One offered model, with the rate the caller's organization is charged for it.\n\n``price_source`` says which rung of ``services.pricing_service`` answered:\n``organization`` for a rate an admin set, ``defaults`` for the\ncommunity-maintained rate this surface seeded or the models.dev fallback,\n``deployment`` for the deployment's own price list, and None when nothing\nprices the model yet. ``pricing_id`` names the organization's own row where\nthere is one, so a client can edit that rate without re-deriving the key.\n``unit`` says what the rates are per, as on a pricing row: tokens, requests\nor images, so a per-request rate is not read as a per-token one.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -12973,7 +12973,7 @@
                 "type": "null"
               }
             ],
-            "description": "What genai-prices would meter this key at today. Null when the dataset does not know it.",
+            "description": "What models.dev would meter this key at today. Null when the dataset does not know it.",
             "title": "Default Input Price Per Million"
           },
           "default_output_price_per_million": {
@@ -12996,7 +12996,7 @@
                 "type": "null"
               }
             ],
-            "description": "The genai-prices entry the default came from.",
+            "description": "The models.dev entry the default came from.",
             "title": "Default Reference"
           },
           "effective_at": {
@@ -23663,7 +23663,7 @@
     },
     "/api/v1/catalog/models": {
       "get": {
-        "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the genai-prices default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances and the hosted\nmodels at the deployment's rates, and nothing that belongs to a tenant.",
+        "description": "The models this caller may use, one entry each however many providers serve it.\n\nPrices are the caller's: an organization's override where one applies, else\nthe deployment's row, else the models.dev default. Aliases and routing\npolicies are not models and are not listed; see Routing. A visitor, where\nthe catalog is public, sees the configured instances and the hosted\nmodels at the deployment's rates, and nothing that belongs to a tenant.",
         "operationId": "catalog-list_catalog",
         "parameters": [
           {
@@ -33204,7 +33204,7 @@
     },
     "/api/v1/pricing/drift": {
       "get": {
-        "description": "Every stored deployment rate in force today, beside today's default for it.\n\nA stored row shadows the genai-prices default silently and forever, whether\nit was a deliberate override or a copy of a then-current default. This is\nwhat makes the difference visible: a row that matches the default is a row\nthat could be deleted, and a row far from it is one worth a second look.\nTool rows (``otari:``) are per request and have no default to drift from,\nso they are left out.",
+        "description": "Every stored deployment rate in force today, beside today's default for it.\n\nA stored row shadows the models.dev default silently and forever, whether\nit was a deliberate override or a copy of a then-current default. This is\nwhat makes the difference visible: a row that matches the default is a row\nthat could be deleted, and a row far from it is one worth a second look.\nTool rows (``otari:``) are per request and have no default to drift from,\nso they are left out.",
         "operationId": "pricing-list_pricing_drift",
         "parameters": [
           {
@@ -34304,7 +34304,7 @@
     },
     "/api/v1/providers": {
       "get": {
-        "description": "List static metadata for every configured provider.\n\nOperator-facing: reports each provider's capabilities, documentation and\npricing links, and display name from the bundled any-llm and genai-prices\ndatasets. No provider is contacted, so this is cheap and always available.",
+        "description": "List static metadata for every configured provider.\n\nOperator-facing: reports each provider's capabilities, documentation and\npricing links, and display name from the bundled any-llm and models.dev\ndatasets. No provider is contacted, so this is cheap and always available.",
         "operationId": "providers-list_providers",
         "responses": {
           "200": {
@@ -34334,7 +34334,7 @@
     },
     "/api/v1/providers/catalog": {
       "get": {
-        "description": "List every known provider for the add-provider picker: id and name only.\n\nLightweight by design so the picker never lags: provider ids come from the\nany-llm registry and names from the bundled genai-prices dataset, so no\nprovider SDK is imported. The autofill hints for a chosen provider come from\nGET /api/v1/providers/catalog/{provider_id}, which imports only that one SDK.",
+        "description": "List every known provider for the add-provider picker: id and name only.\n\nLightweight by design so the picker never lags: provider ids come from the\nany-llm registry and names from the models.dev catalog, so no\nprovider SDK is imported. The autofill hints for a chosen provider come from\nGET /api/v1/providers/catalog/{provider_id}, which imports only that one SDK.",
         "operationId": "providers-provider_catalog",
         "responses": {
           "200": {

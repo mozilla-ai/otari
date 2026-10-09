@@ -227,7 +227,7 @@ the size that matters rather than at their base rate.
 use, cheapest first, with each provider's context and output limits and the
 price the caller's organization would be charged, labeled by which price list
 it came from: the organization's own override, the deployment's stored rate, or
-the genai-prices default. Both routes accept the same credentials as
+the models.dev default. Both routes accept the same credentials as
 `GET /api/v1/models`, and a model the caller may not use answers 404.
 
 Grouping keys on the models.dev display name where the dataset knows the
@@ -243,8 +243,11 @@ reseller exposes as its own id stay separate models. models.dev's description,
 capabilities and modalities are served to every catalog reader here, where
 `GET /api/v1/models/metadata` stays operator-only.
 
-Each offering also carries the provider's own list price from models.dev,
-where it has one, and for a signed-in caller the organization's last thirty
+Each offering also carries the provider's list price from the live models.dev
+catalog, where it has one. The default is billed from the accepted models.dev
+snapshot, which can lag that catalog, so a difference between the two means a
+price update is waiting for review. Each offering also carries, for a signed-in
+caller, for a signed-in caller the organization's last thirty
 days on that offering: requests, cache hit rate, and the effective price per
 million tokens after cache reads and tiers.
 

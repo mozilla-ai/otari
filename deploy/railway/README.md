@@ -36,7 +36,7 @@ the snapshot of what the template sets lives in [`template.json`](template.json)
 | `OTARI_SECRET_KEY` | auto-generated Fernet key | Encrypts the provider credentials you add on the Providers page. Keep it: losing it makes them unrecoverable. |
 | `OTARI_PROVIDER_ACCOUNT_PEPPER` | auto-generated (`${{secret(43)}}`) | Names the provider account a copy of an attached file is in. Otari refuses to start without it while provider copies are on. |
 | `OTARI_REQUIRE_PRICING` | `false` | Pre-set, so a fresh deploy serves models that have no configured pricing. |
-| `OTARI_DEFAULT_PRICING` | `true` | Pre-set, so common models are metered from the bundled genai-prices dataset without configuring each one. Prices you set in the dashboard or via `/api/v1/pricing` always override it. |
+| `OTARI_DEFAULT_PRICING` | `true` | Pre-set, so common models are metered from the bundled models.dev snapshot without configuring each one. Prices you set in the dashboard or via `/api/v1/pricing` always override it. |
 | `OTARI_FORWARDED_ALLOW_IPS` | `*` | Pre-set, so the per-IP sign-in and public-catalog limits see the real client, not Railway's ingress. Safe here because the ingress is the only path to the container; see [Behind a reverse proxy](../../docs/deployment.md#behind-a-reverse-proxy). |
 | `OTARI_PUBLIC_BASE_URL` | `https://${{RAILWAY_PUBLIC_DOMAIN}}` | Pre-wired to the service's Railway domain. OAuth redirect URIs, the passkey relying-party ID and email links are built from it. Change it if you attach a custom domain. |
 | `OTARI_FILES_BACKEND` | `s3` | Pre-set, so uploaded files go to the bucket rather than the container's disk; see [Files](#files). |
@@ -66,7 +66,7 @@ Notes:
   see [Full config via environment](../../docs/configuration.md#full-config-via-environment).
 - `OTARI_DEFAULT_PRICING=true` is also pre-set so that, paired with the above,
   common models are metered using community-maintained rates (the bundled
-  genai-prices dataset) instead of being served unpriced. These are estimates
+  models.dev snapshot) instead of being served unpriced. These are estimates
   and can lag real provider rates, so set explicit prices on the dashboard's
   Models page or via `/api/v1/pricing` for anything you bill on; database prices
   always win over the fallback. The Models page shows, per model, whether this

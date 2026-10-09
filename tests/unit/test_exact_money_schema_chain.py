@@ -10,7 +10,7 @@ else in the suite migrates SQLite, so this is the only coverage of that path.
 The repricing half of the file answers the question the change has to answer
 before it can be trusted: **does a row priced before the conversion still price
 to the same amount after it?** It is asked over the rates a deployment actually
-stores, taken from the genai-prices catalog the default price list is built
+stores, taken from the models.dev catalog the default price list is built
 from, rather than over numbers chosen to make the arithmetic come out even.
 """
 
@@ -58,10 +58,9 @@ _CATALOG_MODELS = (
     ("openai", "gpt-4o"),
     ("openai", "gpt-4o-mini"),
     ("openai", "text-embedding-3-small"),
-    ("anthropic", "claude-3-5-sonnet-latest"),
     ("anthropic", "claude-sonnet-4-5"),
     ("google", "gemini-2.5-pro"),
-    ("deepseek", "deepseek-chat"),
+    ("deepseek", "deepseek-v4-flash"),
     ("mistral", "mistral-large-latest"),
 )
 
@@ -100,7 +99,7 @@ def _catalog_rates() -> list[tuple[str, dict[str, Any]]]:
     stored: list[tuple[str, dict[str, Any]]] = []
     for provider, model in _CATALOG_MODELS:
         pricing = default_model_pricing(provider, model, as_of)
-        assert pricing is not None, f"{provider}:{model} is no longer in the genai-prices catalog"
+        assert pricing is not None, f"{provider}:{model} is no longer in the models.dev catalog"
         rates = {field: getattr(pricing, field) for field in _RATE_COLUMNS}
         stored.append(
             (

@@ -71,7 +71,7 @@ def client(alias_config: GatewayConfig) -> Generator[TestClient]:
 
 @pytest.fixture
 def default_priced_client(alias_config: GatewayConfig) -> Generator[TestClient]:
-    """A gateway that meters unpriced models off the genai-prices fallback."""
+    """A gateway that meters unpriced models off the models.dev fallback."""
     yield from build_test_client(alias_config.model_copy(update={"default_pricing": True}))
 
 

@@ -93,7 +93,7 @@ class PricingSettings(BaseModel):
         default=False,
         description=(
             "When a model has no pricing in the database, fall back to community-maintained "
-            "default pricing from the bundled genai-prices dataset. Off by default: a billing "
+            "default pricing from the models.dev catalog. Off by default: a billing "
             "gateway should price from rates you control, and these community estimates can lag "
             "or differ from real provider rates. Database pricing always takes precedence. Enable "
             "to auto-price common models without configuring each one; while off, require_pricing "
