@@ -35,7 +35,7 @@ from gateway.container import Container, build_container
 from gateway.context_propagation import TraceContextPropagationMiddleware
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, dispose_db, init_db
-from gateway.core.error_codes import error_code_of, error_headers
+from gateway.core.error_codes import INVALID_REQUEST, error_code_of, error_headers
 from gateway.core.feature import Worker
 from gateway.core.settings.tools import warn_about_tool_instances
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
@@ -852,6 +852,10 @@ async def _validation_error_handler(_: Request, exc: Exception) -> Response:
     Dropping ``input`` and ``ctx`` keeps the body inside the ``ValidationError``
     schema the OpenAPI document already publishes, which requires only ``loc``,
     ``msg`` and ``type``.
+
+    ``code`` and ``Otari-Error-Code`` carry ``invalid_request``, as every other
+    coded refusal does, so a client maps a 422 by its code rather than by the
+    shape of ``detail``.
     """
     if not isinstance(exc, RequestValidationError):  # pragma: no cover - registered for it only
         raise exc
@@ -861,8 +865,10 @@ async def _validation_error_handler(_: Request, exc: Exception) -> Response:
             "detail": [
                 {"type": error.get("type", ""), "loc": list(error.get("loc", ())), "msg": error.get("msg", "")}
                 for error in exc.errors()
-            ]
+            ],
+            "code": INVALID_REQUEST,
         },
+        headers=error_headers(INVALID_REQUEST),
     )
 
 
@@ -934,6 +940,16 @@ def create_app(config: GatewayConfig) -> FastAPI:
                 "no key or session opens these paths, and no application holds this credential."
             ),
         }
+
+        validation_error = openapi_schema["components"].get("schemas", {}).get("HTTPValidationError")
+        if validation_error is not None:
+            # What `_validation_error_handler` adds to FastAPI's own 422 body.
+            validation_error["properties"]["code"] = {
+                "type": "string",
+                "const": INVALID_REQUEST,
+                "title": "Code",
+                "description": "Stable error code, also sent as the Otari-Error-Code header.",
+            }
 
         for path, path_item in openapi_schema.get("paths", {}).items():
             if path in _UNAUTHENTICATED_PATHS or _under(path, _PUBLIC_PREFIXES + _COOKIE_AUTH_PREFIXES):

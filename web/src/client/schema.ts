@@ -9214,6 +9214,12 @@ export interface components {
         GuardrailStage: "input" | "output" | "rag_context";
         /** HTTPValidationError */
         HTTPValidationError: {
+            /**
+             * Code
+             * @description Stable error code, also sent as the Otari-Error-Code header.
+             * @constant
+             */
+            code?: "invalid_request";
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
