@@ -29,14 +29,19 @@ describe("ActivityHub", () => {
 
     renderPage(<ActivityHub />, "/activity", WITH_TRACES)
 
-    const sessions = await screen.findByRole("region", { name: "Sessions" })
+    const sessions = await screen.findByRole("grid", { name: "Sessions" })
     await userEvent.click(
-      await within(sessions).findByRole("button", { name: /claude-code/ }),
+      await within(sessions).findByRole("row", { name: /claude-code/ }),
     )
 
+    const panel = await screen.findByRole("dialog", { name: "Session" })
     expect(
-      await screen.findByRole("region", { name: "Turn 1" }),
+      await within(panel).findByRole("region", { name: "Turn 1" }),
     ).toBeInTheDocument()
+    await userEvent.click(within(panel).getByRole("button", { name: "Close" }))
+    expect(
+      screen.queryByRole("dialog", { name: "Session" }),
+    ).not.toBeInTheDocument()
   })
 
   it("reads an opened session in the workspace its list entry names", async () => {
@@ -46,8 +51,9 @@ describe("ActivityHub", () => {
     })
 
     renderPage(<ActivityHub />, "/activity", WITH_TRACES)
+    const sessions = await screen.findByRole("grid", { name: "Sessions" })
     await userEvent.click(
-      await screen.findByRole("button", { name: /claude-code/ }),
+      await within(sessions).findByRole("row", { name: /claude-code/ }),
     )
 
     await vi.waitFor(() =>
@@ -61,6 +67,25 @@ describe("ActivityHub", () => {
     )
   })
 
+  it("names a single request's panel as a request", async () => {
+    const request = traceSummary({
+      trace_id: "req-9",
+      session_source: "none",
+      harness: null,
+    })
+    mockApi({
+      traces: [request],
+      traceDetail: traceDetail({ summary: request }),
+    })
+
+    renderPage(<ActivityHub />, "/activity?trace=req-9", WITH_TRACES)
+
+    const panel = await screen.findByRole("dialog", { name: "Request" })
+    expect(
+      within(panel).getByRole("button", { name: "Copy request ID" }),
+    ).toBeInTheDocument()
+  })
+
   it("switches to the request log and keeps the switch", async () => {
     mockApi({ traces: [] })
 
@@ -72,6 +97,26 @@ describe("ActivityHub", () => {
 
     expect(await screen.findByText(/A per-request log/)).toBeInTheDocument()
     expect(screen.getByRole("radio", { name: "Requests" })).toBeChecked()
+  })
+
+  it("scopes the sessions, their count and the chart to the selected workspace", async () => {
+    const { calls } = mockApi({ traces: [traceSummary()], workspace: "ws-1" })
+
+    renderPage(<ActivityHub />, "/activity", WITH_TRACES)
+
+    await screen.findByRole("grid", { name: "Sessions" })
+    const reads = (path: string) =>
+      calls
+        .filter((call) => call.method === "GET")
+        .map((call) => new URL(call.url, "http://x"))
+        .filter((url) => url.pathname.endsWith(path))
+    await vi.waitFor(() => {
+      for (const path of ["/traces", "/traces/count", "/traces/series"]) {
+        const scoped = reads(path)
+        expect(scoped.length).toBeGreaterThan(0)
+        expect(scoped.at(-1)?.searchParams.get("workspace_id")).toBe("ws-1")
+      }
+    })
   })
 
   it("explains how a client's requests become one session when there are none", async () => {

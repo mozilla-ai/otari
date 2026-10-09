@@ -5,8 +5,11 @@ import { useDeploymentOperator } from "@/shared/api/organizations"
 import { TRACES } from "@/shared/api/queryKeys"
 
 // What narrows the session list. Empty strings and arrays are "no filter", the
-// same reading the URL state gives a cleared key.
+// same reading the URL state gives a cleared key. `workspaceId` is the shell's
+// selected workspace, as the request log takes it; the server only lets it
+// narrow the caller's scope, so a workspace outside it reads as empty.
 export interface TraceFilters {
+  workspaceId: string
   start: string
   q: string
   failedOnly: boolean
@@ -26,6 +29,7 @@ export function useTraceScope(): { base: string; isReady: boolean } {
 
 export function traceParams(filters: TraceFilters): URLSearchParams {
   const params = new URLSearchParams()
+  if (filters.workspaceId) params.set("workspace_id", filters.workspaceId)
   if (filters.start) params.set("start", filters.start)
   if (filters.q) params.set("q", filters.q)
   if (filters.failedOnly) params.set("has_error", "true")
