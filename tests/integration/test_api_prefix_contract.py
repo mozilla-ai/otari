@@ -27,6 +27,7 @@ from typing import Any
 
 import pytest
 from fastapi import FastAPI
+from fastapi.routing import iter_route_contexts
 
 import gateway
 from gateway.api.routes import (
@@ -81,9 +82,8 @@ def _config(postgres_url: str, mode: str | None, **overrides: Any) -> GatewayCon
 
 
 def _mounted(app: FastAPI) -> set[str]:
-    paths = {route.path for route in app.routes if hasattr(route, "path")}
-    # A newer FastAPI may stop flattening nested routers into app.routes; an
-    # empty set here would make every assertion below pass vacuously.
+    paths = {route.path for route in iter_route_contexts(app.routes) if route.path}
+    # An empty set here would make every assertion below pass vacuously.
     assert paths, "app.routes carried no paths"
     return paths
 
