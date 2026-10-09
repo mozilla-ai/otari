@@ -180,10 +180,11 @@ export function parseAddresses(text: string): string[] {
 }
 
 // Adding someone is an address plus a role, and optionally the workspaces to
-// drop them into once they accept. The membership lands `invited`, and every
-// deployment gets an accept link to share: emailed as well where mail can be
-// sent, and the only way in where it cannot, since claiming an identity through
-// signup needs mail and accepting with a password does not.
+// drop them into once they accept. The membership lands `invited`. The accept
+// link is emailed where mail can be sent, and comes back to share only when
+// the email did not go out: the only way in on a deployment without mail,
+// since claiming an identity through signup needs mail and accepting with a
+// password does not.
 function InviteMemberForm({
   isOpen,
   onClose,
@@ -400,7 +401,7 @@ function InviteMemberForm({
           className="sm:col-span-2"
           description={
             mail_ready
-              ? "One or more, separated by commas or new lines. An email with an accept link is sent here, and you get the same link to share. The membership becomes active once they follow it."
+              ? "One or more, separated by commas or new lines. An email with an accept link is sent here. The membership becomes active once they follow it."
               : "One or more, separated by commas or new lines. This deployment sends no mail, so you get an accept link to share with them. The membership becomes active once they follow it."
           }
         />
