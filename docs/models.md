@@ -93,10 +93,12 @@ because their provider exists in any-llm.
 ## Model discovery
 
 `GET /api/v1/models` combines discoverable provider models, configured prices,
-aliases, and routing-policy names. Discovery reads a provider's whole listing,
-so a provider's embedding and rerank models are offered alongside its chat
-models. Discovery is cached and bounded; an unreachable provider does not block
-the catalog indefinitely.
+aliases, and routing-policy names. A provider's embedding and rerank models are
+offered alongside its chat models. Discovery reads one page of a provider's
+listing: Cohere pages its listing at 20 models by default, so Otari asks it for
+its largest page (1000 models), which covers its catalog today; an instance can
+set its own `page_size`. Discovery is cached and bounded; an unreachable
+provider does not block the catalog indefinitely.
 
 Set `model_discovery: false` to publish a curated catalog made from aliases and
 explicitly priced models. For a backend with no listing API, use the instance's

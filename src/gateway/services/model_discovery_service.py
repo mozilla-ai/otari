@@ -299,7 +299,8 @@ def _declared_models(config: GatewayConfig, instance: str) -> list[Model]:
 # names the rest. On a stock account that page ends before every rerank model,
 # so discovery offered a catalog that could not rerank at all. Asking for the
 # SDK's largest page (``page_size`` caps at 1000) is the smallest shim that
-# reads the whole listing. Stopgap: the fix belongs upstream, in any-llm's
+# covers the catalog in one page; a listing past 1000 would still be cut.
+# Stopgap: the fix belongs upstream, in any-llm's
 # Cohere ``_alist_models`` following ``next_page_token``; drop this entry once
 # the SDK pin carries it.
 _LIST_MODELS_KWARGS: dict[LLMProvider, dict[str, Any]] = {
