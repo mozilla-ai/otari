@@ -93,6 +93,7 @@ from gateway.api.routes._platform import (
     _resolve_platform_credentials,
     get_shared_rejection,
     is_provider_billing_error,
+    missing_credential_error,
     record_abandoned_attempt,
     run_platform_attempts,
     upstream_error_message,
@@ -113,6 +114,7 @@ from gateway.core.error_codes import (
     INVALID_MODEL,
     MODEL_NOT_ALLOWED,
     PRICING_REQUIRED,
+    PROVIDER_NOT_CONFIGURED,
     UPSTREAM_RATE_LIMITED,
     error_code_of,
     error_headers,
@@ -381,6 +383,21 @@ PROVIDER_ACCOUNT_QUOTA_DETAIL = (
     "Raise the quota, or route this model to another provider."
 )
 PROVIDER_RATE_LIMITED_DETAIL = "The provider rate-limited this request"
+
+
+def provider_not_configured_detail(provider: str, env_var: str | None) -> str:
+    """The 424 detail for a provider this gateway holds no credential for.
+
+    Composed here rather than copied from any-llm's message, so the remedy is
+    named in Otari's terms (config file, dashboard, environment). The variable
+    name is safe to show: it is a name, never a value.
+    """
+    detail = f"No credential is configured for provider '{provider}'. Add one in config.yml or through the dashboard"
+    if env_var:
+        return f"{detail}, or set {env_var}."
+    return f"{detail}."
+
+
 ALL_PROVIDERS_FAILED_DETAIL = "All upstream providers failed"
 ALL_PROVIDERS_TIMED_OUT_DETAIL = "All upstream providers timed out"
 ALL_PROVIDERS_RATE_LIMITED_DETAIL = "All upstream providers rate-limited this request"
@@ -634,6 +651,15 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     shared with the hybrid-mode fallback classifier via
     :func:`upstream_exception_shape`, so both stay in sync.
     """
+    missing = missing_credential_error(exc)
+    if missing is not None:
+        # Nothing was sent upstream: the deployment holds no credential for the
+        # provider. A 424 rather than a 502 because SDKs retry a 5xx, and no
+        # retry can supply a key.
+        return ProviderErrorMapping(
+            status.HTTP_424_FAILED_DEPENDENCY,
+            provider_not_configured_detail(missing.provider_name or "unknown", missing.env_var_name),
+        )
     kind, status_code = upstream_exception_shape(exc)
     if kind == "timeout":
         return ProviderErrorMapping(status.HTTP_504_GATEWAY_TIMEOUT, PROVIDER_TIMEOUT_DETAIL)
@@ -710,6 +736,8 @@ def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, st
     """
     if status_code == status.HTTP_400_BAD_REQUEST and _is_context_length_error(exc):
         return error_headers(CONTEXT_LENGTH_EXCEEDED)
+    if status_code == status.HTTP_424_FAILED_DEPENDENCY and missing_credential_error(exc) is not None:
+        return error_headers(PROVIDER_NOT_CONFIGURED)
     if status_code != status.HTTP_429_TOO_MANY_REQUESTS:
         return None
     headers = error_headers(UPSTREAM_RATE_LIMITED)

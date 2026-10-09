@@ -20,6 +20,7 @@ import httpx
 from anthropic import APIConnectionError as _AnthropicAPIConnectionError
 from anthropic import APITimeoutError as _AnthropicAPITimeoutError
 from any_llm import LLMProvider
+from any_llm.exceptions import MissingApiKeyError
 from any_llm.types.completion import CompletionUsage
 from fastapi import HTTPException, status
 from openai import APIConnectionError as _OpenAIAPIConnectionError
@@ -735,6 +736,20 @@ def upstream_exception_chain(exc: BaseException) -> Iterator[BaseException]:
         current = getattr(current, "original_exception", None)
 
 
+def missing_credential_error(exc: BaseException) -> MissingApiKeyError | None:
+    """The ``MissingApiKeyError`` in ``exc``'s chain, if the call failed for want of a credential.
+
+    any-llm raises it before any request leaves the gateway, so the failure is
+    the deployment's configuration rather than the provider's, and every
+    classifier reading it (the client-facing status, the attempt label, the
+    usage row) must agree on that.
+    """
+    for current in upstream_exception_chain(exc):
+        if isinstance(current, MissingApiKeyError):
+            return current
+    return None
+
+
 def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | None, int | None]:
     """Classify the *shape* of an upstream exception, independent of retry policy.
 
@@ -899,6 +914,9 @@ def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:
     cancellations, and tool loops that already produced an assistant response are
     handled by the walker before this classifier runs.
     """
+    if missing_credential_error(exc) is not None:
+        return True, "missing_credential"
+
     kind, status_code = upstream_exception_shape(exc)
     if kind is not None:
         return True, kind

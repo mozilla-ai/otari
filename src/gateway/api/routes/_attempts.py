@@ -41,6 +41,7 @@ from gateway.api.routes._platform import (
     _provider_failure_http_exc,
     get_shared_rejection,
     is_provider_billing_error,
+    missing_credential_error,
     record_abandoned_attempt,
     upstream_exception_shape,
 )
@@ -100,6 +101,9 @@ def classify_local_attempt_error(exc: BaseException) -> tuple[bool, str]:
     remains for its generic callback shape; classifications only label logs and
     usage rows. Gateway-side failures are caught before this function runs.
     """
+    if missing_credential_error(exc) is not None:
+        return True, "missing_credential"
+
     kind, status_code = upstream_exception_shape(exc)
     if kind is not None:
         return True, kind
