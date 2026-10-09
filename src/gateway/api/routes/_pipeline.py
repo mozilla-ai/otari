@@ -112,6 +112,7 @@ from gateway.core.config import (
     FALLBACK_HEADER,
     PROVIDER_HEADER,
     REQUEST_ID_HEADER,
+    RESPONSE_DURATION_HEADER,
     GatewayConfig,
 )
 from gateway.core.database import DATABASE_ERRORS, release_session
@@ -1107,13 +1108,16 @@ def _served_by_headers(ctx: RequestContext, provider: Any, chosen: Attempt | Non
 
     ``sent`` counts the candidates the request was sent to, so a candidate the walk
     skipped without calling (a model a rate limit had no room on) is not in it, while
-    it still makes the one that served a fallback.
+    it still makes the one that served a fallback. The duration runs from the handler
+    preamble to now: the provider's answer for a non-streamed request, the stream's
+    opening for a streamed one.
     """
     fell_back = chosen is not None and ctx.plan is not None and chosen.position != ctx.plan.attempts[0].position
     return {
         PROVIDER_HEADER: provider_key(provider),
         ATTEMPT_COUNT_HEADER: str(sent),
         FALLBACK_HEADER: "true" if fell_back else "false",
+        RESPONSE_DURATION_HEADER: str(_elapsed_ms(ctx.started_at)),
     }
 
 

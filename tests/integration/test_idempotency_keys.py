@@ -39,6 +39,7 @@ from gateway.core.config import (
     FALLBACK_HEADER,
     PROVIDER_HEADER,
     REQUEST_ID_HEADER,
+    RESPONSE_DURATION_HEADER,
     ROUTER_TASK_HEADER,
     GatewayConfig,
 )
@@ -143,6 +144,9 @@ def test_retry_replays_the_original_response_without_billing_again(
     assert second.headers[REQUEST_ID_HEADER] == first.headers[REQUEST_ID_HEADER]
     for name in (PROVIDER_HEADER, ATTEMPT_COUNT_HEADER, FALLBACK_HEADER):
         assert second.headers[name] == first.headers[name]
+    # The original's duration would misdescribe a replay, which never reached a provider.
+    assert RESPONSE_DURATION_HEADER in first.headers
+    assert RESPONSE_DURATION_HEADER not in second.headers
     assert second.headers[IDEMPOTENT_REPLAYED_HEADER] == "true"
     assert IDEMPOTENT_REPLAYED_HEADER not in first.headers
     assert _usage_rows(db_session_factory) == 1

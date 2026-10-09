@@ -43,6 +43,7 @@ from gateway.core.config import (
     ATTEMPT_COUNT_HEADER,
     FALLBACK_HEADER,
     PROVIDER_HEADER,
+    RESPONSE_DURATION_HEADER,
     GatewayConfig,
 )
 from gateway.models.routing import RoutingConfig
@@ -239,6 +240,7 @@ def test_a_plain_model_names_the_instance_that_served_it(client: TestClient, str
 
     assert resp.status_code == 200, resp.text
     assert _served_by(resp) == ("openai", "1", "false")
+    assert int(resp.headers[RESPONSE_DURATION_HEADER]) >= 0
 
 
 def test_a_failed_request_names_no_serving_instance(client: TestClient) -> None:
@@ -248,6 +250,7 @@ def test_a_failed_request_names_no_serving_instance(client: TestClient) -> None:
 
     assert resp.status_code == 502
     assert _served_by(resp) == (None, None, None)
+    assert RESPONSE_DURATION_HEADER not in resp.headers
 
 
 # ---------------------------------------------------------------------------
