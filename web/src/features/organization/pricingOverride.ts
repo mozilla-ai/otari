@@ -15,7 +15,6 @@ export const RATE_FIELDS = [
   "output_price_per_million",
   "cache_read_price_per_million",
   "cache_write_price_per_million",
-  "cache_write_1h_price_per_million",
 ] as const
 
 export type RateField = (typeof RATE_FIELDS)[number]

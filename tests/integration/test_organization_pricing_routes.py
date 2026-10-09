@@ -526,7 +526,6 @@ def _rates(**overrides: Any) -> PricingOverrideInput:
         "output_price_per_million": 5.0,
         "cache_read_price_per_million": None,
         "cache_write_price_per_million": None,
-        "cache_write_1h_price_per_million": None,
         "pricing_tiers": [],
         "effective_from": datetime.now(UTC),
         "effective_to": None,
@@ -998,7 +997,6 @@ async def test_any_member_may_read_the_overrides(async_db: AsyncSession, role: s
         "output_price_per_million",
         "cache_read_price_per_million",
         "cache_write_price_per_million",
-        "cache_write_1h_price_per_million",
     ],
 )
 async def test_a_negative_rate_is_refused_at_the_service_boundary(async_db: AsyncSession, field: str) -> None:

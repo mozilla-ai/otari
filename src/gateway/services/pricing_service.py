@@ -393,7 +393,6 @@ def override_as_model_pricing(override: OrganizationModelPricing) -> ModelPricin
         output_price_per_million=override.output_price_per_million,
         cache_read_price_per_million=override.cache_read_price_per_million,
         cache_write_price_per_million=override.cache_write_price_per_million,
-        cache_write_1h_price_per_million=override.cache_write_1h_price_per_million,
         pricing_tiers=override.pricing_tiers or [],
         unit=override.unit or "tokens",
     )

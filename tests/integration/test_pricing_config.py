@@ -294,33 +294,30 @@ def test_set_pricing_persists_cache_rates(
     assert data["cache_write_price_per_million"] == 3.75
 
 
-def test_set_pricing_persists_context_tiers_and_1h_cache_rate(
+def test_set_pricing_persists_context_tiers(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """The pricing API round-trips TTL-specific and long-context rates."""
+    """The pricing API round-trips long-context rates."""
     key = "anthropic:claude-sonnet-4"
     payload = {
         "model_key": key,
         "input_price_per_million": 3.0,
         "output_price_per_million": 15.0,
         "cache_write_price_per_million": 3.75,
-        "cache_write_1h_price_per_million": 6.0,
         "pricing_tiers": [
             {
                 "min_input_tokens": 200000,
                 "input_price_per_million": 6.0,
                 "output_price_per_million": 22.5,
                 "cache_read_price_per_million": None,
-                "cache_write_price_per_million": None,
-                "cache_write_1h_price_per_million": 12.0,
+                "cache_write_price_per_million": 4.5,
             }
         ],
     }
     response = client.post(f"{API_ROOT}/pricing", json=payload, headers=master_key_header)
 
     assert response.status_code == 200
-    assert response.json()["cache_write_1h_price_per_million"] == 6.0
     assert response.json()["pricing_tiers"] == payload["pricing_tiers"]
 
     # Omission preserves thresholds during a new price version, while explicit
