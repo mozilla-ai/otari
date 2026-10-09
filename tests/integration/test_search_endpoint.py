@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from gateway.api.deps import reset_config
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig, RateLimitRule
 from gateway.core.database import reset_db
+from gateway.core.settings.pricing import PricingConfig
 from gateway.inflight import InFlightRegistry
 from gateway.main import create_app
 from gateway.services.search_backend import SearchHit, SearchOutcome, SearchProviderError
@@ -466,6 +467,40 @@ def test_search_is_budget_enforced(
             headers={API_KEY_HEADER: f"Bearer {key['key']}"},
         )
     assert resp.status_code == 403
+
+
+@pytest.fixture
+def config_priced_client(test_config: GatewayConfig) -> Generator[TestClient]:
+    """A client whose search rate comes from the config file's ``pricing`` section."""
+    pricing = {"exa:exa-search": PricingConfig(input_price_per_million=5000.0, output_price_per_million=0.0)}
+    yield from build_test_client(test_config.model_copy(update={"pricing": pricing}))
+
+
+def test_a_config_priced_search_is_reserved_before_it_runs(
+    config_priced_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The config rate is held up front, so a search that would overshoot the cap never reaches the provider."""
+    client = config_priced_client
+    budget = client.post(f"{API_ROOT}/budgets", json={"max_budget": 0.001}, headers=master_key_header).json()
+    client.post(
+        f"{API_ROOT}/users",
+        json={"user_id": "near-cap-user", "budget_id": budget["budget_id"]},
+        headers=master_key_header,
+    )
+    key = client.post(
+        f"{API_ROOT}/keys",
+        json={"key_name": "near-cap-key", "user_id": "near-cap-user"},
+        headers=master_key_header,
+    ).json()
+
+    with _mock_search() as run_search:
+        resp = client.post(
+            f"{API_ROOT}/search/exa-search",
+            json=SEARCH_PAYLOAD,
+            headers={API_KEY_HEADER: f"Bearer {key['key']}"},
+        )
+    assert resp.status_code == 403, resp.text
+    run_search.assert_not_awaited()
 
 
 def test_search_is_not_registered_in_hybrid_mode(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -411,6 +411,12 @@ Audio, moderations, and direct search do not use token pricing. They reuse
 `input_price_per_million` as USD per million requests. An unpriced request on
 these endpoints is served at zero cost.
 
+A search tool's rate is keyed `provider:tool` (`exa:exa-search` for a tool named
+`exa-search` backed by `exa`), and its provider needs no entry under
+`providers:`. That rate is what a search reserves against the caller's budget
+before it runs; without one nothing is held, and only the provider's reported
+charge is billed afterwards.
+
 A model served over chat completions, the Responses API, or Messages can be
 priced the same way, for an upstream that bills per call and reports little or
 no token usage, such as an answer endpoint served through an OpenAI-compatible

@@ -218,6 +218,29 @@ def test_pricing_for_a_decision_provider_is_loaded(postgres_url: str, test_db: S
         dispose_override()
 
 
+def test_pricing_for_a_search_tool_provider_is_loaded(postgres_url: str, test_db: Session) -> None:
+    """A search tool's ``provider:tool`` rate is kept although its provider is not under ``providers``."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        search_tools={"exa-search": {"provider": "exa", "api_key": "test-key"}},
+        pricing={"exa:exa-search": PricingConfig(input_price_per_million=5000.0, output_price_per_million=0.0)},
+    )
+
+    app = create_app(config)
+    override_get_db, dispose_override = build_async_session_override(postgres_url)
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app):
+            loaded = test_db.query(ModelPricing).filter(ModelPricing.model_key == "exa:exa-search").first()
+            assert loaded is not None
+            assert loaded.input_price_per_million == 5000.0
+    finally:
+        dispose_override()
+
+
 def test_pricing_loaded_from_config_normalizes_legacy_slash_format(postgres_url: str, test_db: Session) -> None:
     """Test that pricing configured with legacy slash format is normalized to colon format."""
     config = GatewayConfig(
