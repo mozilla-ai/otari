@@ -330,22 +330,30 @@ async def run_tool_loop_stream(
     base["stream"] = True
     acc = strategy.new_stream_accumulator()
 
-    for _ in range(max_iterations):
+    for iteration in range(1, max_iterations + 1):
         kwargs: dict[str, Any] = {**base, strategy.transcript_key: transcript}
         if merged_tools:
             kwargs["tools"] = merged_tools
 
         stream = await strategy.open_stream(kwargs)
         state = strategy.new_stream_state()
+        events = 0
 
         async with _stream_scope(stream):
             async for event in stream:
+                events += 1
                 action, visible = strategy.observe(state, event, pool, acc)
                 if action is StreamAction.BREAK:
                     break
                 if action is StreamAction.FORWARD:
                     yield visible
 
+        if events == 0:
+            # Nothing to continue from, so the loop exits with whatever it has sent.
+            # The route decides whether that is a complete stream; this line says
+            # which round came back empty.
+            # codeql[py/clear-text-logging-sensitive-data]
+            logger.warning("Tool-loop upstream round %d returned no events model=%s", iteration, kwargs.get("model"))
         if strategy.stream_exiting(state, pool):
             # A mixed batch (the gateway's own tools plus the caller's) exits here so
             # the caller can dispatch its own, but the gateway's calls were hidden

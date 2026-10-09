@@ -51,6 +51,18 @@ class StreamingAttemptFailure:
     is_final_attempt: bool
 
 
+class IncompleteStreamError(Exception):
+    """The upstream ended a stream without the event that completes it, and raised nothing.
+
+    Carries counts only, never content, so its text is safe to log and to store
+    on a usage row.
+    """
+
+    def __init__(self, chunks_received: int) -> None:
+        self.chunks_received = chunks_received
+        super().__init__(f"upstream stream ended without completing ({chunks_received} chunks received)")
+
+
 @dataclass(frozen=True)
 class StreamFormat:
     """SSE formatting configuration for a streaming protocol."""
@@ -181,6 +193,7 @@ async def streaming_generator(
     attach_settlement: Callable[[Any, S], bool] | None = None,
     on_first_chunk: Callable[[], None] | None = None,
     error_payload: Callable[[BaseException], str] | None = None,
+    completes_stream: Callable[[Any], bool] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Shared SSE streaming generator with usage tracking and error handling.
 
@@ -222,6 +235,10 @@ async def streaming_generator(
         error_payload: Renders the SSE error event for the exception that ended
             the stream, so a dialect can say what kind of failure it was. When
             omitted, ``fmt.error_payload`` is sent for every failure.
+        completes_stream: Identifies the chunk that completes a well-formed
+            stream. When set, an upstream that ends without one is failed with
+            :class:`IncompleteStreamError` through the error path, so the client
+            gets an error event rather than a 200 that silently carried nothing.
 
     """
     usage = CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
@@ -233,6 +250,8 @@ async def streaming_generator(
     buffering_terminal = False
     overflow_logged = False
     settlement_task: asyncio.Task[S | None] | None = None
+    chunks_received = 0
+    completed = completes_stream is None
 
     keepalive_interval = keepalive_interval_seconds if fmt.keepalive else 0.0
 
@@ -261,6 +280,9 @@ async def streaming_generator(
                 if chunk is _KEEPALIVE_DUE:
                     yield fmt.keepalive
                     continue
+                chunks_received += 1
+                if not completed and completes_stream is not None and completes_stream(chunk):
+                    completed = True
                 chunk_usage = extract_usage(chunk)
                 if chunk_usage:
                     usage = merge_stream_usage(usage, chunk_usage)
@@ -302,6 +324,9 @@ async def streaming_generator(
                     continue
 
                 yield _format_and_mark_first(chunk)
+
+        if not completed:
+            raise IncompleteStreamError(chunks_received)
 
         # Once the upstream is exhausted, hybrid mode settles before emitting
         # the buffered terminal suffix. Standalone mode retains the historical

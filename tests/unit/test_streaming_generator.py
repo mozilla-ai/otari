@@ -10,6 +10,7 @@ from gateway.streaming import (
     ANTHROPIC_STREAM_FORMAT,
     OPENAI_STREAM_FORMAT,
     RESPONSES_STREAM_FORMAT,
+    IncompleteStreamError,
     streaming_generator,
 )
 
@@ -728,3 +729,81 @@ async def test_on_first_chunk_fires_on_flush_not_on_buffering() -> None:
     assert await gen.__anext__() == "data: trailing\n\n"
     assert calls == 1
     assert await gen.__anext__() == "data: [DONE]\n\n"
+
+
+def _is_stop(chunk: str) -> bool:
+    return chunk == "stop"
+
+
+async def _run_with_completion_check(
+    *chunks: str, settle_before_done: bool = False
+) -> tuple[list[str], list[BaseException], list[str]]:
+    """Run ``chunks`` through the generator with ``"stop"`` as the completing chunk."""
+    errors: list[BaseException] = []
+    settled: list[str] = []
+
+    async def on_complete(usage: CompletionUsage) -> None:
+        settled.append("complete")
+
+    async def on_error(exc: BaseException) -> None:
+        errors.append(exc)
+
+    async def on_no_usage() -> None:
+        settled.append("no_usage")
+
+    async def on_incomplete() -> None:
+        settled.append("incomplete")
+
+    events = [
+        event
+        async for event in streaming_generator(
+            stream=_items(*chunks),
+            format_chunk=_format_chunk,
+            extract_usage=_extract_usage,
+            fmt=ANTHROPIC_STREAM_FORMAT,
+            on_complete=on_complete,
+            on_error=on_error,
+            label="test:model",
+            on_no_usage=on_no_usage,
+            on_incomplete=on_incomplete,
+            settle_before_done=settle_before_done,
+            is_cost_carrier=(lambda chunk: chunk == "usage") if settle_before_done else None,
+            completes_stream=_is_stop,
+        )
+    ]
+    return events, errors, settled
+
+
+@pytest.mark.asyncio
+async def test_an_upstream_that_ends_without_any_chunk_fails_the_stream() -> None:
+    """An empty upstream used to close as a success: a 200 carrying only the done marker."""
+    events, errors, settled = await _run_with_completion_check()
+
+    assert events == [ANTHROPIC_STREAM_FORMAT.error_payload]
+    [error] = errors
+    assert isinstance(error, IncompleteStreamError)
+    assert error.chunks_received == 0
+    assert settled == [], "the error path settles; success and no-usage settlement must not also run"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("settle_before_done", [False, True])
+async def test_an_upstream_that_stops_before_its_completing_chunk_fails_after_what_it_sent(
+    settle_before_done: bool,
+) -> None:
+    events, errors, settled = await _run_with_completion_check("hello", "usage", settle_before_done=settle_before_done)
+
+    assert events == ["data: hello\n\n", "data: usage\n\n", ANTHROPIC_STREAM_FORMAT.error_payload]
+    [error] = errors
+    assert isinstance(error, IncompleteStreamError)
+    assert error.chunks_received == 2
+    assert settled == []
+
+
+@pytest.mark.asyncio
+async def test_a_stream_that_reaches_its_completing_chunk_is_unaffected_by_the_check() -> None:
+    events, errors, settled = await _run_with_completion_check("hello", "usage", "stop")
+
+    assert events == ["data: hello\n\n", "data: usage\n\n", "data: stop\n\n", ANTHROPIC_STREAM_FORMAT.done_marker]
+    assert errors == []
+    assert settled == ["complete"]

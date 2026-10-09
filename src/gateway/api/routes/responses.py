@@ -252,6 +252,7 @@ class _ResponsesAdapter:
     name = Dialect.RESPONSES
     endpoint = USAGE_ENDPOINT
     stream_format: StreamFormat = RESPONSES_STREAM_FORMAT
+    stream_completion_event: str | None = None
     log_success_without_usage = True
 
     def error(

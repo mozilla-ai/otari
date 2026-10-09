@@ -106,7 +106,7 @@ from gateway.services.tools import (
     Dialect,
     ToolUseBudget,
 )
-from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
+from gateway.streaming import ANTHROPIC_STREAM_FORMAT, IncompleteStreamError, StreamFormat
 from gateway.types.attempt import Attempt
 from gateway.types.normalization_target import NormalizationTarget
 
@@ -473,6 +473,7 @@ _STREAM_ERROR_MESSAGES = {
     _ERR_OVERLOADED: "The upstream provider is overloaded. Retry the request.",
     _ERR_RATE_LIMIT: "The upstream provider rate limited the request. Retry the request later.",
 }
+_INCOMPLETE_STREAM_MESSAGE = "The upstream provider ended the stream before completing the message."
 _STREAM_ERROR_STATUS_TYPES = {
     status.HTTP_429_TOO_MANY_REQUESTS: _ERR_RATE_LIMIT,
     529: _ERR_OVERLOADED,
@@ -583,6 +584,11 @@ class _MessagesAdapter:
     name = Dialect.MESSAGES
     endpoint = USAGE_ENDPOINT
     stream_format: StreamFormat = ANTHROPIC_STREAM_FORMAT
+    # Every complete Messages stream ends in ``message_stop``. A non-Anthropic
+    # provider reaches here through any-llm's bridge, which emits nothing at all
+    # for an upstream that produced no chunks, and a tool-loop round can end the
+    # same way after ``message_start`` went out.
+    stream_completion_event: str | None = "message_stop"
     # A successful non-streaming call without provider usage data skips the
     # usage-log row (only the reservation is settled), matching the wire
     # behavior this endpoint has always had.
@@ -610,10 +616,14 @@ class _MessagesAdapter:
         return _anthropic_error(_ERR_API, _PROVIDER_ERROR, status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def stream_error_payload(self, exc: BaseException) -> str:
-        error_type = _upstream_stream_error_type(exc)
-        if error_type is None:
-            return self.stream_format.error_payload
-        event = {"type": "error", "error": {"type": error_type, "message": _STREAM_ERROR_MESSAGES[error_type]}}
+        if isinstance(exc, IncompleteStreamError):
+            error_type, message = _ERR_API, _INCOMPLETE_STREAM_MESSAGE
+        else:
+            upstream_type = _upstream_stream_error_type(exc)
+            if upstream_type is None:
+                return self.stream_format.error_payload
+            error_type, message = upstream_type, _STREAM_ERROR_MESSAGES[upstream_type]
+        event = {"type": "error", "error": {"type": error_type, "message": message}}
         return f"event: error\ndata: {json.dumps(event)}\n\n"
 
     def format_chunk(self, chunk: MessageStreamEvent) -> str:

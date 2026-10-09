@@ -865,7 +865,7 @@ def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
     # streaming_generator triggers _on_complete.
     from unittest.mock import AsyncMock, patch
 
-    from any_llm.types.messages import MessageDelta, MessageDeltaEvent, MessageDeltaUsage
+    from any_llm.types.messages import MessageDelta, MessageDeltaEvent, MessageDeltaUsage, MessageStopEvent
 
     async def fake_loop_stream(**_kwargs: Any) -> Any:
         yield MessageDeltaEvent(
@@ -879,6 +879,7 @@ def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
                 server_tool_use=None,
             ),
         )
+        yield MessageStopEvent(type="message_stop")
 
     with (
         patch("gateway.api.routes.messages.anthropic_tool_loop_stream", new=fake_loop_stream),
@@ -936,7 +937,7 @@ def test_hybrid_mode_tool_loop_streaming_forwards_session_label(
 
     from unittest.mock import AsyncMock, patch
 
-    from any_llm.types.messages import MessageDelta, MessageDeltaEvent, MessageDeltaUsage
+    from any_llm.types.messages import MessageDelta, MessageDeltaEvent, MessageDeltaUsage, MessageStopEvent
 
     async def fake_loop_stream(**_kwargs: Any) -> Any:
         yield MessageDeltaEvent(
@@ -950,6 +951,7 @@ def test_hybrid_mode_tool_loop_streaming_forwards_session_label(
                 server_tool_use=None,
             ),
         )
+        yield MessageStopEvent(type="message_stop")
 
     with (
         patch("gateway.api.routes.messages.anthropic_tool_loop_stream", new=fake_loop_stream),
@@ -1284,7 +1286,7 @@ def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     yielding any event, so the gateway falls through to the second attempt and
     streams its response (same pre-lock-in semantics as chat, which this
     format previously collapsed to a single attempt)."""
-    from any_llm.types.messages import MessageDelta, MessageDeltaEvent, MessageDeltaUsage
+    from any_llm.types.messages import MessageDelta, MessageDeltaEvent, MessageDeltaUsage, MessageStopEvent
 
     usage_reports: list[dict[str, Any]] = []
 
@@ -1317,6 +1319,7 @@ def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
                 server_tool_use=None,
             ),
         )
+        yield MessageStopEvent(type="message_stop")
 
     control_plane_transport(fake_post_platform)
     monkeypatch.setattr("gateway.api.routes._pipeline.MCPClientPool", _FakeMcpPool)

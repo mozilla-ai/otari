@@ -184,6 +184,7 @@ class _ChatAdapter:
 
     name = Dialect.CHAT
     stream_format: StreamFormat = OPENAI_STREAM_FORMAT
+    stream_completion_event: str | None = None
     log_success_without_usage = True
 
     def __init__(self, endpoint: str = USAGE_ENDPOINT) -> None:

@@ -359,6 +359,9 @@ reworded.
 A failure after a stream has started arrives as an error event, which carries
 the code as `error.code` on Chat Completions and Responses:
 `{"error": {"message": "...", "type": "server_error", "code": "upstream_rate_limited"}}`.
+On Messages, a stream the provider ends without `message_stop`, including one
+that sent no events at all, also ends in an `api_error` event rather than
+closing as if it had succeeded, and the request is settled as failed.
 
 ## Caller-orchestrated MCP
 

@@ -297,6 +297,7 @@ from gateway.services.workspace_scope import (
     workspace_for_key_id,
 )
 from gateway.streaming import (
+    IncompleteStreamError,
     StreamFormat,
     StreamingAttemptFailure,
     iterate_streaming_attempts,
@@ -822,6 +823,10 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
     name: Dialect
     endpoint: str
     stream_format: StreamFormat
+    # The ``type`` of the event that completes a well-formed stream, or None where
+    # a stream may end without one. A stream that ends without it is failed with an
+    # SSE error rather than closed as a success.
+    stream_completion_event: str | None
 
     def error(
         self,
@@ -4320,6 +4325,7 @@ def build_streaming_response(
     rate_limit_grant: RateLimitGrant | None = None,
     tags: dict[str, str] | None = None,
     prices: RequestPrices | None = None,
+    tool_loop: bool = False,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
 
@@ -4337,7 +4343,10 @@ def build_streaming_response(
       and reconcile the reservation against actual cost (standalone).
     * ``on_no_usage``: stream finished without usage data; settle per
       ``stream_missing_usage_policy`` instead of silently billing $0.
-    * ``on_error``: report/log the failure and refund the reservation.
+    * ``on_error``: report/log the failure and refund the reservation. A stream
+      the upstream ended without the format's completion event lands here too
+      (:class:`IncompleteStreamError`), so the caller gets an SSE error instead of
+      an empty 200. ``tool_loop`` only labels that case's log line.
     * ``on_incomplete``: client disconnected mid-stream; refund so the
       reservation does not leak.
 
@@ -4529,6 +4538,20 @@ def build_streaming_response(
         )
 
     async def _on_error(exc: BaseException) -> None:
+        if isinstance(exc, IncompleteStreamError):
+            # codeql[py/clear-text-logging-sensitive-data]
+            logger.warning(
+                "Upstream stream ended without completing provider=%s model=%s endpoint=%s chunks=%d "
+                "first_chunk_forwarded=%s tool_loop=%s gateway_tools_ran=%s request_id=%s",
+                provider,
+                model,
+                adapter.endpoint,
+                exc.chunks_received,
+                first_chunk_at is not None,
+                tool_loop,
+                tool_tally is not None and not tool_tally.is_empty(),
+                request_id,
+            )
         if rate_limit_grant is not None:
             await rate_limit_grant.settle(_settled_tokens(reported_usage))
         if platform_active:
@@ -4655,10 +4678,18 @@ def build_streaming_response(
             attach_settlement=_attach_inline_cost if settles_inline else None,
             on_first_chunk=_on_first_chunk,
             error_payload=adapter.stream_error_payload,
+            completes_stream=_completes_stream(adapter.stream_completion_event),
         ),
         media_type="text/event-stream",
         headers=headers,
     )
+
+
+def _completes_stream(event_type: str | None) -> Callable[[Any], bool] | None:
+    """A predicate matching chunks whose ``type`` is ``event_type``, or None when there is none."""
+    if event_type is None:
+        return None
+    return lambda chunk: getattr(chunk, "type", None) == event_type
 
 
 def stream_first_chunk_timeout_seconds(config: GatewayConfig, *, tool_mode: bool) -> float:
@@ -4933,6 +4964,7 @@ async def run_single_attempt_stream(
         attribution=stream_attribution,
         tool_tally=tool_ctx.tally,
         tags=ctx.tags,
+        tool_loop=tool_ctx.use_tool_loop,
     )
 
 
@@ -5170,6 +5202,8 @@ async def run_streaming_with_fallback(
         request_id=route.request_id,
         session_label=session_label,
         started_at=started_at,
+        tool_tally=tool_ctx.tally,
+        tool_loop=tool_mode,
     )
 
 
