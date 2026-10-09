@@ -556,8 +556,8 @@ Rules for instances:
 - `builtin_fetch`, the built-in fetcher, is a fetch instance that always exists and
   cannot be declared. A search instance's `fetch_tool` names the fetch instance that
   enriches its results; without one, `web_fetch_default_tool` does.
-- A name contains no `/` or `:`, is not `builtin_fetch` or `none`, and is unique
-  across both maps.
+- A name contains no `/` or `:`, is not `builtin_fetch` or `none` in any case
+  (`None` and `BUILTIN_FETCH` are reserved too), and is unique across both maps.
 - `options` are checked against the provider's options.
 - A `search_tools` entry that breaks the name rules, or whose `options` carry a key
   the provider does not know or a value it refuses, still loads, with a warning
