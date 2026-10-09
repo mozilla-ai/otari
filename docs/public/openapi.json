@@ -1628,6 +1628,50 @@
         "title": "AnthropicFileMetadata",
         "type": "object"
       },
+      "AppliedEntityPublic": {
+        "description": "One entity a budget applies to: the scope a ceiling caps, and the provider it narrows to.",
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The organization's or the workspace's name; null for a membership or an API key",
+            "title": "Name"
+          },
+          "provider_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Key Id"
+          },
+          "scope_id": {
+            "title": "Scope Id",
+            "type": "string"
+          },
+          "scope_type": {
+            "title": "Scope Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope_type",
+          "scope_id",
+          "provider_key_id",
+          "name"
+        ],
+        "title": "AppliedEntityPublic",
+        "type": "object"
+      },
       "AudioContent": {
         "additionalProperties": true,
         "description": "Audio content for a message.",
@@ -10126,6 +10170,14 @@
       "OrganizationBudgetPublic": {
         "description": "One of the organization's budgets, and how much of its own config names it.\n\nCarries no spend rollup. ``BudgetResponse`` on the deployment surface sums\n``users.spend`` over the gateway's ``users`` table, which is deployment-wide\nand has no tenancy column, so the same figure here would be a cross-tenant\nread. What an organization's own spend is, is a question for Usage.\n\n``ceiling_count`` is the organization-relevant fact instead: how many of its\nceilings this budget currently holds, which is what makes a delete refuse.",
         "properties": {
+          "applied_to": {
+            "description": "Every entity the budget applies to, oldest first",
+            "items": {
+              "$ref": "#/components/schemas/AppliedEntityPublic"
+            },
+            "title": "Applied To",
+            "type": "array"
+          },
           "budget_duration_sec": {
             "anyOf": [
               {
@@ -10224,6 +10276,7 @@
           "budget_duration_sec",
           "reset_alignment",
           "ceiling_count",
+          "applied_to",
           "created_at",
           "updated_at"
         ],

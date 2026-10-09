@@ -138,7 +138,7 @@ test.describe("dashboard core flows", () => {
       // operator manages.
       ["Providers", "Providers"],
       ["Deployment providers", "Deployment providers"],
-      ["Spend & budgets", "Budgets"],
+      ["Budgets", "Budgets"],
     ]) {
       await nav(page).getByRole("link", { name: link, exact: true }).click()
       await expect(pageHeading(page, heading)).toBeVisible()
@@ -174,7 +174,7 @@ test.describe("dashboard core flows", () => {
   test("create a budget", async ({ page }) => {
     await login(page)
     await openOrganization(page)
-    await nav(page).getByRole("link", { name: "Spend & budgets" }).click()
+    await nav(page).getByRole("link", { name: "Budgets", exact: true }).click()
     await page.getByRole("button", { name: "Create your first budget" }).click()
     // Scoped: the heading's trigger and the dialog's submit both say "Create
     // budget", so an unscoped press is ambiguous.
@@ -209,7 +209,7 @@ test.describe("dashboard core flows", () => {
 
     await login(page)
     await openOrganization(page)
-    await nav(page).getByRole("link", { name: "Spend & budgets" }).click()
+    await nav(page).getByRole("link", { name: "Budgets", exact: true }).click()
     const budgetRow = page.getByRole("row", { name: /e2e-budget/ })
     await budgetRow.getByRole("button", { name: "Edit" }).click()
     // The field's visible label is its accessible name now: the picker used to

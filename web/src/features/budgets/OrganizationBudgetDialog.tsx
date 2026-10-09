@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { type RefObject, useState } from "react"
 
 import type { OrganizationBudget } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
@@ -17,7 +17,7 @@ import {
   type ResetAlignment,
 } from "./organizationBudget"
 
-// The form behind both Add and Edit for one of the organization's budgets. One
+// The form behind both Create and Edit for one of the organization's budgets. One
 // component rather than two: the fields are identical, and the endpoint is a
 // PATCH that leaves an omitted field alone, so an edit sends the same shape an
 // add does.
@@ -52,6 +52,8 @@ export interface OrganizationBudgetDialogProps {
   editing?: OrganizationBudget
   /** Called once a save has landed, so the caller can close this. */
   onSaved: () => void
+  /** Where focus returns when the control that opened this is gone. */
+  returnFocusRef?: RefObject<HTMLElement | null>
 }
 
 export function OrganizationBudgetDialog({
@@ -59,11 +61,10 @@ export function OrganizationBudgetDialog({
   onOpenChange,
   editing,
   onSaved,
+  returnFocusRef,
 }: OrganizationBudgetDialogProps) {
   // The mutations live here, below the caller's key, so a refused save is
-  // cleared by the same remount that clears the draft. Held in the card they
-  // outlived it: a refusal's banner greeted the next open, and a failed edit of
-  // one row was what the next row's dialog showed. See feedback.md, "The
+  // cleared by the same remount that clears the draft. See feedback.md, "The
   // component that renders the FormDialog owns everything that resets between
   // opens: the draft *and* its mutation".
   const create = useCreateOrganizationBudget()
@@ -140,12 +141,13 @@ export function OrganizationBudgetDialog({
       onOpenChange={onOpenChange}
       title={editing ? "Edit budget" : "New budget"}
       description="A budget is an amount and the period it is spent over. It caps nothing on its own: a spend ceiling is what points it at an organization, a workspace, or a key."
-      submitLabel={editing ? "Save budget" : "Add budget"}
+      submitLabel={editing ? "Save budget" : "Create budget"}
       onSubmit={submit}
       isPending={create.isPending || update.isPending}
       isSubmitDisabled={limitInvalid}
       isDirty={isDirty}
       error={editing ? update.error : create.error}
+      returnFocusRef={returnFocusRef}
     >
       <Field
         label="Name"

@@ -232,7 +232,7 @@ test.describe("budgets", () => {
   }) => {
     await login(page)
     await openOrganization(page)
-    await openPage(page, "Spend & budgets", "Budgets")
+    await openPage(page, "Budgets", "Budgets")
 
     await page.getByRole("button", { name: "Create budget" }).click()
     // Scoped: the heading's trigger and the dialog's submit both say "Create

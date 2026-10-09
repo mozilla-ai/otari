@@ -83,7 +83,7 @@ describe("nav registry", () => {
       "Workspaces",
       "Members & roles",
       "Email domains",
-      "Spend & budgets",
+      "Budgets",
       "Providers",
       "Deployment providers",
       "Guardrails",
@@ -233,7 +233,7 @@ describe("nav registry", () => {
     // may not point at.
     const money = ORG_NAV_SECTIONS.find((section) => section.id === "org-money")
     expect(money?.items.map((item) => [item.label, item.surface])).toEqual([
-      ["Spend & budgets", "budgets"],
+      ["Budgets", "budgets"],
     ])
     // No row gates on `users` any more. The gateway still serves that surface
     // (budgets, keys and the roster all read /api/v1/users), but a person is a

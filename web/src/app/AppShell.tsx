@@ -1093,7 +1093,7 @@ function AppShellChrome() {
                     aria-label={effectiveCollapsed ? "Organization" : undefined}
                     title={
                       effectiveCollapsed
-                        ? "Organization: members, spend and budgets, users, settings"
+                        ? "Organization: members, budgets, users, settings"
                         : undefined
                     }
                   >

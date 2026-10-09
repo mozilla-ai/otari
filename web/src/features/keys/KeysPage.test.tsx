@@ -1582,7 +1582,7 @@ describe("KeysPage", () => {
         screen.queryByRole("columnheader", { name: "Owner" }),
       ).not.toBeInTheDocument()
       expect(
-        screen.queryByRole("link", { name: /Spend & budgets/ }),
+        screen.queryByRole("link", { name: /Budgets/ }),
       ).not.toBeInTheDocument()
     })
 

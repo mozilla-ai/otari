@@ -11,6 +11,7 @@ A budget with no organization belongs to the deployment: nothing here lists, off
 and a ceiling that names one is still listed, with ``manageable`` false, because it caps this organization's spend.
 """
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -25,11 +26,12 @@ from gateway.exceptions.budget_exceptions import (
     OrganizationScopeNotFoundError,
     SpendCeilingAlreadyExistsError,
 )
-from gateway.models.budgets import SCOPE_TYPES, Budget, ScopedBudget
+from gateway.models.budgets import SCOPE_ORGANIZATION, SCOPE_TYPES, SCOPE_WORKSPACE, Budget, ScopedBudget
 from gateway.models.money import to_usd_or_none
 from gateway.models.tenancy import Organization, User
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.schemas.budgets import (
+    AppliedEntityPublic,
     OrganizationBudgetCreate,
     OrganizationBudgetPublic,
     OrganizationBudgetsPublic,
@@ -41,7 +43,7 @@ from gateway.schemas.budgets import (
 )
 from gateway.services.budgets._periods import period_window
 from gateway.services.budgets._retiming import cadence_of
-from gateway.services.budgets._scopes import ScopeOwnership, lock_workspace_for_scope
+from gateway.services.budgets._scopes import ScopeOwnership, lock_workspace_for_scope, uuid_or_none
 from gateway.services.tenancy.organization_service import OrganizationService
 
 _MAX_LIST_LIMIT = 1000
@@ -80,6 +82,42 @@ class _OrganizationSurface:
         organization = await self._organizations.get_active_organization_for_user(user)
         await self._organizations.require_active_organization_management_access(user=user, organization=organization)
         return organization
+
+    async def _applied_to(
+        self, organization: Organization, budget_ids: Sequence[str]
+    ) -> dict[str, list[AppliedEntityPublic]]:
+        """Return the entities inside this organization that each of these budgets applies to.
+
+        An operator can point another organization's scope at this organization's budget,
+        so the ceilings are filtered to this organization's scopes and that ID never leaves it.
+        """
+        scopes = await self._scopes.get_scope_ids_in(organization.id)
+        ceilings = await self._repositories.ceilings.list_for_budgets_in_scopes(budget_ids, scopes)
+        workspace_ids = {
+            workspace_id
+            for ceiling in ceilings
+            if ceiling.scope_type == SCOPE_WORKSPACE and (workspace_id := uuid_or_none(ceiling.scope_id))
+        }
+        names = await self._organizations.get_workspace_names_in_organization(organization.id, workspace_ids)
+        names[organization.id] = organization.name
+
+        def name_of(ceiling: ScopedBudget) -> str | None:
+            scope_id = uuid_or_none(ceiling.scope_id)
+            if ceiling.scope_type in (SCOPE_ORGANIZATION, SCOPE_WORKSPACE) and scope_id:
+                return names.get(scope_id)
+            return None
+
+        applied: dict[str, list[AppliedEntityPublic]] = {budget_id: [] for budget_id in budget_ids}
+        for ceiling in ceilings:
+            applied[ceiling.budget_id].append(
+                AppliedEntityPublic(
+                    scope_type=ceiling.scope_type,
+                    scope_id=ceiling.scope_id,
+                    provider_key_id=ceiling.provider_key_id,
+                    name=name_of(ceiling),
+                )
+            )
+        return applied
 
     async def _require_no_existing_ceiling(self, request: OrganizationScopedBudgetCreate) -> None:
         if await self._repositories.ceilings.has_ceiling(request.scope_type, request.scope_id, request.provider_key_id):
@@ -137,7 +175,9 @@ class _OrganizationSurface:
                 reset_alignment=request.reset_alignment,
             )
         )
-        return OrganizationBudgetPublic.from_model(budget, organization_id=organization.id, ceiling_count=0)
+        return OrganizationBudgetPublic.from_model(
+            budget, organization_id=organization.id, ceiling_count=0, applied_to=[]
+        )
 
     async def create_ceiling(
         self,
@@ -211,13 +251,16 @@ class _OrganizationSurface:
         limit = min(limit, _MAX_LIST_LIMIT)
         count = await self._repositories.budgets.count_by_organization(organization.id)
         budgets = await self._repositories.budgets.list_by_organization(organization.id, skip=skip, limit=limit)
-        held = await self._repositories.ceilings.count_for_budgets([budget.budget_id for budget in budgets])
+        budget_ids = [budget.budget_id for budget in budgets]
+        held = await self._repositories.ceilings.count_for_budgets(budget_ids)
+        applied = await self._applied_to(organization, budget_ids)
         return OrganizationBudgetsPublic(
             data=[
                 OrganizationBudgetPublic.from_model(
                     budget,
                     organization_id=organization.id,
                     ceiling_count=held.get(budget.budget_id, 0),
+                    applied_to=applied[budget.budget_id],
                 )
                 for budget in budgets
             ],
@@ -272,6 +315,7 @@ class _OrganizationSurface:
             budget,
             organization_id=organization.id,
             ceiling_count=await self._repositories.ceilings.count_for_budget(budget.budget_id),
+            applied_to=(await self._applied_to(organization, [budget.budget_id]))[budget.budget_id],
         )
 
     async def update_ceiling(
