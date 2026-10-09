@@ -137,6 +137,7 @@ _UNGATED_ROUTERS: dict[str, str] = {
     "web_search_backend.router": "its own X-Gateway-Token, checked in the handler",
     "hosted_mode.router": "mode stub: a 404 naming why the prefix is absent on this deployment",
     "hybrid_mode.router": "mode stub, as above",
+    "retired_root.router": "a 404 naming the API root that replaced /v1; serves nothing",
 }
 
 

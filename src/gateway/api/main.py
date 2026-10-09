@@ -53,6 +53,7 @@ from gateway.api.routes import (
     rate_limits,
     rerank,
     responses,
+    retired_root,
     routing,
     routing_memory,
     scoped_budgets,
@@ -105,6 +106,8 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     # management surface; a hybrid data plane stores no telemetry.
     if deployment.supports(Plane.CONTROL):
         app.include_router(otlp.router, prefix=OTLP_ROOT)
+    # The pre-/api root, refused in every mode with a pointer to its successor.
+    app.include_router(retired_root.router)
 
 
 def _register_contributed_routers(api: APIRouter, container: Container) -> None:
