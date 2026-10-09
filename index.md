@@ -63,9 +63,10 @@ Calling the gateway from your own code.
 ### For platform builders
 
 - [Hybrid-mode protocol](hybrid-mode-protocol.md): the Otari/platform wire contract, for building a platform that Otari connects to.
-- [Code-execution protocol](code-execution-protocol.md): the Otari/sandbox contract, for building a code-execution backend that Otari dispatches to. Its machine-readable form is [`public/code-execution-openapi.yaml`](https://github.com/mozilla-ai/otari/blob/v0.18.0/docs/public/code-execution-openapi.yaml).
+- [Code-execution protocol](code-execution-protocol.md): the Otari/sandbox contract, for building a code-execution backend that Otari dispatches to. Its machine-readable form is [`public/code-execution-openapi.yaml`](https://github.com/mozilla-ai/otari/blob/v0.19.0/docs/public/code-execution-openapi.yaml).
 
 ### For contributors
 
-- [Architecture](https://github.com/mozilla-ai/otari/blob/v0.18.0/ARCHITECTURE.md): the two-plane model and the extension seam (ports, adapters, and capability lines) that mark what Otari's core ships versus what an overlay can add.
-- [Backend domains](https://github.com/mozilla-ai/otari/blob/v0.18.0/DOMAINS.md): what each backend domain owns, and the layer shape each domain moves toward.
+- [Architecture](https://github.com/mozilla-ai/otari/blob/v0.19.0/ARCHITECTURE.md): the two-plane model and the extension seam (ports, adapters, and capability lines) that mark what Otari's core ships versus what an overlay can add.
+- [Backend domains](https://github.com/mozilla-ai/otari/blob/v0.19.0/DOMAINS.md): what each backend domain owns, and the layer shape each domain moves toward.
+- [Load test](https://github.com/mozilla-ai/otari/blob/v0.19.0/loadtest/README.md): compares two builds under load on one machine, route by route, and fails when the second got slower or runs more database statements per request. CI runs it on a PR against its base.

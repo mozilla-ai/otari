@@ -46,7 +46,7 @@ uv tool install https://github.com/mozilla-ai/otari/releases/download/vX.Y.Z/ota
 ```
 
 A source checkout's virtualenv carries the same command. See
-[cli/README.md](https://github.com/mozilla-ai/otari/blob/v0.18.0/cli/README.md) for the rest of that distribution.
+[cli/README.md](https://github.com/mozilla-ai/otari/blob/v0.19.0/cli/README.md) for the rest of that distribution.
 
 Five commands apply here:
 
@@ -399,7 +399,7 @@ A verifier that finds what changed through `git status`, as `no-stranded-docbloc
 Two workflows run the check on every pull request to `main`. Both take the CLI, the guardrail files and the verifier scripts from the base commit, so a pull request that edits a gate, a verifier or the CLI is checked by the version it changes, not by its own.
 
 - **Path and verifier gates**, in `.github/workflows/otari-guardrails-check.yml`. The job checks out the base commit and the pull request side by side, stages the pull request against its merge base, and runs `otari guardrails check --type path --type verifier --guardrails-from <base>` in the pull request's tree. A `required` gate that does not pass fails the job.
-- **Judge gates**, in `.github/workflows/otari-guardrails-judges.yml`. The job checks out the base commit only, fetches the pull request as Git objects, and runs `otari guardrails check --base <base> --head <head> --type judge`. The judge calls `claude -p` with every tool and MCP server disabled, because the diff it reads is the pull request author's text. Findings go to the job summary. A failing judge also starts one comment on the pull request, which names the commit it describes and which later runs edit. A finding never fails the job.
+- **Judge gates**, in `.github/workflows/otari-guardrails-judges.yml`. The job checks out the base commit only, fetches the pull request as Git objects, and runs `otari guardrails check --base <base> --head <head> --type judge`. The judge calls `claude -p` with every tool and MCP server disabled, because the diff it reads is the pull request author's text. Findings go to the job summary. A failing judge also starts one comment on the pull request, which names the commit it describes and which later runs edit. A finding fails the job, so it shows in the pull request's checks, but the job is not a required check, so it does not block the merge.
 
 The judge job reads its credential from the `agent-guardrails` GitHub environment, which holds `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. Without either, the judges skip with a notice. A pull request from a fork skips them with a notice too, because it is not given the credential. In both workflows, a base commit whose CLI has no `otari guardrails check` skips the job with a notice, rather than take the command from the pull request.
 

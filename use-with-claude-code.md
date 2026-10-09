@@ -137,7 +137,7 @@ travels in a header, and it must point at a standalone gateway: a hybrid one
 does not serve the route, so every spawn would fall back. The plugin is
 active from then on, in that session and
 every one after. The
-[plugin's README](https://github.com/mozilla-ai/otari/blob/v0.18.0/plugins/otari-router/README.md) has the options, the
+[plugin's README](https://github.com/mozilla-ai/otari/blob/v0.19.0/plugins/otari-router/README.md) has the options, the
 scopes, how to update, and how to run the checkout's copy while developing.
 
 The plugin hooks `agent.spawn`, sends the request above, and passes the

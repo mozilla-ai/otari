@@ -1,7 +1,7 @@
 # Configuration
 
 Otari reads a YAML file, environment variables, and selected settings stored by
-the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.18.0/config.example.yml);
+the management API. Start with [`config.example.yml`](https://github.com/mozilla-ai/otari/blob/v0.19.0/config.example.yml);
 the running dashboard's Settings page shows the effective non-secret scalar
 configuration and which values can be changed without a restart.
 
@@ -113,8 +113,9 @@ deployment whose dashboard and management traffic are heavy, not because
 inference is.
 
 Recycling and the two statement timeouts matter most behind a managed database
-or a NAT, which drop idle connections without closing them. The pool's pre-ping
-would catch a closed connection, but the ping is itself a statement and blocks
+or a NAT, which drop idle connections without closing them. The pool pings a
+connection that has sat idle for more than five seconds before handing it out,
+which would catch a closed one, but the ping is itself a statement and blocks
 on a socket that went away silently, so leaving these unset turns a dropped
 connection into a request that hangs for minutes.
 
@@ -404,11 +405,35 @@ Use `pricing_tiers` for a rate that applies to an entire request after an input
 token threshold. The OpenAPI pricing schemas and dashboard editor show the
 accepted shape.
 
-### Per-request pricing (audio and moderations)
+### Per-request pricing (audio, moderations, and completion models)
 
 Audio, moderations, and direct search do not use token pricing. They reuse
 `input_price_per_million` as USD per million requests. An unpriced request on
 these endpoints is served at zero cost.
+
+A model served over chat completions, the Responses API, or Messages can be
+priced the same way, for an upstream that bills per call and reports little or
+no token usage, such as an answer endpoint served through an OpenAI-compatible
+provider instance named `exa`. Give its pricing `unit: requests`:
+
+```yaml
+pricing:
+  exa:exa:
+    input_price_per_million: 5000   # $0.005 per request
+    output_price_per_million: 0
+    unit: requests
+```
+
+Such a model is charged `input_price_per_million / 1,000,000` for each
+successful call, streamed or not, whatever tokens it reports. The token counts
+are still recorded on the usage row, and still count toward a token budget, but
+they are not priced. A failed call, including a stream that errors or that the
+client abandons, costs nothing. The budget reservation holds that flat amount
+rather than a token estimate. A stream that ends without usage data is charged
+the flat amount too, so `stream_missing_usage_policy` does not apply to it.
+`require_pricing` treats the model like any other completion model, and the
+default-pricing fallback never supplies a per-request rate, so a per-request
+model needs its own pricing row.
 
 ### Per-image pricing (image generation)
 
@@ -421,20 +446,82 @@ token price to a request-priced or image-priced endpoint.
 
 ## Search tools
 
-`search_tools` configures direct `POST /api/v1/search` calls. The same entries can
-be managed at runtime from Tools or `/api/v1/search-tools`.
+`search_tools` names the deployment's search instances. Direct `POST /api/v1/search`
+calls use them by name, and the in-loop `otari_web_search` tool uses the default
+one (below). The same entries can be managed at runtime from Tools or
+`/api/v1/search-tools`. `fetch_tools` names fetch instances, for the
+`otari_web_fetch` tool and for enriching search results.
 
 ```yaml
 search_tools:
   local:
     provider: searxng
     api_base: "http://searxng:8080"
+  exa:
+    provider: exa
+    api_key: "${EXA_API_KEY}"
+    options: {type: auto}
+    fetch_tool: exa-fetch
+fetch_tools:
+  exa-fetch:
+    provider: exa
+    api_key: "${EXA_API_KEY}"
+web_search_default_tool: exa
+web_fetch_default_tool: builtin_fetch
+web_search_max_calls: 10
 ```
 
 `GET /api/v1/search-tools/providers` publishes the supported providers and whether
 each requires an `api_key` or `api_base`. Provider options and request filters
 are covered in [Built-in tools](tools.md). A tool carrying an `api_key` must use
 an HTTPS `api_base`; a keyless local SearXNG endpoint may use HTTP.
+
+Rules for instances:
+
+- `builtin_fetch`, the built-in fetcher, is a fetch instance that always exists and
+  cannot be declared. A search instance's `fetch_tool` names the fetch instance that
+  enriches its results; without one, `web_fetch_default_tool` does.
+- A name contains no `/` or `:`, is not `builtin_fetch` or `none`, and is unique
+  across both maps.
+- `options` are checked against the provider's options.
+- A `search_tools` entry that breaks the name rules, or whose `options` carry a key
+  the provider does not know or a value it refuses, still loads, with a warning
+  that names the entry and the problem. Fix it: a later release refuses it, and
+  once the instances serve requests, the options named are left out of every call.
+  A `fetch_tools` entry that breaks the name rules, or reuses a configured search
+  instance's name, stops startup.
+
+The defaults and the call limit are runtime settings, also set from Tools or
+`/api/v1/tool-settings`. Clearing a runtime value falls back to the configuration
+file or environment, then to the built-in default.
+
+- `web_search_default_tool`: the search instance the in-loop tool uses when no
+  organization key applies, and the one an unnamed direct call uses. It must be one
+  whose provider the in-loop tool can search with; `none` turns in-loop search off.
+  When unset, the in-loop tool uses the search backend the legacy settings
+  describe (`web_search_provider` with its key, else `web_search_url`), else the
+  only search instance, when there is exactly one and the in-loop tool can search
+  with its provider. Several search instances with neither log a warning at
+  startup.
+- `web_fetch_default_tool`: the fetch instance for the fetch tool and for
+  enrichment. Default `builtin_fetch`.
+- `web_search_max_calls`: how many search and fetch calls one request may make
+  together. Default 10.
+
+A default that names no instance, set in the file or earlier at runtime, is treated
+as unset, with a warning at startup.
+
+In this release these settings are read and checked, and no request uses them yet.
+They take effect in later releases: `web_fetch_default_tool` when web fetch moves
+onto the fetch instances, `web_search_default_tool` for unnamed direct calls when
+the direct endpoint does, and the in-loop parts of the other two, with a search
+instance's `fetch_tool`, when in-loop search does.
+
+After that, the old in-loop backend still serves some requests until it is
+removed. In that period `web_fetch_default_tool` governs every fetch tool call,
+while `web_search_max_calls` and `fetch_tool` apply only where the new backend
+serves the request: the old one keeps its fixed limit of 10 calls, its 422 past
+it, and its own enrichment through the built-in fetcher.
 
 ## Decision providers
 
@@ -491,8 +578,8 @@ descriptions along the lines above.
 
 ## Mail
 
-Mail is optional. Invitations always return an accept link, and an invitee who
-has never signed in chooses a password on the page it opens, so members can join
+Mail is optional. An invitation that is not emailed returns its accept link, and an invitee new
+to the deployment chooses a password on the page it opens, so members can join
 a deployment with no transport configured. Without mail, signup, email verification, and password
 reset are unavailable.
 
@@ -534,6 +621,8 @@ and guardrail configuration. Common startup settings are:
 - `code_execution_executor`
 - `web_search_url`
 - `web_search_provider` and `web_search_provider_api_key`
+- `web_search_default_tool`, `web_fetch_default_tool` and `web_search_max_calls`
+  (see [Search tools](#search-tools))
 - `guardrails_url`
 - `guardrail_thread_pool_size`
 - `mcp_allow_loopback` and `mcp_allow_private_hosts`
@@ -639,7 +728,7 @@ contribute capability-gated routers. Most deployments should leave it unset.
 
 This is executable code, not a feature flag. Install the module in the gateway
 environment, pin it to a compatible Otari release, and authenticate every
-contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.18.0/ARCHITECTURE.md) for the extension
+contributed route. See [Architecture](https://github.com/mozilla-ai/otari/blob/v0.19.0/ARCHITECTURE.md) for the extension
 boundary.
 
 ## Product feedback

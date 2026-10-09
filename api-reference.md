@@ -2,8 +2,8 @@
 
 Otari serves an OpenAPI document at `/api/v1/openapi.json` and interactive API
 docs at `/api/v1/docs` by default. The repository also commits the generated
-[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.18.0/docs/public/openapi.json) and
-[Postman collection](https://github.com/mozilla-ai/otari/blob/v0.18.0/docs/public/otari.postman_collection.json). Those generated
+[OpenAPI specification](https://github.com/mozilla-ai/otari/blob/v0.19.0/docs/public/openapi.json) and
+[Postman collection](https://github.com/mozilla-ai/otari/blob/v0.19.0/docs/public/otari.postman_collection.json). Those generated
 artifacts are the source of truth for paths, parameters, and schemas.
 
 The default server address is `http://localhost:8000`. The API is mounted at
@@ -359,6 +359,9 @@ reworded.
 A failure after a stream has started arrives as an error event, which carries
 the code as `error.code` on Chat Completions and Responses:
 `{"error": {"message": "...", "type": "server_error", "code": "upstream_rate_limited"}}`.
+On Messages, a stream the provider ends without `message_stop`, including one
+that sent no events at all, also ends in an `api_error` event rather than
+closing as if it had succeeded, and the request is settled as failed.
 
 ## Caller-orchestrated MCP
 

@@ -214,8 +214,8 @@ the three credentials they used. It is the only path that grants membership
 without somebody deciding about the person, and it is fenced accordingly: see
 [Email-domain auto-join](access-control.md#email-domain-auto-join).
 
-Mail is optional. Inviting a member always gives you an accept link to share,
-and an invitee who has never signed in chooses a password on the page it opens,
+Mail is optional. When an invitation email does not go out, you get the accept link to share,
+and an invitee new to the deployment chooses a password on the page it opens,
 so a deployment without SMTP can still bring people in. See [Configuration](configuration.md#mail).
 
 ## Bundled guide and custom documentation
@@ -234,4 +234,4 @@ privacy notice live. The account menu links each row it has an address for; see
 
 The dashboard source is under `web/`. The published Docker image includes the
 bundle. A source checkout needs `make dashboard` for the gateway to serve it, or
-`pnpm --dir web dev` for frontend development. See [web/README.md](https://github.com/mozilla-ai/otari/blob/v0.18.0/web/README.md).
+`pnpm --dir web dev` for frontend development. See [web/README.md](https://github.com/mozilla-ai/otari/blob/v0.19.0/web/README.md).
