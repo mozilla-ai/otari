@@ -317,7 +317,7 @@ async def run_passthrough(
                 model=model,
                 strategy=config.budget_strategy,
                 counts_toward_budget=not budget_exempt,
-                scope=BudgetScopeRequest(api_key=api_key, provider_instance=row_provider),
+                scope=BudgetScopeRequest(api_key=api_key, provider_instance=row_provider, model=row_model),
                 organization_id=organization_id,
             )
         except HTTPException as exc:
@@ -858,7 +858,7 @@ async def run_decision(
             model=None,
             strategy=config.budget_strategy,
             counts_toward_budget=not budget_exempt,
-            scope=BudgetScopeRequest(api_key=api_key, provider_instance=provider_name),
+            scope=BudgetScopeRequest(api_key=api_key, provider_instance=provider_name, model=model),
             organization_id=organization_id,
         )
     except HTTPException as exc:

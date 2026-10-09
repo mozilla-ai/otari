@@ -372,7 +372,7 @@ def test_a_second_ceiling_on_one_scope_is_refused(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """The partial unique index, reported as words a caller can act on."""
+    """The entity unique index, reported as words a caller can act on."""
     budget = client.post(_BUDGETS, json=_budget_body(), headers=master_key_header).json()
     body = {
         "scope_type": "organization",
@@ -383,6 +383,29 @@ def test_a_second_ceiling_on_one_scope_is_refused(
 
     refused = client.post(_CEILINGS, json=body, headers=master_key_header)
     assert refused.status_code == status.HTTP_409_CONFLICT, refused.text
+
+
+def test_each_model_of_a_provider_carries_its_own_ceiling(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """One ceiling per entity: the provider and each of its models are distinct entities, a repeat is not."""
+    budget = client.post(_BUDGETS, json=_budget_body(), headers=master_key_header).json()
+    scope = {"scope_type": "organization", "scope_id": budget["organization_id"], "budget_id": budget["budget_id"]}
+
+    for narrowing in (
+        {"provider_key_id": "openai"},
+        *({"provider_key_id": "openai", "model": m} for m in ("gpt-4o", "o3")),
+    ):
+        created = client.post(_CEILINGS, json={**scope, **narrowing}, headers=master_key_header)
+        assert created.status_code == status.HTTP_201_CREATED, created.text
+        assert created.json()["model"] == narrowing.get("model")
+
+    repeat = {**scope, "provider_key_id": "openai", "model": "gpt-4o"}
+    assert client.post(_CEILINGS, json=repeat, headers=master_key_header).status_code == status.HTTP_409_CONFLICT
+    orphan = {**scope, "model": "gpt-4o"}
+    refused = client.post(_CEILINGS, json=orphan, headers=master_key_header)
+    assert refused.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, refused.text
 
 
 def test_a_ceiling_on_an_unknown_scope_is_refused(
@@ -432,11 +455,10 @@ def test_a_blank_provider_narrowing_is_refused(
     """A ceiling narrowed to nothing would be created, listed, and never enforced.
 
     ``applicable_budgets`` matches ``provider_key_id == provider_instance OR IS
-    NULL``, and a blank string is neither: it stores as a narrowed row under
-    ``uq_scoped_budgets_scope_with_key`` and binds to no request ever. That is the
-    same permissive-direction failure a scope naming nothing has, so it is refused
-    at the schema rather than normalized, since folding it into null would quietly
-    cap *more* than the caller asked for.
+    NULL``, and a blank string is neither: it stores as a narrowed row and binds
+    to no request ever. That is the same permissive-direction failure a scope
+    naming nothing has, so it is refused at the schema rather than normalized,
+    since folding it into null would quietly cap *more* than the caller asked for.
     """
     budget = client.post(_BUDGETS, json=_budget_body(), headers=master_key_header).json()
 

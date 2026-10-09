@@ -269,6 +269,35 @@ def test_decisions_is_budget_enforced(client: TestClient, master_key_header: dic
     assert [(row["status"], row["status_code"]) for row in rows] == [("error", 403)]
 
 
+@pytest.mark.parametrize(("model", "refused"), [("jev-latest", True), ("another-model", False)])
+def test_decisions_is_held_to_a_model_ceiling(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    api_key_header: dict[str, str],
+    model: str,
+    refused: bool,
+) -> None:
+    """A ceiling narrowed to the decision's model binds it, and one on another model does not."""
+    budget = client.post(f"{API_ROOT}/budgets", json={"max_budget": 0.0}, headers=master_key_header).json()
+    created = client.post(
+        f"{API_ROOT}/scoped-budgets",
+        json={
+            "scope_type": "api_token",
+            "scope_id": api_key_obj["id"],
+            "provider_key_id": "typesafe",
+            "model": model,
+            "budget_id": budget["budget_id"],
+        },
+        headers=master_key_header,
+    )
+    assert created.status_code == 200, created.text
+
+    with _mock_decision():
+        resp = client.post(f"{API_ROOT}/decisions", json=PAYLOAD, headers=api_key_header)
+    assert (resp.status_code == 403) is refused, resp.text
+
+
 def test_decisions_reserves_against_the_token_limit(client: TestClient, master_key_header: dict[str, str]) -> None:
     budget = client.post(f"{API_ROOT}/budgets", json={"token_limit": 10}, headers=master_key_header).json()
     client.post(

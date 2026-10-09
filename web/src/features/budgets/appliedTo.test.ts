@@ -16,6 +16,7 @@ function entity(partial: Partial<AppliedEntity>): AppliedEntity {
     scope_type: "workspace",
     scope_id: "ws-1",
     provider_key_id: null,
+    model: null,
     ...partial,
   }
   const named = ["organization", "workspace"].includes(fields.scope_type)
@@ -71,6 +72,24 @@ describe("formatAppliedTo", () => {
       }),
     ])
     expect(label).toBe("Acme (organization), openai")
+  })
+
+  it("reads a model-narrowed entity as the model on its provider", () => {
+    const onOpenai = {
+      scope_type: "organization",
+      scope_id: "org-1",
+      provider_key_id: "openai",
+    } as const
+    expect(formatAppliedTo([entity({ ...onOpenai, model: "gpt-4o" })])).toBe(
+      "gpt-4o on openai",
+    )
+    expect(
+      formatAppliedTo([
+        entity(onOpenai),
+        entity({ ...onOpenai, model: "gpt-4o" }),
+        entity({ ...onOpenai, model: "o3" }),
+      ]),
+    ).toBe("openai, 2 models")
   })
 
   it("counts members and keys without inventing names for them", () => {

@@ -120,7 +120,10 @@ export function SpendCeilingsCard({
     {
       id: "provider",
       header: "Provider",
-      cell: (row) => row.provider_key_id ?? "Every provider",
+      cell: (row) =>
+        row.model
+          ? `${row.model} on ${row.provider_key_id}`
+          : (row.provider_key_id ?? "Every provider"),
     },
     {
       id: "limit",

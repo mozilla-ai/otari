@@ -311,7 +311,9 @@ def _organization_budget(owner: uuid.UUID | None) -> MagicMock:
 
 def test_organization_budget_public_names_the_owner() -> None:
     owner = uuid.uuid4()
-    entity = AppliedEntityPublic(scope_type="organization", scope_id=str(owner), provider_key_id=None, name="Acme")
+    entity = AppliedEntityPublic(
+        scope_type="organization", scope_id=str(owner), provider_key_id=None, model=None, name="Acme"
+    )
     public = OrganizationBudgetPublic.from_model(
         _organization_budget(owner), organization_id=owner, ceiling_count=2, applied_to=[entity, entity]
     )
