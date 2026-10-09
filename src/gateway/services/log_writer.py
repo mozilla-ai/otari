@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import time
+from decimal import Decimal
 from typing import Protocol
 
 from gateway.core.database import DATA_ERRORS, DATABASE_ERRORS, create_log_session
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter, Gauge, Histogram
 from gateway.models.usage import UsageLog
+from gateway.services.traces import LlmCall, RequestTraces
 
 QUEUE_DEPTH = Gauge(
     "gateway_usage_log_queue_depth",
@@ -249,3 +251,51 @@ class NoopLogWriter:
 
     async def stop(self) -> None:  # noqa: D401,B027
         return None
+
+
+class TracingLogWriter:
+    """A usage log writer that also hands each row to its request's trace as an LLM call.
+
+    Wraps whichever writer the deployment runs and changes nothing about how a row
+    is written: the call is recorded first, in memory, and the row then goes to
+    the wrapped writer exactly as before, so no settlement path has to know
+    traces exist.
+    """
+
+    def __init__(self, inner: LogWriter, traces: RequestTraces) -> None:
+        self._inner = inner
+        self._traces = traces
+
+    async def put(self, log: UsageLog) -> None:
+        trace = self._traces.get(log.request_group_id)
+        if trace is not None:
+            # The row is the billing record: tracing it must never be why it is not written.
+            try:
+                trace.record_llm_call(_llm_call(log))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Usage row not traced (%s)", type(exc).__name__)
+        await self._inner.put(log)
+
+    async def start(self) -> None:
+        await self._inner.start()
+
+    async def stop(self) -> None:
+        await self._inner.stop()
+
+
+def _llm_call(log: UsageLog) -> LlmCall:
+    return LlmCall(
+        attempt_id=log.id,
+        ended=log.timestamp,
+        latency_ms=log.latency_ms,
+        status=log.status,
+        status_code=log.status_code,
+        model=log.model,
+        provider=log.provider,
+        input_tokens=log.prompt_tokens,
+        output_tokens=log.completion_tokens,
+        cost=log.cost if isinstance(log.cost, Decimal) else None,
+        policy_name=log.policy_name,
+        selection_reason=log.selection_reason,
+        attempt_position=log.attempt_position,
+    )

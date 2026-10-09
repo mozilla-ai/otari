@@ -24,6 +24,7 @@ from gateway import features
 from gateway.api.deps import (
     build_file_service,
     build_idempotency_service,
+    build_trace_service,
     get_membership_listener,
     get_workspace_code_execution_policies,
     get_workspace_listener,
@@ -31,12 +32,13 @@ from gateway.api.deps import (
     set_config,
 )
 from gateway.api.main import register_routers
+from gateway.api.trace_capture import TraceCaptureMiddleware
 from gateway.container import Container, build_container
 from gateway.context_propagation import TraceContextPropagationMiddleware
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, dispose_db, init_db
 from gateway.core.error_codes import error_code_of, error_headers
-from gateway.core.feature import Worker
+from gateway.core.feature import CoreFeature, Worker
 from gateway.core.settings.tools import warn_about_tool_instances
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.exceptions import TenancyError
@@ -59,7 +61,7 @@ from gateway.services.dashboard_session_service import revoke_sessions_on_master
 from gateway.services.feedback import new_feedback_rate_limiter
 from gateway.services.files import FileBackends, run_file_sweeper
 from gateway.services.inference import close_decision_client, run_idempotency_sweeper
-from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
+from gateway.services.log_writer import LogWriter, NoopLogWriter, TracingLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
 from gateway.services.model_catalog_service import (
     clear_catalog_cache,
@@ -119,6 +121,7 @@ from gateway.services.tenancy.organization_guardrail_runner import (
     run_guardrail_runner_refresher,
 )
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
+from gateway.services.traces import RequestTraces, TraceWriter, stored_by
 from gateway.version import __version__
 
 # Every path here must be mounted; a contract test checks.
@@ -245,6 +248,27 @@ def _start_idempotency_sweeper(config: GatewayConfig, _container: Container) -> 
     )
 
 
+def _records_traces(config: GatewayConfig, enabled_features: tuple[CoreFeature, ...]) -> bool:
+    """Whether this deployment records agent traces: where the traces feature is on and it holds a database.
+
+    A hybrid data plane holds no database to keep them in, so it records none:
+    collecting spans it could only drop would cost every request for nothing.
+    """
+    return any(feature.name == "traces" for feature in enabled_features) and not config.is_hybrid_mode
+
+
+def _build_trace_writer(config: GatewayConfig) -> TraceWriter:
+    """The writer every request's trace is handed to."""
+    return TraceWriter(
+        stored_by(build_trace_service),
+        max_queued_spans=config.trace_queue_max_spans,
+        batch_spans=config.trace_flush_max_spans,
+        interval_s=config.trace_flush_interval_s,
+        write_timeout_s=config.trace_write_timeout_s,
+        shutdown_s=config.trace_shutdown_flush_s,
+    )
+
+
 def _start_container_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None] | None:
     """Return the sandbox container sweep, or None when no sandbox is held past its request."""
     if not config.sandbox_configured() or config.sandbox_container_idle_ttl_sec <= 0:
@@ -320,6 +344,7 @@ _LIFESPAN_WORKERS: tuple[_LifespanWorker, ...] = (
     _LifespanWorker("sandbox container sweep", _start_container_sweeper),
     # Stored responses hold generated content, so they go once their retention passes.
     _LifespanWorker("idempotency sweep", _start_idempotency_sweeper),
+    # A trace is kept for its retention and no longer.
 )
 
 
@@ -738,10 +763,23 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
         # Start the writer inside the try so a failure here still runs the cleanup
         # below; the refresher tasks are already created and would otherwise leak.
         log_writer_started = False
+        trace_writer: TraceWriter | None = None
+        trace_writer_started = False
         try:
+            # Inside the try, so a failure here still stops the workers started above.
+            # Wired only where create_app set up trace capture, which a bare app has not.
+            request_traces: RequestTraces | None = getattr(app.state, "request_traces", None)
+            if request_traces is not None:
+                # Each usage row a request settles also becomes an LLM span on its trace.
+                log_writer = TracingLogWriter(log_writer, request_traces)
+                trace_writer = _build_trace_writer(config)
             await log_writer.start()
             log_writer_started = True
             app.state.log_writer = log_writer
+            if trace_writer is not None:
+                await trace_writer.start()
+                trace_writer_started = True
+                app.state.trace_writer = trace_writer
             yield
         finally:
             await _stop_refreshers([(task, f"{worker.name} refresher") for task, worker in workers] + feature_workers)
@@ -752,6 +790,11 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             # nothing to stop, but the refreshers above still needed cancelling.
             if log_writer_started:
                 await log_writer.stop()
+            # After the log writer, whose last rows may still add LLM spans, and before
+            # the engines close. Bounded by its own shutdown limit.
+            if trace_writer is not None and trace_writer_started:
+                app.state.trace_writer = None
+                await trace_writer.stop()
             # POST /api/v1/search and /api/v1/decisions each dispatch on one pooled
             # client for the process, so shutdown owns closing them. Each is a no-op
             # when that endpoint was never served.
@@ -1095,8 +1138,18 @@ def create_app(config: GatewayConfig) -> FastAPI:
     # requests in progress and not only settled ones. Unconditional: the entry is
     # a dict insert and delete per request, and the middleware is what guarantees
     # an entry never outlives its response (see gateway.inflight).
+    # Asked once, so the routers, the workers, the middleware and the published surfaces cannot
+    # disagree when a setting changes after this point.
+    app.state.enabled_features = tuple(feature for feature in features.CORE_FEATURES if feature.enabled(config))
     app.state.inflight = InFlightRegistry()
     app.add_middleware(InFlightMiddleware, registry=app.state.inflight)
+    # Closes each request's trace once its response is sent, for the same reason the
+    # in-flight entry is dropped there: it is the one place every request passes once.
+    app.state.request_traces = None
+    app.state.trace_writer = None
+    if _records_traces(config, app.state.enabled_features):
+        app.state.request_traces = RequestTraces()
+        app.add_middleware(TraceCaptureMiddleware, traces=app.state.request_traces)
     if not config.is_hybrid_mode:
         app.add_middleware(RateLimitGrantMiddleware)
 
@@ -1119,9 +1172,6 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
     app.state.config = config
     app.state.gateway_mode = config.effective_mode
-    # Asked once, so the routers, the workers and the published surfaces cannot
-    # disagree when a setting changes after this point.
-    app.state.enabled_features = tuple(feature for feature in features.CORE_FEATURES if feature.enabled(config))
 
     # The composition root, built before the routers because a bootstrap may
     # contribute some of them. Per app rather than module-global, for the same
