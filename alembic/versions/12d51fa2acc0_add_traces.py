@@ -53,6 +53,7 @@ def upgrade() -> None:
     op.create_index("ix_traces_api_key_id", "traces", ["api_key_id"])
     op.create_index("ix_traces_workspace_last_activity", "traces", ["workspace_id", "last_activity_at"])
     op.create_index("ix_traces_last_activity", "traces", ["last_activity_at"])
+    op.create_index("ix_traces_started_at", "traces", ["started_at"])
 
     op.create_table(
         "trace_spans",
@@ -101,6 +102,7 @@ def downgrade() -> None:
     op.drop_index("ix_trace_spans_trace_tool_call", table_name="trace_spans")
     op.drop_index("ix_trace_spans_trace_start", table_name="trace_spans")
     op.drop_table("trace_spans")
+    op.drop_index("ix_traces_started_at", table_name="traces")
     op.drop_index("ix_traces_last_activity", table_name="traces")
     op.drop_index("ix_traces_workspace_last_activity", table_name="traces")
     op.drop_index("ix_traces_api_key_id", table_name="traces")

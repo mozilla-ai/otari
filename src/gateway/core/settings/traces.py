@@ -21,6 +21,14 @@ class TraceSettings(BaseModel):
         gt=0,
         description="Delete a trace once it has had no activity for this many days.",
     )
+    trace_session_max_age_days: Annotated[int, Shown(SettingsGroup.METERING)] = Field(
+        default=90,
+        gt=0,
+        description=(
+            "Delete a session's trace this many days after it started, even while it is still active, so a client "
+            "that keeps reusing one session id gets a new trace rather than one that never ends."
+        ),
+    )
     trace_queue_max_spans: Annotated[int, OMITTED] = Field(
         default=10_000,
         gt=0,

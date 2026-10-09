@@ -10,14 +10,17 @@ from gateway.services.traces._service import TraceService
 
 
 async def run_trace_retention(
-    build_service: Callable[[UnitOfWork], TraceService], *, retention_days: int, interval: float
+    build_service: Callable[[UnitOfWork], TraceService], *, retention_days: int, max_age_days: int, interval: float
 ) -> None:
-    """Expire traces idle longer than ``retention_days``, once per ``interval``, until shutdown."""
+    """Expire traces idle longer than ``retention_days`` or older than ``max_age_days``, once per ``interval``."""
     while True:
         await asyncio.sleep(interval)
         try:
             async with create_unit_of_work() as uow:
-                removed = await build_service(uow).expire(datetime.now(UTC) - timedelta(days=retention_days))
+                now = datetime.now(UTC)
+                removed = await build_service(uow).expire(
+                    idle_before=now - timedelta(days=retention_days), started_before=now - timedelta(days=max_age_days)
+                )
             if removed:
                 logger.info("Trace retention removed %d traces", removed)
         except asyncio.CancelledError:

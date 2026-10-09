@@ -26,6 +26,7 @@ X_LITERAL = re.compile(r"""["']([Xx]-[A-Za-z0-9-]+)["']""")
 # alone. Each reason says what owns the name.
 INHERITED_HEADERS = {
     "x-api-key": "Anthropic's credential header, which its SDKs send.",
+    "x-claude-code-session-id": "Claude Code's own session header, which traces read to group its requests.",
     "X-Content-Type-Options": "Browser security header, honored under this name only.",
     "X-Frame-Options": "Browser security header, honored under this name only.",
     "X-Forwarded-Proto": "Proxy convention, read and never sent.",

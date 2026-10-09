@@ -36,6 +36,8 @@ class Trace(Base):
     __table_args__ = (
         Index("ix_traces_workspace_last_activity", "workspace_id", "last_activity_at"),
         Index("ix_traces_last_activity", "last_activity_at"),
+        # Retention's age bound.
+        Index("ix_traces_started_at", "started_at"),
     )
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
