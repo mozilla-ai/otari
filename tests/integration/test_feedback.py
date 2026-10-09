@@ -22,11 +22,6 @@ from .conftest import build_test_client
 
 
 @pytest.fixture
-def test_config(test_config: GatewayConfig) -> GatewayConfig:
-    return test_config.model_copy(update={"feedback_enabled": True})
-
-
-@pytest.fixture
 def deliveries(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
     calls: list[httpx.Request] = []
 
