@@ -105,7 +105,15 @@ from gateway.api.routes._platform import (
     default_attempt_kwargs as default_attempt_kwargs,  # explicit re-export for the route modules
 )
 from gateway.api.routes._tools import _build_web_retrieval_backend, _resolve_sandbox_purpose_hint
-from gateway.core.config import ATTEMPT_ID_HEADER, END_USER_BUDGET_HEADER, REQUEST_ID_HEADER, GatewayConfig
+from gateway.core.config import (
+    ATTEMPT_COUNT_HEADER,
+    ATTEMPT_ID_HEADER,
+    END_USER_BUDGET_HEADER,
+    FALLBACK_HEADER,
+    PROVIDER_HEADER,
+    REQUEST_ID_HEADER,
+    GatewayConfig,
+)
 from gateway.core.database import DATABASE_ERRORS, release_session
 from gateway.core.env import otari_env
 from gateway.core.error_codes import (
@@ -1092,6 +1100,21 @@ class RequestContext:
 def _end_user_headers(ctx: RequestContext) -> dict[str, str]:
     """``Otari-End-User-Budget`` for a request that billed an end user on a budget."""
     return {END_USER_BUDGET_HEADER: ctx.end_user_budget_id} if ctx.end_user_budget_id else {}
+
+
+def _served_by_headers(ctx: RequestContext, provider: Any, chosen: Attempt | None, sent: int) -> dict[str, str]:
+    """The headers naming the instance that served a standalone request and how it was reached.
+
+    ``sent`` counts the candidates the request was sent to, so a candidate the walk
+    skipped without calling (a model a rate limit had no room on) is not in it, while
+    it still makes the one that served a fallback.
+    """
+    fell_back = chosen is not None and ctx.plan is not None and chosen.position != ctx.plan.attempts[0].position
+    return {
+        PROVIDER_HEADER: provider_key(provider),
+        ATTEMPT_COUNT_HEADER: str(sent),
+        FALLBACK_HEADER: "true" if fell_back else "false",
+    }
 
 
 def scope_prompt_cache_key(request_fields: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
@@ -4869,8 +4892,12 @@ async def run_single_attempt_stream(
                 return await open_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=attempt_kwargs)
 
             absorbed_rows: list[asyncio.Task[None]] = []
+            # Each absorbed failure is a candidate sent the request before the one that served.
+            sent = 1
 
             async def _absorbed(attempt: Attempt, exc: BaseException, _total: int) -> None:
+                nonlocal sent
+                sent += 1
                 await _write_absorbed_row(ctx, absorbed_rows, log_absorbed_attempt(ctx, adapter, attempt, exc))
 
             async def _skipped(attempt: Attempt, refusal: HTTPException) -> None:
@@ -4903,12 +4930,14 @@ async def run_single_attempt_stream(
                 await _absorbed_rows_written(absorbed_rows)
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
             stream_attribution = _attribution_for(ctx, chosen)
+            served_by = _served_by_headers(ctx, provider, chosen, sent)
         else:
             call_kwargs = await _admitted_and_prepared(ctx, adapter, prepare_kwargs, provider, model, call_kwargs)
             stream = await open_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
             # A single-candidate policy still names a policy and a reason, and
             # both belong on the row.
             stream_attribution = _attribution_for(ctx, ctx.plan.head) if ctx.plan is not None else None
+            served_by = _served_by_headers(ctx, provider, None, 1)
     except HTTPException:
         await release_reservation(ctx)
         raise
@@ -4947,7 +4976,7 @@ async def run_single_attempt_stream(
         model=model,
         config=ctx.config,
         db=ctx.db,
-        extra_headers=_container_headers(tool_ctx.container_lease) | _end_user_headers(ctx),
+        extra_headers=_container_headers(tool_ctx.container_lease) | _end_user_headers(ctx) | served_by,
         log_writer=ctx.log_writer,
         api_key_id=ctx.api_key_id,
         user_id=ctx.user_id,
@@ -5644,8 +5673,12 @@ async def run_standalone_non_stream(
                 )
 
             absorbed_rows: list[asyncio.Task[None]] = []
+            # Each absorbed failure is a candidate sent the request before the one that served.
+            sent = 1
 
             async def _absorbed(attempt: Attempt, exc: BaseException, _total: int) -> None:
+                nonlocal sent
+                sent += 1
                 await _write_absorbed_row(ctx, absorbed_rows, log_absorbed_attempt(ctx, adapter, attempt, exc))
 
             async def _skipped(attempt: Attempt, refusal: HTTPException) -> None:
@@ -5678,6 +5711,7 @@ async def run_standalone_non_stream(
                 await _absorbed_rows_written(absorbed_rows)
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
             attribution = _attribution_for(ctx, chosen)
+            served_by = _served_by_headers(ctx, provider, chosen, sent)
         else:
             call_kwargs = await _admitted_and_prepared(ctx, adapter, prepare_kwargs, provider, model, call_kwargs)
             result = await dispatch_non_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
@@ -5685,6 +5719,8 @@ async def run_standalone_non_stream(
             # both belong on the row: "served by its default target" is the answer to
             # the same question a fallover answers differently.
             attribution = _attribution_for(ctx, ctx.plan.head) if ctx.plan is not None else None
+            served_by = _served_by_headers(ctx, provider, None, 1)
+        response.headers.update(served_by)
         if ctx.rate_limit_info:
             for key, value in rate_limit_headers(ctx.rate_limit_info).items():
                 response.headers[key] = value

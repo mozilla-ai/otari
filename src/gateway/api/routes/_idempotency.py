@@ -24,8 +24,11 @@ from fastapi.encoders import jsonable_encoder
 from gateway.api.deps import build_idempotency_service, get_config, get_unit_of_work_if_needed
 from gateway.api.routes._helpers import GUARDRAILS_RESULT_HEADER
 from gateway.core.config import (
+    ATTEMPT_COUNT_HEADER,
     CONVERSATION_HEADER,
     END_USER_BUDGET_HEADER,
+    FALLBACK_HEADER,
+    PROVIDER_HEADER,
     REQUEST_ID_HEADER,
     ROUTER_HEADER,
     ROUTER_TASK_HEADER,
@@ -54,6 +57,9 @@ _REPLAYED_HEADERS = (
     "Otari-Container-Expires-At",
     GUARDRAILS_RESULT_HEADER,
     END_USER_BUDGET_HEADER,
+    PROVIDER_HEADER,
+    ATTEMPT_COUNT_HEADER,
+    FALLBACK_HEADER,
 )
 # The request headers that change what a request does, so they count toward
 # whether a retry is the same request.

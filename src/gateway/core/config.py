@@ -80,6 +80,13 @@ REQUEST_ID_HEADER = "Otari-Request-ID"
 # attempt ids, so this is the finer grained of the two. Hybrid mode only: a
 # standalone gateway resolves no attempts to name.
 ATTEMPT_ID_HEADER = "Otari-Attempt-ID"
+# Response headers describing how a standalone completion was served: the
+# provider instance that answered (its name, never its base URL), how many
+# candidates were sent the request, and whether a candidate other than the
+# plan's first served it. See docs/routing.md#what-is-billed-and-what-the-caller-sees.
+PROVIDER_HEADER = "Otari-Provider"
+ATTEMPT_COUNT_HEADER = "Otari-Attempt-Count"
+FALLBACK_HEADER = "Otari-Fallback"
 # Request header naming the budget a service key's new end user starts on, and
 # response header naming the budget that end user is on.
 END_USER_BUDGET_HEADER = "Otari-End-User-Budget"
