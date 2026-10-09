@@ -10507,12 +10507,22 @@ export interface components {
             /** Name */
             name: string;
             /**
+             * Offered Count
+             * @description How many models the organization offers on this key. Zero means the key has never been refreshed, so it is unnarrowed and reaches whatever its provider serves.
+             */
+            offered_count: number;
+            /**
              * Organization Id
              * Format: uuid
              */
             organization_id: string;
             /** Provider */
             provider: string;
+            /**
+             * Serving Count
+             * @description How many of the offered models have their serving switch on. A key offering models and serving none refuses every request through it until one is switched on.
+             */
+            serving_count: number;
             /** Updated At */
             updated_at?: string | null;
             /**

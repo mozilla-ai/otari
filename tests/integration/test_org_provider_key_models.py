@@ -59,6 +59,7 @@ from gateway.services.providers import OrgProviderModelService
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy import OrgProviderKeyService
 from gateway.services.tenancy.org_provider_key_service import (
+    cached_org_key_offer,
     cached_org_model_restriction,
     refresh_org_provider_cache,
     reset_org_provider_cache,
@@ -300,6 +301,30 @@ async def test_a_model_nothing_prices_is_offered_but_not_served(
     await _service(async_db).refresh_models(user=owner, key_id=key_id)
 
     assert await _offered(async_db, key_id) == {"gpt-4o": True, "gpt-6-unreleased": False}
+
+
+async def test_a_keys_row_counts_what_it_offers_and_what_serves(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The counts the Providers page shows, and the overlay a refusal is explained from."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    key_id = await _key(async_db, owner)
+    fresh_id = await _key(async_db, owner, provider="anthropic", name="fresh")
+    _discovery(monkeypatch, "gpt-4o", "gpt-6-unreleased")
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
+
+    listed = await OrgProviderKeyService(async_db).list_keys_for_user(user=owner)
+    counts = {row.id: (row.offered_count, row.serving_count) for row in listed.data}
+    assert counts == {key_id: (2, 1), fresh_id: (0, 0)}
+    offer = cached_org_key_offer(workspace.id, "openai")
+    assert offer is not None
+    assert offer.key_name == "primary"
+    assert offer.offered == {"gpt-4o": True, "gpt-6-unreleased": False}
+    assert cached_org_key_offer(workspace.id, "anthropic") is None
 
 
 async def test_a_provider_that_will_not_say_offers_nothing_and_says_why(

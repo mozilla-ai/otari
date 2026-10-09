@@ -102,9 +102,11 @@ The organization view contains tenant-wide administration:
   the runtime serves it. Each is priced by the first rung that answers, which is
   the order a request is metered by: this organization's own rate, then the
   deployment price list, then the community defaults. A model nothing prices is
-  offered and left unserved. Deployment providers is the process-wide credential
-  list, which a deployment operator manages and which is served to every
-  organization; it appears in standalone mode only.
+  offered and left unserved. Each key's row counts how many of its offered
+  models are serving, and a key serving none of them is marked, because every
+  request through it is refused until a switch is on. Deployment providers is
+  the process-wide credential list, which a deployment operator manages and
+  which is served to every organization; it appears in standalone mode only.
 
 Settings shows the effective non-secret configuration. Some values can be changed
 at runtime and others require a restart. The server marks that distinction in the

@@ -9702,6 +9702,11 @@
             "title": "Name",
             "type": "string"
           },
+          "offered_count": {
+            "description": "How many models the organization offers on this key. Zero means the key has never been refreshed, so it is unnarrowed and reaches whatever its provider serves.",
+            "title": "Offered Count",
+            "type": "integer"
+          },
           "organization_id": {
             "format": "uuid",
             "title": "Organization Id",
@@ -9710,6 +9715,11 @@
           "provider": {
             "title": "Provider",
             "type": "string"
+          },
+          "serving_count": {
+            "description": "How many of the offered models have their serving switch on. A key offering models and serving none refuses every request through it until one is switched on.",
+            "title": "Serving Count",
+            "type": "integer"
           },
           "updated_at": {
             "anyOf": [
@@ -9736,6 +9746,8 @@
           "name",
           "is_org_default",
           "usable",
+          "offered_count",
+          "serving_count",
           "created_at"
         ],
         "title": "OrgProviderKeyPublic",

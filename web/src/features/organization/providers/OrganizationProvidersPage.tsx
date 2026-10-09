@@ -427,6 +427,27 @@ export function OrganizationProvidersPage() {
       ),
     },
     {
+      id: "serving",
+      header: "Serving",
+      // A key that offers nothing has never been narrowed and reaches whatever
+      // its provider serves, so it has no count to show. One that offers models
+      // and serves none refuses every request through it, which is the state
+      // worth flagging before the first request finds it.
+      cell: (row) =>
+        row.offered_count === 0 ? (
+          <span className="text-subtle">all models</span>
+        ) : row.serving_count === 0 && !row.archived_at ? (
+          <span className="flex items-center gap-2 text-danger">
+            <Dot className="bg-danger" />
+            {`0 of ${row.offered_count} serving`}
+          </span>
+        ) : (
+          <span className="text-muted">
+            {`${row.serving_count} of ${row.offered_count} serving`}
+          </span>
+        ),
+    },
+    {
       id: "api_key",
       header: "API key",
       cell: (row) => (

@@ -775,6 +775,9 @@ export function orgProviderKey(
     // The default is a key this deployment can actually read. A test wanting the
     // other case says so, because that is the state the dashboard has to show.
     usable: true,
+    // Never refreshed: the key offers no rows and is unnarrowed.
+    offered_count: 0,
+    serving_count: 0,
     archived_at: null,
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: null,

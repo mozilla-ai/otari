@@ -65,18 +65,34 @@ class OrgProviderKeyPublic(SQLModel):
             "cannot read is still listed, because deleting or replacing it is what fixes it."
         )
     )
+    offered_count: int = Field(
+        description=(
+            "How many models the organization offers on this key. Zero means the key has never been "
+            "refreshed, so it is unnarrowed and reaches whatever its provider serves."
+        )
+    )
+    serving_count: int = Field(
+        description=(
+            "How many of the offered models have their serving switch on. A key offering models and "
+            "serving none refuses every request through it until one is switched on."
+        )
+    )
     archived_at: datetime | None = None
     created_at: datetime
     updated_at: datetime | None = None
 
     @classmethod
-    def from_row(cls, key: OrgProviderKey, *, usable: bool) -> OrgProviderKeyPublic:
+    def from_row(
+        cls, key: OrgProviderKey, *, usable: bool, offered_count: int = 0, serving_count: int = 0
+    ) -> OrgProviderKeyPublic:
         """Read one row for the API. Never includes the key, only ``last4``.
 
         ``usable`` is passed in rather than derived here: answering it means
         decrypting, which belongs to the service layer that owns the secret box.
         Required rather than defaulted so a caller cannot report a key as working
-        without having asked.
+        without having asked. The two counts come from the offered-models table,
+        and default to a key that offers nothing, which is the one a row has
+        before its first refresh.
 
         ``client_args`` is arbitrary JSON an admin can set (Bedrock's
         ``region_name``, other client kwargs), and a credential-shaped field
@@ -97,6 +113,8 @@ class OrgProviderKeyPublic(SQLModel):
             last4=key.last4,
             is_org_default=key.is_org_default,
             usable=usable,
+            offered_count=offered_count,
+            serving_count=serving_count,
             archived_at=key.archived_at,
             created_at=key.created_at,
             updated_at=key.updated_at,

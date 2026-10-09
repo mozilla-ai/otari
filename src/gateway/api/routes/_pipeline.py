@@ -213,7 +213,12 @@ from gateway.services.mcp_loop import (
     ToolBackend,
 )
 from gateway.services.mcp_stateless import failure_class
-from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
+from gateway.services.model_access import (
+    is_model_allowed,
+    model_not_allowed_detail,
+    org_model_refusal,
+    resolve_request_allowlist,
+)
 from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
@@ -254,7 +259,6 @@ from gateway.services.sandbox_backend import (
     SandboxUnavailableError,
 )
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
-from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
 from gateway.services.tenancy.organization_guardrail_runner import handle as guardrail_handle
 from gateway.services.tenancy.organization_guardrail_service import (
     ResolvedOrganizationGuardrail,
@@ -2183,9 +2187,8 @@ async def resolve_request_context(
             and gate_instance not in config.providers
             and (resolved_provider is None or resolved_provider.owned_endpoint is None)
         ):
-            org_allowlist = cached_org_model_restriction(workspace_id, gate_impl.value)
-            if org_allowlist is not None and gate_model not in org_allowlist:
-                not_allowed_detail = model_not_allowed_detail(model)
+            refusal = org_model_refusal(workspace_id, gate_impl.value, gate_model, selector=model)
+            if refusal is not None:
                 await log_gateway_rejection(
                     db=db,
                     log_writer=log_writer,
@@ -2194,15 +2197,14 @@ async def resolve_request_context(
                     model=gate_model,
                     provider=gate_instance,
                     endpoint=adapter.endpoint,
-                    detail=not_allowed_detail,
-                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=refusal.detail,
+                    status_code=refusal.status_code,
                     started_at=started_at,
                     request_id=request_id,
                     tags=tags,
                 )
-                raise adapter.error(
-                    403, not_allowed_detail, ErrorKind.PERMISSION, headers=error_headers(MODEL_NOT_ALLOWED)
-                )
+                kind = ErrorKind.NOT_FOUND if refusal.status_code == status.HTTP_404_NOT_FOUND else ErrorKind.PERMISSION
+                raise adapter.error(refusal.status_code, refusal.detail, kind, headers=error_headers(refusal.code))
 
         if idempotency is not None and session_principal is None:
             try:

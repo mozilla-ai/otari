@@ -122,6 +122,15 @@ rows at all, and that is not the same as offering none: it means the key is
 unnarrowed and reaches whatever its provider serves. Offering none, which is
 every model switched off, serves nothing.
 
+A refusal on that path says which narrowing turned the model away. A model the
+key offers with its switch off is a 403 with the code `model_not_serving`, naming
+the key and pointing at the switch. A model no key of the provider offers is a
+404 with `model_not_found`. A model the key serves that a workspace restriction
+or the API key's own allow-list excludes keeps the 403 `model_not_allowed`. The
+Providers page shows each key's serving count beside it, so a key offering models
+and serving none is visible before the first request. See
+[Error codes](api-reference.md#error-codes).
+
 Aliases and stored routing policies are workspace-scoped rows, and the catalog
 reads them for a workspace rather than filtering them by target, so a name alone
 would cross a tenant boundary that the allow-list cannot see. A session is

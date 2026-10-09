@@ -351,6 +351,8 @@ reworded.
 | `upstream_rate_limited` | 429 | The provider rate limited the gateway | `Retry-After` when the provider sent one |
 | `invalid_model` | 400 | The model selector names no configured provider | |
 | `model_not_allowed` | 403 | The key may not use the model | |
+| `model_not_serving` | 403 | The organization offers the model on a provider key, with its serving switch off | |
+| `model_not_found` | 404 | A provider key of the organization serves the provider, and none offers the model | |
 | `context_length_exceeded` | 400 | The prompt is too long for the model | |
 | `all_candidates_rejected` | 400 | Every model a routing policy, a catalog ID or the control plane tried rejected the request as invalid | |
 | `pricing_required` | 402 | `require_pricing` is on and the model has no price | |

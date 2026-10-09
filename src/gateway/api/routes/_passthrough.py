@@ -50,7 +50,7 @@ from gateway.api.routes._pipeline import (
 from gateway.api.routes._platform import _classify_upstream_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import release_session
-from gateway.core.error_codes import error_headers
+from gateway.core.error_codes import MODEL_NOT_ALLOWED, error_headers
 from gateway.core.metered_pricing import billable_usage, price_billable_usage, quantize_cost
 from gateway.inflight import track_request
 from gateway.log_config import logger
@@ -81,14 +81,18 @@ from gateway.services.inference import (
     resolve_decision_provider,
 )
 from gateway.services.log_writer import LogWriter
-from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
+from gateway.services.model_access import (
+    is_model_allowed,
+    model_not_allowed_detail,
+    org_model_refusal,
+    resolve_request_allowlist,
+)
 from gateway.services.pricing_service import (
     find_model_pricing,
     no_pricing_error_detail,
     pricing_required_but_missing,
 )
 from gateway.services.provider_kwargs import ResolvedProvider, missing_credential, resolve_provider_selector
-from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
 ResultT = TypeVar("ResultT")
@@ -439,6 +443,7 @@ async def run_passthrough(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=not_allowed_detail,
+            headers=error_headers(MODEL_NOT_ALLOWED),
         )
 
     # Organization-scoped model restriction (otari#643): mirrors `_pipeline.py`'s
@@ -446,19 +451,19 @@ async def run_passthrough(
     # configured instance, the same condition `provider_kwargs.get_provider_kwargs`
     # uses to decide whether to consult the organization overlay at all.
     if workspace_id is not None and resolved.instance not in config.providers:
-        org_allowlist = cached_org_model_restriction(workspace_id, resolved.provider.value)
-        if org_allowlist is not None and resolved.model not in org_allowlist:
+        refusal = org_model_refusal(workspace_id, resolved.provider.value, resolved.model, selector=model)
+        if refusal is not None:
             await refund_reservation(db, reservation)
-            not_allowed_detail = model_not_allowed_detail(model)
             await _log_rejection(
-                not_allowed_detail,
+                refusal.detail,
                 row_model=resolved.model,
                 row_provider=resolved.instance,
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=refusal.status_code,
             )
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=not_allowed_detail,
+                status_code=refusal.status_code,
+                detail=refusal.detail,
+                headers=error_headers(refusal.code),
             )
 
     # Already resolved above (needed there for organization-scoped provider
