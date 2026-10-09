@@ -636,6 +636,26 @@ async def verify_catalog_reader(
     return await verify_api_key_or_master_key(request, db, config)
 
 
+async def catalog_reader_operates_deployment(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
+) -> bool:
+    """Whether a caller :func:`verify_catalog_reader` admitted operates the deployment.
+
+    The question :func:`require_deployment_operator` asks, answered rather than
+    enforced, for a catalog read that shows its operator what it withholds from
+    everyone else. A session is put to the same
+    ``DeploymentUserService.has_administration_access``. Without one, the caller
+    holds the master key, which operates the deployment, or an API key, which
+    does not.
+    """
+    if session_identity is not None:
+        return await DeploymentUserService(db).has_administration_access(session_identity)
+    _, is_master_key = auth
+    return is_master_key
+
+
 async def verify_catalog_reader_or_public(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
