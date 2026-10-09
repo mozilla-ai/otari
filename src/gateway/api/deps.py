@@ -69,7 +69,7 @@ from gateway.services.providers import OrgProviderModelService, ProviderEndpoint
 from gateway.services.rate_limits import RateLimitService
 from gateway.services.routing import clear_router_backend_cache
 from gateway.services.tenancy import OrganizationService, organization_guardrail_runner
-from gateway.services.tenancy.authorization import WorkspaceAccess
+from gateway.services.tenancy.authorization import WorkspaceAccess, resolve_visible_workspace_scope
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, refresh_org_provider_cache
@@ -88,6 +88,7 @@ from gateway.services.tools import (
 )
 from gateway.services.traces import TraceService
 from gateway.services.workspace_scope import default_workspace_id
+from gateway.types.traces import TraceScope
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
 # ``create_app``); ``get_config`` reads from the request's app state and only
@@ -1288,6 +1289,41 @@ def get_rate_limit_service(
 
 RateLimitServiceDep = Annotated[RateLimitService, Depends(get_rate_limit_service)]
 TelemetryStoragePortDep = Annotated[TelemetryStoragePort, Depends(get_telemetry_storage_port)]
+
+
+def get_trace_service(uow: UnitOfWorkDep) -> TraceService:
+    """Build the request's traces service on the request's Unit of Work."""
+    return build_trace_service(uow)
+
+
+TraceServiceDep = Annotated[TraceService, Depends(get_trace_service)]
+
+
+def get_deployment_trace_scope() -> TraceScope:
+    """Every workspace: the scope of the deployment-operator trace routes, which their router gates."""
+    return TraceScope.deployment()
+
+
+async def get_organization_trace_scope(
+    identity: CurrentIdentity, db: Annotated[AsyncSession, Depends(get_db)]
+) -> TraceScope:
+    """The workspaces of their active organization this caller may read traces in.
+
+    The same rule the organization's usage reads use, resolved per request: an
+    owner or an admin reads every workspace in the organization, anyone else the
+    ones they actively belong to. Never taken from the request.
+    """
+    organizations = OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener())
+    scope = await resolve_visible_workspace_scope(db, user=identity, organizations=organizations)
+    if scope.workspace_ids is None:
+        return TraceScope.workspaces(
+            frozenset(await WorkspaceRepository(db).get_ids_by_organization(scope.organization.id))
+        )
+    return TraceScope.workspaces(frozenset(scope.workspace_ids))
+
+
+DeploymentTraceScopeDep = Annotated[TraceScope, Depends(get_deployment_trace_scope)]
+OrganizationTraceScopeDep = Annotated[TraceScope, Depends(get_organization_trace_scope)]
 WebSearchPolicyPortDep = Annotated[WebSearchPolicyPort, Depends(get_web_search_policy_port)]
 
 

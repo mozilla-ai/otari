@@ -87,6 +87,21 @@ class TraceWriter:
         self._ready = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
 
+    def discard_user(self, user_id: str) -> int:
+        """Drop every queued trace a user owns, before their traces are erased; return the spans dropped.
+
+        Erasure deletes what is stored, so what is still waiting here would otherwise
+        be written after it and bring the user's traces back.
+        """
+        kept = deque(trace for trace in self._queue if trace.user_id != user_id)
+        dropped = self._queued_spans - sum(len(trace.spans) for trace in kept)
+        self._queue = kept
+        self._queued_spans -= dropped
+        QUEUED_SPANS.set(self._queued_spans)
+        if dropped:
+            SPANS_DROPPED.labels(reason="erased").inc(dropped)
+        return dropped
+
     def submit(self, trace: TraceWrite, *, truncated: int = 0) -> None:
         """Queue one request's spans, or drop them all when they do not fit. Never waits."""
         if truncated:

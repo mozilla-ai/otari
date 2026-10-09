@@ -298,6 +298,20 @@ class TraceSummary:
     cost_snapshot: Decimal
 
 
+# The grain a series is bucketed by. Bucket starts cross the seam as canonical UTC
+# strings (``YYYY-MM-DDTHH:00:00Z``), so two adapters cannot disagree about a bucket.
+TraceBucketGrain = Literal["hour", "day"]
+
+
+@dataclass(frozen=True)
+class TraceBucket:
+    """How many traces started in one bucket, split by whether any of their spans failed unrecovered."""
+
+    bucket: str
+    succeeded: int
+    failed: int
+
+
 @dataclass(frozen=True)
 class TracePage:
     """One page of traces, newest activity first."""

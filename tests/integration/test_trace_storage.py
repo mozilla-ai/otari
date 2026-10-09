@@ -22,10 +22,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import GatewayConfig
 from gateway.core.database import dispose_db, init_db
 from gateway.core.unit_of_work import create_unit_of_work
+from gateway.exceptions.traces_exceptions import TraceAmbiguousError
 from gateway.models.users import User
 from gateway.repositories.tenancy import OrganizationRepository, WorkspaceRepository
 from gateway.repositories.traces import TracesRepositories
 from gateway.services.traces import TraceService
+from gateway.services.traces import _service as trace_service_module
 from gateway.types.traces import SpanRecord, TraceFilter, TraceScope, TraceWrite
 
 pytestmark = pytest.mark.asyncio
@@ -185,7 +187,7 @@ async def test_the_same_ids_in_two_workspaces_stay_two_traces(
     assert await store.count(TraceScope.deployment(), TraceFilter()) == 2
 
 
-async def test_get_reads_the_workspace_it_names_when_an_id_is_in_two(
+async def test_get_reads_the_workspace_it_names_and_refuses_to_guess_between_two(
     store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID]
 ) -> None:
     first, second = tenants
@@ -194,10 +196,10 @@ async def test_get_reads_the_workspace_it_names_when_an_id_is_in_two(
     both = TraceScope.deployment()
 
     named = await store.get(both, "session-1", span_limit=10, workspace_id=first)
-    unnamed = await store.get(both, "session-1", span_limit=10)
 
     assert named is not None and named.summary.workspace_id == first
-    assert unnamed is not None and unnamed.summary.workspace_id == second, "the most recently active one"
+    with pytest.raises(TraceAmbiguousError):
+        await store.get(both, "session-1", span_limit=10)
 
 
 async def test_a_trace_in_another_workspace_reads_as_absent(
@@ -347,3 +349,15 @@ async def test_expire_ends_a_session_kept_alive_past_its_age(
     await store.write((_write(workspace, "long", _span("req-3", minutes=700)),))
     detail = await store.get(TraceScope.deployment(), "long", span_limit=10)
     assert detail is not None and [span.span_id for span in detail.spans] == ["req-3"], "a fresh trace"
+
+
+async def test_a_series_returns_only_the_newest_buckets_however_wide_its_window(
+    store: TraceService, tenants: tuple[uuid.UUID, uuid.UUID], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, _ = tenants
+    monkeypatch.setattr(trace_service_module, "MAX_SERIES_BUCKETS", 2)
+    await store.write(tuple(_write(workspace, f"s{hour}", _span("req", minutes=60 * hour)) for hour in range(3)))
+
+    series = await store.series(TraceScope.deployment(), TraceFilter(), bucket="hour")
+
+    assert [point.bucket for point in series] == ["2026-10-07T13:00:00Z", "2026-10-07T14:00:00Z"]

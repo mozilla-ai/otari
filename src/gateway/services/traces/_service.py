@@ -10,10 +10,15 @@ from decimal import Decimal
 from typing import Any
 
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.traces_exceptions import TraceAmbiguousError, TraceNotFoundError
 from gateway.models.traces import Trace, TraceSpan
 from gateway.repositories.traces import TraceGrowth, TraceKey, TracesRepositories
+from gateway.services.traces._reading import MAX_SPANS_PER_READ, trace_view
+from gateway.types.trace_views import TraceView
 from gateway.types.traces import (
     SpanRecord,
+    TraceBucket,
+    TraceBucketGrain,
     TraceDetail,
     TraceFilter,
     TracePage,
@@ -22,6 +27,9 @@ from gateway.types.traces import (
     TraceWrite,
     WriteResult,
 )
+
+# The most buckets one series read returns: 90 days by the hour.
+MAX_SERIES_BUCKETS = 90 * 24
 
 
 class TraceService:
@@ -102,17 +110,49 @@ class TraceService:
         """Return one trace with up to ``span_limit`` spans, or None when the scope holds no such trace.
 
         A trace in another tenant's workspace reads as absent, never as forbidden.
+
+        Raises:
+            TraceAmbiguousError: no ``workspace_id`` was given and the id is in more
+                than one of the scope's workspaces.
         """
         async with self._uow:
-            row = await self._traces.find(_workspace_ids(scope), trace_id, workspace_id=workspace_id)
-            if row is None:
+            rows = await self._traces.find(_workspace_ids(scope), trace_id, workspace_id=workspace_id)
+            if not rows:
                 return None
+            if len(rows) > 1:
+                raise TraceAmbiguousError(trace_id)
+            row = rows[0]
             spans = await self._spans.for_trace(row.workspace_id, row.trace_id, limit=span_limit + 1)
             return TraceDetail(
                 summary=_summary(row),
                 spans=tuple(_span_record(span) for span in spans[:span_limit]),
                 truncated=len(spans) > span_limit,
             )
+
+    async def series(
+        self, scope: TraceScope, filters: TraceFilter, *, bucket: TraceBucketGrain
+    ) -> tuple[TraceBucket, ...]:
+        """Count the scope's matching traces per bucket of their start, oldest first, populated buckets only.
+
+        At most :data:`MAX_SERIES_BUCKETS`, the newest, whatever window the filters leave open.
+        """
+        async with self._uow:
+            rows = await self._traces.bucket_counts(
+                _workspace_ids(scope), filters, bucket=bucket, limit=MAX_SERIES_BUCKETS
+            )
+            return tuple(TraceBucket(bucket=key, succeeded=ok, failed=bad) for key, ok, bad in rows)
+
+    async def detail(self, scope: TraceScope, trace_id: str, *, workspace_id: uuid.UUID | None = None) -> TraceView:
+        """One session with its turns.
+
+        Raises:
+            TraceNotFoundError: the scope holds no such trace, including one in a workspace outside it.
+            TraceAmbiguousError: no ``workspace_id`` was given and the id is in more than one workspace.
+        """
+        stored = await self.get(scope, trace_id, span_limit=MAX_SPANS_PER_READ, workspace_id=workspace_id)
+        if stored is None:
+            raise TraceNotFoundError(trace_id)
+        return trace_view(stored, now=datetime.now(UTC))
 
     async def purge_user(self, user_id: str) -> int:
         """Delete every trace a user owns, in every workspace, for erasure."""

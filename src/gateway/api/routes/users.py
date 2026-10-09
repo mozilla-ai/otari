@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import (
     CallerOrganization,
     TelemetryStoragePortDep,
+    TraceServiceDep,
     get_config,
     get_db,
     require_deployment_operator,
@@ -27,6 +28,7 @@ from gateway.models.users import User
 from gateway.repositories.users_repository import UserFilter, count_users, in_organization, page_users
 from gateway.services.budgets import budget_window
 from gateway.services.model_access import validate_allowed_models
+from gateway.services.traces import TraceWriter
 
 router = APIRouter(
     prefix="/users",
@@ -380,12 +382,14 @@ async def update_user(
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
+    request: Request,
     user_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
     storage: TelemetryStoragePortDep,
+    traces: TraceServiceDep,
     organization_id: CallerOrganization,
 ) -> None:
-    """Delete a user in the caller's organization, and erase their telemetry."""
+    """Delete a user in the caller's organization, and erase their telemetry and agent traces."""
     user = await _load_user_in_organization(db, user_id, organization_id)
 
     # Explicit erasure, not a database ON DELETE cascade: this endpoint
@@ -414,6 +418,19 @@ async def delete_user(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not erase this user's telemetry; the user was not deleted",
+        ) from None
+    # Agent traces follow the same rule, for the same reason. What the trace writer
+    # still holds for the user goes first, or it would be written after the purge.
+    trace_writer: TraceWriter | None = getattr(request.app.state, "trace_writer", None)
+    if trace_writer is not None:
+        trace_writer.discard_user(user_id)
+    try:
+        await traces.purge_user(user_id)
+    except Exception:
+        logger.exception("Trace erasure failed for user %s; user was not deleted", user_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not erase this user's agent traces; the user was not deleted",
         ) from None
 
     await db.execute(
