@@ -20,7 +20,6 @@ import httpx
 from anthropic import APIConnectionError as _AnthropicAPIConnectionError
 from anthropic import APITimeoutError as _AnthropicAPITimeoutError
 from any_llm import LLMProvider
-from any_llm.exceptions import MissingApiKeyError
 from any_llm.types.completion import CompletionUsage
 from fastapi import HTTPException, status
 from openai import APIConnectionError as _OpenAIAPIConnectionError
@@ -47,7 +46,7 @@ from gateway.metrics import REGISTRY, Counter
 from gateway.services.bedrock_gateway_auth import build_bedrock_client_args
 from gateway.services.control_plane import ResolveEndpoint, resolve, transport
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
-from gateway.services.provider_kwargs import split_selector
+from gateway.services.provider_kwargs import missing_credential, no_candidate_configured_detail, split_selector
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_retrieval_backend import WebSearchNotReachableError
 
@@ -331,15 +330,6 @@ def no_attempt_served_detail(tried: int) -> str:
     return f"No model could serve the request ({tried} attempts)."
 
 
-def no_attempt_configured_detail(tried: int, providers: Sequence[str]) -> str:
-    """424 detail for a request no attempt could send, because none of their providers has a credential."""
-    names = ", ".join(sorted(set(providers))) or "unknown"
-    return (
-        f"No credential is configured for any provider this request could use ({tried} attempts: {names}). "
-        "Add one in config.yml or through the dashboard."
-    )
-
-
 def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | None:
     """The answer for attempts that all rejected the request alike, or ``None`` when they failed differently.
 
@@ -347,13 +337,11 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
     """
     if len(errors) < 2:
         return None
-    missing = [missing_credential_error(error) for error in errors]
-    if all(error is not None for error in missing):
+    missing = [missing_credential(error) for error in errors]
+    if all(entry is not None for entry in missing):
         return HTTPException(
             status_code=status.HTTP_424_FAILED_DEPENDENCY,
-            detail=no_attempt_configured_detail(
-                len(errors), [error.provider_name or "unknown" for error in missing if error is not None]
-            ),
+            detail=no_candidate_configured_detail([entry for entry in missing if entry is not None]),
             headers=error_headers(PROVIDER_NOT_CONFIGURED),
         )
     answers = [_provider_failure_http_exc(error, fallback_detail="") for error in errors]
@@ -760,20 +748,6 @@ def upstream_exception_chain(exc: BaseException) -> Iterator[BaseException]:
         current = getattr(current, "original_exception", None)
 
 
-def missing_credential_error(exc: BaseException) -> MissingApiKeyError | None:
-    """The ``MissingApiKeyError`` in ``exc``'s chain, if the call failed for want of a credential.
-
-    any-llm raises it before any request leaves the gateway, so the failure is
-    the deployment's configuration rather than the provider's, and every
-    classifier reading it (the client-facing status, the attempt label, the
-    usage row) must agree on that.
-    """
-    for current in upstream_exception_chain(exc):
-        if isinstance(current, MissingApiKeyError):
-            return current
-    return None
-
-
 def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | None, int | None]:
     """Classify the *shape* of an upstream exception, independent of retry policy.
 
@@ -938,7 +912,7 @@ def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:
     cancellations, and tool loops that already produced an assistant response are
     handled by the walker before this classifier runs.
     """
-    if missing_credential_error(exc) is not None:
+    if missing_credential(exc) is not None:
         return True, "missing_credential"
 
     kind, status_code = upstream_exception_shape(exc)

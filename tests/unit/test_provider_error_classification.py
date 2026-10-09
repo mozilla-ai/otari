@@ -41,13 +41,13 @@ from gateway.api.routes._pipeline import (
     classify_provider_error,
     failure_status_code,
     provider_error_headers,
-    provider_not_configured_detail,
     refusal_code,
 )
 from gateway.api.routes._platform import _provider_failure_http_exc, get_shared_rejection, upstream_retry_after
 from gateway.core.error_codes import PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
+from gateway.services.provider_kwargs import MissingCredential
 from gateway.services.upstream_redaction import MAX_EXPOSED_DETAIL_CHARS, redact_upstream_message
 from gateway.streaming import OPENAI_STREAM_FORMAT, openai_error_event
 
@@ -376,7 +376,7 @@ def test_missing_credential_maps_to_424_naming_the_provider_and_its_variable() -
     mapping = classify_provider_error(MissingApiKeyError("anthropic", "ANTHROPIC_API_KEY"))
     assert mapping is not None
     assert mapping.status_code == 424
-    assert mapping.detail == provider_not_configured_detail("anthropic", "ANTHROPIC_API_KEY")
+    assert mapping.detail == MissingCredential("anthropic", "ANTHROPIC_API_KEY").detail
     assert "'anthropic'" in mapping.detail
     assert "ANTHROPIC_API_KEY" in mapping.detail
     assert "Please provide it in the config" not in mapping.detail
@@ -424,8 +424,8 @@ def test_platform_terminal_exc_for_a_missing_credential_is_a_424() -> None:
     assert (exc.headers or {}).get("Otari-Error-Code") == PROVIDER_NOT_CONFIGURED
 
 
-def test_provider_not_configured_detail_without_a_variable() -> None:
-    assert provider_not_configured_detail("vertexai", None).endswith("through the dashboard.")
+def test_missing_credential_detail_without_a_variable() -> None:
+    assert MissingCredential("vertexai", None).detail.endswith("through the dashboard.")
 
 
 # ---------------------------------------------------------------------------
