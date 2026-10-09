@@ -4,9 +4,8 @@ import { login, MASTER_KEY } from "./helpers"
 const MESSAGE =
   "We use Otari to track research spending. Comparing groups would help."
 
-// Feedback is on by default, which is what the e2e gateway runs; the off case
-// is the bootstrap an operator's `feedback_enabled: false` produces. Every
-// submission is intercepted, so nothing reaches the gateway's receiver.
+// The e2e gateway has feedback on, so the off case is stubbed in the bootstrap.
+// Every submission is intercepted and never reaches the receiver.
 async function disableFeedback(page: Page) {
   await page.route("**/api/v1/bootstrap", async (route) => {
     const response = await route.fetch()
