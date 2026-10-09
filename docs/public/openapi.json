@@ -15721,7 +15721,6 @@
             "title": "Key In Url"
           },
           "kind": {
-            "default": "search",
             "description": "Whether this is a search provider or a fetch provider.",
             "enum": [
               "search",
@@ -15818,6 +15817,7 @@
         },
         "required": [
           "id",
+          "kind",
           "requires_api_key",
           "requires_api_base"
         ],
@@ -35829,17 +35829,17 @@
     },
     "/api/v1/search-tools/providers": {
       "get": {
-        "description": "List the providers a search or fetch tool may name, for the add-tool form.\n\nRead from the metadata any-search and any-fetch publish, so a provider a\nlibrary adds is listed with no change here. Reports per provider whether an\nAPI key is required, what endpoint a tool inherits when it declares none,\nand the native options a tool may set. Providers that exist only for tests\nare left out, and so is the fetch provider ``builtin``, which only the\nimplicit ``builtin_fetch`` tool uses.\n\nWhat belongs to this deployment rather than to the libraries, its own tools\non each provider and an endpoint a tool inherits from its settings, is\nshown only to a caller who operates the deployment: the tool settings\nreader withholds the same from anyone else.",
+        "description": "List the providers a search or fetch tool may name, for the add-tool form.\n\nThe list comes from the metadata any-search and any-fetch publish, so a\nprovider either library adds appears with no change to the gateway. Reports\nper provider whether an API key is required, what endpoint a tool inherits\nwhen it declares none, and the native options a tool may set. Providers that\nexist only for tests are left out, and so is the fetch provider ``builtin``,\nwhich only the implicit ``builtin_fetch`` tool uses.\n\nWhat belongs to this deployment rather than to the libraries, its own tools\non each provider and an endpoint a tool inherits from its settings, is\nshown only to a caller who operates the deployment: the tool settings\nreader withholds the same from anyone else.",
         "operationId": "search-tools-list_search_providers",
         "parameters": [
           {
-            "description": "Which providers to list: search providers, the default, or fetch providers.",
+            "description": "Which providers to list: search providers (the default) or fetch providers.",
             "in": "query",
             "name": "kind",
             "required": false,
             "schema": {
               "default": "search",
-              "description": "Which providers to list: search providers, the default, or fetch providers.",
+              "description": "Which providers to list: search providers (the default) or fetch providers.",
               "enum": [
                 "search",
                 "fetch"

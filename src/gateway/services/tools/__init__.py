@@ -8,6 +8,7 @@ and ``ToolUseBudget`` is the per-request cap on one tool's gateway-run calls.
 ``admit_code_execution`` admits its code execution, ``admit_mcp_servers`` its MCP servers,
 and ``apply_web_access_policy`` narrows its web access to what its workspace permits.
 ``web_search_max_results_baseline`` is how many search results a request gets when it names none.
+``search_provider_catalog`` lists the providers a search or fetch tool may name.
 """
 
 from gateway.services.tools._builtin_tool import BuiltinTool
@@ -46,6 +47,7 @@ from gateway.services.tools._native import (
     NativeRendering,
 )
 from gateway.services.tools._registry import BUILTIN_TOOLS, native_rendering
+from gateway.services.tools._search_provider_catalog import search_provider_catalog
 from gateway.services.tools._use_budget import MAX_USES_EXCEEDED_ERROR, ToolUseBudget, is_capped_call
 from gateway.services.tools._web_access import WebAccessGrant, apply_web_access_policy
 from gateway.services.tools._web_admission import (
@@ -116,4 +118,5 @@ __all__ = [
     "web_search_declaration_forms",
     "web_search_intercept_enabled",
     "web_search_max_results_baseline",
+    "search_provider_catalog",
 ]

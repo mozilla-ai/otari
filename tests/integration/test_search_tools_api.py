@@ -18,9 +18,9 @@ from sqlalchemy.orm import Session
 
 import any_fetch
 import any_search
-from gateway.api.routes.search_tools import SearchProviderOptionSchema
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User
+from gateway.schemas.tools import SearchProviderOptionSchema
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.search_backend import SearchHit, SearchOutcome
 from gateway.services.search_tool_store_service import reset_search_tool_cache

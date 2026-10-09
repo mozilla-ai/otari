@@ -24,20 +24,17 @@ about this deployment, its tools and their inherited endpoints, only an operator
 sees.
 """
 
-from collections.abc import Mapping
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import any_fetch
-import any_search
 from gateway.api.deps import (
+    catalog_reader_operates_deployment,
     get_config,
     get_db,
-    get_session_identity,
     require_deployment_operator,
     verify_catalog_reader,
 )
@@ -45,21 +42,13 @@ from gateway.core.config import GatewayConfig
 from gateway.core.settings.tools import (
     SEARCH_PROVIDERS,
     SEARCH_PROVIDERS_REQUIRING_API_BASE,
-    SEARCH_PROVIDERS_REQUIRING_API_KEY,
-    SEARCH_PROVIDERS_WITHOUT_ADAPTER,
-    ToolInstance,
     ToolKind,
-    default_api_base,
-    effective_fetch_instances,
-    effective_search_instances,
-    supported_fetch_providers,
     validate_search_tool_entry,
     validate_search_tool_transport,
 )
 from gateway.log_config import logger
-from gateway.models.api_keys import APIKey
-from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tools import SearchToolCredential
+from gateway.schemas.tools import SearchProviderSchema
 from gateway.services.search_tool_store_service import (
     UNSET,
     config_file_search_tools,
@@ -76,8 +65,8 @@ from gateway.services.secret_box import (
     SecretDecryptionError,
     decrypt_secret,
 )
-from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tool_settings_service import validate_url
+from gateway.services.tools import search_provider_catalog
 
 router = APIRouter(
     prefix="/search-tools",
@@ -85,83 +74,16 @@ router = APIRouter(
     dependencies=[Depends(require_deployment_operator)],
 )
 # The provider catalog, which describes the installed libraries, and only to an
-# operator anything this deployment configured. A tenant reaches it: organization search
-# keys name a provider too, and it is owners and admins who fill that form,
-# never an operator. Gated like the other catalog reads so admitting a session
-# is spelled at the router (see ``deps.verify_catalog_reader``). The route names
-# the gate a second time as a parameter because it uses what the gate resolves;
-# ``Depends`` caching means it still runs once per request.
+# operator anything this deployment configured. A tenant reaches it:
+# organization search keys name a provider too, and it is owners and admins who
+# fill that form, never an operator. Gated like the other catalog reads so
+# admitting a session is spelled at the router (see
+# ``deps.verify_catalog_reader``).
 catalog_router = APIRouter(
     prefix="/search-tools",
     tags=["search-tools"],
     dependencies=[Depends(verify_catalog_reader)],
 )
-
-
-class SearchProviderOptionSchema(BaseModel):
-    """One native option a provider accepts, under the provider's own name."""
-
-    name: str
-    type: Literal["string", "integer", "number", "boolean", "array", "object"]
-    enum: list[str] | None = Field(default=None, description="The only values it takes, when it is limited to a list.")
-    default: Any = Field(default=None, description="The value the provider uses when the option is not set.")
-    description: str = ""
-    operator_only: bool = Field(
-        default=False,
-        description="True when only an instance or a credential may set it, never a workspace or a request.",
-    )
-
-
-class SearchProviderSchema(BaseModel):
-    """One provider a search or fetch instance may name, for the add-tool form.
-
-    One schema for both capabilities: the fields they share, then each one's
-    own, which are null on the other's entries.
-    """
-
-    id: str = Field(description="Value to send as 'provider'.")
-    kind: ToolKind = Field(default="search", description="Whether this is a search provider or a fetch provider.")
-    requires_api_key: bool = Field(description="True when a tool on this provider must carry an API key.")
-    requires_api_base: bool = Field(
-        description="True when this provider has no endpoint of its own, so the tool must say where the backend is."
-    )
-    default_api_base: str | None = Field(
-        default=None,
-        description=(
-            "The endpoint a tool on this provider uses when it declares no api_base. "
-            "Null means nothing supplies one, so an api_base is required. One that comes from the "
-            "deployment's own settings, such as the web_search_url a searxng tool inherits, is shown only "
-            "to a caller who operates the deployment: nothing else inherits it, an organization's key included."
-        ),
-    )
-    doc_url: str | None = Field(default=None, description="The provider's API documentation.")
-    tier: str | None = Field(default=None, description="The library's tier for the provider.")
-    options: list[SearchProviderOptionSchema] | None = Field(
-        default=None,
-        description=(
-            "The native options a tool may set, under the provider's own names. "
-            "Null when there is no schema for the provider yet, so a tool's options are passed unchecked."
-        ),
-    )
-    instances: list[str] = Field(
-        default_factory=list,
-        description=(
-            "The names of this deployment's configured and stored tools on this provider, "
-            "shown only to a caller who operates the deployment."
-        ),
-    )
-    max_results: int | None = Field(default=None, description="Search: the most results one call can ask for.")
-    query_in_url: bool | None = Field(
-        default=None, description="Search: true when the query travels in the request URL."
-    )
-    key_in_url: bool | None = Field(
-        default=None, description="Search: true when the API key travels in the request URL."
-    )
-    max_urls_per_call: int | None = Field(default=None, description="Fetch: the most pages one call can fetch.")
-    renders_javascript: bool | None = Field(
-        default=None, description="Fetch: true when the provider runs a page's JavaScript before reading it."
-    )
-    formats: list[str] | None = Field(default=None, description="Fetch: the formats the page text comes back in.")
 
 
 class StoredSearchToolSchema(BaseModel):
@@ -324,138 +246,29 @@ async def _apply_write(db: AsyncSession, config: GatewayConfig, name: str) -> No
         logger.warning("Search tool overlay refresh failed after writing '%s'; converges within TTL", name)
 
 
-def _instance_names(instances: Mapping[str, ToolInstance]) -> dict[str, list[str]]:
-    """The instances' names, sorted, by the provider each runs on."""
-    names: dict[str, list[str]] = {}
-    for name, instance in sorted(instances.items()):
-        names.setdefault(instance.provider, []).append(name)
-    return names
-
-
-def _option_schemas(
-    options: list[any_search.OptionSpec] | list[any_fetch.OptionSpec],
-) -> list[SearchProviderOptionSchema]:
-    return [SearchProviderOptionSchema(**option.model_dump()) for option in options]
-
-
-async def _operates_the_deployment(
-    db: AsyncSession, auth: tuple[APIKey | None, bool], session_identity: TenancyUser | None
-) -> bool:
-    """Whether the caller operates the deployment, as ``require_deployment_operator`` decides it.
-
-    A session is put to the question that gate puts it to. Without one, the
-    caller holds the master key, which operates the deployment, or an API key,
-    which does not.
-    """
-    if session_identity is not None:
-        return await DeploymentUserService(db).has_administration_access(session_identity)
-    _, is_master_key = auth
-    return is_master_key
-
-
-def _search_providers(config: GatewayConfig, *, operates: bool) -> list[SearchProviderSchema]:
-    instances = _instance_names(effective_search_instances(config)) if operates else {}
-    served = {
-        provider: any_search.AnySearch.get_provider_metadata(provider)
-        for provider in any_search.AnySearch.get_supported_providers()
-    }
-    served = {provider: metadata for provider, metadata in served.items() if metadata.tier != "test"}
-    entries = []
-    for provider in sorted({*served, *SEARCH_PROVIDERS_WITHOUT_ADAPTER}):
-        metadata = served.get(provider)
-        library_base = metadata.default_api_base if metadata is not None else None
-        # An endpoint other than the library's comes from this deployment's
-        # settings, such as the web_search_url a searxng tool inherits, so only
-        # an operator is shown the one a tool would really use.
-        api_base = default_api_base(config, provider) if operates else library_base
-        if metadata is None:
-            # No adapter, so no metadata and no option schema: the gateway's own
-            # tables say what a tool on it needs, so the form can offer it.
-            entries.append(
-                SearchProviderSchema(
-                    id=provider,
-                    kind="search",
-                    requires_api_key=provider in SEARCH_PROVIDERS_REQUIRING_API_KEY,
-                    requires_api_base=provider in SEARCH_PROVIDERS_REQUIRING_API_BASE,
-                    default_api_base=api_base,
-                    instances=instances.get(provider, []),
-                )
-            )
-            continue
-        entries.append(
-            SearchProviderSchema(
-                id=provider,
-                kind="search",
-                requires_api_key=metadata.requires_api_key,
-                requires_api_base=metadata.requires_api_base,
-                default_api_base=api_base,
-                doc_url=metadata.doc_url,
-                tier=metadata.tier,
-                options=_option_schemas(metadata.options),
-                instances=instances.get(provider, []),
-                max_results=metadata.max_results,
-                query_in_url=metadata.query_in_url,
-                key_in_url=metadata.key_in_url,
-            )
-        )
-    return entries
-
-
-def _fetch_providers(config: GatewayConfig, *, operates: bool) -> list[SearchProviderSchema]:
-    # ``builtin`` is not offered: only the implicit builtin_fetch instance runs on it.
-    instances = _instance_names(effective_fetch_instances(config)) if operates else {}
-    entries = []
-    for provider in supported_fetch_providers():
-        metadata = any_fetch.AnyFetch.get_provider_metadata(provider)
-        if metadata.tier == "test":
-            continue
-        entries.append(
-            SearchProviderSchema(
-                id=provider,
-                kind="fetch",
-                requires_api_key=metadata.requires_api_key,
-                requires_api_base=metadata.requires_api_base,
-                default_api_base=metadata.default_api_base,
-                doc_url=metadata.doc_url,
-                tier=metadata.tier,
-                options=_option_schemas(metadata.options),
-                instances=instances.get(provider, []),
-                max_urls_per_call=metadata.max_urls_per_call,
-                renders_javascript=metadata.renders_javascript,
-                formats=list(metadata.formats),
-            )
-        )
-    return sorted(entries, key=lambda entry: entry.id)
-
-
 @catalog_router.get("/providers")
 async def list_search_providers(
-    db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
-    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    operates: Annotated[bool, Depends(catalog_reader_operates_deployment)],
     kind: Annotated[
-        ToolKind, Query(description="Which providers to list: search providers, the default, or fetch providers.")
+        ToolKind, Query(description="Which providers to list: search providers (the default) or fetch providers.")
     ] = "search",
 ) -> list[SearchProviderSchema]:
     """List the providers a search or fetch tool may name, for the add-tool form.
 
-    Read from the metadata any-search and any-fetch publish, so a provider a
-    library adds is listed with no change here. Reports per provider whether an
-    API key is required, what endpoint a tool inherits when it declares none,
-    and the native options a tool may set. Providers that exist only for tests
-    are left out, and so is the fetch provider ``builtin``, which only the
-    implicit ``builtin_fetch`` tool uses.
+    The list comes from the metadata any-search and any-fetch publish, so a
+    provider either library adds appears with no change to the gateway. Reports
+    per provider whether an API key is required, what endpoint a tool inherits
+    when it declares none, and the native options a tool may set. Providers that
+    exist only for tests are left out, and so is the fetch provider ``builtin``,
+    which only the implicit ``builtin_fetch`` tool uses.
 
     What belongs to this deployment rather than to the libraries, its own tools
     on each provider and an endpoint a tool inherits from its settings, is
     shown only to a caller who operates the deployment: the tool settings
     reader withholds the same from anyone else.
     """
-    operates = await _operates_the_deployment(db, auth, session_identity)
-    if kind == "fetch":
-        return _fetch_providers(config, operates=operates)
-    return _search_providers(config, operates=operates)
+    return search_provider_catalog(config, kind, operates=operates)
 
 
 @router.get("")

@@ -4557,12 +4557,12 @@ export interface paths {
          * List Search Providers
          * @description List the providers a search or fetch tool may name, for the add-tool form.
          *
-         *     Read from the metadata any-search and any-fetch publish, so a provider a
-         *     library adds is listed with no change here. Reports per provider whether an
-         *     API key is required, what endpoint a tool inherits when it declares none,
-         *     and the native options a tool may set. Providers that exist only for tests
-         *     are left out, and so is the fetch provider ``builtin``, which only the
-         *     implicit ``builtin_fetch`` tool uses.
+         *     The list comes from the metadata any-search and any-fetch publish, so a
+         *     provider either library adds appears with no change to the gateway. Reports
+         *     per provider whether an API key is required, what endpoint a tool inherits
+         *     when it declares none, and the native options a tool may set. Providers that
+         *     exist only for tests are left out, and so is the fetch provider ``builtin``,
+         *     which only the implicit ``builtin_fetch`` tool uses.
          *
          *     What belongs to this deployment rather than to the libraries, its own tools
          *     on each provider and an endpoint a tool inherits from its settings, is
@@ -13437,7 +13437,6 @@ export interface components {
             /**
              * Kind
              * @description Whether this is a search provider or a fetch provider.
-             * @default search
              * @enum {string}
              */
             kind: "search" | "fetch";
@@ -23194,7 +23193,7 @@ export interface operations {
     "search-tools-list_search_providers": {
         parameters: {
             query?: {
-                /** @description Which providers to list: search providers, the default, or fetch providers. */
+                /** @description Which providers to list: search providers (the default) or fetch providers. */
                 kind?: "search" | "fetch";
             };
             header?: never;
