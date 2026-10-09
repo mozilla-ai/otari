@@ -31,6 +31,8 @@ PRICING_REQUIRED = "pricing_required"
 END_USER_BUDGET_NOT_ALLOWED = "end_user_budget_not_allowed"
 ALL_CANDIDATES_REJECTED = "all_candidates_rejected"
 PROVIDER_NOT_CONFIGURED = "provider_not_configured"
+# A request body or parameter that failed schema validation (a 422).
+INVALID_REQUEST = "invalid_request"
 # Sent only in a stream's error event: the provider failed after the stream
 # started, for a reason no more specific code names.
 PROVIDER_ERROR = "provider_error"

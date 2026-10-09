@@ -6977,6 +6977,12 @@
       },
       "HTTPValidationError": {
         "properties": {
+          "code": {
+            "const": "invalid_request",
+            "description": "Stable error code, also sent as the Otari-Error-Code header.",
+            "title": "Code",
+            "type": "string"
+          },
           "detail": {
             "items": {
               "$ref": "#/components/schemas/ValidationError"
