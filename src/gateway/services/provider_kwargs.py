@@ -39,6 +39,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -250,10 +251,48 @@ def uncredentialed_env_names(config: GatewayConfig, instance: str, entry: Mappin
     env_names = provider_credential_env_names(provider.value)
     if not env_names:
         return None
-    kwargs = {key: value for key, value in entry.items() if key not in _INSTANCE_META_KEYS}
-    if not credential_ladder_exhausted(provider, kwargs):
+    if _entry_declares_a_credential(entry):
+        return None
+    # Asked with no kwargs: the entry contributes nothing that authenticates, so
+    # the provider's own rules (keyless, ambient credentials, its variable being
+    # set) decide whether the call could still go out.
+    if not credential_ladder_exhausted(provider, {}):
         return None
     return tuple(env_names)
+
+
+# Field names that hold something a call can authenticate with. An entry's other
+# fields are call options (``temperature``, ``timeout``), which a request would
+# carry upstream without ever being let in.
+_CREDENTIAL_FIELD = re.compile(r"key|token|secret|credential|password|auth", re.IGNORECASE)
+
+
+def _entry_declares_a_credential(entry: Mapping[str, Any]) -> bool:
+    """Whether a ``providers:`` entry holds anything a call could authenticate with.
+
+    A non-empty credential-named field does, and so does an ``api_base`` (which
+    takes the keyless placeholder) or ``client_args`` carrying a credential-named
+    field, such as an ``Authorization`` default header.
+    """
+    for key, value in entry.items():
+        if key in _INSTANCE_META_KEYS or not value:
+            continue
+        if key == "api_base" or _CREDENTIAL_FIELD.search(key):
+            return True
+        if key == "client_args" and isinstance(value, Mapping) and _mapping_declares_a_credential(value):
+            return True
+    return False
+
+
+def _mapping_declares_a_credential(mapping: Mapping[str, Any]) -> bool:
+    for key, value in mapping.items():
+        if not value:
+            continue
+        if _CREDENTIAL_FIELD.search(str(key)):
+            return True
+        if isinstance(value, Mapping) and _mapping_declares_a_credential(value):
+            return True
+    return False
 
 
 def prune_uncredentialed_providers(config: GatewayConfig) -> dict[str, tuple[str, ...]]:

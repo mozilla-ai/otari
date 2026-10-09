@@ -718,6 +718,8 @@ def uncredentialed_warnings(
         pytest.param({}, id="no-settings"),
         pytest.param({"client_args": {"timeout": 60}}, id="transport-only"),
         pytest.param({"provider_type": "openai", "models": ["gpt-4o"]}, id="meta-only"),
+        pytest.param({"api_key": "", "temperature": 0.7}, id="call-options-are-not-credentials"),
+        pytest.param({"api_key": "", "client_args": {"default_headers": {"X-Trace": "1"}}}, id="non-auth-headers"),
     ],
 )
 def test_entry_without_a_credential_names_the_variables_it_lacks(
@@ -739,6 +741,13 @@ def test_entry_without_a_credential_names_the_variables_it_lacks(
         pytest.param("bedrock", {}, {}, id="ambient-credential"),
         pytest.param("vertexai", {}, {}, id="no-credential-variable"),
         pytest.param("mystery", {"provider_type": "not-a-provider"}, {}, id="unknown-type"),
+        pytest.param(
+            "openai",
+            {"api_key": "", "client_args": {"default_headers": {"Authorization": "Bearer t"}}},
+            {},
+            id="auth-header-in-client-args",
+        ),
+        pytest.param("openai", {"azure_ad_token": "t"}, {}, id="other-credential-field"),
     ],
 )
 def test_entry_that_can_be_called_is_not_uncredentialed(
