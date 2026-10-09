@@ -23,7 +23,7 @@ updates:
   # This block adds *version* updates. Security updates are a separate feature
   # that needs no config and already runs here, which is why advisory-driven
   # bumps arrived for years while a stale-but-unvulnerable package like
-  # genai-prices sat six releases behind.
+  # a floored dependency sat six releases behind.
   #
   # What version updates do for a lockfile entry whose declared floor already
   # permits the newer version is not documented for uv, so
