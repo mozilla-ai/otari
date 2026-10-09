@@ -10436,7 +10436,7 @@
         "type": "object"
       },
       "OrganizationBudgetPublic": {
-        "description": "One of the organization's budgets, and how much of its own config names it.\n\nCarries no spend rollup. ``BudgetResponse`` on the deployment surface sums\n``users.spend`` over the gateway's ``users`` table, which is deployment-wide\nand has no tenancy column, so the same figure here would be a cross-tenant\nread. What an organization's own spend is, is a question for Usage.\n\n``ceiling_count`` is the organization-relevant fact instead: how many\nceilings name this budget, which is what makes a delete refuse. It counts\nevery one, including a ceiling the deployment operator pointed at this budget\nfrom outside the organization, which ``applied_to`` leaves out.",
+        "description": "One of the organization's budgets, and how much of its own config names it.\n\nCarries no spend rollup. ``BudgetResponse`` on the deployment surface sums\n``users.spend`` over the gateway's ``users`` table, which is deployment-wide\nand has no tenancy column, so the same figure here would be a cross-tenant\nread. What an organization's own spend is, is a question for Usage.\n\n``ceiling_count`` is the organization-relevant fact instead: how many\nceilings name this budget. It counts every one, including a ceiling the\ndeployment operator pointed at this budget from outside the organization,\nwhich ``applied_to`` leaves out and which is what makes a delete refuse.",
         "properties": {
           "applied_to": {
             "description": "Every entity the budget applies to, oldest first",
@@ -27356,7 +27356,7 @@
     },
     "/api/v1/organizations/me/budgets/{budget_id}": {
       "delete": {
-        "description": "Delete a budget, refused with 409 while a ceiling or workspace default names it.",
+        "description": "Delete a budget and stop it applying to every entity it applied to, in one step.\n\nRefused with 409 while a workspace member default names it.",
         "operationId": "organization-budgets-delete_organization_budget",
         "parameters": [
           {
@@ -30504,6 +30504,24 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Only the ceilings applying this budget",
+            "in": "query",
+            "name": "budget_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the ceilings applying this budget",
+              "title": "Budget Id"
             }
           }
         ],

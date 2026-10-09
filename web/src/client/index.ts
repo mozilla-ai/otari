@@ -310,6 +310,8 @@ export type CreateOrganizationBudget = Schemas["OrganizationBudgetCreate"]
 export type UpdateOrganizationBudget = Schemas["OrganizationBudgetUpdate"]
 export type AppliedEntity = Schemas["AppliedEntity"]
 export type OrganizationSpendCeiling = Schemas["OrganizationScopedBudgetPublic"]
+export type OrganizationSpendCeilings =
+  Schemas["OrganizationScopedBudgetsPublic"]
 export type PricingRefreshChange = Schemas["PricingRefreshChangeResponse"]
 export type PricingRefreshPreview = Schemas["PricingRefreshPreviewResponse"]
 export type AcceptedPricingSnapshot = Schemas["AcceptedSnapshotResponse"]

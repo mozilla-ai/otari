@@ -118,7 +118,9 @@ deployment. Budgets is the clearest case: an organization owner or
 admin manages their own organization's budgets, each a limit, a reset cycle and
 the entities it applies to (the organization, workspaces, members, API keys,
 providers and models), while a deployment operator gets the deployment-wide
-budgets and the gateway users assigned to them.
+budgets and the gateway users assigned to them. Each organization budget has a
+page of its own showing what every entity has spent this cycle, and deleting a
+budget stops it capping everything it applies to.
 
 Providers answers to the organization role rather than to deployment authority.
 Its owners and admins manage the keys, the models each key offers, and the rate

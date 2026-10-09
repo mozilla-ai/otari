@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router"
 import { FiEdit2, FiTrash2 } from "react-icons/fi"
 
 import type { OrganizationBudget } from "@/client"
@@ -33,7 +34,15 @@ export function OrganizationBudgetsTable({
       id: "name",
       header: "Name",
       isRowHeader: true,
-      cell: (row) => <span className="text-body">{nameBudget(row)}</span>,
+      cell: (row) => (
+        <Link
+          to="/budgets/$budgetId"
+          params={{ budgetId: row.budget_id }}
+          className="text-link hover:text-link-hover"
+        >
+          {nameBudget(row)}
+        </Link>
+      ),
     },
     {
       id: "limit",

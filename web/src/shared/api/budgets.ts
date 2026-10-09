@@ -6,16 +6,21 @@ import type {
   CreateOrganizationBudget,
   CreateScopedBudgetRequest,
   OrganizationBudget,
+  OrganizationContext,
+  OrganizationSpendCeilings,
   ScopedBudget,
   UpdateBudgetRequest,
   UpdateOrganizationBudget,
   UpdateScopedBudgetRequest,
 } from "@/client"
 import { apiFetch } from "@/shared/api/client"
+import { useOrganizationContext } from "@/shared/api/organizations"
 import { fetchAllPaged, fetchAllRows } from "@/shared/api/paging"
 import {
   BUDGETS,
   ORGANIZATION_BUDGETS,
+  ORGANIZATION_CONTEXT,
+  ORGANIZATION_SPEND_CEILINGS,
   SCOPED_BUDGETS,
 } from "@/shared/api/queryKeys"
 
@@ -177,10 +182,45 @@ export function useOrganizationBudgets(enabled = true) {
   })
 }
 
+/**
+ * The ceilings applying one of the organization's budgets, with their spend.
+ *
+ * One page at the endpoint's maximum, which a budget cannot outgrow: its create
+ * and update bodies cap the entities it applies to at the same number. Keyed per
+ * organization, because the server scopes this by the session's active one.
+ */
+export function useOrganizationBudgetCeilings(budgetId: string) {
+  const queryClient = useQueryClient()
+  const context = useOrganizationContext().data
+  return useQuery({
+    queryKey: [
+      ORGANIZATION_SPEND_CEILINGS,
+      context?.organization?.id ?? null,
+      budgetId,
+    ],
+    queryFn: () =>
+      apiFetch<OrganizationSpendCeilings>(
+        `/organizations/me/spend-ceilings?budget_id=${encodeURIComponent(budgetId)}&limit=1000`,
+      ),
+    staleTime: 60_000,
+    // A callback, because this owners-and-admins-only read is opened by a role,
+    // and a role moves under a mounted query (otari#1300): resolved when the
+    // refetch is decided, it sees the context the switch has already written.
+    enabled: () =>
+      queryClient.getQueryData<OrganizationContext>(ORGANIZATION_CONTEXT) ===
+      context,
+  })
+}
+
+// A write moves the ceilings too: the detail page reads them, and a budget's
+// figure, cycle and entities are what they report.
 function invalidateOrganizationSpend(
   queryClient: ReturnType<typeof useQueryClient>,
 ) {
   void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_BUDGETS] })
+  void queryClient.invalidateQueries({
+    queryKey: [ORGANIZATION_SPEND_CEILINGS],
+  })
 }
 
 export function useCreateOrganizationBudget() {

@@ -5,15 +5,11 @@ import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Field } from "@/design-system/forms/Field"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
-import { useKeys } from "@/shared/api/apiKeys"
 import {
   useCreateOrganizationBudget,
   useOrganizationBudgets,
   useUpdateOrganizationBudget,
 } from "@/shared/api/budgets"
-import { useModels } from "@/shared/api/models"
-import { useOrganizationMembers } from "@/shared/api/organizations"
-import { useWorkspaces } from "@/shared/api/workspaces"
 import { AppliedToPicker } from "./AppliedToPicker"
 import {
   describeEntity,
@@ -31,6 +27,7 @@ import {
   cycleFieldsFromDraft,
   findCycleProblem,
 } from "./resetCycle"
+import { useEntitySources } from "./useEntitySources"
 
 // The form behind both Create and Edit for one of the organization's budgets: the
 // limit, the reset cycle and the entities it applies to, saved as one write. One
@@ -88,13 +85,10 @@ export function OrganizationBudgetDialog({
 
   const budgets = useOrganizationBudgets()
   // Read only while open: the page keeps this mounted between opens, and these
-  // four would otherwise load on every visit to the budgets page.
-  const workspaces = useWorkspaces(isOpen)
-  const members = useOrganizationMembers(isOpen)
-  const keys = useKeys(undefined, isOpen)
-  const models = useModels(isOpen)
-  const sourcesSettled = [workspaces, members, keys, models].every(
-    (query) => !query.isPending,
+  // would otherwise load on every visit to the budgets page.
+  const { sources, failedLists, isSettled } = useEntitySources(
+    organizationId,
+    isOpen,
   )
   // The server names the workspaces a budget applies to, so one still reads by
   // name while the workspace list is loading or failed to load.
@@ -130,28 +124,11 @@ export function OrganizationBudgetDialog({
     editing?.budget_id,
     nameBudget,
   )
-  const groups = entityGroups(
-    {
-      organizationId,
-      workspaces: workspaces.data ?? [],
-      members: members.data ?? [],
-      keys: keys.data ?? [],
-      modelIds: (models.data?.data ?? []).map((model) => model.id),
-    },
-    taken,
-  )
+  const groups = entityGroups(sources, taken)
   const organizationKey = entityKey({
     scope_type: "organization",
     scope_id: organizationId,
   })
-
-  // Named, so an empty list reads as a failed read rather than as nothing to pick.
-  const failedLists = [
-    workspaces.isError && "workspaces",
-    members.isError && "members",
-    keys.isError && "API keys",
-    models.isError && "providers and models",
-  ].filter(Boolean)
 
   // What this budget is shown as while it has no name of its own. The token and
   // request caps come from the budget being edited: this form does not offer
@@ -228,11 +205,11 @@ export function OrganizationBudgetDialog({
         organizationKey={organizationKey}
         organizationName={organizationName}
         organizationTaken={taken.get(organizationKey)}
-        isLoading={!sourcesSettled}
+        isLoading={!isSettled}
         describe={(key) =>
           describeEntity(entityFromKey(key), {
             organizationName,
-            workspaces: [...(workspaces.data ?? []), ...namedWorkspaces],
+            workspaces: [...sources.workspaces, ...namedWorkspaces],
           })
         }
       />

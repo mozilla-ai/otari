@@ -1942,7 +1942,9 @@ export interface paths {
         post?: never;
         /**
          * Delete Organization Budget
-         * @description Delete a budget, refused with 409 while a ceiling or workspace default names it.
+         * @description Delete a budget and stop it applying to every entity it applied to, in one step.
+         *
+         *     Refused with 409 while a workspace member default names it.
          */
         delete: operations["organization-budgets-delete_organization_budget"];
         options?: never;
@@ -10797,9 +10799,9 @@ export interface components {
          *     read. What an organization's own spend is, is a question for Usage.
          *
          *     ``ceiling_count`` is the organization-relevant fact instead: how many
-         *     ceilings name this budget, which is what makes a delete refuse. It counts
-         *     every one, including a ceiling the deployment operator pointed at this budget
-         *     from outside the organization, which ``applied_to`` leaves out.
+         *     ceilings name this budget. It counts every one, including a ceiling the
+         *     deployment operator pointed at this budget from outside the organization,
+         *     which ``applied_to`` leaves out and which is what makes a delete refuse.
          */
         OrganizationBudgetPublic: {
             /**
@@ -20592,6 +20594,8 @@ export interface operations {
                 skip?: number;
                 /** @description Maximum number of records to return */
                 limit?: number;
+                /** @description Only the ceilings applying this budget */
+                budget_id?: string | null;
             };
             header?: never;
             path?: never;
