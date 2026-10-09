@@ -188,3 +188,14 @@ jobs:
           elif grep -qE '^  fail ' "$RUNNER_TEMP/judges.txt"; then
             gh api --method POST "repos/$REPO/issues/$PR/comments" -F "body=@$body" > /dev/null
           fi
+
+      # The CLI's exit status ignores judge findings, so the job fails here to
+      # show them in the checks list. It is not a required check, so a finding
+      # still does not block the merge.
+      - name: Fail on a judge finding
+        if: steps.judges.outcome == 'success'
+        run: |
+          if grep -qE '^  fail ' "$RUNNER_TEMP/judges.txt"; then
+            echo "::error title=Judge gates::A judge gate did not pass. Its finding is advisory; see the job summary."
+            exit 1
+          fi
