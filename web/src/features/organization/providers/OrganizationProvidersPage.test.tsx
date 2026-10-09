@@ -930,6 +930,47 @@ describe("OrganizationProvidersPage", () => {
     ).toBeInTheDocument()
   })
 
+  it("opens the models panel outside the key table's scroll frame", async () => {
+    // The key table scrolls sideways where it is wider than its frame, and a
+    // panel rendered as one of its rows scrolls along and is clipped. The panel
+    // has to sit outside that frame, in its own region after the table.
+    mockApi({
+      keys: [orgProviderKey({ id: KEY_ID, name: "Production" })],
+      models: [orgProviderModel({ model: "gpt-4o" })],
+    })
+
+    await renderPage(<OrganizationProvidersPage />)
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Models on Production" }),
+    )
+
+    const panel = await screen.findByRole("region", {
+      name: "Models on Production",
+    })
+    const keyTable = screen.getByRole("grid", {
+      name: "Organization provider keys",
+    })
+    expect(panel).not.toContainElement(keyTable)
+    expect(keyTable).not.toContainElement(panel)
+    expect(panel.closest(".otari-provider-keys-table")).toBeNull()
+    expect(
+      within(panel).getByRole("grid", { name: "Models on Production" }),
+    ).toBeInTheDocument()
+    expect(
+      keyTable.compareDocumentPosition(panel) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Models on Production" }),
+    )
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("region", { name: "Models on Production" }),
+      ).not.toBeInTheDocument(),
+    )
+  })
+
   it("reports a rate list that could not be read instead of opening an empty editor", async () => {
     // The editor is held shut until the rates land, so a read that never lands
     // has to say so: silence plus no dialog reads as a link that did nothing.

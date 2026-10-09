@@ -33,7 +33,7 @@ import { formatRate } from "@/shared/helpers/format"
 import { OfferModelDialog } from "./OfferModelDialog"
 import { refreshOutcome } from "./refreshOutcome"
 
-// One provider key's models, opened as its row's detail.
+// One provider key's models, opened below the key table.
 //
 // Each row shows what the model costs this organization, which rung of the
 // pricing ladder said so, and whether the runtime serves it. The switch is the
