@@ -1,0 +1,71 @@
+{
+  "openai": {
+    "id": "openai", "name": "OpenAI", "doc": "https://platform.openai.com/docs/models",
+    "models": {
+      "gpt-4.1": {"id": "gpt-4.1", "name": "GPT-4.1", "limit": {"context": 1047576, "output": 32768}, "cost": {"input": 2, "output": 8, "cache_read": 0.5}, "canonical_model_id": "openai/gpt-4.1"},
+      "gpt-4": {"id": "gpt-4", "name": "GPT-4", "status": "deprecated", "limit": {"context": 8192, "output": 8192}, "cost": {"input": 30, "output": 60}},
+      "gpt-image-1": {"id": "gpt-image-1", "name": "GPT Image 1", "limit": {"context": 0, "output": 0}}
+    }
+  },
+  "anthropic": {
+    "id": "anthropic", "name": "Anthropic", "doc": "https://docs.anthropic.com/en/docs/about-claude/models",
+    "models": {
+      "claude-sonnet-4-5": {"id": "claude-sonnet-4-5", "name": "Claude Sonnet 4.5", "limit": {"context": 200000, "output": 64000}, "cost": {"input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75}, "canonical_model_id": "anthropic/claude-sonnet-4-5"},
+      "claude-haiku-5-5": {"id": "claude-haiku-5-5", "name": "Claude Haiku 5.5", "limit": {"context": 200000, "output": 64000}, "cost": {"input": 0.1, "output": 0.5, "cache_read": 0.01, "cache_write": 0.125, "tiers": [{"input": 0.5, "output": 2.5, "cache_read": 0.05, "cache_write": 0.625, "tier": {"type": "context", "size": 100000}}, {"input": 9, "tier": {"type": "request", "size": 5}}]}, "canonical_model_id": "anthropic/claude-haiku-5-5"}
+    }
+  },
+  "google": {
+    "id": "google", "name": "Google", "doc": "https://ai.google.dev/gemini-api/docs/pricing",
+    "models": {
+      "gemini-2.5-pro": {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "limit": {"context": 1048576, "output": 65536}, "cost": {"input": 1.25, "output": 10, "cache_read": 0.125, "context_over_200k": {"input": 2.5, "output": 15, "cache_read": 0.25}}, "canonical_model_id": "google/gemini-2.5-pro"}
+    }
+  },
+  "amazon-bedrock": {
+    "id": "amazon-bedrock", "name": "Amazon Bedrock", "doc": "https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html",
+    "models": {
+      "anthropic.claude-sonnet-4-20250514-v1:0": {"id": "anthropic.claude-sonnet-4-20250514-v1:0", "name": "Claude Sonnet 4", "limit": {"context": 200000, "output": 64000}, "cost": {"input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75}, "canonical_model_id": "anthropic/claude-sonnet-4"},
+      "us.anthropic.claude-sonnet-4-20250514-v1:0": {"id": "us.anthropic.claude-sonnet-4-20250514-v1:0", "name": "Claude Sonnet 4 (US)", "limit": {"context": 200000, "output": 64000}, "cost": {"input": 3.3, "output": 16.5, "cache_read": 0.33, "cache_write": 4.125}, "canonical_model_id": "anthropic/claude-sonnet-4"},
+      "anthropic.claude-3-haiku-20240307-v1:0": {"id": "anthropic.claude-3-haiku-20240307-v1:0", "name": "Claude 3 Haiku", "limit": {"context": 200000, "output": 4096}, "cost": {"input": 0.25, "output": 1.25}},
+      "eu.amazon.nova-pro": {"id": "eu.amazon.nova-pro", "name": "Nova Pro (EU)", "limit": {"context": 300000, "output": 10000}, "cost": {"input": 0.8, "output": 3.2}},
+      "amazon.nova-lite-v1:0": {"id": "amazon.nova-lite-v1:0", "name": "Nova Lite", "limit": {"context": 300000, "output": 10000}, "cost": {"input": 0.06, "output": 0.24}}
+    }
+  },
+  "deepinfra": {
+    "id": "deepinfra", "name": "Deep Infra", "doc": "https://deepinfra.com/models",
+    "models": {
+      "Qwen/Qwen3.7-Max": {"id": "Qwen/Qwen3.7-Max", "name": "Qwen3.7 Max", "limit": {"context": 262144, "output": 32768}, "cost": {"input": 2.5, "output": 7.5, "cache_read": 0.5, "tiers": [{"input": 6.25, "output": 18.5, "cache_read": 1.25, "tier": {"type": "context", "size": 128000}}, {"input": 5, "output": 15, "cache_read": 1, "tier": {"type": "context", "size": 32000}}]}}
+    }
+  },
+  "huggingface": {
+    "id": "huggingface", "name": "Hugging Face", "doc": "https://huggingface.co/docs/inference-providers",
+    "models": {
+      "meta-llama/Llama-3.3-70B-Instruct": {"id": "meta-llama/Llama-3.3-70B-Instruct", "name": "Llama 3.3 70B Instruct", "limit": {"context": 131072, "output": 4096}, "cost": {"input": 0.1, "output": 0.2}, "canonical_model_id": "meta-llama/llama-3.3-70b-instruct"}
+    }
+  },
+  "togetherai": {
+    "id": "togetherai", "name": "Together AI", "doc": "https://docs.together.ai/docs/serverless-models",
+    "models": {
+      "meta-llama/Llama-3.3-70B-Instruct": {"id": "meta-llama/Llama-3.3-70B-Instruct", "name": "Llama 3.3 70B", "limit": {"context": 131072, "output": 4096}, "cost": {"input": 0.88, "output": 0.88}, "canonical_model_id": "meta-llama/llama-3.3-70b-instruct"},
+      "shared/same-price": {"id": "shared/same-price", "name": "Same Price", "limit": {"context": 8000, "output": 1000}, "cost": {"input": 1, "output": 2}}
+    }
+  },
+  "groq": {
+    "id": "groq", "name": "Groq", "doc": "https://console.groq.com/docs/models",
+    "models": {
+      "llama-3.3-70b-versatile": {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B Versatile", "limit": {"context": 131072, "output": 32768}, "cost": {"input": 0.59, "output": 0.79}, "canonical_model_id": "meta-llama/llama-3.3-70b-instruct"},
+      "shared/same-price": {"id": "shared/same-price", "name": "Same Price", "limit": {"context": 8000, "output": 1000}, "cost": {"input": 1, "output": 2}}
+    }
+  },
+  "fireworks-ai": {
+    "id": "fireworks-ai", "name": "Fireworks AI", "doc": "https://fireworks.ai/docs/",
+    "models": {
+      "shared/diff-price": {"id": "shared/diff-price", "name": "Diff Price", "limit": {"context": 8000, "output": 1000}, "cost": {"input": 1, "output": 2}}
+    }
+  },
+  "nebius": {
+    "id": "nebius", "name": "Nebius", "doc": "https://docs.nebius.com/",
+    "models": {
+      "shared/diff-price": {"id": "shared/diff-price", "name": "Diff Price", "limit": {"context": 8000, "output": 1000}, "cost": {"input": 1.5, "output": 2}}
+    }
+  }
+}
