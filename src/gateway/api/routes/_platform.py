@@ -28,7 +28,13 @@ from openai import APITimeoutError as _OpenAIAPITimeoutError
 from pydantic import BaseModel, Field, ValidationError
 
 from gateway.core.config import ATTEMPT_ID_HEADER, GatewayConfig
-from gateway.core.error_codes import ALL_CANDIDATES_REJECTED, CONTEXT_LENGTH_EXCEEDED, error_code_of, error_headers
+from gateway.core.error_codes import (
+    ALL_CANDIDATES_REJECTED,
+    CONTEXT_LENGTH_EXCEEDED,
+    PROVIDER_NOT_CONFIGURED,
+    error_code_of,
+    error_headers,
+)
 from gateway.core.retry_after import bounded_retry_after
 from gateway.core.usage import (
     cache_read_tokens_of,
@@ -325,6 +331,15 @@ def no_attempt_served_detail(tried: int) -> str:
     return f"No model could serve the request ({tried} attempts)."
 
 
+def no_attempt_configured_detail(tried: int, providers: Sequence[str]) -> str:
+    """424 detail for a request no attempt could send, because none of their providers has a credential."""
+    names = ", ".join(sorted(set(providers))) or "unknown"
+    return (
+        f"No credential is configured for any provider this request could use ({tried} attempts: {names}). "
+        "Add one in config.yml or through the dashboard."
+    )
+
+
 def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | None:
     """The answer for attempts that all rejected the request alike, or ``None`` when they failed differently.
 
@@ -332,6 +347,15 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
     """
     if len(errors) < 2:
         return None
+    missing = [missing_credential_error(error) for error in errors]
+    if all(error is not None for error in missing):
+        return HTTPException(
+            status_code=status.HTTP_424_FAILED_DEPENDENCY,
+            detail=no_attempt_configured_detail(
+                len(errors), [error.provider_name or "unknown" for error in missing if error is not None]
+            ),
+            headers=error_headers(PROVIDER_NOT_CONFIGURED),
+        )
     answers = [_provider_failure_http_exc(error, fallback_detail="") for error in errors]
     statuses = {answer.status_code for answer in answers}
     if statuses == {status.HTTP_404_NOT_FOUND}:

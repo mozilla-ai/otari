@@ -143,6 +143,10 @@ def failover_config(postgres_url: str) -> GatewayConfig:
                         "on_failure": ["openai:gpt-5-mini"],
                     },
                     "solo": {"select": [{"default": "mistral:mistral-small-latest"}]},
+                    "unconfigured_pair": {
+                        "select": [{"default": "mistral:mistral-small-latest"}],
+                        "on_failure": ["cohere:command-r"],
+                    },
                 }
             }
         ),
@@ -169,6 +173,8 @@ async def _provider_with_only_an_openai_key(**kwargs: Any) -> ChatCompletion:
     """What any-llm does with the candidates: refuses mistral for want of a key, serves openai."""
     if kwargs["model"].startswith("mistral"):
         raise MissingApiKeyError("mistral", "MISTRAL_API_KEY")
+    if kwargs["model"].startswith("cohere"):
+        raise MissingApiKeyError("cohere", "COHERE_API_KEY")
     return _completion(kwargs["model"])
 
 
@@ -196,3 +202,17 @@ def test_a_policy_with_no_credentialed_candidate_is_refused_as_unconfigured(fail
     with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=_provider_with_only_an_openai_key)):
         response = _chat(failover_client, "solo")
     _assert_provider_not_configured(response, "mistral", "MISTRAL_API_KEY")
+
+
+def test_a_policy_whose_candidates_all_lack_a_credential_is_refused_as_unconfigured(
+    failover_client: TestClient,
+) -> None:
+    assert failover_client.post(f"{API_ROOT}/users", json={"user_id": "test-user"}, headers=_MASTER).status_code == 200
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=_provider_with_only_an_openai_key)):
+        response = _chat(failover_client, "unconfigured_pair")
+    assert response.status_code == 424, response.text
+    assert response.headers[ERROR_CODE_HEADER] == PROVIDER_NOT_CONFIGURED
+    body = response.json()
+    assert body["code"] == PROVIDER_NOT_CONFIGURED
+    assert "cohere, mistral" in body["detail"]
+    assert _ANY_LLM_WORDING not in body["detail"]

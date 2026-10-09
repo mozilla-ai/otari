@@ -788,6 +788,10 @@ def failure_status_code(exc: BaseException) -> int:
     """
     if isinstance(exc, MaxToolIterationsExceeded):
         return status.HTTP_422_UNPROCESSABLE_CONTENT
+    # Before the wrapper's own status: a wrapper can carry a 500 around a
+    # credential any-llm never found, and the caller is answered 424 for it.
+    if missing_credential_error(exc) is not None:
+        return status.HTTP_424_FAILED_DEPENDENCY
     _kind, status_code = upstream_exception_shape(exc)
     if status_code is not None:
         return status_code

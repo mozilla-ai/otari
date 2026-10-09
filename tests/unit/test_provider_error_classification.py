@@ -44,7 +44,7 @@ from gateway.api.routes._pipeline import (
     provider_not_configured_detail,
     refusal_code,
 )
-from gateway.api.routes._platform import _provider_failure_http_exc, upstream_retry_after
+from gateway.api.routes._platform import _provider_failure_http_exc, get_shared_rejection, upstream_retry_after
 from gateway.core.error_codes import PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
@@ -388,6 +388,22 @@ def test_missing_credential_is_read_through_the_exception_chain() -> None:
     assert mapping is not None
     assert mapping.status_code == 424
     assert "'mistral'" in mapping.detail
+    # The usage row records what the caller was answered, not the wrapper's 500.
+    assert failure_status_code(wrapped) == 424
+
+
+def test_attempts_that_all_lack_a_credential_share_one_424() -> None:
+    rejection = get_shared_rejection(
+        [MissingApiKeyError("mistral", "MISTRAL_API_KEY"), MissingApiKeyError("cohere", "COHERE_API_KEY")]
+    )
+    assert rejection is not None
+    assert rejection.status_code == 424
+    assert rejection.headers == {"Otari-Error-Code": PROVIDER_NOT_CONFIGURED}
+    assert "cohere, mistral" in rejection.detail
+
+
+def test_attempts_that_fail_differently_share_no_rejection_for_a_missing_credential() -> None:
+    assert get_shared_rejection([MissingApiKeyError("mistral", "MISTRAL_API_KEY"), _StatusError(404)]) is None
 
 
 def test_missing_credential_carries_its_error_code() -> None:
