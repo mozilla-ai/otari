@@ -30,6 +30,7 @@ import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from any_llm import AnyLLM, LLMProvider, alist_models
 from any_llm.types.model import Model
@@ -290,6 +291,22 @@ def _declared_models(config: GatewayConfig, instance: str) -> list[Model]:
     return [Model(id=model_id, created=0, object="model", owned_by=instance) for model_id in declared]
 
 
+# Listing kwargs a provider needs before its catalog is complete, forwarded
+# through any-llm's ``alist_models`` to the SDK's list call.
+#
+# Cohere pages ``/v1/models``, 20 models per page by default, and any-llm's
+# Cohere provider fetches the first page and drops the ``next_page_token`` that
+# names the rest. On a stock account that page ends before every rerank model,
+# so discovery offered a catalog that could not rerank at all. Asking for the
+# SDK's largest page (``page_size`` caps at 1000) is the smallest shim that
+# reads the whole listing. Stopgap: the fix belongs upstream, in any-llm's
+# Cohere ``_alist_models`` following ``next_page_token``; drop this entry once
+# the SDK pin carries it.
+_LIST_MODELS_KWARGS: dict[LLMProvider, dict[str, Any]] = {
+    LLMProvider.COHERE: {"page_size": 1000},
+}
+
+
 async def _discover_for_provider(
     provider_name: str,
     config: GatewayConfig,
@@ -326,7 +343,9 @@ async def _discover_for_provider(
                 api_key=api_key,
                 api_base=api_base,
                 client_args=client_args,
-                **kwargs,
+                # An instance's own kwargs win, and merging rather than spreading
+                # both keeps a ``page_size`` set in config from colliding.
+                **{**_LIST_MODELS_KWARGS.get(provider_enum, {}), **kwargs},
             ),
             timeout=config.model_discovery_timeout_seconds,
         )

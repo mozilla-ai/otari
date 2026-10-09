@@ -93,8 +93,10 @@ because their provider exists in any-llm.
 ## Model discovery
 
 `GET /api/v1/models` combines discoverable provider models, configured prices,
-aliases, and routing-policy names. Discovery is cached and bounded; an
-unreachable provider does not block the catalog indefinitely.
+aliases, and routing-policy names. Discovery reads a provider's whole listing,
+so a provider's embedding and rerank models are offered alongside its chat
+models. Discovery is cached and bounded; an unreachable provider does not block
+the catalog indefinitely.
 
 Set `model_discovery: false` to publish a curated catalog made from aliases and
 explicitly priced models. For a backend with no listing API, use the instance's
