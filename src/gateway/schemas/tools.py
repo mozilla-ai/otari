@@ -10,10 +10,11 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
+import pydantic
 from sqlmodel import Field, SQLModel
 
 from gateway.core.settings.tools import ToolKind
-from gateway.models.tools import OrgWebSearchKey
+from gateway.models.tools import OrgWebSearchKey, SearchToolCredential
 
 
 class OrgWebSearchKeyCreateRequest(SQLModel):
@@ -174,3 +175,202 @@ class SearchProviderSchema(SQLModel):
         default=None, description="Fetch: true when the provider runs a page's JavaScript before reading it."
     )
     formats: list[str] | None = Field(default=None, description="Fetch: the formats the page text comes back in.")
+
+
+# /search-tools management: stored and configured instances, writes and connection tests.
+
+
+class StoredSearchToolSchema(pydantic.BaseModel):
+    """A runtime-stored search or fetch instance. The API key is never returned, only ``last4``."""
+
+    name: str
+    kind: ToolKind = pydantic.Field(default="search", description="Whether this is a search or a fetch instance.")
+    provider: str
+    fetch_tool: str | None = pydantic.Field(
+        default=None,
+        description="A search instance's enrichment fetch instance. Null means the fetch default enriches it.",
+    )
+    api_base: str | None = None
+    last4: str | None = None
+    timeout: float | None = None
+    options: dict[str, Any] = pydantic.Field(default_factory=dict)
+    created_at: str | None = None
+    updated_at: str | None = None
+    # False when the stored key cannot be decrypted with the current
+    # OTARI_SECRET_KEY. Such a tool is skipped at runtime, so the dashboard flags
+    # it for the operator to fix.
+    decryptable: bool = True
+    shadows_config: bool = pydantic.Field(
+        default=False,
+        description="True when a config-file search tool of the same name exists; the stored one is in effect.",
+    )
+
+    @classmethod
+    def from_model(
+        cls,
+        row: SearchToolCredential,
+        *,
+        decryptable: bool = True,
+        shadows_config: bool = False,
+    ) -> "StoredSearchToolSchema":
+        return cls(**row.to_public_dict(), decryptable=decryptable, shadows_config=shadows_config)
+
+
+class CreatedSearchToolSchema(StoredSearchToolSchema):
+    """A stored instance as created, with the default setting the create also stored, if any."""
+
+    pinned_web_search_default_tool: str | None = pydantic.Field(
+        default=None,
+        description=(
+            "Set when this create also stored web_search_default_tool, naming the search instance that was "
+            "the in-loop default because it was the only one, so that adding a second does not turn in-loop "
+            "search off. This runtime value wins over the configuration file until it is cleared."
+        ),
+    )
+    notice: str | None = pydantic.Field(
+        default=None, description="What else the create changed, for the operator to read."
+    )
+
+
+class ConfigSearchToolSchema(pydantic.BaseModel):
+    """A search or fetch instance declared in the config file, or ``builtin_fetch``. Read-only here."""
+
+    name: str
+    kind: ToolKind = pydantic.Field(default="search", description="Whether this is a search or a fetch instance.")
+    provider: str
+    fetch_tool: str | None = pydantic.Field(
+        default=None,
+        description="A search instance's enrichment fetch instance. Null means the fetch default enriches it.",
+    )
+    api_base: str | None = None
+    has_api_key: bool = pydantic.Field(
+        description="Whether the config entry carries an API key. The key itself is not shown."
+    )
+    shadowed: bool = pydantic.Field(
+        default=False,
+        description="True when a stored instance of the same name and kind overrides this entry.",
+    )
+
+
+class SearchToolsResponse(pydantic.BaseModel):
+    """Every search instance ``POST /api/v1/search`` can name, or every fetch instance, by where it came from."""
+
+    stored: list[StoredSearchToolSchema]
+    config: list[ConfigSearchToolSchema]
+
+
+class CreateSearchToolRequest(pydantic.BaseModel):
+    """Create a stored search or fetch instance. ``api_key`` is write-only and requires OTARI_SECRET_KEY."""
+
+    model_config = pydantic.ConfigDict(
+        json_schema_extra={"example": {"name": "local", "provider": "searxng", "api_base": "http://searxng:8080"}}
+    )
+
+    name: str = pydantic.Field(
+        min_length=1,
+        pattern=r"^[^/:]+$",
+        description=(
+            "Name callers pass as 'search_tool_name' or in /api/v1/search/{tool}, or that names a fetch "
+            "instance. It contains no '/' or ':', is not builtin_fetch or none in any case, and is unique "
+            "across search and fetch instances."
+        ),
+    )
+    kind: ToolKind = pydantic.Field(default="search", description="'search' or 'fetch'. It cannot change once created.")
+    provider: str = pydantic.Field(
+        description=(
+            "Provider id. GET /api/v1/search-tools/providers lists the search providers, and with "
+            "?kind=fetch the fetch providers."
+        )
+    )
+    fetch_tool: str | None = pydantic.Field(
+        default=None,
+        description=(
+            "For a search instance: the fetch instance that enriches its results, a configured or stored one "
+            "or builtin_fetch. Omit it for the fetch default."
+        ),
+    )
+    api_base: str | None = pydantic.Field(
+        default=None,
+        description="Backend endpoint. Omit to inherit the provider's default (searxng inherits web_search_url).",
+    )
+    api_key: str | None = pydantic.Field(
+        default=None, description="Provider API key. Stored encrypted; never returned."
+    )
+    timeout: float | None = pydantic.Field(default=None, gt=0, description="Per-request timeout in seconds.")
+    options: dict[str, Any] | None = pydantic.Field(
+        default=None,
+        description="Provider-native request fields used as defaults (e.g. exa's 'type', searxng's 'engines').",
+    )
+
+
+class UpdateSearchToolRequest(pydantic.BaseModel):
+    """Update a stored search or fetch instance. Omitted fields are unchanged; ``api_key`` rotates in place."""
+
+    kind: ToolKind | None = pydantic.Field(
+        default=None, description="Accepted only when it matches the stored kind, which cannot change."
+    )
+    provider: str | None = None
+    fetch_tool: str | None = pydantic.Field(
+        default=None,
+        description="For a search instance: the fetch instance that enriches its results. Null clears it.",
+    )
+    api_base: str | None = None
+    api_key: str | None = pydantic.Field(
+        default=None, description="New API key. Omit to keep the existing one. Never returned."
+    )
+    timeout: float | None = pydantic.Field(default=None, gt=0)
+    options: dict[str, Any] | None = None
+    expected_updated_at: str | None = pydantic.Field(
+        default=None,
+        description="Optimistic concurrency: if set, the update 412s unless it matches the stored updated_at.",
+    )
+
+
+class ReencryptSearchToolsResponse(pydantic.BaseModel):
+    """Result of re-encrypting stored search-tool keys with the primary secret key."""
+
+    reencrypted: int = pydantic.Field(description="Number of stored search-tool keys re-encrypted.")
+    unreadable: int = pydantic.Field(
+        description="Number of encrypted keys left untouched because they could not be decrypted."
+    )
+    skipped: int = pydantic.Field(
+        default=0,
+        description=(
+            "Number of rows whose stored key changed between the read and the write, so the "
+            "re-encryption was not applied. They already hold whoever wrote them last."
+        ),
+    )
+
+
+class SearchToolTestRequest(CreateSearchToolRequest):
+    """An unsaved search or fetch instance to test, and what to test it with."""
+
+    query: str | None = pydantic.Field(
+        default=None, min_length=1, description="For a search instance: the query to run."
+    )
+    url: str | None = pydantic.Field(default=None, min_length=1, description="For a fetch instance: the page to fetch.")
+
+
+class StoredSearchToolTestRequest(pydantic.BaseModel):
+    """What to test a configured or stored instance with."""
+
+    query: str | None = pydantic.Field(
+        default=None, min_length=1, description="For a search instance: the query to run."
+    )
+    url: str | None = pydantic.Field(default=None, min_length=1, description="For a fetch instance: the page to fetch.")
+
+
+class SearchToolTestResponse(pydantic.BaseModel):
+    """How one search or one fetch went. Never the results or the page."""
+
+    ok: bool = pydantic.Field(description="Whether the provider answered the call without an error.")
+    error: str | None = pydantic.Field(
+        default=None,
+        description=(
+            "When not ok, the error's tag: timeout, network, http_error, invalid_response, or the provider's own."
+        ),
+    )
+    hits: int | None = pydantic.Field(default=None, description="For a search that worked: how many hits came back.")
+    characters: int | None = pydantic.Field(
+        default=None, description="For a fetch that worked: how many characters of page text came back."
+    )
