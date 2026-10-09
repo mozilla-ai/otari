@@ -24,7 +24,7 @@ and several search instances with no default between them.
 """
 
 import copy
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Annotated, Any, Literal
@@ -469,8 +469,9 @@ class ToolSettings(BaseModel):
     )
 
     # The config-file tools as loaded, before any dashboard-stored tool is
-    # overlaid by ``search_tool_store_service``.
+    # overlaid by ``search_tool_store_service``, one baseline per map.
     _search_tool_baseline: dict[str, dict[str, Any]] | None = PrivateAttr(default=None)
+    _fetch_tool_baseline: dict[str, dict[str, Any]] | None = PrivateAttr(default=None)
 
     def web_search_provider_configured(self) -> bool:
         """Whether a licensed search API is configured for the in-loop tool.
@@ -672,6 +673,8 @@ def effective_fetch_instances(settings: ToolSettings) -> dict[str, ToolInstance]
     A fetch entry named like a search instance is left out: one named like a
     configured search entry stopped startup, so the instance it meets here is a
     stored one, which loads after the config file and is never refused for it.
+    So is one that breaks the name rules, which only a stored row can, since a
+    configured one stops startup.
     """
     instances = {
         BUILTIN_FETCH: ToolInstance(
@@ -679,9 +682,16 @@ def effective_fetch_instances(settings: ToolSettings) -> dict[str, ToolInstance]
         ),
     }
     for name, entry in settings.fetch_tools.items():
-        if isinstance(entry, dict) and name not in settings.search_tools and name != BUILTIN_FETCH:
+        if isinstance(entry, dict) and name not in settings.search_tools and not instance_name_problems(name):
             instances[name] = _instance("fetch", name, entry, library_backed=True)
     return instances
+
+
+def instance_from_entry(kind: ToolKind, name: str, entry: Mapping[str, Any]) -> ToolInstance:
+    """An entry as the instance the maps would hold, for one not in them, such as one tested before it is saved."""
+    provider = str(entry.get("provider") or name)
+    library_backed = kind == "fetch" or provider in any_search.AnySearch.get_supported_providers()
+    return _instance(kind, name, entry, library_backed=library_backed)
 
 
 def _runtime_or_env(settings: ToolSettings, key: str) -> Any:
@@ -777,6 +787,24 @@ def in_loop_default(settings: ToolSettings) -> ToolInstance | SynthesizedSearchI
     return None
 
 
+def search_default_to_pin(settings: ToolSettings, new_name: str) -> ToolInstance | None:
+    """The search instance to store as ``web_search_default_tool`` before ``new_name`` is added, if any.
+
+    Adding a second search instance would end step 3 of the in-loop default,
+    which needs exactly one, and so turn in-loop search off by accident. So
+    when the one instance there is the in-loop default through that step, the
+    write that adds the second names it first. A ``new_name`` the map already
+    holds replaces an entry rather than adding one.
+    """
+    instances = effective_search_instances(settings)
+    if new_name in instances or len(instances) != 1:
+        return None
+    (only,) = instances.values()
+    default = in_loop_default(settings)
+    from_step_3 = configured_search_default(settings) != only.name
+    return only if from_step_3 and isinstance(default, ToolInstance) and default.name == only.name else None
+
+
 def fetch_default(settings: ToolSettings) -> ToolInstance:
     """The fetch instance for the fetch tool and for enrichment.
 
@@ -806,6 +834,84 @@ def _warn_about_entry(section: str, name: str, problems: list[str]) -> None:
         )
 
 
+def warn_about_instances(settings: ToolSettings, search_names: Iterable[str], fetch_names: Iterable[str]) -> None:
+    """Log what the instance rules say about these instances: what loads anyway, and what is left out.
+
+    :func:`warn_about_tool_instances` runs it for every instance at startup, and
+    the stored-row refresh for each row first seen or changed since. A name the
+    maps no longer hold is skipped. Names and problems only, never a key, an
+    option's value or a URL.
+    """
+    search = effective_search_instances(settings)
+    fetch = effective_fetch_instances(settings)
+    for name in search_names:
+        if (instance := search.get(name)) is None:
+            continue
+        problems = instance_name_problems(name)
+        problems += list(option_problems("search", instance.provider, instance.options).values())
+        _warn_about_entry("search_tools", name, problems)
+    for name in fetch_names:
+        if name not in settings.fetch_tools:
+            continue
+        if name in fetch:
+            instance = fetch[name]
+            problems = list(option_problems("fetch", instance.provider, instance.options).values())
+            _warn_about_entry("fetch_tools", name, problems)
+        elif name in search:
+            logger.error(
+                "fetch_tools.%s is left out: a search instance has the same name, and names are unique "
+                "across search and fetch instances. Rename one of them.",
+                name,
+            )
+        elif problems := instance_name_problems(name):
+            # Only a stored row gets here: a configured one stopped startup.
+            logger.error(
+                "fetch_tools.%s is left out: %s. Delete it and create it under another name.",
+                name,
+                "; ".join(problems),
+            )
+
+
+def dangling_reference_warnings(settings: ToolSettings) -> dict[str, tuple[str, str]]:
+    """Each default setting or ``fetch_tool`` that names no instance it may name, so rule 7 treats it as unset.
+
+    Keyed by setting, each with its value and the warning to log, a ``%s``
+    standing for the value. The stored-row refresh logs one only when the value
+    is new, so a reference left dangling, by a deleted instance for one, is
+    reported once rather than on every refresh.
+    """
+    search = effective_search_instances(settings)
+    fetch = effective_fetch_instances(settings)
+    warnings: dict[str, tuple[str, str]] = {}
+    for name, instance in search.items():
+        if instance.fetch_tool is not None and instance.fetch_tool not in fetch:
+            warnings[f"search_tools.{name}.fetch_tool"] = (
+                instance.fetch_tool,
+                f"search_tools.{name.replace('%', '%%')}.fetch_tool names no fetch instance (%s), so the fetch "
+                "default enriches its results.",
+            )
+    named = configured_search_default(settings)
+    if named is not None and named != NO_SEARCH_DEFAULT:
+        if named not in search:
+            warnings["web_search_default_tool"] = (
+                named,
+                "web_search_default_tool names no search instance (%s), so it is treated as unset.",
+            )
+        elif not search[named].library_backed:
+            warnings["web_search_default_tool"] = (
+                named,
+                "web_search_default_tool names a search instance (%s) whose provider the in-loop tool cannot "
+                "use yet, so it is treated as unset.",
+            )
+    fetch_named = configured_fetch_default(settings)
+    if fetch_named not in fetch:
+        warnings["web_fetch_default_tool"] = (
+            fetch_named,
+            "web_fetch_default_tool names no fetch instance (%s), so builtin_fetch is the fetch default.",
+        )
+    return warnings
+
+
 def warn_about_tool_instances(settings: ToolSettings) -> None:
     """Log what the instance rules let load but an operator should fix.
 
@@ -814,44 +920,10 @@ def warn_about_tool_instances(settings: ToolSettings) -> None:
     Names and problems only, never a key, an option's value or a URL.
     """
     search = effective_search_instances(settings)
-    fetch = effective_fetch_instances(settings)
-    for name, instance in search.items():
-        problems = instance_name_problems(name)
-        problems += list(option_problems("search", instance.provider, instance.options).values())
-        _warn_about_entry("search_tools", name, problems)
-        if instance.fetch_tool is not None and instance.fetch_tool not in fetch:
-            logger.warning(
-                "search_tools.%s.fetch_tool names no fetch instance, so the fetch default enriches its results.",
-                name,
-            )
-    for name in settings.fetch_tools:
-        if name in fetch:
-            instance = fetch[name]
-            problems = list(option_problems("fetch", instance.provider, instance.options).values())
-            _warn_about_entry("fetch_tools", name, problems)
-        elif name in search:
-            logger.error(
-                "fetch_tools.%s is left out: a stored search tool has the same name, and names are unique "
-                "across search and fetch instances. Rename one of them.",
-                name,
-            )
-
+    warn_about_instances(settings, search, settings.fetch_tools)
+    for value, message in dangling_reference_warnings(settings).values():
+        logger.warning(message, value)
     named = configured_search_default(settings)
-    if named is not None and named != NO_SEARCH_DEFAULT:
-        if named not in search:
-            logger.warning("web_search_default_tool names no search instance (%s), so it is treated as unset.", named)
-        elif not search[named].library_backed:
-            logger.warning(
-                "web_search_default_tool names a search instance (%s) whose provider the in-loop tool cannot "
-                "use yet, so it is treated as unset.",
-                named,
-            )
-    fetch_named = configured_fetch_default(settings)
-    if fetch_named not in fetch:
-        logger.warning(
-            "web_fetch_default_tool names no fetch instance (%s), so builtin_fetch is the fetch default.",
-            fetch_named,
-        )
     if named != NO_SEARCH_DEFAULT and len(search) > 1 and in_loop_default(settings) is None:
         usable = sorted(name for name, instance in search.items() if instance.library_backed)
         logger.warning(

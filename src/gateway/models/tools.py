@@ -29,21 +29,25 @@ from gateway.models.secret_fields import redact_secret_like_values
 
 
 class SearchToolCredential(Base):
-    """A ``POST /v1/search`` tool configured at runtime through the dashboard.
+    """A search or fetch instance configured at runtime through the dashboard.
 
-    The database counterpart of a ``search_tools:`` entry in config.yml: it is
-    merged over the config-file tools at runtime (see
-    ``search_tool_store_service``), with the stored row winning on a name
-    collision, exactly as ``ProviderCredential`` does for providers. The API key
-    is held encrypted (``secret_box``) and is optional, because a ``searxng``
-    backend is normally keyless; ``last4`` is kept in clear only so the UI can
-    show which key is set without ever decrypting. Standalone mode only.
+    The database counterpart of a ``search_tools:`` or ``fetch_tools:`` entry in
+    config.yml, as ``kind`` says: it is merged over the config-file entries of
+    its kind at runtime (see ``search_tool_store_service``), with the stored row
+    winning on a name collision, exactly as ``ProviderCredential`` does for
+    providers. ``kind`` is fixed when the row is created, and ``fetch_tool`` is a
+    search row's enrichment instance. The API key is held encrypted
+    (``secret_box``) and is optional, because a ``searxng`` backend is normally
+    keyless; ``last4`` is kept in clear only so the UI can show which key is set
+    without ever decrypting. Standalone mode only.
     """
 
     __tablename__ = "search_tool_credentials"
 
     name: Mapped[str] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(default="search", server_default="search")
     provider: Mapped[str] = mapped_column()
+    fetch_tool: Mapped[str | None] = mapped_column()
     api_base: Mapped[str | None] = mapped_column()
     encrypted_api_key: Mapped[str | None] = mapped_column()
     last4: Mapped[str | None] = mapped_column()
@@ -66,7 +70,9 @@ class SearchToolCredential(Base):
         """
         return {
             "name": self.name,
+            "kind": self.kind,
             "provider": self.provider,
+            "fetch_tool": self.fetch_tool,
             "api_base": self.api_base,
             "last4": self.last4,
             "timeout": self.timeout_seconds,

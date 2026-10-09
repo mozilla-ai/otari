@@ -216,11 +216,14 @@ def _parse(key: str, raw: str) -> SettingValue:
     return raw
 
 
-async def load_overrides(session: AsyncSession) -> dict[str, SettingValue]:
+async def load_overrides(session: AsyncSession, *, report_invalid: bool = True) -> dict[str, SettingValue]:
     """Return every stored, still-valid tool override as a ``{key: value}`` map.
 
     A row whose key is no longer editable, or whose stored value no longer
-    validates, is skipped (and logged) rather than crashing startup.
+    validates, is skipped (and logged) rather than crashing startup. The
+    periodic refresh passes ``report_invalid=False``: startup has reported each
+    such row, and a write stores only a value that validates, so the refresh
+    would repeat the same warning every time it runs.
     """
     # Filter to the tool keys in the query: the runtime_settings table also holds
     # unrelated settings, so there is no need to fetch and scan those in Python.
@@ -236,7 +239,8 @@ async def load_overrides(session: AsyncSession) -> dict[str, SettingValue]:
         except (ValueError, TypeError):
             # Log the key only, never the value: a *_url field may embed credentials
             # (e.g. https://user:secret@host), and stored values must not reach logs.
-            logger.warning("Ignoring invalid stored tool setting %s", row.key)
+            if report_invalid:
+                logger.warning("Ignoring invalid stored tool setting %s", row.key)
     return overrides
 
 

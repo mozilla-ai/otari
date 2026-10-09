@@ -512,9 +512,11 @@ token price to a request-priced or image-priced endpoint.
 
 `search_tools` names the deployment's search instances. Direct `POST /api/v1/search`
 calls use them by name, and the in-loop `otari_web_search` tool uses the default
-one (below). The same entries can be managed at runtime from Tools or
-`/api/v1/search-tools`. `fetch_tools` names fetch instances, for the
-`otari_web_fetch` tool and for enriching search results.
+one (below). `fetch_tools` names fetch instances, for the `otari_web_fetch` tool
+and for enriching search results. Both can also be stored at runtime through
+`/api/v1/search-tools`, a fetch instance with `kind: fetch` and listed with
+`?kind=fetch`, and search instances from Tools too. A stored instance wins over
+a configuration file entry of the same name and kind.
 
 ```yaml
 search_tools:
@@ -562,7 +564,19 @@ Rules for instances:
   that names the entry and the problem. Fix it: a later release refuses it, and
   once the instances serve requests, the options named are left out of every call.
   A `fetch_tools` entry that breaks the name rules, or reuses a configured search
-  instance's name, stops startup.
+  instance's name, stops startup; a stored one is left out, with an error.
+
+Writes through `/api/v1/search-tools` are held to these rules in what they set, so
+rotating the key of an instance stored before the rules still works. When the
+in-loop default is the single search instance, with no default set and no legacy
+settings, adding a second there first sets `web_search_default_tool` to the first,
+so in-loop search does not turn off, and the response says so. That runtime value
+wins over the configuration file until it is cleared.
+
+`POST /api/v1/search-tools/test` runs one search or one fetch on an instance before
+it is saved, and `POST /api/v1/search-tools/{name}/test` on one that exists. Each
+says whether the call worked, the error's tag when it did not, and how many hits or
+characters came back, never the content. `builtin_fetch` has no test yet.
 
 The defaults and the call limit are runtime settings, also set from Tools or
 `/api/v1/tool-settings`. Clearing a runtime value falls back to the configuration
@@ -582,7 +596,7 @@ file or environment, then to the built-in default.
   together. Default 10.
 
 A default that names no instance, set in the file or earlier at runtime, is treated
-as unset, with a warning at startup.
+as unset, with a warning at startup, or from the refresh that first finds it so.
 
 In this release these settings are read and checked, and no request uses them yet.
 They take effect in later releases: `web_fetch_default_tool` when web fetch moves

@@ -1,17 +1,22 @@
-"""Runtime search tools: dashboard-configured ``/v1/search`` tools, merged over config.
+"""Runtime search and fetch instances: dashboard-configured rows, merged over config.
 
 The search counterpart of :mod:`gateway.services.provider_store_service`, and
-deliberately the same shape. A search tool can come from two places:
+deliberately the same shape. A search instance can come from two places:
 ``config.yml`` ``search_tools:`` entries, immutable at runtime and validated at
 startup, and ``search_tool_credentials`` rows written through the dashboard.
 Both mean the same thing to a request, so the dispatch path must see them merged.
+A fetch instance is the same, with ``fetch_tools:`` and the rows whose ``kind`` is
+``fetch``.
 
 Resolution has to stay synchronous: ``resolve_search_tool`` reads
 ``config.search_tools`` on the request path with no database session of its own.
-So stored tools are overlaid onto ``config.search_tools`` in memory: loaded at
-startup, refreshed on a TTL, and re-applied immediately on the worker that served
-a write. A stored row wins over a config-file entry of the same name, and that
-shadowing is logged at startup so it is never silent.
+So stored rows are overlaid onto ``config.search_tools`` and
+``config.fetch_tools`` in memory: loaded at startup, refreshed on a TTL, and
+re-applied immediately on the worker that served a write. A stored row wins over
+a config-file entry of the same name and kind, and that shadowing is logged at
+startup so it is never silent. The periodic refresh also re-reads the runtime
+tool settings, which name these instances, so a default set through another
+replica arrives with the rows it names.
 
 The API key is held encrypted and is optional (a ``searxng`` backend is normally
 keyless); it is decrypted here only to build the in-memory overlay. A row whose
@@ -22,6 +27,8 @@ not load or refresh this in the hybrid platform path.
 
 import asyncio
 import time
+from collections.abc import Sequence
+from datetime import datetime
 from typing import Any, Final, cast
 
 from sqlalchemy import CursorResult, select, update
@@ -29,15 +36,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session
+from gateway.core.settings.tools import ToolKind, dangling_reference_warnings, warn_about_instances
 from gateway.log_config import logger
 from gateway.models.secret_fields import restore_redacted_values
 from gateway.models.tools import SearchToolCredential
+from gateway.services.runtime_settings_service import SettingValue
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
     decrypt_secret,
     encrypt_secret,
 )
+from gateway.services.tool_settings_service import apply_override, load_overrides
 
 # How long a worker may serve a stale search-tool overlay before refreshing. The
 # same TTL the provider overlay uses, for the same reason: a newly added or
@@ -53,9 +63,22 @@ class _Unset:
 # a PATCH drop an api_base or rotate a key without disturbing the rest.
 UNSET: Final = _Unset()
 
-# name -> decrypted overlay entry (the same shape as a config.search_tools value)
+# name -> decrypted overlay entry, the same shape as a config.search_tools value
+# for a search row and a config.fetch_tools value for a fetch row
 _cache: dict[str, dict[str, Any]] = {}
+_fetch_cache: dict[str, dict[str, Any]] = {}
 _cached_at: float | None = None
+# Each row's kind and version as the last overlay saw it, so what the instance
+# rules say about a row is logged when it is new or has changed, not on every
+# refresh.
+_seen_rows: dict[str, tuple[str, datetime | None]] = {}
+# The value each default setting or fetch_tool held when it was last reported as
+# naming no instance, so a reference left dangling is reported once per value.
+_reported_references: dict[str, str] = {}
+# The runtime tool settings as this worker last read them from the database, so
+# a refresh applies only a value that changed there since. Comparing with the
+# config instead would undo a write this worker applied after the read.
+_read_settings: dict[str, SettingValue] = {}
 
 
 def _last4(api_key: str | None) -> str | None:
@@ -65,12 +88,14 @@ def _last4(api_key: str | None) -> str | None:
 
 
 def _row_to_entry(row: SearchToolCredential) -> dict[str, Any]:
-    """Build a config.search_tools-shaped overlay entry from a stored row.
+    """Build a config.search_tools- or config.fetch_tools-shaped overlay entry from a stored row.
 
     Raises ``SecretBoxUnavailableError`` / ``SecretDecryptionError`` when the row
     has a key that cannot be decrypted; the caller decides whether to skip it.
     """
     entry: dict[str, Any] = {"provider": row.provider}
+    if row.fetch_tool and row.kind != "fetch":
+        entry["fetch_tool"] = row.fetch_tool
     if row.api_base:
         entry["api_base"] = row.api_base
     if row.timeout_seconds:
@@ -92,6 +117,10 @@ def reset_search_tool_cache() -> None:
     global _cached_at  # noqa: PLW0603
 
     _cache.clear()
+    _fetch_cache.clear()
+    _seen_rows.clear()
+    _reported_references.clear()
+    _read_settings.clear()
     _cached_at = None
 
 
@@ -105,42 +134,136 @@ def config_file_search_tools(config: GatewayConfig) -> dict[str, dict[str, Any]]
     return baseline if baseline is not None else config.search_tools
 
 
-def apply_to_config(config: GatewayConfig) -> set[str]:
-    """Rebuild ``config.search_tools`` as config-file tools overlaid by the cache.
+def config_file_fetch_tools(config: GatewayConfig) -> dict[str, dict[str, Any]]:
+    """The config-file fetch instances, with no stored overlay applied."""
+    baseline = config._fetch_tool_baseline
+    return baseline if baseline is not None else config.fetch_tools
 
-    Captures the config-file tools as the per-config baseline on first call
-    (before any overlay), so repeated applies stay idempotent and a removed
+
+def config_file_tools(config: GatewayConfig, kind: ToolKind) -> dict[str, dict[str, Any]]:
+    """The config-file instances of ``kind``, with no stored overlay applied."""
+    return config_file_search_tools(config) if kind == "search" else config_file_fetch_tools(config)
+
+
+def apply_to_config(config: GatewayConfig) -> set[str]:
+    """Rebuild ``config.search_tools`` and ``config.fetch_tools`` as config-file entries overlaid by the cache.
+
+    Captures each map's config-file entries as its per-config baseline on first
+    call (before any overlay), so repeated applies stay idempotent and a removed
     stored row restores the config entry even after a cache reset. Returns the
-    set of names where a stored row shadows a config one.
+    set of names where a stored row shadows a config one of its kind.
     """
     if config._search_tool_baseline is None:
         config._search_tool_baseline = {name: dict(entry) for name, entry in config.search_tools.items()}
-    baseline = config._search_tool_baseline
-    config.search_tools = {**baseline, **_cache}
-    return set(baseline) & set(_cache)
+    if config._fetch_tool_baseline is None:
+        config._fetch_tool_baseline = {name: dict(entry) for name, entry in config.fetch_tools.items()}
+    search_baseline = config._search_tool_baseline
+    fetch_baseline = config._fetch_tool_baseline
+    config.search_tools = {**search_baseline, **_cache}
+    config.fetch_tools = {**fetch_baseline, **_fetch_cache}
+    return (set(search_baseline) & set(_cache)) | (set(fetch_baseline) & set(_fetch_cache))
 
 
-async def refresh_search_tool_cache(db: AsyncSession, config: GatewayConfig) -> set[str]:
-    """Reload the overlay from the database, apply it, and return shadowed names."""
-    global _cached_at  # noqa: PLW0603
-
+async def _load_rows(db: AsyncSession) -> Sequence[SearchToolCredential]:
     # `populate_existing`: sessions use `expire_on_commit=False`, so without it
     # a row still in the identity map (as after a rotation on this session)
     # would return the values it was loaded with, not what is committed.
-    rows = (await db.execute(select(SearchToolCredential).execution_options(populate_existing=True))).scalars().all()
-    overlay: dict[str, dict[str, Any]] = {}
+    return (await db.execute(select(SearchToolCredential).execution_options(populate_existing=True))).scalars().all()
+
+
+def _overlay_rows(config: GatewayConfig, rows: Sequence[SearchToolCredential], *, report_changes: bool) -> set[str]:
+    """Overlay the rows on the config's maps, and return the shadowed names.
+
+    A row new or changed since the last overlay has its undecryptable key
+    reported, and, with ``report_changes``, what the instance rules say about
+    it. Startup passes ``False``, because the lifespan's own check reports
+    every instance once the runtime settings have loaded too.
+    """
+    global _cached_at  # noqa: PLW0603
+
+    overlays: dict[str, dict[str, dict[str, Any]]] = {"search": {}, "fetch": {}}
+    seen: dict[str, tuple[str, datetime | None]] = {}
+    changed: dict[str, list[str]] = {"search": [], "fetch": []}
     for row in rows:
+        kind: ToolKind = "fetch" if row.kind == "fetch" else "search"
+        seen[row.name] = (kind, row.updated_at)
+        is_new = _seen_rows.get(row.name) != seen[row.name]
         try:
-            overlay[row.name] = _row_to_entry(row)
+            overlays[kind][row.name] = _row_to_entry(row)
         except (SecretBoxUnavailableError, SecretDecryptionError):
-            logger.warning(
-                "Skipping stored search tool '%s': its API key could not be decrypted (check OTARI_SECRET_KEY).",
-                row.name,
-            )
+            if is_new:
+                logger.warning(
+                    "Skipping stored %s tool '%s': its API key could not be decrypted (check OTARI_SECRET_KEY).",
+                    kind,
+                    row.name,
+                )
+            continue
+        if is_new:
+            changed[kind].append(row.name)
+    _seen_rows.clear()
+    _seen_rows.update(seen)
     _cache.clear()
-    _cache.update(overlay)
+    _cache.update(overlays["search"])
+    _fetch_cache.clear()
+    _fetch_cache.update(overlays["fetch"])
     _cached_at = time.monotonic()
-    return apply_to_config(config)
+    shadowed = apply_to_config(config)
+    if report_changes and (changed["search"] or changed["fetch"]):
+        warn_about_instances(config, changed["search"], changed["fetch"])
+    return shadowed
+
+
+def _apply_settings(config: GatewayConfig, overrides: dict[str, SettingValue]) -> None:
+    """Apply each runtime tool setting whose stored value changed since this worker last read it."""
+    for key, value in overrides.items():
+        if key in _read_settings and _read_settings[key] == value:
+            continue
+        _read_settings[key] = value
+        if getattr(config, key) != value:
+            apply_override(config, key, value)
+            # Key only: a *_url value may embed credentials.
+            logger.info("Applied tool setting %s, changed since this worker last read it", key)
+
+
+def _report_dangling_references(config: GatewayConfig) -> None:
+    """Warn about a default or fetch_tool that names no instance, once for each value it takes."""
+    dangling = dangling_reference_warnings(config)
+    for key, (value, message) in dangling.items():
+        if _reported_references.get(key) != value:
+            logger.warning(message, value)
+            _reported_references[key] = value
+    for key in set(_reported_references) - set(dangling):
+        del _reported_references[key]
+
+
+async def refresh_search_tool_cache(db: AsyncSession, config: GatewayConfig) -> set[str]:
+    """Reload the stored rows, apply them, and return shadowed names.
+
+    The rows only. A write to the tool settings reloads them to check a default
+    against, and must not re-apply the stored settings it is about to replace.
+    """
+    shadowed = _overlay_rows(config, await _load_rows(db), report_changes=True)
+    _report_dangling_references(config)
+    return shadowed
+
+
+async def refresh_tool_instances(db: AsyncSession, config: GatewayConfig) -> set[str]:
+    """Reload the stored rows and the runtime tool settings, apply both, and return shadowed names.
+
+    Only startup reads the tool settings otherwise, so without this a runtime
+    change reaches only the worker that served the write. Both are read in
+    ``db``'s one transaction, the rows first: a create that adds a second search
+    instance stores the default naming the first in the same commit, so a read
+    between the two statements gets at worst that default with the rows before
+    the create, never the second row without the default. Both are applied with
+    no wait in between, so no request sees one without the other.
+    """
+    rows = await _load_rows(db)
+    overrides = await load_overrides(db, report_invalid=False)
+    shadowed = _overlay_rows(config, rows, report_changes=True)
+    _apply_settings(config, overrides)
+    _report_dangling_references(config)
+    return shadowed
 
 
 async def load_search_tools_at_startup(db: AsyncSession, config: GatewayConfig) -> None:
@@ -149,25 +272,33 @@ async def load_search_tools_at_startup(db: AsyncSession, config: GatewayConfig) 
     A failure here is logged rather than raised: stored tools are an addition to
     the config ones, and a gateway that serves every config-file search tool is
     better than one that refuses to start because a credential load failed.
+
+    What the instance rules say is left to the lifespan's own check, which runs
+    next, once every setting has loaded; the dangling references it reports are
+    recorded here so the first refresh does not report them again.
     """
     reset_search_tool_cache()
     try:
-        shadowed = await refresh_search_tool_cache(db, config)
+        shadowed = _overlay_rows(config, await _load_rows(db), report_changes=False)
+        # The lifespan applied these just before; recorded so the first refresh
+        # applies only what changes after.
+        _read_settings.update(await load_overrides(db, report_invalid=False))
     except Exception:
         logger.exception("Failed to load stored search tools; continuing with config search tools only")
-        return
-    if _cache:
-        logger.info("Loaded %d stored search tool(s)", len(_cache))
+        shadowed = set()
+    _reported_references.update({key: value for key, (value, _) in dangling_reference_warnings(config).items()})
+    if _cache or _fetch_cache:
+        logger.info("Loaded %d stored search and %d stored fetch tool(s)", len(_cache), len(_fetch_cache))
     for name in sorted(shadowed):
         logger.warning(
-            "Stored search tool '%s' shadows the config.yml search tool of the same name; "
+            "Stored tool '%s' shadows the config.yml entry of the same name and kind; "
             "the dashboard entry is in effect.",
             name,
         )
 
 
 async def run_search_tool_refresher(config: GatewayConfig, interval: float = SEARCH_TOOL_CACHE_TTL_SECONDS) -> None:
-    """Reload the search-tool overlay forever so other writers' changes arrive.
+    """Reload the stored rows and the runtime tool settings forever so other writers' changes arrive.
 
     A write refreshes the worker that served it; this covers sibling workers and
     other replicas, which converge within ``interval``. Every error is swallowed
@@ -178,7 +309,7 @@ async def run_search_tool_refresher(config: GatewayConfig, interval: float = SEA
         await asyncio.sleep(interval)
         try:
             async with create_session() as db:
-                await refresh_search_tool_cache(db, config)
+                await refresh_tool_instances(db, config)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -190,10 +321,12 @@ async def run_search_tool_refresher(config: GatewayConfig, interval: float = SEA
 # --------------------------------------------------------------------------- #
 
 
-async def list_search_tools(db: AsyncSession) -> list[SearchToolCredential]:
-    """Every stored search tool, ordered by name."""
-    rows = (await db.execute(select(SearchToolCredential).order_by(SearchToolCredential.name))).scalars().all()
-    return list(rows)
+async def list_search_tools(db: AsyncSession, kind: ToolKind | None = None) -> list[SearchToolCredential]:
+    """Every stored row, or every one of ``kind``, ordered by name."""
+    stmt = select(SearchToolCredential).order_by(SearchToolCredential.name)
+    if kind is not None:
+        stmt = stmt.where(SearchToolCredential.kind == kind)
+    return list((await db.execute(stmt)).scalars().all())
 
 
 async def get_search_tool(db: AsyncSession, name: str) -> SearchToolCredential | None:
@@ -215,17 +348,20 @@ async def save_search_tool(
     db: AsyncSession,
     *,
     name: str,
+    kind: ToolKind | _Unset = UNSET,
     provider: str | _Unset = UNSET,
+    fetch_tool: str | None | _Unset = UNSET,
     api_base: str | None | _Unset = UNSET,
     api_key: str | None | _Unset = UNSET,
     timeout: float | None | _Unset = UNSET,
     options: dict[str, Any] | None | _Unset = UNSET,
 ) -> SearchToolCredential:
-    """Create or update a stored search tool (staged; caller commits).
+    """Create or update a stored search or fetch instance (staged; caller commits).
 
     Each field is tri-state: left at ``UNSET`` it keeps the stored value; passed
-    ``None`` it is cleared; passed a value it is set. ``api_key`` is encrypted
-    before storage and requires ``OTARI_SECRET_KEY`` (raises
+    ``None`` it is cleared; passed a value it is set. ``kind`` is set at create
+    only, ``search`` when left at ``UNSET``; the route refuses a change. ``api_key``
+    is encrypted before storage and requires ``OTARI_SECRET_KEY`` (raises
     ``SecretBoxUnavailableError``); passing it ``None`` clears the stored key,
     which is the normal state for a keyless SearXNG backend. ``options`` is
     normalised to ``{}`` when cleared, since the column is non-null. The
@@ -235,13 +371,17 @@ async def save_search_tool(
     if existing is None:
         # ``provider`` is non-null, so a create must supply it; the route
         # validates that before staging.
-        row = SearchToolCredential(name=name, provider="", options={})
+        row = SearchToolCredential(
+            name=name, kind="search" if isinstance(kind, _Unset) else kind, provider="", options={}
+        )
         db.add(row)
     else:
         row = existing
 
     if not isinstance(provider, _Unset):
         row.provider = provider
+    if not isinstance(fetch_tool, _Unset):
+        row.fetch_tool = fetch_tool
     if not isinstance(api_base, _Unset):
         row.api_base = api_base
     if not isinstance(timeout, _Unset):
@@ -308,7 +448,7 @@ async def reencrypt_search_tools(db: AsyncSession) -> tuple[int, int, int]:
 
 
 async def delete_search_tool(db: AsyncSession, name: str) -> bool:
-    """Delete a stored search tool (staged; caller commits). Returns whether it existed."""
+    """Delete a stored search or fetch instance (staged; caller commits). Returns whether it existed."""
     row = await db.get(SearchToolCredential, name)
     if row is None:
         return False

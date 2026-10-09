@@ -4527,17 +4527,24 @@ export interface paths {
         };
         /**
          * List All Search Tools
-         * @description List every search tool ``POST /api/v1/search`` can name.
+         * @description List every search instance ``POST /api/v1/search`` can name, or with ``?kind=fetch`` every fetch instance.
          *
          *     ``stored`` are the editable rows written through this API; ``config`` are the
          *     config-file entries, which are still honored and are reported so the operator
-         *     can see the whole set. Keys are never returned, only ``last4``.
+         *     can see the whole set, ``builtin_fetch`` first among the fetch instances. Keys
+         *     are never returned, only ``last4``.
          */
         get: operations["search-tools-list_all_search_tools"];
         put?: never;
         /**
          * Create Search Tool
-         * @description Add a search tool at runtime. Storing an API key requires OTARI_SECRET_KEY.
+         * @description Add a search or fetch instance at runtime. Storing an API key requires OTARI_SECRET_KEY.
+         *
+         *     Creating a second search instance, while the first is the in-loop default
+         *     only because it is the only one, first sets ``web_search_default_tool`` to
+         *     the first in the same commit, and says so in the response, so that adding
+         *     an instance never turns in-loop search off. That runtime value wins over the
+         *     configuration file until it is cleared.
          */
         post: operations["search-tools-create_search_tool"];
         delete?: never;
@@ -4603,6 +4610,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/search-tools/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Unsaved Search Tool
+         * @description Test an instance before saving it, with one search or one fetch.
+         *
+         *     Takes the create request's fields, held to the create's checks against the
+         *     instances this worker has loaded, plus ``query`` for a search instance or
+         *     ``url`` for a fetch instance. Answers whether the provider answered without
+         *     an error, the error's tag when it did not, and how many hits or characters
+         *     came back, never the results or the page.
+         */
+        post: operations["search-tools-test_unsaved_search_tool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/search-tools/{name}": {
         parameters: {
             query?: never;
@@ -4615,23 +4648,51 @@ export interface paths {
         post?: never;
         /**
          * Delete Stored Search Tool
-         * @description Delete a stored search tool. A config-file search tool cannot be deleted here.
+         * @description Delete a stored search or fetch instance. A config-file one, or ``builtin_fetch``, cannot be deleted here.
          */
         delete: operations["search-tools-delete_stored_search_tool"];
         options?: never;
         head?: never;
         /**
          * Update Search Tool
-         * @description Update a stored search tool. Omitted fields are left as-is; an explicit ``null`` clears them.
+         * @description Update a stored search or fetch instance. Omitted fields are left as-is; an explicit ``null`` clears them.
          *
          *     ``api_key`` follows the same rule: omit it to keep the stored key, send a new
          *     one to rotate, or send ``null`` to clear it (a keyless SearXNG backend). The
          *     row is locked ``FOR UPDATE`` so the ``expected_updated_at`` check and the
          *     write it guards are atomic. The tool as it will be after the update is
          *     validated, so a change that would leave it unusable (clearing the key of a
-         *     provider that needs one) is refused rather than stored.
+         *     provider that needs one) is refused rather than stored. Its options are
+         *     checked against the provider's when the update sets them or changes the
+         *     provider, and ``fetch_tool`` when the update sets it, so rotating the key of
+         *     an instance stored before those rules never trips on them. ``kind`` cannot
+         *     change, so an instance never moves between the search and fetch maps.
          */
         patch: operations["search-tools-update_search_tool"];
+        trace?: never;
+    };
+    "/api/v1/search-tools/{name}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Search Tool
+         * @description Test a configured or stored instance with one search or one fetch.
+         *
+         *     Takes ``query`` for a search instance or ``url`` for a fetch instance, and
+         *     answers as ``POST /search-tools/test`` does. ``builtin_fetch`` has no test
+         *     yet, and answers a 400.
+         */
+        post: operations["search-tools-test_search_tool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/search/{search_tool_name}": {
@@ -7841,23 +7902,35 @@ export interface components {
         };
         /**
          * ConfigSearchToolSchema
-         * @description A search tool declared in the config file. Read-only: it cannot be edited here.
+         * @description A search or fetch instance declared in the config file, or ``builtin_fetch``. Read-only here.
          */
         ConfigSearchToolSchema: {
             /** Api Base */
             api_base?: string | null;
             /**
+             * Fetch Tool
+             * @description A search instance's enrichment fetch instance. Null means the fetch default enriches it.
+             */
+            fetch_tool?: string | null;
+            /**
              * Has Api Key
              * @description Whether the config entry carries an API key. The key itself is not shown.
              */
             has_api_key: boolean;
+            /**
+             * Kind
+             * @description Whether this is a search or a fetch instance.
+             * @default search
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
             /** Name */
             name: string;
             /** Provider */
             provider: string;
             /**
              * Shadowed
-             * @description True when a stored search tool of the same name overrides this entry.
+             * @description True when a stored instance of the same name and kind overrides this entry.
              * @default false
              */
             shadowed: boolean;
@@ -8176,7 +8249,7 @@ export interface components {
         };
         /**
          * CreateSearchToolRequest
-         * @description Create a stored search tool. ``api_key`` is write-only and requires OTARI_SECRET_KEY.
+         * @description Create a stored search or fetch instance. ``api_key`` is write-only and requires OTARI_SECRET_KEY.
          * @example {
          *       "api_base": "http://searxng:8080",
          *       "name": "local",
@@ -8195,8 +8268,20 @@ export interface components {
              */
             api_key?: string | null;
             /**
+             * Fetch Tool
+             * @description For a search instance: the fetch instance that enriches its results, a configured or stored one or builtin_fetch. Omit it for the fetch default.
+             */
+            fetch_tool?: string | null;
+            /**
+             * Kind
+             * @description 'search' or 'fetch'. It cannot change once created.
+             * @default search
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
+            /**
              * Name
-             * @description Name callers pass as 'search_tool_name' or in /api/v1/search/{tool}.
+             * @description Name callers pass as 'search_tool_name' or in /api/v1/search/{tool}, or that names a fetch instance. It contains no '/' or ':', is not builtin_fetch or none in any case, and is unique across search and fetch instances.
              */
             name: string;
             /**
@@ -8208,7 +8293,7 @@ export interface components {
             } | null;
             /**
              * Provider
-             * @description Search provider, one of: exa, searxng.
+             * @description Provider id. GET /api/v1/search-tools/providers lists the search providers, and with ?kind=fetch the fetch providers.
              */
             provider: string;
             /**
@@ -8316,6 +8401,63 @@ export interface components {
              * @description Unique user identifier
              */
             user_id: string;
+        };
+        /**
+         * CreatedSearchToolSchema
+         * @description A stored instance as created, with the default setting the create also stored, if any.
+         */
+        CreatedSearchToolSchema: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * Decryptable
+             * @default true
+             */
+            decryptable: boolean;
+            /**
+             * Fetch Tool
+             * @description A search instance's enrichment fetch instance. Null means the fetch default enriches it.
+             */
+            fetch_tool?: string | null;
+            /**
+             * Kind
+             * @description Whether this is a search or a fetch instance.
+             * @default search
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
+            /** Last4 */
+            last4?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Notice
+             * @description What else the create changed, for the operator to read.
+             */
+            notice?: string | null;
+            /** Options */
+            options?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Pinned Web Search Default Tool
+             * @description Set when this create also stored web_search_default_tool, naming the search instance that was the in-loop default because it was the only one, so that adding a second does not turn in-loop search off. This runtime value wins over the configuration file until it is cleared.
+             */
+            pinned_web_search_default_tool?: string | null;
+            /** Provider */
+            provider: string;
+            /**
+             * Shadows Config
+             * @description True when a config-file search tool of the same name exists; the stored one is in effect.
+             * @default false
+             */
+            shadows_config: boolean;
+            /** Timeout */
+            timeout?: number | null;
+            /** Updated At */
+            updated_at?: string | null;
         };
         /**
          * CurrentPricingPage
@@ -13560,8 +13702,99 @@ export interface components {
             url: string;
         };
         /**
+         * SearchToolTestRequest
+         * @description An unsaved search or fetch instance to test, and what to test it with.
+         * @example {
+         *       "api_base": "http://searxng:8080",
+         *       "name": "local",
+         *       "provider": "searxng"
+         *     }
+         */
+        SearchToolTestRequest: {
+            /**
+             * Api Base
+             * @description Backend endpoint. Omit to inherit the provider's default (searxng inherits web_search_url).
+             */
+            api_base?: string | null;
+            /**
+             * Api Key
+             * @description Provider API key. Stored encrypted; never returned.
+             */
+            api_key?: string | null;
+            /**
+             * Fetch Tool
+             * @description For a search instance: the fetch instance that enriches its results, a configured or stored one or builtin_fetch. Omit it for the fetch default.
+             */
+            fetch_tool?: string | null;
+            /**
+             * Kind
+             * @description 'search' or 'fetch'. It cannot change once created.
+             * @default search
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
+            /**
+             * Name
+             * @description Name callers pass as 'search_tool_name' or in /api/v1/search/{tool}, or that names a fetch instance. It contains no '/' or ':', is not builtin_fetch or none in any case, and is unique across search and fetch instances.
+             */
+            name: string;
+            /**
+             * Options
+             * @description Provider-native request fields used as defaults (e.g. exa's 'type', searxng's 'engines').
+             */
+            options?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Provider
+             * @description Provider id. GET /api/v1/search-tools/providers lists the search providers, and with ?kind=fetch the fetch providers.
+             */
+            provider: string;
+            /**
+             * Query
+             * @description For a search instance: the query to run.
+             */
+            query?: string | null;
+            /**
+             * Timeout
+             * @description Per-request timeout in seconds.
+             */
+            timeout?: number | null;
+            /**
+             * Url
+             * @description For a fetch instance: the page to fetch.
+             */
+            url?: string | null;
+        };
+        /**
+         * SearchToolTestResponse
+         * @description How one search or one fetch went. Never the results or the page.
+         */
+        SearchToolTestResponse: {
+            /**
+             * Characters
+             * @description For a fetch that worked: how many characters of page text came back.
+             */
+            characters?: number | null;
+            /**
+             * Error
+             * @description When not ok, the error's tag: timeout, network, http_error, invalid_response, or the provider's own.
+             */
+            error?: string | null;
+            /**
+             * Hits
+             * @description For a search that worked: how many hits came back.
+             */
+            hits?: number | null;
+            /**
+             * Ok
+             * @description Whether the provider answered the call without an error.
+             */
+            ok: boolean;
+        };
+        /**
          * SearchToolsResponse
-         * @description Every search tool ``POST /api/v1/search`` can name, by where it came from.
+         * @description Every search instance ``POST /api/v1/search`` can name, or every fetch instance, by where it came from.
          */
         SearchToolsResponse: {
             /** Config */
@@ -13795,7 +14028,7 @@ export interface components {
         };
         /**
          * StoredSearchToolSchema
-         * @description A runtime-stored search tool. The API key is never returned, only ``last4``.
+         * @description A runtime-stored search or fetch instance. The API key is never returned, only ``last4``.
          */
         StoredSearchToolSchema: {
             /** Api Base */
@@ -13807,6 +14040,18 @@ export interface components {
              * @default true
              */
             decryptable: boolean;
+            /**
+             * Fetch Tool
+             * @description A search instance's enrichment fetch instance. Null means the fetch default enriches it.
+             */
+            fetch_tool?: string | null;
+            /**
+             * Kind
+             * @description Whether this is a search or a fetch instance.
+             * @default search
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
             /** Last4 */
             last4?: string | null;
             /** Name */
@@ -13827,6 +14072,22 @@ export interface components {
             timeout?: number | null;
             /** Updated At */
             updated_at?: string | null;
+        };
+        /**
+         * StoredSearchToolTestRequest
+         * @description What to test a configured or stored instance with.
+         */
+        StoredSearchToolTestRequest: {
+            /**
+             * Query
+             * @description For a search instance: the query to run.
+             */
+            query?: string | null;
+            /**
+             * Url
+             * @description For a fetch instance: the page to fetch.
+             */
+            url?: string | null;
         };
         /**
          * SwitchActiveOrganizationRequest
@@ -14205,7 +14466,7 @@ export interface components {
         };
         /**
          * UpdateSearchToolRequest
-         * @description Update a stored search tool. Omitted fields are unchanged; ``api_key`` rotates in place.
+         * @description Update a stored search or fetch instance. Omitted fields are unchanged; ``api_key`` rotates in place.
          */
         UpdateSearchToolRequest: {
             /** Api Base */
@@ -14220,6 +14481,16 @@ export interface components {
              * @description Optimistic concurrency: if set, the update 412s unless it matches the stored updated_at.
              */
             expected_updated_at?: string | null;
+            /**
+             * Fetch Tool
+             * @description For a search instance: the fetch instance that enriches its results. Null clears it.
+             */
+            fetch_tool?: string | null;
+            /**
+             * Kind
+             * @description Accepted only when it matches the stored kind, which cannot change.
+             */
+            kind?: ("search" | "fetch") | null;
             /** Options */
             options?: {
                 [key: string]: unknown;
@@ -23139,7 +23410,10 @@ export interface operations {
     };
     "search-tools-list_all_search_tools": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Which instances to list: 'search' (the default) or 'fetch'. */
+                kind?: "search" | "fetch";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -23153,6 +23427,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchToolsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -23176,7 +23459,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StoredSearchToolSchema"];
+                    "application/json": components["schemas"]["CreatedSearchToolSchema"];
                 };
             };
             /** @description Validation Error */
@@ -23242,6 +23525,39 @@ export interface operations {
             };
         };
     };
+    "search-tools-test_unsaved_search_tool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SearchToolTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchToolTestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     "search-tools-delete_stored_search_tool": {
         parameters: {
             query?: never;
@@ -23293,6 +23609,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StoredSearchToolSchema"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "search-tools-test_search_tool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StoredSearchToolTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchToolTestResponse"];
                 };
             };
             /** @description Validation Error */

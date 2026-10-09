@@ -30,6 +30,7 @@ const TOOLS: SearchToolsResponse = {
   stored: [
     {
       name: "local",
+      kind: "search",
       provider: "searxng",
       api_base: "http://searxng:8080",
       last4: null,
@@ -44,6 +45,7 @@ const TOOLS: SearchToolsResponse = {
   config: [
     {
       name: "from-file",
+      kind: "search",
       provider: "exa",
       api_base: null,
       has_api_key: true,
@@ -240,6 +242,7 @@ describe("SearchToolsCard", () => {
       expect(call).toBeDefined()
       expect(JSON.parse(String(call?.[1]?.body))).toEqual({
         name: "second",
+        kind: "search",
         provider: "searxng",
         api_base: "http://other:8080",
         api_key: null,

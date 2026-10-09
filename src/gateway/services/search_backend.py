@@ -130,7 +130,20 @@ class SearchToolError(ValueError):
 
 
 class SearchProviderError(RuntimeError):
-    """The search provider could not be reached or returned malformed data."""
+    """The search provider could not be reached or returned malformed data.
+
+    ``tag`` names the failure in the search library's terms (``timeout``,
+    ``network``, ``http_error``, ``invalid_response``), for a caller that reports
+    the failure without the message, which can carry the upstream body.
+    """
+
+    def __init__(self, message: str, *, tag: str = "provider_error") -> None:
+        super().__init__(message)
+        self.tag = tag
+
+
+def _transport_tag(exc: httpx.HTTPError | httpx.InvalidURL) -> str:
+    return "timeout" if isinstance(exc, httpx.TimeoutException) else "network"
 
 
 @dataclass(frozen=True)
@@ -374,9 +387,10 @@ async def _search_exa(tool: SearchTool, query: SearchQuery) -> SearchOutcome:
             headers={"x-api-key": tool.api_key},
             timeout=tool.timeout_s,
         )
-    except httpx.HTTPError as exc:
+    # InvalidURL is not an HTTPError: a base URL whose port does not parse, say.
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
         msg = f"exa search request failed: {exc}"
-        raise SearchProviderError(msg) from exc
+        raise SearchProviderError(msg, tag=_transport_tag(exc)) from exc
 
     body = _json_object(EXA_PROVIDER, response)
     return SearchOutcome(results=_exa_hits(body), cost_usd=_exa_cost(body))
@@ -386,7 +400,7 @@ def _exa_hits(body: dict[str, Any]) -> list[SearchHit]:
     raw = body.get("results")
     if not isinstance(raw, list):
         msg = "exa search response has no 'results' list"
-        raise SearchProviderError(msg)
+        raise SearchProviderError(msg, tag="invalid_response")
 
     hits: list[SearchHit] = []
     for item in raw:
@@ -480,9 +494,10 @@ async def _search_searxng(tool: SearchTool, query: SearchQuery) -> SearchOutcome
             headers=headers,
             timeout=tool.timeout_s,
         )
-    except httpx.HTTPError as exc:
+    # InvalidURL is not an HTTPError: a base URL whose port does not parse, say.
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
         msg = f"searxng search request failed: {exc}"
-        raise SearchProviderError(msg) from exc
+        raise SearchProviderError(msg, tag=_transport_tag(exc)) from exc
 
     body = _json_object(SEARXNG_PROVIDER, response)
     # A backend that fronts a commercial API can put a whole extracted page in
@@ -501,7 +516,7 @@ def _searxng_hits(body: dict[str, Any], max_chars: int) -> list[SearchHit]:
     raw = body.get("results")
     if not isinstance(raw, list):
         msg = "searxng search response has no 'results' list"
-        raise SearchProviderError(msg)
+        raise SearchProviderError(msg, tag="invalid_response")
 
     hits: list[SearchHit] = []
     for item in raw:
@@ -575,16 +590,16 @@ def _json_object(provider: str, response: httpx.Response) -> dict[str, Any]:
     """
     if response.status_code >= 400:
         msg = f"{provider} search returned HTTP {response.status_code}: {response.text[:_ERROR_BODY_CHARS]}"
-        raise SearchProviderError(msg)
+        raise SearchProviderError(msg, tag="http_error")
 
     try:
         body = response.json()
     except ValueError as exc:
         msg = f"{provider} search returned a body that is not JSON"
-        raise SearchProviderError(msg) from exc
+        raise SearchProviderError(msg, tag="invalid_response") from exc
     if not isinstance(body, dict):
         msg = f"{provider} search returned a {type(body).__name__} body, expected an object"
-        raise SearchProviderError(msg)
+        raise SearchProviderError(msg, tag="invalid_response")
     return body
 
 

@@ -8526,7 +8526,7 @@
         {
           "name": "List All Search Tools",
           "request": {
-            "description": "List every search tool ``POST /api/v1/search`` can name.\n\n``stored`` are the editable rows written through this API; ``config`` are the\nconfig-file entries, which are still honored and are reported so the operator\ncan see the whole set. Keys are never returned, only ``last4``.",
+            "description": "List every search instance ``POST /api/v1/search`` can name, or with ``?kind=fetch`` every fetch instance.\n\n``stored`` are the editable rows written through this API; ``config`` are the\nconfig-file entries, which are still honored and are reported so the operator\ncan see the whole set, ``builtin_fetch`` first among the fetch instances. Keys\nare never returned, only ``last4``.",
             "header": [],
             "method": "GET",
             "url": {
@@ -8538,7 +8538,15 @@
                 "v1",
                 "search-tools"
               ],
-              "raw": "{{baseUrl}}/api/v1/search-tools"
+              "query": [
+                {
+                  "description": "Which instances to list: 'search' (the default) or 'fetch'.",
+                  "disabled": true,
+                  "key": "kind",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/search-tools?kind="
             }
           }
         },
@@ -8554,7 +8562,7 @@
               },
               "raw": "{\n  \"api_base\": \"http://searxng:8080\",\n  \"name\": \"local\",\n  \"provider\": \"searxng\"\n}"
             },
-            "description": "Add a search tool at runtime. Storing an API key requires OTARI_SECRET_KEY.",
+            "description": "Add a search or fetch instance at runtime. Storing an API key requires OTARI_SECRET_KEY.\n\nCreating a second search instance, while the first is the in-loop default\nonly because it is the only one, first sets ``web_search_default_tool`` to\nthe first in the same commit, and says so in the response, so that adding\nan instance never turns in-loop search off. That runtime value wins over the\nconfiguration file until it is cleared.",
             "header": [
               {
                 "key": "Content-Type",
@@ -8624,6 +8632,40 @@
           }
         },
         {
+          "name": "Test Unsaved Search Tool",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"api_base\": \"http://searxng:8080\",\n  \"name\": \"local\",\n  \"provider\": \"searxng\"\n}"
+            },
+            "description": "Test an instance before saving it, with one search or one fetch.\n\nTakes the create request's fields, held to the create's checks against the\ninstances this worker has loaded, plus ``query`` for a search instance or\n``url`` for a fetch instance. Answers whether the provider answered without\nan error, the error's tag when it did not, and how many hits or characters\ncame back, never the results or the page.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "search-tools",
+                "test"
+              ],
+              "raw": "{{baseUrl}}/api/v1/search-tools/test"
+            }
+          }
+        },
+        {
           "name": "Update Search Tool",
           "request": {
             "body": {
@@ -8633,9 +8675,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"expected_updated_at\": \"string\",\n  \"options\": {},\n  \"provider\": \"string\",\n  \"timeout\": 1.0\n}"
+              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"expected_updated_at\": \"string\",\n  \"fetch_tool\": \"string\",\n  \"kind\": \"search\",\n  \"options\": {},\n  \"provider\": \"string\",\n  \"timeout\": 1.0\n}"
             },
-            "description": "Update a stored search tool. Omitted fields are left as-is; an explicit ``null`` clears them.\n\n``api_key`` follows the same rule: omit it to keep the stored key, send a new\none to rotate, or send ``null`` to clear it (a keyless SearXNG backend). The\nrow is locked ``FOR UPDATE`` so the ``expected_updated_at`` check and the\nwrite it guards are atomic. The tool as it will be after the update is\nvalidated, so a change that would leave it unusable (clearing the key of a\nprovider that needs one) is refused rather than stored.",
+            "description": "Update a stored search or fetch instance. Omitted fields are left as-is; an explicit ``null`` clears them.\n\n``api_key`` follows the same rule: omit it to keep the stored key, send a new\none to rotate, or send ``null`` to clear it (a keyless SearXNG backend). The\nrow is locked ``FOR UPDATE`` so the ``expected_updated_at`` check and the\nwrite it guards are atomic. The tool as it will be after the update is\nvalidated, so a change that would leave it unusable (clearing the key of a\nprovider that needs one) is refused rather than stored. Its options are\nchecked against the provider's when the update sets them or changes the\nprovider, and ``fetch_tool`` when the update sets it, so rotating the key of\nan instance stored before those rules never trips on them. ``kind`` cannot\nchange, so an instance never moves between the search and fetch maps.",
             "header": [
               {
                 "key": "Content-Type",
@@ -8667,7 +8709,7 @@
         {
           "name": "Delete Stored Search Tool",
           "request": {
-            "description": "Delete a stored search tool. A config-file search tool cannot be deleted here.",
+            "description": "Delete a stored search or fetch instance. A config-file one, or ``builtin_fetch``, cannot be deleted here.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -8681,6 +8723,48 @@
                 ":name"
               ],
               "raw": "{{baseUrl}}/api/v1/search-tools/:name",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "name",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Test Search Tool",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"query\": \"string\",\n  \"url\": \"string\"\n}"
+            },
+            "description": "Test a configured or stored instance with one search or one fetch.\n\nTakes ``query`` for a search instance or ``url`` for a fetch instance, and\nanswers as ``POST /search-tools/test`` does. ``builtin_fetch`` has no test\nyet, and answers a 400.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "search-tools",
+                ":name",
+                "test"
+              ],
+              "raw": "{{baseUrl}}/api/v1/search-tools/:name/test",
               "variable": [
                 {
                   "description": "path parameter",
