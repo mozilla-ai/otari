@@ -179,8 +179,10 @@ Callers send the alias in `model`. Completion responses keep the alias while
 pricing, budgets, and usage use the resolved target. Configure the target's
 price, not a price under the alias.
 
-An alias also withholds its target from model listings in that workspace. This
-does not apply to routing-policy targets.
+An alias also withholds its target from `GET /api/v1/models` in that workspace,
+where the alias is listed in its place. This does not apply to routing-policy
+targets. The grouped catalog (`GET /api/v1/catalog/models` and the Models page)
+lists real models only and never an alias, so an aliased model stays in it.
 
 Aliases are useful for a curated catalog. A routing policy is the broader form
 when a name needs conditions, failover, weighting, learned selection, or

@@ -262,6 +262,31 @@ def test_the_detail_lists_every_offering_cheapest_first(priced: TestClient, mast
     assert body["also_available_from"] == [{"provider_type": "groq", "name": "Groq"}]
 
 
+def test_an_aliased_model_stays_in_the_catalog(priced: TestClient, master_header: dict[str, str]) -> None:
+    """The grouped catalog lists real models and no alias, so aliasing one must not empty its entry.
+
+    The flat listing keeps hiding the target behind its alias; that is the alias
+    rule, and it holds because the alias itself is listed there.
+    """
+    created = priced.post(f"{API_ROOT}/aliases", json={"name": "fast", "target": _NEBIUS_GLM}, headers=master_header)
+    assert created.status_code == status.HTTP_200_OK, created.text
+
+    body = _get(priced, f"{API_ROOT}/catalog/models", headers=master_header)
+    assert "z-ai/glm-5.3" in [model["id"] for model in body["models"]]
+    detail = _get(priced, f"{API_ROOT}/catalog/models/z-ai/glm-5.3", headers=master_header)
+    assert [offering["selector"] for offering in detail["offerings"]] == [_NEBIUS_GLM, _FIREWORKS_GLM]
+
+    flat = _get(priced, f"{API_ROOT}/models", headers=master_header)
+    flat_ids = [model["id"] for model in flat["data"]]
+    assert "fast" in flat_ids
+    assert _NEBIUS_GLM not in flat_ids
+
+    deleted = priced.delete(f"{API_ROOT}/aliases/fast", headers=master_header)
+    assert deleted.status_code == status.HTTP_204_NO_CONTENT, deleted.text
+    body = _get(priced, f"{API_ROOT}/catalog/models", headers=master_header)
+    assert "z-ai/glm-5.3" in [model["id"] for model in body["models"]]
+
+
 def test_an_unknown_model_is_404(priced: TestClient, master_header: dict[str, str]) -> None:
     with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)):
         response = priced.get(f"{API_ROOT}/catalog/models/no-such-model", headers=master_header)

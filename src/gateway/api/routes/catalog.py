@@ -571,12 +571,25 @@ async def _merged_for(
     session_identity: TenancyUser | None,
     model_provider: ModelProviderPort,
 ) -> MergedCatalog:
+    # The grouped catalog lists real models and never an alias, so an alias's
+    # target stays in: withholding it here would list the model nowhere.
     if caller is None:
         return await build_merged_catalog(
-            db, config, auth=(None, False), session_identity=None, anonymous=True, model_provider=model_provider
+            db,
+            config,
+            auth=(None, False),
+            session_identity=None,
+            anonymous=True,
+            model_provider=model_provider,
+            withhold_alias_targets=False,
         )
     return await build_merged_catalog(
-        db, config, auth=caller, session_identity=session_identity, model_provider=model_provider
+        db,
+        config,
+        auth=caller,
+        session_identity=session_identity,
+        model_provider=model_provider,
+        withhold_alias_targets=False,
     )
 
 
