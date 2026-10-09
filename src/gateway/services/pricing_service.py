@@ -880,6 +880,40 @@ def per_request_meters(cost: Decimal) -> PerRequestMeters | None:
     return {"requests": 1}, [request_charge_line(cost)]
 
 
+SEARCH_UNITS_METER = "search_units"
+
+
+def search_unit_cost(units: int, pricing: ModelPricing | None) -> Decimal:
+    """USD for ``units`` search units at a per-request rate.
+
+    Rerank convention: a provider that bills by search unit (one query over a
+    batch of documents) reports how many it billed, and a rate whose ``unit``
+    is ``requests`` prices each one at ``input_price_per_million / 1e6``. A
+    provider that reports no count is billed one unit, the request itself, as
+    the other per-request routes are. Unpriced settles at $0, as
+    :func:`flat_request_cost` does.
+    """
+    return max(units, 0) * flat_request_cost(pricing)
+
+
+def search_unit_meters(units: int, cost: Decimal) -> PerRequestMeters | None:
+    """Billing meters and charge line for ``units`` search units costing ``cost``.
+
+    The line carries ``unit_rate`` like every per-request line, so the
+    dashboard renders it on that branch; the meter name says what was counted.
+    ``None`` when free, for the reason :func:`per_request_meters` gives.
+    """
+    if not cost or units <= 0:
+        return None
+    line: dict[str, float | int | str] = {
+        "meter": SEARCH_UNITS_METER,
+        "units": units,
+        "unit_rate": float(cost / units),
+        "cost": float(cost),
+    }
+    return {SEARCH_UNITS_METER: units}, [line]
+
+
 GATEWAY_TOOL_PRICING_PROVIDER = "otari"
 
 

@@ -14,7 +14,14 @@ import pytest
 from gateway.core.metered_pricing import price_request
 from gateway.models.pricing import ModelPricing
 from gateway.services.budgets import estimate_cost
-from gateway.services.pricing_service import flat_request_cost, input_token_cost, per_image_cost, per_request_meters
+from gateway.services.pricing_service import (
+    flat_request_cost,
+    input_token_cost,
+    per_image_cost,
+    per_request_meters,
+    search_unit_cost,
+    search_unit_meters,
+)
 
 
 def _pricing(rate: object) -> ModelPricing:
@@ -87,3 +94,40 @@ def test_the_budget_estimate_for_a_per_request_model_is_its_flat_price() -> None
     estimate = estimate_cost(pricing, prompt_chars=40_000, max_output_tokens=None, default_output_tokens=4096)
 
     assert estimate == Decimal("0.005")
+
+
+def _per_request_pricing(rate: object = Decimal(2000)) -> ModelPricing:
+    return ModelPricing(
+        model_key="cohere:rerank-v3.5",
+        input_price_per_million=rate,
+        output_price_per_million=Decimal(0),
+        unit="requests",
+    )
+
+
+def test_search_units_bill_at_the_per_request_rate() -> None:
+    """Each search unit costs what one request costs, exactly."""
+    pricing = _per_request_pricing()
+
+    assert search_unit_cost(1, pricing) == flat_request_cost(pricing) == Decimal("0.002")
+    assert search_unit_cost(3, pricing) == Decimal("0.006")
+    assert isinstance(search_unit_cost(3, pricing), Decimal)
+
+
+def test_search_units_on_an_unpriced_or_unusable_rate_cost_nothing() -> None:
+    assert search_unit_cost(2, None) == Decimal(0)
+    assert search_unit_cost(2, _per_request_pricing(float("nan"))) == Decimal(0)
+    assert search_unit_cost(-1, _per_request_pricing()) == Decimal(0)
+
+
+def test_search_unit_meters_name_the_units_and_carry_a_unit_rate() -> None:
+    """The line is a unit line (``unit_rate``), so it renders on the per-call branch."""
+    meters, lines = search_unit_meters(3, Decimal("0.006")) or (None, None)
+
+    assert meters == {"search_units": 3}
+    assert lines == [{"meter": "search_units", "units": 3, "unit_rate": 0.002, "cost": 0.006}]
+
+
+def test_search_unit_meters_are_absent_when_free() -> None:
+    assert search_unit_meters(2, Decimal(0)) is None
+    assert search_unit_meters(0, Decimal("0.002")) is None

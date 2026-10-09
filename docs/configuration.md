@@ -413,11 +413,22 @@ Use `pricing_tiers` for a rate that applies to an entire request after an input
 token threshold. The OpenAPI pricing schemas and dashboard editor show the
 accepted shape.
 
-### Per-request pricing (audio, moderations, and completion models)
+### Per-request pricing (audio, moderations, rerank, and completion models)
 
 Audio, moderations, and direct search do not use token pricing. They reuse
 `input_price_per_million` as USD per million requests. An unpriced request on
 these endpoints is served at zero cost.
+
+Rerank accepts either unit. A rerank model priced `unit: tokens` is charged
+on the input tokens the provider reports. Providers that bill reranking per
+search unit (one query over a batch of documents) report that count and no
+tokens, so give such a model `unit: requests` and it is charged the reported
+units at `input_price_per_million / 1,000,000` each, or one unit when the
+provider reports none. The budget reservation holds one unit and settles at
+the reported count. The default-pricing dataset carries no rerank rates, so a
+rerank model needs its own pricing row, for example `cohere:rerank-v3.5` at
+`input_price_per_million: 2000` (USD 2 per 1,000 searches) with
+`unit: requests`.
 
 A model served over chat completions, the Responses API, or Messages can be
 priced the same way, for an upstream that bills per call and reports little or

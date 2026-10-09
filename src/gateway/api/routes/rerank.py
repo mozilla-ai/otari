@@ -1,6 +1,7 @@
 """Rerank endpoint — reorder documents by relevance to a query."""
 
 from decimal import Decimal
+from math import ceil
 from typing import Annotated, Any
 
 from any_llm import arerank
@@ -12,11 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._passthrough import BillingMeters, run_passthrough
 from gateway.core.config import GatewayConfig
+from gateway.core.metered_pricing import priced_per_request
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.services.budgets import estimate_cost
 from gateway.services.log_writer import LogWriter
-from gateway.services.pricing_service import input_token_cost
+from gateway.services.pricing_service import input_token_cost, search_unit_cost, search_unit_meters
 from gateway.services.provider_kwargs import ResolvedProvider
 
 router = APIRouter(tags=["rerank"])
@@ -48,15 +50,23 @@ async def create_rerank(
 ) -> Any:
     """Rerank documents by relevance to a query.
 
+    Billing: a model priced per request (``unit: requests``) is charged per
+    search unit the provider reports, or for one unit when it reports none. A
+    model priced per token is charged on the input tokens the provider reports.
+
     Authentication modes:
     - Master key + user field: Use specified user (must exist)
     - API key + user field: Use specified user (must exist)
     - API key without user field: Use the shared "default" user
     """
-    # Rerank bills on total tokens (input only). Estimate from query + documents.
+    # A token-priced model estimates input tokens from query + documents.
     prompt_chars = len(request.query) + sum(len(doc) for doc in request.documents)
 
     def estimate(pricing: ModelPricing | None) -> Decimal:
+        if priced_per_request(pricing):
+            # The provider decides how many search units a query bills; one is
+            # the floor and settlement reconciles the rest.
+            return search_unit_cost(1, pricing)
         return estimate_cost(pricing, prompt_chars=prompt_chars, max_output_tokens=None, default_output_tokens=0)
 
     def usage_tokens(result: RerankResponse) -> tuple[int | None, int | None, int | None]:
@@ -64,12 +74,16 @@ async def create_rerank(
         return (total_tokens, 0, total_tokens)
 
     def compute_cost(result: RerankResponse, pricing: ModelPricing | None) -> Decimal | None:
+        if priced_per_request(pricing):
+            return search_unit_cost(_search_units(result), pricing)
         total_tokens = result.usage.total_tokens if result.usage else None
         if result.usage and pricing and total_tokens:
             return input_token_cost(total_tokens, pricing)
         return None
 
     def compute_meters(result: RerankResponse, pricing: ModelPricing | None, cost: Decimal) -> BillingMeters | None:
+        if priced_per_request(pricing):
+            return search_unit_meters(_search_units(result), cost)
         total_tokens = result.usage.total_tokens if result.usage else None
         if not pricing or not total_tokens:
             return None
@@ -114,3 +128,16 @@ async def create_rerank(
         compute_meters=compute_meters,
     )
     return outcome.result
+
+
+def _search_units(result: RerankResponse) -> int:
+    """How many search units the provider billed for ``result``, at least one.
+
+    Reported under ``meta.billed_units`` by providers that bill rerank per query
+    batch rather than per token. A fraction rounds up: the provider billed it.
+    """
+    billed = result.meta.billed_units if result.meta else None
+    reported = billed.get("search_units") if billed else None
+    if reported is None or reported <= 0:
+        return 1
+    return ceil(reported)
