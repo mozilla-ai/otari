@@ -846,6 +846,31 @@ async def build_merged_catalog(
     )
 
 
+async def build_real_model_catalog(
+    db: AsyncSession,
+    config: GatewayConfig,
+    *,
+    auth: tuple[APIKey | None, bool],
+    session_identity: TenancyUser | None,
+    anonymous: bool = False,
+    model_provider: ModelProviderPort | None,
+) -> MergedCatalog:
+    """The merged catalog for a view that lists real models and never an alias.
+
+    Such a view keeps an alias's target: hiding it behind the alias, as the flat
+    listing does, would list the model nowhere once something aliases it.
+    """
+    return await build_merged_catalog(
+        db,
+        config,
+        auth=auth,
+        session_identity=session_identity,
+        anonymous=anonymous,
+        model_provider=model_provider,
+        withhold_alias_targets=False,
+    )
+
+
 class ViewerPrice(NamedTuple):
     """The rate one viewer is charged for an offering, and which rung it came from."""
 

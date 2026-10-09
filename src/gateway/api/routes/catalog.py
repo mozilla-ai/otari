@@ -62,7 +62,7 @@ from gateway.services.catalog import (
 from gateway.services.merged_catalog_service import (
     MergedCatalog,
     ModelPricingInfo,
-    build_merged_catalog,
+    build_real_model_catalog,
     served_on_deployment_key,
     viewer_price,
 )
@@ -571,25 +571,12 @@ async def _merged_for(
     session_identity: TenancyUser | None,
     model_provider: ModelProviderPort,
 ) -> MergedCatalog:
-    # The grouped catalog lists real models and never an alias, so an alias's
-    # target stays in: withholding it here would list the model nowhere.
     if caller is None:
-        return await build_merged_catalog(
-            db,
-            config,
-            auth=(None, False),
-            session_identity=None,
-            anonymous=True,
-            model_provider=model_provider,
-            withhold_alias_targets=False,
+        return await build_real_model_catalog(
+            db, config, auth=(None, False), session_identity=None, anonymous=True, model_provider=model_provider
         )
-    return await build_merged_catalog(
-        db,
-        config,
-        auth=caller,
-        session_identity=session_identity,
-        model_provider=model_provider,
-        withhold_alias_targets=False,
+    return await build_real_model_catalog(
+        db, config, auth=caller, session_identity=session_identity, model_provider=model_provider
     )
 
 
