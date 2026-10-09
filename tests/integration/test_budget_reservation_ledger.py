@@ -582,6 +582,40 @@ async def test_a_leaked_hold_is_still_reclaimed_by_the_next_request(async_db: As
     assert user.reserved == Decimal("1.000000")
 
 
+@pytest.mark.asyncio
+async def test_a_hold_another_session_leaked_is_reclaimed_past_a_stale_identity_map(
+    async_db: AsyncSession, postgres_url: str, tenancy: Fixture
+) -> None:
+    """The sweep is skipped for a user row holding nothing, so that row must be read fresh.
+
+    This session loaded the user while it held nothing; the leaked hold was taken
+    through another one, as a concurrent request's would be. Read from the
+    identity map, the row still shows nothing held and the leak is never swept.
+    """
+    await _with_budget(async_db, tenancy)
+    # Held for the whole test: the identity map is weak, and an unreferenced user
+    # would be loaded afresh whether or not the read asks for it.
+    loaded = await async_db.get_one(User, tenancy.user_id)
+    assert loaded.reserved == Decimal(0)
+
+    engine = create_async_engine(_to_async_url(postgres_url))
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as other:
+            leaked = await reserve_budget(other, tenancy.user_id, 3.0)
+            assert leaked.reservation_id is not None
+            row = await other.get_one(BudgetReservation, leaked.reservation_id)
+            row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+            await other.commit()
+    finally:
+        await engine.dispose()
+
+    await reserve_budget(async_db, tenancy.user_id, 1.0)
+
+    assert await _status(async_db, leaked.reservation_id) == RESERVATION_EXPIRED
+    user = await _user(async_db, tenancy.user_id)
+    assert user.reserved == Decimal("1.000000")
+
+
 def _updated_tables(statements: list[str]) -> list[str]:
     tables = []
     for statement in statements:

@@ -1,7 +1,7 @@
 """The batch writer keeps rows it could not write the first time, and drains on stop."""
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -114,6 +114,11 @@ async def test_a_full_queue_drops_the_row_rather_than_blocking_the_request() -> 
     assert writer._queue.qsize() == 1
 
 
+async def _until(condition: Callable[[], bool]) -> None:
+    while not condition():
+        await asyncio.sleep(0.001)
+
+
 def _dropped() -> float:
     return REGISTRY.get_sample_value("gateway_usage_log_rows_total", {"writer": "batch", "result": "dropped"}) or 0.0
 
@@ -130,7 +135,9 @@ async def test_stop_gives_up_after_its_timeout_and_counts_what_it_was_flushing(
     await writer.put(_rows(1)[0])
     if started:
         await writer.start()
-        await asyncio.sleep(0.05)  # the loop takes the row and backs off from its first failure
+        # Until the loop has tried the row and is backing off: a fixed sleep that
+        # ran short would leave it on the queue, the unstarted case over again.
+        await asyncio.wait_for(_until(lambda: store.commits >= 1), timeout=5)
     before = _dropped()
 
     await asyncio.wait_for(writer.stop(), timeout=5)
