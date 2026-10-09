@@ -60,6 +60,17 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
         """
         await self.db.execute(select(col(Workspace.id)).where(col(Workspace.id) == workspace_id).with_for_update())
 
+    async def lock_many(self, workspace_ids: Collection[uuid.UUID]) -> None:
+        """Take the row lock on each of these workspaces, in ID order so two writers cannot deadlock."""
+        if not workspace_ids:
+            return
+        await self.db.execute(
+            select(col(Workspace.id))
+            .where(col(Workspace.id).in_(list(workspace_ids)))
+            .order_by(col(Workspace.id))
+            .with_for_update()
+        )
+
     async def get_by_ids(self, workspace_ids: Collection[uuid.UUID]) -> Sequence[Workspace]:
         """Return the workspaces named by a batch of ids (order unspecified).
 
@@ -327,6 +338,15 @@ class WorkspaceMemberRepository:
             select(col(WorkspaceMember.workspace_id)).where(col(WorkspaceMember.id) == workspace_member_id)
         )
         return result.scalar_one_or_none()
+
+    async def get_workspace_ids(self, workspace_member_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        """Return the IDs of the workspaces these memberships belong to."""
+        if not workspace_member_ids:
+            return set()
+        result = await self.db.execute(
+            select(col(WorkspaceMember.workspace_id)).where(col(WorkspaceMember.id).in_(list(workspace_member_ids)))
+        )
+        return set(result.scalars().all())
 
     async def get_ids_by_organization(self, organization_id: uuid.UUID) -> list[uuid.UUID]:
         """Return the ID of every membership in an organization's workspaces, whatever its status."""

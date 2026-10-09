@@ -1628,6 +1628,65 @@
         "title": "AnthropicFileMetadata",
         "type": "object"
       },
+      "AppliedEntity": {
+        "description": "One entity a budget applies to: a scope inside the organization, optionally narrowed to a provider or model.",
+        "properties": {
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "pattern": "^\\S+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Narrow the cap to one model of the provider, by the id the provider gives it; omit or null to cap every model. Requires provider_key_id, because a model id is only unique within its provider",
+            "title": "Model"
+          },
+          "provider_key_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "pattern": "^\\S+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Key Id"
+          },
+          "scope_id": {
+            "description": "Id of the capped identity",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Scope Id",
+            "type": "string"
+          },
+          "scope_type": {
+            "description": "Which kind of identity the budget caps",
+            "enum": [
+              "organization",
+              "workspace",
+              "workspace_member",
+              "org_member",
+              "api_token"
+            ],
+            "title": "Scope Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope_type",
+          "scope_id"
+        ],
+        "title": "AppliedEntity",
+        "type": "object"
+      },
       "AppliedEntityPublic": {
         "description": "One entity a budget applies to: the scope a ceiling caps, and the provider or model it narrows to.",
         "properties": {
@@ -10210,8 +10269,24 @@
         "type": "object"
       },
       "OrganizationBudgetCreate": {
-        "description": "Create one budget owned by the caller's organization.",
+        "description": "Create one budget owned by the caller's organization, and apply it to its entities in the same step.",
         "properties": {
+          "applied_to": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AppliedEntity"
+                },
+                "maxItems": 1000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every entity the budget applies to, as a whole set. On update, entities missing from it stop carrying the budget and entities already in it keep their spend; omit it or send null to leave the entities as they are, and send an empty list to remove them all",
+            "title": "Applied To"
+          },
           "max_budget": {
             "anyOf": [
               {
@@ -10361,7 +10436,7 @@
         "type": "object"
       },
       "OrganizationBudgetPublic": {
-        "description": "One of the organization's budgets, and how much of its own config names it.\n\nCarries no spend rollup. ``BudgetResponse`` on the deployment surface sums\n``users.spend`` over the gateway's ``users`` table, which is deployment-wide\nand has no tenancy column, so the same figure here would be a cross-tenant\nread. What an organization's own spend is, is a question for Usage.\n\n``ceiling_count`` is the organization-relevant fact instead: how many of its\nceilings this budget currently holds, which is what makes a delete refuse.",
+        "description": "One of the organization's budgets, and how much of its own config names it.\n\nCarries no spend rollup. ``BudgetResponse`` on the deployment surface sums\n``users.spend`` over the gateway's ``users`` table, which is deployment-wide\nand has no tenancy column, so the same figure here would be a cross-tenant\nread. What an organization's own spend is, is a question for Usage.\n\n``ceiling_count`` is the organization-relevant fact instead: how many\nceilings name this budget, which is what makes a delete refuse. It counts\nevery one, including a ceiling the deployment operator pointed at this budget\nfrom outside the organization, which ``applied_to`` leaves out.",
         "properties": {
           "applied_to": {
             "description": "Every entity the budget applies to, oldest first",
@@ -10525,8 +10600,24 @@
         "type": "object"
       },
       "OrganizationBudgetUpdate": {
-        "description": "Replace a budget's label, figure and period.\n\nEvery field is optional and keyed on ``model_fields_set``, matching\nthe deployment-wide budget update's own: an *omitted* field is left alone, and an\nexplicit null clears it, so sending ``max_budget: null`` takes a budget back\nto uncapped, which is what the dashboard's dialog does. A cycle's settings\nare checked as the row ends up with them, not as submitted, since an omitted\nsetting keeps its stored value.",
+        "description": "Replace a budget's label, figure, reset cycle and the entities it applies to.\n\n``applied_to`` is the exception to the rule below: null means the same as\nomitting it, because \"apply to nothing\" is the empty list.\n\nEvery other field is optional and keyed on ``model_fields_set``, matching\nthe deployment-wide budget update's own: an *omitted* field is left alone, and an\nexplicit null clears it, so sending ``max_budget: null`` takes a budget back\nto uncapped, which is what the dashboard's dialog does. A cycle's settings\nare checked as the row ends up with them, not as submitted, since an omitted\nsetting keeps its stored value.",
         "properties": {
+          "applied_to": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AppliedEntity"
+                },
+                "maxItems": 1000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every entity the budget applies to, as a whole set. On update, entities missing from it stop carrying the budget and entities already in it keep their spend; omit it or send null to leave the entities as they are, and send an empty list to remove them all",
+            "title": "Applied To"
+          },
           "max_budget": {
             "anyOf": [
               {
@@ -27215,7 +27306,7 @@
         ]
       },
       "post": {
-        "description": "Define a budget owned by this organization. Owners and admins only.",
+        "description": "Define a budget owned by this organization, and the entities it applies to, in one step.\n\nOwners and admins only. A refused entity (a scope outside this organization,\nor one that already carries a budget) refuses the whole save, so no budget is\nleft behind applying to part of what was asked.",
         "operationId": "organization-budgets-create_organization_budget",
         "requestBody": {
           "content": {
@@ -27314,7 +27405,7 @@
         ]
       },
       "patch": {
-        "description": "Change a budget's label, figure or period.\n\nEvery ceiling naming it is held to the new figure from here on, which is the\npoint of naming a budget rather than typing an amount per place it applies.",
+        "description": "Change a budget's label, figure, reset cycle or the entities it applies to, in one step.\n\nEvery ceiling naming it is held to the new figure from here on, which is the\npoint of naming a budget rather than typing an amount per place it applies.\n``applied_to`` replaces the entity set; an entity it keeps keeps its spend.",
         "operationId": "organization-budgets-update_organization_budget",
         "parameters": [
           {

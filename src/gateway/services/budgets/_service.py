@@ -66,7 +66,7 @@ class BudgetService:
     async def create_organization_budget(
         self, *, user: User, request: OrganizationBudgetCreate
     ) -> OrganizationBudgetPublic:
-        """Create a budget owned by the caller's organization."""
+        """Create a budget owned by the caller's organization, applied to the entities the request names."""
         async with self._uow:
             return await self._organization.create_budget(user=user, request=request)
 
@@ -202,7 +202,7 @@ class BudgetService:
     async def update_organization_budget(
         self, *, user: User, budget_id: str, request: OrganizationBudgetUpdate
     ) -> OrganizationBudgetPublic:
-        """Change a budget the caller's organization owns, and hold every ceiling naming it to the new figure."""
+        """Change a budget the caller's organization owns and the entities it applies to, in one transaction."""
         async with self._uow:
             return await self._organization.update_budget(user=user, budget_id=budget_id, request=request)
 

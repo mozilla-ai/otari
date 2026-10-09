@@ -312,6 +312,13 @@ class OrganizationService:
         """Serialize this transaction against every other writer holding the workspace's row lock."""
         await self.workspace_rows.lock(workspace_id)
 
+    async def lock_workspaces(
+        self, workspace_ids: Collection[uuid.UUID], workspace_member_ids: Collection[uuid.UUID]
+    ) -> None:
+        """Lock these workspaces and the ones these memberships sit in, in one ordered statement."""
+        workspaces = set(workspace_ids) | await self.workspaces.get_workspace_ids(workspace_member_ids)
+        await self.workspace_rows.lock_many(workspaces)
+
     async def get_organization_id_for_organization_member(
         self,
         organization_member_id: uuid.UUID,

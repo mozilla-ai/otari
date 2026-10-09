@@ -1917,7 +1917,11 @@ export interface paths {
         put?: never;
         /**
          * Create Organization Budget
-         * @description Define a budget owned by this organization. Owners and admins only.
+         * @description Define a budget owned by this organization, and the entities it applies to, in one step.
+         *
+         *     Owners and admins only. A refused entity (a scope outside this organization,
+         *     or one that already carries a budget) refuses the whole save, so no budget is
+         *     left behind applying to part of what was asked.
          */
         post: operations["organization-budgets-create_organization_budget"];
         delete?: never;
@@ -1945,10 +1949,11 @@ export interface paths {
         head?: never;
         /**
          * Update Organization Budget
-         * @description Change a budget's label, figure or period.
+         * @description Change a budget's label, figure, reset cycle or the entities it applies to, in one step.
          *
          *     Every ceiling naming it is held to the new figure from here on, which is the
          *     point of naming a budget rather than typing an amount per place it applies.
+         *     ``applied_to`` replaces the entity set; an entity it keeps keeps its spend.
          */
         patch: operations["organization-budgets-update_organization_budget"];
         trace?: never;
@@ -6733,6 +6738,30 @@ export interface components {
             type: "file";
         };
         /**
+         * AppliedEntity
+         * @description One entity a budget applies to: a scope inside the organization, optionally narrowed to a provider or model.
+         */
+        AppliedEntity: {
+            /**
+             * Model
+             * @description Narrow the cap to one model of the provider, by the id the provider gives it; omit or null to cap every model. Requires provider_key_id, because a model id is only unique within its provider
+             */
+            model?: string | null;
+            /** Provider Key Id */
+            provider_key_id?: string | null;
+            /**
+             * Scope Id
+             * @description Id of the capped identity
+             */
+            scope_id: string;
+            /**
+             * Scope Type
+             * @description Which kind of identity the budget caps
+             * @enum {string}
+             */
+            scope_type: "organization" | "workspace" | "workspace_member" | "org_member" | "api_token";
+        };
+        /**
          * AppliedEntityPublic
          * @description One entity a budget applies to: the scope a ceiling caps, and the provider or model it narrows to.
          */
@@ -10699,9 +10728,14 @@ export interface components {
         };
         /**
          * OrganizationBudgetCreate
-         * @description Create one budget owned by the caller's organization.
+         * @description Create one budget owned by the caller's organization, and apply it to its entities in the same step.
          */
         OrganizationBudgetCreate: {
+            /**
+             * Applied To
+             * @description Every entity the budget applies to, as a whole set. On update, entities missing from it stop carrying the budget and entities already in it keep their spend; omit it or send null to leave the entities as they are, and send an empty list to remove them all
+             */
+            applied_to?: components["schemas"]["AppliedEntity"][] | null;
             /**
              * Max Budget
              * @description Maximum spend in USD over one period; null caps nothing
@@ -10762,8 +10796,10 @@ export interface components {
          *     and has no tenancy column, so the same figure here would be a cross-tenant
          *     read. What an organization's own spend is, is a question for Usage.
          *
-         *     ``ceiling_count`` is the organization-relevant fact instead: how many of its
-         *     ceilings this budget currently holds, which is what makes a delete refuse.
+         *     ``ceiling_count`` is the organization-relevant fact instead: how many
+         *     ceilings name this budget, which is what makes a delete refuse. It counts
+         *     every one, including a ceiling the deployment operator pointed at this budget
+         *     from outside the organization, which ``applied_to`` leaves out.
          */
         OrganizationBudgetPublic: {
             /**
@@ -10807,9 +10843,12 @@ export interface components {
         };
         /**
          * OrganizationBudgetUpdate
-         * @description Replace a budget's label, figure and period.
+         * @description Replace a budget's label, figure, reset cycle and the entities it applies to.
          *
-         *     Every field is optional and keyed on ``model_fields_set``, matching
+         *     ``applied_to`` is the exception to the rule below: null means the same as
+         *     omitting it, because "apply to nothing" is the empty list.
+         *
+         *     Every other field is optional and keyed on ``model_fields_set``, matching
          *     the deployment-wide budget update's own: an *omitted* field is left alone, and an
          *     explicit null clears it, so sending ``max_budget: null`` takes a budget back
          *     to uncapped, which is what the dashboard's dialog does. A cycle's settings
@@ -10817,6 +10856,11 @@ export interface components {
          *     setting keeps its stored value.
          */
         OrganizationBudgetUpdate: {
+            /**
+             * Applied To
+             * @description Every entity the budget applies to, as a whole set. On update, entities missing from it stop carrying the budget and entities already in it keep their spend; omit it or send null to leave the entities as they are, and send an empty list to remove them all
+             */
+            applied_to?: components["schemas"]["AppliedEntity"][] | null;
             /**
              * Max Budget
              * @description Maximum spend in USD over one period; null caps nothing

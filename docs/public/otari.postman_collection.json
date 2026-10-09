@@ -3733,9 +3733,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_anchor_at\": \"2024-01-01T00:00:00Z\",\n  \"reset_cycle\": \"every_n_hours\",\n  \"reset_every_n\": 1,\n  \"reset_month\": 1,\n  \"reset_month_day\": 1,\n  \"reset_weekdays\": 1,\n  \"token_limit\": 0\n}"
+              "raw": "{\n  \"applied_to\": [\n    {\n      \"scope_type\": \"organization\",\n      \"scope_id\": \"string\"\n    }\n  ],\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_anchor_at\": \"2024-01-01T00:00:00Z\",\n  \"reset_cycle\": \"every_n_hours\",\n  \"reset_every_n\": 1,\n  \"reset_month\": 1,\n  \"reset_month_day\": 1,\n  \"reset_weekdays\": 1,\n  \"token_limit\": 0\n}"
             },
-            "description": "Define a budget owned by this organization. Owners and admins only.",
+            "description": "Define a budget owned by this organization, and the entities it applies to, in one step.\n\nOwners and admins only. A refused entity (a scope outside this organization,\nor one that already carries a budget) refuses the whole save, so no budget is\nleft behind applying to part of what was asked.",
             "header": [
               {
                 "key": "Content-Type",
@@ -3768,9 +3768,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_anchor_at\": \"2024-01-01T00:00:00Z\",\n  \"reset_cycle\": \"every_n_hours\",\n  \"reset_every_n\": 1,\n  \"reset_month\": 1,\n  \"reset_month_day\": 1,\n  \"reset_weekdays\": 1,\n  \"token_limit\": 0\n}"
+              "raw": "{\n  \"applied_to\": [\n    {\n      \"scope_type\": \"organization\",\n      \"scope_id\": \"string\"\n    }\n  ],\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_anchor_at\": \"2024-01-01T00:00:00Z\",\n  \"reset_cycle\": \"every_n_hours\",\n  \"reset_every_n\": 1,\n  \"reset_month\": 1,\n  \"reset_month_day\": 1,\n  \"reset_weekdays\": 1,\n  \"token_limit\": 0\n}"
             },
-            "description": "Change a budget's label, figure or period.\n\nEvery ceiling naming it is held to the new figure from here on, which is the\npoint of naming a budget rather than typing an amount per place it applies.",
+            "description": "Change a budget's label, figure, reset cycle or the entities it applies to, in one step.\n\nEvery ceiling naming it is held to the new figure from here on, which is the\npoint of naming a budget rather than typing an amount per place it applies.\n``applied_to`` replaces the entity set; an entity it keeps keeps its spend.",
             "header": [
               {
                 "key": "Content-Type",
