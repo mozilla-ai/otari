@@ -1,164 +1,423 @@
-"""Tests for explicit genai-prices snapshot refreshes."""
+"""Tests for explicit models.dev price snapshot refreshes."""
 
-from types import SimpleNamespace
-from typing import cast
-from unittest.mock import AsyncMock
+import asyncio
+import json
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from pathlib import Path
+from typing import Any
 
 import pytest
-from genai_prices.data_snapshot import DataSnapshot, get_snapshot
-from genai_prices.update_prices import DEFAULT_UPDATE_URL
+import pytest_asyncio
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-import gateway.services.pricing_refresh_service as pricing_refresh_service
+import gateway.services.pricing.generations as generations
+import gateway.services.pricing_refresh_service as refresh
 from gateway.models.pricing import PricingSnapshot, PricingSnapshotHistory
-
-_PERSISTED_SNAPSHOT = (
-    '[{"id":"test","name":"Test","api_pattern":"","models":['
-    '{"id":"model","match":{"equals":"model"},"prices":{"input_mtok":"1","output_mtok":"2"}}]}]'
+from gateway.services.pricing import (
+    active_generations,
+    active_timeline,
+    bundled_generation,
+    current_index,
+    resolve_as_of,
 )
 
 
-def test_refresh_targets_the_maintained_feed() -> None:
-    """Pins below genai-prices 0.1.0 fetch the frozen v1 feed, which never changes again."""
-
-    assert DEFAULT_UPDATE_URL.endswith("prices/new_data/v2/data.json")
-
-
-def test_parse_snapshot_normalizes_upstream_normalization_errors() -> None:
-    raw_snapshot = (
-        '[{"id":"test","name":"Test","api_pattern":"","models":['
-        '{"id":"model","match":{"equals":"model"},"prices":[1]}]}]'
-    )
-
-    with pytest.raises(ValueError, match="Invalid genai-prices snapshot"):
-        pricing_refresh_service._parse_snapshot(raw_snapshot)
+def _catalog(input_rate: float = 1, *, extra: bool = False) -> dict[str, Any]:
+    models: dict[str, Any] = {
+        "model": {"id": "model", "name": "Model", "cost": {"input": input_rate, "output": 2}, "limit": {"context": 8}}
+    }
+    if extra:
+        models["other"] = {"id": "other", "cost": {"input": 3, "output": 4}}
+    return {"test": {"id": "test", "name": "Test", "doc": "https://example.test", "models": models}}
 
 
-def _snapshot_with_changed_price() -> tuple[DataSnapshot, str, str]:
-    raw_snapshot = _PERSISTED_SNAPSHOT.replace('"input_mtok":"1"', '"input_mtok":"987.654"')
-    providers = pricing_refresh_service._parse_snapshot(raw_snapshot)
-    return DataSnapshot(providers=providers, from_auto_update=True), "test:model", raw_snapshot
+def _raw(input_rate: float = 1, *, extra: bool = False) -> str:
+    return json.dumps(_catalog(input_rate, extra=extra))
 
 
-@pytest.mark.asyncio
-async def test_refresh_requires_confirmation_before_changing_active_prices(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A reviewed snapshot survives into a separate confirmation session."""
+@pytest_asyncio.fixture
+async def session(tmp_path: Path) -> AsyncIterator[AsyncSession]:
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'prices.db'}")
+    async with engine.begin() as conn:
+        await conn.run_sync(PricingSnapshot.__table__.create)  # type: ignore[attr-defined]
+        await conn.run_sync(PricingSnapshotHistory.__table__.create)  # type: ignore[attr-defined]
+    async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+        yield db
+    await engine.dispose()
 
-    active_snapshot = get_snapshot()
-    latest_snapshot, model_key, raw_snapshot = _snapshot_with_changed_price()
-    monkeypatch.setattr(
-        pricing_refresh_service,
-        "_fetch_latest_snapshot",
-        lambda: pricing_refresh_service._PendingSnapshot(latest_snapshot, raw_snapshot),
-    )
 
-    preview_session = AsyncMock(spec=AsyncSession)
-    preview_session.get.return_value = None
+@pytest.fixture
+def upstream(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """The catalog the fetch returns, and the arguments it was called with."""
+    state: dict[str, Any] = {"catalog": _catalog(), "calls": []}
 
-    preview = await pricing_refresh_service.prepare_price_refresh(preview_session)
+    async def fetch(**kwargs: Any) -> dict[str, Any]:
+        state["calls"].append(kwargs)
+        catalog: dict[str, Any] = state["catalog"]
+        return catalog
 
-    assert preview.added_count >= 1
-    assert get_snapshot() is active_snapshot
+    monkeypatch.setattr(refresh, "fetch_models_dev_document", fetch)
+    return state
 
-    pending = preview_session.add.call_args.args[0]
-    assert isinstance(pending, PricingSnapshot)
-    assert pending.source == pricing_refresh_service.GENAI_PRICES_PENDING_SOURCE
-    assert pending.snapshot == raw_snapshot
-    preview_session.commit.assert_awaited_once()
 
-    # The pending-row read, then the history window the prune reads.
-    result = SimpleNamespace(scalar_one_or_none=lambda: pending, scalars=lambda: iter(()))
-    confirmation_session = AsyncMock(spec=AsyncSession)
-    confirmation_session.execute.return_value = result
-    confirmation_session.get.return_value = None
-
-    assert await pricing_refresh_service.confirm_price_refresh(confirmation_session) is True
-    assert (
-        pricing_refresh_service._snapshot_prices(get_snapshot(), preview.fetched_at)[model_key]
-        == (pricing_refresh_service._snapshot_prices(latest_snapshot, preview.fetched_at)[model_key])
-    )
-    # The accepted snapshot, and the history row that says who accepted it.
-    added = [call.args[0] for call in confirmation_session.add.call_args_list]
-    assert [type(row) for row in added] == [PricingSnapshot, PricingSnapshotHistory]
-    stored, history = added
-    assert isinstance(stored, PricingSnapshot)
-    assert stored.source == pricing_refresh_service.GENAI_PRICES_SOURCE
-    assert stored.snapshot == raw_snapshot
-    assert isinstance(history, PricingSnapshotHistory)
-    assert history.accepted_by == "operator"
-    assert history.snapshot == raw_snapshot
-    confirmation_session.delete.assert_awaited_once_with(pending)
-    confirmation_session.commit.assert_awaited_once()
-
-    no_pending = AsyncMock(spec=AsyncSession)
-    no_pending.execute.return_value = SimpleNamespace(scalar_one_or_none=lambda: None)
-    assert await pricing_refresh_service.confirm_price_refresh(no_pending) is False
+def test_parse_snapshot_refuses_what_is_not_a_catalog() -> None:
+    for raw in ("not json", "[]", "{}", '{"p": {"id": "p", "models": {}}}'):
+        with pytest.raises(ValueError, match="Invalid models.dev snapshot"):
+            refresh._parse_snapshot(raw)
 
 
 @pytest.mark.asyncio
-async def test_startup_loads_the_persisted_genai_prices_snapshot() -> None:
-    """An approved upstream catalog is restored after a gateway restart."""
+async def test_a_fetch_is_held_for_review_and_confirmation_activates_it(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    bundled = current_index()
+    preview = await refresh.prepare_price_refresh(session)
 
-    row = PricingSnapshot(source=pricing_refresh_service.GENAI_PRICES_SOURCE, snapshot=_PERSISTED_SNAPSHOT)
-    result = SimpleNamespace(scalar_one_or_none=lambda: row)
-    session = AsyncMock(spec=AsyncSession)
-    session.execute.return_value = result
+    assert preview.removed_count > 0
+    assert preview.added_count == 1
+    assert len(preview.changes) == 100
+    assert preview.changes_truncated
+    assert current_index() is bundled
+    pending = await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE)
+    assert pending is not None
+    assert json.loads(pending.snapshot)["test"]["models"]["model"]["limit"] == {"context": 8}
 
-    await pricing_refresh_service.load_persisted_price_snapshot(cast(AsyncSession, session))
+    assert await refresh.confirm_price_refresh(session) is True
 
-    provider = get_snapshot().find_provider("model", "test", None)
-    assert provider.id == "test"
+    assert current_index().get("test", "model") is not None
+    baseline, accepted = active_generations()
+    assert baseline.baseline and not accepted.baseline
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is None
+    active = await session.get(PricingSnapshot, refresh.MODELS_DEV_SOURCE)
+    assert active is not None and active.snapshot == pending.snapshot
+    history = (await session.execute(select(PricingSnapshotHistory))).scalars().all()
+    assert [(row.source, row.accepted_by, row.model_count) for row in history] == [("models.dev", "operator", 1)]
+    assert await refresh.confirm_price_refresh(session) is False
 
 
 @pytest.mark.asyncio
-async def test_refresher_applies_a_snapshot_accepted_on_another_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_the_stored_snapshot_is_trimmed_to_the_price_fields(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    upstream["catalog"]["test"]["models"]["model"].update(
+        description="long text", modalities={"input": ["text"]}, experimental={"modes": {}}
+    )
+    await refresh.prepare_price_refresh(session)
+
+    pending = await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE)
+    assert pending is not None
+    assert set(json.loads(pending.snapshot)["test"]["models"]["model"]) == {"name", "cost", "limit"}
+
+
+@pytest.mark.asyncio
+async def test_the_preview_reports_changed_rates_against_the_active_snapshot(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+
+    upstream["catalog"] = _catalog(input_rate=9, extra=True)
+    preview = await refresh.prepare_price_refresh(session)
+
+    assert (preview.added_count, preview.changed_count, preview.removed_count) == (1, 1, 0)
+    assert [(c.model_key, c.change) for c in preview.changes] == [("test:model", "changed"), ("test:other", "added")]
+    assert not preview.changes_truncated
+
+    pending = await refresh.preview_pending_refresh(session)
+    assert pending is not None and pending.changed_count == 1
+    assert await refresh.reject_price_refresh(session) is True
+    assert await refresh.preview_pending_refresh(session) is None
+
+
+@pytest.mark.asyncio
+async def test_a_fetch_failure_is_a_refresh_error(session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fail(**_: Any) -> dict[str, Any]:
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr(refresh, "fetch_models_dev_document", fail)
+    with pytest.raises(refresh.PricingRefreshError):
+        await refresh.prepare_price_refresh(session)
+
+
+@pytest.mark.asyncio
+async def test_a_catalog_without_models_is_not_stored(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    upstream["catalog"] = {"p": {"id": "p", "models": {}}}
+    with pytest.raises(refresh.PricingRefreshError):
+        await refresh.prepare_price_refresh(session)
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is None
+
+
+@pytest.mark.asyncio
+async def test_a_catalog_pricing_no_model_is_not_stored(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    upstream["catalog"] = {"p": {"id": "p", "models": {"m": {"id": "m", "name": "M"}}}}
+    with pytest.raises(refresh.PricingRefreshError, match="prices no models"):
+        await refresh.prepare_price_refresh(session)
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rate", [-1, 2_000_000])
+async def test_an_implausible_rate_rejects_the_whole_catalog(
+    session: AsyncSession, upstream: dict[str, Any], rate: float
+) -> None:
+    upstream["catalog"]["test"]["models"]["other"] = {"id": "other", "cost": {"input": 1, "output": rate}}
+    with pytest.raises(refresh.PricingRefreshError, match="implausible"):
+        await refresh.prepare_price_refresh(session)
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is None
+
+
+@pytest.mark.asyncio
+async def test_an_implausible_tier_rate_rejects_the_whole_catalog(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    upstream["catalog"]["test"]["models"]["model"]["cost"]["tiers"] = [
+        {"tier": {"type": "context", "size": 100}, "input": float("inf")}
+    ]
+    with pytest.raises(refresh.PricingRefreshError):
+        await refresh.prepare_price_refresh(session)
+
+
+@pytest.mark.asyncio
+async def test_a_large_drop_is_stored_for_review_and_flagged(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    preview = await refresh.prepare_price_refresh(session)
+
+    assert preview.needs_review is True
+    assert preview.review_reason is not None and "priced models fall" in preview.review_reason
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is not None
+    assert await refresh.confirm_price_refresh(session) is True
+
+
+@pytest.mark.asyncio
+async def test_a_small_change_needs_no_review(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+    upstream["catalog"] = _catalog(input_rate=9, extra=True)
+
+    preview = await refresh.prepare_price_refresh(session)
+
+    assert preview.needs_review is False
+    assert preview.review_reason is None
+
+
+@pytest.mark.asyncio
+async def test_failed_persistence_keeps_the_active_generations(
+    session: AsyncSession, upstream: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await refresh.prepare_price_refresh(session)
+    bundled = active_generations()
+
+    async def broken_commit() -> None:
+        raise SQLAlchemyError("database unavailable")
+
+    monkeypatch.setattr(session, "commit", broken_commit)
+    with pytest.raises(refresh.PricingRefreshError):
+        await refresh.confirm_price_refresh(session)
+
+    assert active_generations() == bundled
+
+
+@pytest.mark.asyncio
+async def test_startup_restores_the_accepted_history(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+    upstream["catalog"] = _catalog(input_rate=5)
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+
+    refresh.reset_price_refresh_state()
+    assert active_generations() == (bundled_generation(),)
+    await refresh.load_persisted_price_snapshot(session)
+
+    generations = active_generations()[1:]
+    assert len(generations) == 2
+    assert active_generations()[0].baseline
+    assert generations[0].effective_at < generations[1].effective_at
+    old, new = (g.index.get("test", "model") for g in generations)
+    assert old is not None and new is not None
+    assert (str(old.input), str(new.input)) == ("1", "5")
+
+
+@pytest.mark.asyncio
+async def test_refresher_applies_a_snapshot_accepted_on_another_worker(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A confirm served by a sibling worker propagates here on the next tick, once."""
 
-    _, model_key, raw_snapshot = _snapshot_with_changed_price()
-    row = PricingSnapshot(source=pricing_refresh_service.GENAI_PRICES_SOURCE, snapshot=raw_snapshot)
-    session = AsyncMock(spec=AsyncSession)
-    session.execute.return_value = SimpleNamespace(scalar_one_or_none=lambda: row)
+    session.add(PricingSnapshot(source=refresh.MODELS_DEV_SOURCE, snapshot=_raw()))
+    await session.commit()
 
-    await pricing_refresh_service.refresh_price_snapshot(cast(AsyncSession, session))
+    await refresh.refresh_price_snapshot(session)
 
-    provider = get_snapshot().find_provider("model", "test", None)
-    assert provider.id == "test"
-    assert pricing_refresh_service._applied_snapshot_raw == raw_snapshot
+    assert current_index().get("test", "model") is not None
+    assert refresh._applied_updated_at is not None
 
-    # An unchanged stored snapshot must be skipped so the price cache is left alone.
     monkeypatch.setattr(
-        pricing_refresh_service,
-        "_apply_active_snapshot",
-        lambda _: pytest.fail("an unchanged snapshot must not be re-applied"),
+        refresh,
+        "_apply_persisted_snapshots",
+        lambda *_: pytest.fail("an unchanged snapshot must not be re-applied"),
     )
-    await pricing_refresh_service.refresh_price_snapshot(cast(AsyncSession, session))
+    monkeypatch.setattr(
+        refresh,
+        "_get_active_snapshot_row",
+        lambda *_: pytest.fail("an unchanged snapshot's payload must not be read"),
+    )
+    await refresh.refresh_price_snapshot(session)
 
 
 @pytest.mark.asyncio
-async def test_failed_snapshot_persistence_keeps_the_active_prices(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A database failure cannot activate a snapshot that was not saved."""
+async def test_an_invalid_persisted_snapshot_leaves_the_bundled_prices(session: AsyncSession) -> None:
+    session.add(PricingSnapshot(source=refresh.MODELS_DEV_SOURCE, snapshot="{}"))
+    await session.commit()
 
-    active_snapshot = get_snapshot()
-    latest_snapshot, _, _ = _snapshot_with_changed_price()
-    monkeypatch.setattr(
-        pricing_refresh_service,
-        "_fetch_latest_snapshot",
-        lambda: pricing_refresh_service._PendingSnapshot(latest_snapshot, _PERSISTED_SNAPSHOT),
-    )
-    preview_session = AsyncMock(spec=AsyncSession)
-    preview_session.get.return_value = None
-    await pricing_refresh_service.prepare_price_refresh(preview_session)
-    pending = preview_session.add.call_args.args[0]
+    await refresh.load_persisted_price_snapshot(session)
 
-    result = SimpleNamespace(scalar_one_or_none=lambda: pending, scalars=lambda: iter(()))
-    session = AsyncMock(spec=AsyncSession)
-    session.execute.return_value = result
-    session.get.return_value = None
-    session.commit.side_effect = SQLAlchemyError("database unavailable")
+    assert active_generations() == (bundled_generation(),)
 
-    with pytest.raises(pricing_refresh_service.PricingRefreshError):
-        await pricing_refresh_service.confirm_price_refresh(session)
 
-    assert get_snapshot() is active_snapshot
-    session.rollback.assert_awaited_once()
+@pytest.mark.asyncio
+async def test_the_history_keeps_only_the_newest_snapshots(
+    session: AsyncSession, upstream: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(refresh, "PRICING_SNAPSHOT_HISTORY_KEEP", 2)
+    for rate in (1, 2, 3):
+        upstream["catalog"] = _catalog(input_rate=rate)
+        await refresh.prepare_price_refresh(session)
+        await refresh.confirm_price_refresh(session)
+
+    assert len(await refresh.list_accepted_snapshots(session)) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_poll_claim_is_honored_for_one_interval(session: AsyncSession) -> None:
+    assert await refresh.claim_poll_tick(session, 3600) is True
+    assert await refresh.claim_poll_tick(session, 3600) is False
+    row = await session.get(PricingSnapshot, refresh.MODELS_DEV_POLL_CLAIM_SOURCE)
+    assert row is not None
+
+
+async def _accept_baseline(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+    upstream["catalog"] = _catalog(input_rate=9, extra=True)
+
+
+@pytest.mark.asyncio
+async def test_confirm_refuses_a_pending_snapshot_replaced_after_the_preview(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    await _accept_baseline(session, upstream)
+    reviewed = await refresh.prepare_price_refresh(session)
+    upstream["catalog"] = _catalog(input_rate=11, extra=True)
+    replacement = await refresh.prepare_price_refresh(session)
+    assert reviewed.digest != replacement.digest
+    before = current_index()
+
+    with pytest.raises(refresh.PendingSnapshotChanged):
+        await refresh.confirm_price_refresh(session, digest=reviewed.digest)
+
+    assert current_index() is before
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is not None
+    assert len((await session.execute(select(PricingSnapshotHistory))).scalars().all()) == 1
+
+
+@pytest.mark.asyncio
+async def test_confirm_accepts_the_snapshot_its_digest_names(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    await _accept_baseline(session, upstream)
+    reviewed = await refresh.prepare_price_refresh(session)
+
+    assert await refresh.confirm_price_refresh(session, digest=reviewed.digest) is True
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is None
+
+
+@pytest.mark.asyncio
+async def test_reject_refuses_a_replaced_pending_snapshot(session: AsyncSession, upstream: dict[str, Any]) -> None:
+    await _accept_baseline(session, upstream)
+    reviewed = await refresh.prepare_price_refresh(session)
+    upstream["catalog"] = _catalog(input_rate=11, extra=True)
+    await refresh.prepare_price_refresh(session)
+
+    with pytest.raises(refresh.PendingSnapshotChanged):
+        await refresh.reject_price_refresh(session, digest=reviewed.digest)
+
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is not None
+
+
+@pytest.mark.asyncio
+async def test_the_stored_pending_row_matches_the_previewed_digest(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    preview = await refresh.prepare_price_refresh(session)
+    pending = await refresh.preview_pending_refresh(session)
+    assert pending is not None
+    assert pending.digest == preview.digest
+
+
+@pytest.mark.asyncio
+async def test_auto_applies_only_what_it_prepared(
+    session: AsyncSession, upstream: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _accept_baseline(session, upstream)
+    prepare = refresh.prepare_price_refresh
+
+    async def prepare_then_get_replaced(*args: Any, **kwargs: Any) -> Any:
+        preview = await prepare(*args, **kwargs)
+        pending = await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE)
+        assert pending is not None
+        pending.snapshot = _raw(input_rate=77, extra=True)
+        await session.commit()
+        return preview
+
+    monkeypatch.setattr(refresh, "prepare_price_refresh", prepare_then_get_replaced)
+
+    assert await refresh.poll_price_updates(session, "auto") == "pending"
+
+    assert len((await session.execute(select(PricingSnapshotHistory))).scalars().all()) == 1
+    assert await session.get(PricingSnapshot, refresh.MODELS_DEV_PENDING_SOURCE) is not None
+
+
+@pytest.mark.asyncio
+async def test_dates_before_the_first_acceptance_price_at_the_bundled_rate(
+    session: AsyncSession, upstream: dict[str, Any]
+) -> None:
+    before = datetime.now(UTC) - timedelta(days=1)
+    bundled = bundled_generation().index.resolve("openai", "gpt-4o")
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+    upstream["catalog"] = _catalog(input_rate=5)
+    await refresh.prepare_price_refresh(session)
+    await refresh.confirm_price_refresh(session)
+    refresh.reset_price_refresh_state()
+    await refresh.load_persisted_price_snapshot(session)
+
+    assert bundled is not None
+    earlier = resolve_as_of(active_timeline(), before, "openai", "gpt-4o")
+    assert earlier is not None and earlier.input == bundled.input
+    assert resolve_as_of(active_timeline(), before, "test", "model") is None
+
+
+@pytest.mark.asyncio
+async def test_history_longer_than_the_resident_window_fails_closed_before_it(
+    session: AsyncSession, upstream: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(refresh, "MAX_RESIDENT_GENERATIONS", 2)
+    monkeypatch.setattr(generations, "MAX_RESIDENT_GENERATIONS", 2)
+    before = datetime.now(UTC) - timedelta(days=1)
+    for rate in (1, 2, 3):
+        upstream["catalog"] = _catalog(input_rate=rate)
+        await refresh.prepare_price_refresh(session)
+        await refresh.confirm_price_refresh(session)
+        await asyncio.sleep(0.01)
+    refresh.reset_price_refresh_state()
+    await refresh.load_persisted_price_snapshot(session)
+
+    timeline = active_timeline()
+    assert len(timeline.generations) == 2
+    assert not any(g.baseline for g in timeline.generations)
+    assert resolve_as_of(timeline, before, "test", "model") is None
+    assert resolve_as_of(timeline, before, "openai", "gpt-4o") is None
+    latest = resolve_as_of(timeline, datetime.now(UTC), "test", "model")
+    assert latest is not None and latest.input == Decimal(3)

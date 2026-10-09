@@ -9,7 +9,7 @@ spelling.
 
 import re
 from bisect import bisect_right
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -99,7 +99,7 @@ class ModelsDevPrice:
             for tier in self.tiers
         ]
 
-    def _price_signature(self) -> tuple[object, ...]:
+    def price_signature(self) -> tuple[object, ...]:
         return (self.input, self.output, self.cache_read, self.cache_write, self.tiers)
 
 
@@ -119,6 +119,27 @@ def parse_rate(value: object) -> Decimal | None:
     except InvalidOperation:
         return None
     return rate
+
+
+def invalid_rate_count(catalog: Mapping[str, Any]) -> int:
+    """How many rates in a parsed ``api.json`` are present but not believable prices."""
+
+    def bad(raw: object) -> int:
+        if not isinstance(raw, dict):
+            return 0
+        return sum(1 for name in _RATE_FIELDS if raw.get(name) is not None and parse_rate(raw[name]) is None)
+
+    count = 0
+    for provider in catalog.values():
+        models = provider.get("models") if isinstance(provider, dict) else None
+        for model in models.values() if isinstance(models, dict) else ():
+            cost = model.get("cost") if isinstance(model, dict) else None
+            if not isinstance(cost, dict):
+                continue
+            count += bad(cost) + bad(cost.get("context_over_200k"))
+            tiers = cost.get("tiers")
+            count += sum(bad(tier) for tier in tiers) if isinstance(tiers, list) else 0
+    return count
 
 
 def _rates(raw: object) -> dict[str, Decimal]:
@@ -253,6 +274,11 @@ class ModelsDevPriceIndex:
     def __len__(self) -> int:
         return sum(len(models) for models in self._by_provider.values())
 
+    def entries(self) -> Iterator[ModelsDevPrice]:
+        """Every catalog entry."""
+        for models in self._by_provider.values():
+            yield from models.values()
+
     def get(self, provider_id: str, model_id: str) -> ModelsDevPrice | None:
         """The exact catalog entry, with no matching rules applied."""
         return self._by_provider.get(provider_id, {}).get(model_id)
@@ -333,7 +359,7 @@ class ModelsDevPriceIndex:
     def _agreed(candidates: list[ModelsDevPrice]) -> ModelsDevPrice | None:
         if not candidates or not all(c.priced for c in candidates):
             return None
-        if len({c._price_signature() for c in candidates}) != 1:
+        if len({c.price_signature() for c in candidates}) != 1:
             return None
         vendor = (candidates[0].canonical_model_id or "").partition("/")[0]
         return min(candidates, key=lambda c: (c.provider_id != vendor, c.provider_id, c.model_id))

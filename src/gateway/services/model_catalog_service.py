@@ -130,7 +130,12 @@ def _read_cache(ttl: int, *, serve_stale: bool = False, force: bool = False) -> 
     return _MISS
 
 
-async def _fetch() -> dict[str, Any] | None:
+class ModelsDevFetchError(Exception):
+    """The models.dev catalog could not be downloaded or was not a JSON object."""
+
+
+async def _download() -> dict[str, Any]:
+    """One bounded download of ``api.json``; every failure is a ``ModelsDevFetchError``."""
     try:
         async with (
             httpx.AsyncClient(timeout=_FETCH_TIMEOUT_SECONDS) as client,
@@ -142,17 +147,50 @@ async def _fetch() -> dict[str, Any] | None:
             async for chunk in resp.aiter_bytes():
                 total += len(chunk)
                 if total > _MAX_CATALOG_BYTES:
-                    logger.warning("models.dev catalog exceeded %d bytes; ignoring", _MAX_CATALOG_BYTES)
-                    return None
+                    raise ModelsDevFetchError(f"models.dev catalog exceeded {_MAX_CATALOG_BYTES} bytes")
                 chunks.append(chunk)
         data = json.loads(b"".join(chunks))
+    except ModelsDevFetchError:
+        raise
     except Exception as exc:
-        logger.warning("models.dev catalog fetch failed: %s", exc)
-        return None
+        raise ModelsDevFetchError(f"models.dev catalog fetch failed: {exc}") from exc
     if not isinstance(data, dict):
-        logger.warning("models.dev catalog was not a JSON object; ignoring")
-        return None
+        raise ModelsDevFetchError("models.dev catalog was not a JSON object")
     return data
+
+
+async def _fetch() -> dict[str, Any] | None:
+    try:
+        return await _download()
+    except ModelsDevFetchError as exc:
+        logger.warning("%s; ignoring", exc)
+        return None
+
+
+def _fresh_cached(reuse_within: float) -> dict[str, Any] | None:
+    if reuse_within > 0 and _cache.ok and (time.monotonic() - _cache.at) < reuse_within:
+        return _cache.data
+    return None
+
+
+async def fetch_models_dev_document(*, reuse_within: float = 0.0, fill_cache: bool = False) -> dict[str, Any]:
+    """Download ``api.json`` for a caller that needs it now, raising on failure.
+
+    The price refresh uses this, so it works whether or not
+    ``models_dev_metadata`` is on. A copy the metadata cache fetched within
+    ``reuse_within`` seconds is returned instead of downloading again, and a
+    download made here fills that cache when ``fill_cache`` is set (the caller
+    passes ``models_dev_metadata``), so the catalog refresher need not repeat it.
+    """
+    async with _lock:
+        if (reused := _fresh_cached(reuse_within)) is not None:
+            return reused
+        data = await _download()
+        if fill_cache:
+            _cache.data = data
+            _cache.ok = True
+            _cache.at = time.monotonic()
+        return data
 
 
 async def load_models_dev_catalog(
@@ -160,12 +198,15 @@ async def load_models_dev_catalog(
     *,
     serve_stale: bool = False,
     force: bool = False,
+    reuse_within: float = 0.0,
 ) -> dict[str, Any] | None:
     """Return the cached models.dev catalog, fetching it if stale.
 
     Returns ``None`` when metadata enrichment is disabled or the fetch failed.
     ``serve_stale`` answers from the cache at any age so a dashboard read never
-    waits on models.dev; ``force`` is the background refresher's fetch.
+    waits on models.dev; ``force`` is the background refresher's fetch, which
+    still skips the download when a copy newer than ``reuse_within`` seconds is
+    cached (the price refresh may have just fetched it).
     """
     if not config.models_dev_metadata:
         return None
@@ -181,6 +222,8 @@ async def load_models_dev_catalog(
         cached = _read_cache(ttl, serve_stale=serve_stale, force=force)
         if cached is not _MISS:
             return cached  # type: ignore[return-value]
+        if (reused := _fresh_cached(reuse_within)) is not None:
+            return reused
 
         data = await _fetch()
         _cache.data = data
@@ -222,16 +265,16 @@ async def run_catalog_refresher(config: GatewayConfig, interval: float | None = 
     without a restart.
     """
     while True:
+        # Recomputed per tick, not captured once, so a TTL changed at runtime
+        # takes effect on the next round.
+        delay = interval if interval is not None else _catalog_refresh_interval(config)
         try:
             if background_catalog_enabled(config):
-                await load_models_dev_catalog(config, force=True)
+                await load_models_dev_catalog(config, force=True, reuse_within=delay / 2)
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.warning("models.dev catalog refresh failed; retrying on the next tick", exc_info=True)
-        # Recomputed per tick, not captured once, so a TTL changed at runtime
-        # takes effect on the next round.
-        delay = interval if interval is not None else _catalog_refresh_interval(config)
         await asyncio.sleep(delay)
 
 

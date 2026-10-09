@@ -1,4 +1,4 @@
-"""The scheduled genai-prices check: what each policy does with what it fetches."""
+"""The scheduled models.dev price check: what each policy does with what it fetches."""
 
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
@@ -11,7 +11,7 @@ from gateway.core.config import GatewayConfig
 from gateway.services.pricing_refresh_service import PricingRefreshPreview
 
 
-def _preview(changed: int) -> PricingRefreshPreview:
+def _preview(changed: int, *, needs_review: bool = False) -> PricingRefreshPreview:
     return PricingRefreshPreview(
         fetched_at=datetime.now(UTC),
         added_count=0,
@@ -19,6 +19,9 @@ def _preview(changed: int) -> PricingRefreshPreview:
         removed_count=0,
         changes=[],
         changes_truncated=False,
+        digest="abc",
+        needs_review=needs_review,
+        review_reason="priced models fall from 10 to 1" if needs_review else None,
     )
 
 
@@ -39,7 +42,7 @@ async def test_review_holds_an_update_for_an_operator(stubs: dict[str, AsyncMock
 
     assert await refresh.poll_price_updates(session, "review") == "pending"
 
-    stubs["prepare"].assert_awaited_once_with(session)
+    stubs["prepare"].assert_awaited_once_with(session, None, reuse_within=0.0)
     stubs["confirm"].assert_not_awaited()
     stubs["reject"].assert_not_awaited()
 
@@ -50,7 +53,18 @@ async def test_auto_applies_an_update_and_says_who_did(stubs: dict[str, AsyncMoc
 
     assert await refresh.poll_price_updates(session, "auto") == "applied"
 
-    stubs["confirm"].assert_awaited_once_with(session, accepted_by="schedule")
+    stubs["confirm"].assert_awaited_once_with(session, accepted_by="schedule", digest="abc")
+
+
+@pytest.mark.asyncio
+async def test_auto_leaves_an_implausible_update_pending(stubs: dict[str, AsyncMock]) -> None:
+    stubs["prepare"].return_value = _preview(changed=2, needs_review=True)
+    session = AsyncMock(spec=AsyncSession)
+
+    assert await refresh.poll_price_updates(session, "auto") == "pending"
+
+    stubs["confirm"].assert_not_awaited()
+    stubs["reject"].assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -62,7 +76,7 @@ async def test_an_unchanged_fetch_leaves_nothing_pending(stubs: dict[str, AsyncM
 
     assert await refresh.poll_price_updates(session, "auto") == "unchanged"
 
-    stubs["reject"].assert_awaited_once_with(session)
+    stubs["reject"].assert_awaited_once_with(session, digest="abc")
     stubs["confirm"].assert_not_awaited()
 
 

@@ -72,7 +72,7 @@
         "type": "object"
       },
       "AcceptedSnapshotResponse": {
-        "description": "One accepted genai-prices snapshot in the history.",
+        "description": "One accepted models.dev snapshot in the history.",
         "properties": {
           "accepted_at": {
             "format": "date-time",
@@ -13090,7 +13090,7 @@
         "type": "object"
       },
       "PricingRefreshConfirmationResponse": {
-        "description": "Result of activating a reviewed genai-prices refresh.",
+        "description": "Result of activating a reviewed models.dev refresh.",
         "properties": {
           "applied": {
             "default": true,
@@ -13102,7 +13102,7 @@
         "type": "object"
       },
       "PricingRefreshPreviewResponse": {
-        "description": "Reviewable summary of a pending genai-prices refresh.",
+        "description": "Reviewable summary of a pending models.dev refresh.",
         "properties": {
           "added_count": {
             "title": "Added Count",
@@ -13123,10 +13123,22 @@
             "title": "Changes Truncated",
             "type": "boolean"
           },
+          "digest": {
+            "default": "",
+            "description": "Identity of the pending snapshot; send it to confirm or reject to act on exactly this one.",
+            "title": "Digest",
+            "type": "string"
+          },
           "fetched_at": {
             "format": "date-time",
             "title": "Fetched At",
             "type": "string"
+          },
+          "needs_review": {
+            "default": false,
+            "description": "True when the update is implausibly large; the scheduled `auto` policy leaves it pending.",
+            "title": "Needs Review",
+            "type": "boolean"
           },
           "protected_model_count": {
             "title": "Protected Model Count",
@@ -13135,6 +13147,18 @@
           "removed_count": {
             "title": "Removed Count",
             "type": "integer"
+          },
+          "review_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the update needs review.",
+            "title": "Review Reason"
           }
         },
         "required": [
@@ -33270,6 +33294,26 @@
       "post": {
         "description": "Activate the latest reviewed default-price snapshot.",
         "operationId": "pricing-confirm_pricing_refresh",
+        "parameters": [
+          {
+            "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
+            "in": "query",
+            "name": "digest",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
+              "title": "Digest"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -33280,6 +33324,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -33330,9 +33384,39 @@
       "post": {
         "description": "Discard a reviewed default-price snapshot without applying it.",
         "operationId": "pricing-reject_pricing_refresh",
+        "parameters": [
+          {
+            "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
+            "in": "query",
+            "name": "digest",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `digest` of the previewed snapshot; 409 when the pending one differs.",
+              "title": "Digest"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
