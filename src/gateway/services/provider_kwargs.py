@@ -403,6 +403,16 @@ def with_provider_retries(provider: LLMProvider, kwargs: dict[str, Any], max_ret
     }
 
 
+def with_failover_retries(provider: LLMProvider, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """``kwargs`` for one candidate of a plan that can fall over, with no client retries by default.
+
+    A provider SDK that retries a 429 and honors its ``Retry-After`` spends seconds
+    before the walk may try the next candidate, which is the remedy the policy
+    already names. A retry count the instance or the deployment configured wins.
+    """
+    return with_provider_retries(provider, kwargs, 0)
+
+
 def effective_credential(provider: LLMProvider, kwargs: Mapping[str, Any]) -> ResolvedCredential:
     """The credential a call made with ``kwargs`` authenticates with.
 

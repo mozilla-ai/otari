@@ -231,7 +231,7 @@ from gateway.services.provider_kwargs import (
     credential_ladder_exhausted,
     provider_key,
     resolve_provider_selector,
-    with_provider_retries,
+    with_failover_retries,
 )
 from gateway.services.providers import owned_endpoint_http_client
 from gateway.services.routing import (
@@ -4779,15 +4779,10 @@ async def _prepared(
 
 
 def _failover_kwargs(adapter: FormatAdapter[Any, Any]) -> Callable[[Attempt, dict[str, Any]], dict[str, Any]]:
-    """Builds each candidate's kwargs for a plan that can fall over, with no client retries by default.
-
-    A provider SDK that retries a 429 and honors its ``Retry-After`` spends seconds
-    before the walk may try the next candidate, which is the remedy the policy
-    already names. A retry count the instance or the deployment configured wins.
-    """
+    """Builds each candidate's kwargs for a plan that can fall over."""
 
     def _build(attempt: Attempt, base_request_fields: dict[str, Any]) -> dict[str, Any]:
-        return with_provider_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, base_request_fields), 0)
+        return with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, base_request_fields))
 
     return _build
 

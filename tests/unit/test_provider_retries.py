@@ -12,6 +12,7 @@ from gateway.services.provider_kwargs import (
     _GOOGLE_RETRY_PROVIDERS,
     _MAX_RETRIES_CLIENT_PROVIDERS,
     get_provider_kwargs,
+    with_failover_retries,
     with_provider_retries,
 )
 
@@ -139,3 +140,10 @@ def test_google_sdk_receives_the_attempt_count(retries: int) -> None:
     retry_options = llm.client._api_client._http_options.retry_options  # type: ignore[attr-defined]
     assert retry_options is not None
     assert retry_options.attempts == retries + 1
+
+
+def test_failover_candidate_gets_no_client_retries_unless_configured() -> None:
+    assert with_failover_retries(LLMProvider.OPENAI, {"api_key": "sk"})["client_args"] == {"max_retries": 0}
+
+    configured = {"api_key": "sk", "client_args": {"max_retries": 3}}
+    assert with_failover_retries(LLMProvider.OPENAI, configured) is configured
