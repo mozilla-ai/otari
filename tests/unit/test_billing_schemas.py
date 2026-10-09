@@ -29,6 +29,7 @@ from gateway.api.routes.usage import UsageEntry
 TOKEN_LINE = {"meter": "input", "units": 1200, "rate_per_million": 3.0, "cost": 0.0036}
 IMAGE_LINE = {"meter": "images", "units": 2, "unit_rate": 0.04, "cost": 0.08}
 REQUEST_LINE = {"meter": "request", "units": 1, "unit_rate": 0.002, "cost": 0.002}
+SEARCH_UNIT_LINE = {"meter": "search_units", "units": 2, "unit_rate": 0.002, "cost": 0.004}
 TOOL_LINE = {"meter": "web_search_calls", "units": 3, "unit_rate": 0.01, "cost": 0.03}
 
 
@@ -65,7 +66,7 @@ def entry(**overrides: object) -> UsageEntry:
     return UsageEntry(**fields)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("line", [TOKEN_LINE, IMAGE_LINE, REQUEST_LINE, TOOL_LINE])
+@pytest.mark.parametrize("line", [TOKEN_LINE, IMAGE_LINE, REQUEST_LINE, SEARCH_UNIT_LINE, TOOL_LINE])
 def test_charge_line_round_trips_unchanged(line: dict[str, object]) -> None:
     """A stored line serializes back exactly as written, keys and values."""
     dumped = entry(pricing_breakdown=[line]).model_dump(mode="json")["pricing_breakdown"]

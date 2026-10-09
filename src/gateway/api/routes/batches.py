@@ -21,6 +21,7 @@ from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes._pipeline import _raise_for_unresolvable_model, failure_status_code
 from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import MODEL_NOT_ALLOWED, error_headers
 from gateway.core.metered_pricing import calculate_token_cost, quantize_cost
 from gateway.core.usage import cache_read_tokens_of
 from gateway.log_config import logger
@@ -42,10 +43,14 @@ from gateway.services.budgets import (
     reserve_budget,
 )
 from gateway.services.log_writer import LogWriter
-from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
+from gateway.services.model_access import (
+    is_model_allowed,
+    model_not_allowed_detail,
+    org_model_refusal,
+    resolve_request_allowlist,
+)
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import get_provider_kwargs, resolve_provider_selector
-from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
 from gateway.services.workspace_scope import (
     organization_for_workspace_id,
     resolve_workspace_id,
@@ -373,6 +378,7 @@ async def create_batch(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=model_not_allowed_detail(request.model),
+            headers=error_headers(MODEL_NOT_ALLOWED),
         )
 
     # Organization-scoped model restriction (otari#643): mirrors `_pipeline.py`'s
@@ -380,11 +386,12 @@ async def create_batch(
     # configured instance, the same condition `provider_kwargs.get_provider_kwargs`
     # uses to decide whether to consult the organization overlay at all.
     if workspace_id is not None and resolved.instance not in config.providers:
-        org_allowlist = cached_org_model_restriction(workspace_id, provider.value)
-        if org_allowlist is not None and model not in org_allowlist:
+        refusal = org_model_refusal(workspace_id, provider.value, model, selector=request.model)
+        if refusal is not None:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=model_not_allowed_detail(request.model),
+                status_code=refusal.status_code,
+                detail=refusal.detail,
+                headers=error_headers(refusal.code),
             )
 
     # Validate provider supports batch operations

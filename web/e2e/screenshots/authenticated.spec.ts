@@ -201,8 +201,8 @@ test.describe("organization rail", () => {
   })
 
   test("organization provider models panel", async ({ page }) => {
-    // The panel is the point of the merge and sits inside a row, so the page
-    // capture above does not reach it. Expanded by pressing the row's own
+    // The panel is the point of the merge and opens below the table, so the
+    // page capture above does not reach it. Expanded by pressing the row's own
     // control rather than by a seeded id, which is created at run time.
     await login(page)
     await ensureOrgProviderKey(page)

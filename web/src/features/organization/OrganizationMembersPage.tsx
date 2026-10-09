@@ -299,7 +299,7 @@ function InviteMemberForm({
           {invited.map((one) => (
             <li key={one.invitation_id} className="flex flex-col gap-1">
               <strong className="break-all text-sm">{one.email}</strong>
-              {one.mail_sent ? (
+              {one.mail_sent || !one.accept_link ? (
                 <span className="text-xs text-muted">Email sent.</span>
               ) : (
                 <CopyableValue
@@ -318,10 +318,12 @@ function InviteMemberForm({
     )
   }
 
-  // After a successful invite: whether it was emailed, and the link either way,
-  // so an operator can forward it even when the email did go out.
+  // After a successful invite: whether it was emailed, and the link to share
+  // when it was not. A delivered link goes to the invitee's mailbox alone.
   if (result) {
-    const acceptLink = absoluteDashboardLink(result.accept_link)
+    const acceptLink = result.accept_link
+      ? absoluteDashboardLink(result.accept_link)
+      : null
     return (
       <FormDialog
         isOpen={isOpen}
@@ -341,8 +343,7 @@ function InviteMemberForm({
           {result.mail_sent ? (
             <>
               An email with an accept link was sent to{" "}
-              <strong>{result.email}</strong>. You can also share the link
-              yourself.
+              <strong>{result.email}</strong>.
             </>
           ) : (
             // Not "mail isn't configured": mail_sent is also false when a
@@ -354,14 +355,18 @@ function InviteMemberForm({
             </>
           )}
         </InfoBanner>
-        <CopyableValue value={acceptLink} label="Accept link">
-          <span className="break-all text-xs">{acceptLink}</span>
-        </CopyableValue>
-        <p className="text-xs text-muted">
-          Whoever opens it can join as {result.email}, and choose its first
-          password if that address has never signed in, so send it only to them.
-          It works once, until {formatDateTime(result.expires_at)}.
-        </p>
+        {acceptLink ? (
+          <>
+            <CopyableValue value={acceptLink} label="Accept link">
+              <span className="break-all text-xs">{acceptLink}</span>
+            </CopyableValue>
+            <p className="text-xs text-muted">
+              Whoever opens it can join as {result.email}, and may choose its
+              first password, so send it only to them. It works once, until{" "}
+              {formatDateTime(result.expires_at)}.
+            </p>
+          </>
+        ) : null}
       </FormDialog>
     )
   }

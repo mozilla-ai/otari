@@ -480,6 +480,15 @@ def _request_context(plan: Any) -> Any:
     )
 
 
+def test_only_a_candidate_past_the_head_is_a_fallback() -> None:
+    from gateway.services.routing import CompiledPlan
+
+    head, second = _attempt(1, "m"), _attempt(2, "n", instance="anthropic")
+    plan = CompiledPlan(policy_name="p", attempts=[head, second])
+    assert not plan.is_fallback(head)
+    assert plan.is_fallback(second)
+
+
 def _ctx_with_guardrails(*guardrails: Any) -> Any:
     from gateway.services.routing import CompiledPlan
 

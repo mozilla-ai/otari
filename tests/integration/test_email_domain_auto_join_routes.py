@@ -192,6 +192,36 @@ def test_a_password_sign_in_joins_the_organization_that_proved_the_domain(
     _assert_joined(client, signed_in, beta=claiming_organization, home=home)
 
 
+def test_an_address_claimed_through_an_invitation_link_does_not_auto_join(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    claiming_organization: str,
+) -> None:
+    """A link claim is the inviting organization vouching for the address, which any organization can do.
+
+    Otherwise an admin anywhere could invite ``anyone@acme.example``, choose its
+    password through the link they were handed back, and sign in to the
+    organization that proved ``acme.example``.
+    """
+    invited = client.post(
+        f"{API_ROOT}/organizations/me/member-invitations",
+        json={"email": ADDRESS, "role": "member"},
+        headers=master_key_header,
+    )
+    assert invited.status_code == 201, invited.text
+    token = _TOKEN_IN_LINK.search(invited.json()["accept_link"])
+    assert token
+    accepted = client.post(f"{API_ROOT}/invitations/accept", json={"token": token.group(1), "password": PASSWORD})
+    assert accepted.status_code == 200, accepted.text
+    client.cookies.clear()
+
+    signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": ADDRESS, "password": PASSWORD})
+
+    assert signed_in.status_code == 200, signed_in.text
+    joined = {row["organization"]["id"] for row in _memberships(client)}
+    assert claiming_organization not in joined
+
+
 def test_an_oauth_sign_in_joins_the_organization_that_proved_the_domain(
     client: TestClient,
     master_key_header: dict[str, str],

@@ -27,7 +27,12 @@ from openai import APITimeoutError as _OpenAIAPITimeoutError
 from pydantic import BaseModel, Field, ValidationError
 
 from gateway.core.config import ATTEMPT_ID_HEADER, GatewayConfig
-from gateway.core.error_codes import ALL_CANDIDATES_REJECTED, CONTEXT_LENGTH_EXCEEDED, error_code_of, error_headers
+from gateway.core.error_codes import (
+    ALL_CANDIDATES_REJECTED,
+    CONTEXT_LENGTH_EXCEEDED,
+    error_code_of,
+    error_headers,
+)
 from gateway.core.retry_after import bounded_retry_after
 from gateway.core.usage import (
     cache_read_tokens_of,
@@ -40,7 +45,7 @@ from gateway.metrics import REGISTRY, Counter
 from gateway.services.bedrock_gateway_auth import build_bedrock_client_args
 from gateway.services.control_plane import ResolveEndpoint, resolve, transport
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
-from gateway.services.provider_kwargs import split_selector
+from gateway.services.provider_kwargs import missing_credential, no_candidate_configured_detail, split_selector
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_retrieval_backend import WebSearchNotReachableError
 
@@ -331,6 +336,13 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
     """
     if len(errors) < 2:
         return None
+    missing = [entry for entry in map(missing_credential, errors) if entry is not None]
+    if len(missing) == len(errors):
+        return HTTPException(
+            status_code=missing[0].status_code,
+            detail=no_candidate_configured_detail(missing),
+            headers=error_headers(missing[0].code),
+        )
     answers = [_provider_failure_http_exc(error, fallback_detail="") for error in errors]
     statuses = {answer.status_code for answer in answers}
     if statuses == {status.HTTP_404_NOT_FOUND}:
@@ -899,6 +911,9 @@ def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:
     cancellations, and tool loops that already produced an assistant response are
     handled by the walker before this classifier runs.
     """
+    if missing_credential(exc) is not None:
+        return True, "missing_credential"
+
     kind, status_code = upstream_exception_shape(exc)
     if kind is not None:
         return True, kind

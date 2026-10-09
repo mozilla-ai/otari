@@ -224,6 +224,7 @@ async def test_declining_cancels_the_invitation_and_kills_the_emailed_link(
     service = OrganizationService(async_db, **membership_writes(async_db))
 
     issued = await _invite(service, admin, email="invitee@example.com")
+    assert issued.accept_link is not None
     token = issued.accept_link.split("token=")[1]
 
     await service.decline_pending_membership_for_user(

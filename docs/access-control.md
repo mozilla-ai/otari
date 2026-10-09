@@ -358,8 +358,10 @@ whatever edge controls the deployment has.
 ## Invitations
 
 An owner or admin can invite a person to an organization and selected workspaces.
-The dashboard always shows the accept link after an invite, so it can be shared
-by hand. If mail is configured, Otari also emails it.
+If mail is configured, Otari emails the accept link. When the email does not go
+out (no mail configured, or the send failed), the dashboard shows the link instead,
+so it can be shared by hand. A link that was emailed is never shown to the
+inviter, so only the invitee's mailbox holds it.
 
 To invite several people at once, paste their addresses into the invite dialog,
 separated by commas or new lines (up to 100). Everyone gets the same role and
@@ -372,11 +374,23 @@ in, the accept page asks them to choose a first password, and once they accept
 they can sign in straight away. No verification email is needed, so this works on
 a deployment without mail. An address that can already sign in, by password or
 through a provider, just accepts; the link cannot set or replace a password on
-it.
+it. Neither can it for an address another organization has already added: the
+inviter holds the link too, so that person accepts without a password and then
+signs in through a provider or resets their password, either of which proves the
+address.
+
+A password chosen through a link counts as verified so the person can sign in,
+but Otari records that an organization vouched for the address rather than that
+the person proved it. A vouched address does not trigger
+[email-domain auto-join](#email-domain-auto-join), and another organization
+cannot add or invite it, since the vouching organization's admins could have
+chosen its password. A later provider sign-in on it replaces the password with
+the provider, and resetting the password by email also proves the address;
+either lifts both restrictions.
 
 Invitation tokens are bearer credentials. Whoever holds an unused link can join
-as the invited address, and choose its first password if it has never signed
-in, so send it only to that person.
+as the invited address, and choose its first password where the link allows one,
+so send it only to that person.
 Do not put tokens in logs or analytics. The browser validates and accepts them
 through the public invitation endpoints. A link works once, and expires after
 `invitation_expiry_hours`.
@@ -413,7 +427,8 @@ narrow:
 - Only `member` and `viewer` can be handed out. Proving control of a domain is
   not a decision about a person, so it never confers organization management.
 - An unverified address is skipped, so signing up on an address without reading
-  the mail is not enough.
+  the mail is not enough. So is one only vouched for through an invitation
+  link, since any organization can invite any address.
 - An existing membership is left alone. A suspended one is not revived by
   signing in, and an established role is not overwritten.
 - The person's active organization is never changed by joining.

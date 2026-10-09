@@ -173,7 +173,7 @@ def _resolves(dependant: Dependant, gate: Callable[..., Any]) -> bool:
 
 
 def _route_id(name: str, route: APIRoute) -> str:
-    return f"{name} {'/'.join(sorted(route.methods))} {route.path or '/'}"
+    return f"{name} {'/'.join(sorted(route.methods or ()))} {route.path or '/'}"
 
 
 def _routes(routers: list[tuple[str, APIRouter]]) -> Iterator[Any]:

@@ -542,6 +542,8 @@ async def reset_password(db: AsyncSession, *, token: str, new_password: str) -> 
     identity.hashed_password = await hash_password_async(new_password)
     identity.password_reset_token_hash = None
     identity.password_reset_token_expires_at = None
+    # The reset link went to the mailbox, which proves what a vouch only asserted.
+    identity.email_vouched_at = None
     db.add(identity)
     await revoke_user_dashboard_sessions(db, identity.id)
     await db.commit()

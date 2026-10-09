@@ -11,7 +11,7 @@ requires.
 import uuid
 from collections.abc import Collection, Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -129,15 +129,17 @@ class OrgProviderKeyModelRepository(
         )
         return set(result.scalars().all())
 
-    async def enabled_models_for_keys(self, org_provider_key_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, list[str]]:
-        """The served models of each key that offers any, keyed by key id.
+    async def offered_models_for_keys(
+        self, org_provider_key_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, dict[str, bool]]:
+        """Every offered model of each key that offers any, with its serving switch, keyed by key id.
 
         **A key absent from the result offers nothing and is therefore
         unnarrowed**, which is the convention
         `WorkspaceProviderModelRestrictionRepository.list_for_workspace_keys`
         already sets: a caller must not read a missing key as "serves nothing".
-        A key present with an empty list is the opposite answer, and is the one
-        a key whose every model is switched off produces.
+        A key present with every switch off is the opposite answer, and is the
+        one a key whose every model is switched off produces.
         """
         wanted = set(org_provider_key_ids)
         if not wanted:
@@ -151,12 +153,35 @@ class OrgProviderKeyModelRepository(
             .where(col(OrgProviderKeyModel.org_provider_key_id).in_(wanted))
             .order_by(col(OrgProviderKeyModel.model))
         )
-        offered: dict[uuid.UUID, list[str]] = {}
+        offered: dict[uuid.UUID, dict[str, bool]] = {}
         for key_id, model, enabled in result.all():
-            served = offered.setdefault(key_id, [])
-            if enabled:
-                served.append(model)
+            offered.setdefault(key_id, {})[model] = bool(enabled)
         return offered
+
+    async def enabled_models_for_keys(self, org_provider_key_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, list[str]]:
+        """The served models of each key that offers any, keyed by key id.
+
+        Same presence convention as :meth:`offered_models_for_keys`, which this
+        reads through: a missing key is unnarrowed, a present key with an empty
+        list serves nothing.
+        """
+        offered = await self.offered_models_for_keys(org_provider_key_ids)
+        return {key_id: [model for model, enabled in models.items() if enabled] for key_id, models in offered.items()}
+
+    async def offer_counts_for_keys(
+        self, org_provider_key_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, tuple[int, int]]:
+        """``(offered, serving)`` per key, in one grouped query; a key offering nothing is absent."""
+        wanted = set(org_provider_key_ids)
+        if not wanted:
+            return {}
+        served = func.sum(case((col(OrgProviderKeyModel.enabled).is_(True), 1), else_=0))
+        result = await self.db.execute(
+            select(col(OrgProviderKeyModel.org_provider_key_id), func.count(), served)
+            .where(col(OrgProviderKeyModel.org_provider_key_id).in_(wanted))
+            .group_by(col(OrgProviderKeyModel.org_provider_key_id))
+        )
+        return {key_id: (int(offered), int(serving or 0)) for key_id, offered, serving in result.all()}
 
     async def create_many(self, rows: Sequence[OrgProviderKeyModel]) -> Sequence[OrgProviderKeyModel]:
         """Stage several offered rows at once. The caller owns the transaction.

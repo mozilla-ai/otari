@@ -31,6 +31,7 @@ from gateway.exceptions.organizations_exceptions import (
     InvitationPasswordNotAcceptedError,
     MembershipUpdateError,
     NotAuthorizedError,
+    OrganizationMemberAddressUnprovenError,
     OrganizationMemberAlreadyExistsError,
     OrganizationMemberNotFoundError,
     OrganizationNameRequiredError,
@@ -140,6 +141,18 @@ def _has_never_signed_in(user: User) -> bool:
     account someone signs in to with Google as unclaimed.
     """
     return user.is_active and user.hashed_password is None and user.email_verified_at is None
+
+
+def _refuse_address_vouched_elsewhere(target: User, membership: OrganizationMember | None, email: str) -> None:
+    """Refuse adding an identity whose address only another organization has vouched for.
+
+    A vouched identity (``email_vouched_at``) carries a password its first
+    organization's admins could have chosen, so a second organization adding it
+    would hand them that organization's access. One already on this roster in
+    any status is this organization's own, and is left alone.
+    """
+    if membership is None and target.email_vouched_at is not None:
+        raise OrganizationMemberAddressUnprovenError(email)
 
 
 def _invitation_accept_path(token: str) -> str:
@@ -809,6 +822,7 @@ class OrganizationService:
                 membership = await self.members.get_by_organization_and_user(organization.id, target.id)
                 if membership is not None and membership.status == "active":
                     raise OrganizationMemberAlreadyExistsError(email)
+                _refuse_address_vouched_elsewhere(target, membership, email)
 
                 if membership is None:
                     # The same rule the revive branch gets from
@@ -1185,6 +1199,7 @@ class OrganizationService:
         membership = await self.members.get_by_organization_and_user(organization.id, target.id)
         if membership is not None and membership.status == "active":
             raise OrganizationMemberAlreadyExistsError(email)
+        _refuse_address_vouched_elsewhere(target, membership, email)
         if membership is not None and membership.status == "invited":
             # Expiry is lazy: `_resolve_pending_invitation` only flips a
             # `pending` row to `expired` when someone presents its token,
@@ -1250,7 +1265,12 @@ class OrganizationService:
         token: str,
         config: GatewayConfig,
     ) -> InviteOrganizationMemberResultPublic:
-        """Email a committed invitation's accept link, where links can be mailed, and report whether it went."""
+        """Email a committed invitation's accept link, where links can be mailed, and report whether it went.
+
+        The link is returned to the inviter only when the email did not go out.
+        A delivered link then reaches the invitee's mailbox alone, rather than
+        also sitting with an admin who could open it as them.
+        """
         email = invitation.email
         accept_link = mailer.link(_invitation_accept_path(token))
         mail_sent = False
@@ -1279,7 +1299,7 @@ class OrganizationService:
             email=email,
             role=membership.role,
             mail_sent=mail_sent,
-            accept_link=accept_link,
+            accept_link=None if mail_sent else accept_link,
             expires_at=invitation.expires_at,
             created_at=invitation.created_at,
         )
@@ -1311,12 +1331,29 @@ class OrganizationService:
             raise InvitationNotFoundError
         return invitation, membership, organization
 
+    async def _invitation_may_set_password(self, invitee: User | None, organization_id: uuid.UUID) -> bool:
+        """Whether accepting an invitation from ``organization_id`` may choose ``invitee``'s first password.
+
+        The inviter always holds the accept link (it is returned to them whether
+        or not mail went out), so a password chosen through it is the inviting
+        organization vouching for the address, not proof of the mailbox. That is
+        enough for an identity no other organization knows. One another
+        organization has added (as anything, an owner included) is refused, or
+        any admin anywhere could create an organization, invite that address and
+        claim the account; it can still claim itself through signup, a password
+        reset or a provider, each of which proves the address.
+        """
+        if invitee is None or not _has_never_signed_in(invitee):
+            return False
+        memberships = await self.members.get_by_user(invitee.id)
+        return all(membership.organization_id == organization_id for membership in memberships)
+
     async def get_invitation_preview(self, token: str) -> InvitationPreviewPublic:
         """Look up a pending invitation by token, for the accept page. No auth: the token is the proof.
 
-        ``needs_password`` tells the token's holder whether the invited address
-        can already sign in. That is only ever said to someone holding this
-        invitation, which already names the address, so it widens nothing
+        ``needs_password`` tells the token's holder whether accepting may set
+        the address's first password. That is only ever said to someone holding
+        this invitation, which already names the address, so it widens nothing
         signup's enumeration-safety protects.
         """
         invitation, membership, organization = await self._resolve_pending_invitation(token)
@@ -1326,7 +1363,7 @@ class OrganizationService:
             organization_name=organization.name,
             role=membership.role,
             expires_at=invitation.expires_at,
-            needs_password=invitee is not None and _has_never_signed_in(invitee),
+            needs_password=await self._invitation_may_set_password(invitee, organization.id),
         )
 
     async def accept_invitation(
@@ -1346,10 +1383,12 @@ class OrganizationService:
 
         ``password`` is what lets a deployment with no mail let an invitee in:
         signup has to mail a verification link, but the invitation link already
-        proves what that link would, since it reached the invitee either by
-        email or from an admin who vouches for the address. It is accepted only
-        for an identity that has never signed in, so a forwarded link can claim
-        an unclaimed seat and never take over an account.
+        stands in for what that link would, since it reached the invitee either
+        by email or from an admin who vouches for the address. It is accepted
+        only where ``_invitation_may_set_password`` allows, so a link can claim
+        an unclaimed seat and never take over an account. The verification it
+        stamps is recorded as vouched (``email_vouched_at``), which domain
+        auto-join does not trust.
         """
         if password is not None:
             # Before the lookup, so a policy refusal says nothing about the token.
@@ -1369,11 +1408,12 @@ class OrganizationService:
         invitation, membership, organization = await self._resolve_pending_invitation(token)
         if password is not None:
             invitee = await self.users.get(membership.user_id)
-            if invitee is None or not _has_never_signed_in(invitee):
+            if invitee is None or not await self._invitation_may_set_password(invitee, organization.id):
                 raise InvitationPasswordNotAcceptedError
             now = datetime.now(UTC)
             values: dict[str, str | datetime | None] = {
                 "email_verified_at": now,
+                "email_vouched_at": now,
                 "full_name": invitee.full_name or (full_name or "").strip() or None,
             }
             if terms_accepted:

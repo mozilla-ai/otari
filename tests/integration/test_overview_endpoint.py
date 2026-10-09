@@ -241,6 +241,160 @@ async def test_reserved_spend_counts_against_a_ceiling(
     assert ceilings["worst"]["spent"] == 105
 
 
+@pytest.mark.asyncio
+async def test_a_deployment_budget_enforced_through_a_scoped_budget_is_judged(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    async_db: AsyncSession,
+) -> None:
+    """A budget attached to an API key rather than to users still caps spend,
+    so the strip has to see it: a cap that refuses requests and reads as "no
+    budgets set" on the same page would be the page contradicting the gateway."""
+
+    async_db.add(Budget(budget_id="b-key-cap", name="Key cap", max_budget=Decimal(10)))
+    async_db.add(
+        ScopedBudget(
+            id="sb-key",
+            scope_type="api_token",
+            scope_id=str(uuid.uuid4()),
+            budget_id="b-key-cap",
+            current_spend=Decimal(9),
+            reserved_spend=Decimal(0),
+        )
+    )
+    await async_db.commit()
+
+    body = client.get(_ENDPOINT, headers=master_key_header).json()
+
+    budgets = body["budgets"]
+    assert (budgets["capped_count"], budgets["near_count"], budgets["over_count"]) == (1, 1, 0)
+    # The cap is the ceiling's own, not a per-user share, and the scope travels
+    # so the page can name an unnamed ceiling after what it caps.
+    assert budgets["worst"]["allocated"] == 10
+    assert budgets["worst"]["spent"] == 9
+    assert budgets["worst"]["scope_type"] == "api_token"
+    assert budgets["worst"]["name"] is None
+    # Nothing of the deployment's reaches the organization's ceiling strip.
+    assert body["ceilings"]["capped_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_budget_held_by_users_and_a_scope_is_judged_once_per_cap(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    async_db: AsyncSession,
+) -> None:
+    """One budget, two caps: the users' shared allowance and the key's own."""
+
+    async_db.add(Budget(budget_id="b-both", name="Both", max_budget=Decimal(100)))
+    async_db.add(ApiUser(user_id="u-both", budget_id="b-both", spend=Decimal(10), reserved=Decimal(0)))
+    async_db.add(
+        ScopedBudget(
+            id="sb-both",
+            scope_type="api_token",
+            scope_id=str(uuid.uuid4()),
+            budget_id="b-both",
+            name="Service key",
+            current_spend=Decimal(100),
+            reserved_spend=Decimal(5),
+        )
+    )
+    await async_db.commit()
+
+    body = client.get(_ENDPOINT, headers=master_key_header).json()
+
+    budgets = body["budgets"]
+    assert budgets["capped_count"] == 2
+    assert budgets["over_count"] == 1
+    assert budgets["worst"]["name"] == "Service key"
+    assert budgets["worst"]["spent"] == 105
+
+
+@pytest.mark.asyncio
+async def test_an_organizations_ceiling_stays_off_the_deployment_strip(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    async_db: AsyncSession,
+) -> None:
+    """An organization's budget is judged on the ceilings strip, and only there."""
+
+    organization_id = _caller_organization_id(client, master_key_header)
+    async_db.add(Budget(budget_id="b-org", name="Org cap", max_budget=Decimal(50), organization_id=organization_id))
+    async_db.add(
+        ScopedBudget(
+            id="sb-org",
+            scope_type="api_token",
+            scope_id=str(uuid.uuid4()),
+            budget_id="b-org",
+            current_spend=Decimal(50),
+            reserved_spend=Decimal(0),
+        )
+    )
+    await async_db.commit()
+
+    body = client.get(_ENDPOINT, headers=master_key_header).json()
+
+    assert body["budgets"]["capped_count"] == 0
+    # Not counted as a deployment budget either, or the strip would report a
+    # budget it never judges.
+    assert body["budgets"]["total_count"] == 0
+    assert body["ceilings"]["over_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_an_organizations_budget_held_by_users_stays_off_the_deployment_strip(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    async_db: AsyncSession,
+) -> None:
+    """Users holding an organization's budget do not put it on the deployment strip,
+    which neither counts nor judges budgets an organization owns."""
+
+    organization_id = _caller_organization_id(client, master_key_header)
+    async_db.add(
+        Budget(budget_id="b-org-users", name="Org users", max_budget=Decimal(10), organization_id=organization_id)
+    )
+    async_db.add(ApiUser(user_id="u-org", budget_id="b-org-users", spend=Decimal(20), reserved=Decimal(0)))
+    await async_db.commit()
+
+    body = client.get(_ENDPOINT, headers=master_key_header).json()
+
+    assert body["budgets"]["capped_count"] == 0
+    assert body["budgets"]["total_count"] == 0
+    assert body["budgets"]["worst"] is None
+
+
+@pytest.mark.asyncio
+async def test_deployment_ceilings_are_counted_and_ranked_in_the_database(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    async_db: AsyncSession,
+) -> None:
+    """Over, near and under ceilings are counted, the furthest one is the worst,
+    and a zero cap with spend against it reads as over."""
+
+    for budget_id, cap, spent in (("b-over", 10, 15), ("b-near", 10, 9), ("b-under", 10, 1), ("b-zero", 0, 1)):
+        async_db.add(Budget(budget_id=budget_id, name=budget_id, max_budget=Decimal(cap)))
+        async_db.add(
+            ScopedBudget(
+                id=f"sb-{budget_id}",
+                scope_type="api_token",
+                scope_id=str(uuid.uuid4()),
+                budget_id=budget_id,
+                current_spend=Decimal(spent),
+                reserved_spend=Decimal(0),
+            )
+        )
+    await async_db.commit()
+
+    budgets = client.get(_ENDPOINT, headers=master_key_header).json()["budgets"]
+
+    assert budgets["capped_count"] == 4
+    assert budgets["over_count"] == 2
+    assert budgets["near_count"] == 1
+    assert budgets["worst"]["budget_id"] == "b-over"
+
+
 # =============================================================================
 # Who sees which strip
 #

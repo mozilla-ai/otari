@@ -103,7 +103,11 @@ no way to send them back.
 
 Every Chat, Messages, and Responses response carries an `Otari-Request-ID`
 header, streaming or not. In hybrid mode it is the platform's id for the
-request; a standalone gateway mints its own.
+request; a standalone gateway mints its own. A standalone gateway also names the
+provider instance that served the request, whether a fallback did, and how long
+it took, in `Otari-Provider`, `Otari-Attempt-Count`, `Otari-Fallback` and
+`Otari-Response-Duration-Ms`; see
+[What is billed and what the caller sees](routing.md#what-is-billed-and-what-the-caller-sees).
 
 A priced response also carries its cost on the usage object it already returns,
 as `usage.cost_usd` (a six-decimal USD string) and `usage.pricing_source`. On a
@@ -222,8 +226,8 @@ Send an `Idempotency-Key` header on a non-streaming Chat, Messages, or Responses
 request to make that retry safe. The value is any unique string of 1 to 255
 printable ASCII characters; a UUID is the usual choice. A retry with the same key
 and the same body then gets the original response, with its original
-`Otari-Request-ID` and `usage.cost_usd`, and an `Otari-Idempotent-Replayed: true`
-header, without calling the provider or billing again. While the original is
+`Otari-Request-ID`, serving headers and `usage.cost_usd`, and an `Otari-Idempotent-Replayed: true`
+header (but no `Otari-Response-Duration-Ms`, which described the original), without calling the provider or billing again. While the original is
 still running, a retry is answered 409 with `Retry-After`, and if the original
 fails the next retry runs in its place.
 
@@ -351,9 +355,12 @@ reworded.
 | `upstream_rate_limited` | 429 | The provider rate limited the gateway | `Retry-After` when the provider sent one |
 | `invalid_model` | 400 | The model selector names no configured provider | |
 | `model_not_allowed` | 403 | The key may not use the model | |
+| `model_not_serving` | 403 | The organization offers the model on a provider key, with its serving switch off | |
+| `model_not_found` | 404 | A provider key of the organization serves the provider, and none offers the model | |
 | `context_length_exceeded` | 400 | The prompt is too long for the model | |
 | `all_candidates_rejected` | 400 | Every model a routing policy, a catalog ID or the control plane tried rejected the request as invalid | |
 | `pricing_required` | 402 | `require_pricing` is on and the model has no price | |
+| `provider_not_configured` | 424 | The gateway holds no credential for the model's provider, so nothing was sent upstream. Not a 5xx, so a client does not retry it: add the credential in `config.yml`, through the dashboard, or in the environment variable the detail names | |
 | `end_user_budget_not_allowed` | 403 | A service key named an end-user budget that is not on its `end_user_budget_ids` | |
 | `provider_error` | 200, in a stream's error event only | The provider failed after the stream started, for a reason no other code names | |
 

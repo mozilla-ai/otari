@@ -24,7 +24,7 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from apron_auth import OAuthClient
 from fastapi import FastAPI
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, iter_route_contexts
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -176,8 +176,10 @@ def test_the_flow_cookie_reaches_every_route_that_reads_it(client: TestClient, o
     app = cast(FastAPI, client.app)
     served = [
         route.path
-        for route in app.routes
-        if isinstance(route, APIRoute) and route.endpoint.__module__ == auth_oauth.__name__
+        for route in iter_route_contexts(app.routes)
+        if route.path
+        and isinstance(route.original_route, APIRoute)
+        and route.endpoint.__module__ == auth_oauth.__name__
     ]
     assert served, "no OAuth routes are mounted, so this check would hold vacuously"
     withheld = [path for path in served if not (path == cookie_path or path.startswith(f"{cookie_path}/"))]

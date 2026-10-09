@@ -3,7 +3,7 @@
 import os
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from prometheus_client import generate_latest
 
@@ -161,6 +161,70 @@ def test_middleware_labels_parameterized_route_with_template() -> None:
     assert _sample("gateway_requests_total", raw_labels_b) == 0.0
     # Paths that match no route land in the bounded fallback bucket.
     assert _sample("gateway_requests_total", unmatched_labels) - before_unmatched == 1.0
+
+
+def test_labels_do_not_depend_on_how_fastapi_records_included_routes() -> None:
+    """A route mounted through nested routers gets the label of its full template.
+
+    From FastAPI 0.137 the route on the scope carries only its own router's
+    prefix, not the API root or the OTLP root it is included under. The routers
+    here are mounted the way ``register_routers`` mounts them, so the labels are
+    the same whichever way the installed FastAPI records the route.
+    """
+    files = APIRouter(prefix="/files")
+
+    @files.get("/{file_id}")
+    async def get_file(file_id: str) -> dict[str, str]:
+        return {"id": file_id}
+
+    chat = APIRouter()
+
+    @chat.post("/chat/completions")
+    async def complete() -> dict[str, str]:
+        return {}
+
+    stub = APIRouter()
+
+    @stub.get("/{path:path}")
+    async def catch_all(path: str) -> dict[str, str]:
+        return {"path": path}
+
+    otlp = APIRouter()
+
+    @otlp.post("/v1/traces")
+    async def traces() -> dict[str, str]:
+        return {}
+
+    api = APIRouter(prefix=API_ROOT)
+    api.include_router(files)
+    api.include_router(chat)
+    api.include_router(stub)
+    app = FastAPI()
+    app.include_router(api)
+    app.include_router(otlp, prefix=OTLP_ROOT)
+    app.add_middleware(MetricsMiddleware)
+    app.add_route("/metrics", metrics_endpoint, methods=["GET"])
+    client = TestClient(app)
+
+    expected = [
+        ("POST", f"{API_ROOT}/chat/completions", "/chat/completions", API_VERSION, 200),
+        ("GET", f"{API_ROOT}/files/abc", "/files/{file_id}", API_VERSION, 200),
+        ("GET", f"{API_ROOT}/files/def", "/files/{file_id}", API_VERSION, 200),
+        ("GET", f"{API_ROOT}/batches/abc", "/{path:path}", API_VERSION, 200),
+        ("POST", f"{OTLP_ROOT}/v1/traces", f"{OTLP_ROOT}/v1/traces", "", 200),
+        ("GET", "/no/such/route", "unmatched", "", 404),
+    ]
+    for method, path, endpoint, api_version, status in expected:
+        labels = {"method": method, "endpoint": endpoint, "api_version": api_version, "status": str(status)}
+        before = _sample("gateway_requests_total", labels)
+        assert client.request(method, path).status_code == status
+        assert _sample("gateway_requests_total", labels) - before == 1.0, (method, path)
+
+    # /metrics is served under its own template but never counted.
+    metrics_labels = {"method": "GET", "endpoint": "/metrics", "api_version": "", "status": "200"}
+    before = _sample("gateway_requests_total", metrics_labels)
+    assert client.get("/metrics").status_code == 200
+    assert _sample("gateway_requests_total", metrics_labels) == before
 
 
 def test_the_endpoint_label_does_not_carry_the_api_root() -> None:

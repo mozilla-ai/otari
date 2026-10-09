@@ -151,10 +151,11 @@ class OrgProviderLastModelError(TenancyValidationError):
 class OrgProviderModelUnpricedError(TenancyValidationError):
     """Serving was asked for a model nothing prices.
 
-    The other half of the disabled-until-priced rule. The offer path records such
-    a model unserved so it cannot be billed at nothing; without this the switch
-    would be a way straight past that, putting the model in the catalog and
-    through the dispatch gate with no rate behind it.
+    The other half of the disabled-until-priced rule, which holds while
+    ``require_pricing`` is on. The offer path records such a model unserved so it
+    cannot be billed at nothing; without this the switch would be a way straight
+    past that, putting the model in the catalog and through the dispatch gate
+    with no rate behind it.
     """
 
     def __init__(self, model: str) -> None:

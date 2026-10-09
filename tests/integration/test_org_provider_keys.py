@@ -46,6 +46,7 @@ from gateway.schemas.providers import (
     WorkspaceProviderKeyOverrideRequest,
 )
 from gateway.services.provider_kwargs import resolve_provider_selector
+from gateway.services.provider_store_service import apply_to_config, reset_provider_cache
 from gateway.services.secret_box import encrypt_secret, generate_secret_key
 from gateway.services.tenancy import OrgProviderKeyService
 from gateway.services.tenancy.org_provider_key_service import (
@@ -759,6 +760,30 @@ async def test_an_instance_addressed_selector_never_consults_organization_scoped
     config = GatewayConfig(providers={"openai": {"api_key": "sk-config-file"}})
     resolved = resolve_provider_selector(config, "openai:gpt-4o", workspace_id=workspace.id)
     assert resolved.kwargs["api_key"] == "sk-config-file"
+
+
+async def test_a_config_entry_without_a_credential_does_not_shadow_an_organization_scoped_key(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = OrgProviderKeyService(async_db)
+    key = await service.create_key_for_user(user=owner, request=_create_request(api_key="sk-org-scoped-5678"))
+    await service.set_org_default_for_user(user=owner, key_id=key.id)
+    await refresh_org_provider_cache(async_db)
+
+    # The config.yml entry is there in name only (``api_key: ${OPENAI_API_KEY}``
+    # with the variable empty). Once the deployment overlay is applied it is
+    # gone, so the selector is bare and the organization's own key serves it.
+    config = GatewayConfig(providers={"openai": {"api_key": ""}})
+    reset_provider_cache()
+    apply_to_config(config)
+    assert "openai" not in config.providers
+
+    resolved = resolve_provider_selector(config, "openai:gpt-4o", workspace_id=workspace.id)
+    assert resolved.kwargs["api_key"] == "sk-org-scoped-5678"
 
 
 async def test_dispatch_without_workspace_id_ignores_organization_scoped_keys(async_db: AsyncSession) -> None:

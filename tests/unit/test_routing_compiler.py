@@ -116,8 +116,10 @@ def test_a_mixed_drop_reports_the_actionable_one(config: GatewayConfig) -> None:
 @pytest.fixture(autouse=True)
 def _clean_org_restriction_cache() -> Iterator[None]:
     org_store._org_model_restrictions.clear()
+    org_store._org_key_offers.clear()
     yield
     org_store._org_model_restrictions.clear()
+    org_store._org_key_offers.clear()
 
 
 def test_a_fallover_candidate_violating_the_org_restriction_is_dropped(config: GatewayConfig) -> None:
@@ -138,6 +140,29 @@ def test_a_fallover_candidate_violating_the_org_restriction_is_dropped(config: G
     )
 
     assert [attempt.model for attempt in plan.attempts] == ["claude-3-opus"]
+
+
+def test_a_dropped_org_candidate_reads_after_its_selector(config: GatewayConfig) -> None:
+    """The operator detail renders ``'<selector>' <detail>``, so an
+    organization-key refusal is recorded as a fragment naming why: switched
+    off, or offered on no key."""
+    workspace_id = uuid.uuid4()
+    org_store._org_model_restrictions[(workspace_id, "anthropic")] = ["claude-3-opus"]
+    org_store._org_key_offers[(workspace_id, "anthropic")] = org_store.KeyOffer(
+        key_name="primary", offered={"claude-3-opus": True, "claude-3-haiku": False}
+    )
+
+    plan = compile_policy(
+        config,
+        "restricted",
+        _spec("anthropic:claude-3-opus", "anthropic:claude-3-haiku", "anthropic:claude-unknown"),
+        workspace_id=workspace_id,
+    )
+
+    assert [(item.selector, item.detail) for item in plan.dropped] == [
+        ("anthropic:claude-3-haiku", "is offered by the organization's provider key but not serving"),
+        ("anthropic:claude-unknown", "is not offered by the organization's provider key"),
+    ]
 
 
 def test_an_instance_addressed_candidate_ignores_the_org_restriction(config: GatewayConfig) -> None:

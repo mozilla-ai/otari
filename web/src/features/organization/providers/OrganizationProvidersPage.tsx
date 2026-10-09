@@ -374,6 +374,9 @@ export function OrganizationProvidersPage() {
   const rows = (keys.data ?? []).filter(
     (key) => showArchived || !key.archived_at,
   )
+  // The key whose models are open, if it is on the table: an archived key's
+  // id can sit in the URL while archived rows are hidden.
+  const expandedKey = rows.find((key) => key.id === expandedKeyId)
   // Archived keys are excluded: one that is out of use is not a problem to
   // report, and counting it would keep the banner up after the fix.
   const unreadableCount = (keys.data ?? []).filter(
@@ -425,6 +428,27 @@ export function OrganizationProvidersPage() {
       cell: (row) => (
         <span className="text-muted">{providerDisplayName(row.provider)}</span>
       ),
+    },
+    {
+      id: "serving",
+      header: "Serving",
+      // A key that offers nothing has never been narrowed and reaches whatever
+      // its provider serves, so it has no count to show. One that offers models
+      // and serves none refuses every request through it, which is the state
+      // worth flagging before the first request finds it.
+      cell: (row) =>
+        row.offered_count === 0 ? (
+          <span className="text-subtle">all models</span>
+        ) : row.serving_count === 0 && !row.archived_at ? (
+          <span className="flex items-center gap-2 text-danger">
+            <Dot className="bg-danger" />
+            {`0 of ${row.offered_count} serving`}
+          </span>
+        ) : (
+          <span className="text-muted">
+            {`${row.serving_count} of ${row.offered_count} serving`}
+          </span>
+        ),
     },
     {
       id: "api_key",
@@ -644,26 +668,36 @@ export function OrganizationProvidersPage() {
             getRowKey={(row) => row.id}
             isLoading={context.isPending || keys.isLoading}
             emptyContent="No provider keys yet. Add one to let every workspace in this organization call that provider."
-            detailKey={expandedKeyId === "" ? null : expandedKeyId}
-            renderDetail={(row) => (
-              <ProviderModelsPanel
-                providerKey={row}
-                canEdit={canEdit}
-                onEditRate={(model) =>
-                  url.patch({ override: `${row.provider}:${model.model}` })
-                }
-                page={modelsPage}
-                pageSize={modelsSize}
-                onPageChange={(next) =>
-                  url.patch({ models_page: String(next) })
-                }
-                onPageSizeChange={(size) =>
-                  url.patch({ models_size: String(size), models_page: "0" })
-                }
-              />
-            )}
           />
         </TableScrollFrame>
+      ) : null}
+
+      {/* Below the table rather than inside it as a detail row: the key table
+          is wider than its frame on a narrow screen and scrolls sideways, and a
+          row inside it scrolls along and is clipped. Out here the panel takes
+          the page's width and its own table scrolls in its own frame. Keyed by
+          the row so a jump to another key remounts the panel rather than
+          carrying the previous key's state over. */}
+      {expandedKey ? (
+        <section
+          key={expandedKey.id}
+          aria-label={`Models on ${expandedKey.name}`}
+          className="mt-4 rounded-lg border border-border bg-surface"
+        >
+          <ProviderModelsPanel
+            providerKey={expandedKey}
+            canEdit={canEdit}
+            onEditRate={(model) =>
+              url.patch({ override: `${expandedKey.provider}:${model.model}` })
+            }
+            page={modelsPage}
+            pageSize={modelsSize}
+            onPageChange={(next) => url.patch({ models_page: String(next) })}
+            onPageSizeChange={(size) =>
+              url.patch({ models_size: String(size), models_page: "0" })
+            }
+          />
+        </section>
       ) : null}
 
       <ConfirmDialog

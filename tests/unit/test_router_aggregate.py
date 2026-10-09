@@ -11,7 +11,7 @@ twice is a failure rather than a silent no-op.
 from collections import Counter
 
 from fastapi import APIRouter, FastAPI
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, iter_route_contexts
 
 from gateway.api.main import _register_contributed_routers, _register_core_routers, register_routers
 from gateway.api.routes import hosted_mode, otlp
@@ -21,10 +21,17 @@ from gateway.core.config import API_ROOT, OTLP_ROOT, GatewayConfig
 Operations = Counter[tuple[str, str]]
 
 
+def _api_routes(app: FastAPI) -> list[tuple[str, APIRoute]]:
+    """Each route ``app`` serves, with the full path it answers at, in match order."""
+    return [
+        (context.path or "", context.original_route)
+        for context in iter_route_contexts(app.routes)
+        if isinstance(context.original_route, APIRoute)
+    ]
+
+
 def _operations(app: FastAPI) -> Operations:
-    return Counter(
-        (route.path, method) for route in app.routes if isinstance(route, APIRoute) for method in route.methods
-    )
+    return Counter((path, method) for path, route in _api_routes(app) for method in route.methods or ())
 
 
 def _standalone() -> GatewayConfig:
@@ -82,7 +89,7 @@ def _mount_order(config: GatewayConfig) -> list[str]:
     app.state.container = build_container(config.bootstrap, workspace_listener=None)
     app.state.enabled_features = ()
     register_routers(app, config)
-    return [route.path for route in app.routes if isinstance(route, APIRoute)]
+    return [path for path, _ in _api_routes(app)]
 
 
 def test_a_fixed_route_is_matched_before_the_catch_all_that_would_swallow_it() -> None:
@@ -126,16 +133,16 @@ def test_a_contributed_route_is_matched_before_a_mode_stub() -> None:
     app.state.container = container
     app.state.enabled_features = ()
     register_routers(app, GatewayConfig(mode="hosted", bootstrap=None))
-    routes = [route for route in app.routes if isinstance(route, APIRoute)]
+    routes = _api_routes(app)
 
     # The probe sits under /chat, which the hosted stub claims with a catch-all.
-    probe = next(i for i, route in enumerate(routes) if route.path.endswith("/chat/overlay-probe"))
+    probe = next(i for i, (path, _) in enumerate(routes) if path.endswith("/chat/overlay-probe"))
 
-    stubs = [i for i, route in enumerate(routes) if route.endpoint.__module__ == hosted_mode.__name__]
+    stubs = [i for i, (_, route) in enumerate(routes) if route.endpoint.__module__ == hosted_mode.__name__]
     served = [
         i
-        for i, route in enumerate(routes)
-        if route.endpoint.__module__ != hosted_mode.__name__ and route.path.startswith(API_ROOT)
+        for i, (path, route) in enumerate(routes)
+        if route.endpoint.__module__ != hosted_mode.__name__ and path.startswith(API_ROOT)
     ]
     assert stubs, "no mode stub was mounted, so this check would hold vacuously"
     assert served, "nothing else was mounted, so this check would hold vacuously"
