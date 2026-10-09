@@ -1690,6 +1690,21 @@
       "AppliedEntityPublic": {
         "description": "One entity a budget applies to: the scope a ceiling caps, and the provider or model it narrows to.",
         "properties": {
+          "current_requests": {
+            "description": "Requests this period, zero once the period has ended",
+            "title": "Current Requests",
+            "type": "integer"
+          },
+          "current_spend": {
+            "description": "Spend this period, zero once the period has ended",
+            "title": "Current Spend",
+            "type": "number"
+          },
+          "current_tokens": {
+            "description": "Tokens this period, zero once the period has ended",
+            "title": "Current Tokens",
+            "type": "integer"
+          },
           "model": {
             "anyOf": [
               {
@@ -1724,6 +1739,21 @@
             ],
             "title": "Provider Key Id"
           },
+          "reserved_requests": {
+            "description": "Requests held by requests still in flight",
+            "title": "Reserved Requests",
+            "type": "integer"
+          },
+          "reserved_spend": {
+            "description": "Spend held by requests still in flight",
+            "title": "Reserved Spend",
+            "type": "number"
+          },
+          "reserved_tokens": {
+            "description": "Tokens held by requests still in flight",
+            "title": "Reserved Tokens",
+            "type": "integer"
+          },
           "scope_id": {
             "title": "Scope Id",
             "type": "string"
@@ -1738,7 +1768,13 @@
           "scope_id",
           "provider_key_id",
           "model",
-          "name"
+          "name",
+          "current_spend",
+          "reserved_spend",
+          "current_tokens",
+          "reserved_tokens",
+          "current_requests",
+          "reserved_requests"
         ],
         "title": "AppliedEntityPublic",
         "type": "object"

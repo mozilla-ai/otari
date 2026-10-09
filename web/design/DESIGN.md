@@ -59,7 +59,7 @@ for a component, not for those.
 | --- | --- |
 | `@heroui/react` | `Button`, `Select`, `Tooltip`, `Spinner`, and the rest of HeroUI v3 |
 | `layout/Section` · `/PageIntro` · `/SettingsGroup` · `/SettingRow` · `/Toolbar` · `/TableScrollFrame` | one component each, named for its file |
-| `metrics/KpiStrip` · `/KpiCell` · `/Meter` · `/ProgressBar` | one each |
+| `metrics/KpiStrip` · `/KpiCell` · `/Meter` · `/ProgressBar` · `/HeadroomRing` | one each |
 | `metrics/SpendMeter` | `SpendMeter`, `spendState`, and the `SpendState` type |
 | `metrics/SeverityMark` | `SeverityMark`, and the `Severity` type |
 | `metrics/TrendChip` | `TrendChip`, `trendState`, and the `Trend*` types |

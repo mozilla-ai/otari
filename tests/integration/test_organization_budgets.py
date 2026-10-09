@@ -884,6 +884,40 @@ async def test_a_listed_budget_names_what_it_applies_to(async_db: AsyncSession) 
 
 
 @pytest.mark.asyncio
+async def test_a_listed_entity_carries_its_spend_this_period(async_db: AsyncSession) -> None:
+    """What the table's usage reads: a live period's spend as stored, an ended one's as zero, holds either way."""
+    organization = await _organization(async_db, slug="acme-usage")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, name="Research", owner=owner)
+    budget = await _service(async_db).create_organization_budget(user=owner, request=_create())
+    now = datetime.now(UTC)
+    for scope_type, scope_id, period_end in [
+        ("organization", str(organization.id), now + timedelta(days=1)),
+        ("workspace", str(workspace.id), now - timedelta(days=1)),
+    ]:
+        async_db.add(
+            ScopedBudget(
+                scope_type=scope_type,
+                scope_id=scope_id,
+                budget_id=budget.budget_id,
+                current_spend=Decimal(3),
+                reserved_spend=Decimal(1),
+                current_tokens=30,
+                current_requests=2,
+                period_end=period_end,
+            )
+        )
+    await async_db.commit()
+
+    (listed,) = (await _service(async_db).list_organization_budgets(user=owner)).data
+
+    assert [
+        (e.scope_type, e.current_spend, e.reserved_spend, e.current_tokens, e.current_requests)
+        for e in listed.applied_to
+    ] == [("organization", 3.0, 1.0, 30, 2), ("workspace", 0.0, 1.0, 0, 0)]
+
+
+@pytest.mark.asyncio
 async def test_giving_a_cadence_to_a_budget_that_had_none_retimes_its_ceilings(async_db: AsyncSession) -> None:
     """The case that is an enforcement bug rather than a cosmetic one.
 

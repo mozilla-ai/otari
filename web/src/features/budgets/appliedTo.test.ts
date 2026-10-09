@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import type { NamedAppliedEntity } from "@/client"
+import { namedAppliedEntity } from "@/tests/fixtures"
 
 import { APPLIED_TO_NOTHING, formatAppliedTo } from "./appliedTo"
 
@@ -12,15 +13,12 @@ const NAMES: Record<string, string> = {
 
 /** An entity as the server lists it: the organization and workspaces named, the rest not. */
 function entity(partial: Partial<NamedAppliedEntity>): NamedAppliedEntity {
-  const fields = {
-    scope_type: "workspace",
-    scope_id: "ws-1",
-    provider_key_id: null,
-    model: null,
+  const { scope_type, scope_id } = namedAppliedEntity(partial)
+  const named = ["organization", "workspace"].includes(scope_type)
+  return namedAppliedEntity({
+    name: named ? (NAMES[scope_id] ?? null) : null,
     ...partial,
-  }
-  const named = ["organization", "workspace"].includes(fields.scope_type)
-  return { name: named ? (NAMES[fields.scope_id] ?? null) : null, ...fields }
+  })
 }
 
 describe("formatAppliedTo", () => {

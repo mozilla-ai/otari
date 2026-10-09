@@ -128,6 +128,7 @@ Every export in the two files, and every loose file. Tests move with their subje
 | `KpiCell` | `metrics/KpiCell.tsx` |
 | `Meter` | `metrics/Meter.tsx` |
 | `SpendMeter`, `spendState`, `SpendState` | `metrics/SpendMeter.tsx` |
+| `HeadroomRing` | `metrics/HeadroomRing.tsx` |
 | `SeverityMark`, `Severity` | `metrics/SeverityMark.tsx` |
 | `Tab`, `TabRow` | `navigation/TabRow.tsx` |
 | `Segmented` | `navigation/Segmented.tsx` |
