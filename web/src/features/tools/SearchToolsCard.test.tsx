@@ -12,12 +12,14 @@ import { pickOption } from "@/tests/select"
 const PROVIDERS: SearchProviderInfo[] = [
   {
     id: "exa",
+    kind: "search",
     requires_api_key: true,
     requires_api_base: false,
     default_api_base: "https://api.exa.ai",
   },
   {
     id: "searxng",
+    kind: "search",
     requires_api_key: false,
     requires_api_base: true,
     default_api_base: "http://searxng:8080",

@@ -8578,7 +8578,7 @@
         {
           "name": "List Search Providers",
           "request": {
-            "description": "List the search providers this build can dispatch to, for the add-tool form.\n\nReports per provider whether an API key is required and what endpoint a tool\ninherits when it declares none, so the form can ask for exactly what the\nchosen provider needs instead of taking a free-text provider name.",
+            "description": "List the providers a search or fetch tool may name, for the add-tool form.\n\nRead from the metadata any-search and any-fetch publish, so a provider a\nlibrary adds is listed with no change here. Reports per provider whether an\nAPI key is required, what endpoint a tool inherits when it declares none,\nand the native options a tool may set. Providers that exist only for tests\nare left out, and so is the fetch provider ``builtin``, which only the\nimplicit ``builtin_fetch`` tool uses.\n\nWhat belongs to this deployment rather than to the libraries, its own tools\non each provider and an endpoint a tool inherits from its settings, is\nshown only to a caller who operates the deployment: the tool settings\nreader withholds the same from anyone else.",
             "header": [],
             "method": "GET",
             "url": {
@@ -8591,7 +8591,15 @@
                 "search-tools",
                 "providers"
               ],
-              "raw": "{{baseUrl}}/api/v1/search-tools/providers"
+              "query": [
+                {
+                  "description": "Which providers to list: search providers, the default, or fetch providers.",
+                  "disabled": true,
+                  "key": "kind",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/search-tools/providers?kind="
             }
           }
         },

@@ -4555,11 +4555,19 @@ export interface paths {
         };
         /**
          * List Search Providers
-         * @description List the search providers this build can dispatch to, for the add-tool form.
+         * @description List the providers a search or fetch tool may name, for the add-tool form.
          *
-         *     Reports per provider whether an API key is required and what endpoint a tool
-         *     inherits when it declares none, so the form can ask for exactly what the
-         *     chosen provider needs instead of taking a free-text provider name.
+         *     Read from the metadata any-search and any-fetch publish, so a provider a
+         *     library adds is listed with no change here. Reports per provider whether an
+         *     API key is required, what endpoint a tool inherits when it declares none,
+         *     and the native options a tool may set. Providers that exist only for tests
+         *     are left out, and so is the fetch provider ``builtin``, which only the
+         *     implicit ``builtin_fetch`` tool uses.
+         *
+         *     What belongs to this deployment rather than to the libraries, its own tools
+         *     on each provider and an endpoint a tool inherits from its settings, is
+         *     shown only to a caller who operates the deployment: the tool settings
+         *     reader withholds the same from anyone else.
          */
         get: operations["search-tools-list_search_providers"];
         put?: never;
@@ -13355,20 +13363,109 @@ export interface components {
             task_id?: string | null;
         };
         /**
+         * SearchProviderOptionSchema
+         * @description One native option a provider accepts, under the provider's own name.
+         */
+        SearchProviderOptionSchema: {
+            /**
+             * Default
+             * @description The value the provider uses when the option is not set.
+             */
+            default?: unknown;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Enum
+             * @description The only values it takes, when it is limited to a list.
+             */
+            enum?: string[] | null;
+            /** Name */
+            name: string;
+            /**
+             * Operator Only
+             * @description True when only an instance or a credential may set it, never a workspace or a request.
+             * @default false
+             */
+            operator_only: boolean;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "string" | "integer" | "number" | "boolean" | "array" | "object";
+        };
+        /**
          * SearchProviderSchema
-         * @description One search provider this build can dispatch to, for the add-tool picker.
+         * @description One provider a search or fetch instance may name, for the add-tool form.
+         *
+         *     One schema for both capabilities: the fields they share, then each one's
+         *     own, which are null on the other's entries.
          */
         SearchProviderSchema: {
             /**
              * Default Api Base
-             * @description The endpoint a tool on this provider uses when it declares no api_base. Null means nothing supplies one, so an api_base is required.
+             * @description The endpoint a tool on this provider uses when it declares no api_base. Null means nothing supplies one, so an api_base is required. One that comes from the deployment's own settings, such as the web_search_url a searxng tool inherits, is shown only to a caller who operates the deployment: nothing else inherits it, an organization's key included.
              */
             default_api_base?: string | null;
+            /**
+             * Doc Url
+             * @description The provider's API documentation.
+             */
+            doc_url?: string | null;
+            /**
+             * Formats
+             * @description Fetch: the formats the page text comes back in.
+             */
+            formats?: string[] | null;
             /**
              * Id
              * @description Value to send as 'provider'.
              */
             id: string;
+            /**
+             * Instances
+             * @description The names of this deployment's configured and stored tools on this provider, shown only to a caller who operates the deployment.
+             */
+            instances?: string[];
+            /**
+             * Key In Url
+             * @description Search: true when the API key travels in the request URL.
+             */
+            key_in_url?: boolean | null;
+            /**
+             * Kind
+             * @description Whether this is a search provider or a fetch provider.
+             * @default search
+             * @enum {string}
+             */
+            kind: "search" | "fetch";
+            /**
+             * Max Results
+             * @description Search: the most results one call can ask for.
+             */
+            max_results?: number | null;
+            /**
+             * Max Urls Per Call
+             * @description Fetch: the most pages one call can fetch.
+             */
+            max_urls_per_call?: number | null;
+            /**
+             * Options
+             * @description The native options a tool may set, under the provider's own names. Null when there is no schema for the provider yet, so a tool's options are passed unchecked.
+             */
+            options?: components["schemas"]["SearchProviderOptionSchema"][] | null;
+            /**
+             * Query In Url
+             * @description Search: true when the query travels in the request URL.
+             */
+            query_in_url?: boolean | null;
+            /**
+             * Renders Javascript
+             * @description Fetch: true when the provider runs a page's JavaScript before reading it.
+             */
+            renders_javascript?: boolean | null;
             /**
              * Requires Api Base
              * @description True when this provider has no endpoint of its own, so the tool must say where the backend is.
@@ -13379,6 +13476,11 @@ export interface components {
              * @description True when a tool on this provider must carry an API key.
              */
             requires_api_key: boolean;
+            /**
+             * Tier
+             * @description The library's tier for the provider.
+             */
+            tier?: string | null;
         };
         /**
          * SearchRequest
@@ -23091,7 +23193,10 @@ export interface operations {
     };
     "search-tools-list_search_providers": {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Which providers to list: search providers, the default, or fetch providers. */
+                kind?: "search" | "fetch";
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -23105,6 +23210,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchProviderSchema"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

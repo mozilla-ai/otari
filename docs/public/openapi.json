@@ -15596,8 +15596,65 @@
         "title": "ScoredExample",
         "type": "object"
       },
+      "SearchProviderOptionSchema": {
+        "description": "One native option a provider accepts, under the provider's own name.",
+        "properties": {
+          "default": {
+            "description": "The value the provider uses when the option is not set.",
+            "title": "Default"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "enum": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The only values it takes, when it is limited to a list.",
+            "title": "Enum"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "operator_only": {
+            "default": false,
+            "description": "True when only an instance or a credential may set it, never a workspace or a request.",
+            "title": "Operator Only",
+            "type": "boolean"
+          },
+          "type": {
+            "enum": [
+              "string",
+              "integer",
+              "number",
+              "boolean",
+              "array",
+              "object"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type"
+        ],
+        "title": "SearchProviderOptionSchema",
+        "type": "object"
+      },
       "SearchProviderSchema": {
-        "description": "One search provider this build can dispatch to, for the add-tool picker.",
+        "description": "One provider a search or fetch instance may name, for the add-tool form.\n\nOne schema for both capabilities: the fields they share, then each one's\nown, which are null on the other's entries.",
         "properties": {
           "default_api_base": {
             "anyOf": [
@@ -15608,13 +15665,133 @@
                 "type": "null"
               }
             ],
-            "description": "The endpoint a tool on this provider uses when it declares no api_base. Null means nothing supplies one, so an api_base is required.",
+            "description": "The endpoint a tool on this provider uses when it declares no api_base. Null means nothing supplies one, so an api_base is required. One that comes from the deployment's own settings, such as the web_search_url a searxng tool inherits, is shown only to a caller who operates the deployment: nothing else inherits it, an organization's key included.",
             "title": "Default Api Base"
+          },
+          "doc_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider's API documentation.",
+            "title": "Doc Url"
+          },
+          "formats": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fetch: the formats the page text comes back in.",
+            "title": "Formats"
           },
           "id": {
             "description": "Value to send as 'provider'.",
             "title": "Id",
             "type": "string"
+          },
+          "instances": {
+            "description": "The names of this deployment's configured and stored tools on this provider, shown only to a caller who operates the deployment.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Instances",
+            "type": "array"
+          },
+          "key_in_url": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Search: true when the API key travels in the request URL.",
+            "title": "Key In Url"
+          },
+          "kind": {
+            "default": "search",
+            "description": "Whether this is a search provider or a fetch provider.",
+            "enum": [
+              "search",
+              "fetch"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "max_results": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Search: the most results one call can ask for.",
+            "title": "Max Results"
+          },
+          "max_urls_per_call": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fetch: the most pages one call can fetch.",
+            "title": "Max Urls Per Call"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SearchProviderOptionSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The native options a tool may set, under the provider's own names. Null when there is no schema for the provider yet, so a tool's options are passed unchecked.",
+            "title": "Options"
+          },
+          "query_in_url": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Search: true when the query travels in the request URL.",
+            "title": "Query In Url"
+          },
+          "renders_javascript": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fetch: true when the provider runs a page's JavaScript before reading it.",
+            "title": "Renders Javascript"
           },
           "requires_api_base": {
             "description": "True when this provider has no endpoint of its own, so the tool must say where the backend is.",
@@ -15625,6 +15802,18 @@
             "description": "True when a tool on this provider must carry an API key.",
             "title": "Requires Api Key",
             "type": "boolean"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The library's tier for the provider.",
+            "title": "Tier"
           }
         },
         "required": [
@@ -35640,8 +35829,26 @@
     },
     "/api/v1/search-tools/providers": {
       "get": {
-        "description": "List the search providers this build can dispatch to, for the add-tool form.\n\nReports per provider whether an API key is required and what endpoint a tool\ninherits when it declares none, so the form can ask for exactly what the\nchosen provider needs instead of taking a free-text provider name.",
+        "description": "List the providers a search or fetch tool may name, for the add-tool form.\n\nRead from the metadata any-search and any-fetch publish, so a provider a\nlibrary adds is listed with no change here. Reports per provider whether an\nAPI key is required, what endpoint a tool inherits when it declares none,\nand the native options a tool may set. Providers that exist only for tests\nare left out, and so is the fetch provider ``builtin``, which only the\nimplicit ``builtin_fetch`` tool uses.\n\nWhat belongs to this deployment rather than to the libraries, its own tools\non each provider and an endpoint a tool inherits from its settings, is\nshown only to a caller who operates the deployment: the tool settings\nreader withholds the same from anyone else.",
         "operationId": "search-tools-list_search_providers",
+        "parameters": [
+          {
+            "description": "Which providers to list: search providers, the default, or fetch providers.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "search",
+              "description": "Which providers to list: search providers, the default, or fetch providers.",
+              "enum": [
+                "search",
+                "fetch"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -35656,6 +35863,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [

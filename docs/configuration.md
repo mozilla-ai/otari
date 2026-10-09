@@ -497,10 +497,19 @@ web_fetch_default_tool: builtin_fetch
 web_search_max_calls: 10
 ```
 
-`GET /api/v1/search-tools/providers` publishes the supported providers and whether
-each requires an `api_key` or `api_base`. Provider options and request filters
-are covered in [Built-in tools](tools.md). A tool carrying an `api_key` must use
-an HTTPS `api_base`; a keyless local SearXNG endpoint may use HTTP.
+`GET /api/v1/search-tools/providers` publishes the supported search providers,
+and with `?kind=fetch` the fetch providers: whether each requires an `api_key` or
+`api_base`, and the native options an instance may set. Any signed-in user or
+API key can read it. Only the deployment's operator also sees which of the
+deployment's instances use each provider, and the `api_base` a `searxng`
+instance inherits from `web_search_url`. Provider options and request filters
+are covered in [Built-in tools](tools.md).
+
+An instance takes its key only from its own `api_key`, such as
+`"${EXA_API_KEY}"` above. Unlike an LLM provider, it never falls back to the
+provider's environment variable, so an entry for a provider that needs a key and
+carries none stops startup. A tool carrying an `api_key` must use an HTTPS
+`api_base`; a keyless local SearXNG endpoint may use HTTP.
 
 Rules for instances:
 

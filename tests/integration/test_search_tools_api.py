@@ -7,17 +7,26 @@ validation applies are applied here, config-file tools stay honored and
 read-only, and a tool added at runtime is immediately dispatchable.
 """
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT, GatewayConfig
+import any_fetch
+import any_search
+from gateway.api.routes.search_tools import SearchProviderOptionSchema
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User
+from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.search_backend import SearchHit, SearchOutcome
 from gateway.services.search_tool_store_service import reset_search_tool_cache
 from gateway.services.secret_box import generate_secret_key
+
+from .conftest import build_test_client
 
 
 @pytest.fixture
@@ -219,6 +228,165 @@ def test_provider_catalog_reports_what_each_provider_needs(
     assert catalog["searxng"]["requires_api_base"] is True
     # Nothing supplies one on this config, so the form must ask for it.
     assert catalog["searxng"]["default_api_base"] is None
+
+
+_INHERITED_URL = "http://searxng.internal:8080"
+
+
+@pytest.fixture
+def catalog_client(test_config: GatewayConfig, clean_database: None) -> Iterator[TestClient]:
+    """The shared config, plus a URL a searxng tool inherits and one fetch tool."""
+    config = test_config.model_copy(
+        update={
+            "web_search_url": _INHERITED_URL,
+            "fetch_tools": {"exa-fetch": {"provider": "exa", "api_key": "file-key"}},
+        },
+        deep=True,
+    )
+    yield from build_test_client(config)
+
+
+def _catalog(client: TestClient, kind: str | None = None, **request: Any) -> dict[str, dict[str, Any]]:
+    resp = client.get(f"{API_ROOT}/search-tools/providers", params={"kind": kind} if kind else None, **request)
+    assert resp.status_code == 200, resp.text
+    return {entry["id"]: entry for entry in resp.json()}
+
+
+def test_search_catalog_serves_the_library_metadata(
+    catalog_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    catalog = _catalog(catalog_client, headers=master_key_header)
+    # any-search's fake provider exists for tests: accepted in configuration, never offered.
+    assert list(catalog) == ["exa", "searxng"]
+    exa = catalog["exa"]
+    metadata = any_search.AnySearch.get_provider_metadata("exa")
+    assert exa["kind"] == "search"
+    assert exa["doc_url"] == metadata.doc_url
+    assert exa["tier"] == "production"
+    assert exa["max_results"] == metadata.max_results
+    assert exa["query_in_url"] is False
+    assert exa["options"] == [option.model_dump() for option in metadata.options]
+    assert exa["instances"] == ["from-file"]
+    # Fetch's own fields stay null on a search entry, and no environment key is reported.
+    assert exa["max_urls_per_call"] is None
+    assert exa["formats"] is None
+    assert "env_key" not in exa
+
+
+def test_searxng_keeps_its_entry_without_a_schema(
+    catalog_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    searxng = _catalog(catalog_client, headers=master_key_header)["searxng"]
+    assert searxng["requires_api_key"] is False
+    assert searxng["requires_api_base"] is True
+    assert searxng["default_api_base"] == _INHERITED_URL
+    # Null, not empty: its options are passed unchecked, not refused.
+    assert searxng["options"] is None
+    assert searxng["instances"] == []
+
+    assert _create(catalog_client, master_key_header).status_code == 201
+    assert _catalog(catalog_client, headers=master_key_header)["searxng"]["instances"] == ["local"]
+
+
+def test_fetch_catalog_serves_any_fetch(catalog_client: TestClient, master_key_header: dict[str, str]) -> None:
+    catalog = _catalog(catalog_client, "fetch", headers=master_key_header)
+    # builtin serves only the implicit builtin_fetch tool, and fake exists for tests.
+    assert list(catalog) == ["exa"]
+    exa = catalog["exa"]
+    metadata = any_fetch.AnyFetch.get_provider_metadata("exa")
+    assert exa["kind"] == "fetch"
+    assert exa["requires_api_key"] is True
+    assert exa["default_api_base"] == metadata.default_api_base
+    assert exa["max_urls_per_call"] == metadata.max_urls_per_call
+    assert exa["renders_javascript"] is False
+    assert exa["formats"] == metadata.formats
+    assert exa["options"] == [option.model_dump() for option in metadata.options]
+    assert exa["instances"] == ["exa-fetch"]
+    assert exa["max_results"] is None
+
+
+@pytest.mark.parametrize("library", [any_search.AnySearch, any_fetch.AnyFetch], ids=["any-search", "any-fetch"])
+def test_every_option_a_library_declares_fits_the_catalog_schema(
+    library: type[any_search.AnySearch] | type[any_fetch.AnyFetch],
+) -> None:
+    """A new option type or field in a library fails here, in the library's own change, not as a 500."""
+    for provider in library.get_supported_providers():
+        for option in library.get_provider_metadata(provider).options:
+            declared = option.model_dump()
+            assert SearchProviderOptionSchema(**declared).model_dump() == declared, (provider, option.name)
+
+
+def test_catalog_kind_is_search_or_fetch(catalog_client: TestClient, master_key_header: dict[str, str]) -> None:
+    resp = catalog_client.get(f"{API_ROOT}/search-tools/providers?kind=crawl", headers=master_key_header)
+    assert resp.status_code == 422
+
+
+def _session_token(db: Session, organization: Organization, *, email: str, is_superuser: bool) -> str:
+    user = User(email=email, full_name="Reader", active_organization_id=organization.id, is_superuser=is_superuser)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    db.add(OrganizationMember(organization_id=organization.id, user_id=user.id, role="member", status="active"))
+    token = f"otari-sess-{email}"
+    db.add(
+        DashboardSession(
+            token_hash=hash_session_token(token),
+            user_id=user.id,
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(hours=12),
+        )
+    )
+    db.commit()
+    return token
+
+
+@pytest.fixture
+def sessions(
+    catalog_client: TestClient, master_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> dict[str, str]:
+    assert catalog_client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).status_code == 200
+    db = db_session_factory()
+    try:
+        organization = Organization(name="Alpha", slug="alpha")
+        db.add(organization)
+        db.commit()
+        db.refresh(organization)
+        return {
+            "member": _session_token(db, organization, email="member@alpha.test", is_superuser=False),
+            "operator": _session_token(db, organization, email="root@alpha.test", is_superuser=True),
+        }
+    finally:
+        db.close()
+
+
+def test_every_catalog_reader_lists_providers_and_only_an_operator_sees_the_deployment_in_them(
+    catalog_client: TestClient, master_key_header: dict[str, str], sessions: dict[str, str]
+) -> None:
+    assert catalog_client.get(f"{API_ROOT}/search-tools/providers").status_code == 401
+
+    minted = catalog_client.post(f"{API_ROOT}/keys", json={"key_name": "reader"}, headers=master_key_header)
+    api_key = {API_KEY_HEADER: f"Bearer {minted.json()['key']}"}
+    by_api_key = _catalog(catalog_client, headers=api_key)
+    assert by_api_key["searxng"]["default_api_base"] is None
+    assert by_api_key["exa"]["instances"] == []
+    # The library's endpoints are the same for everyone, so they are not withheld.
+    assert by_api_key["exa"]["default_api_base"] == "https://api.exa.ai"
+    assert _catalog(catalog_client, "fetch", headers=api_key)["exa"]["instances"] == []
+
+    by_master_key = _catalog(catalog_client, headers=master_key_header)
+    assert by_master_key["searxng"]["default_api_base"] == _INHERITED_URL
+    assert by_master_key["exa"]["instances"] == ["from-file"]
+
+    for role, operates in (("member", False), ("operator", True)):
+        catalog_client.cookies.set(SESSION_COOKIE_NAME, sessions[role])
+        try:
+            catalog = _catalog(catalog_client)
+            fetch = _catalog(catalog_client, "fetch")
+        finally:
+            catalog_client.cookies.clear()
+        assert catalog["searxng"]["default_api_base"] == (_INHERITED_URL if operates else None), role
+        assert catalog["exa"]["instances"] == (["from-file"] if operates else []), role
+        assert fetch["exa"]["instances"] == (["exa-fetch"] if operates else []), role
 
 
 def test_stored_tool_is_immediately_dispatchable(

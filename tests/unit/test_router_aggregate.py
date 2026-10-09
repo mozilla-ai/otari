@@ -95,8 +95,9 @@ def _mount_order(config: GatewayConfig) -> list[str]:
 def test_a_fixed_route_is_matched_before_the_catch_all_that_would_swallow_it() -> None:
     """Starlette serves the first route that matches, so mount order is behavior.
 
-    Three routers here end in a greedy path parameter, and the fixed routes
-    that live under the same prefix are mounted ahead of them on purpose. Swap
+    Three routers here end in a greedy path parameter and one in a plain one,
+    and the fixed routes that live under the same prefix are mounted ahead of
+    them on purpose. Swap
     the pair and ``/models/discoverable`` starts resolving as a model id: a 200
     with the wrong body, no error anywhere, and a counted-operations check
     cannot see it because the set of routes did not change.
@@ -110,6 +111,7 @@ def test_a_fixed_route_is_matched_before_the_catch_all_that_would_swallow_it() -
     assert first(f"{API_ROOT}/models/discoverable") < first(f"{API_ROOT}/models/{{model_id:path}}")
     assert first(f"{API_ROOT}/models/metadata") < first(f"{API_ROOT}/models/{{model_id:path}}")
     assert first(f"{API_ROOT}/pricing/refresh") < first(f"{API_ROOT}/pricing/{{model_key:path}}")
+    assert first(f"{API_ROOT}/search-tools/providers") < first(f"{API_ROOT}/search-tools/{{name}}")
 
 
 def test_a_contributed_route_is_matched_before_a_mode_stub() -> None:

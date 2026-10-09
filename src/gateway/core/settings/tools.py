@@ -39,8 +39,8 @@ from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
 
 # Search providers the standalone POST /api/v1/search endpoint's own clients can
-# dispatch to, and the ones its provider catalog lists. Declared here rather than
-# in the adapter module so the config layer never imports the service layer.
+# dispatch to. Declared here rather than in the adapter module so the config
+# layer never imports the service layer.
 # Which providers a ``search_tools`` entry may name is wider: see
 # :func:`supported_search_providers`.
 SEARCH_PROVIDERS = ("exa", "searxng")
@@ -51,8 +51,9 @@ SEARCH_PROVIDERS = ("exa", "searxng")
 # importing `gateway.services.web_search_providers`, which imports this name.
 WEB_SEARCH_PROVIDERS = ("tavily", "brave")
 # Providers that authenticate with an API key, for the direct endpoint's own
-# clients and its catalog. Validation asks the library's metadata instead, so a
-# provider any-search adds is held to its own requirement.
+# clients and the catalog's entries for providers without an adapter. Validation
+# asks the library's metadata instead, so a provider any-search adds is held to
+# its own requirement.
 SEARCH_PROVIDERS_REQUIRING_API_KEY = ("exa",)
 # Providers with no endpoint of their own to default to, so the tool has to say
 # where the backend is. The only one today is ``searxng``, which speaks the same

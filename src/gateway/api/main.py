@@ -258,6 +258,9 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(tool_settings.operator_router, Plane.CONTROL),
     RouterMount(tool_settings.reader_router, Plane.CONTROL),
     RouterMount(tool_settings.catalog_router, Plane.CONTROL),
+    # Both prefixed /search-tools. The catalog first, because its one route is a
+    # fixed path and the operator's end in a path parameter.
+    RouterMount(search_tools.catalog_router, Plane.CONTROL),
     RouterMount(search_tools.router, Plane.CONTROL),
     RouterMount(tools.router, Plane.CONTROL),
 )
