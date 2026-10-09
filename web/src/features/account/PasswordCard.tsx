@@ -55,7 +55,7 @@ export function PasswordCard() {
   const [isOpen, setIsOpen] = useState(false)
   // Bumped on every open and used as the dialog's key, so a draft credential is
   // cleared on the way in rather than left in memory on the way out
-  // (`SpendCeilingsCard` is the pattern).
+  // (`OrganizationBudgetsPage` is the pattern).
   const [openCount, setOpenCount] = useState(0)
   // What the last successful call did. Neither fact survives it otherwise: the
   // address comes back in the response, and whether that call was the claim

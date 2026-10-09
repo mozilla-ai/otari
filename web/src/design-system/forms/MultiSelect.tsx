@@ -15,6 +15,12 @@ export interface MultiSelectOption {
    * apart. Same shape and same treatment as `ComboBoxField`'s.
    */
   hint?: string
+  /**
+   * Listed but not pickable, for an option that exists and is spoken for
+   * elsewhere. Shown rather than left out, so the list still answers "why is
+   * that one missing", and the hint is where to say why.
+   */
+  isDisabled?: boolean
 }
 
 /** How many matches are rendered at once, however many the query reaches. */
@@ -52,6 +58,7 @@ export function MultiSelect({
   noMatchesMessage = "Nothing matches what you typed.",
   countNoun = { one: "selected", other: "selected" },
   maxVisible = DEFAULT_MAX_VISIBLE,
+  searchesId = true,
   autoFocus,
 }: {
   label: string
@@ -80,6 +87,12 @@ export function MultiSelect({
    * is inside a modal. The footer says when it is capping.
    */
   maxVisible?: number
+  /**
+   * Whether the query matches an option's `id`. On where an id is something an
+   * operator knows and types (a user id); off where it is an internal key the
+   * query would match by accident.
+   */
+  searchesId?: boolean
   /** A form's first field takes this; see feedback.md. */
   autoFocus?: boolean
 }) {
@@ -125,7 +138,7 @@ export function MultiSelect({
   const reached = options.filter(
     (option) =>
       needle === "" ||
-      option.id.toLowerCase().includes(needle) ||
+      (searchesId && option.id.toLowerCase().includes(needle)) ||
       option.label.toLowerCase().includes(needle) ||
       (option.hint?.toLowerCase().includes(needle) ?? false),
   )
@@ -149,6 +162,13 @@ export function MultiSelect({
   // option press keeps focus anyway, because its `onMouseDown` prevents the
   // default that would have moved it.
   const toggle = (id: string) => {
+    // A disabled option can still be removed: it may have been picked before it
+    // became spoken for, and the chip is the way out.
+    if (
+      !value.includes(id) &&
+      options.find((option) => option.id === id)?.isDisabled
+    )
+      return
     onChange(
       value.includes(id)
         ? value.filter((current) => current !== id)
@@ -266,6 +286,12 @@ export function MultiSelect({
               setIsOpen(true)
             }}
             onFocus={open}
+            // A press on a field that already has focus fires no focus event,
+            // so without this a list closed with Escape stays closed under the
+            // pointer, and the next Escape closes the dialog instead.
+            onClick={() => {
+              if (!isOpen) open()
+            }}
             onBlur={(event) => {
               // Only when focus actually left the control: a press on an option
               // blurs the input and must not close the list before the press
@@ -317,6 +343,7 @@ export function MultiSelect({
                       id={optionId(index)}
                       role="option"
                       aria-selected={isSelected}
+                      aria-disabled={option.isDisabled || undefined}
                       aria-label={
                         option.hint
                           ? `${option.label} (${option.hint})`
@@ -344,7 +371,7 @@ export function MultiSelect({
                       // documents as a hazard. `surface-alt` rather than
                       // `surface-muted`: the two resolve to the same value and
                       // only this one is registered in @theme.
-                      className={`flex min-h-11 cursor-pointer items-center gap-2.5 border-border-subtle px-2.5 text-sm not-first:border-t ${
+                      className={`flex min-h-11 cursor-pointer items-center gap-2.5 border-border-subtle px-2.5 text-sm not-first:border-t aria-disabled:opacity-(--disabled-opacity) ${
                         index === activeIndex
                           ? "bg-surface-subtle"
                           : isSelected

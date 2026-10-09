@@ -266,9 +266,9 @@ test.describe("organization rail", () => {
  * A seeded admin identity with a password would be the faithful way in, and this
  * harness has no password login: `login` is the only auth path and it is
  * master-key only. So the caller's own context read is stubbed instead, which is
- * the technique `public.spec.ts` already uses for the invitation pages. The two
- * organization-scoped reads are stubbed with it, because a master-key session is
- * still what the gateway sees and it would answer them for the operator's
+ * the technique `public.spec.ts` already uses for the invitation pages. The
+ * organization's budget list is stubbed with it, because a master-key session is
+ * still what the gateway sees and it would answer for the operator's
  * organization rather than the shape this page is being captured for.
  *
  * What this does and does not cover: the layout, both themes and all three
@@ -339,61 +339,6 @@ async function stubAdminSpendView(page: Page): Promise<void> {
       },
     })
   })
-  await page.route("**/v1/organizations/me/spend-ceilings*", async (route) => {
-    await route.fulfill({
-      json: {
-        data: [
-          {
-            id: "44444444-4444-4444-4444-444444444444",
-            scope_type: "organization",
-            scope_id: "22222222-2222-2222-2222-222222222222",
-            provider_key_id: null,
-            budget_id: "11111111-1111-1111-1111-111111111111",
-            name: "Whole organization",
-            max_budget: 2500,
-            current_spend: 412.5,
-            reserved_spend: 3.25,
-            reset_cycle: "monthly",
-            reset_every_n: null,
-            reset_anchor_at: null,
-            reset_weekdays: null,
-            reset_month_day: 1,
-            reset_month: null,
-            period_start: "2026-08-01T00:00:00+00:00",
-            period_end: "2026-09-01T00:00:00+00:00",
-            manageable: true,
-            created_at: "2026-08-01T00:00:00+00:00",
-            updated_at: "2026-08-01T00:00:00+00:00",
-          },
-          {
-            // The row the otari-ai cutover writes: enforcing, and its figure set
-            // outside this organization. Included so the marker is captured.
-            id: "55555555-5555-5555-5555-555555555555",
-            scope_type: "workspace",
-            scope_id: "66666666-6666-6666-6666-666666666666",
-            provider_key_id: "openai-eu",
-            budget_id: "77777777-7777-7777-7777-777777777777",
-            name: null,
-            max_budget: 100,
-            current_spend: 12,
-            reserved_spend: 0,
-            reset_cycle: "every_n_days",
-            reset_every_n: 1,
-            reset_anchor_at: "2026-08-01T00:00:00+00:00",
-            reset_weekdays: null,
-            reset_month_day: null,
-            reset_month: null,
-            period_start: "2026-08-30T00:00:00+00:00",
-            period_end: "2026-08-31T00:00:00+00:00",
-            manageable: false,
-            created_at: "2026-08-01T00:00:00+00:00",
-            updated_at: "2026-08-01T00:00:00+00:00",
-          },
-        ],
-        count: 2,
-      },
-    })
-  })
 }
 
 /**
@@ -436,10 +381,10 @@ test.describe("organization admin", () => {
     await expect(
       page.getByRole("heading", { name: /^budgets$/i }).first(),
     ).toBeVisible()
-    // Awaited past the loading rows, so the capture is the populated tables
-    // rather than two spinners.
+    // Awaited past the loading rows, so the capture is the populated table
+    // rather than a spinner.
     await expect(page.getByText("Engineering monthly")).toBeVisible()
-    await expect(page.getByText("Set at the deployment level")).toBeVisible()
+    await expect(page.getByText("Acme (organization), Platform")).toBeVisible()
     await captureScreenshot(page, "organization-budgets")
   })
 })

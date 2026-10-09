@@ -114,10 +114,11 @@ tokens per minute and requests in flight; rules from config.yml are listed there
 read-only.
 
 What a page shows can also depend on who is signed in, not only on the
-deployment. Budgets is the clearest case: an organization owner or admin
-manages their own organization's budgets, one table naming what each budget
-applies to, while a deployment operator gets the deployment-wide budgets and
-the gateway users assigned to them.
+deployment. Budgets is the clearest case: an organization owner or
+admin manages their own organization's budgets, each a limit, a reset cycle and
+the entities it applies to (the organization, workspaces, members, API keys,
+providers and models), while a deployment operator gets the deployment-wide
+budgets and the gateway users assigned to them.
 
 Providers answers to the organization role rather than to deployment authority.
 Its owners and admins manage the keys, the models each key offers, and the rate

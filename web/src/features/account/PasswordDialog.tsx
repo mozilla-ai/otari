@@ -64,7 +64,7 @@ function PasswordField({
  * The password form, and the mutation behind it.
  *
  * Below the card's key on this component, which is the house shape for a
- * dialog's draft (`SpendCeilingDialog` says the same): a draft credential is
+ * dialog's draft (`OrganizationBudgetDialog` says the same): a draft credential is
  * cleared on the way in rather than left in memory on the way out, and a
  * refused save cannot greet the next open.
  *

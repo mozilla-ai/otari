@@ -2,14 +2,27 @@ import { type RefObject, useState } from "react"
 
 import type { OrganizationBudget } from "@/client"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { Field } from "@/design-system/forms/Field"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
+import { useKeys } from "@/shared/api/apiKeys"
 import {
   useCreateOrganizationBudget,
+  useOrganizationBudgets,
   useUpdateOrganizationBudget,
 } from "@/shared/api/budgets"
-
-import { unnamedBudgetLabel } from "./budgetLabel"
+import { useModels } from "@/shared/api/models"
+import { useOrganizationMembers } from "@/shared/api/organizations"
+import { useWorkspaces } from "@/shared/api/workspaces"
+import { AppliedToPicker } from "./AppliedToPicker"
+import {
+  describeEntity,
+  entityFromKey,
+  entityGroups,
+  entityKey,
+  takenEntities,
+} from "./appliedEntities"
+import { budgetLabeler, unnamedBudgetLabel } from "./budgetLabel"
 import { ResetCycleField } from "./ResetCycleField"
 import {
   type CycleDraft,
@@ -19,7 +32,8 @@ import {
   findCycleProblem,
 } from "./resetCycle"
 
-// The form behind both Create and Edit for one of the organization's budgets. One
+// The form behind both Create and Edit for one of the organization's budgets: the
+// limit, the reset cycle and the entities it applies to, saved as one write. One
 // component rather than two: the fields are identical, and the endpoint is a
 // PATCH that leaves an omitted field alone, so an edit sends the same shape an
 // add does.
@@ -48,6 +62,8 @@ export interface OrganizationBudgetDialogProps {
   onOpenChange: (open: boolean) => void
   /** The budget being edited; absent means this is an add. */
   editing?: OrganizationBudget
+  organizationId: string
+  organizationName: string
   /** Called once a save has landed, so the caller can close this. */
   onSaved: () => void
   /** Where focus returns when the control that opened this is gone. */
@@ -58,6 +74,8 @@ export function OrganizationBudgetDialog({
   isOpen,
   onOpenChange,
   editing,
+  organizationId,
+  organizationName,
   onSaved,
   returnFocusRef,
 }: OrganizationBudgetDialogProps) {
@@ -67,39 +85,77 @@ export function OrganizationBudgetDialog({
   // opens: the draft *and* its mutation".
   const create = useCreateOrganizationBudget()
   const update = useUpdateOrganizationBudget()
-  const save = (draft: OrganizationBudgetDraft) => {
-    const onDone = { onSuccess: onSaved }
-    if (editing) {
-      update.mutate({ id: editing.budget_id, body: draft }, onDone)
-      return
-    }
-    create.mutate(draft, onDone)
-  }
-  // Seeded on mount only, because the caller remounts this on each open. That
-  // matters more here than on most forms: these values decide what colleagues
-  // may spend, so inheriting the last budget's figure into a different one is
-  // the expensive kind of mistake.
-  const seed = {
-    name: editing?.name ?? "",
-    limit: limitToInput(editing?.max_budget),
-    cycle: cycleDraftFrom(editing),
-  }
-  const [name, setName] = useState(seed.name)
-  const [limit, setLimit] = useState(seed.limit)
-  const [cycle, setCycle] = useState<CycleDraft>(seed.cycle)
+
+  const budgets = useOrganizationBudgets()
+  // Read only while open: the page keeps this mounted between opens, and these
+  // four would otherwise load on every visit to the budgets page.
+  const workspaces = useWorkspaces(isOpen)
+  const members = useOrganizationMembers(isOpen)
+  const keys = useKeys(undefined, isOpen)
+  const models = useModels(isOpen)
+  const sourcesSettled = [workspaces, members, keys, models].every(
+    (query) => !query.isPending,
+  )
+  // The server names the workspaces a budget applies to, so one still reads by
+  // name while the workspace list is loading or failed to load.
+  const namedWorkspaces = (editing?.applied_to ?? []).flatMap((entity) =>
+    entity.scope_type === "workspace" && entity.name
+      ? [{ id: entity.scope_id, name: entity.name }]
+      : [],
+  )
+
+  // Seeded on mount only, because the caller remounts this on each open: these
+  // values decide what colleagues may spend, so inheriting the last budget's
+  // figure into a different one is the expensive kind of mistake. The entities
+  // come with the budget, so an edit opens on the whole set it will send back.
+  const [name, setName] = useState(editing?.name ?? "")
+  const [limit, setLimit] = useState(limitToInput(editing?.max_budget))
+  const [cycle, setCycle] = useState<CycleDraft>(cycleDraftFrom(editing))
+  const [applied, setApplied] = useState<string[]>(() =>
+    (editing?.applied_to ?? []).map(entityKey),
+  )
 
   const amount = parseLimit(limit)
   const limitInvalid = limit.trim() !== "" && amount === undefined
-  // The whole draft against what it was seeded with, so what "unsaved" means
-  // cannot drift from what the form holds.
-  const { isDirty } = useDirtySnapshot({ name, limit, cycle })
+  const { isDirty } = useDirtySnapshot({
+    name,
+    limit,
+    cycle,
+    applied: [...applied].sort(),
+  })
 
-  // What this budget is shown as while it has no name of its own, said on the
-  // field so the admin sees the label before saving rather than after. On the
-  // description rather than as the placeholder, which design/forms.md reserves
-  // for an example of what to type. The token and request caps come from the
-  // budget being edited: this form does not offer them, and a label derived
-  // without them would understate what it caps.
+  const nameBudget = budgetLabeler(budgets.data ?? [])
+  const taken = takenEntities(
+    budgets.data ?? [],
+    editing?.budget_id,
+    nameBudget,
+  )
+  const groups = entityGroups(
+    {
+      organizationId,
+      workspaces: workspaces.data ?? [],
+      members: members.data ?? [],
+      keys: keys.data ?? [],
+      modelIds: (models.data?.data ?? []).map((model) => model.id),
+    },
+    taken,
+  )
+  const organizationKey = entityKey({
+    scope_type: "organization",
+    scope_id: organizationId,
+  })
+
+  // Named, so an empty list reads as a failed read rather than as nothing to pick.
+  const failedLists = [
+    workspaces.isError && "workspaces",
+    members.isError && "members",
+    keys.isError && "API keys",
+    models.isError && "providers and models",
+  ].filter(Boolean)
+
+  // What this budget is shown as while it has no name of its own. The token and
+  // request caps come from the budget being edited: this form does not offer
+  // them, and a label derived without them would understate what it caps.
   const cycleWire = cycleFieldsFromDraft(cycle)
   const unnamedLabel = unnamedBudgetLabel({
     max_budget: amount ?? null,
@@ -111,21 +167,25 @@ export function OrganizationBudgetDialog({
   const submit = () => {
     if (limitInvalid || findCycleProblem(cycle) !== undefined) return
     // The whole cycle set every time, never one field: the server refuses a
-    // budget holding a setting its cycle does not take, so a weekday mask left
-    // behind by a switch to Monthly is what makes an otherwise valid save fail.
-    save({
+    // budget holding a setting its cycle does not take.
+    const body = {
       name: name.trim() === "" ? null : name.trim(),
       max_budget: amount ?? null,
       ...cycleWire,
-    })
+      applied_to: applied.map(entityFromKey),
+    }
+    const onDone = { onSuccess: onSaved }
+    if (editing) update.mutate({ id: editing.budget_id, body }, onDone)
+    else create.mutate(body, onDone)
   }
 
   return (
     <FormDialog
       isOpen={isOpen}
       onOpenChange={onOpenChange}
+      size="xl"
       title={editing ? "Edit budget" : "New budget"}
-      description="A budget is an amount, a reset cycle, and the entities it applies to. It caps nothing on its own: a spend ceiling is what points it at an organization, a workspace, or a key."
+      description="A budget is a limit, a reset cycle, and the entities it applies to."
       submitLabel={editing ? "Save budget" : "Create budget"}
       onSubmit={submit}
       isPending={create.isPending || update.isPending}
@@ -140,7 +200,7 @@ export function OrganizationBudgetDialog({
         onChange={setName}
         placeholder="Engineering monthly"
         autoFocus
-        description={`Optional. What this budget is called wherever it is handed out. Left blank, that is "${unnamedLabel}".`}
+        description={`Optional. Left blank, this budget is called "${unnamedLabel}".`}
       />
       <Field
         label="Limit (USD)"
@@ -150,17 +210,36 @@ export function OrganizationBudgetDialog({
         isInvalid={limitInvalid}
         errorMessage="Enter an amount of zero or more, or leave it blank for no limit."
         // "no dollar limit", not "admits every request": a budget capping
-        // tokens or requests still refuses, so the old wording is a claim about
-        // behavior this field no longer decides alone.
+        // tokens or requests still refuses.
         description="Leave blank for no dollar limit."
       />
       <ResetCycleField value={cycle} onChange={setCycle} />
+      {failedLists.length > 0 ? (
+        <InfoBanner tone="warning">
+          Could not load {failedLists.join(", ")}, so those cannot be picked.
+          Entities this budget already applies to are kept. Close this and try
+          again to pick them.
+        </InfoBanner>
+      ) : null}
+      <AppliedToPicker
+        value={applied}
+        onChange={setApplied}
+        groups={groups}
+        organizationKey={organizationKey}
+        organizationName={organizationName}
+        organizationTaken={taken.get(organizationKey)}
+        isLoading={!sourcesSettled}
+        describe={(key) =>
+          describeEntity(entityFromKey(key), {
+            organizationName,
+            workspaces: [...(workspaces.data ?? []), ...namedWorkspaces],
+          })
+        }
+      />
       {editing && editing.ceiling_count > 0 ? (
         <p className="text-sm text-muted">
-          {editing.ceiling_count === 1
-            ? "1 spend ceiling is held to this budget and moves with it."
-            : `${editing.ceiling_count} spend ceilings are held to this budget and move with it.`}{" "}
-          Spend already recorded stays; the new figure applies from here on.
+          Spend already recorded stays; a new limit or cycle applies from here
+          on.
         </p>
       ) : null}
     </FormDialog>
