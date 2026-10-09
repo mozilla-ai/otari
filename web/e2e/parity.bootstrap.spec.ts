@@ -67,8 +67,6 @@ test("the deployment bootstrap is served unauthenticated", async ({
     passkeys_enabled: true,
     passkeys_ready: false,
     oauth_providers: [],
-    // On by default; an operator turns it off. See
-    // docs/configuration.md#product-feedback.
     feedback_enabled: true,
     // No SMTP configured in this e2e environment, so invitations are
     // creatable but not emailed; see docs/configuration.md#mail.
