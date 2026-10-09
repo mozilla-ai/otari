@@ -25,7 +25,7 @@ from gateway.schemas.budgets import (
     WorkspaceMemberBudgetPolicyPublic,
     WorkspaceMemberBudgetPolicyUpdate,
 )
-from gateway.services.budgets._periods import period_window
+from gateway.services.budgets._periods import budget_window
 from gateway.services.tenancy.authorization import WorkspaceAccess
 from gateway.services.tenancy.organization_service import OrganizationService
 
@@ -38,10 +38,9 @@ def _member_ceiling(member_id: uuid.UUID, policy: WorkspaceBudgetDefault, budget
     """Build one member's ceiling on the budget a policy hands out.
 
     The ceiling names the budget rather than copying its figure, so editing the budget moves every member on it.
-    Only the period window is the member's own: two members capped a week apart on a rolling budget
-    are each a period from their own start.
+    The period window is the budget's, so every member on it rolls on the same boundary.
     """
-    window = period_window(datetime.now(UTC), duration=budget.budget_duration_sec, alignment=budget.reset_alignment)
+    window = budget_window(datetime.now(UTC), budget)
     period_start, period_end = window if window is not None else (None, None)
     return ScopedBudget(
         scope_type=SCOPE_WORKSPACE_MEMBER,

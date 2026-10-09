@@ -34,12 +34,41 @@ MAX_COUNT_LIMIT = 1_000_000_000_000_000
 # rpm_limit and tpm_limit are 32-bit columns, so a larger value fails on commit rather than validation.
 MAX_MINUTE_LIMIT = 2_147_483_647
 
-# An enum changes the published OpenAPI schema, so the two published vocabularies stay `Literal`.
-ResetAlignment = Literal["calendar_day", "calendar_week", "calendar_month"]
-RESET_ALIGNMENTS: tuple[ResetAlignment, ...] = get_args(ResetAlignment)
-ALIGN_DAY: ResetAlignment = "calendar_day"
-ALIGN_WEEK: ResetAlignment = "calendar_week"
-ALIGN_MONTH: ResetAlignment = "calendar_month"
+# An enum changes the published OpenAPI schema, so the published vocabularies stay `Literal`.
+#
+# NULL is the seventh cycle, "never": a budget that admits spend without ever
+# rolling. It stays NULL rather than becoming a word, because `budget_window`
+# already answers None for it and a `"never"` literal would be a second spelling
+# of the same state for every reader to handle.
+ResetCycle = Literal["every_n_hours", "every_n_days", "daily", "weekly", "monthly", "yearly"]
+RESET_CYCLES: tuple[ResetCycle, ...] = get_args(ResetCycle)
+CYCLE_HOURS: ResetCycle = "every_n_hours"
+CYCLE_DAYS: ResetCycle = "every_n_days"
+CYCLE_DAILY: ResetCycle = "daily"
+CYCLE_WEEKLY: ResetCycle = "weekly"
+CYCLE_MONTHLY: ResetCycle = "monthly"
+CYCLE_YEARLY: ResetCycle = "yearly"
+
+# The longest interval, in its own unit: roughly ten years, past any real
+# cadence, inside the INTEGER column, and short of the `timedelta` overflow that
+# would otherwise answer a mistyped value with a 500.
+MAX_EVERY_N_HOURS = 10 * 365 * 24
+MAX_EVERY_N_DAYS = 10 * 365
+
+# A weekly cycle's selected weekdays, as a bitmask with bit k set for weekday k in
+# `date.weekday()` order (Monday 0 through Sunday 6). An integer rather than a
+# list or a delimited string because the gate reads it on every request that bills
+# to a weekly budget: a mask is one column read and a shift, where a parse is an
+# allocation per request. 1 through 127 is "at least one day, no bit above
+# Sunday", which the CHECK enforces.
+WEEKDAY_MASK_MIN = 1
+WEEKDAY_MASK_MAX = 0b1111111
+
+# The day of the month a monthly or yearly cycle rolls on. Capped at 28 so every
+# month has the day: a budget set to the 31st would otherwise roll in seven months
+# and not in the other five, which is a different product in February than in
+# March and is not one anybody chose.
+MAX_MONTH_DAY = 28
 
 ScopeType = Literal["organization", "workspace", "workspace_member", "org_member", "api_token"]
 SCOPE_TYPES: tuple[ScopeType, ...] = get_args(ScopeType)
@@ -61,14 +90,54 @@ class Budget(Base):
     """Budget model for spending limits."""
 
     __tablename__ = "budgets"
+    # Each cycle names exactly the settings it carries, and the CHECKs make that
+    # an equality rather than a convention: a setting is present precisely when
+    # its cycle is selected, so a stale anchor cannot survive a cycle change and
+    # a missing one cannot reach the gate. ``COALESCE`` on both sides because a
+    # bare ``reset_cycle IN (...)`` is NULL for a never-resetting budget, and a
+    # CHECK passes on NULL, which would let the "never" row keep any settings it
+    # happened to be written with.
     __table_args__ = (
-        # A period comes from one place or the other, never both, matching the
-        # rule ``scoped_budgets`` already enforced when it carried its own. Without
-        # it the pair encodes one concept twice and ``(86400, calendar_month)`` is
-        # storable and meaningless.
         CheckConstraint(
-            "NOT (budget_duration_sec IS NOT NULL AND reset_alignment IS NOT NULL)",
-            name="ck_budgets_single_period_source",
+            "reset_cycle IS NULL OR reset_cycle IN "
+            "('every_n_hours', 'every_n_days', 'daily', 'weekly', 'monthly', 'yearly')",
+            name="ck_budgets_reset_cycle_vocabulary",
+        ),
+        CheckConstraint(
+            "(COALESCE(reset_cycle, '') IN ('every_n_hours', 'every_n_days')) = (reset_every_n IS NOT NULL)",
+            name="ck_budgets_reset_every_n_present",
+        ),
+        CheckConstraint(
+            "reset_every_n IS NULL OR reset_every_n > 0",
+            name="ck_budgets_reset_every_n_positive",
+        ),
+        CheckConstraint(
+            "(COALESCE(reset_cycle, '') IN ('every_n_hours', 'every_n_days')) = (reset_anchor_at IS NOT NULL)",
+            name="ck_budgets_reset_anchor_present",
+        ),
+        CheckConstraint(
+            "(COALESCE(reset_cycle, '') = 'weekly') = (reset_weekdays IS NOT NULL)",
+            name="ck_budgets_reset_weekdays_present",
+        ),
+        CheckConstraint(
+            f"reset_weekdays IS NULL OR (reset_weekdays BETWEEN {WEEKDAY_MASK_MIN} AND {WEEKDAY_MASK_MAX})",
+            name="ck_budgets_reset_weekdays_range",
+        ),
+        CheckConstraint(
+            "(COALESCE(reset_cycle, '') IN ('monthly', 'yearly')) = (reset_month_day IS NOT NULL)",
+            name="ck_budgets_reset_month_day_present",
+        ),
+        CheckConstraint(
+            f"reset_month_day IS NULL OR (reset_month_day BETWEEN 1 AND {MAX_MONTH_DAY})",
+            name="ck_budgets_reset_month_day_range",
+        ),
+        CheckConstraint(
+            "(COALESCE(reset_cycle, '') = 'yearly') = (reset_month IS NOT NULL)",
+            name="ck_budgets_reset_month_present",
+        ),
+        CheckConstraint(
+            "reset_month IS NULL OR (reset_month BETWEEN 1 AND 12)",
+            name="ck_budgets_reset_month_range",
         ),
     )
 
@@ -115,14 +184,31 @@ class Budget(Base):
     # for a scoped ceiling that names this budget.
     rpm_limit: Mapped[int | None] = mapped_column(default=None)
     tpm_limit: Mapped[int | None] = mapped_column(default=None)
-    budget_duration_sec: Mapped[int | None] = mapped_column()
-    # Snap the window to a UTC calendar boundary instead of counting a fixed
-    # number of seconds, which is the only way to express a calendar month (2592000
-    # seconds is a different, 1.5 percent more generous, product). It lives here
-    # rather than on the rows that enforce a budget because a limit and the period
-    # it is spent over are one product decision, and splitting them let a ceiling
-    # reset on a cadence the budget defining it had never heard of.
-    reset_alignment: Mapped[str | None] = mapped_column(default=None)
+    # How often the budget rolls, and the settings that cycle needs. They live
+    # here rather than on the rows that enforce a budget because a limit and the
+    # period it is spent over are one product decision, and splitting them let a
+    # ceiling reset on a cadence the budget defining it had never heard of.
+    #
+    # A plain string rather than a database enum, for the reason ``scope_type`` is
+    # one: a new cycle then needs no enum migration. NULL is "never".
+    reset_cycle: Mapped[str | None] = mapped_column(default=None)
+    # The interval, in whichever unit ``reset_cycle`` names. One column for both
+    # interval cycles because the cycle already says the unit, and two would make
+    # ``(every_n_hours, reset_every_n_days=6)`` storable.
+    reset_every_n: Mapped[int | None] = mapped_column(default=None)
+    # Where an interval cycle's first period opened. A fixed interval has no
+    # calendar boundary to derive a window from, so later periods are counted
+    # from this one to keep their phase.
+    reset_anchor_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    # The weekdays a weekly cycle rolls on, as the bitmask ``WEEKDAY_MASK_MIN``
+    # documents. Several are allowed, and the limit applies to each period
+    # between them: Monday and Friday give a four-day period and a three-day one.
+    reset_weekdays: Mapped[int | None] = mapped_column(default=None)
+    # The day a monthly cycle rolls on, and the day of the month a yearly one
+    # does. Capped at ``MAX_MONTH_DAY`` so every month has it.
+    reset_month_day: Mapped[int | None] = mapped_column(default=None)
+    # The month a yearly cycle rolls in, 1 through 12.
+    reset_month: Mapped[int | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -141,8 +227,12 @@ class Budget(Base):
             "max_budget": self.max_budget,
             "token_limit": self.token_limit,
             "request_limit": self.request_limit,
-            "budget_duration_sec": self.budget_duration_sec,
-            "reset_alignment": self.reset_alignment,
+            "reset_cycle": self.reset_cycle,
+            "reset_every_n": self.reset_every_n,
+            "reset_anchor_at": self.reset_anchor_at.isoformat() if self.reset_anchor_at else None,
+            "reset_weekdays": self.reset_weekdays,
+            "reset_month_day": self.reset_month_day,
+            "reset_month": self.reset_month,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

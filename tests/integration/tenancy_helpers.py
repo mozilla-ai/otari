@@ -5,6 +5,7 @@ start from whatever organization, workspace and membership shape it needs
 without first satisfying authorization rules it is not exercising.
 """
 
+from datetime import datetime
 from typing import TypedDict
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -97,8 +98,12 @@ async def create_budget(
     db: AsyncSession,
     *,
     max_budget: float | None = None,
-    budget_duration_sec: int | None = None,
-    reset_alignment: str | None = None,
+    reset_cycle: str | None = None,
+    reset_every_n: int | None = None,
+    reset_anchor_at: datetime | None = None,
+    reset_weekdays: int | None = None,
+    reset_month_day: int | None = None,
+    reset_month: int | None = None,
     name: str | None = None,
 ) -> str:
     """A budget for a default to hand out, returning its id.
@@ -109,8 +114,12 @@ async def create_budget(
     budget = Budget(
         name=name,
         max_budget=max_budget,
-        budget_duration_sec=budget_duration_sec,
-        reset_alignment=reset_alignment,
+        reset_cycle=reset_cycle,
+        reset_every_n=reset_every_n,
+        reset_anchor_at=reset_anchor_at,
+        reset_weekdays=reset_weekdays,
+        reset_month_day=reset_month_day,
+        reset_month=reset_month,
     )
     db.add(budget)
     await db.flush()

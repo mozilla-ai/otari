@@ -522,7 +522,7 @@ def test_a_service_key_bills_search_to_the_end_user_it_names(
 ) -> None:
     """``user`` on a service key's search names an end user, created with the key's end-user budget."""
     budget = client.post(
-        f"{API_ROOT}/budgets", json={"request_limit": 1, "budget_duration_sec": 86400}, headers=master_key_header
+        f"{API_ROOT}/budgets", json={"request_limit": 1, "reset_cycle": "daily"}, headers=master_key_header
     ).json()
     key = client.post(
         f"{API_ROOT}/keys",

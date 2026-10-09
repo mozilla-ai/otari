@@ -31,9 +31,18 @@ Is it one of a set too long to scroll, or open-ended?
  └── ComboBoxField                 (search as you type; `allowsCustomValue`
                                     for a list that is a shortcut, not a whitelist)
 Is it many of a set?
- ├── In a form -> MultiSelect
- └── In a toolbar -> FilterMultiComboBox
+ ├── In a toolbar -> FilterMultiComboBox
+ ├── Short enough to show whole (about seven), and seeing them all matters?
+ │    └── Yes -> CheckboxGroup     (every option on screen, no popover)
+ └── No -> MultiSelect             (searchable; the list is the problem)
 ```
+
+`CheckboxGroup` is `RadioGroup`'s plural and draws the same line against
+`MultiSelect` that `RadioGroup` draws against `Select`. `MultiSelect` is a
+combobox: it hides its options behind a search field because its lists are long
+enough that scrolling them is the problem. Seven weekdays have no such problem,
+and a popover there costs a click to answer a question every option on screen
+would have answered already.
 
 `Select` and `FilterSelect` are two components rather than one with a mode, and
 the same is true of `RadioGroup` against `Segmented`. In both pairs the filter
@@ -67,6 +76,11 @@ MultiSelect: { label, value: readonly string[], onChange: (next: string[]) => vo
   isInvalid?, errorMessage?, reserveMessage?, searchPlaceholder?, emptyMessage?,
   noMatchesMessage?, countNoun?: { one, other }, maxVisible = 50, autoFocus? }
 RadioGroup: { label, value, onChange, options: RadioOption[], description?,
+  orientation = "vertical", isRequired?, isDisabled?, isInvalid?, errorMessage?,
+  className? }
+CheckboxGroup: { label, hideLabel?, value: readonly string[],
+  onChange: (next: string[]) => void, options: readonly CheckboxOption[]
+  ({ value, label, description?, isDisabled? }), description?,
   orientation = "vertical", isRequired?, isDisabled?, isInvalid?, errorMessage?,
   className? }
 FilterSelect: { value, onChange: (next: string) => void, options: { value, label }[],

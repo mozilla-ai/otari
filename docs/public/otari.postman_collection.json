@@ -1418,7 +1418,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 1,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"rpm_limit\": 1,\n  \"token_limit\": 0,\n  \"tpm_limit\": 1\n}"
+              "raw": "{\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_anchor_at\": \"2024-01-01T00:00:00Z\",\n  \"reset_cycle\": \"every_n_hours\",\n  \"reset_every_n\": 1,\n  \"reset_month\": 1,\n  \"reset_month_day\": 1,\n  \"reset_weekdays\": 1,\n  \"rpm_limit\": 1,\n  \"token_limit\": 0,\n  \"tpm_limit\": 1\n}"
             },
             "description": "Create a new budget.",
             "header": [
@@ -1478,7 +1478,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 1,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"rpm_limit\": 1,\n  \"token_limit\": 0,\n  \"tpm_limit\": 1\n}"
+              "raw": "{\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_anchor_at\": \"2024-01-01T00:00:00Z\",\n  \"reset_cycle\": \"every_n_hours\",\n  \"reset_every_n\": 1,\n  \"reset_month\": 1,\n  \"reset_month_day\": 1,\n  \"reset_weekdays\": 1,\n  \"rpm_limit\": 1,\n  \"token_limit\": 0,\n  \"tpm_limit\": 1\n}"
             },
             "description": "Create a budget under an id you choose, or replace the one with that id.\n\nEvery field takes the value in the body, and a field left out is cleared, so\nthe same request always leaves the same budget. Answers 201 when it created\nthe budget. Users on a budget it replaces stay on it, and its ceilings follow\na change of reset period. A budget an organization owns is not replaced.",
             "header": [
@@ -1519,7 +1519,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 1,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"rpm_limit\": 1,\n  \"token_limit\": 0,\n  \"tpm_limit\": 1\n}"
+              "raw": "{\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_anchor_at\": \"2024-01-01T00:00:00Z\",\n  \"reset_cycle\": \"every_n_hours\",\n  \"reset_every_n\": 1,\n  \"reset_month\": 1,\n  \"reset_month_day\": 1,\n  \"reset_weekdays\": 1,\n  \"rpm_limit\": 1,\n  \"token_limit\": 0,\n  \"tpm_limit\": 1\n}"
             },
             "description": "Update a budget.",
             "header": [
@@ -3733,7 +3733,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 1,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"token_limit\": 0\n}"
+              "raw": "{\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_anchor_at\": \"2024-01-01T00:00:00Z\",\n  \"reset_cycle\": \"every_n_hours\",\n  \"reset_every_n\": 1,\n  \"reset_month\": 1,\n  \"reset_month_day\": 1,\n  \"reset_weekdays\": 1,\n  \"token_limit\": 0\n}"
             },
             "description": "Define a budget owned by this organization. Owners and admins only.",
             "header": [
@@ -3768,7 +3768,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 1,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_alignment\": \"calendar_day\",\n  \"token_limit\": 0\n}"
+              "raw": "{\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"request_limit\": 0,\n  \"reset_anchor_at\": \"2024-01-01T00:00:00Z\",\n  \"reset_cycle\": \"every_n_hours\",\n  \"reset_every_n\": 1,\n  \"reset_month\": 1,\n  \"reset_month_day\": 1,\n  \"reset_weekdays\": 1,\n  \"token_limit\": 0\n}"
             },
             "description": "Change a budget's label, figure or period.\n\nEvery ceiling naming it is held to the new figure from here on, which is the\npoint of naming a budget rather than typing an amount per place it applies.",
             "header": [

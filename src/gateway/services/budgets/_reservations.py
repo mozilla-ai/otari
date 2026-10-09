@@ -65,9 +65,8 @@ DEFAULT_RESERVATION_TTL_SEC = 900
 
 
 async def _cas_reset_user_budget(db: AsyncSession, user: User, budget: Budget, now: datetime) -> User:
-    # Both cadences, through the one derivation. Reading only
-    # ``budget_duration_sec`` here left a calendar-aligned budget with a null
-    # next reset, and a null next reset never fires, so the row never refilled.
+    # Every cycle through the one derivation: a null next reset never fires, so
+    # a cycle this missed would never refill.
     window = budget_window(now, budget)
     started_at, next_reset_at = window if window is not None else (now, None)
 

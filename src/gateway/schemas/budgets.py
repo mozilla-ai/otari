@@ -9,14 +9,19 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field, model_validator
 
 from gateway.models.budgets import (
     MAX_COUNT_LIMIT,
+    MAX_EVERY_N_DAYS,
+    MAX_EVERY_N_HOURS,
     MAX_MINUTE_LIMIT,
+    MAX_MONTH_DAY,
+    WEEKDAY_MASK_MAX,
+    WEEKDAY_MASK_MIN,
     Budget,
     BudgetResetLog,
-    ResetAlignment,
+    ResetCycle,
     ScopedBudget,
     ScopeType,
     WorkspaceBudgetDefault,
@@ -24,11 +29,52 @@ from gateway.models.budgets import (
 from gateway.models.money import MAX_USD_LIMIT, as_float
 from gateway.models.users import User
 
-_PERIOD_DESCRIPTION = "Seconds between resets, counted from the last one. Mutually exclusive with reset_alignment"
-_ALIGNMENT_DESCRIPTION = (
-    "Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way "
-    "to express a calendar month. Mutually exclusive with budget_duration_sec"
+_CYCLE_DESCRIPTION = (
+    "How often the budget resets. Null never resets. daily, weekly, monthly and yearly reset at "
+    "00:00 UTC; every_n_hours and every_n_days reset every reset_every_n hours or days counted "
+    "from reset_anchor_at. Each cycle carries its own "
+    "settings and no others: every_n_hours and every_n_days take reset_every_n and "
+    "reset_anchor_at, weekly takes reset_weekdays, monthly takes reset_month_day, and yearly "
+    "takes reset_month and reset_month_day"
 )
+_EVERY_N_DESCRIPTION = (
+    "How many hours or days between resets, in the unit reset_cycle names: "
+    f"at most {MAX_EVERY_N_HOURS} hours or {MAX_EVERY_N_DAYS} days"
+)
+_ANCHOR_DESCRIPTION = (
+    "Where an interval cycle's first period opened. Later periods are counted from it, so the "
+    "cadence keeps its phase rather than restarting at the next request"
+)
+_WEEKDAYS_DESCRIPTION = (
+    "The weekdays a weekly cycle resets on, as a bitmask with bit 0 Monday through bit 6 Sunday. "
+    "Several are allowed and the limit applies to each period between them, so Monday and Friday "
+    "give a four-day period and a three-day one"
+)
+_MONTH_DAY_DESCRIPTION = (
+    f"The day of the month a monthly or yearly cycle resets on, 1 to {MAX_MONTH_DAY}. Capped so every month has the day"
+)
+_MONTH_DESCRIPTION = "The month a yearly cycle resets in, 1 to 12"
+
+
+_REMOVED_PERIOD_FIELDS = ("budget_duration_sec", "reset_alignment")
+
+
+class _RefusesRemovedPeriodFields(BaseModel):
+    """Refuse the period fields `reset_cycle` replaced, rather than ignore them.
+
+    Ignored, an old client's `budget_duration_sec` would answer 201 with a budget
+    that never resets, which is the opposite of what it asked for.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_removed_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            removed = [name for name in _REMOVED_PERIOD_FIELDS if name in data]
+            if removed:
+                raise ValueError(f"{', '.join(removed)} was replaced by reset_cycle and its settings")
+        return data
+
 
 # An id a caller chooses for a budget: letters, digits, '.', '_' and '-', so it
 # reads the same in a path, a header and a config file.
@@ -38,7 +84,7 @@ BUDGET_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
 _ProviderKeyId = Annotated[str, Field(min_length=1, max_length=255, pattern=r"^\S+$")]
 
 
-class CreateBudgetRequest(BaseModel):
+class CreateBudgetRequest(_RefusesRemovedPeriodFields):
     """Request model for creating a new budget."""
 
     name: str | None = Field(default=None, description="Admin-facing label for the budget")
@@ -70,13 +116,14 @@ class CreateBudgetRequest(BaseModel):
             "admitted while the user's minute is under the limit. Null is unlimited"
         ),
     )
-    budget_duration_sec: int | None = Field(
-        default=None, gt=0, description="Budget duration in seconds (e.g., 86400 for daily, 604800 for weekly)"
+    reset_cycle: ResetCycle | None = Field(default=None, description=_CYCLE_DESCRIPTION)
+    reset_every_n: int | None = Field(default=None, gt=0, le=MAX_EVERY_N_HOURS, description=_EVERY_N_DESCRIPTION)
+    reset_anchor_at: AwareDatetime | None = Field(default=None, description=_ANCHOR_DESCRIPTION)
+    reset_weekdays: int | None = Field(
+        default=None, ge=WEEKDAY_MASK_MIN, le=WEEKDAY_MASK_MAX, description=_WEEKDAYS_DESCRIPTION
     )
-    reset_alignment: ResetAlignment | None = Field(
-        default=None,
-        description=_ALIGNMENT_DESCRIPTION,
-    )
+    reset_month_day: int | None = Field(default=None, ge=1, le=MAX_MONTH_DAY, description=_MONTH_DAY_DESCRIPTION)
+    reset_month: int | None = Field(default=None, ge=1, le=12, description=_MONTH_DESCRIPTION)
 
 
 class BudgetResponse(BaseModel):
@@ -100,8 +147,12 @@ class BudgetResponse(BaseModel):
     request_limit: int | None
     rpm_limit: int | None = None
     tpm_limit: int | None = None
-    budget_duration_sec: int | None
-    reset_alignment: str | None
+    reset_cycle: str | None
+    reset_every_n: int | None
+    reset_anchor_at: str | None
+    reset_weekdays: int | None
+    reset_month_day: int | None
+    reset_month: int | None
     created_at: str
     updated_at: str
     user_count: int = 0
@@ -127,8 +178,12 @@ class BudgetResponse(BaseModel):
             request_limit=budget.request_limit,
             rpm_limit=budget.rpm_limit,
             tpm_limit=budget.tpm_limit,
-            budget_duration_sec=budget.budget_duration_sec,
-            reset_alignment=budget.reset_alignment,
+            reset_cycle=budget.reset_cycle,
+            reset_every_n=budget.reset_every_n,
+            reset_anchor_at=budget.reset_anchor_at.isoformat() if budget.reset_anchor_at else None,
+            reset_weekdays=budget.reset_weekdays,
+            reset_month_day=budget.reset_month_day,
+            reset_month=budget.reset_month,
             created_at=budget.created_at.isoformat(),
             updated_at=budget.updated_at.isoformat(),
             user_count=user_count,
@@ -137,7 +192,7 @@ class BudgetResponse(BaseModel):
         )
 
 
-class UpdateBudgetRequest(BaseModel):
+class UpdateBudgetRequest(_RefusesRemovedPeriodFields):
     """Request model for updating a budget."""
 
     name: str | None = Field(default=None)
@@ -169,8 +224,14 @@ class UpdateBudgetRequest(BaseModel):
             "admitted while the user's minute is under the limit. Null is unlimited"
         ),
     )
-    budget_duration_sec: int | None = Field(default=None, gt=0)
-    reset_alignment: ResetAlignment | None = Field(default=None)
+    reset_cycle: ResetCycle | None = Field(default=None, description=_CYCLE_DESCRIPTION)
+    reset_every_n: int | None = Field(default=None, gt=0, le=MAX_EVERY_N_HOURS, description=_EVERY_N_DESCRIPTION)
+    reset_anchor_at: AwareDatetime | None = Field(default=None, description=_ANCHOR_DESCRIPTION)
+    reset_weekdays: int | None = Field(
+        default=None, ge=WEEKDAY_MASK_MIN, le=WEEKDAY_MASK_MAX, description=_WEEKDAYS_DESCRIPTION
+    )
+    reset_month_day: int | None = Field(default=None, ge=1, le=MAX_MONTH_DAY, description=_MONTH_DAY_DESCRIPTION)
+    reset_month: int | None = Field(default=None, ge=1, le=12, description=_MONTH_DESCRIPTION)
 
 
 class EndUserPublic(BaseModel):
@@ -298,8 +359,12 @@ class ScopedBudgetFigures(BaseModel):
     request_limit: int | None
     current_requests: int
     reserved_requests: int
-    budget_duration_sec: int | None
-    reset_alignment: str | None
+    reset_cycle: str | None
+    reset_every_n: int | None
+    reset_anchor_at: str | None
+    reset_weekdays: int | None
+    reset_month_day: int | None
+    reset_month: int | None
     period_start: str | None
     period_end: str | None
     created_at: str
@@ -324,8 +389,12 @@ class ScopedBudgetFigures(BaseModel):
             "request_limit": budget.request_limit,
             "current_requests": ceiling.current_requests,
             "reserved_requests": ceiling.reserved_requests,
-            "budget_duration_sec": budget.budget_duration_sec,
-            "reset_alignment": budget.reset_alignment,
+            "reset_cycle": budget.reset_cycle,
+            "reset_every_n": budget.reset_every_n,
+            "reset_anchor_at": budget.reset_anchor_at.isoformat() if budget.reset_anchor_at else None,
+            "reset_weekdays": budget.reset_weekdays,
+            "reset_month_day": budget.reset_month_day,
+            "reset_month": budget.reset_month,
             "period_start": ceiling.period_start.isoformat() if ceiling.period_start else None,
             "period_end": ceiling.period_end.isoformat() if ceiling.period_end else None,
             "created_at": ceiling.created_at.isoformat(),
@@ -340,7 +409,7 @@ class ScopedBudgetResponse(ScopedBudgetFigures):
     enforced against ``current_spend + reserved_spend``, so there is no rollup
     over users to compute.
 
-    Every limit, along with ``budget_duration_sec`` and ``reset_alignment``, is
+    Every limit, along with the reset cycle and its settings, is
     read off the budget rather than stored here, and carried on the wire so a
     caller can render a ceiling without fetching every budget to resolve one id.
     """
@@ -351,7 +420,7 @@ class ScopedBudgetResponse(ScopedBudgetFigures):
         return cls(**cls._figures_of(ceiling, budget))
 
 
-class OrganizationBudgetRates(BaseModel):
+class OrganizationBudgetRates(_RefusesRemovedPeriodFields):
     """The figures and the period a budget holds, shared by the create and update bodies."""
 
     name: str | None = Field(default=None, max_length=200, description="Admin-facing label for the budget")
@@ -373,8 +442,14 @@ class OrganizationBudgetRates(BaseModel):
         le=MAX_COUNT_LIMIT,
         description="Maximum requests over one period; null caps nothing. Independent of max_budget",
     )
-    budget_duration_sec: int | None = Field(default=None, gt=0, description=_PERIOD_DESCRIPTION)
-    reset_alignment: ResetAlignment | None = Field(default=None, description=_ALIGNMENT_DESCRIPTION)
+    reset_cycle: ResetCycle | None = Field(default=None, description=_CYCLE_DESCRIPTION)
+    reset_every_n: int | None = Field(default=None, gt=0, le=MAX_EVERY_N_HOURS, description=_EVERY_N_DESCRIPTION)
+    reset_anchor_at: AwareDatetime | None = Field(default=None, description=_ANCHOR_DESCRIPTION)
+    reset_weekdays: int | None = Field(
+        default=None, ge=WEEKDAY_MASK_MIN, le=WEEKDAY_MASK_MAX, description=_WEEKDAYS_DESCRIPTION
+    )
+    reset_month_day: int | None = Field(default=None, ge=1, le=MAX_MONTH_DAY, description=_MONTH_DAY_DESCRIPTION)
+    reset_month: int | None = Field(default=None, ge=1, le=12, description=_MONTH_DESCRIPTION)
 
 
 class OrganizationBudgetCreate(OrganizationBudgetRates):
@@ -387,10 +462,9 @@ class OrganizationBudgetUpdate(OrganizationBudgetRates):
     Every field is optional and keyed on ``model_fields_set``, matching
     the deployment-wide budget update's own: an *omitted* field is left alone, and an
     explicit null clears it, so sending ``max_budget: null`` takes a budget back
-    to uncapped, which is what the dashboard's dialog does. The period pair is
-    still mutually exclusive, and setting one does not clear the other, which is
-    why :func:`_require_single_period_source` re-checks the *resulting* pair
-    rather than the submitted one.
+    to uncapped, which is what the dashboard's dialog does. A cycle's settings
+    are checked as the row ends up with them, not as submitted, since an omitted
+    setting keeps its stored value.
     """
 
 
@@ -423,8 +497,12 @@ class OrganizationBudgetPublic(BaseModel):
     max_budget: float | None
     token_limit: int | None
     request_limit: int | None
-    budget_duration_sec: int | None
-    reset_alignment: str | None
+    reset_cycle: str | None
+    reset_every_n: int | None
+    reset_anchor_at: str | None
+    reset_weekdays: int | None
+    reset_month_day: int | None
+    reset_month: int | None
     ceiling_count: int
     applied_to: list[AppliedEntityPublic] = Field(description="Every entity the budget applies to, oldest first")
     created_at: str
@@ -453,8 +531,12 @@ class OrganizationBudgetPublic(BaseModel):
             max_budget=as_float(budget.max_budget),
             token_limit=budget.token_limit,
             request_limit=budget.request_limit,
-            budget_duration_sec=budget.budget_duration_sec,
-            reset_alignment=budget.reset_alignment,
+            reset_cycle=budget.reset_cycle,
+            reset_every_n=budget.reset_every_n,
+            reset_anchor_at=budget.reset_anchor_at.isoformat() if budget.reset_anchor_at else None,
+            reset_weekdays=budget.reset_weekdays,
+            reset_month_day=budget.reset_month_day,
+            reset_month=budget.reset_month,
             ceiling_count=ceiling_count,
             applied_to=applied_to,
             created_at=budget.created_at.isoformat(),
@@ -574,8 +656,12 @@ class WorkspaceMemberBudgetPolicyPublic(BaseModel):
     max_budget: float | None
     token_limit: int | None
     request_limit: int | None
-    budget_duration_sec: int | None
-    reset_alignment: str | None
+    reset_cycle: str | None
+    reset_every_n: int | None
+    reset_anchor_at: str | None
+    reset_weekdays: int | None
+    reset_month_day: int | None
+    reset_month: int | None
     created_at: str
     updated_at: str
 
@@ -590,8 +676,12 @@ class WorkspaceMemberBudgetPolicyPublic(BaseModel):
             max_budget=as_float(budget.max_budget),
             token_limit=budget.token_limit,
             request_limit=budget.request_limit,
-            budget_duration_sec=budget.budget_duration_sec,
-            reset_alignment=budget.reset_alignment,
+            reset_cycle=budget.reset_cycle,
+            reset_every_n=budget.reset_every_n,
+            reset_anchor_at=budget.reset_anchor_at.isoformat() if budget.reset_anchor_at else None,
+            reset_weekdays=budget.reset_weekdays,
+            reset_month_day=budget.reset_month_day,
+            reset_month=budget.reset_month,
             created_at=default.created_at.isoformat(),
             updated_at=default.updated_at.isoformat(),
         )

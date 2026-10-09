@@ -10,15 +10,18 @@ from pydantic import BaseModel, ValidationError
 
 from gateway.api.routes.scoped_budgets import _SCOPE_SUBJECTS
 from gateway.models.budgets import (
-    ALIGN_DAY,
-    ALIGN_MONTH,
-    ALIGN_WEEK,
+    CYCLE_DAILY,
+    CYCLE_DAYS,
+    CYCLE_HOURS,
+    CYCLE_MONTHLY,
+    CYCLE_WEEKLY,
+    CYCLE_YEARLY,
     RESERVATION_ACTIVE,
     RESERVATION_EXPIRED,
     RESERVATION_RELEASED,
     RESERVATION_SETTLED,
     RESERVATION_STATUSES,
-    RESET_ALIGNMENTS,
+    RESET_CYCLES,
     SCOPE_API_TOKEN,
     SCOPE_ORG_MEMBER,
     SCOPE_ORGANIZATION,
@@ -29,8 +32,9 @@ from gateway.models.budgets import (
 from gateway.schemas.budgets import CreateScopedBudgetRequest, OrganizationScopedBudgetCreate
 
 
-def test_the_alignment_constants_cover_the_literal() -> None:
-    assert {ALIGN_DAY, ALIGN_WEEK, ALIGN_MONTH} == set(RESET_ALIGNMENTS)
+def test_the_cycle_constants_cover_the_literal() -> None:
+    named = {CYCLE_HOURS, CYCLE_DAYS, CYCLE_DAILY, CYCLE_WEEKLY, CYCLE_MONTHLY, CYCLE_YEARLY}
+    assert named == set(RESET_CYCLES)
 
 
 def test_the_scope_constants_cover_the_literal() -> None:

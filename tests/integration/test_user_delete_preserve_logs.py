@@ -65,7 +65,15 @@ def test_delete_user_preserves_budget_reset_logs(
     """Soft-deleting a user preserves FK links in budget reset logs."""
     budget_resp = client.post(
         f"{API_ROOT}/budgets",
-        json={"max_budget": 100.0, "budget_duration_sec": 60},
+        json={
+            "max_budget": 100.0,
+            "reset_cycle": "every_n_hours",
+            "reset_every_n": 1,
+            # Before this case's own clock, which starts in 2025: an anchor in
+            # the future is a budget whose first period has not opened yet, so
+            # nothing would roll however far the clock is advanced.
+            "reset_anchor_at": "2025-01-01T00:00:00Z",
+        },
         headers=master_key_header,
     )
     budget_id = budget_resp.json()["budget_id"]
@@ -85,7 +93,9 @@ def test_delete_user_preserves_budget_reset_logs(
             headers=master_key_header,
         )
 
-    time_after_reset = initial_time + timedelta(seconds=61)
+    # Past the hourly cycle's next boundary. An hour is the floor a period can
+    # take now, so the 61 seconds this used to advance no longer crosses one.
+    time_after_reset = initial_time + timedelta(hours=1, seconds=1)
     with (
         patch("gateway.services.budgets._reservations.datetime") as mock_dt_budget,
         patch("gateway.api.routes._pipeline.datetime") as mock_dt_chat,

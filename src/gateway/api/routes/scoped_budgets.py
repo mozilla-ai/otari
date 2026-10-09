@@ -28,7 +28,7 @@ from gateway.models.budgets import (
 )
 from gateway.models.tenancy import Organization, OrganizationMember, Workspace, WorkspaceMember
 from gateway.schemas.budgets import CreateScopedBudgetRequest, ScopedBudgetResponse, UpdateScopedBudgetRequest
-from gateway.services.budgets import lock_workspace_for_scope, period_window
+from gateway.services.budgets import budget_window, lock_workspace_for_scope
 
 # Auth is declared on the router, not repeated on each handler, following
 # `routes/organizations.py`: every handler here needs the master key, and a
@@ -130,11 +130,7 @@ async def create_scoped_budget(
     # boundary it is already past, so its first period is the remainder of the
     # calendar period it was created in rather than a full one starting now. The
     # cadence is the budget's, which is the whole point of naming one.
-    window = period_window(
-        datetime.now(UTC),
-        duration=limit.budget_duration_sec,
-        alignment=limit.reset_alignment,
-    )
+    window = budget_window(datetime.now(UTC), limit)
     period_start, period_end = window if window is not None else (None, None)
     budget = ScopedBudget(
         scope_type=request.scope_type,
@@ -242,11 +238,7 @@ async def update_scoped_budget(
         # from a ``period_start`` belonging to the old budget's cadence. Spend
         # already recorded stays: the ceiling is the same allowance, held to a
         # different figure from here on.
-        window = period_window(
-            datetime.now(UTC),
-            duration=limit.budget_duration_sec,
-            alignment=limit.reset_alignment,
-        )
+        window = budget_window(datetime.now(UTC), limit)
         budget.period_start, budget.period_end = window if window is not None else (None, None)
 
     try:
