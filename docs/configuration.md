@@ -298,8 +298,9 @@ Vertex AI), Groq, Cerebras, Together, Gemini and Vertex AI clients. Other
 providers (Bedrock, Mistral, Cohere, Ollama and the rest) keep their SDK's own
 retry behavior, which `client_args` can still configure where the SDK allows
 it. A retry setting in an instance's `client_args` (`max_retries`, or
-`http_options.retry_options` for Google) wins over both values. Owned provider
-endpoints are not affected.
+`http_options.retry_options` for Google) wins over both values. Neither value
+reaches an [owned provider endpoint](provider-endpoints.md), which keeps its
+SDK's default outside a policy that can fall over.
 
 ### Runtime provider management
 
