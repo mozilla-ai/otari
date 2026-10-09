@@ -284,7 +284,6 @@ export function PricingOverrideDialog({
         output_price_per_million: 0,
         cache_read_price_per_million: null,
         cache_write_price_per_million: null,
-        cache_write_1h_price_per_million: null,
         effective_from: fromLocalInput(from),
         effective_to: fromLocalInput(to),
         unit,

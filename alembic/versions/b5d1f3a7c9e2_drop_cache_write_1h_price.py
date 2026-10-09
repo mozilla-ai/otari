@@ -6,7 +6,7 @@ usage rows stays; only the rate columns and the override table's non-negative
 check go.
 
 Revision ID: b5d1f3a7c9e2
-Revises: a9d3e5f7b1c2
+Revises: c7e1a4d9b3f2
 Create Date: 2026-10-08 00:00:00.000000
 
 """
@@ -18,7 +18,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "b5d1f3a7c9e2"
-down_revision: str | Sequence[str] | None = "a9d3e5f7b1c2"
+down_revision: str | Sequence[str] | None = "c7e1a4d9b3f2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
