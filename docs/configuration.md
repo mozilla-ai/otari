@@ -26,7 +26,12 @@ providers:
 ```
 
 String values support `${ENV_VAR}` interpolation. Keep credentials in the
-environment or a secret store rather than committing them to YAML.
+environment or a secret store rather than committing them to YAML. A
+reference to a variable that is not set fails the load. A variable that is
+set but empty leaves a `providers` entry with no credential, and Otari ignores
+such an entry with a warning that names the variable, so a credential stored
+for the same provider through the dashboard serves its requests instead of
+being shadowed by the empty one.
 
 ## Environment variables
 

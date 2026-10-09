@@ -228,6 +228,64 @@ def credential_ladder_exhausted(provider: LLMProvider, kwargs: dict[str, Any]) -
     return not _provider_env_key_present(provider)
 
 
+# Instances already reported as ignored, so the warning is logged once per
+# instance per process rather than on every overlay refresh.
+_uncredentialed_warned: set[str] = set()
+
+
+def uncredentialed_env_names(config: GatewayConfig, instance: str, entry: Mapping[str, Any]) -> tuple[str, ...] | None:
+    """The variables a ``providers:`` entry could have taken its credential from, or ``None``.
+
+    ``None`` means the entry can be called as it stands: it carries a credential
+    or an ``api_base`` (which takes the keyless placeholder), its provider needs
+    no key, the provider's own variable is set, or the provider cannot be
+    inspected at all. A tuple means the entry declares nothing a call could
+    authenticate with: ``api_key: ${VAR}`` with ``VAR`` set but empty is the
+    usual way to get here.
+    """
+    try:
+        provider = LLMProvider(config.provider_instance_type(instance))
+    except ValueError:
+        return None
+    env_names = provider_credential_env_names(provider.value)
+    if not env_names:
+        return None
+    kwargs = {key: value for key, value in entry.items() if key not in _INSTANCE_META_KEYS}
+    if not credential_ladder_exhausted(provider, kwargs):
+        return None
+    return tuple(env_names)
+
+
+def prune_uncredentialed_providers(config: GatewayConfig) -> dict[str, tuple[str, ...]]:
+    """Drop every ``providers:`` entry that declares no credential, and say so once.
+
+    A hollow entry is worse than no entry: an ``instance:model`` selector that
+    matches it never consults an organization's own key for the same provider,
+    and a bare ``provider:model`` selector is gated and priced as if the
+    deployment served it, so the credential an operator stored on the dashboard
+    goes unused while every request fails upstream. Returns what was dropped,
+    keyed by instance, with the variables that would have filled each.
+    """
+    pruned = {
+        instance: env_names
+        for instance, entry in config.providers.items()
+        if isinstance(entry, Mapping) and (env_names := uncredentialed_env_names(config, instance, entry)) is not None
+    }
+    for instance, env_names in pruned.items():
+        del config.providers[instance]
+        if instance in _uncredentialed_warned:
+            continue
+        _uncredentialed_warned.add(instance)
+        logger.warning(
+            "providers.%s declares no credential and none of %s is set, so the entry is ignored. A credential "
+            "stored for the provider through the dashboard serves its requests instead.",
+            instance,
+            # codeql[py/clear-text-logging-sensitive-data]
+            ", ".join(env_names),
+        )
+    return pruned
+
+
 def get_provider_kwargs(
     config: GatewayConfig,
     provider: LLMProvider,

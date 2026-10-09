@@ -688,3 +688,87 @@ def test_undeclared_env_provider_warns_nothing_outside_standalone(
     get_provider_kwargs(GatewayConfig(mode=mode, providers={}), LLMProvider.ANTHROPIC)
 
     assert "not declared" not in undeclared_env_warnings.text
+
+
+# ---------------------------------------------------------------------------
+# A providers: entry that declares no credential is ignored, not shadowing
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def uncredentialed_warnings(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> Iterator[pytest.LogCaptureFixture]:
+    """Capture gateway warnings with the once-per-instance memory cleared and the SDK variables unset."""
+    monkeypatch.setattr(provider_kwargs, "_uncredentialed_warned", set())
+    for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "COHERE_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    _capture_gateway_logs(caplog)
+    try:
+        yield caplog
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        pytest.param({"api_key": ""}, id="empty-string"),
+        pytest.param({"api_key": None}, id="none"),
+        pytest.param({}, id="no-settings"),
+        pytest.param({"client_args": {"timeout": 60}}, id="transport-only"),
+        pytest.param({"provider_type": "openai", "models": ["gpt-4o"]}, id="meta-only"),
+    ],
+)
+def test_entry_without_a_credential_names_the_variables_it_lacks(
+    entry: dict[str, object], uncredentialed_warnings: pytest.LogCaptureFixture
+) -> None:
+    config = GatewayConfig(providers={"openai": entry})
+    assert provider_kwargs.uncredentialed_env_names(config, "openai", entry) == ("OPENAI_API_KEY",)
+
+
+@pytest.mark.parametrize(
+    ("instance", "entry", "env"),
+    [
+        pytest.param("openai", {"api_key": "sk-config"}, {}, id="key-in-config"),
+        pytest.param("openai", {"api_key": ""}, {"OPENAI_API_KEY": "sk-env"}, id="key-in-env"),
+        pytest.param(
+            "home_lab", {"provider_type": "openai", "api_base": "http://models.local/v1"}, {}, id="keyless-base"
+        ),
+        pytest.param("ollama", {}, {}, id="keyless-local-backend"),
+        pytest.param("bedrock", {}, {}, id="ambient-credential"),
+        pytest.param("vertexai", {}, {}, id="no-credential-variable"),
+        pytest.param("mystery", {"provider_type": "not-a-provider"}, {}, id="unknown-type"),
+    ],
+)
+def test_entry_that_can_be_called_is_not_uncredentialed(
+    instance: str,
+    entry: dict[str, object],
+    env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    uncredentialed_warnings: pytest.LogCaptureFixture,
+) -> None:
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    config = GatewayConfig.model_construct(providers={instance: entry})
+    assert provider_kwargs.uncredentialed_env_names(config, instance, entry) is None
+
+
+def test_prune_drops_the_hollow_entries_and_warns_once_per_instance(
+    uncredentialed_warnings: pytest.LogCaptureFixture,
+) -> None:
+    config = GatewayConfig(
+        providers={"openai": {"api_key": ""}, "anthropic": {"api_key": "sk-ant-config"}, "ollama": {}}
+    )
+
+    first = provider_kwargs.prune_uncredentialed_providers(config)
+    second = provider_kwargs.prune_uncredentialed_providers(config)
+
+    assert first == {"openai": ("OPENAI_API_KEY",)}
+    assert second == {}
+    assert set(config.providers) == {"anthropic", "ollama"}
+    records = [r for r in uncredentialed_warnings.records if "declares no credential" in r.getMessage()]
+    assert len(records) == 1
+    message = records[0].getMessage()
+    assert "providers.openai" in message and "OPENAI_API_KEY" in message
+    assert "sk-ant-config" not in message
