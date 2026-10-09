@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
+from sqlmodel import col
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
@@ -45,6 +46,13 @@ def _token_from(accept_link: str) -> str:
 
 
 PASSWORD = "correct-horse-battery"  # pragma: allowlist secret
+
+
+def _switch(client: TestClient, headers: dict[str, str], organization_id: str) -> None:
+    switched = client.post(
+        f"{API_ROOT}/organizations/me/switch", json={"organization_id": organization_id}, headers=headers
+    )
+    assert switched.status_code == 200, switched.text
 
 
 def _roster_row(client: TestClient, headers: dict[str, str], email: str) -> dict[str, Any]:
@@ -76,10 +84,11 @@ def test_invite_emails_the_accept_link_when_a_transport_is_configured(
         gateway_logger.removeHandler(caplog.handler)
 
     assert result["mail_sent"] is True
-    # Absolute, because it has to mean something outside a browser.
-    assert result["accept_link"].startswith("https://otari.example.com/#/accept-invitation?token=")
+    # Delivered, so the link went to the mailbox alone and not back to the inviter.
+    assert result["accept_link"] is None
     assert "You're invited to join" in caplog.text
-    assert result["accept_link"] in caplog.text
+    # Absolute, because it has to mean something outside a browser.
+    assert "https://otari.example.com/#/accept-invitation?token=" in caplog.text
     # The recipient is redacted in the log line even on the success path.
     assert "mailed@example.com" not in caplog.text
 
@@ -332,6 +341,112 @@ def test_a_forwarded_link_cannot_set_a_password_on_an_address_that_can_already_s
     assert _roster_row(client, master_key_header, "ida@example.com")["status"] == "invited"
     accept = client.post(f"{API_ROOT}/invitations/accept", json={"token": token})
     assert accept.status_code == 200, accept.text
+
+
+def test_a_link_claim_is_recorded_as_vouched_rather_than_proven(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """The inviter holds the link too, so a password chosen through it is the organization's word."""
+    result = _invite(client, master_key_header, email="joan@example.com")
+    accept = client.post(
+        f"{API_ROOT}/invitations/accept",
+        json={"token": _token_from(result["accept_link"]), "password": PASSWORD},
+    )
+    assert accept.status_code == 200, accept.text
+
+    invitee = db_session.get(User, uuid.UUID(_roster_row(client, master_key_header, "joan@example.com")["user_id"]))
+    assert invitee is not None
+    db_session.refresh(invitee)
+    assert invitee.email_verified_at is not None
+    assert invitee.email_vouched_at is not None
+
+
+def test_a_link_from_another_organization_cannot_claim_an_address_already_on_a_roster(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """Any session can create an organization and invite any address, so its link must not claim one.
+
+    Kay is added to the deployment's organization and has never signed in. A
+    second organization, created by the same caller as anyone could, invites her
+    and holds the accept link it gets back: that link must not choose her password.
+    """
+    added = client.post(
+        f"{API_ROOT}/organizations/me/members",
+        json={"email": "kay@example.com", "role": "owner"},
+        headers=master_key_header,
+    )
+    assert added.status_code == 201, added.text
+    created = client.post(f"{API_ROOT}/organizations", json={"name": "Mallory"}, headers=master_key_header)
+    assert created.status_code == 201, created.text
+    _switch(client, master_key_header, created.json()["id"])
+    token = _token_from(_invite(client, master_key_header, email="kay@example.com")["accept_link"])
+
+    preview = client.post(f"{API_ROOT}/invitations/validate", json={"token": token})
+    assert preview.json()["needs_password"] is False
+    refused = client.post(f"{API_ROOT}/invitations/accept", json={"token": token, "password": PASSWORD})
+    assert refused.status_code == 400, refused.text
+
+    invitee = db_session.get(User, uuid.UUID(added.json()["user_id"]))
+    assert invitee is not None
+    db_session.refresh(invitee)
+    assert invitee.hashed_password is None
+    assert invitee.email_verified_at is None
+    signed_in = client.post(f"{API_ROOT}/auth/session", json={"email": "kay@example.com", "password": PASSWORD})
+    assert signed_in.status_code == 401
+    # Joining without a password still works; it claims nothing.
+    accept = client.post(f"{API_ROOT}/invitations/accept", json={"token": token})
+    assert accept.status_code == 200, accept.text
+
+
+def test_an_address_another_organization_vouched_for_cannot_be_added_until_it_is_proven(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """Pre-claiming: vouch for an address nobody holds yet, then wait for a real organization to add it.
+
+    Mallory invites a fresh address and chooses its password through her own
+    link. The deployment's organization adding or inviting that address later
+    would hand Mallory a seat in it, so both are refused until the address is
+    proven.
+    """
+    home = client.get(f"{API_ROOT}/organizations/me", headers=master_key_header).json()["organization"]["id"]
+    created = client.post(f"{API_ROOT}/organizations", json={"name": "Mallory"}, headers=master_key_header)
+    assert created.status_code == 201, created.text
+    _switch(client, master_key_header, created.json()["id"])
+    token = _token_from(_invite(client, master_key_header, email="lin@example.com")["accept_link"])
+    claimed = client.post(f"{API_ROOT}/invitations/accept", json={"token": token, "password": PASSWORD})
+    assert claimed.status_code == 200, claimed.text
+    _switch(client, master_key_header, home)
+
+    added = client.post(
+        f"{API_ROOT}/organizations/me/members",
+        json={"email": "lin@example.com", "role": "member"},
+        headers=master_key_header,
+    )
+    assert added.status_code == 409, added.text
+    invited = client.post(
+        f"{API_ROOT}/organizations/me/member-invitations",
+        json={"email": "lin@example.com", "role": "member"},
+        headers=master_key_header,
+    )
+    assert invited.status_code == 409, invited.text
+
+    # Once the address is proven (a reset by email, a provider sign-in), it is an ordinary identity.
+    identity = db_session.query(User).filter(col(User.email) == "lin@example.com").one()
+    identity.email_vouched_at = None
+    db_session.add(identity)
+    db_session.commit()
+    added = client.post(
+        f"{API_ROOT}/organizations/me/members",
+        json={"email": "lin@example.com", "role": "member"},
+        headers=master_key_header,
+    )
+    assert added.status_code == 201, added.text
 
 
 def test_a_password_that_breaks_the_policy_is_refused_before_anything_is_accepted(
@@ -774,7 +889,7 @@ def test_bulk_invite_emails_every_address_when_a_transport_is_configured(
     assert len(result["invited"]) == 7
     assert result["failed"] == []
     assert all(row["mail_sent"] is True for row in result["invited"])
-    assert len({row["accept_link"] for row in result["invited"]}) == 7
+    assert all(row["accept_link"] is None for row in result["invited"])
 
 
 def test_bulk_invite_refuses_an_empty_list(client: TestClient, master_key_header: dict[str, str]) -> None:

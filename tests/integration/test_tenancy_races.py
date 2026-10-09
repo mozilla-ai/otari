@@ -944,6 +944,7 @@ async def test_concurrent_accepts_of_one_invitation_produce_one_active_membershi
         ),
         config=config,
     )
+    assert invited.accept_link is not None
     token = invited.accept_link.split("token=")[1]
 
     async def attempt(session: AsyncSession) -> object:
@@ -992,8 +993,10 @@ async def test_a_signup_racing_a_password_accept_never_overwrites_the_winner(
     ).invite_active_organization_member_for_user(
         user=owner_row,
         request=InviteOrganizationMemberRequest(email="iris@example.com"),
-        config=config,
+        # No mail for the invite itself, so the link comes back to share.
+        config=GatewayConfig(),
     )
+    assert invited.accept_link is not None
     token = invited.accept_link.split("token=")[1]
 
     async def accept() -> object:
@@ -1172,6 +1175,7 @@ async def test_concurrent_accept_and_revoke_of_one_invitation_produce_one_consis
         request=InviteOrganizationMemberRequest(email="ivy@example.com"),
         config=GatewayConfig(),
     )
+    assert invited.accept_link is not None
     token = invited.accept_link.split("token=")[1]
     assert invited.invitation_id is not None
 

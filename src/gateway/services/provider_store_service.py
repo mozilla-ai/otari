@@ -11,7 +11,10 @@ from the streaming hot path, which has no database session. So stored providers
 are overlaid onto ``config.providers`` in memory: loaded at startup, refreshed
 on a TTL (like the alias cache), and re-applied immediately on the worker that
 served a write. A stored row wins over a config-file entry of the same instance
-name, and that shadowing is logged at startup so it is never silent.
+name, and that shadowing is logged at startup so it is never silent. An entry
+left without a credential once merged (``api_key: ${VAR}`` with ``VAR`` empty)
+is dropped from the merged map, with a warning, so it cannot shadow an
+organization's own key for the same provider.
 
 The API key is held encrypted; it is decrypted here only to build the in-memory
 overlay. A row whose key cannot be decrypted (no or wrong ``OTARI_SECRET_KEY``)
@@ -31,6 +34,7 @@ from gateway.core.database import create_session
 from gateway.log_config import logger
 from gateway.models.providers import ProviderCredential
 from gateway.models.secret_fields import restore_redacted_values
+from gateway.services.provider_kwargs import prune_uncredentialed_providers
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
@@ -113,6 +117,9 @@ def apply_to_config(config: GatewayConfig) -> set[str]:
         config._provider_baseline = {name: dict(entry) for name, entry in config.providers.items()}
     baseline = config._provider_baseline
     config.providers = {**baseline, **_cache}
+    # After the merge, not before: a stored row fills a config-file entry whose
+    # ``${VAR}`` resolved empty, and the baseline keeps that entry so it can.
+    prune_uncredentialed_providers(config)
     return set(baseline) & set(_cache)
 
 
@@ -151,6 +158,9 @@ async def load_providers_at_startup(db: AsyncSession, config: GatewayConfig) -> 
         shadowed = await refresh_provider_cache(db, config)
     except Exception:
         logger.exception("Failed to load stored providers; continuing with config providers only")
+        # The empty overlay still has to be applied, so a config entry with no
+        # credential is dropped on this path too.
+        apply_to_config(config)
         return
     if _cache:
         logger.info("Loaded %d stored provider(s)", len(_cache))

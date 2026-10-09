@@ -21,7 +21,15 @@ from any_llm.types.completion import (
 )
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig, RateLimitRule
+from gateway.core.config import (
+    API_KEY_HEADER,
+    API_ROOT,
+    ATTEMPT_COUNT_HEADER,
+    FALLBACK_HEADER,
+    PROVIDER_HEADER,
+    GatewayConfig,
+    RateLimitRule,
+)
 from gateway.models.routing import RoutingConfig
 
 from .conftest import build_test_client
@@ -135,6 +143,19 @@ def test_a_spilled_request_records_the_model_it_skipped(first_capped: TestClient
     ]
     assert group[0]["status_code"] == 429
     assert group[0]["error_message"] == "Skipped: Rate limit 'first-cap' exceeded: 2 requests per minute"
+
+
+def test_a_spilled_request_is_a_fallback_sent_to_one_candidate(first_capped: TestClient) -> None:
+    for _ in range(2):
+        _chat(first_capped, "spill")
+
+    response, sent = _chat(first_capped, "spill")
+
+    assert sent == [SECOND]
+    assert response.headers[PROVIDER_HEADER] == "anthropic"
+    # The full model was skipped without being called, so one candidate was sent the request.
+    assert response.headers[ATTEMPT_COUNT_HEADER] == "1"
+    assert response.headers[FALLBACK_HEADER] == "true"
 
 
 def test_a_direct_call_to_a_full_model_is_refused(first_capped: TestClient) -> None:

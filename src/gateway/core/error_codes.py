@@ -22,10 +22,15 @@ RATE_LIMITED = "rate_limited"
 UPSTREAM_RATE_LIMITED = "upstream_rate_limited"
 INVALID_MODEL = "invalid_model"
 MODEL_NOT_ALLOWED = "model_not_allowed"
+# The organization offers the model on a provider key, with its serving switch off.
+MODEL_NOT_SERVING = "model_not_serving"
+# A provider key of the organization serves the provider, and none offers the model.
+MODEL_NOT_FOUND = "model_not_found"
 CONTEXT_LENGTH_EXCEEDED = "context_length_exceeded"
 PRICING_REQUIRED = "pricing_required"
 END_USER_BUDGET_NOT_ALLOWED = "end_user_budget_not_allowed"
 ALL_CANDIDATES_REJECTED = "all_candidates_rejected"
+PROVIDER_NOT_CONFIGURED = "provider_not_configured"
 # A request body or parameter that failed schema validation (a 422).
 INVALID_REQUEST = "invalid_request"
 

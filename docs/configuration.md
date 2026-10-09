@@ -26,7 +26,12 @@ providers:
 ```
 
 String values support `${ENV_VAR}` interpolation. Keep credentials in the
-environment or a secret store rather than committing them to YAML.
+environment or a secret store rather than committing them to YAML. A
+reference to a variable that is not set fails the load. A variable that is
+set but empty leaves a `providers` entry with no credential, and Otari ignores
+such an entry with a warning that names the variable, so a credential stored
+for the same provider through the dashboard serves its requests instead of
+being shadowed by the empty one.
 
 ## Environment variables
 
@@ -77,7 +82,7 @@ the corresponding startup value after the database is available.
 | `require_pricing` | Reject unpriced, budgeted traffic. Defaults to `true`. |
 | `default_pricing` | Use the bundled genai-prices catalog when no stored price exists. |
 | `pricing_refresh` | What a scheduled genai-prices check does with an update: `manual`, `review`, or `auto`. |
-| `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `false`; startup setting, unavailable in hybrid mode. See [Product feedback](#product-feedback). |
+| `feedback_enabled` | Allow deliberate feedback submissions to the Otari team. Defaults to `true`; startup setting, unavailable in hybrid mode. See [Product feedback](#product-feedback). |
 | `public_catalog` | Serve the model catalog to visitors without a session. Defaults to `false`. |
 | `public_catalog_rate_limit_per_minute` | Anonymous catalog reads per client address per minute. Defaults to 60. |
 | `rate_limit_rpm` | Per-user request limit. Unset disables it. |
@@ -319,7 +324,10 @@ rejected instead of bypassing the budget.
 With `require_pricing: false`, such a request is served, its model tokens carry
 no cost, and its response carries no inline `cost_usd`. The usage row records no
 cost unless the request also ran priced gateway tools, whose charges are still
-recorded. The gateway logs a warning for each unpriced model at most once an
+recorded. The same setting governs an organization's own provider keys: a model
+a key offers that nothing prices is switched on and served at no cost, where
+`require_pricing: true` keeps it switched off until it has a rate (see
+[Who is shown which models](models.md#who-is-shown-which-models)). The gateway logs a warning for each unpriced model at most once an
 hour per process, and the dashboard shows operators a banner naming the models
 that served unpriced traffic in the selected workspace in the last 24 hours
 and still have no stored price, linked to those requests in Activity, where
@@ -405,11 +413,29 @@ Use `pricing_tiers` for a rate that applies to an entire request after an input
 token threshold. The OpenAPI pricing schemas and dashboard editor show the
 accepted shape.
 
-### Per-request pricing (audio, moderations, and completion models)
+### Per-request pricing (audio, moderations, rerank, and completion models)
 
 Audio, moderations, and direct search do not use token pricing. They reuse
 `input_price_per_million` as USD per million requests. An unpriced request on
 these endpoints is served at zero cost.
+
+A search tool's rate is keyed `provider:tool` (`exa:exa-search` for a tool named
+`exa-search` backed by `exa`), and its provider needs no entry under
+`providers:`. That rate is what a search reserves against the caller's budget
+before it runs; without one no dollars are held, though the search still holds
+one request against a request-count budget. A successful search settles at the
+provider's reported charge when it reports one, and at the rate otherwise.
+
+Rerank accepts either unit. A rerank model priced `unit: tokens` is charged
+on the input tokens the provider reports. Providers that bill reranking per
+search unit (one query over a batch of documents) report that count and no
+tokens, so give such a model `unit: requests` and it is charged the reported
+units at `input_price_per_million / 1,000,000` each, or one unit when the
+provider reports none. The budget reservation holds one unit and settles at
+the reported count. The default-pricing dataset carries no rerank rates, so a
+rerank model needs its own pricing row, for example `cohere:rerank-v3.5` at
+`input_price_per_million: 2000` (USD 2 per 1,000 searches) with
+`unit: requests`.
 
 A model served over chat completions, the Responses API, or Messages can be
 priced the same way, for an upstream that bills per call and reports little or
@@ -578,8 +604,8 @@ descriptions along the lines above.
 
 ## Mail
 
-Mail is optional. Invitations always return an accept link, and an invitee who
-has never signed in chooses a password on the page it opens, so members can join
+Mail is optional. An invitation that is not emailed returns its accept link, and an invitee new
+to the deployment chooses a password on the page it opens, so members can join
 a deployment with no transport configured. Without mail, signup, email verification, and password
 reset are unavailable.
 
@@ -733,12 +759,12 @@ boundary.
 
 ## Product feedback
 
-With `feedback_enabled` on, signed-in dashboard users can choose **Feedback**,
-beside Documentation in the top bar (in the account menu on a phone), to send a
-message to the Otari team. The team receives it privately in Slack. Only the
-message is sent: no email, screenshot, page URL, account identifier, deployment
-identifier, or usage history is attached. Opening the form, typing, and
-canceling make no outbound request.
+Signed-in dashboard users can choose **Feedback**, beside Documentation in the
+top bar (in the account menu on a phone), to send a message to the Otari team.
+The team receives it privately in Slack. Only the message is sent: no email,
+screenshot, page URL, account identifier, deployment identifier, or usage
+history is attached. Opening the form, typing, and canceling make no outbound
+request.
 
 The gateway forwards the message to
 `https://api.otari.ai/api/v1/feedback/submissions`. It does not forward the
@@ -747,15 +773,11 @@ see connection metadata, so this is private feedback, not anonymous feedback.
 Keep request-body capture disabled for the feedback endpoint in any additional
 logging or tracing you configure.
 
-Feedback is off by default. To turn it on, set `feedback_enabled: true` in YAML
-or `OTARI_FEEDBACK_ENABLED=true`, then restart. Off, the endpoint is not mounted
-and the Feedback entry is hidden. Standalone and hosted deployments can offer
-it; hybrid gateways never do. This setting is visible in Settings but cannot be
-changed there at runtime.
-
-The otari.ai intake does not deliver to Slack yet, so until it does, every send
-fails with the "didn't reach us" message and the gateway logs the receiver's
-status. That is why feedback is off by default for now.
+Feedback is on by default. To turn it off, set `feedback_enabled: false` in
+YAML or `OTARI_FEEDBACK_ENABLED=false`, then restart. Off, the endpoint is not
+mounted and the Feedback entry is hidden. Standalone and hosted deployments
+offer it; hybrid gateways never do. This setting is visible in Settings but
+cannot be changed there at runtime.
 
 Each signed-in person (and the master key) can send five messages every ten
 minutes; past that the gateway answers `429` with `Retry-After`.

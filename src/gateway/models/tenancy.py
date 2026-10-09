@@ -197,6 +197,12 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # would let either confirm the other's address.
     email_verification_token: str | None = Field(default=None, unique=True, index=True)
     email_verified_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
+    # Set beside ``email_verified_at`` when the verification is an organization
+    # admin's word rather than a proof: a first password chosen through an
+    # invitation link, which the inviter also holds. Domain auto-join ignores a
+    # vouched address, a provider sign-in treats it as unverified, and a
+    # password reset (a mailbox proof) clears it.
+    email_vouched_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
     # otari#650's own columns, added alongside rather than reusing
     # ``email_verification_token`` above: that one is carried verbatim for
     # hosted-edition parity and stores a raw token per its own comment, and
@@ -1094,11 +1100,16 @@ class InviteOrganizationMemberResultPublic(SQLModel):
     mail_sent: bool = Field(
         description=(
             "Whether the invitation email was actually dispatched. False when mail is not "
-            "configured, or the send itself failed; accept_link is set either way, so the "
-            "operator can share it themselves rather than the invitation being a dead end."
+            "configured, or the send itself failed."
         )
     )
-    accept_link: str
+    accept_link: str | None = Field(
+        default=None,
+        description=(
+            "The link to share with the invitee yourself, set only when mail_sent is false. A "
+            "delivered link goes to the invitee's mailbox alone, so the inviter cannot open it as them."
+        ),
+    )
     expires_at: datetime
     created_at: datetime
 

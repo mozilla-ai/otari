@@ -540,6 +540,7 @@ async def test_accepting_an_invitation_into_a_second_organization_is_no_longer_a
         request=InviteOrganizationMemberRequest(email="invitee@example.com"),
         config=_TEST_CONFIG,
     )
+    assert invitation.accept_link is not None
     await service.accept_invitation(invitation.accept_link.split("token=")[1])
 
     memberships = await service.list_organization_memberships_for_user(user=invitee)

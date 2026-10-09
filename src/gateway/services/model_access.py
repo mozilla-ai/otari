@@ -15,15 +15,21 @@ the inference gates and the catalog filter feed it the *same* canonical
 ``instance:model`` key so visibility and execution can never disagree.
 """
 
+import uuid
+from dataclasses import dataclass
+from http import HTTPStatus
+
 from any_llm import LLMProvider
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
 from gateway.models.api_keys import APIKey
 from gateway.models.users import User
 from gateway.services.alias_service import all_alias_names
 from gateway.services.provider_kwargs import split_selector
+from gateway.services.tenancy.org_provider_key_service import cached_org_key_offer, cached_org_model_restriction
 
 
 def effective_allowlist(api_key: APIKey | None, user: User | None = None) -> list[str] | None:
@@ -191,3 +197,64 @@ def validate_allowed_models(config: GatewayConfig, entries: list[str] | None) ->
 def model_not_allowed_detail(model: str) -> str:
     """Human-readable 403 detail for a model a key may not use."""
     return f"Model '{model}' is not permitted for this API key."
+
+
+def model_not_serving_detail(model: str, key_name: str) -> str:
+    """403 detail for a model an organization offers on a provider key with its serving switch off."""
+    return (
+        f"Model '{model}' is offered on provider key '{key_name}' but not serving. "
+        "Turn it on under Organization > Providers."
+    )
+
+
+def model_not_found_detail(model: str, key_name: str) -> str:
+    """404 detail for a model no provider key of the organization offers."""
+    return f"Provider key '{key_name}' does not offer '{model}'. Refresh the key's models or add it."
+
+
+@dataclass(frozen=True)
+class OrgModelRefusal:
+    """Why the organization-key path turns a model away, in wire terms."""
+
+    code: str
+    status_code: int
+    detail: str
+
+
+def org_model_refusal(workspace_id: uuid.UUID, provider: str, model: str, *, selector: str) -> OrgModelRefusal | None:
+    """Why the active organization key's allow-list turns ``model`` away, or ``None`` when it does not.
+
+    Reads the same list the catalog does (`cached_org_model_restriction`), so
+    the gate and the catalog cannot disagree about whether the model serves;
+    what it adds is the reason, which the list alone cannot carry. A model the
+    organization offers with its switch off is refused as not serving, so the
+    operator is sent to the switch rather than to a key's permissions. One no
+    key offers at all is not found, which is what a misspelled or never-listed
+    model is. A model the key serves that a workspace restriction excludes, and
+    the legacy case of a restriction on a key offering no rows, keep the
+    not-allowed refusal. ``selector`` is what the caller wrote (an alias, a
+    ``provider:model`` pair) and is what the detail names.
+    """
+    allowed = cached_org_model_restriction(workspace_id, provider)
+    if allowed is None or model in allowed:
+        return None
+    not_allowed = OrgModelRefusal(
+        code=MODEL_NOT_ALLOWED, status_code=HTTPStatus.FORBIDDEN, detail=model_not_allowed_detail(selector)
+    )
+    offer = cached_org_key_offer(workspace_id, provider)
+    if offer is None or offer.offered is None:
+        return not_allowed
+    enabled = offer.offered.get(model)
+    if enabled is None:
+        return OrgModelRefusal(
+            code=MODEL_NOT_FOUND,
+            status_code=HTTPStatus.NOT_FOUND,
+            detail=model_not_found_detail(selector, offer.key_name),
+        )
+    if not enabled:
+        return OrgModelRefusal(
+            code=MODEL_NOT_SERVING,
+            status_code=HTTPStatus.FORBIDDEN,
+            detail=model_not_serving_detail(selector, offer.key_name),
+        )
+    return not_allowed

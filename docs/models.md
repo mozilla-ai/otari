@@ -93,8 +93,12 @@ because their provider exists in any-llm.
 ## Model discovery
 
 `GET /api/v1/models` combines discoverable provider models, configured prices,
-aliases, and routing-policy names. Discovery is cached and bounded; an
-unreachable provider does not block the catalog indefinitely.
+aliases, and routing-policy names. A provider's embedding and rerank models are
+offered alongside its chat models. Discovery reads one page of a provider's
+listing: Cohere pages its listing at 20 models by default, so Otari asks it for
+its largest page (1000 models), which covers its catalog today; an instance can
+set its own `page_size`. Discovery is cached and bounded; an unreachable
+provider does not block the catalog indefinitely.
 
 Set `model_discovery: false` to publish a curated catalog made from aliases and
 explicitly priced models. For a backend with no listing API, use the instance's
@@ -121,6 +125,23 @@ dispatch, because both read one allow-list. A key nobody has refreshed offers no
 rows at all, and that is not the same as offering none: it means the key is
 unnarrowed and reaches whatever its provider serves. Offering none, which is
 every model switched off, serves nothing.
+
+A model nothing prices is offered switched off while `require_pricing` is on,
+and the switch refuses to turn it on until it has a rate, so a model the
+pricing data has not caught up with cannot be billed at nothing. With
+`require_pricing: false` the deployment serves unpriced traffic by choice, so
+such a model is offered switched on and served at no cost, like an unpriced
+model of a `providers:` instance (see
+[Default pricing](configuration.md#default-pricing)).
+
+A refusal on that path says which narrowing turned the model away. A model the
+key offers with its switch off is a 403 with the code `model_not_serving`, naming
+the key and pointing at the switch. A model no key of the provider offers is a
+404 with `model_not_found`. A model the key serves that a workspace restriction
+or the API key's own allow-list excludes keeps the 403 `model_not_allowed`. The
+Providers page shows each key's serving count beside it, so a key offering models
+and serving none is visible before the first request. See
+[Error codes](api-reference.md#error-codes).
 
 Aliases and stored routing policies are workspace-scoped rows, and the catalog
 reads them for a workspace rather than filtering them by target, so a name alone
@@ -158,8 +179,10 @@ Callers send the alias in `model`. Completion responses keep the alias while
 pricing, budgets, and usage use the resolved target. Configure the target's
 price, not a price under the alias.
 
-An alias also withholds its target from model listings in that workspace. This
-does not apply to routing-policy targets.
+An alias also withholds its target from `GET /api/v1/models` in that workspace,
+where the alias is listed in its place. This does not apply to routing-policy
+targets. The grouped catalog (`GET /api/v1/catalog/models` and the Models page)
+lists real models only and never an alias, so an aliased model stays in it.
 
 Aliases are useful for a curated catalog. A routing policy is the broader form
 when a name needs conditions, failover, weighting, learned selection, or

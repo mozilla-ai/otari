@@ -411,4 +411,53 @@ describe("PricingOverrideDialog", () => {
       String(stored.input_price_per_million),
     )
   })
+
+  it("stores a per-request rate per million when it is entered per thousand", async () => {
+    const requests = mockApi({ overrides: [] })
+    const user = userEvent.setup()
+
+    await renderDialog()
+
+    // Before the key: the picker's open suggestions hide the rest of the form.
+    await user.click(await screen.findByRole("radio", { name: "Requests" }))
+    await user.type(
+      screen.getByRole("combobox", { name: /model key/i }),
+      "cohere:rerank-v3.5",
+    )
+    // One rate: a request price has no output side and no cache.
+    expect(screen.queryByLabelText(/output, per 1m tokens/i)).toBeNull()
+    expect(screen.queryByLabelText(/cache read/i)).toBeNull()
+    await user.type(screen.getByLabelText(/price per 1,000 requests/i), "2")
+    await user.click(screen.getByRole("button", { name: /^add override$/i }))
+
+    await waitFor(() => {
+      const write = requests.find(
+        (request) =>
+          request.method === "POST" &&
+          request.url.includes(`${API_ROOT}/organizations/me/pricing`),
+      )
+      expect(write?.body).toMatchObject({
+        model_key: "cohere:rerank-v3.5",
+        input_price_per_million: 2000,
+        output_price_per_million: 0,
+        cache_read_price_per_million: null,
+        unit: "requests",
+      })
+    })
+  })
+
+  it("opens a stored per-request rate in its own unit, per thousand", async () => {
+    const stored = pricingOverride({
+      model_key: "cohere:rerank-v3.5",
+      input_price_per_million: 2000,
+      output_price_per_million: 0,
+      unit: "requests",
+    })
+    mockApi({ overrides: [stored] })
+
+    await renderDialog([stored], { editing: stored })
+
+    expect(await screen.findByRole("radio", { name: "Requests" })).toBeChecked()
+    expect(screen.getByLabelText(/price per 1,000 requests/i)).toHaveValue("2")
+  })
 })

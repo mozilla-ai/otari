@@ -102,9 +102,11 @@ The organization view contains tenant-wide administration:
   the runtime serves it. Each is priced by the first rung that answers, which is
   the order a request is metered by: this organization's own rate, then the
   deployment price list, then the community defaults. A model nothing prices is
-  offered and left unserved. Deployment providers is the process-wide credential
-  list, which a deployment operator manages and which is served to every
-  organization; it appears in standalone mode only.
+  offered and left unserved. Each key's row counts how many of its offered
+  models are serving, and a key serving none of them is marked, because every
+  request through it is refused until a switch is on. Deployment providers is
+  the process-wide credential list, which a deployment operator manages and
+  which is served to every organization; it appears in standalone mode only.
 
 Settings shows the effective non-secret configuration. Some values can be changed
 at runtime and others require a restart. The server marks that distinction in the
@@ -128,6 +130,14 @@ and settles its upstream bill, so its rate is the deployment price list's, which
 is `/api/v1/pricing` and has no page of its own. The genai-prices defaults are
 likewise kept current through `/api/v1/pricing/refresh` rather than from the
 dashboard.
+
+A rate is per million tokens, per request, or per image, and the rate form asks
+which. A request or image rate is entered per 1,000, the way providers publish
+one: $2 per 1,000 searches for a rerank model is entered as 2 and stored as 2000
+per million, which is how every rate travels on the wire. The model lists name
+such a rate by its unit, for example "$0.002 per request". The same choice is on
+Activity's "Price this model", which opens per request for a rerank request and
+per image for an image generation.
 
 Exact page names and availability can change with deployment mode and installed
 extensions. The running dashboard is the source of truth.
@@ -214,8 +224,8 @@ the three credentials they used. It is the only path that grants membership
 without somebody deciding about the person, and it is fenced accordingly: see
 [Email-domain auto-join](access-control.md#email-domain-auto-join).
 
-Mail is optional. Inviting a member always gives you an accept link to share,
-and an invitee who has never signed in chooses a password on the page it opens,
+Mail is optional. When an invitation email does not go out, you get the accept link to share,
+and an invitee new to the deployment chooses a password on the page it opens,
 so a deployment without SMTP can still bring people in. See [Configuration](configuration.md#mail).
 
 ## Bundled guide and custom documentation

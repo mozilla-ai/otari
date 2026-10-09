@@ -39,13 +39,14 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from any_llm import AnyLLM, LLMProvider
-from any_llm.exceptions import AnyLLMError
+from any_llm.exceptions import AnyLLMError, MissingApiKeyError
 
 from gateway.auth.vertex_auth import setup_vertex_environment
 from gateway.core.config import (
@@ -55,6 +56,7 @@ from gateway.core.config import (
     GatewayConfig,
     provider_credential_env_names,
 )
+from gateway.core.error_codes import PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import FORBIDDEN_ENDPOINT_DEFAULTS
 from gateway.log_config import logger
 from gateway.services.alias_service import resolve_effective_alias
@@ -226,6 +228,102 @@ def credential_ladder_exhausted(provider: LLMProvider, kwargs: dict[str, Any]) -
     if provider_credential_env_names(provider.value) == ():
         return False
     return not _provider_env_key_present(provider)
+
+
+# Instances already reported as ignored, so the warning is logged once per
+# instance per process rather than on every overlay refresh.
+_uncredentialed_warned: set[str] = set()
+
+
+def uncredentialed_env_names(config: GatewayConfig, instance: str, entry: Mapping[str, Any]) -> tuple[str, ...] | None:
+    """The variables a ``providers:`` entry could have taken its credential from, or ``None``.
+
+    ``None`` means the entry can be called as it stands: it carries a credential
+    or an ``api_base`` (which takes the keyless placeholder), its provider needs
+    no key, the provider's own variable is set, or the provider cannot be
+    inspected at all. A tuple means the entry declares nothing a call could
+    authenticate with: ``api_key: ${VAR}`` with ``VAR`` set but empty is the
+    usual way to get here.
+    """
+    try:
+        provider = LLMProvider(config.provider_instance_type(instance))
+    except ValueError:
+        return None
+    env_names = provider_credential_env_names(provider.value)
+    if not env_names:
+        return None
+    if _entry_declares_a_credential(entry):
+        return None
+    # Asked with no kwargs: the entry contributes nothing that authenticates, so
+    # the provider's own rules (keyless, ambient credentials, its variable being
+    # set) decide whether the call could still go out.
+    if not credential_ladder_exhausted(provider, {}):
+        return None
+    return tuple(env_names)
+
+
+# Field names that hold something a call can authenticate with. An entry's other
+# fields are call options (``temperature``, ``timeout``), which a request would
+# carry upstream without ever being let in.
+_CREDENTIAL_FIELD = re.compile(r"key|token|secret|credential|password|auth", re.IGNORECASE)
+
+
+def _entry_declares_a_credential(entry: Mapping[str, Any]) -> bool:
+    """Whether a ``providers:`` entry holds anything a call could authenticate with.
+
+    A non-empty credential-named field does, and so does an ``api_base`` (which
+    takes the keyless placeholder) or ``client_args`` carrying a credential-named
+    field, such as an ``Authorization`` default header.
+    """
+    for key, value in entry.items():
+        if key in _INSTANCE_META_KEYS or not value:
+            continue
+        if key == "api_base" or _CREDENTIAL_FIELD.search(key):
+            return True
+        if key == "client_args" and isinstance(value, Mapping) and _mapping_declares_a_credential(value):
+            return True
+    return False
+
+
+def _mapping_declares_a_credential(mapping: Mapping[str, Any]) -> bool:
+    for key, value in mapping.items():
+        if not value:
+            continue
+        if _CREDENTIAL_FIELD.search(str(key)):
+            return True
+        if isinstance(value, Mapping) and _mapping_declares_a_credential(value):
+            return True
+    return False
+
+
+def prune_uncredentialed_providers(config: GatewayConfig) -> dict[str, tuple[str, ...]]:
+    """Drop every ``providers:`` entry that declares no credential, and say so once.
+
+    A hollow entry is worse than no entry: an ``instance:model`` selector that
+    matches it never consults an organization's own key for the same provider,
+    and a bare ``provider:model`` selector is gated and priced as if the
+    deployment served it, so the credential an operator stored on the dashboard
+    goes unused while every request fails upstream. Returns what was dropped,
+    keyed by instance, with the variables that would have filled each.
+    """
+    pruned = {
+        instance: env_names
+        for instance, entry in config.providers.items()
+        if isinstance(entry, Mapping) and (env_names := uncredentialed_env_names(config, instance, entry)) is not None
+    }
+    for instance, env_names in pruned.items():
+        del config.providers[instance]
+        if instance in _uncredentialed_warned:
+            continue
+        _uncredentialed_warned.add(instance)
+        logger.warning(
+            "providers.%s declares no credential and none of %s is set, so the entry is ignored. A credential "
+            "stored for the provider through the dashboard serves its requests instead.",
+            instance,
+            # codeql[py/clear-text-logging-sensitive-data]
+            ", ".join(env_names),
+        )
+    return pruned
 
 
 def get_provider_kwargs(
@@ -658,3 +756,50 @@ def is_deployment_instance_key(config: GatewayConfig, model_key: str) -> bool:
     """
     split = split_selector(model_key)
     return split is not None and split[0] in config.providers
+
+
+@dataclass(frozen=True)
+class MissingCredential:
+    """A call any-llm refused locally because no credential resolved for its provider.
+
+    Nothing reached the provider, so the failure is the deployment's
+    configuration rather than the provider's, and it is named in Otari's terms.
+    The variable is a name, never a value, so it is safe to show.
+
+    Answered with a 424 rather than a 502: clients retry a 5xx, and no retry can
+    supply a key. ``code`` lets a caller tell it from a provider's own 424.
+    """
+
+    provider: str
+    env_var: str | None
+    status_code: ClassVar[int] = 424
+    code: ClassVar[str] = PROVIDER_NOT_CONFIGURED
+
+    @property
+    def detail(self) -> str:
+        detail = (
+            f"No credential is configured for provider '{self.provider}'. "
+            "Add one in config.yml or through the dashboard"
+        )
+        return f"{detail}, or set {self.env_var}." if self.env_var else f"{detail}."
+
+
+def missing_credential(exc: BaseException) -> MissingCredential | None:
+    """The missing credential behind ``exc``, read through its ``original_exception`` chain."""
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, MissingApiKeyError):
+            return MissingCredential(provider=current.provider_name or "unknown", env_var=current.env_var_name)
+        current = getattr(current, "original_exception", None)
+    return None
+
+
+def no_candidate_configured_detail(missing: Sequence[MissingCredential]) -> str:
+    """Why a request failed when every candidate it could use lacked a credential."""
+    names = ", ".join(sorted({entry.provider for entry in missing})) or "unknown"
+    return (
+        f"No credential is configured for any provider this request could use ({len(missing)} attempts: {names}). "
+        "Add one in config.yml or through the dashboard."
+    )

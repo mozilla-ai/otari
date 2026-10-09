@@ -622,6 +622,7 @@ async def build_merged_catalog(
     cached_only: bool = False,
     model_provider: ModelProviderPort | None,
     include_offered: bool = True,
+    withhold_alias_targets: bool = True,
 ) -> MergedCatalog:
     """Merge discovery, stored prices, defaults, aliases and policies for one caller.
 
@@ -634,6 +635,11 @@ async def build_merged_catalog(
     Passing ``None`` as ``model_provider`` lists no hosted providers, and
     ``include_offered=False`` leaves out the caller's organization's offered
     models; both are what the selector index's deployment-wide build wants.
+
+    ``withhold_alias_targets=False`` keeps an alias's target in the listing
+    beside the alias. The flat listing hides the target behind its alias, but a
+    reader that lists real models only (the grouped catalog, the selector index)
+    would otherwise list the model nowhere once something aliases it.
     """
     # Aliases are scoped, so the catalog is too: a caller sees their workspace's
     # aliases and the configured ones, plus their own user-scoped layer, never
@@ -695,7 +701,7 @@ async def build_merged_catalog(
     # the genai-prices default then vanished from the dashboard along with its
     # rate, and the single-model read served the same model with its price all
     # along, so nothing was actually kept off the wire.
-    alias_targets = alias_target_keys(config, configured_aliases)
+    alias_targets = alias_target_keys(config, configured_aliases) if withhold_alias_targets else set()
 
     merged: dict[str, ModelObject] = {}
     discovered_keys: set[str] = set()
@@ -837,6 +843,31 @@ async def build_merged_catalog(
         dynamic_policies=dynamic_policies,
         discovered_keys=discovered_keys,
         deployment_key_models=scope.deployment_key_models,
+    )
+
+
+async def build_real_model_catalog(
+    db: AsyncSession,
+    config: GatewayConfig,
+    *,
+    auth: tuple[APIKey | None, bool],
+    session_identity: TenancyUser | None,
+    anonymous: bool = False,
+    model_provider: ModelProviderPort | None,
+) -> MergedCatalog:
+    """The merged catalog for a view that lists real models and never an alias.
+
+    Such a view keeps an alias's target: hiding it behind the alias, as the flat
+    listing does, would list the model nowhere once something aliases it.
+    """
+    return await build_merged_catalog(
+        db,
+        config,
+        auth=auth,
+        session_identity=session_identity,
+        anonymous=anonymous,
+        model_provider=model_provider,
+        withhold_alias_targets=False,
     )
 
 

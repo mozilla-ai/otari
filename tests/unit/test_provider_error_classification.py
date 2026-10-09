@@ -19,7 +19,12 @@ from typing import Any
 import httpx
 import pytest
 from anthropic import APITimeoutError as AnthropicAPITimeoutError
-from any_llm.exceptions import ContextLengthExceededError, InvalidRequestError, UnsupportedParameterError
+from any_llm.exceptions import (
+    ContextLengthExceededError,
+    InvalidRequestError,
+    MissingApiKeyError,
+    UnsupportedParameterError,
+)
 from any_llm.utils.exception_handler import convert_exception
 from botocore.exceptions import ClientError
 from openai import APITimeoutError as OpenAIAPITimeoutError
@@ -38,9 +43,11 @@ from gateway.api.routes._pipeline import (
     provider_error_headers,
     refusal_code,
 )
-from gateway.api.routes._platform import _provider_failure_http_exc, upstream_retry_after
+from gateway.api.routes._platform import _provider_failure_http_exc, get_shared_rejection, upstream_retry_after
+from gateway.core.error_codes import PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
+from gateway.services.provider_kwargs import MissingCredential
 from gateway.services.upstream_redaction import MAX_EXPOSED_DETAIL_CHARS, redact_upstream_message
 from gateway.streaming import OPENAI_STREAM_FORMAT, openai_error_event
 
@@ -356,6 +363,69 @@ def test_platform_terminal_exc_falls_back_to_generic() -> None:
     assert exc.status_code == 502
     assert exc.detail == "LLM provider error"
     assert "SECRET" not in str(exc.detail)
+
+
+# ---------------------------------------------------------------------------
+# A provider the gateway holds no credential for
+# ---------------------------------------------------------------------------
+
+
+def test_missing_credential_maps_to_424_naming_the_provider_and_its_variable() -> None:
+    """Nothing went upstream, so the answer is the deployment's to fix: a client
+    error that names the provider and the variable, in the gateway's own words."""
+    mapping = classify_provider_error(MissingApiKeyError("anthropic", "ANTHROPIC_API_KEY"))
+    assert mapping is not None
+    assert mapping.status_code == 424
+    assert mapping.detail == MissingCredential("anthropic", "ANTHROPIC_API_KEY").detail
+    assert "'anthropic'" in mapping.detail
+    assert "ANTHROPIC_API_KEY" in mapping.detail
+    assert "Please provide it in the config" not in mapping.detail
+
+
+def test_missing_credential_is_read_through_the_exception_chain() -> None:
+    wrapped = _WrappedError(500, MissingApiKeyError("mistral", "MISTRAL_API_KEY"))
+    mapping = classify_provider_error(wrapped)
+    assert mapping is not None
+    assert mapping.status_code == 424
+    assert "'mistral'" in mapping.detail
+    # The usage row records what the caller was answered, not the wrapper's 500.
+    assert failure_status_code(wrapped) == 424
+
+
+def test_attempts_that_all_lack_a_credential_share_one_424() -> None:
+    rejection = get_shared_rejection(
+        [MissingApiKeyError("mistral", "MISTRAL_API_KEY"), MissingApiKeyError("cohere", "COHERE_API_KEY")]
+    )
+    assert rejection is not None
+    assert rejection.status_code == 424
+    assert rejection.headers == {"Otari-Error-Code": PROVIDER_NOT_CONFIGURED}
+    assert "cohere, mistral" in rejection.detail
+
+
+def test_attempts_that_fail_differently_share_no_rejection_for_a_missing_credential() -> None:
+    assert get_shared_rejection([MissingApiKeyError("mistral", "MISTRAL_API_KEY"), _StatusError(404)]) is None
+
+
+def test_missing_credential_carries_its_error_code() -> None:
+    exc = MissingApiKeyError("anthropic", "ANTHROPIC_API_KEY")
+    assert provider_error_headers(exc, 424) == {"Otari-Error-Code": PROVIDER_NOT_CONFIGURED}
+    assert refusal_code(exc) == PROVIDER_NOT_CONFIGURED
+    assert failure_status_code(exc) == 424
+
+
+def test_missing_credential_error_code_is_not_sent_for_an_upstream_424() -> None:
+    """A provider's own 424 is a different failure, so it keeps no code of ours."""
+    assert provider_error_headers(_StatusError(424), 424) is None
+
+
+def test_platform_terminal_exc_for_a_missing_credential_is_a_424() -> None:
+    exc = _provider_failure_http_exc(MissingApiKeyError("anthropic", "ANTHROPIC_API_KEY"), fallback_detail="x")
+    assert exc.status_code == 424
+    assert (exc.headers or {}).get("Otari-Error-Code") == PROVIDER_NOT_CONFIGURED
+
+
+def test_missing_credential_detail_without_a_variable() -> None:
+    assert MissingCredential("vertexai", None).detail.endswith("through the dashboard.")
 
 
 # ---------------------------------------------------------------------------

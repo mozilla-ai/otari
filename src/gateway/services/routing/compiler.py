@@ -31,16 +31,16 @@ from dataclasses import dataclass, field, replace
 from any_llm.exceptions import AnyLLMError
 
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.routing import MAX_CANDIDATES, PolicySpec, WhenClause
-from gateway.services.model_access import is_model_allowed
+from gateway.services.model_access import is_model_allowed, org_model_refusal
 from gateway.services.provider_kwargs import (
     credential_ladder_exhausted,
     resolve_catalog_fallback,
     resolve_provider_selector,
 )
-from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
 from gateway.types.attempt import Attempt
 from gateway.types.budget_state import BudgetState
 
@@ -124,6 +124,16 @@ class DroppedCandidate:
     """Human-readable, for an operator."""
 
 
+# A dropped candidate's detail reads after its selector ("'openai:x' is ..."),
+# so the organization-key refusals are phrased as fragments here rather than
+# reusing the full sentence the request routes answer with.
+_ORG_REFUSAL_FRAGMENTS: dict[str, str] = {
+    MODEL_NOT_ALLOWED: "is not in this workspace's organization-key model allow-list",
+    MODEL_NOT_SERVING: "is offered by the organization's provider key but not serving",
+    MODEL_NOT_FOUND: "is not offered by the organization's provider key",
+}
+
+
 @dataclass(frozen=True)
 class CompiledPlan:
     """An ordered plan, plus everything that was left out and why."""
@@ -150,6 +160,10 @@ class CompiledPlan:
     def selection_reason(self) -> str:
         """Why the head candidate was selected."""
         return self.attempts[0].selection_reason
+
+    def is_fallback(self, served: Attempt) -> bool:
+        """Whether ``served`` is a candidate other than the head, failed or skipped past."""
+        return served.position != self.head.position
 
 
 def needs_budget_state(spec: PolicySpec) -> bool:
@@ -419,15 +433,9 @@ def _resolve_candidates(
         # `router`/`on_failure` fallover cannot serve a model the workspace's
         # organization key excludes just because the head candidate passed.
         if workspace_id is not None and resolved.instance not in config.providers:
-            org_allowlist = cached_org_model_restriction(workspace_id, resolved.provider.value)
-            if org_allowlist is not None and resolved.model not in org_allowlist:
-                dropped.append(
-                    DroppedCandidate(
-                        selector,
-                        "not_allowed",
-                        "is not in this workspace's organization-key model allow-list",
-                    )
-                )
+            refusal = org_model_refusal(workspace_id, resolved.provider.value, resolved.model, selector=selector)
+            if refusal is not None:
+                dropped.append(DroppedCandidate(selector, "not_allowed", _ORG_REFUSAL_FRAGMENTS[refusal.code]))
                 continue
         seen.add(canonical)
         attempts.append(

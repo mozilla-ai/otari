@@ -29,6 +29,9 @@ usage record the models that were attempted.
 
 `select` chooses where a request starts. `on_failure` lists what to try after a
 retryable failure.
+A candidate whose provider has no credential configured counts as one, so the
+policy moves on to the next. When no candidate has a credential, the request is
+refused with `424 provider_not_configured`.
 
 ```yaml
 routing:
@@ -287,6 +290,25 @@ Each failed attempt before a successful fallback gets an `absorbed` usage row.
 All attempts share a `request_group_id`, which is the request's `Otari-Request-ID`.
 Absorbed rows have no settled model cost and do not increase request or error
 totals; the final row represents the caller-visible request.
+
+Every successful Chat Completions, Messages, and Responses response, routed or
+not, also says how it was served, so a caller's own metrics can see a fallback
+without reading the usage log:
+
+| Header | Value |
+| --- | --- |
+| `Otari-Provider` | The provider instance that served the request, by its configured name (`openai`, `azure-eu`). Never its base URL or credentials. |
+| `Otari-Attempt-Count` | How many candidates the request was sent to, including the one that served. A candidate skipped without being called, such as a model a rate limit had no room on, is not counted. |
+| `Otari-Fallback` | `true` when a candidate other than the plan's first served the request, whether the first failed or was skipped; otherwise `false`. |
+| `Otari-Response-Duration-Ms` | Whole milliseconds from the start of the handler preamble to the provider answering the request, failed candidates included. For a streamed response, to the stream opening, since the headers go out then. |
+
+A request naming a model or an alias reports `1` and `false`. Streaming responses
+carry the same values: failover happens before the stream opens, so the serving
+candidate and the attempt count are already known when the headers are sent. A
+failure later in the stream is reported in the stream and changes neither. The
+request's cost is `usage.cost_usd` in the body, as described in the
+[API reference](api-reference.md#request-id-and-inline-cost). These headers are
+sent by a standalone gateway.
 
 Built-in tool charges settle on the final row. Candidate price and remaining
 budget are checked before each attempt, so a fallback cannot silently bypass

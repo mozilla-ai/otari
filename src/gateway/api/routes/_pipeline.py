@@ -105,7 +105,16 @@ from gateway.api.routes._platform import (
     default_attempt_kwargs as default_attempt_kwargs,  # explicit re-export for the route modules
 )
 from gateway.api.routes._tools import _build_web_retrieval_backend, _resolve_sandbox_purpose_hint
-from gateway.core.config import ATTEMPT_ID_HEADER, END_USER_BUDGET_HEADER, REQUEST_ID_HEADER, GatewayConfig
+from gateway.core.config import (
+    ATTEMPT_COUNT_HEADER,
+    ATTEMPT_ID_HEADER,
+    END_USER_BUDGET_HEADER,
+    FALLBACK_HEADER,
+    PROVIDER_HEADER,
+    REQUEST_ID_HEADER,
+    RESPONSE_DURATION_HEADER,
+    GatewayConfig,
+)
 from gateway.core.database import DATABASE_ERRORS, release_session
 from gateway.core.env import otari_env
 from gateway.core.error_codes import (
@@ -213,7 +222,12 @@ from gateway.services.mcp_loop import (
     ToolBackend,
 )
 from gateway.services.mcp_stateless import failure_class
-from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
+from gateway.services.model_access import (
+    is_model_allowed,
+    model_not_allowed_detail,
+    org_model_refusal,
+    resolve_request_allowlist,
+)
 from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.pricing_service import (
     GATEWAY_TOOL_PRICING_PROVIDER,
@@ -229,6 +243,7 @@ from gateway.services.pricing_service import (
 from gateway.services.provider_kwargs import (
     ResolvedProvider,
     credential_ladder_exhausted,
+    missing_credential,
     provider_key,
     resolve_provider_selector,
 )
@@ -253,7 +268,6 @@ from gateway.services.sandbox_backend import (
     SandboxUnavailableError,
 )
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
-from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
 from gateway.services.tenancy.organization_guardrail_runner import handle as guardrail_handle
 from gateway.services.tenancy.organization_guardrail_service import (
     ResolvedOrganizationGuardrail,
@@ -381,6 +395,8 @@ PROVIDER_ACCOUNT_QUOTA_DETAIL = (
     "Raise the quota, or route this model to another provider."
 )
 PROVIDER_RATE_LIMITED_DETAIL = "The provider rate-limited this request"
+
+
 ALL_PROVIDERS_FAILED_DETAIL = "All upstream providers failed"
 ALL_PROVIDERS_TIMED_OUT_DETAIL = "All upstream providers timed out"
 ALL_PROVIDERS_RATE_LIMITED_DETAIL = "All upstream providers rate-limited this request"
@@ -634,6 +650,9 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     shared with the hybrid-mode fallback classifier via
     :func:`upstream_exception_shape`, so both stay in sync.
     """
+    missing = missing_credential(exc)
+    if missing is not None:
+        return ProviderErrorMapping(missing.status_code, missing.detail)
     kind, status_code = upstream_exception_shape(exc)
     if kind == "timeout":
         return ProviderErrorMapping(status.HTTP_504_GATEWAY_TIMEOUT, PROVIDER_TIMEOUT_DETAIL)
@@ -710,6 +729,9 @@ def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, st
     """
     if status_code == status.HTTP_400_BAD_REQUEST and _is_context_length_error(exc):
         return error_headers(CONTEXT_LENGTH_EXCEEDED)
+    missing = missing_credential(exc)
+    if missing is not None and status_code == missing.status_code:
+        return error_headers(missing.code)
     if status_code != status.HTTP_429_TOO_MANY_REQUESTS:
         return None
     headers = error_headers(UPSTREAM_RATE_LIMITED)
@@ -760,6 +782,11 @@ def failure_status_code(exc: BaseException) -> int:
     """
     if isinstance(exc, MaxToolIterationsExceeded):
         return status.HTTP_422_UNPROCESSABLE_CONTENT
+    # Before the wrapper's own status: a wrapper can carry a 500 around a
+    # credential any-llm never found, and the row records what the caller saw.
+    missing = missing_credential(exc)
+    if missing is not None:
+        return missing.status_code
     _kind, status_code = upstream_exception_shape(exc)
     if status_code is not None:
         return status_code
@@ -1092,6 +1119,24 @@ class RequestContext:
 def _end_user_headers(ctx: RequestContext) -> dict[str, str]:
     """``Otari-End-User-Budget`` for a request that billed an end user on a budget."""
     return {END_USER_BUDGET_HEADER: ctx.end_user_budget_id} if ctx.end_user_budget_id else {}
+
+
+def _served_by_headers(ctx: RequestContext, provider: Any, chosen: Attempt | None, sent: int) -> dict[str, str]:
+    """The headers naming the instance that served a standalone request and how it was reached.
+
+    ``sent`` counts the candidates the request was sent to, so a candidate the walk
+    skipped without calling (a model a rate limit had no room on) is not in it, while
+    it still makes the one that served a fallback. The duration runs from the handler
+    preamble to now: the provider's answer for a non-streamed request, the stream's
+    opening for a streamed one.
+    """
+    fell_back = chosen is not None and ctx.plan is not None and ctx.plan.is_fallback(chosen)
+    return {
+        PROVIDER_HEADER: provider_key(provider),
+        ATTEMPT_COUNT_HEADER: str(sent),
+        FALLBACK_HEADER: "true" if fell_back else "false",
+        RESPONSE_DURATION_HEADER: str(_elapsed_ms(ctx.started_at)),
+    }
 
 
 def scope_prompt_cache_key(request_fields: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
@@ -2169,9 +2214,8 @@ async def resolve_request_context(
             and gate_instance not in config.providers
             and (resolved_provider is None or resolved_provider.owned_endpoint is None)
         ):
-            org_allowlist = cached_org_model_restriction(workspace_id, gate_impl.value)
-            if org_allowlist is not None and gate_model not in org_allowlist:
-                not_allowed_detail = model_not_allowed_detail(model)
+            refusal = org_model_refusal(workspace_id, gate_impl.value, gate_model, selector=model)
+            if refusal is not None:
                 await log_gateway_rejection(
                     db=db,
                     log_writer=log_writer,
@@ -2180,15 +2224,14 @@ async def resolve_request_context(
                     model=gate_model,
                     provider=gate_instance,
                     endpoint=adapter.endpoint,
-                    detail=not_allowed_detail,
-                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=refusal.detail,
+                    status_code=refusal.status_code,
                     started_at=started_at,
                     request_id=request_id,
                     tags=tags,
                 )
-                raise adapter.error(
-                    403, not_allowed_detail, ErrorKind.PERMISSION, headers=error_headers(MODEL_NOT_ALLOWED)
-                )
+                kind = ErrorKind.NOT_FOUND if refusal.status_code == status.HTTP_404_NOT_FOUND else ErrorKind.PERMISSION
+                raise adapter.error(refusal.status_code, refusal.detail, kind, headers=error_headers(refusal.code))
 
         if idempotency is not None and session_principal is None:
             try:
@@ -4869,8 +4912,12 @@ async def run_single_attempt_stream(
                 return await open_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=attempt_kwargs)
 
             absorbed_rows: list[asyncio.Task[None]] = []
+            # Each absorbed failure is a candidate sent the request before the one that served.
+            sent = 1
 
             async def _absorbed(attempt: Attempt, exc: BaseException, _total: int) -> None:
+                nonlocal sent
+                sent += 1
                 await _write_absorbed_row(ctx, absorbed_rows, log_absorbed_attempt(ctx, adapter, attempt, exc))
 
             async def _skipped(attempt: Attempt, refusal: HTTPException) -> None:
@@ -4903,12 +4950,14 @@ async def run_single_attempt_stream(
                 await _absorbed_rows_written(absorbed_rows)
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
             stream_attribution = _attribution_for(ctx, chosen)
+            served_by = _served_by_headers(ctx, provider, chosen, sent)
         else:
             call_kwargs = await _admitted_and_prepared(ctx, adapter, prepare_kwargs, provider, model, call_kwargs)
             stream = await open_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
             # A single-candidate policy still names a policy and a reason, and
             # both belong on the row.
             stream_attribution = _attribution_for(ctx, ctx.plan.head) if ctx.plan is not None else None
+            served_by = _served_by_headers(ctx, provider, None, 1)
     except HTTPException:
         await release_reservation(ctx)
         raise
@@ -4947,7 +4996,7 @@ async def run_single_attempt_stream(
         model=model,
         config=ctx.config,
         db=ctx.db,
-        extra_headers=_container_headers(tool_ctx.container_lease) | _end_user_headers(ctx),
+        extra_headers=_container_headers(tool_ctx.container_lease) | _end_user_headers(ctx) | served_by,
         log_writer=ctx.log_writer,
         api_key_id=ctx.api_key_id,
         user_id=ctx.user_id,
@@ -5644,8 +5693,12 @@ async def run_standalone_non_stream(
                 )
 
             absorbed_rows: list[asyncio.Task[None]] = []
+            # Each absorbed failure is a candidate sent the request before the one that served.
+            sent = 1
 
             async def _absorbed(attempt: Attempt, exc: BaseException, _total: int) -> None:
+                nonlocal sent
+                sent += 1
                 await _write_absorbed_row(ctx, absorbed_rows, log_absorbed_attempt(ctx, adapter, attempt, exc))
 
             async def _skipped(attempt: Attempt, refusal: HTTPException) -> None:
@@ -5678,6 +5731,7 @@ async def run_standalone_non_stream(
                 await _absorbed_rows_written(absorbed_rows)
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
             attribution = _attribution_for(ctx, chosen)
+            served_by = _served_by_headers(ctx, provider, chosen, sent)
         else:
             call_kwargs = await _admitted_and_prepared(ctx, adapter, prepare_kwargs, provider, model, call_kwargs)
             result = await dispatch_non_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
@@ -5685,6 +5739,8 @@ async def run_standalone_non_stream(
             # both belong on the row: "served by its default target" is the answer to
             # the same question a fallover answers differently.
             attribution = _attribution_for(ctx, ctx.plan.head) if ctx.plan is not None else None
+            served_by = _served_by_headers(ctx, provider, None, 1)
+        response.headers.update(served_by)
         if ctx.rate_limit_info:
             for key, value in rate_limit_headers(ctx.rate_limit_info).items():
                 response.headers[key] = value
