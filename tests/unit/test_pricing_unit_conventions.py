@@ -15,6 +15,7 @@ from gateway.core.metered_pricing import price_request
 from gateway.models.pricing import ModelPricing
 from gateway.services.budgets import estimate_cost, rerank_estimate
 from gateway.services.pricing_service import (
+    billed_search_units,
     flat_request_cost,
     input_token_cost,
     per_image_cost,
@@ -170,3 +171,11 @@ def test_rerank_holds_one_search_unit_on_a_per_request_rate() -> None:
     assert rerank_estimate(_per_token_pricing(), prompt_chars=4000) == estimate_cost(
         _per_token_pricing(), prompt_chars=4000, max_output_tokens=None, default_output_tokens=0
     )
+
+
+def test_billed_search_units_round_up_and_floor_at_one() -> None:
+    assert billed_search_units({"search_units": 2.0}) == 2
+    assert billed_search_units({"search_units": 1.2}) == 2
+    assert billed_search_units({"search_units": 0}) == 1
+    assert billed_search_units({}) == 1
+    assert billed_search_units(None) == 1

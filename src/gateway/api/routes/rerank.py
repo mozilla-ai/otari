@@ -1,7 +1,6 @@
 """Rerank endpoint — reorder documents by relevance to a query."""
 
 from decimal import Decimal
-from math import ceil
 from typing import Annotated, Any
 
 from any_llm import arerank
@@ -17,7 +16,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.services.budgets import rerank_estimate
 from gateway.services.log_writer import LogWriter
-from gateway.services.pricing_service import rerank_cost, rerank_meters
+from gateway.services.pricing_service import billed_search_units, rerank_cost, rerank_meters
 from gateway.services.provider_kwargs import ResolvedProvider
 
 router = APIRouter(tags=["rerank"])
@@ -115,13 +114,4 @@ def _total_tokens(result: RerankResponse) -> int | None:
 
 
 def _search_units(result: RerankResponse) -> int:
-    """How many search units the provider billed for ``result``, at least one.
-
-    Reported under ``meta.billed_units`` by providers that bill rerank per query
-    batch rather than per token. A fraction rounds up: the provider billed it.
-    """
-    billed = result.meta.billed_units if result.meta else None
-    reported = billed.get("search_units") if billed else None
-    if reported is None or reported <= 0:
-        return 1
-    return ceil(reported)
+    return billed_search_units(result.meta.billed_units if result.meta else None)

@@ -1,9 +1,10 @@
 """Shared pricing lookup utilities."""
 
 import uuid
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from math import ceil
 from typing import NamedTuple
 
 from genai_prices import Usage, calc_price
@@ -894,6 +895,19 @@ def search_unit_cost(units: int, pricing: ModelPricing | None) -> Decimal:
     :func:`flat_request_cost` does.
     """
     return max(units, 0) * flat_request_cost(pricing)
+
+
+def billed_search_units(billed_units: Mapping[str, float] | None) -> int:
+    """How many search units a rerank request bills, at least one.
+
+    Reported under ``meta.billed_units`` by providers that bill rerank per query
+    batch rather than per token. A fraction rounds up, because the provider
+    billed it, and a request that reports none bills one unit: the request itself.
+    """
+    reported = billed_units.get("search_units") if billed_units else None
+    if reported is None or reported <= 0:
+        return 1
+    return ceil(reported)
 
 
 def rerank_cost(pricing: ModelPricing | None, *, search_units: int, total_tokens: int | None) -> Decimal | None:
