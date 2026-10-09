@@ -31,6 +31,7 @@
 * [Use with Codex](use-with-codex.md)
 * [Use with opencode](use-with-opencode.md)
 * [Use with a ChatGPT subscription](chatgpt-subscription.md)
+* [Agent traces](traces.md)
 * [Importing external usage](external-usage.md)
 * [SDK compatibility](sdk-compatibility.md)
 

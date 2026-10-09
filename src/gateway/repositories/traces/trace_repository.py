@@ -5,7 +5,7 @@ from collections.abc import Collection, Sequence
 from dataclasses import astuple, dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Never, cast
+from typing import Any, Literal, Never, cast
 
 from sqlalchemy import (
     BigInteger,
@@ -30,7 +30,7 @@ from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
 
-from gateway.core.sql import dialect_name, utc_bound
+from gateway.core.sql import bucket_expr, canonical_bucket, dialect_name, utc_bound
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.traces import Trace
 from gateway.repositories.base_repository import BaseRepository
@@ -187,25 +187,47 @@ class TraceRepository(BaseRepository[Trace, Never, Never]):
         )
         return result.scalar_one()
 
+    async def bucket_counts(
+        self,
+        workspace_ids: Collection[uuid.UUID] | None,
+        query: TraceFilter,
+        *,
+        bucket: Literal["hour", "day"],
+        limit: int,
+    ) -> list[tuple[str, int, int]]:
+        """Return ``(bucket, succeeded, failed)`` per populated bucket of trace start, oldest first.
+
+        Only the newest ``limit`` buckets: the query orders newest first so the
+        limit keeps the recent end, and the result is turned around.
+        """
+        key = bucket_expr(dialect_name(self.db), bucket, Trace.started_at).label("bucket")
+        failed = func.sum(case((Trace.error_count > 0, 1), else_=0))
+        result = await self.db.execute(
+            select(key, func.count(), failed)
+            .where(*_scoped(workspace_ids, _conditions(query)))
+            .group_by(key)
+            .order_by(key.desc())
+            .limit(limit)
+        )
+        rows = [
+            (canonical_bucket(row[0], bucket), int(row[1]) - int(row[2] or 0), int(row[2] or 0)) for row in result.all()
+        ]
+        return rows[::-1]
+
     async def find(
         self, workspace_ids: Collection[uuid.UUID] | None, trace_id: str, *, workspace_id: uuid.UUID | None = None
-    ) -> Trace | None:
-        """Return one trace inside the scope, or None.
+    ) -> Sequence[Trace]:
+        """Return the scope's traces with this id: at most two, enough to tell one from several.
 
-        A trace is keyed by its workspace and its id, so ``workspace_id`` names the
-        one meant. Without it the same id in two workspaces of the scope resolves
-        to the most recently active, never to whichever row comes back first.
+        A trace is keyed by its workspace and its id, so ``workspace_id`` names the one meant.
         """
         conditions = [Trace.trace_id == trace_id]
         if workspace_id is not None:
             conditions.append(Trace.workspace_id == workspace_id)
         result = await self.db.execute(
-            select(Trace)
-            .where(*_scoped(workspace_ids, conditions))
-            .order_by(Trace.last_activity_at.desc(), Trace.workspace_id)
-            .limit(1)
+            select(Trace).where(*_scoped(workspace_ids, conditions)).order_by(Trace.workspace_id).limit(2)
         )
-        return result.scalar_one_or_none()
+        return result.scalars().all()
 
     async def delete_for_user(self, user_id: str) -> int:
         """Delete every trace a user owns, in every workspace."""

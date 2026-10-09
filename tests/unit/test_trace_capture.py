@@ -63,7 +63,7 @@ def _usage_row(**overrides: Any) -> UsageLog:
     return UsageLog(**(fields | overrides))
 
 
-def _write(spans: int, request_id: str = "req-1") -> TraceWrite:
+def _write(spans: int, request_id: str = "req-1", user_id: str = "alice") -> TraceWrite:
     step = SpanRecord(span_id=request_id, kind="step", origin="gateway", name="request", outcome="ok")
     extra = tuple(
         SpanRecord(span_id=f"{request_id}-{i}", kind="tool", origin="gateway", name="tool", outcome="ok")
@@ -72,7 +72,7 @@ def _write(spans: int, request_id: str = "req-1") -> TraceWrite:
     return TraceWrite(
         workspace_id=_WORKSPACE,
         trace_id=request_id,
-        user_id="alice",
+        user_id=user_id,
         api_key_id=None,
         session_source="none",
         spans=(step, *extra),
@@ -230,6 +230,22 @@ async def test_queued_traces_are_written_in_batches() -> None:
     written = [trace.trace_id for call in store.write.await_args_list for trace in call.args[0]]
     assert written == ["a", "b"]
     assert all(sum(len(t.spans) for t in call.args[0]) <= 4 for call in store.write.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_an_erased_users_queued_traces_are_never_written() -> None:
+    """Erasure deletes what is stored; what is still queued must not bring it back."""
+    store = AsyncMock()
+    store.write.return_value = WriteResult()
+    writer = _writer(store, interval_s=60.0, batch_spans=100)
+    writer.submit(_write(2, "theirs", user_id="bob"))
+    writer.submit(_write(3, "mine"))
+
+    assert writer.discard_user("bob") == 2
+    await writer.start()
+    await writer.stop()
+
+    assert [t.trace_id for call in store.write.await_args_list for t in call.args[0]] == ["mine"]
 
 
 @pytest.mark.asyncio

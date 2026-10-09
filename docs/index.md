@@ -57,6 +57,7 @@ Calling the gateway from your own code.
 - [Use with Codex](use-with-codex.md): route the Codex CLI through Otari over the Responses API, or import its usage without routing.
 - [Use with opencode](use-with-opencode.md): point the opencode CLI at Otari.
 - [Use with a ChatGPT subscription](chatgpt-subscription.md): route Otari at ChatGPT Plus/Pro models through a local Codex-OAuth proxy.
+- [Agent traces](traces.md): see each agent session as turns, LLM calls and tool calls, with their timing and cost.
 - [Importing external usage](external-usage.md): bring subscription-backed usage (Claude Code, Codex, any OTLP app) into your analytics.
 - [SDK compatibility](sdk-compatibility.md): how the language SDKs are released and which SDK version works with which Otari version.
 

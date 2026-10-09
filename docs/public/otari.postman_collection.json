@@ -5794,6 +5794,299 @@
     {
       "item": [
         {
+          "name": "List Traces",
+          "request": {
+            "description": "List agent sessions, most recently active first.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "traces"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                },
+                {
+                  "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "disabled": true,
+                  "key": "start",
+                  "value": ""
+                },
+                {
+                  "description": "Last activity before this instant (ISO 8601).",
+                  "disabled": true,
+                  "key": "end",
+                  "value": ""
+                },
+                {
+                  "description": "Owning users.",
+                  "disabled": true,
+                  "key": "user_id",
+                  "value": ""
+                },
+                {
+                  "description": "API keys.",
+                  "disabled": true,
+                  "key": "api_key_id",
+                  "value": ""
+                },
+                {
+                  "description": "Agent harnesses.",
+                  "disabled": true,
+                  "key": "harness",
+                  "value": ""
+                },
+                {
+                  "description": "What grouped the session.",
+                  "disabled": true,
+                  "key": "session_source",
+                  "value": ""
+                },
+                {
+                  "description": "Only sessions with, or without, an unrecovered error.",
+                  "disabled": true,
+                  "key": "has_error",
+                  "value": ""
+                },
+                {
+                  "description": "A trace id, or the start of one.",
+                  "disabled": true,
+                  "key": "q",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces?skip=&limit=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+            }
+          }
+        },
+        {
+          "name": "Count Traces",
+          "request": {
+            "description": "Count the agent sessions that match.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "traces",
+                "count"
+              ],
+              "query": [
+                {
+                  "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "disabled": true,
+                  "key": "start",
+                  "value": ""
+                },
+                {
+                  "description": "Last activity before this instant (ISO 8601).",
+                  "disabled": true,
+                  "key": "end",
+                  "value": ""
+                },
+                {
+                  "description": "Owning users.",
+                  "disabled": true,
+                  "key": "user_id",
+                  "value": ""
+                },
+                {
+                  "description": "API keys.",
+                  "disabled": true,
+                  "key": "api_key_id",
+                  "value": ""
+                },
+                {
+                  "description": "Agent harnesses.",
+                  "disabled": true,
+                  "key": "harness",
+                  "value": ""
+                },
+                {
+                  "description": "What grouped the session.",
+                  "disabled": true,
+                  "key": "session_source",
+                  "value": ""
+                },
+                {
+                  "description": "Only sessions with, or without, an unrecovered error.",
+                  "disabled": true,
+                  "key": "has_error",
+                  "value": ""
+                },
+                {
+                  "description": "A trace id, or the start of one.",
+                  "disabled": true,
+                  "key": "q",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/count?workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+            }
+          }
+        },
+        {
+          "name": "Trace Series",
+          "request": {
+            "description": "Count sessions per bucket of their start, split by whether any span failed unrecovered.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "traces",
+                "series"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "bucket",
+                  "value": ""
+                },
+                {
+                  "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "disabled": true,
+                  "key": "start",
+                  "value": ""
+                },
+                {
+                  "description": "Last activity before this instant (ISO 8601).",
+                  "disabled": true,
+                  "key": "end",
+                  "value": ""
+                },
+                {
+                  "description": "Owning users.",
+                  "disabled": true,
+                  "key": "user_id",
+                  "value": ""
+                },
+                {
+                  "description": "API keys.",
+                  "disabled": true,
+                  "key": "api_key_id",
+                  "value": ""
+                },
+                {
+                  "description": "Agent harnesses.",
+                  "disabled": true,
+                  "key": "harness",
+                  "value": ""
+                },
+                {
+                  "description": "What grouped the session.",
+                  "disabled": true,
+                  "key": "session_source",
+                  "value": ""
+                },
+                {
+                  "description": "Only sessions with, or without, an unrecovered error.",
+                  "disabled": true,
+                  "key": "has_error",
+                  "value": ""
+                },
+                {
+                  "description": "A trace id, or the start of one.",
+                  "disabled": true,
+                  "key": "q",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/series?bucket=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+            }
+          }
+        },
+        {
+          "name": "Get Trace",
+          "request": {
+            "description": "One agent session: its turns, and every span inside them.\n\nA trace outside the scope is a 404. Without ``workspace_id``, an id in more\nthan one of the caller's workspaces is a 409 rather than a guess.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "organizations",
+                "me",
+                "traces",
+                ":trace_id"
+              ],
+              "query": [
+                {
+                  "description": "The workspace the trace is in, as its list entry names it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/organizations/me/traces/:trace_id?workspace_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "trace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "organization-traces"
+    },
+    {
+      "item": [
+        {
           "name": "List Organization Usage",
           "request": {
             "description": "List the caller's organization's usage logs, most recent first.\n\nThe tenant-scoped counterpart of ``GET /api/v1/usage``: same filters, same bare\nJSON array, same separate ``/count`` for a paginator's total, confined to\nwhat the caller's membership lets them see. Scope is never a parameter here.",
@@ -9041,6 +9334,291 @@
     {
       "item": [
         {
+          "name": "List Traces",
+          "request": {
+            "description": "List agent sessions, most recently active first.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "traces"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                },
+                {
+                  "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "disabled": true,
+                  "key": "start",
+                  "value": ""
+                },
+                {
+                  "description": "Last activity before this instant (ISO 8601).",
+                  "disabled": true,
+                  "key": "end",
+                  "value": ""
+                },
+                {
+                  "description": "Owning users.",
+                  "disabled": true,
+                  "key": "user_id",
+                  "value": ""
+                },
+                {
+                  "description": "API keys.",
+                  "disabled": true,
+                  "key": "api_key_id",
+                  "value": ""
+                },
+                {
+                  "description": "Agent harnesses.",
+                  "disabled": true,
+                  "key": "harness",
+                  "value": ""
+                },
+                {
+                  "description": "What grouped the session.",
+                  "disabled": true,
+                  "key": "session_source",
+                  "value": ""
+                },
+                {
+                  "description": "Only sessions with, or without, an unrecovered error.",
+                  "disabled": true,
+                  "key": "has_error",
+                  "value": ""
+                },
+                {
+                  "description": "A trace id, or the start of one.",
+                  "disabled": true,
+                  "key": "q",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/traces?skip=&limit=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+            }
+          }
+        },
+        {
+          "name": "Count Traces",
+          "request": {
+            "description": "Count the agent sessions that match.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "traces",
+                "count"
+              ],
+              "query": [
+                {
+                  "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "disabled": true,
+                  "key": "start",
+                  "value": ""
+                },
+                {
+                  "description": "Last activity before this instant (ISO 8601).",
+                  "disabled": true,
+                  "key": "end",
+                  "value": ""
+                },
+                {
+                  "description": "Owning users.",
+                  "disabled": true,
+                  "key": "user_id",
+                  "value": ""
+                },
+                {
+                  "description": "API keys.",
+                  "disabled": true,
+                  "key": "api_key_id",
+                  "value": ""
+                },
+                {
+                  "description": "Agent harnesses.",
+                  "disabled": true,
+                  "key": "harness",
+                  "value": ""
+                },
+                {
+                  "description": "What grouped the session.",
+                  "disabled": true,
+                  "key": "session_source",
+                  "value": ""
+                },
+                {
+                  "description": "Only sessions with, or without, an unrecovered error.",
+                  "disabled": true,
+                  "key": "has_error",
+                  "value": ""
+                },
+                {
+                  "description": "A trace id, or the start of one.",
+                  "disabled": true,
+                  "key": "q",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/traces/count?workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+            }
+          }
+        },
+        {
+          "name": "Trace Series",
+          "request": {
+            "description": "Count sessions per bucket of their start, split by whether any span failed unrecovered.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "traces",
+                "series"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "bucket",
+                  "value": ""
+                },
+                {
+                  "description": "Only sessions in this workspace. Narrows the caller's scope; never widens it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "Last activity at or after this instant (ISO 8601).",
+                  "disabled": true,
+                  "key": "start",
+                  "value": ""
+                },
+                {
+                  "description": "Last activity before this instant (ISO 8601).",
+                  "disabled": true,
+                  "key": "end",
+                  "value": ""
+                },
+                {
+                  "description": "Owning users.",
+                  "disabled": true,
+                  "key": "user_id",
+                  "value": ""
+                },
+                {
+                  "description": "API keys.",
+                  "disabled": true,
+                  "key": "api_key_id",
+                  "value": ""
+                },
+                {
+                  "description": "Agent harnesses.",
+                  "disabled": true,
+                  "key": "harness",
+                  "value": ""
+                },
+                {
+                  "description": "What grouped the session.",
+                  "disabled": true,
+                  "key": "session_source",
+                  "value": ""
+                },
+                {
+                  "description": "Only sessions with, or without, an unrecovered error.",
+                  "disabled": true,
+                  "key": "has_error",
+                  "value": ""
+                },
+                {
+                  "description": "A trace id, or the start of one.",
+                  "disabled": true,
+                  "key": "q",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/traces/series?bucket=&workspace_id=&start=&end=&user_id=&api_key_id=&harness=&session_source=&has_error=&q="
+            }
+          }
+        },
+        {
+          "name": "Get Trace",
+          "request": {
+            "description": "One agent session: its turns, and every span inside them.\n\nA trace outside the scope is a 404. Without ``workspace_id``, an id in more\nthan one of the caller's workspaces is a 409 rather than a guess.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "traces",
+                ":trace_id"
+              ],
+              "query": [
+                {
+                  "description": "The workspace the trace is in, as its list entry names it.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/api/v1/traces/:trace_id?workspace_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "trace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "traces"
+    },
+    {
+      "item": [
+        {
           "name": "List Usage",
           "request": {
             "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, failure status code,\nmodel, endpoint, provider, source, session (``source_label``), and request\ngroup (``request_group_id``, repeatable, which returns a routed request's\nwhole attempt plan). Paginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /api/v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
@@ -9866,7 +10444,7 @@
         {
           "name": "Delete User",
           "request": {
-            "description": "Delete a user in the caller's organization, and erase their telemetry.",
+            "description": "Delete a user in the caller's organization, and erase their telemetry and agent traces.",
             "header": [],
             "method": "DELETE",
             "url": {
