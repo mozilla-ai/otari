@@ -113,7 +113,6 @@ from gateway.core.error_codes import (
     INVALID_MODEL,
     MODEL_NOT_ALLOWED,
     PRICING_REQUIRED,
-    PROVIDER_NOT_CONFIGURED,
     UPSTREAM_RATE_LIMITED,
     error_code_of,
     error_headers,
@@ -640,8 +639,7 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     """
     missing = missing_credential(exc)
     if missing is not None:
-        # A 424 rather than a 502 because SDKs retry a 5xx, and no retry can supply a key.
-        return ProviderErrorMapping(status.HTTP_424_FAILED_DEPENDENCY, missing.detail)
+        return ProviderErrorMapping(missing.status_code, missing.detail)
     kind, status_code = upstream_exception_shape(exc)
     if kind == "timeout":
         return ProviderErrorMapping(status.HTTP_504_GATEWAY_TIMEOUT, PROVIDER_TIMEOUT_DETAIL)
@@ -718,8 +716,9 @@ def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, st
     """
     if status_code == status.HTTP_400_BAD_REQUEST and _is_context_length_error(exc):
         return error_headers(CONTEXT_LENGTH_EXCEEDED)
-    if status_code == status.HTTP_424_FAILED_DEPENDENCY and missing_credential(exc) is not None:
-        return error_headers(PROVIDER_NOT_CONFIGURED)
+    missing = missing_credential(exc)
+    if missing is not None and status_code == missing.status_code:
+        return error_headers(missing.code)
     if status_code != status.HTTP_429_TOO_MANY_REQUESTS:
         return None
     headers = error_headers(UPSTREAM_RATE_LIMITED)
@@ -771,9 +770,10 @@ def failure_status_code(exc: BaseException) -> int:
     if isinstance(exc, MaxToolIterationsExceeded):
         return status.HTTP_422_UNPROCESSABLE_CONTENT
     # Before the wrapper's own status: a wrapper can carry a 500 around a
-    # credential any-llm never found, and the caller is answered 424 for it.
-    if missing_credential(exc) is not None:
-        return status.HTTP_424_FAILED_DEPENDENCY
+    # credential any-llm never found, and the row records what the caller saw.
+    missing = missing_credential(exc)
+    if missing is not None:
+        return missing.status_code
     _kind, status_code = upstream_exception_shape(exc)
     if status_code is not None:
         return status_code

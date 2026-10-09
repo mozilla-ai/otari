@@ -30,7 +30,6 @@ from gateway.core.config import ATTEMPT_ID_HEADER, GatewayConfig
 from gateway.core.error_codes import (
     ALL_CANDIDATES_REJECTED,
     CONTEXT_LENGTH_EXCEEDED,
-    PROVIDER_NOT_CONFIGURED,
     error_code_of,
     error_headers,
 )
@@ -337,12 +336,12 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
     """
     if len(errors) < 2:
         return None
-    missing = [missing_credential(error) for error in errors]
-    if all(entry is not None for entry in missing):
+    missing = [entry for entry in map(missing_credential, errors) if entry is not None]
+    if len(missing) == len(errors):
         return HTTPException(
-            status_code=status.HTTP_424_FAILED_DEPENDENCY,
-            detail=no_candidate_configured_detail([entry for entry in missing if entry is not None]),
-            headers=error_headers(PROVIDER_NOT_CONFIGURED),
+            status_code=missing[0].status_code,
+            detail=no_candidate_configured_detail(missing),
+            headers=error_headers(missing[0].code),
         )
     answers = [_provider_failure_http_exc(error, fallback_detail="") for error in errors]
     statuses = {answer.status_code for answer in answers}

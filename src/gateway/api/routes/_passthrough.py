@@ -50,7 +50,7 @@ from gateway.api.routes._pipeline import (
 from gateway.api.routes._platform import _classify_upstream_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import release_session
-from gateway.core.error_codes import PROVIDER_NOT_CONFIGURED, error_headers
+from gateway.core.error_codes import error_headers
 from gateway.core.metered_pricing import billable_usage, price_billable_usage, quantize_cost
 from gateway.inflight import track_request
 from gateway.log_config import logger
@@ -558,14 +558,9 @@ async def run_passthrough(
 
         missing = missing_credential(e)
         if missing is not None:
-            # Nothing reached the provider: the deployment holds no credential
-            # for it. Answered before any route-specific mapping, and as a 424
-            # rather than a 502, because a retrying SDK cannot supply a key.
             logger.warning("No credential configured for %s:%s", resolved.provider, resolved.model)
             raise HTTPException(
-                status_code=status.HTTP_424_FAILED_DEPENDENCY,
-                detail=missing.detail,
-                headers=error_headers(PROVIDER_NOT_CONFIGURED),
+                status_code=missing.status_code, detail=missing.detail, headers=error_headers(missing.code)
             ) from e
 
         mapped = map_provider_error(e) if map_provider_error else None

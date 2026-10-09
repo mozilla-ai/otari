@@ -43,7 +43,7 @@ import re
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError, MissingApiKeyError
@@ -56,6 +56,7 @@ from gateway.core.config import (
     GatewayConfig,
     provider_credential_env_names,
 )
+from gateway.core.error_codes import PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import FORBIDDEN_ENDPOINT_DEFAULTS
 from gateway.log_config import logger
 from gateway.services.alias_service import resolve_effective_alias
@@ -764,10 +765,15 @@ class MissingCredential:
     Nothing reached the provider, so the failure is the deployment's
     configuration rather than the provider's, and it is named in Otari's terms.
     The variable is a name, never a value, so it is safe to show.
+
+    Answered with a 424 rather than a 502: clients retry a 5xx, and no retry can
+    supply a key. ``code`` lets a caller tell it from a provider's own 424.
     """
 
     provider: str
     env_var: str | None
+    status_code: ClassVar[int] = 424
+    code: ClassVar[str] = PROVIDER_NOT_CONFIGURED
 
     @property
     def detail(self) -> str:
