@@ -97,7 +97,7 @@ export function allocationStrip(
      * after what it caps ("A workspace"), which the id fingerprint below cannot
      * say; a deployment budget has no scope and keeps the fingerprint.
      */
-    nameOf?: (worst: WorstAllocation) => string
+    nameOf?: (worst: WorstAllocation) => string | undefined
   },
 ): BudgetHealth {
   if (!health || health.total_count === 0) return noneToJudge(labels.none)

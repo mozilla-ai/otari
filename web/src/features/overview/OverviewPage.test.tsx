@@ -553,6 +553,47 @@ describe("OverviewPage", () => {
     )
   })
 
+  it("tells budgets that cap no spend apart from no budgets at all", async () => {
+    // A budget limiting only tokens or requests has no spend share to show,
+    // and "no budgets set" beside it would contradict the Budgets page.
+    mockApi({
+      overview: {
+        budgets: strip({ capped_count: 0, total_count: 2, worst: null }),
+      },
+    })
+    renderPage(<OverviewPage />)
+    expect(await screen.findByText("no budget caps spend")).toBeInTheDocument()
+    expect(screen.queryByText("no budgets set")).not.toBeInTheDocument()
+  })
+
+  it("names an unnamed budget enforced through a scoped budget after what it caps", async () => {
+    // A deployment budget attached to an API key arrives with the scope it
+    // caps and no name of its own; the tile says "An API key" rather than an
+    // id fingerprint, the way the ceilings strip names its rows.
+    mockApi({
+      overview: {
+        budgets: strip({
+          near_count: 1,
+          worst: {
+            budget_id: "b-key-cap",
+            name: null,
+            spent: 9,
+            allocated: 10,
+            scope_type: "api_token",
+            scope_id: "eeecba57-49c3-4e40-b3c1-d170aeed55c8",
+          },
+        }),
+      },
+    })
+    renderPage(<OverviewPage />)
+    expect(await screen.findByText("90.0%")).toBeInTheDocument()
+    expect(
+      screen.getByRole("progressbar", {
+        name: "Worst budget usage: An API key (eeecba57…)",
+      }),
+    ).toBeInTheDocument()
+  })
+
   it("summarizes provider health and surfaces problems in the status strip", async () => {
     mockApi({
       health: {

@@ -25,10 +25,10 @@ _ZERO = Decimal(0)
 class Allocation:
     """One row with a finite cap: what it is called, spent, and may spend.
 
-    ``scope_type`` and ``scope_id`` are a ceiling's and are None for a
-    deployment budget, which caps no scope. A ceiling nobody named is named on
-    screen after what it caps ("A workspace"), so the scope has to survive the
-    reduction or the row would fall back to an id fingerprint.
+    ``scope_type`` and ``scope_id`` are a ceiling's and are None for a budget
+    judged through its users, which caps no scope. A ceiling nobody named is
+    named on screen after what it caps ("A workspace"), so the scope has to
+    survive the reduction or the row would fall back to an id fingerprint.
     """
 
     name: str | None
@@ -86,10 +86,19 @@ class OverviewRepository:
     async def budget_allocations(self) -> list[Allocation]:
         """The deployment's capped budgets, with the spend against each.
 
-        ``max_budget`` on a deployment budget is a per-user cap that its users
+        A deployment budget is enforced two ways, and both are judged here.
+        Attached to users, ``max_budget`` is a per-user cap that its users
         share, so the honest allocation is the cap times the number of active
-        users holding it, which is what the budgets page shows. A budget with no
-        cap or no users has no utilization to judge and is left out.
+        users holding it, which is what the budgets page shows. Attached to a
+        scope through a scoped budget (an API key, a workspace, an organization
+        or a member), the ceiling carries its own counters and the allocation is
+        the cap itself. A budget with no cap, or with neither users nor a
+        scope, has no utilization to judge and is left out.
+
+        Only ceilings on a budget the deployment owns are read here: a budget
+        with an ``organization_id`` is that organization's, and its ceilings are
+        the organization's spend ceilings, judged by :meth:`ceiling_allocations`
+        so a row is never counted on both strips.
 
         One grouped pass rather than a count per budget: this runs on every
         overview load, and a query per row is what makes a summary cost more
@@ -117,7 +126,7 @@ class OverviewRepository:
             .where(Budget.max_budget.is_not(None))
         )
         rows = (await self.db.execute(stmt)).all()
-        return [
+        shared = [
             Allocation(
                 name=budget.name,
                 budget_id=budget.budget_id,
@@ -127,6 +136,23 @@ class OverviewRepository:
             for budget, user_count, spend, reserved in rows
             if user_count > 0
         ]
+        ceilings = (
+            select(ScopedBudget, Budget.max_budget)
+            .join(Budget, ScopedBudget.budget_id == Budget.budget_id)
+            .where(Budget.organization_id.is_(None), Budget.max_budget.is_not(None))
+        )
+        scoped = [
+            Allocation(
+                name=ceiling.name,
+                budget_id=ceiling.budget_id,
+                spent=float(ceiling.current_spend) + float(ceiling.reserved_spend),
+                allocated=float(max_budget),
+                scope_type=ceiling.scope_type,
+                scope_id=ceiling.scope_id,
+            )
+            for ceiling, max_budget in (await self.db.execute(ceilings)).all()
+        ]
+        return shared + scoped
 
     async def ceiling_allocations(self, organization_id: uuid.UUID) -> list[Allocation]:
         """One organization's capped spend ceilings, with the spend against each.
@@ -170,9 +196,14 @@ class OverviewRepository:
         return int(await self.db.scalar(stmt) or 0)
 
     async def count_budgets(self) -> int:
-        """Every deployment budget, capped or not, for the same distinction."""
+        """Every deployment budget, capped or not, for the same distinction.
 
-        return int(await self.db.scalar(select(func.count()).select_from(Budget)) or 0)
+        An organization's own budgets are counted by :meth:`count_ceilings`, as
+        :meth:`budget_allocations` leaves them to the ceilings strip.
+        """
+
+        stmt = select(func.count()).select_from(Budget).where(Budget.organization_id.is_(None))
+        return int(await self.db.scalar(stmt) or 0)
 
     async def workspace_organization(self, workspace_id: uuid.UUID) -> uuid.UUID | None:
         """Which organization owns this workspace, or None where none does.
