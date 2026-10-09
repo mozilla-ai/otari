@@ -496,8 +496,9 @@ async def test_streaming_fallback_forwards_started_at_to_build_streaming_respons
 class _Settlement:
     """Records which settlement primitives the callbacks invoked."""
 
-    def __init__(self, pricing_source: PriceSource | None = "deployment") -> None:
+    def __init__(self, pricing_source: PriceSource | None = "deployment", *, per_request: bool = False) -> None:
         self.pricing_source = pricing_source
+        self.per_request = per_request
         self.reconciled: list[float] = []
         self.settled_tokens: list[int] = []
         self.refunded = 0
@@ -509,6 +510,8 @@ class _Settlement:
             usage = kwargs.get("usage_override")
             if kwargs.get("cost_override") is not None:
                 return LoggedUsage(Decimal(kwargs["cost_override"]), None)
+            if self.per_request and kwargs.get("error") is None:
+                return LoggedUsage(Decimal("0.005"), self.pricing_source)
             return LoggedUsage(Decimal("0.25"), self.pricing_source) if usage else LoggedUsage(None, None)
 
         async def fake_log_usage(**kwargs: Any) -> Decimal | None:
@@ -521,6 +524,10 @@ class _Settlement:
         async def fake_refund(db: Any, handle: Any) -> None:
             self.refunded += 1
 
+        async def fake_bills_per_request(db: Any, **kwargs: Any) -> bool:
+            return self.per_request
+
+        monkeypatch.setattr(pipeline, "bills_per_request", fake_bills_per_request)
         monkeypatch.setattr(pipeline, "log_usage", fake_log_usage)
         monkeypatch.setattr(pipeline, "record_usage", fake_record_usage)
         monkeypatch.setattr(pipeline, "reconcile_reservation", fake_reconcile)
@@ -661,6 +668,27 @@ async def test_stream_without_usage_estimate_policy_charges_estimate(monkeypatch
     assert settlement.refunded == 0
 
 
+@pytest.mark.parametrize("policy", ["allow_free", "estimate", "fail"])
+@pytest.mark.asyncio
+async def test_stream_without_usage_of_a_per_request_model_charges_its_price(
+    monkeypatch: pytest.MonkeyPatch, policy: str
+) -> None:
+    """The missing-usage policy is for token pricing; a model priced per request owes its flat rate."""
+    settlement = _Settlement(per_request=True)
+    settlement.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk()
+
+    await _drain(_build(stream(), GatewayConfig(stream_missing_usage_policy=cast(Any, policy))))
+
+    assert settlement.reconciled == [Decimal("0.005")]
+    assert settlement.refunded == 0
+    (logged,) = settlement.logged
+    assert logged.get("error") is None
+    assert logged.get("cost_override") is None
+
+
 @pytest.mark.asyncio
 async def test_stream_error_refunds(monkeypatch: pytest.MonkeyPatch) -> None:
     settlement = _Settlement()
@@ -793,6 +821,19 @@ async def test_completed_stream_row_carries_the_request_id(monkeypatch: pytest.M
     assert logged["request_id"] == "req-1"
 
 
+def _no_pricing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A successful row resolves its model's rate even without usage, in case it is priced per request."""
+
+    async def organization_for_workspace_id(db: Any, workspace_id: uuid.UUID | None) -> None:
+        return None
+
+    async def resolve_model_pricing(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(pipeline, "organization_for_workspace_id", organization_for_workspace_id)
+    monkeypatch.setattr(pipeline, "resolve_model_pricing", resolve_model_pricing)
+
+
 class _FakeLogWriter:
     def __init__(self) -> None:
         self.put_rows: list[Any] = []
@@ -816,6 +857,7 @@ async def test_log_usage_skips_the_workspace_lookup_when_given_one(monkeypatch: 
         return uuid.uuid4()
 
     monkeypatch.setattr(pipeline, "workspace_for_key_id", counting_workspace_for_key_id)
+    _no_pricing(monkeypatch)
     workspace_id = uuid.uuid4()
 
     await log_usage(
@@ -832,8 +874,11 @@ async def test_log_usage_skips_the_workspace_lookup_when_given_one(monkeypatch: 
 
 
 @pytest.mark.asyncio
-async def test_log_usage_stores_the_request_id_as_the_group_of_an_unrouted_row() -> None:
+async def test_log_usage_stores_the_request_id_as_the_group_of_an_unrouted_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """An unrouted row has no attribution, and is findable by ``Otari-Request-ID`` all the same."""
+    _no_pricing(monkeypatch)
     writer = _FakeLogWriter()
 
     await log_usage(
@@ -866,6 +911,7 @@ async def test_log_usage_still_resolves_the_workspace_when_not_given_one(monkeyp
         return resolved
 
     monkeypatch.setattr(pipeline, "workspace_for_key_id", counting_workspace_for_key_id)
+    _no_pricing(monkeypatch)
     log_writer = _FakeLogWriter()
 
     await log_usage(

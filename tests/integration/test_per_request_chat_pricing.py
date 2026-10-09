@@ -26,9 +26,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from gateway.api.routes import _pipeline
 from gateway.core.config import API_KEY_HEADER, API_ROOT
 from gateway.models.usage import UsageLog
+from gateway.services.budgets import reserve_budget
 
 from .conftest import MODEL_NAME
 
@@ -126,15 +126,14 @@ def _chat(
         return _stream()
 
     reserved: list[Decimal] = []
-    real_reserve = _pipeline.reserve_budget
 
     async def _capture(*args: Any, **kwargs: Any) -> Any:
         reserved.append(Decimal(str(args[2])))
-        return await real_reserve(*args, **kwargs)
+        return await reserve_budget(*args, **kwargs)
 
     with (
         patch("gateway.api.routes.chat.acompletion", side_effect=_acompletion),
-        patch.object(_pipeline, "reserve_budget", side_effect=_capture),
+        patch("gateway.api.routes._pipeline.reserve_budget", side_effect=_capture),
     ):
         response = client.post(
             f"{API_ROOT}/chat/completions",
@@ -295,7 +294,10 @@ def test_a_model_priced_per_token_is_unchanged(
     assert row.cost == Decimal("0.06")
     assert row.billing_meters is not None
     assert row.billing_meters["total_input_tokens"] == 12
-    assert row.pricing_breakdown == [{"meter": "input", "units": 12, "rate_per_million": 5000.0, "cost": 0.06}]
+    assert row.pricing_breakdown == [
+        {"meter": "input", "units": 12, "rate_per_million": 5000.0, "cost": 0.06},
+        {"meter": "output", "units": 34, "rate_per_million": 0.0, "cost": 0.0},
+    ]
     user = _user(client, master_key_header)
     assert user["spend"] == pytest.approx(0.06)
     assert user["reserved"] == pytest.approx(0.0)

@@ -382,8 +382,8 @@ def price_request(pricing: typing.Any) -> tuple[Decimal, dict[str, int], list[Ch
     A free request carries no charge line, so the breakdown never shows a
     billed meter explaining a charge that did not happen.
     """
-    cost = request_cost(pricing)
-    return quantize_cost(cost), {"requests": 1}, [request_charge_line(cost)] if cost else []
+    cost = quantize_cost(request_cost(pricing))
+    return cost, {"requests": 1}, [request_charge_line(cost)] if cost else []
 
 
 def _price_meters(

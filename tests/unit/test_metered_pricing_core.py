@@ -334,6 +334,18 @@ def test_a_rate_priced_per_request_settles_one_request_whatever_the_tokens() -> 
     assert lines == [{"meter": "request", "units": 1, "unit_rate": 0.005, "cost": 0.005}]
 
 
+def test_a_per_request_charge_line_agrees_with_the_settled_cost() -> None:
+    """A rate below a micro-dollar per request rounds once, and the line shows the rounded amount."""
+    cost, _, lines = price_request(_pricing(input_price_per_million=Decimal("1.5"), unit="requests"))
+
+    assert cost == Decimal("0.000002")
+    assert lines == [{"meter": "request", "units": 1, "unit_rate": 0.000002, "cost": 0.000002}]
+
+    cost, _, lines = price_request(_pricing(input_price_per_million=Decimal("0.4"), unit="requests"))
+
+    assert (cost, lines) == (Decimal("0"), [])
+
+
 def test_a_free_per_request_rate_writes_no_charge_line() -> None:
     cost, meters, lines = price_request(_pricing(input_price_per_million=Decimal("0"), unit="requests"))
 
