@@ -340,6 +340,32 @@ class WorkspaceWebSearchKeyOverrideConflictError(TenancyValidationError):
         super().__init__("A web search key cannot be both pinned and turned off for a workspace")
 
 
+class SearchToolRefusedError(TenancyValidationError):
+    """A search or fetch instance the instance rules refuse to write or test.
+
+    A 422, the status the same route's request validation answers with.
+    """
+
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+class SearchToolNotFoundError(TenancyNotFoundError):
+    """No configured or stored search or fetch instance has this name."""
+
+    def __init__(self, name: str):
+        super().__init__(f"No search or fetch instance '{name}'.")
+
+
+class SearchToolUntestableError(TenancyValidationError):
+    """``builtin_fetch`` has no connection test until web fetch runs on the fetch instances."""
+
+    def __init__(self, name: str):
+        super().__init__(
+            f"{name}, the built-in fetcher, has no connection test yet: it arrives when web fetch runs on the "
+            "fetch instances."
+        )
+
+
 __all__ = [
     "CodeExecutionPolicyResolutionFailedError",
     "CodeExecutionPolicyResolutionFailure",
@@ -348,6 +374,9 @@ __all__ = [
     "McpSessionsInterruptedError",
     "SandboxImageNotAllowedError",
     "SandboxToolsUnrunnableError",
+    "SearchToolNotFoundError",
+    "SearchToolRefusedError",
+    "SearchToolUntestableError",
     "WebAccessNotEnabledError",
     "WebAccessRefusedError",
     "WebAccessToolNotAuthorizedError",

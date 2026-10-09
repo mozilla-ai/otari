@@ -40,6 +40,7 @@ from gateway.core.settings.tools import ToolKind, dangling_reference_warnings, w
 from gateway.log_config import logger
 from gateway.models.secret_fields import restore_redacted_values
 from gateway.models.tools import SearchToolCredential
+from gateway.repositories.tools import SearchToolRepository
 from gateway.services.runtime_settings_service import SettingValue
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
@@ -140,6 +141,11 @@ def config_file_fetch_tools(config: GatewayConfig) -> dict[str, dict[str, Any]]:
     return baseline if baseline is not None else config.fetch_tools
 
 
+def stored_tool_names() -> frozenset[str]:
+    """The names of the stored rows the last overlay holds, of either kind."""
+    return frozenset(_cache) | frozenset(_fetch_cache)
+
+
 def config_file_tools(config: GatewayConfig, kind: ToolKind) -> dict[str, dict[str, Any]]:
     """The config-file instances of ``kind``, with no stored overlay applied."""
     return config_file_search_tools(config) if kind == "search" else config_file_fetch_tools(config)
@@ -162,13 +168,6 @@ def apply_to_config(config: GatewayConfig) -> set[str]:
     config.search_tools = {**search_baseline, **_cache}
     config.fetch_tools = {**fetch_baseline, **_fetch_cache}
     return (set(search_baseline) & set(_cache)) | (set(fetch_baseline) & set(_fetch_cache))
-
-
-async def _load_rows(db: AsyncSession) -> Sequence[SearchToolCredential]:
-    # `populate_existing`: sessions use `expire_on_commit=False`, so without it
-    # a row still in the identity map (as after a rotation on this session)
-    # would return the values it was loaded with, not what is committed.
-    return (await db.execute(select(SearchToolCredential).execution_options(populate_existing=True))).scalars().all()
 
 
 def _overlay_rows(config: GatewayConfig, rows: Sequence[SearchToolCredential], *, report_changes: bool) -> set[str]:
@@ -242,7 +241,7 @@ async def refresh_search_tool_cache(db: AsyncSession, config: GatewayConfig) -> 
     The rows only. A write to the tool settings reloads them to check a default
     against, and must not re-apply the stored settings it is about to replace.
     """
-    shadowed = _overlay_rows(config, await _load_rows(db), report_changes=True)
+    shadowed = _overlay_rows(config, await SearchToolRepository(db).list_committed(), report_changes=True)
     _report_dangling_references(config)
     return shadowed
 
@@ -258,7 +257,7 @@ async def refresh_tool_instances(db: AsyncSession, config: GatewayConfig) -> set
     the create, never the second row without the default. Both are applied with
     no wait in between, so no request sees one without the other.
     """
-    rows = await _load_rows(db)
+    rows = await SearchToolRepository(db).list_committed()
     overrides = await load_overrides(db, report_invalid=False)
     shadowed = _overlay_rows(config, rows, report_changes=True)
     _apply_settings(config, overrides)
@@ -279,7 +278,7 @@ async def load_search_tools_at_startup(db: AsyncSession, config: GatewayConfig) 
     """
     reset_search_tool_cache()
     try:
-        shadowed = _overlay_rows(config, await _load_rows(db), report_changes=False)
+        shadowed = _overlay_rows(config, await SearchToolRepository(db).list_committed(), report_changes=False)
         # The lifespan applied these just before; recorded so the first refresh
         # applies only what changes after.
         _read_settings.update(await load_overrides(db, report_invalid=False))

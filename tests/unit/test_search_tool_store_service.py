@@ -16,6 +16,7 @@ from gateway.core.settings.tools import (
     warn_about_instances,
 )
 from gateway.models.tools import SearchToolCredential
+from gateway.repositories.tools import SearchToolRepository
 from gateway.services import search_tool_store_service as store
 from gateway.services.search_backend import resolve_search_tool
 from gateway.services.search_tool_store_service import (
@@ -311,7 +312,7 @@ async def test_the_refresh_reads_the_rows_then_the_settings_and_applies_both(
     """Rows first, so a default and the rows it names reach this worker together."""
     reads: list[str] = []
 
-    async def load_rows(_db: object) -> list[SearchToolCredential]:
+    async def list_committed(_repository: object) -> list[SearchToolCredential]:
         reads.append("rows")
         return [_row("first"), _row("second")]
 
@@ -320,7 +321,7 @@ async def test_the_refresh_reads_the_rows_then_the_settings_and_applies_both(
         reads.append("settings")
         return {"web_search_default_tool": "first", "web_search_url": None}
 
-    monkeypatch.setattr(store, "_load_rows", load_rows)
+    monkeypatch.setattr(SearchToolRepository, "list_committed", list_committed)
     monkeypatch.setattr(store, "load_overrides", load_overrides)
     caplog.set_level(logging.INFO, logger="gateway")
     config = GatewayConfig()

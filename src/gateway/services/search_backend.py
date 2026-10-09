@@ -138,11 +138,13 @@ class SearchProviderError(RuntimeError):
     """
 
     def __init__(self, message: str, *, tag: str = "provider_error") -> None:
+        """Carry the message for the log and the tag for a caller that reports only the tag."""
         super().__init__(message)
         self.tag = tag
 
 
 def _transport_tag(exc: httpx.HTTPError | httpx.InvalidURL) -> str:
+    """The tag for a request that never got an answer: it timed out, or it could not be sent."""
     return "timeout" if isinstance(exc, httpx.TimeoutException) else "network"
 
 

@@ -26,14 +26,13 @@ about this deployment, its tools and their inherited endpoints, only an operator
 sees.
 """
 
+from collections.abc import Mapping
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import any_fetch
-import any_search
 from gateway.api.deps import (
     catalog_reader_operates_deployment,
     get_config,
@@ -46,20 +45,8 @@ from gateway.core.database import DATABASE_ERRORS, release_session
 from gateway.core.settings.tools import (
     BUILTIN_FETCH,
     BUILTIN_FETCH_PROVIDER,
-    RESERVED_INSTANCE_NAMES,
-    SEARCH_PROVIDERS_REQUIRING_API_BASE,
-    SEARCH_PROVIDERS_WITHOUT_ADAPTER,
     ToolInstance,
     ToolKind,
-    effective_fetch_instances,
-    effective_search_instances,
-    instance_from_entry,
-    instance_name_problems,
-    option_problems,
-    search_default_to_pin,
-    validate_fetch_tool_entry,
-    validate_search_tool_entry,
-    validate_search_tool_transport,
 )
 from gateway.inflight import track_request
 from gateway.log_config import logger
@@ -77,13 +64,6 @@ from gateway.schemas.tools import (
     StoredSearchToolTestRequest,
     UpdateSearchToolRequest,
 )
-from gateway.services.search_backend import (
-    SearchProviderError,
-    SearchQuery,
-    SearchToolError,
-    resolve_search_tool,
-    run_search,
-)
 from gateway.services.search_tool_store_service import (
     UNSET,
     config_file_search_tools,
@@ -96,6 +76,7 @@ from gateway.services.search_tool_store_service import (
     refresh_search_tool_cache,
     refresh_tool_instances,
     save_search_tool,
+    stored_tool_names,
 )
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
@@ -106,9 +87,19 @@ from gateway.services.tool_settings_service import (
     WEB_SEARCH_DEFAULT_TOOL,
     apply_override,
     stage_override,
-    validate_url,
 )
-from gateway.services.tools import search_provider_catalog
+from gateway.services.tools import (
+    check_kind_unchanged,
+    check_test_input,
+    check_tool_entry,
+    check_tool_name_is_free,
+    check_tool_write,
+    default_to_pin,
+    instance_to_test,
+    run_connection_test,
+    search_provider_catalog,
+    unsaved_instance_to_test,
+)
 
 router = APIRouter(
     prefix="/search-tools",
@@ -137,117 +128,6 @@ def _is_decryptable(row: SearchToolCredential) -> bool:
     except (SecretBoxUnavailableError, SecretDecryptionError):
         return False
     return True
-
-
-def _unprocessable(detail: str) -> HTTPException:
-    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=detail)
-
-
-def _section(kind: ToolKind) -> str:
-    return "search_tools" if kind == "search" else "fetch_tools"
-
-
-def _validate_entry(name: str, entry: dict[str, Any], *, kind: ToolKind, inherited_api_base: str | None = None) -> None:
-    """Hold a dashboard-written instance to the rules the config file is held to, as a 422.
-
-    The same validation startup runs on, per kind, so an instance saved here can
-    never be one that would refuse to boot from a config file.
-    """
-    try:
-        if kind == "search":
-            validate_search_tool_entry(name, entry)
-        else:
-            validate_fetch_tool_entry(name, entry)
-    except ValueError as exc:
-        raise _unprocessable(str(exc)) from None
-    provider = str(entry.get("provider") or name)
-    api_base = entry.get("api_base")
-    if not api_base and kind == "search" and provider in SEARCH_PROVIDERS_REQUIRING_API_BASE:
-        api_base = inherited_api_base
-    if api_base:
-        try:
-            validate_url(str(api_base))
-            validate_search_tool_transport(name, api_base, entry.get("api_key"))
-        except ValueError as exc:
-            raise _unprocessable(str(exc)) from None
-
-
-def _check_write_rules(
-    config: GatewayConfig,
-    name: str,
-    entry: dict[str, Any],
-    *,
-    kind: ToolKind,
-    sets_name: bool,
-    sets_options: bool,
-    sets_fetch_tool: bool,
-) -> None:
-    """Refuse, as a 422, what the instance rules let load but not be written.
-
-    Only in what the write sets: a search instance stored before the rules keeps
-    loading with its name and options, so a change that leaves them alone, such
-    as rotating its key, does not trip on them. A fetch instance's name is held
-    to the rules by its entry's own validation.
-    """
-    provider = str(entry.get("provider") or name)
-    problems = instance_name_problems(name) if sets_name and kind == "search" else []
-    if sets_options:
-        problems += option_problems(kind, provider, entry.get("options") or {}).values()
-    if problems:
-        raise _unprocessable(f"{_section(kind)}.{name} is refused: {'; '.join(problems)}.")
-    fetch_tool = entry.get("fetch_tool")
-    if not sets_fetch_tool or fetch_tool is None:
-        return
-    if kind == "fetch":
-        raise _unprocessable(f"fetch_tools.{name}.fetch_tool is refused: only a search instance has one.")
-    if fetch_tool not in effective_fetch_instances(config):
-        raise _unprocessable(
-            f"search_tools.{name}.fetch_tool must name a fetch instance, or {BUILTIN_FETCH}; "
-            f"there is no '{fetch_tool}'."
-        )
-
-
-def _check_name_is_free(config: GatewayConfig, name: str, kind: ToolKind) -> None:
-    """Refuse, as a 422, a name an instance of the other kind already has.
-
-    Names are unique across search and fetch instances, because the pricing key
-    ``<provider>:<instance>`` carries no capability. A stored instance may still
-    take the name of a config-file one of its own kind, which it then overrides.
-    """
-    other: ToolKind = "fetch" if kind == "search" else "search"
-    if name in (config.fetch_tools if kind == "search" else config.search_tools):
-        raise _unprocessable(
-            f"A {other} instance named '{name}' exists; names are unique across search and fetch instances."
-        )
-
-
-def _pin_refusal(pinned: str, *, stored: bool) -> str:
-    way_out = (
-        f"delete '{pinned}' and create it again under another name, since a stored name cannot change"
-        if stored
-        else f"rename '{pinned}' in the configuration file"
-    )
-    return (
-        f"Adding a second search instance would leave the in-loop tool with no default, so this create first "
-        f"sets web_search_default_tool to '{pinned}', the only search instance until now. That name is reserved "
-        f"and cannot be the default: {way_out}, then add this one."
-    )
-
-
-def _strip(value: str | None) -> str | None:
-    return value.strip() if isinstance(value, str) else value
-
-
-def _entry(request: CreateSearchToolRequest) -> dict[str, Any]:
-    """The request as a config-file entry, the shape the checks and the overlay read."""
-    return {
-        "provider": request.provider,
-        "fetch_tool": _strip(request.fetch_tool),
-        "api_base": request.api_base,
-        "api_key": request.api_key,
-        "timeout": request.timeout,
-        "options": request.options,
-    }
 
 
 async def _commit(db: AsyncSession, *, conflict_detail: str | None = None) -> None:
@@ -392,8 +272,8 @@ async def create_search_tool(
     """
     name = request.name.strip()
     kind = request.kind
-    entry = _entry(request)
-    _validate_entry(name, entry, kind=kind, inherited_api_base=config.web_search_url)
+    entry = request.to_entry()
+    check_tool_entry(name, entry, kind=kind, inherited_api_base=config.web_search_url)
     try:
         # Another replica may have stored an instance this one would clash with or
         # name, or the default setting the pin below reads.
@@ -402,7 +282,7 @@ async def create_search_tool(
         await db.rollback()
         logger.exception("Failed to reload stored tools before creating '%s'", name)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
-    _check_write_rules(
+    check_tool_write(
         config,
         name,
         entry,
@@ -411,14 +291,11 @@ async def create_search_tool(
         sets_options=request.options is not None,
         sets_fetch_tool=True,
     )
-    _check_name_is_free(config, name, kind)
+    check_tool_name_is_free(config, name, kind)
     conflict = f"A stored {kind} tool '{name}' already exists; use PATCH to update it."
     if await get_search_tool(db, name) is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict)
-    pinned = search_default_to_pin(config, name) if kind == "search" else None
-    if pinned is not None and pinned.name.lower() in RESERVED_INSTANCE_NAMES:
-        stored = await get_search_tool(db, pinned.name) is not None
-        raise _unprocessable(_pin_refusal(pinned.name, stored=stored))
+    pinned = default_to_pin(config, name, stored_names=stored_tool_names()) if kind == "search" else None
     try:
         row = await save_search_tool(
             db,
@@ -443,14 +320,8 @@ async def create_search_tool(
             "search instances at the same time. Reload and retry."
         )
     await _commit(db, conflict_detail=conflict)
-    notice = None
     if pinned is not None:
         apply_override(config, WEB_SEARCH_DEFAULT_TOOL, pinned.name)
-        notice = (
-            f"web_search_default_tool is now '{pinned.name}'. The in-loop tool searched with it as the only search "
-            f"instance, and adding '{name}' would otherwise have turned in-loop search off. This runtime value "
-            "wins over the configuration file until it is cleared."
-        )
         logger.info("Set web_search_default_tool to '%s' before adding a second search instance", pinned.name)
     from_config = config_file_tools(config, kind)
     shadows_config = name in from_config
@@ -466,7 +337,7 @@ async def create_search_tool(
         **row.to_public_dict(),
         shadows_config=shadows_config,
         pinned_web_search_default_tool=pinned.name if pinned is not None else None,
-        notice=notice,
+        notice=pinned.notice if pinned is not None else None,
     )
 
 
@@ -494,11 +365,7 @@ async def update_search_tool(
     if existing is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No stored search tool '{name}'.")
     kind: ToolKind = "fetch" if existing.kind == "fetch" else "search"
-    if request.kind is not None and request.kind != kind:
-        raise _unprocessable(
-            f"'{name}' is a {kind} instance, and an instance's kind cannot change: delete it and create it "
-            f"again as a {request.kind} instance."
-        )
+    check_kind_unchanged(name, kind, request.kind)
     if request.expected_updated_at is not None:
         current = existing.updated_at.isoformat() if existing.updated_at else None
         if current != request.expected_updated_at:
@@ -510,9 +377,10 @@ async def update_search_tool(
     # Distinguish "field omitted" (keep) from "field set to null" (clear), then
     # validate the resulting tool rather than the patch in isolation.
     sent = request.model_fields_set
+    fetch_tool = request.fetch_tool.strip() if request.fetch_tool is not None else None
     merged: dict[str, Any] = {
         "provider": request.provider if "provider" in sent and request.provider else existing.provider,
-        "fetch_tool": _strip(request.fetch_tool) if "fetch_tool" in sent else existing.fetch_tool,
+        "fetch_tool": fetch_tool if "fetch_tool" in sent else existing.fetch_tool,
         "api_base": request.api_base if "api_base" in sent else existing.api_base,
         "timeout": request.timeout if "timeout" in sent else existing.timeout_seconds,
         "options": request.options if "options" in sent else existing.options,
@@ -520,7 +388,7 @@ async def update_search_tool(
         # decrypted here just to re-validate it.
         "api_key": request.api_key if "api_key" in sent else existing.encrypted_api_key,
     }
-    _validate_entry(name, merged, kind=kind, inherited_api_base=config.web_search_url)
+    check_tool_entry(name, merged, kind=kind, inherited_api_base=config.web_search_url)
     sets_fetch_tool = "fetch_tool" in sent
     if sets_fetch_tool and merged["fetch_tool"] is not None:
         try:
@@ -530,7 +398,7 @@ async def update_search_tool(
             await db.rollback()
             logger.exception("Failed to reload stored tools before updating '%s'", name)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
-    _check_write_rules(
+    check_tool_write(
         config,
         name,
         merged,
@@ -583,94 +451,25 @@ async def delete_stored_search_tool(
     await _apply_write(db, config, name)
 
 
-def _library_call(instance: ToolInstance) -> tuple[dict[str, Any], dict[str, Any]]:
-    """What a library provider is built and called with: the instance's settings and options as the resolver sends them.
-
-    The instance's own key and base URL, never the environment's: the libraries
-    read a provider's variable when none is passed, and an empty one counts as
-    passed. Options carry otari's defaults below them, and leave out the ones
-    the rules drop.
-    """
-    default_timeout = any_search.DEFAULT_TIMEOUT if instance.kind == "search" else any_fetch.DEFAULT_TIMEOUT
-    settings = {
-        "api_key": instance.api_key or "",
-        "api_base": instance.api_base or "",
-        "timeout": instance.timeout or default_timeout,
-    }
-    kept = {key: value for key, value in instance.options.items() if key not in instance.dropped_options}
-    return settings, {**instance.provider_defaults, **kept}
-
-
-async def _test_with_library(instance: ToolInstance, *, query: str | None, url: str | None) -> SearchToolTestResponse:
-    settings, options = _library_call(instance)
-    try:
-        if instance.kind == "search":
-            async with any_search.AnySearch.create(instance.provider, **settings) as engine:
-                result = await engine.search(str(query), **options)
-            if result.error is not None:
-                return SearchToolTestResponse(ok=False, error=result.error.tag)
-            return SearchToolTestResponse(ok=True, hits=len(result.hits))
-        async with any_fetch.AnyFetch.create(instance.provider, **settings) as fetcher:
-            page = await fetcher.fetch(str(url), **options)
-        if page.error is not None:
-            return SearchToolTestResponse(ok=False, error=page.error.tag)
-        return SearchToolTestResponse(ok=True, characters=len(page.text))
-    except (any_search.ProviderError, any_fetch.ProviderError) as exc:
-        return SearchToolTestResponse(ok=False, error=exc.tag)
-    except (any_search.AnySearchError, any_fetch.AnyFetchError) as exc:
-        # A key or option the provider cannot run with: the instance's to fix.
-        raise _unprocessable(str(exc)) from None
-
-
-async def _test_with_old_client(
-    config: GatewayConfig, name: str, entry: dict[str, Any], query: str
-) -> SearchToolTestResponse:
-    """One search through the direct endpoint's own client, which serves SearXNG until any-search does."""
-    try:
-        # Resolved as the direct endpoint resolves it, against this entry alone,
-        # so an unsaved one inherits web_search_url and the engines the same way.
-        tool = resolve_search_tool(config.model_copy(update={"search_tools": {name: entry}}), name)
-    except SearchToolError as exc:
-        raise _unprocessable(str(exc)) from None
-    try:
-        outcome = await run_search(tool, SearchQuery(query=query))
-    except SearchProviderError as exc:
-        return SearchToolTestResponse(ok=False, error=exc.tag)
-    return SearchToolTestResponse(ok=True, hits=len(outcome.results))
-
-
 # The in-flight registry's name for a connection test, named or not.
 TEST_ENDPOINT = f"{API_ROOT}/search-tools/test"
 
 
-async def _run_test(
+async def _dispatch_test(
     raw_request: Request,
     db: AsyncSession,
     config: GatewayConfig,
     instance: ToolInstance,
-    entry: dict[str, Any],
+    entry: Mapping[str, Any],
     *,
     query: str | None,
     url: str | None,
 ) -> SearchToolTestResponse:
-    if instance.kind == "search" and not query:
-        raise _unprocessable("A search instance is tested with a 'query'.")
-    if instance.kind == "fetch" and not url:
-        raise _unprocessable("A fetch instance is tested with a 'url'.")
-    # Not held across the provider call, which can take the instance's whole timeout.
+    """Run a connection test as a provider call: no pooled connection held across it, and seen in flight."""
+    check_test_input(instance, query=query, url=url)
     await release_session(db)
     track_request(raw_request, endpoint=TEST_ENDPOINT, model=instance.name, provider=instance.provider)
-    if instance.kind == "search" and instance.provider in SEARCH_PROVIDERS_WITHOUT_ADAPTER:
-        response = await _test_with_old_client(config, instance.name, entry, str(query))
-    else:
-        response = await _test_with_library(instance, query=query, url=url)
-    logger.info(
-        "Connection test of %s instance '%s': %s",
-        instance.kind,
-        instance.name,
-        "ok" if response.ok else f"failed ({response.error})",
-    )
-    return response
+    return await run_connection_test(config, instance, entry, query=query, url=url)
 
 
 @router.post("/test")
@@ -689,20 +488,9 @@ async def test_unsaved_search_tool(
     came back, never the results or the page.
     """
     name = request.name.strip()
-    entry = _entry(request)
-    _validate_entry(name, entry, kind=request.kind, inherited_api_base=config.web_search_url)
-    _check_write_rules(
-        config,
-        name,
-        entry,
-        kind=request.kind,
-        sets_name=True,
-        sets_options=request.options is not None,
-        sets_fetch_tool=True,
-    )
-    _check_name_is_free(config, name, request.kind)
-    instance = instance_from_entry(request.kind, name, entry)
-    return await _run_test(raw_request, db, config, instance, entry, query=request.query, url=request.url)
+    entry = request.to_entry()
+    instance = unsaved_instance_to_test(config, name, entry, kind=request.kind)
+    return await _dispatch_test(raw_request, db, config, instance, entry, query=request.query, url=request.url)
 
 
 @router.post("/{name}/test")
@@ -724,18 +512,5 @@ async def test_search_tool(
         await refresh_search_tool_cache(db, config)
     except DATABASE_ERRORS:
         logger.warning("Search tool overlay refresh failed before testing '%s'; testing the loaded one", name)
-    if (search := effective_search_instances(config).get(name)) is not None:
-        entry = config.search_tools[name]
-        return await _run_test(raw_request, db, config, search, entry, query=request.query, url=request.url)
-    if name == BUILTIN_FETCH:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"{BUILTIN_FETCH}, the built-in fetcher, has no connection test yet: it arrives when web fetch "
-                "runs on the fetch instances."
-            ),
-        )
-    if (fetch := effective_fetch_instances(config).get(name)) is not None:
-        entry = config.fetch_tools[name]
-        return await _run_test(raw_request, db, config, fetch, entry, query=request.query, url=request.url)
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No search or fetch instance '{name}'.")
+    instance, entry = instance_to_test(config, name)
+    return await _dispatch_test(raw_request, db, config, instance, entry, query=request.query, url=request.url)

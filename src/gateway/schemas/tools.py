@@ -213,6 +213,7 @@ class StoredSearchToolSchema(pydantic.BaseModel):
         decryptable: bool = True,
         shadows_config: bool = False,
     ) -> "StoredSearchToolSchema":
+        """The public view of a stored row: never the key, only its last four characters."""
         return cls(**row.to_public_dict(), decryptable=decryptable, shadows_config=shadows_config)
 
 
@@ -301,6 +302,18 @@ class CreateSearchToolRequest(pydantic.BaseModel):
         default=None,
         description="Provider-native request fields used as defaults (e.g. exa's 'type', searxng's 'engines').",
     )
+
+    def to_entry(self) -> dict[str, Any]:
+        """The request as a configuration file entry, the shape the checks and the overlay read."""
+        fetch_tool = self.fetch_tool.strip() if self.fetch_tool is not None else None
+        return {
+            "provider": self.provider,
+            "fetch_tool": fetch_tool,
+            "api_base": self.api_base,
+            "api_key": self.api_key,
+            "timeout": self.timeout,
+            "options": self.options,
+        }
 
 
 class UpdateSearchToolRequest(pydantic.BaseModel):
