@@ -608,13 +608,13 @@ export function OverviewPage({
     noneCapped: "No capped budgets",
     // A deployment budget enforced through a scoped budget is named after what
     // it caps when nobody named it, the way the ceilings strip names its rows.
-    // No organization or workspace roster is loaded on this page, so the
-    // labels fall back to their generic forms.
+    // No roster is loaded here, and a deployment budget can cap any tenant's
+    // organization, so the labels stay generic rather than naming the caller's.
     nameOf: (worst) =>
       worst.scope_type
         ? scopeLabel(
             { scope_type: worst.scope_type, scope_id: worst.scope_id ?? "" },
-            { organizationName: "This organization", workspaces: [] },
+            { organizationName: "An organization", workspaces: [] },
           )
         : undefined,
   })

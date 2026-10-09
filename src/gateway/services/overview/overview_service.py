@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from gateway.exceptions.organizations_exceptions import NotAuthorizedError, WorkspaceNotFoundError
 from gateway.models.tenancy import Organization
 from gateway.models.tenancy import User as TenancyUser
-from gateway.repositories.overview.overview_repository import Allocation, OverviewRepository
+from gateway.repositories.overview.overview_repository import Allocation, CeilingRollup, OverviewRepository
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.workspace_service import WorkspaceService
@@ -75,15 +75,19 @@ def _utilization(row: Allocation) -> float:
     return 1.0 if row.spent > 0 else 0.0
 
 
-def judge(rows: list[Allocation], *, total_count: int) -> AllocationHealth:
-    """Reduce capped rows to counts and the worst of them."""
+def judge(rows: list[Allocation], *, total_count: int, ceilings: CeilingRollup | None = None) -> AllocationHealth:
+    """Reduce capped rows, and any ceilings the database already reduced, to counts and the worst of them."""
 
     scored = [(row, _utilization(row)) for row in rows]
-    worst_row = max(scored, key=lambda pair: pair[1], default=None)
+    if ceilings is not None and ceilings.worst is not None:
+        scored_worst = [*scored, (ceilings.worst, _utilization(ceilings.worst))]
+    else:
+        scored_worst = scored
+    worst_row = max(scored_worst, key=lambda pair: pair[1], default=None)
     return AllocationHealth(
-        over_count=sum(1 for _, pct in scored if pct >= 1),
-        near_count=sum(1 for _, pct in scored if BUDGET_WARN <= pct < 1),
-        capped_count=len(rows),
+        over_count=sum(1 for _, pct in scored if pct >= 1) + (ceilings.over_count if ceilings else 0),
+        near_count=sum(1 for _, pct in scored if BUDGET_WARN <= pct < 1) + (ceilings.near_count if ceilings else 0),
+        capped_count=len(rows) + (ceilings.capped_count if ceilings else 0),
         total_count=total_count,
         worst=(
             WorstAllocation(
@@ -156,13 +160,17 @@ class OverviewService:
             budgets = judge(
                 await self._repository.budget_allocations(owner_organization_id=None),
                 total_count=await self._repository.count_budgets(owner_organization_id=None),
+                ceilings=await self._repository.ceiling_rollup(owner_organization_id=None, warn_at=BUDGET_WARN),
             )
 
         ceilings = None
         if await self._manages_spend(identity, organization):
             ceilings = judge(
-                await self._repository.ceiling_allocations(organization.id),
+                [],
                 total_count=await self._repository.count_ceilings(organization.id),
+                ceilings=await self._repository.ceiling_rollup(
+                    owner_organization_id=organization.id, warn_at=BUDGET_WARN
+                ),
             )
 
         return OverviewSummary(

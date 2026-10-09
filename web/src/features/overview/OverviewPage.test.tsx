@@ -594,6 +594,33 @@ describe("OverviewPage", () => {
     ).toBeInTheDocument()
   })
 
+  it("does not name a deployment budget's organization ceiling after the caller's organization", async () => {
+    // A deployment budget can cap any tenant's organization, so the tile keeps
+    // the label generic instead of claiming the caller's own.
+    mockApi({
+      overview: {
+        budgets: strip({
+          near_count: 1,
+          worst: {
+            budget_id: "b-org-cap",
+            name: null,
+            spent: 9,
+            allocated: 10,
+            scope_type: "organization",
+            scope_id: "4c1f0e2a-7a77-4d0f-9b35-3c1b6f7c2d11",
+          },
+        }),
+      },
+    })
+    renderPage(<OverviewPage />)
+    expect(
+      await screen.findByRole("progressbar", {
+        name: "Worst budget usage: An organization (whole organization)",
+      }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/This organization/)).not.toBeInTheDocument()
+  })
+
   it("summarizes provider health and surfaces problems in the status strip", async () => {
     mockApi({
       health: {
