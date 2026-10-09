@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core import error_codes
 from gateway.core.database import DATABASE_ERRORS
-from gateway.core.metered_pricing import estimate_metered_cost
+from gateway.core.metered_pricing import estimate_metered_cost, priced_per_request
 from gateway.log_config import logger
 from gateway.metrics import REGISTRY, Counter
 from gateway.models.budgets import (
@@ -41,7 +41,7 @@ from gateway.services.budgets._scoped_enforcement import (
 from gateway.services.budgets._scoped_enforcement import release as release_scoped
 from gateway.services.budgets._scoped_enforcement import reserve as reserve_scoped
 from gateway.services.budgets._scoped_enforcement import settle as settle_scoped
-from gateway.services.pricing_service import find_model_pricing, is_free_pricing
+from gateway.services.pricing_service import find_model_pricing, is_free_pricing, search_unit_cost
 from gateway.services.provider_kwargs import provider_key
 from gateway.types.budget_state import BudgetState
 
@@ -395,6 +395,18 @@ def estimate_cost(
         estimated_output_tokens=output_tokens,
         cache_write_ttl=cache_write_ttl,
     )
+
+
+def rerank_estimate(pricing: ModelPricing | None, *, prompt_chars: int) -> Decimal:
+    """Upper bound a rerank request holds against its budgets before dispatch.
+
+    A per-request rate holds one search unit: the provider decides how many a
+    query bills, one is the floor, and settlement reconciles the rest. A
+    per-token rate holds the input tokens estimated from the query and documents.
+    """
+    if priced_per_request(pricing):
+        return search_unit_cost(1, pricing)
+    return estimate_cost(pricing, prompt_chars=prompt_chars, max_output_tokens=None, default_output_tokens=0)
 
 
 async def _held_handle(

@@ -474,6 +474,40 @@ def test_a_foreign_workspaces_alias_names_are_not_listed(
     assert "acme-confidential-summarizer" in _catalog_as(client, world, "superuser")
 
 
+def _grouped_selectors_as(client: TestClient, world: _World, who: str) -> set[str]:
+    client.cookies.set(SESSION_COOKIE_NAME, world.sessions[who])
+    try:
+        response = client.get(f"{API_ROOT}/catalog/models")
+        assert response.status_code == status.HTTP_200_OK, response.text
+        return {selector for model in response.json()["models"] for selector in model["selectors"]}
+    finally:
+        client.cookies.clear()
+
+
+def test_an_alias_leaves_its_organization_key_target_in_the_grouped_catalog(
+    client: TestClient, master_key_header: dict[str, str], world: _World
+) -> None:
+    """The grouped catalog lists real models and never an alias, so aliasing one must not hide it there.
+
+    The flat listing still trades the target for the alias, which is the alias
+    rule, and the grouped catalog keeps the model whether or not an alias exists.
+    """
+    created = client.post(
+        f"{API_ROOT}/aliases", json={"name": "fast", "target": _OPENAI_MODEL}, headers=master_key_header
+    )
+    assert created.status_code == status.HTTP_200_OK, created.text
+
+    assert _OPENAI_MODEL in _grouped_selectors_as(client, world, "superuser")
+    flat = _catalog_as(client, world, "superuser")
+    assert "fast" in flat
+    assert _OPENAI_MODEL not in flat
+
+    deleted = client.delete(f"{API_ROOT}/aliases/fast", headers=master_key_header)
+    assert deleted.status_code == status.HTTP_204_NO_CONTENT, deleted.text
+    assert _OPENAI_MODEL in _grouped_selectors_as(client, world, "superuser")
+    assert _OPENAI_MODEL in _catalog_as(client, world, "superuser")
+
+
 def test_a_provider_whose_only_key_will_not_decrypt_is_withheld(
     client: TestClient, world: _World, db_session_factory: Callable[[], Session]
 ) -> None:

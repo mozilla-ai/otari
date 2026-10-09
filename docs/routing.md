@@ -29,6 +29,9 @@ usage record the models that were attempted.
 
 `select` chooses where a request starts. `on_failure` lists what to try after a
 retryable failure.
+A candidate whose provider has no credential configured counts as one, so the
+policy moves on to the next. When no candidate has a credential, the request is
+refused with `424 provider_not_configured`.
 
 ```yaml
 routing:

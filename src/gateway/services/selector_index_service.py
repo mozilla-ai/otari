@@ -253,6 +253,8 @@ async def rebuild_selector_index(
         cached_only=not fetch,
         model_provider=model_provider,
         include_offered=False,
+        # Indexed by real offering, so an aliased model keeps its selectors.
+        withhold_alias_targets=False,
     )
     catalog = (
         await load_models_dev_catalog(config, serve_stale=background_catalog_enabled(config))

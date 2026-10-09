@@ -329,8 +329,8 @@ export function useRemoveOrganizationMember() {
 }
 
 // The dashboard's one write path onto the roster: lands `invited`, and the
-// response always carries `accept_link` (whether or not `mail_sent` is true),
-// so the operator can share it themselves.
+// response carries `accept_link` only when `mail_sent` is false, for the
+// operator to share themselves.
 export function useInviteOrganizationMember() {
   const queryClient = useQueryClient()
   return useMutation({

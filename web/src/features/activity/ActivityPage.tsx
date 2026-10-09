@@ -26,6 +26,10 @@ import {
 import { FilterMultiComboBox } from "@/design-system/navigation/FilterMultiComboBox"
 import { FilterSelect } from "@/design-system/navigation/FilterSelect"
 import {
+  type PricingUnit,
+  pricingUnitForEndpoint,
+} from "@/features/models/pricingUnit"
+import {
   type ManualRates,
   SetPriceDialog,
 } from "@/features/models/SetPriceDialog"
@@ -783,6 +787,7 @@ export function ActivityPage() {
   // unset when that dialog is closed. Distinct from `priceOpen` above, which
   // reprices already-logged imported rows rather than setting a model's price.
   const [modelPriceKey, setModelPriceKey] = useState<string>()
+  const [modelPriceUnit, setModelPriceUnit] = useState<PricingUnit>("tokens")
   const [expandedId, setExpandedId] = useState<string>()
 
   // Inline accordion panel under the clicked row (DataTable renderDetail).
@@ -809,8 +814,9 @@ export function ActivityPage() {
           entry={entry}
           onPriceModel={
             scope.isDeploymentWide
-              ? (model) => {
+              ? (model, endpoint) => {
                   setPriceOpenCount((count) => count + 1)
+                  setModelPriceUnit(pricingUnitForEndpoint(endpoint))
                   setModelPriceKey(model)
                 }
               : null
@@ -885,6 +891,7 @@ export function ActivityPage() {
           rates.cache_read_price_per_million ?? null,
         cache_write_price_per_million:
           rates.cache_write_price_per_million ?? null,
+        unit: rates.unit ?? "tokens",
       },
       { onSuccess: () => setModelPriceKey(undefined) },
     )
@@ -1334,6 +1341,8 @@ export function ActivityPage() {
         submitLabel="Price this model"
         collectModelKey
         initialModelKey={modelPriceKey ?? ""}
+        chooseUnit
+        initialUnit={modelPriceUnit}
         title="Price this model"
         description={() =>
           "Set what this model costs, taken from the request you were looking at. Requests from now on are costed at these rates and counted against budgets; rows already logged keep the cost they were served with."

@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -284,6 +284,76 @@ class TestDiscoverAllModels:
         assert len(result) == 2
         assert result[0][0] == "openai"
         assert result[0][1].id == "gpt-4o"
+
+    @staticmethod
+    def _paged_listing(catalog: list[Model]) -> Callable[..., Awaitable[list[Model]]]:
+        """A listing that pages like Cohere's: ``page_size`` models, 20 by default, and no second page."""
+
+        async def fake_alist(**kwargs: Any) -> list[Model]:
+            return catalog[: int(kwargs.get("page_size", 20))]
+
+        return fake_alist
+
+    @pytest.mark.asyncio
+    async def test_cohere_discovery_reads_past_the_default_page(self) -> None:
+        """Cohere lists 20 models a page; discovery asks for the whole listing so rerank models are offered."""
+        catalog = [_make_model(f"command-{n:02d}", owned_by="cohere") for n in range(40)]
+        catalog += [_make_model("rerank-v3.5", owned_by="cohere"), _make_model("embed-v4.0", owned_by="cohere")]
+        config = self._make_config(providers={"cohere": {"api_key": "co-test"}})
+        listing = AsyncMock(side_effect=self._paged_listing(catalog))
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache") as mock_cache_fn,
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", listing),
+            patch("gateway.services.model_discovery_service.get_provider_kwargs", return_value={"api_key": "co-test"}),
+        ):
+            mock_cache_fn.return_value = ModelCache()
+            result = await discover_all_models(config)
+
+        assert [model.id for _, model in result] == [model.id for model in catalog]
+        assert listing.await_args is not None
+        assert listing.await_args.kwargs["page_size"] == 1000
+
+    @pytest.mark.asyncio
+    async def test_other_providers_list_without_a_page_size(self) -> None:
+        """The page-size shim is Cohere's; a provider that does not page gets the plain call."""
+        config = self._make_config(providers={"openai": {"api_key": "sk-test"}})
+        listing = AsyncMock(return_value=[_make_model("gpt-4o")])
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache") as mock_cache_fn,
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", listing),
+            patch("gateway.services.model_discovery_service.get_provider_kwargs", return_value={"api_key": "sk-test"}),
+        ):
+            mock_cache_fn.return_value = ModelCache()
+            await discover_all_models(config)
+
+        assert listing.await_args is not None
+        assert "page_size" not in listing.await_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_configured_page_size_overrides_the_cohere_default(self) -> None:
+        """A ``page_size`` an instance configures wins over the shim instead of colliding with it."""
+        config = self._make_config(providers={"cohere": {"api_key": "co-test"}})
+        listing = AsyncMock(return_value=[_make_model("rerank-v3.5", owned_by="cohere")])
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache") as mock_cache_fn,
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", listing),
+            patch(
+                "gateway.services.model_discovery_service.get_provider_kwargs",
+                return_value={"api_key": "co-test", "page_size": 50},
+            ),
+        ):
+            mock_cache_fn.return_value = ModelCache()
+            result = await discover_all_models(config)
+
+        assert [model.id for _, model in result] == ["rerank-v3.5"]
+        assert listing.await_args is not None
+        assert listing.await_args.kwargs["page_size"] == 50
 
     @pytest.mark.asyncio
     async def test_uses_cache_on_hit(self) -> None:

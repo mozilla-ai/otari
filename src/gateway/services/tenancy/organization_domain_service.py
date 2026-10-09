@@ -301,7 +301,8 @@ class OrganizationDomainService:
 
         - An unverified address is skipped. Otherwise signing up as
           ``anyone@theircompany.com`` without ever reading the mail would be
-          enough to get in.
+          enough to get in. So is a vouched one (``email_vouched_at``), or an
+          admin of any organization could invite that address and claim it.
         - A claim that is disabled, whose DNS proof has not landed, or whose
           proof has aged out past ``DOMAIN_PROOF_TTL``, is skipped.
         - An existing membership is returned untouched. A ``suspended`` row
@@ -321,7 +322,9 @@ class OrganizationDomainService:
         # operator, which signs in through the same route. It has no domain to
         # match and no verification to have done, so it falls out here rather
         # than at the address check below.
-        if user.email is None or user.email_verified_at is None:
+        # A vouched address is one an organization admin asserted, not one the
+        # person proved, and any organization can vouch for any address.
+        if user.email is None or user.email_verified_at is None or user.email_vouched_at is not None:
             return None
 
         domain = email_domain(user.email)

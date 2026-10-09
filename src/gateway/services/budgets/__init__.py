@@ -13,6 +13,7 @@ from gateway.services.budgets._reservations import (
     reconcile_reservation,
     record_external_spend,
     refund_reservation,
+    rerank_estimate,
     reserve_budget,
 )
 from gateway.services.budgets._retiming import cadence_of, retime_ceilings_for_budget
@@ -31,6 +32,7 @@ __all__ = [
     "budget_window",
     "cadence_of",
     "estimate_cost",
+    "rerank_estimate",
     "estimate_tokens",
     "get_budget_state",
     "increase_reservation",

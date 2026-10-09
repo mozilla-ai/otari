@@ -606,6 +606,17 @@ export function OverviewPage({
   const budget = allocationStrip(summary.data?.budgets, {
     none: "No budgets configured",
     noneCapped: "No capped budgets",
+    // A deployment budget enforced through a scoped budget is named after what
+    // it caps when nobody named it, the way the ceilings strip names its rows.
+    // No roster is loaded here, and a deployment budget can cap any tenant's
+    // organization, so the labels stay generic rather than naming the caller's.
+    nameOf: (worst) =>
+      worst.scope_type
+        ? scopeLabel(
+            { scope_type: worst.scope_type, scope_id: worst.scope_id ?? "" },
+            { organizationName: "An organization", workspaces: [] },
+          )
+        : undefined,
   })
   const providerHealth = providerHealthStatus(health.data)
 
@@ -717,7 +728,9 @@ export function OverviewPage({
               : isEmpty
                 ? "NO BUDGETS SET"
                 : summary.data?.budgets
-                  ? "no budgets set"
+                  ? summary.data.budgets.total_count === 0
+                    ? "no budgets set"
+                    : "no budget caps spend"
                   : "no data"
           }
           // `SpendMeter`, not the plain accent `Meter`: a one-color bar would

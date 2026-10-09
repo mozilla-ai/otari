@@ -222,7 +222,7 @@ export function bootstrap(
     // clearing a list it does not care about.
     oauth_providers: [],
     mail_ready: false,
-    feedback_enabled: false,
+    feedback_enabled: true,
     // Off by default, matching the config default; the public-catalog tests
     // turn it on.
     public_catalog: false,
@@ -751,6 +751,7 @@ export function orgProviderModel(
     cache_write_1h_price_per_million: null,
     price_source: "defaults",
     pricing_id: null,
+    unit: "tokens",
     enabled: true,
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: null,
@@ -775,6 +776,9 @@ export function orgProviderKey(
     // The default is a key this deployment can actually read. A test wanting the
     // other case says so, because that is the state the dashboard has to show.
     usable: true,
+    // Never refreshed: the key offers no rows and is unnarrowed.
+    offered_count: 0,
+    serving_count: 0,
     archived_at: null,
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: null,

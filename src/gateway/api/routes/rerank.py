@@ -14,9 +14,9 @@ from gateway.api.routes._passthrough import BillingMeters, run_passthrough
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
-from gateway.services.budgets import estimate_cost
+from gateway.services.budgets import rerank_estimate
 from gateway.services.log_writer import LogWriter
-from gateway.services.pricing_service import input_token_cost
+from gateway.services.pricing_service import billed_search_units, rerank_cost, rerank_meters
 from gateway.services.provider_kwargs import ResolvedProvider
 
 router = APIRouter(tags=["rerank"])
@@ -48,37 +48,29 @@ async def create_rerank(
 ) -> Any:
     """Rerank documents by relevance to a query.
 
+    Billing: a model priced per request (``unit: requests``) is charged per
+    search unit the provider reports, or for one unit when it reports none. A
+    model priced per token is charged on the input tokens the provider reports.
+
     Authentication modes:
     - Master key + user field: Use specified user (must exist)
     - API key + user field: Use specified user (must exist)
     - API key without user field: Use the shared "default" user
     """
-    # Rerank bills on total tokens (input only). Estimate from query + documents.
     prompt_chars = len(request.query) + sum(len(doc) for doc in request.documents)
 
     def estimate(pricing: ModelPricing | None) -> Decimal:
-        return estimate_cost(pricing, prompt_chars=prompt_chars, max_output_tokens=None, default_output_tokens=0)
+        return rerank_estimate(pricing, prompt_chars=prompt_chars)
 
     def usage_tokens(result: RerankResponse) -> tuple[int | None, int | None, int | None]:
-        total_tokens = result.usage.total_tokens if result.usage else None
+        total_tokens = _total_tokens(result)
         return (total_tokens, 0, total_tokens)
 
     def compute_cost(result: RerankResponse, pricing: ModelPricing | None) -> Decimal | None:
-        total_tokens = result.usage.total_tokens if result.usage else None
-        if result.usage and pricing and total_tokens:
-            return input_token_cost(total_tokens, pricing)
-        return None
+        return rerank_cost(pricing, search_units=_search_units(result), total_tokens=_total_tokens(result))
 
     def compute_meters(result: RerankResponse, pricing: ModelPricing | None, cost: Decimal) -> BillingMeters | None:
-        total_tokens = result.usage.total_tokens if result.usage else None
-        if not pricing or not total_tokens:
-            return None
-        rate = float(pricing.input_price_per_million)
-        breakdown = [{"meter": "input", "units": total_tokens, "rate_per_million": rate, "cost": float(cost)}]
-        # See embeddings: the canonical meter name is what the billed-token SQL and
-        # the dashboard read. Rerank logs the same count as its prompt tokens, so
-        # this reports the value the fallback already produced.
-        return {"total_input_tokens": total_tokens}, breakdown
+        return rerank_meters(pricing, search_units=_search_units(result), total_tokens=_total_tokens(result), cost=cost)
 
     async def call_provider(resolved: ResolvedProvider) -> RerankResponse:
         rerank_kwargs: dict[str, Any] = {
@@ -114,3 +106,12 @@ async def create_rerank(
         compute_meters=compute_meters,
     )
     return outcome.result
+
+
+def _total_tokens(result: RerankResponse) -> int | None:
+    """The tokens the provider reported for ``result``, if it reported any."""
+    return result.usage.total_tokens if result.usage else None
+
+
+def _search_units(result: RerankResponse) -> int:
+    return billed_search_units(result.meta.billed_units if result.meta else None)

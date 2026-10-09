@@ -648,10 +648,10 @@ describe("OrganizationMembersPage", () => {
     ).toBeInTheDocument()
   })
 
-  it("confirms the send, and still offers the link, when the email went out", async () => {
-    // The link is offered either way, so an operator can forward it over chat
-    // too. The acknowledgement is one way out of two here, since a delivered
-    // invitation leaves nothing behind that only this dialog holds.
+  it("confirms the send, and offers no link, when the email went out", async () => {
+    // A delivered link goes to the invitee's mailbox alone, so the server
+    // returns none. The acknowledgement is one way out of two here, since a
+    // delivered invitation leaves nothing behind that only this dialog holds.
     mockApi({
       members: [OWNER],
       inviteResult: {
@@ -661,7 +661,7 @@ describe("OrganizationMembersPage", () => {
         role: "member",
         status: "invited",
         mail_sent: true,
-        accept_link: "/#/accept-invitation?token=abc123",
+        accept_link: null,
         expires_at: "2026-01-08T00:00:00+00:00",
         created_at: "2026-01-01T00:00:00+00:00",
       },
@@ -684,11 +684,7 @@ describe("OrganizationMembersPage", () => {
     )
     expect(within(sent).getByText("ada@example.com")).toBeInTheDocument()
     expect(screen.queryByText(/Otari did not send the email/)).toBeNull()
-    expect(
-      screen.getByText(
-        `${window.location.origin}${window.location.pathname}#/accept-invitation?token=abc123`,
-      ),
-    ).toBeInTheDocument()
+    expect(screen.queryByText(/#\/accept-invitation/)).toBeNull()
 
     await user.keyboard("{Escape}")
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
@@ -710,7 +706,7 @@ describe("OrganizationMembersPage", () => {
       role: "member",
       status: "invited",
       mail_sent: mailSent,
-      accept_link: `/#/accept-invitation?token=${email}`,
+      accept_link: mailSent ? null : `/#/accept-invitation?token=${email}`,
       expires_at: "2026-01-08T00:00:00+00:00",
       created_at: "2026-01-01T00:00:00+00:00",
     })

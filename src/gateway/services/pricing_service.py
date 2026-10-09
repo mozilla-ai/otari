@@ -1,9 +1,10 @@
 """Shared pricing lookup utilities."""
 
 import uuid
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from math import ceil
 from typing import NamedTuple
 
 from genai_prices import Usage, calc_price
@@ -12,7 +13,7 @@ from sqlalchemy import case, distinct, func, inspect, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
-from gateway.core.metered_pricing import meter_cost, quantize_cost, request_charge_line, to_decimal
+from gateway.core.metered_pricing import meter_cost, priced_per_request, quantize_cost, request_charge_line, to_decimal
 from gateway.log_config import logger
 from gateway.models.pricing import ModelPricing, OrganizationModelPricing, PriceSource
 
@@ -878,6 +879,84 @@ def per_request_meters(cost: Decimal) -> PerRequestMeters | None:
     if not cost:
         return None
     return {"requests": 1}, [request_charge_line(cost)]
+
+
+SEARCH_UNITS_METER = "search_units"
+
+
+def search_unit_cost(units: int, pricing: ModelPricing | None) -> Decimal:
+    """USD for ``units`` search units at a per-request rate.
+
+    Rerank convention: a provider that bills by search unit (one query over a
+    batch of documents) reports how many it billed, and a rate whose ``unit``
+    is ``requests`` prices each one at ``input_price_per_million / 1e6``. A
+    provider that reports no count is billed one unit, the request itself, as
+    the other per-request routes are. Unpriced settles at $0, as
+    :func:`flat_request_cost` does.
+    """
+    return max(units, 0) * flat_request_cost(pricing)
+
+
+def billed_search_units(billed_units: Mapping[str, float] | None) -> int:
+    """How many search units a rerank request bills, at least one.
+
+    Reported under ``meta.billed_units`` by providers that bill rerank per query
+    batch rather than per token. A fraction rounds up, because the provider
+    billed it, and a request that reports none bills one unit: the request itself.
+    """
+    reported = billed_units.get("search_units") if billed_units else None
+    if reported is None or reported <= 0:
+        return 1
+    return ceil(reported)
+
+
+def rerank_cost(pricing: ModelPricing | None, *, search_units: int, total_tokens: int | None) -> Decimal | None:
+    """USD a rerank request costs, or ``None`` when nothing it reported is priced.
+
+    A per-request rate bills the search units the provider reported (see
+    :func:`search_unit_cost`). A per-token rate bills the input tokens the
+    provider reported, and a provider that reports none leaves the row unpriced.
+    """
+    if priced_per_request(pricing):
+        return search_unit_cost(search_units, pricing)
+    if pricing and total_tokens:
+        return input_token_cost(total_tokens, pricing)
+    return None
+
+
+def rerank_meters(
+    pricing: ModelPricing | None, *, search_units: int, total_tokens: int | None, cost: Decimal
+) -> PerRequestMeters | None:
+    """Billing meters and charge lines for a rerank request priced by :func:`rerank_cost`."""
+    if priced_per_request(pricing):
+        return search_unit_meters(search_units, cost)
+    if not pricing or not total_tokens:
+        return None
+    rate = float(pricing.input_price_per_million)
+    breakdown: list[dict[str, float | int | str]] = [
+        {"meter": "input", "units": total_tokens, "rate_per_million": rate, "cost": float(cost)}
+    ]
+    # See embeddings: the canonical meter name is what the billed-token SQL and
+    # the dashboard read.
+    return {"total_input_tokens": total_tokens}, breakdown
+
+
+def search_unit_meters(units: int, cost: Decimal) -> PerRequestMeters | None:
+    """Billing meters and charge line for ``units`` search units costing ``cost``.
+
+    The line carries ``unit_rate`` like every per-request line, so the
+    dashboard renders it on that branch; the meter name says what was counted.
+    ``None`` when free, for the reason :func:`per_request_meters` gives.
+    """
+    if not cost or units <= 0:
+        return None
+    line: dict[str, float | int | str] = {
+        "meter": SEARCH_UNITS_METER,
+        "units": units,
+        "unit_rate": float(cost / units),
+        "cost": float(cost),
+    }
+    return {SEARCH_UNITS_METER: units}, [line]
 
 
 GATEWAY_TOOL_PRICING_PROVIDER = "otari"

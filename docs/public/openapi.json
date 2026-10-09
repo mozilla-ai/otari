@@ -7348,8 +7348,16 @@
         "description": "What issuing an invitation produces, and whether the email actually went out.",
         "properties": {
           "accept_link": {
-            "title": "Accept Link",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The link to share with the invitee yourself, set only when mail_sent is false. A delivered link goes to the invitee's mailbox alone, so the inviter cannot open it as them.",
+            "title": "Accept Link"
           },
           "created_at": {
             "format": "date-time",
@@ -7371,7 +7379,7 @@
             "type": "string"
           },
           "mail_sent": {
-            "description": "Whether the invitation email was actually dispatched. False when mail is not configured, or the send itself failed; accept_link is set either way, so the operator can share it themselves rather than the invitation being a dead end.",
+            "description": "Whether the invitation email was actually dispatched. False when mail is not configured, or the send itself failed.",
             "title": "Mail Sent",
             "type": "boolean"
           },
@@ -7397,7 +7405,6 @@
           "email",
           "role",
           "mail_sent",
-          "accept_link",
           "expires_at",
           "created_at"
         ],
@@ -9468,7 +9475,7 @@
         "type": "object"
       },
       "OrgProviderKeyModelPublic": {
-        "description": "One offered model, with the rate the caller's organization is charged for it.\n\n``price_source`` says which rung of ``services.pricing_service`` answered:\n``organization`` for a rate an admin set, ``defaults`` for the\ncommunity-maintained rate this surface seeded or the genai-prices fallback,\n``deployment`` for the deployment's own price list, and None when nothing\nprices the model yet. ``pricing_id`` names the organization's own row where\nthere is one, so a client can edit that rate without re-deriving the key.",
+        "description": "One offered model, with the rate the caller's organization is charged for it.\n\n``price_source`` says which rung of ``services.pricing_service`` answered:\n``organization`` for a rate an admin set, ``defaults`` for the\ncommunity-maintained rate this surface seeded or the genai-prices fallback,\n``deployment`` for the deployment's own price list, and None when nothing\nprices the model yet. ``pricing_id`` names the organization's own row where\nthere is one, so a client can edit that rate without re-deriving the key.\n``unit`` says what the rates are per, as on a pricing row: tokens, requests\nor images, so a per-request rate is not read as a per-token one.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -9575,6 +9582,11 @@
               }
             ],
             "title": "Pricing Id"
+          },
+          "unit": {
+            "default": "tokens",
+            "title": "Unit",
+            "type": "string"
           },
           "updated_at": {
             "anyOf": [
@@ -9702,6 +9714,11 @@
             "title": "Name",
             "type": "string"
           },
+          "offered_count": {
+            "description": "How many models the organization offers on this key. Zero means the key has never been refreshed, so it is unnarrowed and reaches whatever its provider serves.",
+            "title": "Offered Count",
+            "type": "integer"
+          },
           "organization_id": {
             "format": "uuid",
             "title": "Organization Id",
@@ -9710,6 +9727,11 @@
           "provider": {
             "title": "Provider",
             "type": "string"
+          },
+          "serving_count": {
+            "description": "How many of the offered models have their serving switch on. A key offering models and serving none refuses every request through it until one is switched on.",
+            "title": "Serving Count",
+            "type": "integer"
           },
           "updated_at": {
             "anyOf": [
@@ -9736,6 +9758,8 @@
           "name",
           "is_org_default",
           "usable",
+          "offered_count",
+          "serving_count",
           "created_at"
         ],
         "title": "OrgProviderKeyPublic",
@@ -34641,7 +34665,7 @@
     },
     "/api/v1/rerank": {
       "post": {
-        "description": "Rerank documents by relevance to a query.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+        "description": "Rerank documents by relevance to a query.\n\nBilling: a model priced per request (``unit: requests``) is charged per\nsearch unit the provider reports, or for one unit when it reports none. A\nmodel priced per token is charged on the input tokens the provider reports.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
         "operationId": "rerank-create_rerank",
         "requestBody": {
           "content": {

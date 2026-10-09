@@ -1,14 +1,21 @@
 """Unit tests for the per-key model access-control matcher and validation."""
 
+import uuid
+from collections.abc import Iterator
+
 import pytest
 
 from gateway.core.config import GatewayConfig
+from gateway.core.error_codes import MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
 from gateway.services.model_access import (
     effective_allowlist,
     is_allowlist_subset,
     is_model_allowed,
+    org_model_refusal,
     validate_allowed_models,
 )
+from gateway.services.tenancy import org_provider_key_service as org_store
+from gateway.services.tenancy.org_provider_key_service import KeyOffer
 
 
 class _Key:
@@ -119,3 +126,73 @@ def test_validate_passthrough_and_dedup() -> None:
 def test_validate_rejects_bad_entries(bad: str) -> None:
     with pytest.raises(ValueError):
         validate_allowed_models(GatewayConfig(), [bad])
+
+
+# --- organization-key refusals ---------------------------------------------
+
+
+@pytest.fixture
+def workspace_id() -> Iterator[uuid.UUID]:
+    """A workspace whose overlay entries are cleared after the test."""
+    workspace_id = uuid.uuid4()
+    org_store._org_model_restrictions.clear()
+    org_store._org_key_offers.clear()
+    yield workspace_id
+    org_store._org_model_restrictions.clear()
+    org_store._org_key_offers.clear()
+
+
+def _narrow(workspace_id: uuid.UUID, *, served: list[str], offered: dict[str, bool] | None) -> None:
+    org_store._org_model_restrictions[(workspace_id, "openai")] = served
+    org_store._org_key_offers[(workspace_id, "openai")] = KeyOffer(key_name="primary", offered=offered)
+
+
+def test_an_unnarrowed_provider_refuses_nothing(workspace_id: uuid.UUID) -> None:
+    assert org_model_refusal(workspace_id, "openai", "gpt-4o", selector="openai:gpt-4o") is None
+
+
+def test_a_served_model_is_not_refused(workspace_id: uuid.UUID) -> None:
+    _narrow(workspace_id, served=["gpt-4o"], offered={"gpt-4o": True, "gpt-4o-mini": False})
+    assert org_model_refusal(workspace_id, "openai", "gpt-4o", selector="openai:gpt-4o") is None
+
+
+def test_a_model_switched_off_is_refused_as_not_serving(workspace_id: uuid.UUID) -> None:
+    _narrow(workspace_id, served=["gpt-4o"], offered={"gpt-4o": True, "gpt-4o-mini": False})
+    refusal = org_model_refusal(workspace_id, "openai", "gpt-4o-mini", selector="openai:gpt-4o-mini")
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (MODEL_NOT_SERVING, 403)
+    assert "offered on provider key 'primary' but not serving" in refusal.detail
+    assert "openai:gpt-4o-mini" in refusal.detail
+
+
+def test_a_model_no_key_offers_is_not_found(workspace_id: uuid.UUID) -> None:
+    _narrow(workspace_id, served=["gpt-4o"], offered={"gpt-4o": True})
+    refusal = org_model_refusal(workspace_id, "openai", "gpt-does-not-exist", selector="openai:gpt-does-not-exist")
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (MODEL_NOT_FOUND, 404)
+    assert "Provider key 'primary' does not offer 'openai:gpt-does-not-exist'" in refusal.detail
+
+
+def test_a_workspace_restriction_on_a_served_model_stays_not_allowed(workspace_id: uuid.UUID) -> None:
+    """The key serves it; this workspace chose not to reach it, which is a permission, not a switch."""
+    _narrow(workspace_id, served=["gpt-4o"], offered={"gpt-4o": True, "gpt-4o-mini": True})
+    refusal = org_model_refusal(workspace_id, "openai", "gpt-4o-mini", selector="fast")
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (MODEL_NOT_ALLOWED, 403)
+    assert refusal.detail == "Model 'fast' is not permitted for this API key."
+
+
+def test_a_restriction_on_a_key_offering_no_rows_stays_not_allowed(workspace_id: uuid.UUID) -> None:
+    _narrow(workspace_id, served=["gpt-4o"], offered=None)
+    refusal = org_model_refusal(workspace_id, "openai", "gpt-4o-mini", selector="openai:gpt-4o-mini")
+    assert refusal is not None
+    assert refusal.code == MODEL_NOT_ALLOWED
+
+
+def test_the_detail_names_the_selector_not_the_resolved_model(workspace_id: uuid.UUID) -> None:
+    """An alias exists partly to keep its target off the wire."""
+    _narrow(workspace_id, served=[], offered={"gpt-4o": False})
+    refusal = org_model_refusal(workspace_id, "openai", "gpt-4o", selector="fast")
+    assert refusal is not None
+    assert "fast" in refusal.detail
+    assert "gpt-4o" not in refusal.detail

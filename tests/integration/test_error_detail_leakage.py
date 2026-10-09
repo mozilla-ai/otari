@@ -21,15 +21,8 @@ def test_provider_error_does_not_leak_details(
     api_key_header: dict[str, str],
     test_user: dict[str, Any],
 ) -> None:
-    """Test that provider errors return a generic message without internal details."""
-    response = client.post(
-        f"{API_ROOT}/chat/completions",
-        json={
-            "model": "openai:nonexistent-model-xyz",
-            "messages": [{"role": "user", "content": "Hello"}],
-        },
-        headers=api_key_header,
-    )
+    """A failure that carries no safe signal keeps the generic detail, whatever its message said."""
+    response = _post_chat(client, api_key_header, RuntimeError("upstream exploded: token=sk-live-secret"))
     assert response.status_code == 502
     detail = response.json()["detail"]
     assert detail == "LLM provider error"
