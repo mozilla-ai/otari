@@ -254,6 +254,42 @@ def test_an_end_user_belongs_to_its_owners_organization_before_it_spends(
     assert "eu_alpha_customer" not in _listed(client, world, "beta_operator")
 
 
+def test_a_count_of_an_owners_end_users_counts_only_in_the_owners_organization(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """``include_total`` is how a service sizes its end users in one call, so it is scoped like the page.
+
+    A count is the one assertion here that has to be a number. The beta side is
+    what makes it mean something: beta's operator naming alpha's owner must get
+    zero, not alpha's figure.
+    """
+    session = db_session_factory()
+    try:
+        session.add_all(
+            [User(user_id=f"eu_alpha_{n}", parent_user_id=ALPHA_KEYED, external_id=f"customer-{n}") for n in range(3)]
+        )
+        session.add(User(user_id="eu_beta_0", parent_user_id=BETA_KEYED, external_id="customer-0"))
+        session.commit()
+    finally:
+        session.close()
+
+    def total(who: str, owner: str) -> str:
+        client.cookies.set(SESSION_COOKIE_NAME, world.sessions[who])
+        try:
+            response = client.get(
+                f"{API_ROOT}/users", params={"parent_user_id": owner, "limit": 1, "include_total": True}
+            )
+            assert response.status_code == status.HTTP_200_OK, response.text
+            return response.headers["Otari-Total-Count"]
+        finally:
+            client.cookies.clear()
+
+    assert total("alpha_operator", ALPHA_KEYED) == "3"
+    assert total("beta_operator", BETA_KEYED) == "1"
+    assert total("beta_operator", ALPHA_KEYED) == "0"
+    assert total("alpha_operator", BETA_KEYED) == "0"
+
+
 def test_one_identity_is_listed_in_every_organization_it_belongs_to(client: TestClient, world: _World) -> None:
     """The case a single ``users.organization_id`` column could not have held.
 
