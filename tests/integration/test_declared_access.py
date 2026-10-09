@@ -54,7 +54,9 @@ def _key(**overrides: Any) -> ApiKeyConfig:
     return ApiKeyConfig(**fields)
 
 
-def _config(base: GatewayConfig, *, budgets: dict[str, BudgetConfig] | None = None, **keys: ApiKeyConfig) -> GatewayConfig:
+def _config(
+    base: GatewayConfig, *, budgets: dict[str, BudgetConfig] | None = None, **keys: ApiKeyConfig
+) -> GatewayConfig:
     return base.model_copy(update={"budgets": BUDGETS if budgets is None else budgets, "api_keys": keys})
 
 
@@ -122,8 +124,13 @@ def test_a_restart_applies_the_same_config_without_a_second_row(test_config: Gat
         (first,) = _declared_keys(client)
         (first_ceiling,) = _key_ceilings(client, first["id"])
         # An edit made through the API, which config.yml overrides at the next start.
-        assert client.patch(f"{API_ROOT}/budgets/mlpa-global", json={"max_budget": 5}, headers=MASTER).status_code == 200
-        assert client.patch(f"{API_ROOT}/keys/{first['id']}", json={"is_service_key": False}, headers=MASTER).status_code == 200
+        assert (
+            client.patch(f"{API_ROOT}/budgets/mlpa-global", json={"max_budget": 5}, headers=MASTER).status_code == 200
+        )
+        assert (
+            client.patch(f"{API_ROOT}/keys/{first['id']}", json={"is_service_key": False}, headers=MASTER).status_code
+            == 200
+        )
 
     with _boot(config) as client:
         (second,) = _declared_keys(client)
