@@ -109,6 +109,7 @@ _SETTING_NAMES = frozenset(
         "provider_account_pepper",
         "provider_allow_private_hosts",
         "provider_endpoints_enabled",
+        "provider_max_retries",
         "providers",
         "public_base_url",
         "public_catalog",

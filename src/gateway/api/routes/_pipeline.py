@@ -231,6 +231,7 @@ from gateway.services.provider_kwargs import (
     credential_ladder_exhausted,
     provider_key,
     resolve_provider_selector,
+    with_provider_retries,
 )
 from gateway.services.providers import owned_endpoint_http_client
 from gateway.services.routing import (
@@ -4777,6 +4778,20 @@ async def _prepared(
         raise domain_error(adapter, exc) from exc
 
 
+def _failover_kwargs(adapter: FormatAdapter[Any, Any]) -> Callable[[Attempt, dict[str, Any]], dict[str, Any]]:
+    """Builds each candidate's kwargs for a plan that can fall over, with no client retries by default.
+
+    A provider SDK that retries a 429 and honors its ``Retry-After`` spends seconds
+    before the walk may try the next candidate, which is the remedy the policy
+    already names. A retry count the instance or the deployment configured wins.
+    """
+
+    def _build(attempt: Attempt, base_request_fields: dict[str, Any]) -> dict[str, Any]:
+        return with_provider_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, base_request_fields), 0)
+
+    return _build
+
+
 def _model_admission(ctx: RequestContext) -> AdmitAttempt | None:
     """Admits each candidate of a walk under the ``per: model`` rate limits, skipping a full one."""
     grant = ctx.rate_limit_grant
@@ -4887,7 +4902,7 @@ async def run_single_attempt_stream(
                     run_attempt=_open_candidate,
                     max_tool_iterations=tool_ctx.max_tool_iterations,
                     policy_name=ctx.plan.policy_name,
-                    build_kwargs=adapter.local_attempt_kwargs,
+                    build_kwargs=_failover_kwargs(adapter),
                     prepare_kwargs=prepare_kwargs,
                     admit_attempt=_model_admission(ctx),
                     on_absorbed=_absorbed,
@@ -5662,7 +5677,7 @@ async def run_standalone_non_stream(
                     run_attempt=_run_candidate,
                     max_tool_iterations=tool_ctx.max_tool_iterations,
                     policy_name=ctx.plan.policy_name,
-                    build_kwargs=adapter.local_attempt_kwargs,
+                    build_kwargs=_failover_kwargs(adapter),
                     prepare_kwargs=prepare_kwargs,
                     admit_attempt=_model_admission(ctx),
                     on_absorbed=_absorbed,

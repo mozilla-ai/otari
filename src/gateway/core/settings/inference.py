@@ -4,11 +4,22 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
-from gateway.core.settings_view import OMITTED
+from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
 
 
 class InferenceSettings(BaseModel):
-    """How a completion request that carries an ``Idempotency-Key`` is deduplicated."""
+    """How a completion request is retried upstream and deduplicated."""
+
+    provider_max_retries: Annotated[int | None, Shown(SettingsGroup.MODELS)] = Field(
+        default=None,
+        ge=0,
+        description=(
+            "How many times a provider client retries a failed call (a 429, a 5xx or a dropped connection) "
+            "before Otari sees the failure. Unset leaves each provider SDK's own default. A provider "
+            "instance's max_retries overrides it. Applies to the OpenAI-compatible, Anthropic, Groq, "
+            "Cerebras, Together, Gemini and Vertex AI clients; other providers keep their SDK's behavior."
+        ),
+    )
 
     idempotency_retention_sec: Annotated[int, OMITTED] = Field(
         default=86400,

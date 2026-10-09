@@ -1916,7 +1916,7 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
                 return
 
     def validate_provider_instances(self) -> None:
-        """Validate per-instance ``provider_type`` / ``models`` declarations.
+        """Validate per-instance ``provider_type`` / ``models`` / ``max_retries`` declarations.
 
         Fails fast at startup so a typo in ``provider_type`` (or a non-list
         ``models``) surfaces immediately rather than as a per-request error.
@@ -1952,6 +1952,12 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             models = entry.get("models")
             if models is not None and not (isinstance(models, list) and all(isinstance(m, str) for m in models)):
                 msg = f"providers.{instance}.models must be a list of model id strings."
+                raise ValueError(msg)
+            max_retries = entry.get("max_retries")
+            if max_retries is not None and (
+                isinstance(max_retries, bool) or not isinstance(max_retries, int) or max_retries < 0
+            ):
+                msg = f"providers.{instance}.max_retries must be a non-negative integer."
                 raise ValueError(msg)
             if not entry:
                 self._warn_on_uncredentialed_bare_entry(instance)

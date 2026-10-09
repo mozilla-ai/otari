@@ -55,6 +55,11 @@ All conditions in one `when` block must match. Numeric comparisons use exactly
 one of `gt`, `gte`, `lt`, or `lte`. A budget condition does not match a
 caller with no finite budget.
 
+In a policy that can fall over, each candidate gets one upstream call unless a
+retry count is configured, so a throttled provider hands over to the next
+candidate at once rather than after its SDK's own retries. See
+[Provider retries](configuration.md#provider-retries).
+
 ## Load balance across providers (weighted routing)
 
 The weighted router chooses independently for each request and normalizes the

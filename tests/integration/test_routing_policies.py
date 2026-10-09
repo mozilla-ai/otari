@@ -17,7 +17,7 @@ The invariants worth defending, and why:
 
 import asyncio
 import json
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
@@ -1464,6 +1464,115 @@ def test_responses_endpoint_fails_over(client: TestClient) -> None:
 
     assert resp.status_code == 200, resp.text
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
+
+
+# ---------------------------------------------------------------------------
+# Provider retries
+# ---------------------------------------------------------------------------
+
+
+def _client_retries(kwargs: Mapping[str, Any]) -> Any:
+    return (kwargs.get("client_args") or {}).get("max_retries", "sdk default")
+
+
+def _failing_over_retries(client: TestClient, endpoint: str) -> list[Any]:
+    """The client retry count each candidate of the ``fast`` policy was dispatched with."""
+    retries: list[Any] = []
+
+    async def flaky(**kwargs: Any) -> Any:
+        retries.append(_client_retries(kwargs))
+        model = kwargs["model"]
+        if model in ("openai:gpt-5-mini", "gpt-5-mini"):
+            raise _http_error(429)
+        if endpoint == "messages":
+            return _message_response()
+        if endpoint == "responses":
+            from any_llm.types.responses import Response as ProviderResponse
+
+            return ProviderResponse.model_construct(
+                id="resp-1", object="response", created_at=0, model="claude-haiku-4-5", output=[], usage=None
+            )
+        return _completion("claude-haiku-4-5")
+
+    if endpoint == "messages":
+        with patch("gateway.api.routes.messages.amessages", new=flaky):
+            resp = client.post(
+                f"{API_ROOT}/messages",
+                json={
+                    "model": "fast",
+                    "max_tokens": 16,
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "metadata": {"user_id": "test-user"},
+                },
+                headers=HEADERS,
+            )
+    elif endpoint == "responses":
+        with (
+            patch("gateway.api.routes.responses.aresponses", new=flaky),
+            patch("gateway.services.inference._responses_bridge.aresponses_via_chat_completions", new=flaky),
+        ):
+            resp = client.post(
+                f"{API_ROOT}/responses", json={"model": "fast", "input": "hi", "user": "test-user"}, headers=HEADERS
+            )
+    else:
+        with patch("gateway.api.routes.chat.acompletion", new=flaky):
+            resp = _chat(client, "fast")
+    assert resp.status_code == 200, resp.text
+    return retries
+
+
+@pytest.mark.parametrize("endpoint", ["chat", "messages", "responses"])
+def test_a_policy_that_can_fail_over_dispatches_without_client_retries(client: TestClient, endpoint: str) -> None:
+    """An SDK retrying a 429 would hold the request on a candidate the policy already says to leave."""
+    _create_user(client)
+
+    assert _failing_over_retries(client, endpoint) == [0, 0]
+
+
+def test_streaming_failover_dispatches_without_client_retries(client: TestClient) -> None:
+    _create_user(client)
+    retries: list[Any] = []
+
+    async def flaky_stream(**kwargs: Any) -> Any:
+        retries.append(_client_retries(kwargs))
+        raise _http_error(429)
+
+    with patch("gateway.api.routes.chat.acompletion", new=flaky_stream):
+        _chat(client, "fast", stream=True)
+
+    assert retries == [0, 0]
+
+
+def test_a_single_candidate_keeps_the_sdk_retry_default(client: TestClient) -> None:
+    _create_user(client)
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))) as mock:
+        assert _chat(client, "openai:gpt-5-mini").status_code == 200
+        assert _chat(client, "solo").status_code == 200
+
+    assert [_client_retries(call.kwargs) for call in mock.await_args_list] == ["sdk default", "sdk default"]
+
+
+@pytest.fixture
+def retrying_client(routing_config: GatewayConfig) -> Generator[TestClient]:
+    """``fast`` again, with a deployment retry count and an instance that overrides it."""
+    providers = {**routing_config.providers, "anthropic": {"api_key": "sk-ant", "max_retries": 1}}
+    yield from build_test_client(routing_config.model_copy(update={"provider_max_retries": 3, "providers": providers}))
+
+
+@pytest.mark.parametrize("endpoint", ["chat", "messages", "responses"])
+def test_configured_retries_reach_every_candidate(retrying_client: TestClient, endpoint: str) -> None:
+    _create_user(retrying_client)
+
+    assert _failing_over_retries(retrying_client, endpoint) == [3, 1]
+
+
+def test_configured_retries_reach_a_single_candidate(retrying_client: TestClient) -> None:
+    _create_user(retrying_client)
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))) as mock:
+        assert _chat(retrying_client, "openai:gpt-5-mini").status_code == 200
+
+    assert mock.await_args is not None
+    assert _client_retries(mock.await_args.kwargs) == 3
 
 
 # ---------------------------------------------------------------------------

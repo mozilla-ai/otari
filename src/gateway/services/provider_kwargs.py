@@ -68,7 +68,60 @@ if TYPE_CHECKING:
 
 # Keys that describe an instance to otari but are not credentials any-llm
 # understands, so they must be stripped before the provider call.
-_INSTANCE_META_KEYS = ("provider_type", "models")
+_INSTANCE_META_KEYS = ("provider_type", "models", "max_retries")
+
+# Providers whose any-llm client is built by an SDK that takes ``max_retries``
+# in its constructor (OpenAI's, Anthropic's and the SDKs generated the same
+# way). Every other SDK rejects the keyword or ignores it, so the setting is
+# translated for Google's clients below and left out for the rest.
+# ``tests/unit/test_provider_retries.py`` builds each one to keep this list true
+# of the installed any-llm. ``otari`` builds its own client and is left out.
+_MAX_RETRIES_CLIENT_PROVIDERS: frozenset[LLMProvider] = frozenset(
+    {
+        LLMProvider.ANTHROPIC,
+        LLMProvider.AZUREANTHROPIC,
+        LLMProvider.VERTEXAIANTHROPIC,
+        LLMProvider.OPENAI,
+        LLMProvider.AZUREOPENAI,
+        LLMProvider.ATLASCLOUD,
+        LLMProvider.CASCADIA,
+        LLMProvider.CEREBRAS,
+        LLMProvider.DASHSCOPE,
+        LLMProvider.DATABRICKS,
+        LLMProvider.DEEPINFRA,
+        LLMProvider.DEEPSEEK,
+        LLMProvider.EDENAI,
+        LLMProvider.FIREWORKS,
+        LLMProvider.GITHUB,
+        LLMProvider.GMI,
+        LLMProvider.GROQ,
+        LLMProvider.INCEPTION,
+        LLMProvider.KENARI,
+        LLMProvider.LLAMA,
+        LLMProvider.LLAMACPP,
+        LLMProvider.LLAMAFILE,
+        LLMProvider.META,
+        LLMProvider.MINIMAX,
+        LLMProvider.MOONSHOT,
+        LLMProvider.MZAI,
+        LLMProvider.NEBIUS,
+        LLMProvider.NEOSANTARA,
+        LLMProvider.OPENROUTER,
+        LLMProvider.PERPLEXITY,
+        LLMProvider.PORTKEY,
+        LLMProvider.QINIU,
+        LLMProvider.REQUESTY,
+        LLMProvider.SAMBANOVA,
+        LLMProvider.TELNYX,
+        LLMProvider.TOGETHER,
+        LLMProvider.VLLM,
+        LLMProvider.ZAI,
+    }
+)
+
+# google-genai counts attempts rather than retries, through
+# ``http_options.retry_options``, and by default makes one attempt.
+_GOOGLE_RETRY_PROVIDERS: frozenset[LLMProvider] = frozenset({LLMProvider.GEMINI, LLMProvider.VERTEXAI})
 
 # any-llm rejects a keyless call to most providers (openai, anthropic, ...) with
 # MissingApiKeyError, but a self-hosted OpenAI-/Anthropic-compatible backend
@@ -296,11 +349,58 @@ def get_provider_kwargs(
             elif isinstance(client_args, dict) and "region_name" not in client_args:
                 kwargs["client_args"] = {**client_args, "region_name": region}
 
+    max_retries = raw_config.get("max_retries") if raw_config is not None else None
+    if max_retries is None:
+        max_retries = config.provider_max_retries
+    if max_retries is not None:
+        kwargs = with_provider_retries(provider, kwargs, max_retries)
+
     placeholder = keyless_placeholder_api_key(provider, kwargs.get("api_base"), kwargs.get("api_key"))
     if placeholder is not None:
         kwargs["api_key"] = placeholder
 
     return kwargs
+
+
+def _client_retries_set(provider: LLMProvider, client_args: Mapping[str, Any]) -> bool:
+    """Whether ``client_args`` already says how often ``provider``'s client retries."""
+    if provider in _GOOGLE_RETRY_PROVIDERS:
+        http_options = client_args.get("http_options")
+        if isinstance(http_options, Mapping):
+            return http_options.get("retry_options") is not None
+        return getattr(http_options, "retry_options", None) is not None
+    return "max_retries" in client_args
+
+
+def with_provider_retries(provider: LLMProvider, kwargs: dict[str, Any], max_retries: int) -> dict[str, Any]:
+    """``kwargs`` with a client that retries a failed call ``max_retries`` times.
+
+    Returns ``kwargs`` unchanged when the provider's SDK has no retry setting
+    Otari knows how to pass, or when the instance's own ``client_args`` already
+    set one, which is the most specific statement an operator can make. The
+    ``client_args`` dict is copied, never mutated, because it can be the one
+    held by the deployment's config.
+    """
+    if provider not in _MAX_RETRIES_CLIENT_PROVIDERS and provider not in _GOOGLE_RETRY_PROVIDERS:
+        return kwargs
+    client_args = kwargs.get("client_args")
+    if client_args is None:
+        client_args = {}
+    elif not isinstance(client_args, Mapping):
+        return kwargs
+    if _client_retries_set(provider, client_args):
+        return kwargs
+    if provider in _MAX_RETRIES_CLIENT_PROVIDERS:
+        return {**kwargs, "client_args": {**client_args, "max_retries": max_retries}}
+    http_options = client_args.get("http_options")
+    if http_options is not None and not isinstance(http_options, Mapping):
+        # An HttpOptions object came from code rather than config; it is left as built.
+        return kwargs
+    retry_options = {"attempts": max_retries + 1}
+    return {
+        **kwargs,
+        "client_args": {**client_args, "http_options": {**(http_options or {}), "retry_options": retry_options}},
+    }
 
 
 def effective_credential(provider: LLMProvider, kwargs: Mapping[str, Any]) -> ResolvedCredential:

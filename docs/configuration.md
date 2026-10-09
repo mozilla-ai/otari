@@ -84,6 +84,7 @@ the corresponding startup value after the database is available.
 | `rate_limit_store` | Where `rate_limit_rpm` and the `rate_limits` rules are counted: `memory` (the default) or `redis`. See [Rate limits across replicas](#rate-limits-across-replicas). |
 | `rate_limit_redis_url` | The Redis that the `redis` store counts in. |
 | `rate_limits` | Requests per minute, tokens per minute and requests in flight, per deployment, API key, user or model. Also managed from the dashboard. See [Rate limit rules](#rate-limit-rules). |
+| `provider_max_retries` | How many times a provider SDK retries a failed call before Otari sees the failure. Unset keeps each SDK's default. See [Provider retries](#provider-retries). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
 | `accept_incoming_trace_context` | Join spans the gateway creates to the caller's trace. Defaults to `false`. See [Trace context propagation](#trace-context-propagation). |
@@ -263,6 +264,42 @@ providers:
 
 Call it as `home_lab:qwen3-32b`. The optional `models` list supplies discovery
 for backends without a model-listing endpoint. See [Models](models.md).
+
+### Provider retries
+
+Most provider SDKs retry a failed call themselves before Otari sees the failure.
+The OpenAI and Anthropic SDKs, and every OpenAI-compatible provider built on
+them, retry a 429, a 5xx or a dropped connection twice by default and wait out
+the provider's `Retry-After`, so one request to a throttled provider can make
+three upstream calls and take many seconds to fail. Google's SDK (Gemini,
+Vertex AI) does not retry by default. A client that retries on top of that
+multiplies the calls again.
+
+`provider_max_retries` sets the retry count for every provider instance, and an
+instance's own `max_retries` overrides it:
+
+```yaml
+provider_max_retries: 0   # OTARI_PROVIDER_MAX_RETRIES
+
+providers:
+  openai:
+    api_key: ${OPENAI_API_KEY}
+    max_retries: 1
+```
+
+When neither is set, each SDK keeps its own default, except in a routing policy
+that can fall over to another candidate (an `on_failure` chain or a weighted or
+router pool): there every candidate makes one upstream call, so a failure moves
+to the next candidate at once instead of after the SDK's retries. Setting either
+value restores retries inside such a policy too.
+
+The setting reaches the OpenAI-compatible, Anthropic (including Azure and
+Vertex AI), Groq, Cerebras, Together, Gemini and Vertex AI clients. Other
+providers (Bedrock, Mistral, Cohere, Ollama and the rest) keep their SDK's own
+retry behavior, which `client_args` can still configure where the SDK allows
+it. A retry setting in an instance's `client_args` (`max_retries`, or
+`http_options.retry_options` for Google) wins over both values. Owned provider
+endpoints are not affected.
 
 ### Runtime provider management
 

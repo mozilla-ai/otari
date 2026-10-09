@@ -23,6 +23,9 @@ providers:
   openai:
     api_key: YOUR_OPENAI_API_KEY_HERE
     # api_base: "https://api.openai.com/v1"
+    # Retries the SDK makes before Otari sees a failure. Overrides
+    # provider_max_retries. See docs/configuration.md#provider-retries.
+    # max_retries: 0
 
   # A named OpenAI-compatible backend. The optional model list supplies
   # discovery when the backend has no /v1/models endpoint.
