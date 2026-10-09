@@ -11,7 +11,10 @@ _RETENTION_INTERVAL_S = 3600.0
 
 async def _retention(config: GatewayConfig) -> None:
     await run_trace_retention(
-        build_trace_service, retention_days=config.trace_retention_days, interval=_RETENTION_INTERVAL_S
+        build_trace_service,
+        retention_days=config.trace_retention_days,
+        max_age_days=config.trace_session_max_age_days,
+        interval=_RETENTION_INTERVAL_S,
     )
 
 

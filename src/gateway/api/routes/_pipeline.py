@@ -283,7 +283,7 @@ from gateway.services.tools import (
     read_web_search_max_uses,
     web_search_intercept_enabled,
 )
-from gateway.services.traces import RequestTrace
+from gateway.services.traces import RequestTrace, TurnFacts, harness_of, resolve_session
 from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.web_retrieval_backend import (
     WEB_FETCH_TOOL_NAME,
@@ -1923,6 +1923,8 @@ async def resolve_request_context(
     tools: list[dict[str, Any]] | None = None,
     idempotency: IdempotencyGuard | None = None,
     tags: dict[str, str] | None = None,
+    turn: TurnFacts | None = None,
+    session_label: str | None = None,
 ) -> RequestContext:
     """Run the shared handler preamble up to (and including) budget pre-debit.
 
@@ -2472,9 +2474,13 @@ async def resolve_request_context(
     # Opened beside the in-flight entry, for the same requests, and closed by the
     # trace middleware once the response is sent. A request with no local workspace
     # (every hybrid request) records nothing here yet.
+    session = resolve_session(raw_request.headers, session_label=session_label, tags=tags)
     trace: RequestTrace | None = None
     if config.trace_capture_enabled and workspace_id is not None:
         trace = RequestTrace(
+            session=session,
+            harness=harness_of(raw_request.headers),
+            turn=turn,
             request_id=request_id,
             workspace_id=workspace_id,
             user_id=user_id,

@@ -20,6 +20,7 @@ from sqlalchemy import (
     delete,
     false,
     func,
+    or_,
     select,
     tuple_,
     update,
@@ -210,11 +211,12 @@ class TraceRepository(BaseRepository[Trace, Never, Never]):
         """Delete every trace a user owns, in every workspace."""
         return await self._delete(Trace.user_id == user_id)
 
-    async def delete_inactive_before(self, before: datetime) -> int:
-        """Delete every trace whose last activity is before ``before``."""
-        bound = utc_bound(before)
-        assert bound is not None
-        return await self._delete(Trace.last_activity_at < bound)
+    async def delete_expired(self, *, idle_before: datetime, started_before: datetime) -> int:
+        """Delete every trace idle since before ``idle_before`` or started before ``started_before``."""
+        idle = utc_bound(idle_before)
+        started = utc_bound(started_before)
+        assert idle is not None and started is not None
+        return await self._delete(or_(Trace.last_activity_at < idle, Trace.started_at < started))
 
     async def _delete(self, condition: ColumnElement[bool]) -> int:
         result = cast("CursorResult[Any]", await self.db.execute(delete(Trace).where(condition)))

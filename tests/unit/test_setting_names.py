@@ -151,6 +151,7 @@ _SETTING_NAMES = frozenset(
         "trace_max_spans_per_request",
         "trace_queue_max_spans",
         "trace_retention_days",
+        "trace_session_max_age_days",
         "trace_shutdown_flush_s",
         "trace_write_timeout_s",
         "ui_base_url",

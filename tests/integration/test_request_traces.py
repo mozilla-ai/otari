@@ -160,3 +160,32 @@ def test_a_streamed_completion_is_traced_once_its_body_is_sent(
 
     assert spans["step"].outcome == "ok"
     assert spans["llm"].output_tokens == 5
+
+
+def test_requests_of_one_harness_session_share_one_trace(
+    client: TestClient, api_key_header: dict[str, str], db_session_factory: Callable[[], Session]
+) -> None:
+    headers = api_key_header | {"x-claude-code-session-id": "b57732d4", "user-agent": "claude-cli/2.1.291"}
+    first = [{"role": "user", "content": "x"}]
+    second = [
+        *first,
+        {"role": "assistant", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "Bash"}}]},
+        {"role": "tool", "tool_call_id": "call_1", "content": "x"},
+    ]
+    with patch("gateway.api.routes.chat.acompletion", return_value=_completion()):
+        for messages in (first, second):
+            response = client.post(
+                f"{API_ROOT}/chat/completions", json={"model": MODEL_NAME, "messages": messages}, headers=headers
+            )
+            assert response.status_code == 200
+
+    trace_id = _only_trace_id(db_session_factory)
+    spans = _wait_for_spans(db_session_factory, trace_id, 5)
+
+    steps = sorted((span for span in spans if span.kind == "step"), key=lambda span: span.start_time or 0)
+    assert [step.opens_turn for step in steps] == [True, False]
+    [tool] = [span for span in spans if span.kind == "tool"]
+    assert (tool.tool_name, tool.tool_type, tool.outcome) == ("Bash", "client", "ok")
+    with db_session_factory() as session:
+        trace = session.scalars(select(Trace).where(Trace.trace_id == trace_id)).one()
+    assert (trace.session_source, trace.harness, trace.step_count) == ("harness", "claude-code", 2)
