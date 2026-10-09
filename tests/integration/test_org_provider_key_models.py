@@ -766,6 +766,29 @@ async def test_with_require_pricing_off_adding_an_unpriced_model_by_name_serves_
     assert await _offered(async_db, key_id) == {"rerank-v3.5": True}
 
 
+async def test_with_require_pricing_off_a_refresh_leaves_an_administrator_s_switch_off(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Offered on while unpriced, so off can only be an administrator's choice,
+    and a rate arriving later must not overrule it."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    key_id = await _key(async_db, owner)
+    _discovery(monkeypatch, "gpt-6-unreleased")
+    _defaults(monkeypatch, {})
+    service = _service(async_db, require_pricing=False)
+    await service.refresh_models(user=owner, key_id=key_id)
+    listed = await service.list_models(user=owner, key_id=key_id)
+    assert listed.data[0].enabled is True
+    await service.set_model_enabled(user=owner, key_id=key_id, model_id=listed.data[0].id, enabled=False)
+
+    _defaults(monkeypatch, {"gpt-6-unreleased": ("4.0", "16")})
+    result = await service.refresh_pricing(user=owner, key_id=key_id)
+
+    assert result.repriced == ["gpt-6-unreleased"]
+    assert await _offered(async_db, key_id) == {"gpt-6-unreleased": False}
+
+
 async def test_with_require_pricing_off_the_switch_accepts_an_unpriced_model(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:

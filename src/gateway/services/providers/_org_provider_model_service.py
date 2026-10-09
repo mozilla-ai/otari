@@ -595,9 +595,10 @@ class OrgProviderModelService:
                 if default is None or _priced_by_deployment(rate) or row.model not in allowed:
                     continue
                 fresh.append(_seeded_row(organization_id, model_key, default, now))
-                if not row.enabled:
-                    # It arrived disabled because nothing priced it. Something
-                    # does now.
+                if not row.enabled and self._pricing_required:
+                    # While pricing is required, an unpriced model can only be
+                    # off because nothing priced it, and something does now.
+                    # With it off, the switch was an administrator's, so it stays.
                     row.enabled = True
                     await self.models.save(row)
                 repriced.append(row.model)
