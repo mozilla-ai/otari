@@ -109,9 +109,9 @@ async def _none(*_args: object, **_kwargs: object) -> None:
     return None
 
 
-def _service(db: AsyncSession) -> OrgProviderModelService:
+def _service(db: AsyncSession, *, require_pricing: bool = True) -> OrgProviderModelService:
     uow = UnitOfWork(db)
-    config = GatewayConfig()
+    config = GatewayConfig(require_pricing=require_pricing)
     return OrgProviderModelService(
         uow,
         config=config,
@@ -707,6 +707,100 @@ async def test_serving_a_model_nothing_prices_is_refused(
         await _service(async_db).set_model_enabled(user=owner, key_id=key_id, model_id=listed.data[0].id, enabled=True)
 
     assert await _offered(async_db, key_id) == {"gpt-6-unreleased": False}
+
+
+async def test_adding_an_unpriced_model_by_name_offers_it_switched_off(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The by-name path offers through the same rule as discovery: no rate, no serving."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    key_id = await _key(async_db, owner)
+    _defaults(monkeypatch, {})
+
+    offered = await _service(async_db).add_model(user=owner, key_id=key_id, model="rerank-v3.5")
+
+    assert offered.enabled is False
+    assert await _offered(async_db, key_id) == {"rerank-v3.5": False}
+
+
+# --------------------------------------------------------------------------- #
+# require_pricing off
+# --------------------------------------------------------------------------- #
+
+
+async def test_with_require_pricing_off_an_unpriced_model_is_offered_switched_on(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Disabled-until-priced is how require_pricing reaches an organization's
+    key. With the setting off the deployment serves unpriced traffic by choice,
+    so a model nothing prices is offered serving, and a priced one is seeded as
+    before."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    key_id = await _key(async_db, owner)
+    await OrgProviderKeyService(async_db).set_org_default_for_user(user=owner, key_id=key_id)
+    _discovery(monkeypatch, "gpt-4o", "gpt-6-unreleased")
+    _defaults(monkeypatch, {"gpt-4o": ("2.5", "10")})
+
+    await _service(async_db, require_pricing=False).refresh_models(user=owner, key_id=key_id)
+
+    assert await _offered(async_db, key_id) == {"gpt-4o": True, "gpt-6-unreleased": True}
+    assert {rate.model_key for rate in await _organization_rates(async_db)} == {"openai:gpt-4o"}
+    assert cached_org_model_restriction(workspace.id, "openai") == ["gpt-4o", "gpt-6-unreleased"]
+
+
+async def test_with_require_pricing_off_adding_an_unpriced_model_by_name_serves_it(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    key_id = await _key(async_db, owner, provider="cohere")
+    _defaults(monkeypatch, {})
+
+    offered = await _service(async_db, require_pricing=False).add_model(user=owner, key_id=key_id, model="rerank-v3.5")
+
+    assert offered.enabled is True
+    assert offered.price_source is None
+    assert await _offered(async_db, key_id) == {"rerank-v3.5": True}
+
+
+async def test_with_require_pricing_off_the_switch_accepts_an_unpriced_model(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A row that arrived disabled while the setting was on can be turned on
+    once it is off, because the dispatch gate reads the same setting and would
+    serve it. Turning the setting back on leaves the row as it is: the switch
+    refuses only the transition, the way it always has."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    key_id = await _key(async_db, owner)
+    await OrgProviderKeyService(async_db).set_org_default_for_user(user=owner, key_id=key_id)
+    _discovery(monkeypatch, "gpt-6-unreleased")
+    _defaults(monkeypatch, {})
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
+    listed = await _service(async_db).list_models(user=owner, key_id=key_id)
+    assert listed.data[0].enabled is False
+    assert cached_org_model_restriction(workspace.id, "openai") == []
+
+    updated = await _service(async_db, require_pricing=False).set_model_enabled(
+        user=owner, key_id=key_id, model_id=listed.data[0].id, enabled=True
+    )
+
+    assert updated.enabled is True
+    assert await _offered(async_db, key_id) == {"gpt-6-unreleased": True}
+    assert cached_org_model_restriction(workspace.id, "openai") == ["gpt-6-unreleased"]
+
+    # Off and on again under the default: the row stays served, and only a
+    # fresh "on" is refused.
+    off = await _service(async_db).set_model_enabled(
+        user=owner, key_id=key_id, model_id=listed.data[0].id, enabled=False
+    )
+    assert off.enabled is False
+    with pytest.raises(OrgProviderModelUnpricedError):
+        await _service(async_db).set_model_enabled(user=owner, key_id=key_id, model_id=listed.data[0].id, enabled=True)
 
 
 async def test_switching_a_model_off_is_never_refused(async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:

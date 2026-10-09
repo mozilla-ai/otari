@@ -122,6 +122,14 @@ rows at all, and that is not the same as offering none: it means the key is
 unnarrowed and reaches whatever its provider serves. Offering none, which is
 every model switched off, serves nothing.
 
+A model nothing prices is offered switched off while `require_pricing` is on,
+and the switch refuses to turn it on until it has a rate, so a model the
+pricing data has not caught up with cannot be billed at nothing. With
+`require_pricing: false` the deployment serves unpriced traffic by choice, so
+such a model is offered switched on and served at no cost, like an unpriced
+model of a `providers:` instance (see
+[Default pricing](configuration.md#default-pricing)).
+
 A refusal on that path says which narrowing turned the model away. A model the
 key offers with its switch off is a 403 with the code `model_not_serving`, naming
 the key and pointing at the switch. A model no key of the provider offers is a

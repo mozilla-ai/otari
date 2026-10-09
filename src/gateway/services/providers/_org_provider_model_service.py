@@ -25,11 +25,12 @@ row an admin edited through ``/organizations/me/pricing`` carries ``"api"`` and
 a refresh leaves it alone forever. That is the whole provenance mechanism, and
 it is why no timestamp column mirrors it.
 
-**Disabled until priced.** A model no rate could be found for is recorded and
-not served, so a model the pricing data has not caught up with cannot be billed
-at nothing. The switch is also how a model is withdrawn: rows are disabled
-rather than deleted, so the model, its rate and its history stay where an admin
-can turn it back on.
+**Disabled until priced.** While ``require_pricing`` is on, a model no rate could
+be found for is recorded and not served, so a model the pricing data has not
+caught up with cannot be billed at nothing. With it off, the deployment serves
+unpriced traffic by choice, and such a model is offered switched on. The switch
+is also how a model is withdrawn: rows are disabled rather than deleted, so the
+model, its rate and its history stay where an admin can turn it back on.
 
 No transaction is open across an upstream dial or across the thread hop that
 resolves community defaults, both of which can take the whole discovery timeout.
@@ -271,6 +272,16 @@ class OrgProviderModelService:
         self.keys = keys
         self.refresh_overlay = refresh_overlay
 
+    @property
+    def _pricing_required(self) -> bool:
+        """Whether an unpriced model must stay unserved.
+
+        Read at call time rather than bound in the constructor: a runtime
+        settings override mutates the config this service holds, and the switch
+        has to agree with the dispatch gate that reads the same field.
+        """
+        return self.config.require_pricing
+
     # ------------------------------------------------------------------
     # Authorization
     # ------------------------------------------------------------------
@@ -340,7 +351,7 @@ class OrgProviderModelService:
         Takes no rate: an organization's rates are written through
         ``/organizations/me/pricing``, so a price set here and a price set there
         could not disagree. The offer seeds the community default like any other,
-        and a model nothing prices lands disabled.
+        and a model nothing prices lands disabled while ``require_pricing`` is on.
 
         Raises:
             OrgProviderKeyNotFoundError: no such key in the caller's organization.
@@ -389,24 +400,28 @@ class OrgProviderModelService:
     ) -> OrgProviderKeyModelPublic:
         """Turn one offered model's serving switch on or off.
 
-        Switching one on is refused where nothing prices it. The offer path
-        already records such a model unserved so it cannot be billed at nothing,
-        and without the same check here the switch would be a way straight past
-        that rule: the model would reach the catalog, and the dispatch gate, with
-        no rate behind it. Switching one *off* is never refused, so a row that
-        reached that state some other way can still be withdrawn.
+        Switching one on is refused where nothing prices it, while
+        ``require_pricing`` is on. The offer path already records such a model
+        unserved so it cannot be billed at nothing, and without the same check
+        here the switch would be a way straight past that rule: the model would
+        reach the catalog, and the dispatch gate, with no rate behind it. With
+        ``require_pricing`` off the operator has chosen to serve unpriced
+        traffic, and the dispatch gate lets it through, so the switch does too.
+        Switching one *off* is never refused, so a row that reached that state
+        some other way can still be withdrawn.
 
         Raises:
             OrgProviderKeyNotFoundError: no such key in the caller's organization.
             OrgProviderModelNotFoundError: no such model on that key.
-            OrgProviderModelUnpricedError: serving was asked for an unpriced model.
+            OrgProviderModelUnpricedError: serving was asked for an unpriced model
+                and ``require_pricing`` is on.
         """
         async with self.uow:
             key = await self._key_for_user(user, key_id)
             row = await self.models.get_in_key(model_id, key_id)
             if row is None:
                 raise OrgProviderModelNotFoundError(model_id)
-            if enabled and not row.enabled:
+            if enabled and not row.enabled and self._pricing_required:
                 priced = await self._current_prices(key, [row])
                 if row.model not in priced:
                     raise OrgProviderModelUnpricedError(row.model)
@@ -635,15 +650,17 @@ class OrgProviderModelService:
             seeded[model] = _seeded_row(organization_id, model_key, default, now)
         await self.org_pricing.stage_seeded_rates(list(seeded.values()))
 
+        # Offered and not served when nothing prices it, so a model the
+        # community data has not caught up with cannot be billed at nothing.
+        # With require_pricing off, unpriced traffic is what the operator asked
+        # for, and the dispatch gate serves it, so it is offered switched on.
+        serve_unpriced = not self._pricing_required
         rows = [
             OrgProviderKeyModel(
                 organization_id=organization_id,
                 org_provider_key_id=key_id,
                 model=model,
-                # Offered and not served when nothing prices it, so a model the
-                # community data has not caught up with cannot be billed at
-                # nothing.
-                enabled=keys_by_model[model] in priced_by_a_table or model in seeded,
+                enabled=serve_unpriced or keys_by_model[model] in priced_by_a_table or model in seeded,
             )
             for model in models
         ]

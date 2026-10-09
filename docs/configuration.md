@@ -324,7 +324,10 @@ rejected instead of bypassing the budget.
 With `require_pricing: false`, such a request is served, its model tokens carry
 no cost, and its response carries no inline `cost_usd`. The usage row records no
 cost unless the request also ran priced gateway tools, whose charges are still
-recorded. The gateway logs a warning for each unpriced model at most once an
+recorded. The same setting governs an organization's own provider keys: a model
+a key offers that nothing prices is switched on and served at no cost, where
+`require_pricing: true` keeps it switched off until it has a rate (see
+[Who is shown which models](models.md#who-is-shown-which-models)). The gateway logs a warning for each unpriced model at most once an
 hour per process, and the dashboard shows operators a banner naming the models
 that served unpriced traffic in the selected workspace in the last 24 hours
 and still have no stored price, linked to those requests in Activity, where
