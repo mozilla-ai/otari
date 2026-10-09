@@ -12,7 +12,7 @@ from sqlalchemy import case, distinct, func, inspect, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
-from gateway.core.metered_pricing import meter_cost, quantize_cost, request_charge_line, to_decimal
+from gateway.core.metered_pricing import meter_cost, priced_per_request, quantize_cost, request_charge_line, to_decimal
 from gateway.log_config import logger
 from gateway.models.pricing import ModelPricing, OrganizationModelPricing, PriceSource
 
@@ -894,6 +894,37 @@ def search_unit_cost(units: int, pricing: ModelPricing | None) -> Decimal:
     :func:`flat_request_cost` does.
     """
     return max(units, 0) * flat_request_cost(pricing)
+
+
+def rerank_cost(pricing: ModelPricing | None, *, search_units: int, total_tokens: int | None) -> Decimal | None:
+    """USD a rerank request costs, or ``None`` when nothing it reported is priced.
+
+    A per-request rate bills the search units the provider reported (see
+    :func:`search_unit_cost`). A per-token rate bills the input tokens the
+    provider reported, and a provider that reports none leaves the row unpriced.
+    """
+    if priced_per_request(pricing):
+        return search_unit_cost(search_units, pricing)
+    if pricing and total_tokens:
+        return input_token_cost(total_tokens, pricing)
+    return None
+
+
+def rerank_meters(
+    pricing: ModelPricing | None, *, search_units: int, total_tokens: int | None, cost: Decimal
+) -> PerRequestMeters | None:
+    """Billing meters and charge lines for a rerank request priced by :func:`rerank_cost`."""
+    if priced_per_request(pricing):
+        return search_unit_meters(search_units, cost)
+    if not pricing or not total_tokens:
+        return None
+    rate = float(pricing.input_price_per_million)
+    breakdown: list[dict[str, float | int | str]] = [
+        {"meter": "input", "units": total_tokens, "rate_per_million": rate, "cost": float(cost)}
+    ]
+    # See embeddings: the canonical meter name is what the billed-token SQL and
+    # the dashboard read.
+    return {"total_input_tokens": total_tokens}, breakdown
 
 
 def search_unit_meters(units: int, cost: Decimal) -> PerRequestMeters | None:

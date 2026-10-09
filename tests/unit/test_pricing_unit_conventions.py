@@ -13,12 +13,14 @@ import pytest
 
 from gateway.core.metered_pricing import price_request
 from gateway.models.pricing import ModelPricing
-from gateway.services.budgets import estimate_cost
+from gateway.services.budgets import estimate_cost, rerank_estimate
 from gateway.services.pricing_service import (
     flat_request_cost,
     input_token_cost,
     per_image_cost,
     per_request_meters,
+    rerank_cost,
+    rerank_meters,
     search_unit_cost,
     search_unit_meters,
 )
@@ -131,3 +133,40 @@ def test_search_unit_meters_name_the_units_and_carry_a_unit_rate() -> None:
 def test_search_unit_meters_are_absent_when_free() -> None:
     assert search_unit_meters(2, Decimal(0)) is None
     assert search_unit_meters(0, Decimal("0.002")) is None
+
+
+def _per_token_pricing() -> ModelPricing:
+    return ModelPricing(
+        model_key="voyage:rerank-2.5",
+        input_price_per_million=Decimal(50),
+        output_price_per_million=Decimal(0),
+    )
+
+
+def test_rerank_bills_search_units_on_a_per_request_rate_and_tokens_otherwise() -> None:
+    assert rerank_cost(_per_request_pricing(), search_units=2, total_tokens=None) == Decimal("0.004")
+    assert rerank_cost(_per_token_pricing(), search_units=1, total_tokens=1000) == Decimal("0.05")
+    # A token rate with no reported tokens leaves the row unpriced, as before.
+    assert rerank_cost(_per_token_pricing(), search_units=1, total_tokens=None) is None
+    assert rerank_cost(None, search_units=1, total_tokens=1000) is None
+
+
+def test_rerank_meters_follow_the_rate_unit() -> None:
+    meters, _ = rerank_meters(_per_request_pricing(), search_units=2, total_tokens=None, cost=Decimal("0.004")) or (
+        None,
+        None,
+    )
+    assert meters == {"search_units": 2}
+    meters, _ = rerank_meters(_per_token_pricing(), search_units=1, total_tokens=1000, cost=Decimal("0.05")) or (
+        None,
+        None,
+    )
+    assert meters == {"total_input_tokens": 1000}
+    assert rerank_meters(_per_token_pricing(), search_units=1, total_tokens=None, cost=Decimal(0)) is None
+
+
+def test_rerank_holds_one_search_unit_on_a_per_request_rate() -> None:
+    assert rerank_estimate(_per_request_pricing(), prompt_chars=10_000) == Decimal("0.002")
+    assert rerank_estimate(_per_token_pricing(), prompt_chars=4000) == estimate_cost(
+        _per_token_pricing(), prompt_chars=4000, max_output_tokens=None, default_output_tokens=0
+    )
