@@ -51,6 +51,7 @@ from gateway.repositories.tools import (
     WorkspaceCodeExecutionPolicyRepository,
     WorkspaceWebSearchKeyOverrideRepository,
 )
+from gateway.repositories.traces import TracesRepositories
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetMembershipListener, BudgetService
@@ -85,6 +86,7 @@ from gateway.services.tools import (
     WorkspaceCodeExecutionPolicyService,
     WorkspaceSearchKeys,
 )
+from gateway.services.traces import TraceService
 from gateway.services.workspace_scope import default_workspace_id
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
@@ -696,6 +698,11 @@ def build_file_service(uow: UnitOfWork, backends: FileBackends, config: GatewayC
         raise RuntimeError("Unscoped uploads are not supported in this context; specify a workspace.")
 
     return FileService(uow, FileRepositories.on(uow), backends, config, reject_unscoped_upload)
+
+
+def build_trace_service(uow: UnitOfWork) -> TraceService:
+    """Build the traces operations for a request or a worker job."""
+    return TraceService(uow, TracesRepositories.on(uow))
 
 
 def _file_backends(request: Request) -> FileBackends | None:
