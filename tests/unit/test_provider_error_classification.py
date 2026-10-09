@@ -19,9 +19,15 @@ from typing import Any
 import httpx
 import pytest
 from anthropic import APITimeoutError as AnthropicAPITimeoutError
-from any_llm.exceptions import ContextLengthExceededError, InvalidRequestError, UnsupportedParameterError
+from any_llm.exceptions import (
+    ContextLengthExceededError,
+    InvalidRequestError,
+    ProviderError,
+    UnsupportedParameterError,
+)
 from any_llm.utils.exception_handler import convert_exception
 from botocore.exceptions import ClientError
+from fastapi import HTTPException
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from gateway.api.routes._pipeline import (
@@ -37,12 +43,13 @@ from gateway.api.routes._pipeline import (
     failure_status_code,
     provider_error_headers,
     refusal_code,
+    stream_error_code,
 )
 from gateway.api.routes._platform import _provider_failure_http_exc, upstream_retry_after
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.upstream_redaction import MAX_EXPOSED_DETAIL_CHARS, redact_upstream_message
-from gateway.streaming import OPENAI_STREAM_FORMAT, openai_error_event
+from gateway.streaming import OPENAI_STREAM_FORMAT, IncompleteStreamError, openai_error_event
 
 _RAW = "raw provider detail SECRET token=abc123"
 
@@ -852,6 +859,37 @@ def test_a_stream_error_event_carries_the_code_that_ended_it() -> None:
     payload = json.loads(event.removeprefix("data: "))
     assert payload["error"]["code"] == "upstream_rate_limited"
     assert openai_error_event(OPENAI_STREAM_FORMAT, None) == OPENAI_STREAM_FORMAT.error_payload
+
+
+def test_a_stream_ended_by_a_more_specific_refusal_keeps_its_code() -> None:
+    assert stream_error_code(_rate_limited_with("3")) == "upstream_rate_limited"
+    assert stream_error_code(ContextLengthExceededError("prompt is too long", status_code=400)) == (
+        "context_length_exceeded"
+    )
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        _StatusError(400),
+        _StatusError(503),
+        httpx.ConnectError("refused"),
+        ProviderError("upstream broke"),
+        IncompleteStreamError(3),
+    ],
+    ids=["rejected", "unavailable", "unreachable", "any-llm", "incomplete"],
+)
+def test_a_stream_the_provider_failed_is_coded_as_a_provider_error(exc: Exception) -> None:
+    assert stream_error_code(exc) == "provider_error"
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [MaxToolIterationsExceeded("cap"), RuntimeError("bug"), HTTPException(status_code=502, detail="x")],
+    ids=["tool-cap", "gateway-bug", "uncoded-refusal"],
+)
+def test_a_stream_the_gateway_failed_is_not_blamed_on_the_provider(exc: Exception) -> None:
+    assert stream_error_code(exc) is None
 
 
 # ---------------------------------------------------------------------------

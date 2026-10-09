@@ -113,6 +113,7 @@ from gateway.core.error_codes import (
     INVALID_MODEL,
     MODEL_NOT_ALLOWED,
     PRICING_REQUIRED,
+    PROVIDER_ERROR,
     UPSTREAM_RATE_LIMITED,
     error_code_of,
     error_headers,
@@ -736,6 +737,28 @@ def refusal_code(exc: BaseException) -> str | None:
     if mapping is None:
         return None
     return error_code_of(provider_error_headers(exc, mapping.status_code))
+
+
+def stream_error_code(exc: BaseException) -> str | None:
+    """The ``error.code`` of the event that ends a stream on ``exc``, or None.
+
+    The refusal's own code where it has one, otherwise ``provider_error`` for any
+    failure the provider caused, so a client can tell a provider failure from the
+    gateway's own without reading the message.
+    """
+    code = refusal_code(exc)
+    if code is not None or isinstance(exc, HTTPException):
+        return code
+    if _is_upstream_failure(exc):
+        return PROVIDER_ERROR
+    return None
+
+
+def _is_upstream_failure(exc: BaseException) -> bool:
+    """Whether ``exc`` came from the provider rather than from the gateway."""
+    if isinstance(exc, IncompleteStreamError) or upstream_exception_shape(exc) != (None, None):
+        return True
+    return any(isinstance(current, AnyLLMError) for current in upstream_exception_chain(exc))
 
 
 def failure_status_code(exc: BaseException) -> int:

@@ -39,7 +39,6 @@ from gateway.api.routes._pipeline import (
     prepare_gateway_tools,
     provider_error_headers,
     raise_all_streaming_attempts_failed,
-    refusal_code,
     release_reservation,
     resolve_dispatch_provider,
     resolve_request_context,
@@ -48,6 +47,7 @@ from gateway.api.routes._pipeline import (
     run_standalone_non_stream,
     run_streaming_with_fallback,
     scope_prompt_cache_key,
+    stream_error_code,
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost, build_attempt_client_args
 from gateway.api.routes._request_tags import RequestMetadata, forwarded_metadata, request_tags
@@ -278,7 +278,7 @@ class _ResponsesAdapter:
         )
 
     def stream_error_payload(self, exc: BaseException) -> str:
-        return openai_error_event(self.stream_format, refusal_code(exc))
+        return openai_error_event(self.stream_format, stream_error_code(exc))
 
     def format_chunk(self, chunk: ResponseStreamEvent) -> str:
         return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True)}\n\n"

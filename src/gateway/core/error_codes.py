@@ -26,6 +26,9 @@ CONTEXT_LENGTH_EXCEEDED = "context_length_exceeded"
 PRICING_REQUIRED = "pricing_required"
 END_USER_BUDGET_NOT_ALLOWED = "end_user_budget_not_allowed"
 ALL_CANDIDATES_REJECTED = "all_candidates_rejected"
+# Sent only in a stream's error event: the provider failed after the stream
+# started, for a reason no more specific code names.
+PROVIDER_ERROR = "provider_error"
 
 
 def error_headers(code: str, *, budget_scope: str | None = None, rule: str | None = None) -> dict[str, str]:
