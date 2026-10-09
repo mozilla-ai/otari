@@ -72,7 +72,9 @@ class _Recorder:
 
         async def fake_reserve(*args: Any, **kwargs: Any) -> ReservationHandle:
             self.reserve_calls.append(kwargs)
-            return ReservationHandle(user_id="user-1", estimate=Decimal(0), reserved=True, strategy="for_update")
+            return ReservationHandle(
+                scope=None, user_id="user-1", estimate=Decimal(0), reserved=True, strategy="for_update"
+            )
 
         async def fake_increase(*args: Any, **kwargs: Any) -> None:
             if topup_status is not None:

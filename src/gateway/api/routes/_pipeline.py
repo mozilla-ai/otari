@@ -194,6 +194,7 @@ from gateway.services.budgets import (
     estimate_tokens,
     get_budget_state,
     increase_reservation,
+    move_reservation_to_provider,
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
@@ -1566,6 +1567,7 @@ async def _bill_vision_side_call(
     await reconcile_reservation(
         db,
         ReservationHandle(
+            scope=None,
             user_id=user_id,
             estimate=ZERO,
             reserved=False,
@@ -1623,6 +1625,50 @@ class EstimateInputs:
     max_output_tokens: int | None
     default_output_tokens: int
     cache_write_ttl: Literal["5m", "1h"] | None = None
+
+
+async def move_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) -> None:
+    """Move the reservation onto ``attempt``'s provider's budgets before the walk sends ``attempt`` the request.
+
+    A candidate whose provider has a budget with no room raises :class:`CandidateCannotServe`.
+    That budget binds only this provider, so a candidate on another provider can still serve.
+    """
+    if ctx.db is None or ctx.reservation is None:
+        return
+    repriced: Decimal | None = None
+    estimated_tokens: int | None = None
+    if ctx.estimate_inputs is not None:
+        pricing = await find_model_pricing(
+            ctx.db,
+            attempt.instance,
+            attempt.model,
+            organization_id=ctx.organization_id,
+        )
+        repriced = estimate_cost(
+            pricing,
+            prompt_chars=ctx.estimate_inputs.prompt_chars,
+            max_output_tokens=ctx.estimate_inputs.max_output_tokens,
+            default_output_tokens=ctx.estimate_inputs.default_output_tokens,
+            cache_write_ttl=ctx.estimate_inputs.cache_write_ttl,
+        )
+        estimated_tokens = estimate_tokens(
+            prompt_chars=ctx.estimate_inputs.prompt_chars,
+            max_output_tokens=ctx.estimate_inputs.max_output_tokens,
+            default_output_tokens=ctx.estimate_inputs.default_output_tokens,
+        )
+    try:
+        await move_reservation_to_provider(
+            ctx.db,
+            ctx.reservation,
+            attempt.instance,
+            estimate=repriced,
+            tokens=estimated_tokens,
+            reservation_ttl_sec=ctx.config.budget_reservation_ttl_sec,
+        )
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_403_FORBIDDEN:
+            raise
+        raise CandidateCannotServe(exc) from exc
 
 
 async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) -> None:
@@ -2317,9 +2363,8 @@ async def resolve_request_context(
                 counts_toward_budget=not budget_exempt,
                 # The tenancy-scoped ceilings resolve from the key's workspace and
                 # the identity behind it, and from the provider this attempt is
-                # about to call. A fallover to a different provider keeps the
-                # ceilings resolved here: repricing changes the amount held, not
-                # which caps the request was admitted against.
+                # about to call. A fallback to a different provider moves the
+                # reservation onto that provider's ceilings before it is called.
                 scope=BudgetScopeRequest(api_key=api_key, provider_instance=gate_instance),
                 # Already resolved for the pricing gate above, so the free-model
                 # check reads the same rate the estimate was built from.
@@ -4820,6 +4865,18 @@ async def _prepared(
         raise domain_error(adapter, exc) from exc
 
 
+def _candidate_admission(ctx: RequestContext) -> AdmitAttempt:
+    """Admits each candidate of a walk, a fallback onto its provider's budgets first, then under the rate limits."""
+    admit_model = _model_admission(ctx)
+
+    async def _admit(attempt: Attempt) -> Callable[[bool], Awaitable[None]] | None:
+        if attempt.position > 1:
+            await move_reservation_for_attempt(ctx, attempt)
+        return await admit_model(attempt) if admit_model is not None else None
+
+    return _admit
+
+
 def _model_admission(ctx: RequestContext) -> AdmitAttempt | None:
     """Admits each candidate of a walk under the ``per: model`` rate limits, skipping a full one."""
     grant = ctx.rate_limit_grant
@@ -4936,7 +4993,7 @@ async def run_single_attempt_stream(
                     policy_name=ctx.plan.policy_name,
                     build_kwargs=adapter.local_attempt_kwargs,
                     prepare_kwargs=prepare_kwargs,
-                    admit_attempt=_model_admission(ctx),
+                    admit_attempt=_candidate_admission(ctx),
                     on_absorbed=_absorbed,
                     on_skipped=_skipped,
                     on_terminal=stopped_on.append,
@@ -5717,7 +5774,7 @@ async def run_standalone_non_stream(
                     policy_name=ctx.plan.policy_name,
                     build_kwargs=adapter.local_attempt_kwargs,
                     prepare_kwargs=prepare_kwargs,
-                    admit_attempt=_model_admission(ctx),
+                    admit_attempt=_candidate_admission(ctx),
                     on_absorbed=_absorbed,
                     on_skipped=_skipped,
                     on_terminal=stopped_on.append,

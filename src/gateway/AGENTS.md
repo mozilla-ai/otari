@@ -136,6 +136,7 @@ silently ignored through the other.
 shared settlement helpers reconcile or refund it. Scoped reservations use
 conditional updates in one total order and compensate earlier holds when a
 later ceiling refuses.
+Before a fallback to another provider, `move_reservation_to_provider` puts the reservation on that provider's ceilings, so it holds and settles there. A candidate whose provider ceiling has no room is skipped.
 
 `services/budgets/_ledger.py` gives each request's holds one identity.
 Settlement claims that row before changing counters, making duplicate release a

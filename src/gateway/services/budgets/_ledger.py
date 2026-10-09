@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import case, delete, select, update
+from sqlalchemy import case, delete, select, true, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped
 
@@ -80,6 +81,7 @@ async def record(
     token_estimate: int = 0,
     scoped_token_estimate: int = 0,
     request_estimate: int = 0,
+    scoped_request_estimate: int = 0,
     ttl_seconds: int,
     commit: bool = True,
 ) -> str | None:
@@ -94,9 +96,8 @@ async def record(
 
     Every amount is per leg, as the caller knows them: ``token_estimate`` is what
     the per-user leg holds and ``scoped_token_estimate`` what each ceiling does,
-    and the two diverge whenever a top-up grows one and not the other. The request
-    count takes one figure because it never grows, so both legs hold what they
-    held at admission; the row records it only when that leg holds at all.
+    and the two diverge whenever a top-up grows one and not the other.
+    The row records the per-user leg's request count only when that leg holds at all.
     """
     if not user_reserved and not scoped_budgets:
         return None
@@ -121,7 +122,7 @@ async def record(
                 scoped_budget_id=applicable.budget_id,
                 amount=scoped_estimate,
                 token_amount=scoped_token_estimate,
-                request_amount=request_estimate,
+                request_amount=scoped_request_estimate,
             )
         )
     if commit:
@@ -169,6 +170,7 @@ async def grow(
     reservation_id: str | None,
     *,
     user_delta: Decimal,
+    user_grew: bool,
     scoped_delta: Decimal,
     token_delta: int = 0,
     scoped_token_delta: int = 0,
@@ -179,6 +181,7 @@ async def grow(
     because the top-up belongs to a request the ceiling has already counted. Each
     token delta is the one its own leg took: the ceilings grow whenever the
     request has any, and the per-user leg only when it has a budget to grow.
+    ``user_grew`` says whether the per-user leg took a hold in this top-up.
 
     ``increase_reservation`` grows the counters in place, so the ledger grows the
     same row rather than opening a second one: two rows for one request would
@@ -194,6 +197,8 @@ async def grow(
     """
     if reservation_id is None:
         return True
+    # A row written while the per-user leg held nothing records that leg once a top-up holds it.
+    user_holds = true() if user_grew else BudgetReservation.user_reserved
     result = await db.execute(
         update(BudgetReservation)
         .where(
@@ -202,12 +207,12 @@ async def grow(
         )
         .values(
             estimate=BudgetReservation.estimate + user_delta,
-            # Gated on the row's own record of whether the per-user leg holds, not
-            # on the dollar delta: a top-up can grow tokens alone (a model priced
-            # at zero, an expanded prompt), and reading ``user_delta > 0`` as "the
-            # user leg grew" would drop exactly that hold.
-            token_estimate=BudgetReservation.token_estimate
-            + case((BudgetReservation.user_reserved, token_delta), else_=0),
+            user_reserved=user_holds,
+            # Gated on whether the per-user leg holds, not on the dollar delta: a
+            # top-up can grow tokens alone (a model priced at zero, an expanded
+            # prompt), and reading ``user_delta > 0`` as "the user leg grew" would
+            # drop exactly that hold.
+            token_estimate=BudgetReservation.token_estimate + case((user_holds, token_delta), else_=0),
         )
         .execution_options(synchronize_session=False)
     )
@@ -229,6 +234,58 @@ async def grow(
             .execution_options(synchronize_session=False)
         )
     await db.commit()
+    return True
+
+
+@dataclass(frozen=True)
+class LineAmounts:
+    """What a reservation holds on each one of its scoped ceilings."""
+
+    amount: Decimal
+    tokens: int
+    requests: int
+
+
+async def move(
+    db: AsyncSession,
+    reservation_id: str,
+    *,
+    added: Sequence[str],
+    dropped: Sequence[str],
+    holds: LineAmounts,
+) -> bool:
+    """Record that a live reservation holds ``holds`` on ``added`` and no longer holds on ``dropped``.
+
+    Returns ``False`` and changes nothing when the sweep has already reclaimed the reservation.
+
+    NOTE: The caller owns the transaction and must commit it with the release of the dropped holds.
+    """
+    # NOTE: This UPDATE keeps the status. It locks the row until the commit, so the sweep cannot reclaim it in between.
+    result = await db.execute(
+        update(BudgetReservation)
+        .where(BudgetReservation.id == reservation_id, BudgetReservation.status == RESERVATION_ACTIVE)
+        .values(status=RESERVATION_ACTIVE)
+        .execution_options(synchronize_session=False)
+    )
+    if not getattr(result, "rowcount", 0):
+        return False
+    if dropped:
+        await db.execute(
+            delete(BudgetReservationScope).where(
+                BudgetReservationScope.reservation_id == reservation_id,
+                BudgetReservationScope.scoped_budget_id.in_(list(dropped)),
+            )
+        )
+    for budget_id in added:
+        db.add(
+            BudgetReservationScope(
+                reservation_id=reservation_id,
+                scoped_budget_id=budget_id,
+                amount=holds.amount,
+                token_amount=holds.tokens,
+                request_amount=holds.requests,
+            )
+        )
     return True
 
 
@@ -530,6 +587,8 @@ async def run_reservation_sweeper(interval: float, *, batch_size: int, retention
 
 __all__ = [
     "grow",
+    "LineAmounts",
+    "move",
     "reclaim_expired_for_user",
     "prune_terminal",
     "record",

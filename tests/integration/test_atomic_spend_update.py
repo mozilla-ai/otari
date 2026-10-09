@@ -29,7 +29,9 @@ async def test_spend_update_uses_sql_expression(async_db: AsyncSession) -> None:
     actual_cost = Decimal("3.500001")
     await reconcile_reservation(
         async_db,
-        ReservationHandle(user_id="atomic-user", estimate=Decimal(0), reserved=False, strategy="for_update"),
+        ReservationHandle(
+            scope=None, user_id="atomic-user", estimate=Decimal(0), reserved=False, strategy="for_update"
+        ),
         actual_cost,
     )
 
@@ -53,7 +55,9 @@ async def test_multiple_spend_updates_accumulate(async_db: AsyncSession) -> None
     for _ in range(3):
         await reconcile_reservation(
             async_db,
-            ReservationHandle(user_id="multi-spend-user", estimate=Decimal(0), reserved=False, strategy="for_update"),
+            ReservationHandle(
+                scope=None, user_id="multi-spend-user", estimate=Decimal(0), reserved=False, strategy="for_update"
+            ),
             Decimal("20.000001"),
         )
 
