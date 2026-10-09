@@ -61,7 +61,9 @@ def test_client_args_win_and_the_config_is_not_mutated() -> None:
 
     assert _client_args(config, LLMProvider.OPENAI) == {"max_retries": 5, "timeout": 30}
 
-    other = GatewayConfig(provider_max_retries=2, providers={"openai": {"api_key": "sk", "client_args": {"timeout": 30}}})
+    other = GatewayConfig(
+        provider_max_retries=2, providers={"openai": {"api_key": "sk", "client_args": {"timeout": 30}}}
+    )
     original = other.providers["openai"]["client_args"]
     assert _client_args(other, LLMProvider.OPENAI) == {"timeout": 30, "max_retries": 2}
     assert original == {"timeout": 30}
