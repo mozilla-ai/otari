@@ -4,6 +4,46 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.19.0](https://github.com/mozilla-ai/otari/releases/tag/v0.19.0) - 2026-10-09
+
+
+
+### Bug Fixes
+
+- **responses:** Drop echoed bridge reasoning ids and fall back to chat when /responses is missing in [#2129](https://github.com/mozilla-ai/otari/pull/2129) by [@tbille](https://github.com/tbille) ([`d4d60fa`](https://github.com/mozilla-ai/otari/commit/d4d60fa29e38623dd0daa6947907409edd613f1a))
+- Address review findings on the hot-path PR by [@daavoo](https://github.com/daavoo) ([`95e8002`](https://github.com/mozilla-ai/otari/commit/95e8002e5039f5bdd688a1d5f20d356217d7b85d))
+- **budgets:** Give back the ceilings' holds when a failed commit did not land in [#2016](https://github.com/mozilla-ai/otari/pull/2016) by [@daavoo](https://github.com/daavoo) ([`a931afe`](https://github.com/mozilla-ai/otari/commit/a931afe07bb483ec29f14cad0f0090420be8559d))
+- **responses:** Resolve item_reference when serving Responses through chat completions in [#2142](https://github.com/mozilla-ai/otari/pull/2142) by [@tbille](https://github.com/tbille) ([`6cc40bb`](https://github.com/mozilla-ai/otari/commit/6cc40bba74449c4a32ab8e900c041b35c81f19d9))
+- **pricing:** Settle per-request charge lines at the rounded cost and fix CI in [#2141](https://github.com/mozilla-ai/otari/pull/2141) by [@daavoo](https://github.com/daavoo) ([`5b3e67c`](https://github.com/mozilla-ai/otari/commit/5b3e67c6ae4085ea97ba46a24509fb98a80cd0cf))
+- **mail:** Check an address's shape in linear time in [#2159](https://github.com/mozilla-ai/otari/pull/2159) by [@daavoo](https://github.com/daavoo) ([`734263f`](https://github.com/mozilla-ai/otari/commit/734263f5cff19a9122c3e7687707399068d2a10d))
+- **messages:** Fail a stream that ends without message_stop in [#2147](https://github.com/mozilla-ai/otari/pull/2147) by [@daavoo](https://github.com/daavoo) ([`16f7214`](https://github.com/mozilla-ai/otari/commit/16f7214d0988e23d7cc7e72952190add5d7664cb))
+
+
+### Features
+
+- **any-search:** Add the Exa search and contents adapters in [#2126](https://github.com/mozilla-ai/otari/pull/2126) by [@aittalam](https://github.com/aittalam) ([`0b3a968`](https://github.com/mozilla-ai/otari/commit/0b3a968d0ec1aa00a07dd31d8857fee777cb113d))
+- **tools:** Add search and fetch instances to the web tool settings in [#2128](https://github.com/mozilla-ai/otari/pull/2128) by [@aittalam](https://github.com/aittalam) ([`118c3a7`](https://github.com/mozilla-ai/otari/commit/118c3a71d423ff78399b23ceaff825e40109e723))
+- **pricing:** Charge completion models priced per request a flat amount per call by [@daavoo](https://github.com/daavoo) ([`7327642`](https://github.com/mozilla-ai/otari/commit/73276420c117b84e838d07e98377ed8ee0cbfd9b))
+
+
+### Other
+
+- Potential fix for code scanning alert no. 1: Untrusted Checkout TOCTOU in [#2122](https://github.com/mozilla-ai/otari/pull/2122) by [@peteski22](https://github.com/peteski22) ([`4796ee1`](https://github.com/mozilla-ai/otari/commit/4796ee167bef5d43b8caa409228d3c1bbf538734))
+
+
+### Performance
+
+- **docker:** Compile bytecode when the image is built in [#2121](https://github.com/mozilla-ai/otari/pull/2121) by [@daavoo](https://github.com/daavoo) ([`af9414b`](https://github.com/mozilla-ai/otari/commit/af9414ba8f4fda637d41125ef3eba2b73102526a))
+- **database:** Ping a pooled connection only after it sat idle by [@daavoo](https://github.com/daavoo) ([`2e77ec5`](https://github.com/mozilla-ai/otari/commit/2e77ec5c63ae0ff26959beef0bd641dec949bcd5))
+- **api:** Set the security headers from a pure ASGI middleware by [@daavoo](https://github.com/daavoo) ([`c3877ab`](https://github.com/mozilla-ai/otari/commit/c3877ab5e44b7a175a607a05968c09c7c42374c5))
+- **usage:** Write absorbed rows beside the next attempt, and harden the batch writer by [@daavoo](https://github.com/daavoo) ([`5a3db2e`](https://github.com/mozilla-ai/otari/commit/5a3db2e2c181210a6061371014ddda3615a6cab0))
+- **providers:** Reuse a provider's client across requests by [@daavoo](https://github.com/daavoo) ([`926e232`](https://github.com/mozilla-ai/otari/commit/926e232599c415857d39c930fb72d30b3a3956dd))
+- **rate-limit:** Count a request's rules concurrently, its own before the deployment's by [@daavoo](https://github.com/daavoo) ([`215a93f`](https://github.com/mozilla-ai/otari/commit/215a93ff8b6acc7f9b8d7263161e78f913fc27a8))
+- **pricing:** Price each model once per request by [@daavoo](https://github.com/daavoo) ([`68cb163`](https://github.com/mozilla-ai/otari/commit/68cb163a5c57a776966df9ab02de674b575c2013))
+- **budgets:** Do less, and lock the shared ceiling for less time, per reservation by [@daavoo](https://github.com/daavoo) ([`c6bdeb1`](https://github.com/mozilla-ai/otari/commit/c6bdeb11930e45f5e1e291c52ddbd0eefbf59814))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.18.0...v0.19.0
 ## [0.18.0](https://github.com/mozilla-ai/otari/releases/tag/v0.18.0) - 2026-10-08
 
 
