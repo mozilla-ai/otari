@@ -59,14 +59,13 @@ from urllib.parse import urlparse
 
 import httpx
 
-from gateway.core.config import (
-    API_ROOT,
+from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.core.settings.tools import (
     SEARCH_PROVIDERS,
     SEARCH_PROVIDERS_REQUIRING_API_KEY,
-    GatewayConfig,
+    default_api_base,
     validate_search_tool_transport,
 )
-from gateway.core.settings.tools import default_api_base
 from gateway.services.web_search_providers import WebSearchProviderError, provider_search
 
 if TYPE_CHECKING:

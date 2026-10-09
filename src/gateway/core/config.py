@@ -22,16 +22,7 @@ from gateway.core.settings.budgets import BudgetSettings
 from gateway.core.settings.feedback import FeedbackSettings
 from gateway.core.settings.inference import InferenceSettings
 from gateway.core.settings.pricing import PricingSettings
-
-# Re-exported for the modules that import them from here. The settings module
-# never imports this one, so neither is read while the other is half-loaded.
-from gateway.core.settings.tools import SEARCH_PROVIDERS as SEARCH_PROVIDERS
-from gateway.core.settings.tools import SEARCH_PROVIDERS_REQUIRING_API_BASE as SEARCH_PROVIDERS_REQUIRING_API_BASE
-from gateway.core.settings.tools import SEARCH_PROVIDERS_REQUIRING_API_KEY as SEARCH_PROVIDERS_REQUIRING_API_KEY
-from gateway.core.settings.tools import WEB_SEARCH_PROVIDERS as WEB_SEARCH_PROVIDERS
 from gateway.core.settings.tools import ToolSettings
-from gateway.core.settings.tools import validate_search_tool_entry as validate_search_tool_entry
-from gateway.core.settings.tools import validate_search_tool_transport as validate_search_tool_transport
 from gateway.core.settings_view import OMITTED, SECRET, SettingsGroup, Shown
 from gateway.log_config import logger
 from gateway.models.routing import RoutingConfig

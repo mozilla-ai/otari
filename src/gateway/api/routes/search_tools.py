@@ -26,15 +26,15 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, require_deployment_operator
-from gateway.core.config import (
+from gateway.core.config import GatewayConfig
+from gateway.core.settings.tools import (
     SEARCH_PROVIDERS,
     SEARCH_PROVIDERS_REQUIRING_API_BASE,
     SEARCH_PROVIDERS_REQUIRING_API_KEY,
-    GatewayConfig,
+    default_api_base,
     validate_search_tool_entry,
     validate_search_tool_transport,
 )
-from gateway.core.settings.tools import default_api_base
 from gateway.log_config import logger
 from gateway.models.tools import SearchToolCredential
 from gateway.services.search_tool_store_service import (

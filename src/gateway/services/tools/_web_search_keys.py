@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
-from gateway.core.config import WEB_SEARCH_PROVIDERS
+from gateway.core.settings.tools import WEB_SEARCH_PROVIDERS
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.shared_exceptions import SecretBoxUnavailableTenancyError
 from gateway.exceptions.tools_exceptions import (

@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from gateway.core.config import WEB_SEARCH_PROVIDERS
+from gateway.core.settings.tools import WEB_SEARCH_PROVIDERS
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

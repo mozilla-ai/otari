@@ -13,7 +13,8 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.config import WEB_SEARCH_PROVIDERS, GatewayConfig
+from gateway.core.config import GatewayConfig
+from gateway.core.settings.tools import WEB_SEARCH_PROVIDERS
 from gateway.exceptions.tools_exceptions import WebSearchPolicyResolutionFailedError, WebSearchPolicyResolutionFailure
 from gateway.log_config import logger
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential, WebTool
