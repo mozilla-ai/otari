@@ -76,6 +76,13 @@ sees an ordinary Responses object or event stream. A provider with its own
 Responses API (OpenAI, Azure OpenAI, Gemini, Groq, and others) is called
 natively, as before.
 
+The same translation serves such a provider reached through a custom `api_base`
+whose server has no `/responses` route, as many OpenAI-compatible servers do not:
+a `404`, `405` or `501` from it is retried as a chat completion. A `404` whose
+message names an item or a model is about the request, not a missing route, so
+it is returned as is, and a request the translation cannot carry gets the
+server's original error rather than the `400` described below.
+
 The translation covers text, image and file input, `instructions`, function
 tools and `tool_choice`, `max_output_tokens`, `reasoning.effort`, JSON output
 through `text.format`, and reasoning text a provider returns. Gateway-run tools
