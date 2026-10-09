@@ -104,7 +104,7 @@ class OverviewRepository:
                 # ``routes/budgets.py`` gives: in PostgreSQL
                 # ``coalesce(numeric, double precision)`` resolves the sum as
                 # double precision and rolls exact counters up through a float.
-                func.coalesce(func.sum(User.spend), _ZERO).label("spend"),
+                func.coalesce(func.sum(User.spend_this_period()), _ZERO).label("spend"),
                 func.coalesce(func.sum(User.reserved), _ZERO).label("reserved"),
             )
             .where(User.budget_id.is_not(None), User.deleted_at.is_(None))
@@ -145,7 +145,8 @@ class OverviewRepository:
             Allocation(
                 name=ceiling.name,
                 budget_id=ceiling.budget_id,
-                spent=float(ceiling.current_spend) + float(ceiling.reserved_spend),
+                spent=(0.0 if ceiling.period_has_ended else float(ceiling.current_spend))
+                + float(ceiling.reserved_spend),
                 allocated=float(max_budget),
                 scope_type=ceiling.scope_type,
                 scope_id=ceiling.scope_id,

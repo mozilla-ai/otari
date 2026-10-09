@@ -83,13 +83,13 @@ class UserResponse(BaseModel):
         return cls(
             user_id=user.user_id,
             alias=user.alias,
-            spend=float(user.spend),
+            spend=float(user.spend_now),
             # In-flight budget held by accepted-but-not-yet-settled requests;
             # the effective committed amount is spend + reserved.
             reserved=float(user.reserved),
-            current_tokens=user.current_tokens,
+            current_tokens=user.tokens_now,
             reserved_tokens=user.reserved_tokens,
-            current_requests=user.current_requests,
+            current_requests=user.requests_now,
             reserved_requests=user.reserved_requests,
             budget_id=user.budget_id,
             allowed_models=list(user.allowed_models) if user.allowed_models is not None else None,

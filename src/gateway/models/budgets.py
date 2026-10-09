@@ -5,10 +5,10 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal, get_args
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Uuid, false, text
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Uuid, case, false, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from gateway.models.base import Base, UtcDateTime
+from gateway.models.base import Base, UtcDateTime, has_passed
 from gateway.models.money import UsdCost
 
 # The largest token or request limit a route accepts, and the largest hold it
@@ -365,6 +365,29 @@ class ScopedBudget(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+    @property
+    def period_has_ended(self) -> bool:
+        """Whether the stored window is over and the counters are last period's.
+
+        A window rolls when the next request arrives, so a read reports the
+        ``current_*`` counters as zero once this is true; holds are never masked.
+        """
+        return has_passed(self.period_end)
+
+
+def ceiling_counters_rolled_if_ended(now: datetime) -> dict[str, Any]:
+    """UPDATE values that zero a ceiling's counters if its stored window has ended by ``now``.
+
+    For a write that moves the window, which would otherwise carry the ended
+    period's spend into the new one where no roll would ever clear it.
+    """
+    ended = ScopedBudget.period_end <= now
+    return {
+        "current_spend": case((ended, Decimal(0)), else_=ScopedBudget.current_spend),
+        "current_tokens": case((ended, 0), else_=ScopedBudget.current_tokens),
+        "current_requests": case((ended, 0), else_=ScopedBudget.current_requests),
+    }
 
 
 class BudgetReservation(Base):

@@ -45,6 +45,7 @@ from sqlmodel import col
 
 from gateway.api.deps import (
     ApiKeyFormatPortDep,
+    BudgetServiceDep,
     CurrentIdentity,
     GrowthSignalPortDep,
     get_config,
@@ -56,6 +57,7 @@ from gateway.api.routes.keys import (
     NOT_INTERNAL,
     CreateKeyResponse,
     KeyInfo,
+    _delete_key,
     _load_key_in_organization,
 )
 from gateway.auth.models import hash_key, key_suffix
@@ -432,17 +434,10 @@ async def delete_own_key(
     key_id: str,
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
+    budgets: BudgetServiceDep,
 ) -> None:
     """Delete (revoke) one of the caller's own API keys."""
     organization_id, owner_user_id = await _caller_context(db, identity)
     key = await _load_key_in_organization(db, key_id, organization_id, owner_user_id=owner_user_id)
 
-    await db.delete(key)
-    try:
-        await db.commit()
-    except SQLAlchemyError:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+    await _delete_key(db, budgets, key)

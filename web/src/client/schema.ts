@@ -922,8 +922,9 @@ export interface paths {
          *
          *     Every field takes the value in the body, and a field left out is cleared, so
          *     the same request always leaves the same budget. Answers 201 when it created
-         *     the budget. Users on a budget it replaces stay on it, and its ceilings follow
-         *     a change of reset period. A budget an organization owns is not replaced.
+         *     the budget. Users on a budget it replaces stay on it, and they and its
+         *     ceilings follow a change of reset period. A budget an organization owns is
+         *     not replaced.
          */
         put: operations["budgets-put_budget"];
         post?: never;

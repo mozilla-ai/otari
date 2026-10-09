@@ -25,6 +25,7 @@ from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
 from gateway.schemas.budgets import EndUserPublic, EndUserPut, EndUserUpdate
+from gateway.services.budgets import BudgetService
 from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
 from gateway.services.workspace_scope import organization_default_workspace_id
 
@@ -52,6 +53,18 @@ SURFACE = Surface("keys")
 # for the same reason a write is, because the id a read hands back is what a write
 # is aimed with, and a 404 is the answer a route with no business in a row gives.
 NOT_INTERNAL = col(APIKey.internal_secret).is_(None)
+
+
+async def _delete_key(db: AsyncSession, budgets: BudgetService, key: APIKey) -> None:
+    """Delete a key and the budgets applied to it in one transaction."""
+    await db.delete(key)
+    try:
+        await budgets.delete_api_key_ceilings(key.id)
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database error",
+        ) from None
 
 
 async def _load_key_in_organization(
@@ -571,6 +584,7 @@ async def delete_key(
     key_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
     organization_id: CallerOrganization,
+    budgets: BudgetServiceDep,
 ) -> None:
     """Delete (revoke) an API key in the caller's organization.
 
@@ -578,15 +592,7 @@ async def delete_key(
     """
     key = await _load_key_in_organization(db, key_id, organization_id)
 
-    await db.delete(key)
-    try:
-        await db.commit()
-    except SQLAlchemyError:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database error",
-        ) from None
+    await _delete_key(db, budgets, key)
 
 
 ExternalId = Annotated[str, Path(description="The id the service names the end user by in a request's user field")]
