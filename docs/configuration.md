@@ -89,6 +89,8 @@ the corresponding startup value after the database is available.
 | `rate_limit_store` | Where `rate_limit_rpm` and the `rate_limits` rules are counted: `memory` (the default) or `redis`. See [Rate limits across replicas](#rate-limits-across-replicas). |
 | `rate_limit_redis_url` | The Redis that the `redis` store counts in. |
 | `rate_limits` | Requests per minute, tokens per minute and requests in flight, per deployment, API key, user or model. Also managed from the dashboard. See [Rate limit rules](#rate-limit-rules). |
+| `budgets` | Budgets declared by id and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
+| `api_keys` | API keys, service keys among them, declared with a secret you choose and written to the database at every start. See [Budgets and API keys in config](#budgets-and-api-keys-in-config). |
 | `provider_max_retries` | How many times a provider SDK retries a failed call before Otari sees the failure. Unset keeps each SDK's default. See [Provider retries](#provider-retries). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
 | `enable_metrics` | Serve Prometheus metrics at `/metrics`. Needs the `metrics` extra (`pip install gateway[metrics]`), which the Docker image installs; setting this without it refuses to start. |
@@ -244,6 +246,114 @@ warning per offending member (`opentelemetry.trace.span`). Enable it for trusted
 service-to-service callers, ideally behind a proxy that strips these headers at
 the edge. Browsers cannot send them cross-origin: they are not in the CORS
 allow-list.
+
+## Budgets and API keys in config
+
+A deployment can declare its budgets and API keys in config.yml instead of
+creating them through the management API. Each start writes them to the
+database, so a service that calls Otari needs only this file and one secret
+that both sides read from the environment. Standalone and hosted mode only: a
+hybrid gateway holds no budgets or keys of its own, so it refuses to start with
+either section set.
+
+```yaml
+budgets:
+  end-user-budget-ai:
+    max_budget: 0.1
+    reset_alignment: calendar_day
+    rpm_limit: 40
+    tpm_limit: 2000
+  mlpa-global:
+    max_budget: 100
+    reset_alignment: calendar_day
+
+api_keys:
+  mlpa:
+    secret: ${MLPA_SERVICE_KEY}
+    user_id: mlpa
+    is_service_key: true
+    end_user_budget_ids: [end-user-budget-ai]
+    end_user_budget_id: end-user-budget-ai
+    ceiling: mlpa-global
+```
+
+A budget is keyed by its id and takes the fields `PUT /api/v1/budgets/{budget_id}`
+takes: `name`, `max_budget`, `token_limit`, `request_limit`, `rpm_limit`,
+`tpm_limit`, and either `budget_duration_sec` or `reset_alignment`, not both.
+An id is up to 128 letters, digits, `.`, `_` and `-`, and starts with a letter
+or digit.
+
+A key is keyed by a name of the same form, which is how Otari finds it again at
+the next start. It takes:
+
+| Field | Meaning |
+| --- | --- |
+| `secret` | Required. The secret requests present, interpolated from the environment. |
+| `key_name` | Display name. Defaults to the key's name in config. |
+| `user_id` | The user the key bills to, created when missing. Unset uses the shared `default` user. |
+| `is_service_key` | Lets requests name end users. See [Service keys and end users](access-control.md#service-keys-and-end-users). |
+| `end_user_budget_ids` | Budgets a request may start a new end user on with `Otari-End-User-Budget`. |
+| `end_user_budget_id` | Budget a new end user starts on when the request names none. Must be on `end_user_budget_ids` when both are set. |
+| `ceiling` | Budget that caps the key as a whole, across all of its end users: a scoped budget with `scope_type: api_token` on the key. |
+| `exclude_from_budget` | Log the key's cost without enforcing any budget. |
+| `reject_user_mismatch` | Per-key override of the deployment setting. |
+
+Unknown fields are refused, so a misspelled limit stops the start rather than
+leaving a budget uncapped. A key may name a budget declared here or one that
+already exists in the database.
+
+### The secret
+
+The secret is yours to choose, so the same value works across restarts and
+replicas, and rotating it is a matter of changing the variable on both sides.
+It must look like a key Otari mints: `tk-` followed by at least 47 letters,
+digits, `-` and `_`, random enough not to read as a placeholder. Generate one
+with:
+
+```bash
+python -c "import secrets; print('tk-' + secrets.token_urlsafe(48))"
+```
+
+Otari refuses to start when a secret is empty, is a placeholder, does not have
+that form, equals the master key, or is shared by two keys. Only its hash is
+stored, and no log line, error or API response carries it: the keys API shows
+its usual prefix and last four characters.
+
+### What config.yml owns
+
+Config is the source of truth for what it declares, and every start writes it
+back:
+
+- A missing budget or key is created. An existing one gets the declared values,
+  so a change made through the API or the dashboard lasts until the next start.
+  Fields a key does not declare (expiry, allowed models, metadata) are left as
+  they are, and a key that was deactivated is active again.
+- Changing a key's secret in config changes its secret at the next start, and
+  the old one stops working.
+- `end_user_budget_ids`, `end_user_budget_id` and `ceiling` are reconciled the
+  same way. End users already created keep the budget they started on, as they
+  do when the key is changed through the API. A ceiling moved to another budget
+  restarts its period and keeps the spend it has recorded; a ceiling already on
+  the declared budget keeps its period, so a restart does not reset it. A key
+  with no `ceiling` keeps any ceiling it has.
+- Nothing is deleted. A budget or key removed from config stays as it is and
+  stops being marked as declared, so it can then be changed or deleted through
+  the API. A key deleted through the API while config still declares it is
+  created again at the next start.
+
+`GET /api/v1/budgets` reports `origin: config` on a declared budget, and
+`GET /api/v1/keys` reports the key's `config_name`. A key whose secret is
+already on a key minted through the API takes that key over, keeping its id,
+its end users and its ceiling, which is how an existing key moves into config.
+
+Every replica applies the declarations when it starts. They are written in one
+transaction, and each insert yields to a row another replica placed first, so
+replicas starting together create one budget, one key and one ceiling. A
+declaration that cannot be applied, such as a key naming a budget that does not
+exist, stops the start and nothing is written.
+
+Declarations are applied before the first-run bootstrap key, so a fresh
+deployment that declares a key does not mint and print one.
 
 ## Provider configuration
 

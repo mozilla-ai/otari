@@ -1,7 +1,11 @@
 import uuid
+from collections.abc import Callable, Mapping
 
+from gateway.core.settings.api_keys import ApiKeyConfig
+from gateway.core.settings.budgets import BudgetConfig
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.exceptions.budget_exceptions import DeploymentBudgetIsEndUserDefaultError
+from gateway.exceptions import TenancyError
+from gateway.exceptions.budget_exceptions import DeclaredAccessError, DeploymentBudgetIsEndUserDefaultError
 from gateway.models.api_keys import APIKey
 from gateway.models.tenancy import User
 from gateway.rate_limit import BudgetMinuteLimits
@@ -24,6 +28,7 @@ from gateway.schemas.budgets import (
     WorkspaceMemberBudgetPolicyUpdate,
 )
 from gateway.services.api_keys import ApiKeyService
+from gateway.services.budgets._declared import attach_key_ceiling
 from gateway.services.budgets._deployment_surface import _DeploymentSurface
 from gateway.services.budgets._end_users import ResolvedEndUser, _EndUsers, end_user_budget_list
 from gateway.services.budgets._member_policies import _MemberPolicies
@@ -49,12 +54,65 @@ class BudgetService:
         workspace_access: WorkspaceAccess,
     ) -> None:
         self._uow = uow
+        self._repositories = repositories
         self._budgets = repositories.budgets
         self._api_keys = api_keys
         self._organization = _OrganizationSurface(repositories, ScopeOwnership(organizations, api_keys), organizations)
         self._end_users = _EndUsers(repositories)
         self._deployment = _DeploymentSurface(repositories)
         self._member_policies = _MemberPolicies(repositories, organizations, workspace_access)
+
+    async def apply_declared_access(
+        self,
+        budgets: Mapping[str, BudgetConfig],
+        api_keys: Mapping[str, ApiKeyConfig],
+        *,
+        workspace_id: uuid.UUID | None,
+        fingerprint: Callable[[str], str],
+    ) -> None:
+        """Write the budgets and API keys config.yml declares over what is stored, in one transaction.
+
+        Each budget is created or replaced under its id. Each key is created or
+        updated under its config name, with its secret, its end-user budgets and,
+        when it names one, the ceiling that caps it. Nothing config.yml no longer
+        declares is deleted; it only stops being marked as declared. Replicas that
+        start at once each run this, and every insert yields to a row another one
+        placed first.
+
+        A new key lands in ``workspace_id``, which may be None only when no key is declared.
+
+        Raises:
+            DeclaredAccessError: an entry cannot be applied. Nothing is written.
+        """
+        declared_keys = list(api_keys)
+        async with self._uow:
+            for budget_id, budget in budgets.items():
+                try:
+                    await self._deployment.put_budget(budget_id, CreateBudgetRequest(**budget.model_dump()))
+                except TenancyError as exc:
+                    raise DeclaredAccessError(f"budgets.{budget_id}", exc.message) from exc
+            await self._budgets.mark_declared(list(budgets))
+            for name, key in api_keys.items():
+                if workspace_id is None:
+                    raise ValueError("A declared API key needs a workspace to land in")
+                try:
+                    listed, to_check = end_user_budget_list(
+                        key.end_user_budget_ids, key.end_user_budget_id, check_default=True, check_list=True
+                    )
+                    await self._end_users.require_assignable_budgets(to_check)
+                    key_id = await self._api_keys.apply_declared_key(
+                        name,
+                        key,
+                        declared_names=declared_keys,
+                        end_user_budget_ids=listed,
+                        workspace_id=workspace_id,
+                        fingerprint=fingerprint,
+                    )
+                    if key.ceiling is not None:
+                        await attach_key_ceiling(self._repositories, key_id, key.ceiling)
+                except TenancyError as exc:
+                    raise DeclaredAccessError(f"api_keys.{name}", exc.message) from exc
+            await self._api_keys.release_undeclared_keys(declared_keys)
 
     async def create_member_policy(
         self, *, user: User, workspace_id: uuid.UUID, request: WorkspaceMemberBudgetPolicyCreate

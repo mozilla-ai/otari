@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal, get_args
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Uuid, false, text
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, String, Uuid, false, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from gateway.models.base import Base, UtcDateTime
@@ -33,6 +33,14 @@ MAX_COUNT_LIMIT = 1_000_000_000_000_000
 
 # rpm_limit and tpm_limit are 32-bit columns, so a larger value fails on commit rather than validation.
 MAX_MINUTE_LIMIT = 2_147_483_647
+
+# An id a caller chooses for a budget: letters, digits, '.', '_' and '-', so it
+# reads the same in a path, a header and a config file.
+BUDGET_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+
+# The ``origin`` of a budget that config.yml declares, which every start writes
+# back. NULL is every other budget, whoever created it.
+BUDGET_ORIGIN_CONFIG = "config"
 
 # An enum changes the published OpenAPI schema, so the two published vocabularies stay `Literal`.
 ResetAlignment = Literal["calendar_day", "calendar_week", "calendar_month"]
@@ -123,6 +131,10 @@ class Budget(Base):
     # it is spent over are one product decision, and splitting them let a ceiling
     # reset on a cadence the budget defining it had never heard of.
     reset_alignment: Mapped[str | None] = mapped_column(default=None)
+    # ``config`` while config.yml declares this budget, so the dashboard can say
+    # that an edit made here lasts only until the next start. Cleared on the
+    # start after the declaration is removed; the budget itself stays.
+    origin: Mapped[str | None] = mapped_column(String(16), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -143,6 +155,7 @@ class Budget(Base):
             "request_limit": self.request_limit,
             "budget_duration_sec": self.budget_duration_sec,
             "reset_alignment": self.reset_alignment,
+            "origin": self.origin,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

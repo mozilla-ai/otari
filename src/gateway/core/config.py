@@ -18,6 +18,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gateway.core.addresses import normalized_address
 from gateway.core.env import otari_env
+from gateway.core.settings.api_keys import ApiKeySettings
 from gateway.core.settings.budgets import BudgetSettings
 from gateway.core.settings.feedback import FeedbackSettings
 from gateway.core.settings.inference import InferenceSettings
@@ -483,7 +484,9 @@ class RelyingParty(NamedTuple):
 
 # Gotcha: fields are ordered last base first, then this class's own.
 # The settings view keeps that order, so moving a base reorders it.
-class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, FeedbackSettings, ToolSettings, BaseSettings):
+class GatewayConfig(
+    InferenceSettings, BudgetSettings, ApiKeySettings, PricingSettings, FeedbackSettings, ToolSettings, BaseSettings
+):
     """Gateway configuration with support for YAML files and environment variables."""
 
     model_config = SettingsConfigDict(
@@ -1828,6 +1831,21 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             )
             raise ValueError(msg) from exc
 
+    def validate_declared_access(self) -> None:
+        """Refuse ``budgets`` and ``api_keys`` declarations that cannot be applied, naming no secret.
+
+        A hybrid gateway holds no budgets or keys of its own, so it refuses both
+        rather than ignoring them, the way it refuses ``rate_limits``.
+        """
+        if self.is_hybrid_mode and (self.budgets or self.api_keys):
+            msg = (
+                "budgets and api_keys are declared in config, but a hybrid gateway holds neither; "
+                "declare them on the control plane instead"
+            )
+            raise ValueError(msg)
+        if problems := self.declared_api_key_problems(self.master_key):
+            raise ValueError("; ".join(problems))
+
     def validate_aliases(self) -> None:
         """Validate the ``aliases`` map at startup so misconfig fails fast."""
         for name, target in self.aliases.items():
@@ -2637,6 +2655,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.validate_mode_selection()
     config.validate_provider_instances()
     config.validate_aliases()
+    config.validate_declared_access()
     config.validate_routing_policies()
     config.validate_search_tools()
     config.validate_fetch_tools()

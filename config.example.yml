@@ -59,6 +59,19 @@ providers:
 #       on_failure:
 #         - anthropic:claude-haiku-4-5
 
+# Budgets and API keys written to the database at every start. A key's secret is
+# yours to choose ('tk-' plus random characters); see docs/configuration.md.
+# budgets:
+#   per-user-daily: {max_budget: 1.0, reset_alignment: calendar_day}
+#   service-global: {max_budget: 100, reset_alignment: calendar_month}
+# api_keys:
+#   my-service:
+#     secret: ${MY_SERVICE_KEY}
+#     user_id: my-service
+#     is_service_key: true
+#     end_user_budget_id: per-user-daily
+#     ceiling: service-global
+
 # Optional server controls.
 # rate_limit_rpm: 60
 # enable_metrics: true

@@ -2098,6 +2098,18 @@
             ],
             "title": "Organization Id"
           },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "'config' while config.yml declares this budget, in which case every start writes the declared values back over any change made through the API; null otherwise",
+            "title": "Origin"
+          },
           "request_limit": {
             "anyOf": [
               {
@@ -7477,6 +7489,17 @@
               }
             ],
             "title": "Capture Agent Telemetry"
+          },
+          "config_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Name"
           },
           "created_at": {
             "title": "Created At",

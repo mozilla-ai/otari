@@ -1,12 +1,43 @@
 """Budget settings."""
 
-from typing import Annotated
+import re
+from typing import Annotated, Self
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
+from gateway.models.budgets import BUDGET_ID_PATTERN, MAX_COUNT_LIMIT, MAX_MINUTE_LIMIT, ResetAlignment
+from gateway.models.money import MAX_USD_LIMIT
 
 STREAM_MISSING_USAGE_POLICIES = ("estimate", "fail", "allow_free")
+
+_BUDGET_ID = re.compile(BUDGET_ID_PATTERN)
+
+
+class BudgetConfig(BaseModel):
+    """One budget config.yml declares, with the fields and bounds ``PUT /budgets/{budget_id}`` accepts.
+
+    Unknown fields are refused rather than ignored, so a misspelled limit fails
+    the start instead of leaving the budget uncapped on that axis.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    max_budget: float | None = Field(default=None, ge=0, le=MAX_USD_LIMIT)
+    token_limit: int | None = Field(default=None, ge=0, le=MAX_COUNT_LIMIT)
+    request_limit: int | None = Field(default=None, ge=0, le=MAX_COUNT_LIMIT)
+    rpm_limit: int | None = Field(default=None, ge=1, le=MAX_MINUTE_LIMIT)
+    tpm_limit: int | None = Field(default=None, ge=1, le=MAX_MINUTE_LIMIT)
+    budget_duration_sec: int | None = Field(default=None, gt=0)
+    reset_alignment: ResetAlignment | None = None
+
+    @model_validator(mode="after")
+    def _single_period_source(self) -> Self:
+        if self.budget_duration_sec is not None and self.reset_alignment is not None:
+            msg = "a budget resets on budget_duration_sec or on reset_alignment, not both"
+            raise ValueError(msg)
+        return self
 
 
 class BudgetSettings(BaseModel):
@@ -78,6 +109,27 @@ class BudgetSettings(BaseModel):
             "unbounded. Used by the pre-debit estimate; reconciled to actual usage on completion."
         ),
     )
+
+    budgets: Annotated[dict[str, BudgetConfig], OMITTED] = Field(
+        default_factory=dict,
+        description=(
+            "Budgets this deployment declares, keyed by budget id. Each start creates a missing one and writes the "
+            "declared values over an existing one, so config.yml wins over a change made through the API. A budget "
+            "removed from here is kept as it is. Standalone mode only."
+        ),
+    )
+
+    @field_validator("budgets")
+    @classmethod
+    def _validate_budget_ids(cls, value: dict[str, BudgetConfig]) -> dict[str, BudgetConfig]:
+        for budget_id in value:
+            if not _BUDGET_ID.match(budget_id):
+                msg = (
+                    f"budget id '{budget_id}' must start with a letter or digit and hold only letters, digits, "
+                    "'.', '_' and '-' (at most 128 characters)"
+                )
+                raise ValueError(msg)
+        return value
 
     @field_validator("stream_missing_usage_policy")
     @classmethod

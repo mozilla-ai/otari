@@ -67,6 +67,11 @@ may also define:
 
 The plaintext key is returned only when it is created or rotated. Store it then.
 Rotation preserves the key record and invalidates the previous secret.
+A key can also be declared in config.yml with a secret you choose, in which
+case config.yml owns it and writes it back at every start; see
+[Budgets and API keys in config](configuration.md#budgets-and-api-keys-in-config).
+Rotating a declared key through the API lasts only until the next start, which
+restores the secret config.yml declares.
 
 A budget-exempt key is also exempt from `require_pricing`. Reserve such keys for
 usage import or other intentional observability-only traffic.
@@ -163,6 +168,34 @@ at every deploy. An id is up to 128 letters, digits, `.`, `_` and `-`, and
 starts with a letter or digit.
 `POST /api/v1/budgets` still generates an id, and `GET /api/v1/budgets`
 reports how many users are on each budget in `user_count`.
+
+### Declaring a service key in config
+
+A service whose keys and budgets should not depend on a provisioning script can
+declare them in config.yml instead. The two requests above become:
+
+```yaml
+budgets:
+  end-user-budget-ai: {max_budget: 0.1, reset_alignment: calendar_day, rpm_limit: 40, tpm_limit: 2000}
+  end-user-budget-memories: {max_budget: 0.05, reset_alignment: calendar_day}
+  mlpa-global: {max_budget: 100, reset_alignment: calendar_day}
+
+api_keys:
+  mlpa:
+    secret: ${MLPA_SERVICE_KEY}
+    user_id: mlpa
+    is_service_key: true
+    end_user_budget_ids: [end-user-budget-ai, end-user-budget-memories]
+    end_user_budget_id: end-user-budget-ai
+    ceiling: mlpa-global
+```
+
+`ceiling` is the key's own ceiling, the scoped budget on the API key that pools
+every end user. The service reads the same `MLPA_SERVICE_KEY` and presents it as
+its API key, so nothing has to hand a freshly minted secret from one to the
+other, and a restart or a second replica does not change it. Every start writes
+the declared settings back over changes made through the API; see
+[What config.yml owns](configuration.md#what-configyml-owns).
 
 ### Managing end users
 

@@ -4,7 +4,7 @@ import importlib.util
 from collections.abc import AsyncGenerator, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, Response, status
@@ -24,7 +24,9 @@ from gateway import features
 from gateway.api.deps import (
     build_file_service,
     build_idempotency_service,
+    get_budget_service,
     get_membership_listener,
+    get_unit_of_work,
     get_workspace_code_execution_policies,
     get_workspace_listener,
     get_workspace_search_keys,
@@ -119,7 +121,11 @@ from gateway.services.tenancy.organization_guardrail_runner import (
     run_guardrail_runner_refresher,
 )
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
+from gateway.services.workspace_scope import default_workspace_id
 from gateway.version import __version__
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 # Every path here must be mounted; a contract test checks.
 _PUBLIC_PREFIXES = (f"{API_ROOT}/health",)
@@ -521,6 +527,28 @@ def _validate_provider_account_pepper(config: GatewayConfig) -> None:
         raise ValueError(msg)
 
 
+async def apply_declared_access(config: GatewayConfig, session: "AsyncSession", key_format: ApiKeyFormatPort) -> None:
+    """Write the ``budgets`` and ``api_keys`` config.yml declares into the database, before the first request.
+
+    Runs on every start, including with nothing declared, so a budget or key
+    removed from config.yml stops being marked as declared. A declaration that
+    cannot be applied raises and the gateway does not start: a key without the
+    ceiling it declares would serve uncapped.
+    """
+    # Only when a key is declared: resolving can create the default workspace on a schema built without Alembic.
+    workspace_id = await default_workspace_id(session) if config.api_keys else None
+    budgets = get_budget_service(get_unit_of_work(session), session)
+    await budgets.apply_declared_access(
+        config.budgets, config.api_keys, workspace_id=workspace_id, fingerprint=key_format.fingerprint
+    )
+    if config.budgets or config.api_keys:
+        logger.info(
+            "Applied %d declared budget(s) and %d declared API key(s) from config",
+            len(config.budgets),
+            len(config.api_keys),
+        )
+
+
 def _validate_platform_config(config: GatewayConfig) -> None:
     config.validate_mode_selection()
     if not config.is_hybrid_mode:
@@ -650,6 +678,11 @@ def _create_lifespan() -> Callable[[FastAPI], Any]:
             warn_about_tool_instances(config)
         else:
             init_db(config)
+            # On a session of its own, committed before the startup session below
+            # opens, so SQLite's one writer is never held twice. Before the
+            # bootstrap key, which a deployment that declares its keys does not need.
+            async with create_session() as session:
+                await apply_declared_access(config, session, app.state.container.resolve(ApiKeyFormatPort, session))
             async with create_session() as session:
                 # Persisted dashboard overrides win over config/env; apply them
                 # before pricing init so default-pricing behavior is consistent.
@@ -879,6 +912,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     _warn_if_hosted_has_no_data_plane(config)
     _validate_metrics_support(config)
     _validate_rate_limit_store(config)
+    config.validate_declared_access()
     # A set-but-invalid OTARI_SECRET_KEY must not silently pass startup and then
     # break provider-credential storage at request time. Fail fast here instead.
     validate_secret_key()

@@ -285,6 +285,12 @@ field with its settings view (`core/settings_view.py`): shown in a group,
 omitted, or secret. The settings endpoint derives its view from that, and a
 field without one fails at import.
 
+The `budgets` and `api_keys` sections are not read on requests: each start
+writes them to the database (`apply_declared_access` in `main.py`, through
+`BudgetService.apply_declared_access`), and the rows are what enforcement reads.
+A declared key's secret is a `SecretStr`, so validation names the key and never
+the value.
+
 A domain's settings live in `core/settings/<domain>.py`. `GatewayConfig`
 inherits them rather than nesting them, because a nested model does not read
 a flat `OTARI_<FIELD>` variable. A new setting goes in its domain's module

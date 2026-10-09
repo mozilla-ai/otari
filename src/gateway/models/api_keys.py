@@ -9,6 +9,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from gateway.models.base import Base
 
+# How many budgets one key may list for its end users.
+MAX_END_USER_BUDGETS = 100
+
 
 class APIKey(Base):
     """API Key model for authentication and authorization."""
@@ -37,6 +40,10 @@ class APIKey(Base):
             postgresql_where=text("internal_secret IS NOT NULL"),
             sqlite_where=text("internal_secret IS NOT NULL"),
         ),
+        # One row per config.yml entry, which is what lets replicas starting at
+        # once insert it without a second copy: the loser's insert conflicts here.
+        # NULLs are distinct on both engines, so every other key is unconstrained.
+        Index("uq_api_keys_config_name", "config_name", unique=True),
     )
 
     id: Mapped[str] = mapped_column(primary_key=True)
@@ -113,6 +120,9 @@ class APIKey(Base):
     # key listings filter on: a row with a value here is machinery rather than a
     # credential anybody manages, and no endpoint ever returns the value itself.
     internal_secret: Mapped[str | None] = mapped_column()
+    # The name config.yml declares this key under, set only while it does. Every
+    # start finds the key by it and writes the declared settings and secret back.
+    config_name: Mapped[str | None] = mapped_column(default=None)
 
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
 
@@ -144,5 +154,6 @@ class APIKey(Base):
             "is_service_key": self.is_service_key,
             "end_user_budget_id": self.end_user_budget_id,
             "end_user_budget_ids": self.assignable_end_user_budgets(),
+            "config_name": self.config_name,
             "metadata": self.metadata_,
         }
