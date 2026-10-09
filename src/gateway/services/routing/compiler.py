@@ -151,6 +151,10 @@ class CompiledPlan:
         """Why the head candidate was selected."""
         return self.attempts[0].selection_reason
 
+    def is_fallback(self, served: Attempt) -> bool:
+        """Whether ``served`` is a candidate other than the head, failed or skipped past."""
+        return served.position != self.head.position
+
 
 def needs_budget_state(spec: PolicySpec) -> bool:
     """Whether any condition in ``spec`` reads budget numbers.

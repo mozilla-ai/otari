@@ -1112,7 +1112,7 @@ def _served_by_headers(ctx: RequestContext, provider: Any, chosen: Attempt | Non
     preamble to now: the provider's answer for a non-streamed request, the stream's
     opening for a streamed one.
     """
-    fell_back = chosen is not None and ctx.plan is not None and chosen.position != ctx.plan.attempts[0].position
+    fell_back = chosen is not None and ctx.plan is not None and ctx.plan.is_fallback(chosen)
     return {
         PROVIDER_HEADER: provider_key(provider),
         ATTEMPT_COUNT_HEADER: str(sent),
