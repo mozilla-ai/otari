@@ -212,10 +212,6 @@ export type UsageFilterKeysArePinned = Assert<
 // Users, keys and budgets
 // ---------------------------------------------------------------------------
 export type User = Schemas["UserResponse"]
-export type CreateUserRequest = Defaulted<
-  Schemas["CreateUserRequest"],
-  "blocked"
->
 export type UpdateUserRequest = Schemas["UpdateUserRequest"]
 export type ApiKey = Schemas["KeyInfo"]
 export type CreateKeyRequest = Schemas["CreateKeyRequest"]
@@ -250,9 +246,6 @@ export type BudgetResetAlignment = NonNullable<
 // ---------------------------------------------------------------------------
 export type ModelObject = Schemas["ModelObject"]
 export type ModelListResponse = Schemas["ModelListResponse"]
-export type ModelPricingInfo = Schemas["ModelPricingInfo"]
-export type ModelMetadata = Schemas["ModelMetadata"]
-export type ModelMetadataResponse = Schemas["ModelMetadataResponse"]
 export type DiscoverableModel = Schemas["DiscoverableModel"]
 export type DiscoverableProvider = Schemas["DiscoverableProvider"]
 export type DiscoverableModelsResponse = Schemas["DiscoverableModelsResponse"]
@@ -264,7 +257,6 @@ export type WorstAllocation = Schemas["WorstAllocationResponse"]
 
 export type PricingResponse = Schemas["PricingResponse"]
 export type CurrentPricingPage = Schemas["CurrentPricingPage"]
-export type PricingTier = Schemas["PricingTier"]
 
 // The catalog folded by model (`/v1/catalog`): one summary per model in the
 // list, and one detail carrying every offering of it the caller may use.
@@ -280,10 +272,6 @@ export type CatalogOffering = Schemas["CatalogOffering"]
 export type CatalogCapabilities = Schemas["CatalogCapabilities"]
 export type CatalogElsewhere = Schemas["CatalogElsewhere"]
 export type CatalogOfferingUsage = Schemas["OfferingUsage"]
-/** A tier as stored, which may be a shape this client cannot read (see the spec). */
-export type StoredPricingTier = NonNullable<
-  ModelPricingInfo["pricing_tiers"]
->[number]
 // `unit` carries a schema default, so the generator emits it as required; the
 // callers that price a model omit it and the gateway reads tokens.
 export type SetPricingRequest = Defaulted<Schemas["SetPricingRequest"], "unit">
@@ -384,15 +372,11 @@ export type SetRoutingPolicyRequest = Omit<Schemas["PolicyRequest"], "spec"> & {
 }
 export type AliasResponse = Schemas["AliasResponse"]
 export type CreateAliasRequest = Schemas["AliasRequest"]
-export type ExplainPolicyRequest = Schemas["ExplainRequest"]
-export type ExplainPolicyResponse = Schemas["ExplainResponse"]
 export type RouterStatus = Schemas["RouterStatus"]
 export type RouterPool = Schemas["PoolStatus"]
 export type LearnedPolicy = Schemas["LearnedPolicy"]
 export type RecordedPool = Schemas["RecordedPool"]
 export type ScoredExample = Schemas["ScoredExample"]
-export type RankCandidatesRequest = Schemas["RankRequest"]
-export type RankCandidatesResponse = Schemas["RankResponse"]
 
 // ---------------------------------------------------------------------------
 // Settings, tools and guardrails
