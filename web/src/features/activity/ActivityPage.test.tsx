@@ -1078,6 +1078,53 @@ describe("ActivityPage", () => {
     ).toBe(false)
   })
 
+  it("prices a rerank model per request, entered per thousand", async () => {
+    const user = userEvent.setup()
+    const { calls } = mockApi({
+      rows: [
+        entry({
+          id: "search",
+          model: "rerank-v3.5",
+          provider: "cohere",
+          endpoint: "/v1/rerank",
+          cost: null,
+        }),
+      ],
+    })
+    renderPage(<ActivityPage />)
+
+    const row = (await screen.findByText("rerank-v3.5")).closest("tr")!
+    await user.click(row)
+    await user.click(screen.getByRole("button", { name: "Price this model" }))
+
+    const dialog = await screen.findByRole("dialog")
+    // Opened in the unit the endpoint bills in, with no token fields to fill.
+    expect(
+      within(dialog).getByRole("radio", { name: "Requests" }),
+    ).toBeChecked()
+    expect(within(dialog).queryByLabelText("Output $ / 1M")).toBeNull()
+    await user.type(
+      within(dialog).getByLabelText("Price per 1,000 requests"),
+      "2",
+    )
+    await user.click(
+      within(dialog).getByRole("button", { name: "Price this model" }),
+    )
+
+    await waitFor(() => {
+      const call = calls.find(
+        (c) => c.url.includes(`${API_ROOT}/pricing`) && c.method === "POST",
+      )
+      expect(call).toBeTruthy()
+      expect(JSON.parse(call!.body!)).toMatchObject({
+        model_key: "cohere:rerank-v3.5",
+        input_price_per_million: 2000,
+        output_price_per_million: 0,
+        unit: "requests",
+      })
+    })
+  })
+
   it("does not offer model pricing on a request that was costed", async () => {
     const user = userEvent.setup()
     mockApi({

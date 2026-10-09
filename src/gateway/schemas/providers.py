@@ -201,6 +201,8 @@ class OrgProviderKeyModelPublic(SQLModel):
     ``deployment`` for the deployment's own price list, and None when nothing
     prices the model yet. ``pricing_id`` names the organization's own row where
     there is one, so a client can edit that rate without re-deriving the key.
+    ``unit`` says what the rates are per, as on a pricing row: tokens, requests
+    or images, so a per-request rate is not read as a per-token one.
     """
 
     id: uuid.UUID
@@ -213,6 +215,7 @@ class OrgProviderKeyModelPublic(SQLModel):
     cache_write_1h_price_per_million: float | None = None
     price_source: PriceSource | None = None
     pricing_id: uuid.UUID | None = None
+    unit: str = "tokens"
     enabled: bool
     created_at: datetime
     updated_at: datetime | None = None

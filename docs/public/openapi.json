@@ -9468,7 +9468,7 @@
         "type": "object"
       },
       "OrgProviderKeyModelPublic": {
-        "description": "One offered model, with the rate the caller's organization is charged for it.\n\n``price_source`` says which rung of ``services.pricing_service`` answered:\n``organization`` for a rate an admin set, ``defaults`` for the\ncommunity-maintained rate this surface seeded or the genai-prices fallback,\n``deployment`` for the deployment's own price list, and None when nothing\nprices the model yet. ``pricing_id`` names the organization's own row where\nthere is one, so a client can edit that rate without re-deriving the key.",
+        "description": "One offered model, with the rate the caller's organization is charged for it.\n\n``price_source`` says which rung of ``services.pricing_service`` answered:\n``organization`` for a rate an admin set, ``defaults`` for the\ncommunity-maintained rate this surface seeded or the genai-prices fallback,\n``deployment`` for the deployment's own price list, and None when nothing\nprices the model yet. ``pricing_id`` names the organization's own row where\nthere is one, so a client can edit that rate without re-deriving the key.\n``unit`` says what the rates are per, as on a pricing row: tokens, requests\nor images, so a per-request rate is not read as a per-token one.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -9575,6 +9575,11 @@
               }
             ],
             "title": "Pricing Id"
+          },
+          "unit": {
+            "default": "tokens",
+            "title": "Unit",
+            "type": "string"
           },
           "updated_at": {
             "anyOf": [

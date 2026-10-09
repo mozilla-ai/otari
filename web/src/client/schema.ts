@@ -10420,6 +10420,8 @@ export interface components {
          *     ``deployment`` for the deployment's own price list, and None when nothing
          *     prices the model yet. ``pricing_id`` names the organization's own row where
          *     there is one, so a client can edit that rate without re-deriving the key.
+         *     ``unit`` says what the rates are per, as on a pricing row: tokens, requests
+         *     or images, so a per-request rate is not read as a per-token one.
          */
         OrgProviderKeyModelPublic: {
             /** Cache Read Price Per Million */
@@ -10455,6 +10457,11 @@ export interface components {
             price_source?: ("organization" | "deployment" | "defaults") | null;
             /** Pricing Id */
             pricing_id?: string | null;
+            /**
+             * Unit
+             * @default tokens
+             */
+            unit: string;
             /** Updated At */
             updated_at?: string | null;
         };

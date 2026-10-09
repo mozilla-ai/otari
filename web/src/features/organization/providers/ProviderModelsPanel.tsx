@@ -20,6 +20,7 @@ import { PageLoading } from "@/design-system/feedback/PageLoading"
 import { Toggle } from "@/design-system/forms/Toggle"
 import { Badge } from "@/design-system/indicators/Badge"
 import { TableScrollFrame } from "@/design-system/layout/TableScrollFrame"
+import { formatPricedRate, pricingUnitOf } from "@/features/models/pricingUnit"
 import {
   useOrgProviderModels,
   useRefreshOrgProviderModelPricing,
@@ -63,6 +64,29 @@ function rate(value: number | undefined) {
     <span className="text-subtle">—</span>
   ) : (
     <span className="text-mono-caption tabular-nums">{formatRate(value)}</span>
+  )
+}
+
+/**
+ * The input cell, which names its unit when the rate is not per token: a
+ * per-request rate of 2000 per million under "Input / 1M" would read as a
+ * token price a thousand times too high.
+ */
+function inputRate(row: OrgProviderModel) {
+  const unit = pricingUnitOf(row.unit)
+  const value = row.input_price_per_million ?? undefined
+  if (unit === "tokens" || value === undefined) return rate(value)
+  return (
+    <span className="text-mono-caption tabular-nums">
+      {formatPricedRate(value, unit)}
+    </span>
+  )
+}
+
+/** A rate that only a token price carries, as a dash on any other unit. */
+function tokenRate(row: OrgProviderModel, value: number | null | undefined) {
+  return rate(
+    pricingUnitOf(row.unit) === "tokens" ? (value ?? undefined) : undefined,
   )
 }
 
@@ -145,25 +169,25 @@ export function ProviderModelsPanel({
       id: "input",
       header: "Input / 1M",
       align: "end",
-      cell: (row) => rate(row.input_price_per_million ?? undefined),
+      cell: inputRate,
     },
     {
       id: "output",
       header: "Output / 1M",
       align: "end",
-      cell: (row) => rate(row.output_price_per_million ?? undefined),
+      cell: (row) => tokenRate(row, row.output_price_per_million),
     },
     {
       id: "cache_read",
       header: "Cache read",
       align: "end",
-      cell: (row) => rate(row.cache_read_price_per_million ?? undefined),
+      cell: (row) => tokenRate(row, row.cache_read_price_per_million),
     },
     {
       id: "cache_write",
       header: "Cache write",
       align: "end",
-      cell: (row) => rate(row.cache_write_price_per_million ?? undefined),
+      cell: (row) => tokenRate(row, row.cache_write_price_per_million),
     },
     {
       id: "source",

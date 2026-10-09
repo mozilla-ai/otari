@@ -153,7 +153,34 @@ describe("RequestDetail", () => {
     await flushRouter()
 
     await user.click(screen.getByRole("button", { name: "Price this model" }))
-    expect(onPriceModel).toHaveBeenCalledWith("openai:gpt-4o")
+    expect(onPriceModel).toHaveBeenCalledWith(
+      "openai:gpt-4o",
+      "/v1/chat/completions",
+    )
+  })
+
+  it("passes the endpoint with the model, so a rerank row prices per request", async () => {
+    const user = userEvent.setup()
+    const onPriceModel = vi.fn()
+    mockApi()
+    renderPage(
+      <RequestDetail
+        entry={entry({
+          cost: null,
+          provider: "cohere",
+          model: "rerank-v3.5",
+          endpoint: "/v1/rerank",
+        })}
+        onPriceModel={onPriceModel}
+      />,
+    )
+    await flushRouter()
+
+    await user.click(screen.getByRole("button", { name: "Price this model" }))
+    expect(onPriceModel).toHaveBeenCalledWith(
+      "cohere:rerank-v3.5",
+      "/v1/rerank",
+    )
   })
 
   it("still explains an uncosted row to a caller who cannot price it", async () => {

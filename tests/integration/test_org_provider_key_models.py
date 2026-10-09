@@ -448,6 +448,32 @@ async def test_a_rate_the_admin_set_stops_following_the_community_default(
     assert stored.input_price_per_million == Decimal("1.0")
 
 
+async def test_an_offered_model_says_what_its_rate_is_per(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every rate is stored per million, so a per-request rate of 2000 is $2 per
+    1,000 calls and only its unit stops a reader taking it for a token price."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    key_id = await _key(async_db, owner)
+    _discovery(monkeypatch, "rerank-v3.5")
+    _defaults(monkeypatch, {"rerank-v3.5": ("2.0", "0")})
+    await _service(async_db).refresh_models(user=owner, key_id=key_id)
+
+    listed = await _service(async_db).list_models(user=owner, key_id=key_id)
+    assert listed.data[0].unit == "tokens"
+
+    [stored] = await _organization_rates(async_db)
+    stored.input_price_per_million = Decimal("2000")
+    stored.unit = "requests"
+    stored.origin = "api"
+    await async_db.commit()
+
+    listed = await _service(async_db).list_models(user=owner, key_id=key_id)
+    assert listed.data[0].unit == "requests"
+    assert listed.data[0].input_price_per_million == 2000.0
+
+
 async def test_replacing_a_rate_through_the_pricing_api_stops_a_refresh_moving_it(
     async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:

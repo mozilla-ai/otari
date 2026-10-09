@@ -751,6 +751,7 @@ export function orgProviderModel(
     cache_write_1h_price_per_million: null,
     price_source: "defaults",
     pricing_id: null,
+    unit: "tokens",
     enabled: true,
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: null,

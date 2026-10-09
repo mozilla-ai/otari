@@ -2,19 +2,30 @@ import { Input, Label, TextField } from "@heroui/react"
 import { useState } from "react"
 import { FormDialog } from "@/design-system/feedback/FormDialog"
 import { InfoBanner } from "@/design-system/feedback/InfoBanner"
+import { RadioGroup } from "@/design-system/forms/RadioGroup"
 import { useDirtySnapshot } from "@/design-system/forms/useDirtySnapshot"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
 import { isValidModelKey } from "@/features/models/modelKey"
+import {
+  PRICING_UNIT_OPTIONS,
+  type PricingUnit,
+  pricingUnitOf,
+  toStoredRate,
+  unitRateLabel,
+} from "@/features/models/pricingUnit"
 import { formatNumber } from "@/shared/helpers/format"
 
 // Per-1M rates entered by an operator to reprice imported usage rows. Input and
 // output are required; the cache rates are optional (blank folds those tokens
 // into the fresh-input charge, matching how unset cache pricing behaves).
+// `unit` is set only by a dialog that offers the choice, and a rate for
+// requests or images arrives already converted to its per-million value.
 export interface ManualRates {
   input_price_per_million: number
   output_price_per_million: number
   cache_read_price_per_million?: number
   cache_write_price_per_million?: number
+  unit?: PricingUnit
 }
 
 interface RateFieldProps {
@@ -85,6 +96,14 @@ export interface SetPriceDialogProps {
    * `collectModelKey`.
    */
   initialModelKey?: string
+  /**
+   * Offer the unit the price is per (tokens, requests, images). Only for a
+   * model's own price: repricing imported rows recomputes from each row's token
+   * counts, so a unit there would mean nothing.
+   */
+  chooseUnit?: boolean
+  /** The unit selected when the dialog opens. Only read with `chooseUnit`. */
+  initialUnit?: PricingUnit
 }
 
 const defaultDescription = (count: number): string =>
@@ -102,11 +121,20 @@ export function SetPriceDialog({
   description = defaultDescription,
   collectModelKey = false,
   initialModelKey = "",
+  chooseUnit = false,
+  initialUnit = "tokens",
 }: SetPriceDialogProps) {
   // Seeded on mount only, because the caller remounts this on each open.
   // Reopening for a different selection must not inherit the last rates, which
   // is a real footgun when the values set money.
   const [modelKey, setModelKey] = useState(initialModelKey)
+  const [unit, setUnit] = useState<PricingUnit>(
+    chooseUnit ? initialUnit : "tokens",
+  )
+  // Switching the unit swaps the rate fields, and a remounted field must not
+  // pull focus out of the radio group the operator is still in.
+  const [unitChanged, setUnitChanged] = useState(false)
+  const focusFirstRate = !collectModelKey && !unitChanged
   const [input, setInput] = useState("")
   const [output, setOutput] = useState("")
   const [cacheRead, setCacheRead] = useState("")
@@ -115,6 +143,7 @@ export function SetPriceDialog({
   // from what the form holds.
   const { isDirty } = useDirtySnapshot({
     modelKey,
+    unit,
     input,
     output,
     cacheRead,
@@ -127,39 +156,54 @@ export function SetPriceDialog({
   const cacheWriteRate = parseRate(cacheWrite)
 
   const keyInvalid = collectModelKey && !isValidModelKey(modelKey)
+  // A request or image price is one rate: there is no output, and no cache.
+  const isTokens = unit === "tokens"
 
   const isInvalid =
     keyInvalid ||
     inputRate === null ||
     Number.isNaN(inputRate) ||
-    outputRate === null ||
-    Number.isNaN(outputRate) ||
-    Number.isNaN(cacheReadRate ?? 0) ||
-    Number.isNaN(cacheWriteRate ?? 0)
+    (isTokens &&
+      (outputRate === null ||
+        Number.isNaN(outputRate) ||
+        Number.isNaN(cacheReadRate ?? 0) ||
+        Number.isNaN(cacheWriteRate ?? 0)))
 
   // Owned here rather than by the caller: below its key, so both reset with the
   // draft on the next open.
   const [isSaving, setIsSaving] = useState(false)
   const [failure, setFailure] = useState<unknown>(undefined)
 
+  const rates = (): ManualRates | undefined => {
+    if (isInvalid || inputRate === null) return undefined
+    if (!isTokens) {
+      return {
+        input_price_per_million: toStoredRate(inputRate, unit),
+        output_price_per_million: 0,
+        unit,
+      }
+    }
+    if (outputRate === null) return undefined
+    return {
+      input_price_per_million: inputRate,
+      output_price_per_million: outputRate,
+      ...(cacheReadRate !== null && !Number.isNaN(cacheReadRate)
+        ? { cache_read_price_per_million: cacheReadRate }
+        : {}),
+      ...(cacheWriteRate !== null && !Number.isNaN(cacheWriteRate)
+        ? { cache_write_price_per_million: cacheWriteRate }
+        : {}),
+      ...(chooseUnit ? { unit } : {}),
+    }
+  }
+
   const submit = () => {
-    if (isInvalid || inputRate === null || outputRate === null) return
+    const body = rates()
+    if (body === undefined) return
     if (isSaving) return
     setFailure(undefined)
     setIsSaving(true)
-    onSubmit(
-      {
-        input_price_per_million: inputRate,
-        output_price_per_million: outputRate,
-        ...(cacheReadRate !== null && !Number.isNaN(cacheReadRate)
-          ? { cache_read_price_per_million: cacheReadRate }
-          : {}),
-        ...(cacheWriteRate !== null && !Number.isNaN(cacheWriteRate)
-          ? { cache_write_price_per_million: cacheWriteRate }
-          : {}),
-      },
-      modelKey.trim(),
-    )
+    onSubmit(body, modelKey.trim())
       .catch((error: unknown) => setFailure(error))
       .finally(() => setIsSaving(false))
   }
@@ -195,34 +239,61 @@ export function SetPriceDialog({
           description="The selector callers send as model, prefix included (for example vllm:mistral-small)."
         />
       ) : null}
-      <div className="grid gap-3 sm:grid-cols-2">
-        <RateField
-          label="Input $ / 1M"
-          value={input}
-          onChange={setInput}
-          isRequired
-          autoFocus={!collectModelKey}
+      {chooseUnit ? (
+        <RadioGroup
+          label="Priced per"
+          orientation="horizontal"
+          value={unit}
+          onChange={(value) => {
+            setUnitChanged(true)
+            setUnit(pricingUnitOf(value))
+          }}
+          options={PRICING_UNIT_OPTIONS}
+          description="Rerank and other per-call endpoints are billed per request; image generation per image."
         />
-        <RateField
-          label="Output $ / 1M"
-          value={output}
-          onChange={setOutput}
-          isRequired
-        />
-        <RateField
-          label="Cache read $ / 1M"
-          value={cacheRead}
-          onChange={setCacheRead}
-        />
-        <RateField
-          label="Cache write $ / 1M"
-          value={cacheWrite}
-          onChange={setCacheWrite}
-        />
-      </div>
-      <InfoBanner tone="info">
-        Leave a cache rate blank to bill those tokens at the input rate.
-      </InfoBanner>
+      ) : null}
+      {isTokens ? (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <RateField
+              label="Input $ / 1M"
+              value={input}
+              onChange={setInput}
+              isRequired
+              autoFocus={focusFirstRate}
+            />
+            <RateField
+              label="Output $ / 1M"
+              value={output}
+              onChange={setOutput}
+              isRequired
+            />
+            <RateField
+              label="Cache read $ / 1M"
+              value={cacheRead}
+              onChange={setCacheRead}
+            />
+            <RateField
+              label="Cache write $ / 1M"
+              value={cacheWrite}
+              onChange={setCacheWrite}
+            />
+          </div>
+          <InfoBanner tone="info">
+            Leave a cache rate blank to bill those tokens at the input rate.
+          </InfoBanner>
+        </>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <RateField
+            label={unitRateLabel(unit)}
+            value={input}
+            onChange={setInput}
+            isRequired
+            autoFocus={focusFirstRate}
+          />
+        </div>
+      )}
     </FormDialog>
   )
 }

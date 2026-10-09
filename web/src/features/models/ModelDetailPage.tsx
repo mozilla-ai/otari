@@ -21,6 +21,11 @@ import {
   priceSourceLabel,
 } from "@/features/models/catalog"
 import {
+  formatPricedRate,
+  type PricingUnit,
+  pricingUnitOf,
+} from "@/features/models/pricingUnit"
+import {
   publicCatalogHref,
   rememberModel,
 } from "@/features/models/publicCatalog"
@@ -128,10 +133,23 @@ export function listPriceNote(
 function RateCell({
   metered,
   listed,
+  unit,
+  tokenOnly = false,
 }: {
   metered: number | null | undefined
   listed: number | null | undefined
+  /** What the offering's price is per; a non-token rate names its unit. */
+  unit: PricingUnit
+  /** A rate only a token price has (output), shown as a dash on any other unit. */
+  tokenOnly?: boolean
 }) {
+  if (unit !== "tokens") {
+    return (
+      <span className="text-mono-caption">
+        {tokenOnly || metered == null ? "—" : formatPricedRate(metered, unit)}
+      </span>
+    )
+  }
   const note = listPriceNote(metered, listed)
   return (
     <span className="flex flex-col items-end">
@@ -253,6 +271,7 @@ function offeringColumns({
         <RateCell
           metered={row.input}
           listed={row.offering.metadata_input_price_per_million}
+          unit={pricingUnitOf(row.offering.pricing?.unit)}
         />
       ),
     },
@@ -265,6 +284,8 @@ function offeringColumns({
         <RateCell
           metered={row.output}
           listed={row.offering.metadata_output_price_per_million}
+          unit={pricingUnitOf(row.offering.pricing?.unit)}
+          tokenOnly
         />
       ),
     },
