@@ -1,7 +1,9 @@
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Collection, Sequence
 
+from gateway.core.settings.api_keys import ApiKeyConfig
 from gateway.repositories.api_keys import ApiKeyRepository
+from gateway.services.api_keys._declared import apply_declared_key
 
 
 class ApiKeyService:
@@ -28,3 +30,35 @@ class ApiKeyService:
     async def forget_end_user_budget(self, budget_id: str) -> None:
         """Take a budget off every key's list of end-user budgets."""
         await self._keys.remove_end_user_budget(budget_id)
+
+    async def apply_declared_key(
+        self,
+        config_name: str,
+        spec: ApiKeyConfig,
+        *,
+        declared_names: Collection[str],
+        end_user_budget_ids: list[str] | None,
+        workspace_id: uuid.UUID,
+        fingerprint: Callable[[str], str],
+    ) -> str:
+        """Create the key config.yml declares under ``config_name``, or write the declared values over it.
+
+        Returns the key's id. ``end_user_budget_ids`` is the declared list once checked; ``fingerprint`` is the bound
+        key format's, and a new key lands in ``workspace_id``.
+        """
+        return await apply_declared_key(
+            self._keys,
+            config_name,
+            spec,
+            declared_names=declared_names,
+            end_user_budget_ids=end_user_budget_ids,
+            workspace_id=workspace_id,
+            fingerprint=fingerprint,
+        )
+
+    async def release_undeclared_keys(self, declared_names: Collection[str]) -> list[str]:
+        """Stop marking as declared every key config.yml no longer declares, and return their former names.
+
+        The keys themselves stay, with their secrets and settings.
+        """
+        return await self._keys.release_config_names(declared_names)

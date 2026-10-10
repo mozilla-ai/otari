@@ -1,14 +1,14 @@
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from decimal import Decimal
 from typing import Never
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.budget_exceptions import BudgetStillReferencedError
-from gateway.models.budgets import Budget, BudgetResetLog
+from gateway.models.budgets import BUDGET_ORIGIN_CONFIG, Budget, BudgetResetLog
 from gateway.models.users import User
 from gateway.repositories.base_repository import BaseRepository
 
@@ -121,3 +121,26 @@ class BudgetRepository(BaseRepository[Budget, Never, Never]):
             await self.db.flush()
         except IntegrityError:
             raise BudgetStillReferencedError(budget_id) from None
+
+    async def mark_declared(self, budget_ids: Collection[str]) -> None:
+        """Mark these budgets as declared in config.yml, and clear the mark from every other budget.
+
+        Only rows whose mark changes are written, so a restart with nothing changed locks none.
+        """
+        declared = list(budget_ids)
+        if declared:
+            await self.db.execute(
+                update(Budget)
+                .where(
+                    Budget.budget_id.in_(declared),
+                    or_(Budget.origin.is_(None), Budget.origin != BUDGET_ORIGIN_CONFIG),
+                )
+                .values(origin=BUDGET_ORIGIN_CONFIG)
+                .execution_options(synchronize_session=False)
+            )
+        await self.db.execute(
+            update(Budget)
+            .where(Budget.origin == BUDGET_ORIGIN_CONFIG, Budget.budget_id.not_in(declared))
+            .values(origin=None)
+            .execution_options(synchronize_session=False)
+        )

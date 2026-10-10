@@ -20,7 +20,7 @@ from gateway.api.deps import (
 from gateway.auth.models import hash_key, key_suffix
 from gateway.core.config import GatewayConfig
 from gateway.core.surface import Surface
-from gateway.models.api_keys import APIKey
+from gateway.models.api_keys import MAX_END_USER_BUDGETS, APIKey
 from gateway.models.tenancy import Workspace
 from gateway.models.users import User
 from gateway.repositories.users_repository import get_or_create_default_user, owned_by_organization
@@ -96,10 +96,6 @@ async def _load_key_in_organization(
         )
 
     return key
-
-
-# How many budgets one key may list for its end users.
-MAX_END_USER_BUDGETS = 100
 
 
 class CreateKeyRequest(BaseModel):
@@ -208,6 +204,9 @@ class KeyInfo(BaseModel):
     # The budgets a request may start an end user on: the key's list, or its default alone.
     end_user_budget_ids: list[str]
     workspace_id: uuid.UUID
+    # Set while config.yml declares this key: every start writes the declared
+    # secret and settings back, so a change made here lasts until the next one.
+    config_name: str | None = None
     metadata: dict[str, Any]
 
     @classmethod
@@ -232,6 +231,7 @@ class KeyInfo(BaseModel):
             is_service_key=bool(key.is_service_key),
             end_user_budget_id=key.end_user_budget_id,
             end_user_budget_ids=key.assignable_end_user_budgets(),
+            config_name=key.config_name,
             metadata=dict(key.metadata_) if key.metadata_ else {},
         )
 

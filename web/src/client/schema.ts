@@ -7021,6 +7021,11 @@ export interface components {
             name: string | null;
             /** Organization Id */
             organization_id: string | null;
+            /**
+             * Origin
+             * @description 'config' while config.yml declares this budget, in which case every start writes the declared values back over any change made through the API; null otherwise
+             */
+            origin?: string | null;
             /** Request Limit */
             request_limit: number | null;
             /** Reset Alignment */
@@ -9604,6 +9609,8 @@ export interface components {
             allowed_models: string[] | null;
             /** Capture Agent Telemetry */
             capture_agent_telemetry: boolean | null;
+            /** Config Name */
+            config_name?: string | null;
             /** Created At */
             created_at: string;
             /** End User Budget Id */

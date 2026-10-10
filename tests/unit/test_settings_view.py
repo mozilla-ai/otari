@@ -20,6 +20,7 @@ CREDENTIALS = (
     "oauth_github_client_secret",
     "web_search_provider_api_key",
     "web_search_backend_token",
+    "api_keys",
 )
 
 

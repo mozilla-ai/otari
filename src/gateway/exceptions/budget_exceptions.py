@@ -277,3 +277,13 @@ __all__ = [
     "WorkspaceBudgetDefaultBudgetNotFoundError",
     "WorkspaceBudgetDefaultNotFoundError",
 ]
+
+
+class DeclaredAccessError(TenancyValidationError):
+    """config.yml declares a budget or an API key this deployment cannot apply, so the gateway does not start.
+
+    The message names the config entry and never a key's secret.
+    """
+
+    def __init__(self, entry: str, reason: str):
+        super().__init__(f"{entry}: {reason}")
