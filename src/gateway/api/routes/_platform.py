@@ -954,7 +954,10 @@ async def _report_platform_usage(
     timeout_ms = int(config.platform.get("usage_timeout_ms", 5000))
     max_retries = int(config.platform.get("usage_max_retries", 3))
     usage_url = transport.control_plane_url(platform_base_url, "/gateway/usage")
-    headers = {"X-Gateway-Token": config.platform_token or ""}
+    headers = {
+        "X-Gateway-Token": config.platform_token or "",
+        "Otari-Protocol-Version": str(transport.PLATFORM_PROTOCOL_VERSION),
+    }
 
     payload: dict[str, Any] = {
         "correlation_id": correlation_id,

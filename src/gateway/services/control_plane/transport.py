@@ -8,6 +8,11 @@ from typing import Any
 
 import httpx
 
+# Bumped when the resolve/usage wire shapes in docs/hybrid-mode-protocol.md
+# change in a way the platform needs to branch on. Sent as X-Otari-Protocol-
+# Version on every resolve and usage call; unread by this gateway itself.
+PLATFORM_PROTOCOL_VERSION = 1
+
 
 def control_plane_url(base_url: str, path: str) -> str:
     """Join ``path`` onto the control plane's base URL."""
