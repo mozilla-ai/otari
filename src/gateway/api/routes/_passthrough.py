@@ -10,8 +10,9 @@ estimate, provider call, token extraction, cost computation) as callbacks.
 Provider failures are classified by ``classify_provider_error``, the helper the
 chat, messages, and responses routes use, so a provider's refusal of the
 caller's request (an upstream 400 or 404, an operation or parameter the provider
-does not support) answers with the same 4xx and redacted detail there, and an
-upstream outage with a 502 whose detail is fixed. The raw provider message is
+does not support) answers with the same 4xx and redacted detail there, a
+missing or rejected credential with a 424, and an upstream outage with a 502
+whose detail is fixed. The raw provider message is
 preserved on the usage log's ``error_message``.
 
 Every row this scaffold writes comes from one of two places: ``_usage_row`` for
@@ -51,7 +52,7 @@ from gateway.api.routes._pipeline import (
     throttle_early_rejection,
     unresolvable_model_detail,
 )
-from gateway.api.routes._platform import _classify_upstream_error, is_provider_credential_rejection
+from gateway.api.routes._platform import _classify_upstream_error
 from gateway.core.config import GatewayConfig
 from gateway.core.database import release_session
 from gateway.core.error_codes import MODEL_NOT_ALLOWED, PROVIDER_CREDENTIAL_REJECTED, error_headers
@@ -596,16 +597,6 @@ async def run_passthrough(
             logger.warning("No credential configured for %s:%s", resolved.provider, resolved.model)
             raise HTTPException(
                 status_code=missing.status_code, detail=missing.detail, headers=error_headers(missing.code)
-            ) from e
-
-        if is_provider_credential_rejection(e):
-            logger.warning(
-                "The provider rejected the credential configured for %s:%s", resolved.provider, resolved.model
-            )
-            raise HTTPException(
-                status_code=status.HTTP_424_FAILED_DEPENDENCY,
-                detail=PROVIDER_CREDENTIALS_DETAIL,
-                headers=error_headers(PROVIDER_CREDENTIAL_REJECTED),
             ) from e
 
         mapped = map_provider_error(e) if map_provider_error else None
