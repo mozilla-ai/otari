@@ -610,7 +610,13 @@ async def run_passthrough(
             )
             raise HTTPException(
                 status_code=mapping.status_code,
-                detail=hide_alias_target(mapping.detail, resolved),
+                detail=hide_alias_target(
+                    mapping.detail,
+                    alias=resolved.alias,
+                    instance=resolved.instance,
+                    model=resolved.model,
+                    dispatch_model=resolved.dispatch_model,
+                ),
                 headers=provider_error_headers(e, mapping.status_code),
             ) from e
 
