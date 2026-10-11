@@ -13,7 +13,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from gateway.api.routes._pipeline import PROVIDER_TIMEOUT_DETAIL
 from gateway.core.config import API_ROOT
+from gateway.core.error_codes import ERROR_CODE_HEADER, UPSTREAM_RATE_LIMITED
 from gateway.metrics import REGISTRY
 from gateway.models.usage import UsageLog
 
@@ -575,3 +577,53 @@ def test_embeddings_keyword_the_caller_did_not_send_stays_a_502(
         )
     assert resp.status_code == 502
     assert "encoding_format" not in resp.json()["detail"]
+
+
+def test_embeddings_upstream_rate_limit_is_a_429_with_its_retry_after(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """The provider's rate limit keeps its status and wait, and names itself as the provider's."""
+    request = httpx.Request("POST", "https://api.openai.com/v1/embeddings")
+    upstream = openai.RateLimitError(
+        "Error code: 429 - Rate limit reached for requests",
+        response=httpx.Response(429, request=request, headers={"Retry-After": "7"}),
+        body={"message": "Rate limit reached for requests"},
+    )
+    with patch(
+        "gateway.api.routes.embeddings.aembedding",
+        new_callable=AsyncMock,
+        side_effect=convert_exception(upstream, "openai"),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/embeddings",
+            json={"model": "openai:text-embedding-3-small", "input": "hello"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 429
+    assert resp.headers[ERROR_CODE_HEADER] == UPSTREAM_RATE_LIMITED
+    assert resp.headers["Retry-After"] == "7"
+
+    rows = _error_rows(client, master_key_header, api_key_obj["user_id"])
+    assert [row["status_code"] for row in rows] == [429]
+
+
+def test_embeddings_provider_timeout_is_a_504(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    timeout = openai.APITimeoutError(request=httpx.Request("POST", "https://api.openai.com/v1/embeddings"))
+    with patch(
+        "gateway.api.routes.embeddings.aembedding",
+        new_callable=AsyncMock,
+        side_effect=convert_exception(timeout, "openai"),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/embeddings",
+            json={"model": "openai:text-embedding-3-small", "input": "hello"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 504
+    assert resp.json()["detail"] == PROVIDER_TIMEOUT_DETAIL

@@ -378,12 +378,15 @@ removed.
 
 The completion routes and the pass-through routes (embeddings, images, audio,
 moderations, rerank) classify a provider failure the same way. A provider that
-rejects the request (its own 400 or 422) answers 400, an unknown model 404, and
-its rate limit 429. A model whose provider has no such operation (rerank on a
-chat model, for example) or whose SDK has no parameter for a field the caller
-sent answers 400, naming the operation or the field. None of these are 5xx, so
-an OpenAI-compatible client does not retry them. A provider timeout answers
-504, and any other provider failure 502.
+rejects the request (its own 400 or 422) answers 400, and an unknown model 404.
+A model whose provider has no such operation (rerank on a chat model, for
+example) or whose SDK has no parameter for a field the caller sent answers 400,
+naming the operation or the field. An OpenAI-compatible client does not retry a
+400 or a 404. The provider's rate limit answers 429 with
+`Otari-Error-Code: upstream_rate_limited` and the provider's `Retry-After` when
+it sent one, which a client may retry after waiting. A provider timeout answers
+504, and any other provider failure 502. When the request named a model alias,
+a provider message that names the alias's target names the alias instead.
 
 Gateway-side failures use fixed public messages. Diagnose them with protected
 logs and safe metadata such as request ID, provider, model, and status. Do not

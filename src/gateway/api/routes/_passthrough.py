@@ -24,6 +24,7 @@ scaffolds record a rejection identically.
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Collection
@@ -111,6 +112,22 @@ PASSTHROUGH_PROVIDER_ERROR_DETAIL = "The request could not be completed by the p
 # matching the shape ``price_billable_usage`` and ``price_tool_calls`` already
 # write for the chat and tool-charge paths.
 BillingMeters = tuple[dict[str, Any], list[dict[str, Any]]]
+
+
+def _hide_alias_target(detail: str, resolved: ResolvedProvider) -> str:
+    """``detail`` with the target of the caller's alias replaced by the alias.
+
+    A provider's message often names the model it was asked for, which for an
+    aliased request is the target the alias exists to hide (see ``relabel``).
+    """
+    alias = resolved.alias
+    if alias is None:
+        return detail
+    targets = {f"{resolved.instance}:{resolved.model}", resolved.dispatch_model, resolved.model}
+    # One pass, longest first, so a qualified name is replaced whole and an alias
+    # that contains its target is not rewritten again.
+    pattern = "|".join(re.escape(target) for target in sorted(targets, key=len, reverse=True))
+    return re.sub(pattern, lambda _match: alias, detail)
 
 
 def resolve_passthrough_user_id(
@@ -618,7 +635,7 @@ async def run_passthrough(
             )
             raise HTTPException(
                 status_code=mapping.status_code,
-                detail=mapping.detail,
+                detail=_hide_alias_target(mapping.detail, resolved),
                 headers=provider_error_headers(e, mapping.status_code),
             ) from e
 

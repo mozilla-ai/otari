@@ -573,3 +573,27 @@ def test_transcription_ignores_genai_prices_defaults(
     assert latest["cost"] == 0.0
     assert latest["billing_meters"] is None
     assert latest["pricing_breakdown"] is None
+
+
+@pytest.mark.parametrize(("form", "expected_status"), [({"language": "en"}, 400), ({}, 502)])
+def test_transcription_param_the_provider_sdk_refuses(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    form: dict[str, str],
+    expected_status: int,
+) -> None:
+    """A form field the caller sent and the SDK refuses is named in a 400; the same refusal of a field the
+    caller never sent stays the gateway's 502."""
+    with patch(
+        "gateway.api.routes.audio.atranscription",
+        new_callable=AsyncMock,
+        side_effect=TypeError("transcribe() got an unexpected keyword argument 'language'"),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/audio/transcriptions",
+            files={"file": ("test.mp3", b"audio-data", "audio/mpeg")},
+            data={"model": "openai:whisper-1", **form},
+            headers=api_key_header,
+        )
+    assert resp.status_code == expected_status
+    assert ("'language'" in resp.json()["detail"]) is (expected_status == 400)
