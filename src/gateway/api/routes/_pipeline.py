@@ -798,8 +798,8 @@ def failure_status_code(exc: BaseException) -> int:
     as a 424 (a provider rejecting the gateway's credentials is a gateway-config
     fault, not the caller's key), but the log keeps the 401 so "how much of my
     error rate is my own misconfiguration" stays answerable. When the provider
-    returned no status at all (timeout, unreachable), records the gateway's own classification instead, so an error
-    row still carries a code to group on.
+    returned no status at all (timeout, unreachable), records the gateway's own
+    classification instead, so an error row still carries a code to group on.
 
     The tool-loop cap is checked first because it is the gateway's own limit, not
     an upstream failure: it carries no HTTP status of its own, so it would

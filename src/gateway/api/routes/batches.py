@@ -18,10 +18,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._helpers import resolve_user_id
-from gateway.api.routes._pipeline import _raise_for_unresolvable_model, failure_status_code
+from gateway.api.routes._pipeline import (
+    PROVIDER_CREDENTIALS_DETAIL,
+    _raise_for_unresolvable_model,
+    failure_status_code,
+)
+from gateway.api.routes._platform import is_provider_credential_rejection
 from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
-from gateway.core.error_codes import MODEL_NOT_ALLOWED, error_headers
+from gateway.core.error_codes import MODEL_NOT_ALLOWED, PROVIDER_CREDENTIAL_REJECTED, error_headers
 from gateway.core.metered_pricing import calculate_token_cost, quantize_cost
 from gateway.core.usage import cache_read_tokens_of
 from gateway.log_config import logger
@@ -286,13 +291,24 @@ def _authorize_legacy_batch(
         )
 
 
+def _provider_failure(exc: Exception) -> HTTPException:
+    """The answer to a failed provider call: a rejected credential is a 424, anything else a 502."""
+    if is_provider_credential_rejection(exc):
+        return HTTPException(
+            status_code=status.HTTP_424_FAILED_DEPENDENCY,
+            detail=PROVIDER_CREDENTIALS_DETAIL,
+            headers=error_headers(PROVIDER_CREDENTIAL_REJECTED),
+        )
+    return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="LLM provider error")
+
+
 async def _retrieve_batch_or_502(
     provider_enum: LLMProvider,
     batch_id: str,
     provider: str,
     provider_kwargs: dict[str, Any],
 ) -> Batch:
-    """Retrieve a batch from the provider, mapping failures to 502."""
+    """Retrieve a batch from the provider, mapping failures as ``_provider_failure`` does."""
     try:
         batch: Batch = await aretrieve_batch(
             provider=provider_enum,
@@ -303,10 +319,7 @@ async def _retrieve_batch_or_502(
         raise
     except Exception as e:
         logger.error("Batch retrieve failed for %s: %s", provider, e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="LLM provider error",
-        ) from e
+        raise _provider_failure(e) from e
     return batch
 
 
@@ -470,10 +483,7 @@ async def create_batch(
         )
         await refund_reservation(db, reservation)
         logger.error("Batch create failed for %s: %s", provider, e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="LLM provider error",
-        ) from e
+        raise _provider_failure(e) from e
     finally:
         try:
             os.unlink(tmp_path)
@@ -577,10 +587,7 @@ async def cancel_batch(
         raise
     except Exception as e:
         logger.error("Batch cancel failed for %s: %s", provider, e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="LLM provider error",
-        ) from e
+        raise _provider_failure(e) from e
 
     response_data = batch.model_dump()
     response_data["provider"] = provider
@@ -624,10 +631,7 @@ async def list_batches(
         raise
     except Exception as e:
         logger.error("Batch list failed for %s: %s", provider, e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="LLM provider error",
-        ) from e
+        raise _provider_failure(e) from e
 
     # Prefer the local records (strict) and fall back to the metadata marker for
     # legacy batches. One bulk lookup avoids a per-batch query.
@@ -716,10 +720,7 @@ async def retrieve_batch_results(
         ) from e
     except Exception as e:
         logger.error("Batch results retrieve failed for %s: %s", provider, e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="LLM provider error",
-        ) from e
+        raise _provider_failure(e) from e
 
     # Extract model from the first successful result if available
     batch_model = "batch"
