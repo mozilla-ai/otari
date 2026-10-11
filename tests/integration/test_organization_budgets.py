@@ -711,6 +711,53 @@ async def test_every_scope_kind_resolves_to_its_organization(async_db: AsyncSess
 
 
 @pytest.mark.asyncio
+async def test_a_listed_budget_names_what_it_applies_to(async_db: AsyncSession) -> None:
+    """Named where the entity has a name, narrowed where it is narrowed, and never another tenant's scope."""
+    organization = await _organization(async_db, slug="acme-applied")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, name="Research", owner=owner)
+    membership = (
+        (await async_db.execute(select(OrganizationMember).where(col(OrganizationMember.user_id) == owner.id)))
+        .scalars()
+        .one()
+    )
+    service = _service(async_db)
+    budget = await service.create_organization_budget(user=owner, request=_create())
+    unused = await service.create_organization_budget(user=owner, request=_create(name="Unused"))
+    for scope_type, scope_id, provider in [
+        ("organization", str(organization.id), None),
+        ("workspace", str(workspace.id), "openai"),
+        ("org_member", str(membership.id), None),
+    ]:
+        await service.create_organization_ceiling(
+            user=owner,
+            request=OrganizationScopedBudgetCreate(
+                scope_type=scope_type,  # type: ignore[arg-type]
+                scope_id=scope_id,
+                provider_key_id=provider,
+                budget_id=budget.budget_id,
+            ),
+        )
+
+    # An operator may point another organization's workspace at this budget; that ID must not reach this admin.
+    other = await _organization(async_db, slug="other-applied")
+    other_owner = await _member(async_db, other, role="owner", full_name="Other owner")
+    foreign = await _workspace(async_db, other, name="Elsewhere", owner=other_owner)
+    async_db.add(ScopedBudget(scope_type="workspace", scope_id=str(foreign.id), budget_id=budget.budget_id))
+    await async_db.commit()
+
+    listed = {row.budget_id: row for row in (await service.list_organization_budgets(user=owner)).data}
+
+    assert [(e.scope_type, e.provider_key_id, e.name) for e in listed[budget.budget_id].applied_to] == [
+        ("organization", None, "Acme-Applied"),
+        ("workspace", "openai", "Research"),
+        ("org_member", None, None),
+    ]
+    assert listed[budget.budget_id].ceiling_count == 4
+    assert listed[unused.budget_id].applied_to == []
+
+
+@pytest.mark.asyncio
 async def test_giving_a_cadence_to_a_budget_that_had_none_retimes_its_ceilings(async_db: AsyncSession) -> None:
     """The case that is an enforcement bug rather than a cosmetic one.
 

@@ -255,7 +255,7 @@ test.describe("organization rail", () => {
 })
 
 /**
- * The organization-admin view of Spend & budgets.
+ * The organization-admin view of Budgets.
  *
  * `/budgets` above captures the deployment-operator page, because `login`
  * exchanges the master key and that session is the bootstrap operator, so
@@ -295,6 +295,20 @@ async function stubAdminSpendView(page: Page): Promise<void> {
             budget_duration_sec: null,
             reset_alignment: "calendar_month",
             ceiling_count: 2,
+            applied_to: [
+              {
+                scope_type: "organization",
+                scope_id: "22222222-2222-2222-2222-222222222222",
+                provider_key_id: null,
+                name: "Acme",
+              },
+              {
+                scope_type: "workspace",
+                scope_id: "44444444-4444-4444-4444-444444444444",
+                provider_key_id: null,
+                name: "Platform",
+              },
+            ],
             created_at: "2026-08-01T00:00:00+00:00",
             updated_at: "2026-08-01T00:00:00+00:00",
           },
@@ -306,6 +320,7 @@ async function stubAdminSpendView(page: Page): Promise<void> {
             budget_duration_sec: null,
             reset_alignment: "calendar_day",
             ceiling_count: 0,
+            applied_to: [],
             created_at: "2026-08-02T00:00:00+00:00",
             updated_at: "2026-08-02T00:00:00+00:00",
           },
@@ -396,18 +411,18 @@ test.describe("organization member", () => {
 })
 
 test.describe("organization admin", () => {
-  test("organization spend and budgets", async ({ page }) => {
+  test("organization budgets", async ({ page }) => {
     await login(page)
     await stubAdminSpendView(page)
     await gotoRoute(page, "/budgets")
     await expect(
-      page.getByRole("heading", { name: /spend & budgets/i }).first(),
+      page.getByRole("heading", { name: /^budgets$/i }).first(),
     ).toBeVisible()
     // Awaited past the loading rows, so the capture is the populated tables
     // rather than two spinners.
     await expect(page.getByText("Engineering monthly")).toBeVisible()
     await expect(page.getByText("Set at the deployment level")).toBeVisible()
-    await captureScreenshot(page, "organization-spend-budgets")
+    await captureScreenshot(page, "organization-budgets")
   })
 })
 

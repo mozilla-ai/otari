@@ -9,7 +9,7 @@ from fastapi import HTTPException
 
 from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes.pricing import PricingResponse
-from gateway.schemas.budgets import BudgetResponse, OrganizationBudgetPublic
+from gateway.schemas.budgets import AppliedEntityPublic, BudgetResponse, OrganizationBudgetPublic
 
 
 def _make_error(detail: str, status_code: int = 400) -> HTTPException:
@@ -293,7 +293,10 @@ def _organization_budget(owner: uuid.UUID | None) -> MagicMock:
 
 def test_organization_budget_public_names_the_owner() -> None:
     owner = uuid.uuid4()
-    public = OrganizationBudgetPublic.from_model(_organization_budget(owner), organization_id=owner, ceiling_count=2)
+    entity = AppliedEntityPublic(scope_type="organization", scope_id=str(owner), provider_key_id=None, name="Acme")
+    public = OrganizationBudgetPublic.from_model(
+        _organization_budget(owner), organization_id=owner, ceiling_count=2, applied_to=[entity, entity]
+    )
     assert public.organization_id == owner
     assert public.ceiling_count == 2
 
@@ -302,4 +305,4 @@ def test_organization_budget_public_names_the_owner() -> None:
 def test_organization_budget_public_refuses_a_budget_it_does_not_own(row_owner: uuid.UUID | None) -> None:
     budget = _organization_budget(row_owner)
     with pytest.raises(ValueError, match="does not belong to this organization"):
-        OrganizationBudgetPublic.from_model(budget, organization_id=uuid.uuid4(), ceiling_count=0)
+        OrganizationBudgetPublic.from_model(budget, organization_id=uuid.uuid4(), ceiling_count=0, applied_to=[])

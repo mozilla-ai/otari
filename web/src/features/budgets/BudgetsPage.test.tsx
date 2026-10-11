@@ -1042,8 +1042,9 @@ describe("BudgetsPage", () => {
     })
     renderPage(<BudgetsPage />)
 
+    // Both grids are named "Budgets"; this column is the organization page's own.
     expect(
-      await screen.findByRole("grid", { name: "Organization budgets" }),
+      await screen.findByRole("columnheader", { name: "Applied to" }),
     ).toBeInTheDocument()
     expect(
       screen.getByRole("grid", { name: "Organization spend ceilings" }),
@@ -1066,7 +1067,7 @@ describe("BudgetsPage", () => {
 
     expect(await screen.findByText("Deployment wide")).toBeInTheDocument()
     expect(
-      screen.queryByRole("grid", { name: "Organization budgets" }),
+      screen.queryByRole("columnheader", { name: "Applied to" }),
     ).toBeNull()
   })
 })

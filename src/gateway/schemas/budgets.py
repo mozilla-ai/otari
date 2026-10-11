@@ -394,6 +394,17 @@ class OrganizationBudgetUpdate(OrganizationBudgetRates):
     """
 
 
+class AppliedEntityPublic(BaseModel):
+    """One entity a budget applies to: the scope a ceiling caps, and the provider it narrows to."""
+
+    scope_type: str
+    scope_id: str
+    provider_key_id: str | None
+    name: str | None = Field(
+        description="The organization's or the workspace's name; null for a membership or an API key",
+    )
+
+
 class OrganizationBudgetPublic(BaseModel):
     """One of the organization's budgets, and how much of its own config names it.
 
@@ -415,6 +426,7 @@ class OrganizationBudgetPublic(BaseModel):
     budget_duration_sec: int | None
     reset_alignment: str | None
     ceiling_count: int
+    applied_to: list[AppliedEntityPublic] = Field(description="Every entity the budget applies to, oldest first")
     created_at: str
     updated_at: str
 
@@ -425,6 +437,7 @@ class OrganizationBudgetPublic(BaseModel):
         *,
         organization_id: uuid.UUID,
         ceiling_count: int,
+        applied_to: list[AppliedEntityPublic],
     ) -> OrganizationBudgetPublic:
         """Build the public form of a budget that the given organization owns.
 
@@ -443,6 +456,7 @@ class OrganizationBudgetPublic(BaseModel):
             budget_duration_sec=budget.budget_duration_sec,
             reset_alignment=budget.reset_alignment,
             ceiling_count=ceiling_count,
+            applied_to=applied_to,
             created_at=budget.created_at.isoformat(),
             updated_at=budget.updated_at.isoformat(),
         )
@@ -590,6 +604,7 @@ class WorkspaceMemberBudgetPoliciesPublic(BaseModel):
 
 __all__ = [
     "BUDGET_ID_PATTERN",
+    "AppliedEntityPublic",
     "BudgetResetLogResponse",
     "BudgetResponse",
     "CreateBudgetRequest",
