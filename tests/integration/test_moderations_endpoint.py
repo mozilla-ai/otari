@@ -201,11 +201,12 @@ def test_moderations_unsupported_provider_returns_400(
     assert resp.json() == {"detail": "Provider anthropic does not support moderation"}
 
 
-def test_moderations_generic_not_implemented_returns_502(
+def test_moderations_generic_not_implemented_returns_400(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """Generic NotImplementedError (without locked phrasing) returns 502."""
+    """any-llm raises NotImplementedError for a feature the provider lacks, so
+    without the locked phrasing it is still a refusal, as on the completion routes."""
     with patch(
         "gateway.api.routes.moderations.amoderation",
         new_callable=AsyncMock,
@@ -216,8 +217,8 @@ def test_moderations_generic_not_implemented_returns_502(
             json={"model": "openai:omni-moderation-latest", "input": "hello"},
             headers=api_key_header,
         )
-    assert resp.status_code == 502
-    assert "could not be completed" in resp.json()["detail"].lower()
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "some internal implementation gap"
 
 
 def test_moderations_logs_usage(

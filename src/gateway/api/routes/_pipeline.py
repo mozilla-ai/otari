@@ -39,7 +39,7 @@ import json
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Coroutine, Iterable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -533,7 +533,7 @@ def _provider_rejected_param_detail(param: str) -> str:
     return f"The provider serving this model does not accept the '{param}' parameter"
 
 
-def _rejected_param(exc: BaseException) -> str | None:
+def _rejected_param(exc: BaseException, request_params: Collection[str] = _FORWARDED_PARAMS) -> str | None:
     """The request param a provider SDK refused as an unknown keyword, if any.
 
     any-llm hands a provider's SDK the params its ``*Params`` model declares, so
@@ -552,7 +552,9 @@ def _rejected_param(exc: BaseException) -> str | None:
     Python raises this same wording for any bad keyword and this classifier is
     reached from ``except Exception`` arms that wrap more than the provider call:
 
-    * The name has to be one a request body can carry (:data:`_FORWARDED_PARAMS`).
+    * The name has to be one a request body can carry: ``request_params``, which
+      defaults to the completion formats' :data:`_FORWARDED_PARAMS`. A
+      pass-through route names the fields its own request set instead.
       An operator's ``client_args`` typo (``timeoutt``) and a gateway-internal
       signature drift after an SDK bump (a tool backend's ``image``) are neither,
       so they keep the generic 502 and stay on the error-rate panel as the
@@ -572,7 +574,7 @@ def _rejected_param(exc: BaseException) -> str | None:
         if "__init__" in message:
             continue
         match = _UNEXPECTED_KWARG.search(message)
-        if match and match.group(1) in _FORWARDED_PARAMS:
+        if match and match.group(1) in request_params:
             return match.group(1)
     return None
 
@@ -632,7 +634,9 @@ def _is_account_quota_error(exc: BaseException) -> bool:
     )
 
 
-def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
+def classify_provider_error(
+    exc: BaseException, *, request_params: Collection[str] = _FORWARDED_PARAMS
+) -> ProviderErrorMapping | None:
     """Map an upstream provider exception to a safe, specific (status, detail).
 
     Returns ``None`` when the failure carries no signal we can safely act on, so
@@ -654,6 +658,10 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     ``APITimeoutError``, and a duck-typed fallback for other provider SDKs) is
     shared with the hybrid-mode fallback classifier via
     :func:`upstream_exception_shape`, so both stay in sync.
+
+    ``request_params`` is the set of names a caller could have sent, which is
+    what lets an SDK's unknown-keyword ``TypeError`` read as the caller's 400
+    (see :func:`_rejected_param`).
     """
     missing = missing_credential(exc)
     if missing is not None:
@@ -671,7 +679,7 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
         return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _unsupported_feature_detail(exc))
     # The same shape one layer down: a param any-llm forwards that the resolved
     # provider's SDK has no parameter for.
-    if (param := _rejected_param(exc)) is not None:
+    if (param := _rejected_param(exc, request_params)) is not None:
         return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _provider_rejected_param_detail(param))
     if status_code is None:
         # A status-less InvalidRequestError means the provider (gemini, bedrock,
@@ -791,7 +799,7 @@ def _is_upstream_failure(exc: BaseException) -> bool:
     return any(isinstance(current, AnyLLMError) for current in upstream_exception_chain(exc))
 
 
-def failure_status_code(exc: BaseException) -> int:
+def failure_status_code(exc: BaseException, *, request_params: Collection[str] = _FORWARDED_PARAMS) -> int:
     """The HTTP status to record on the usage log for an upstream failure.
 
     Prefers the status the provider actually returned, which is deliberately not
@@ -820,7 +828,7 @@ def failure_status_code(exc: BaseException) -> int:
     _kind, status_code = upstream_exception_shape(exc)
     if status_code is not None:
         return status_code
-    mapping = classify_provider_error(exc)
+    mapping = classify_provider_error(exc, request_params=request_params)
     return mapping.status_code if mapping is not None else status.HTTP_502_BAD_GATEWAY
 
 

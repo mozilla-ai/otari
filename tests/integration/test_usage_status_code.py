@@ -311,20 +311,20 @@ def test_passthrough_provider_failure_records_the_upstream_status(
     with patch(
         "gateway.api.routes.embeddings.aembedding",
         new_callable=AsyncMock,
-        side_effect=_StatusError(429),
+        side_effect=_StatusError(503),
     ):
         response = client.post(
             f"{API_ROOT}/embeddings",
             json={"model": "openai:text-embedding-3-small", "input": "hi"},
             headers=api_key_header,
         )
-    # The caller sees the deliberately generic provider error, not the upstream 429.
+    # The caller sees the deliberately generic provider error, not the upstream 503.
     assert response.status_code == 502
     assert "SECRET" not in response.text
 
     rows = _error_rows(client, master_key_header, endpoint="/v1/embeddings")
     assert len(rows) == 1
-    assert rows[0]["status_code"] == 429
+    assert rows[0]["status_code"] == 503
 
 
 def test_batch_create_failure_records_the_upstream_status(

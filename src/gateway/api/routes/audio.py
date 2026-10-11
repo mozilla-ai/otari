@@ -135,6 +135,16 @@ async def create_transcription(
         model=model,
         user=user,
         call_provider=call_provider,
+        request_params=[
+            name
+            for name, value in (
+                ("language", language),
+                ("prompt", prompt),
+                ("response_format", response_format),
+                ("temperature", temperature),
+            )
+            if value is not None
+        ],
         lookup_pricing=True,
         pricing_use_defaults=False,
         reserve_before_resolve=True,
@@ -237,6 +247,7 @@ async def create_speech(
         model=request.model,
         user=request.user,
         call_provider=call_provider,
+        request_params=request.model_fields_set,
         lookup_pricing=True,
         pricing_use_defaults=False,
         reserve_before_resolve=True,

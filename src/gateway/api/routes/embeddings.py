@@ -142,6 +142,7 @@ async def create_embedding(
         model=request.model,
         user=request.user,
         call_provider=call_provider,
+        request_params=request.model_fields_set,
         estimate=estimate,
         enforce_require_pricing=True,
         usage_tokens=usage_tokens,

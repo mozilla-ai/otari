@@ -106,6 +106,7 @@ async def create_moderation(
         model=request.model,
         user=request.user,
         call_provider=call_provider,
+        request_params=request.model_fields_set,
         pricing_use_defaults=False,
         estimate=estimate,
         usage_tokens=usage_tokens,

@@ -732,6 +732,27 @@ def test_the_caller_fault_gate_excludes_the_params_the_schema_refuses() -> None:
     assert failure_status_code(exc) == 502
 
 
+def test_rejected_param_names_a_field_the_route_says_the_caller_set() -> None:
+    """A pass-through route's fields are not completion params, so it names the
+    ones the caller set, and only those can read as the caller's 400."""
+    exc = TypeError("AsyncV2Client.embed() got an unexpected keyword argument 'encoding_format'")
+    assert classify_provider_error(exc) is None
+
+    mapping = classify_provider_error(exc, request_params={"encoding_format"})
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert "'encoding_format'" in mapping.detail
+    assert "AsyncV2Client" not in mapping.detail
+    assert failure_status_code(exc, request_params={"encoding_format"}) == 400
+
+
+def test_rejected_param_the_caller_did_not_set_stays_unclassified() -> None:
+    """A keyword the route added itself is the gateway's mismatch, not the caller's."""
+    exc = TypeError("embed() got an unexpected keyword argument 'inputs'")
+    assert classify_provider_error(exc, request_params={"input", "encoding_format"}) is None
+    assert failure_status_code(exc, request_params={"input", "encoding_format"}) == 502
+
+
 def test_unrelated_type_error_stays_unclassified() -> None:
     """A TypeError that is not a keyword-argument rejection carries no signal a
     caller could act on, so it keeps the generic 502 rather than becoming a 400
