@@ -316,7 +316,7 @@ from gateway.streaming import (
     IncompleteStreamError,
     StreamFormat,
     StreamingAttemptFailure,
-    await_first_chunk,
+    hold_for_first_chunk,
     iterate_streaming_attempts,
     merge_stream_usage,
     streaming_generator,
@@ -4282,10 +4282,8 @@ async def open_stream(
 ) -> AsyncIterator[ChunkT]:
     """Open the upstream stream for a single-attempt streaming request.
 
-    A provider stream is held until its first chunk, for up to
-    ``streaming_first_chunk_hold_ms``, so a provider failure before any output
-    raises here and is answered with the status the same request would get
-    unstreamed.
+    A provider stream is held for its first chunk (:func:`hold_for_first_chunk`),
+    so a provider failure before any output raises here.
 
     The sandbox and web_search backends are opened eagerly (their
     ``__aenter__`` runs before this function returns) so a backend-unreachable
@@ -4296,9 +4294,7 @@ async def open_stream(
     kwargs = adapter.prepare_stream_kwargs(call_kwargs)
 
     if not tool_ctx.use_tool_loop:
-        stream = await adapter.open_provider_stream(kwargs)
-        hold_ms = tool_ctx.config.streaming_first_chunk_hold_ms
-        return await await_first_chunk(stream, hold_ms / 1000) if hold_ms > 0 else stream
+        return await hold_for_first_chunk(await adapter.open_provider_stream(kwargs), tool_ctx.config)
 
     if tool_ctx.mcp_server_configs:
         return _lazy_mcp_stream(adapter, kwargs, tool_ctx.mcp_server_configs, tool_ctx)

@@ -116,3 +116,29 @@ async def test_closing_the_iterator_after_the_window_cancels_the_pending_read() 
 
     assert stream.read_cancelled.is_set()
     assert stream.closed
+
+
+class _FastStream:
+    """A stream whose first read finishes at once, recording whether it was closed."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def __aiter__(self) -> "_FastStream":
+        return self
+
+    async def __anext__(self) -> str:
+        return "chunk"
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_closing_a_prefetched_stream_before_reading_it_closes_the_source() -> None:
+    stream = _FastStream()
+    prefetched = await await_first_chunk(stream, 1.0)
+
+    await prefetched.aclose()  # type: ignore[attr-defined]
+
+    assert stream.closed

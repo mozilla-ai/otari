@@ -5,7 +5,7 @@ import json
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import aclosing, suppress
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from any_llm.types.completion import CompletionUsage
 
@@ -19,6 +19,9 @@ from gateway.core.usage import (
 )
 from gateway.log_config import logger
 from gateway.model_labeling import relabel_model
+
+if TYPE_CHECKING:
+    from gateway.core.config import GatewayConfig
 
 A = TypeVar("A")  # Attempt-like, opaque to this module
 C = TypeVar("C")  # Chunk type emitted by the upstream stream
@@ -423,6 +426,9 @@ async def streaming_generator(
             except Exception as log_err:
                 # codeql[py/clear-text-logging-sensitive-data]
                 logger.error("Failed to settle incomplete stream for %s: %s", label, log_err)
+        # Iterating the source never closes it, so a stream the client abandoned
+        # would hold the provider's connection until garbage collection.
+        await _close_stream_quietly(stream)
 
 
 async def iterate_streaming_attempts(
@@ -547,6 +553,20 @@ async def iterate_streaming_attempts(
     raise RuntimeError("iterate_streaming_attempts: no attempts provided")
 
 
+async def hold_for_first_chunk(stream: AsyncIterator[C], config: "GatewayConfig") -> AsyncIterator[C]:
+    """``stream``, held for its first chunk as ``streaming_first_chunk_hold_ms`` says.
+
+    Holding lets a provider failure before any output raise before the caller
+    sends a status line, so it is answered with the status the same request gets
+    unstreamed, and a routing policy can still fall over. A hold of 0 returns
+    ``stream`` unread, so the response is committed as soon as it opens.
+    """
+    hold_ms = config.streaming_first_chunk_hold_ms
+    if hold_ms <= 0:
+        return stream
+    return await await_first_chunk(stream, hold_ms / 1000)
+
+
 async def await_first_chunk(stream: AsyncIterator[C], window_seconds: float) -> AsyncIterator[C]:
     """Wait up to ``window_seconds`` for ``stream``'s first chunk, so a failure before it raises here.
 
@@ -575,23 +595,24 @@ async def await_first_chunk(stream: AsyncIterator[C], window_seconds: float) -> 
             await first
         await _close_stream_quietly(stream)
         raise
-    if not first.done():
-        return _AfterPendingFirst(first, stream)
-    try:
-        chunk = first.result()
-    except StopAsyncIteration:
-        return _empty_async_iter()
-    except BaseException:
-        await _close_stream_quietly(stream)
-        raise
-    return _stitched(chunk, stream)
+    if first.done():
+        try:
+            first.result()
+        except StopAsyncIteration:
+            return _empty_async_iter()
+        except BaseException:
+            await _close_stream_quietly(stream)
+            raise
+    return _Prefetched(first, stream)
 
 
-class _AfterPendingFirst(AsyncIterator[C]):
-    """Resumes a first read still pending, then the rest of the stream.
+class _Prefetched(AsyncIterator[C]):
+    """A first read, finished or still pending, followed by the rest of the stream.
 
-    A class rather than a generator so ``aclose`` reaches the pending read even
-    when iteration never started: closing an unstarted generator runs none of its body.
+    A class rather than a generator so ``aclose`` reaches the source stream and
+    any pending read even when iteration never started: closing an unstarted
+    generator runs none of its body, which would leave the provider's
+    connection open until garbage collection.
     """
 
     def __init__(self, first: asyncio.Future[C], remaining: AsyncIterator[C]) -> None:
