@@ -10,6 +10,7 @@ from gateway.services.inference._decisions import (
     request_decision,
     resolve_decision_provider,
 )
+from gateway.services.inference._embeddings import EmbeddingOptionsService
 from gateway.services.inference._idempotency import (
     Admission,
     BlockedCaller,
@@ -41,6 +42,7 @@ __all__ = [
     "Claimed",
     "DecisionProvider",
     "DecisionProviderError",
+    "EmbeddingOptionsService",
     "IdempotencyService",
     "IdempotentRequest",
     "InvalidKey",

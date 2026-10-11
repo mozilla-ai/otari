@@ -8918,6 +8918,11 @@ export interface components {
              * @description Input text to embed
              */
             input: string | string[];
+            /**
+             * Input Type
+             * @description What the input will be used for, for providers whose embedding depends on it: Cohere (`search_document`, `search_query`, `classification`, `clustering`, `image`) and Voyage (`query`, `document`). The provider validates the value. Any other provider answers 400, rather than embedding the input as if the field were absent.
+             */
+            input_type?: string | null;
             /** Model */
             model: string;
             /** User */

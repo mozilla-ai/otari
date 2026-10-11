@@ -207,6 +207,82 @@ def test_embeddings_optional_fields(
     assert call_kwargs[extra_field] == values[extra_field]
 
 
+@pytest.mark.parametrize(
+    ("model", "input_type"),
+    [("cohere:embed-english-v3.0", "search_query"), ("voyage:voyage-3", "query")],
+)
+def test_embeddings_forwards_input_type_to_providers_that_take_it(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    model: str,
+    input_type: str,
+) -> None:
+    """``input_type`` reaches any-llm for a provider whose embedding depends on it."""
+    mock_resp = _mock_embedding_response()
+    with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp) as mock:
+        resp = client.post(
+            f"{API_ROOT}/embeddings",
+            json={"model": model, "input": ["hi"], "input_type": input_type},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+    assert mock.call_args.kwargs["input_type"] == input_type
+
+
+def test_embeddings_omits_input_type_when_not_sent(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """Without the field, any-llm's own provider default applies."""
+    mock_resp = _mock_embedding_response()
+    with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp) as mock:
+        resp = client.post(
+            f"{API_ROOT}/embeddings",
+            json={"model": "cohere:embed-english-v3.0", "input": ["hi"]},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+    assert "input_type" not in mock.call_args.kwargs
+
+
+def test_embeddings_rejects_input_type_for_a_provider_without_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """A provider that does not take ``input_type`` is a 400 before any call, not a 502 or a silent drop."""
+    with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock) as mock:
+        resp = client.post(
+            f"{API_ROOT}/embeddings",
+            json={"model": "openai:text-embedding-3-small", "input": "hi", "input_type": "search_query"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "'input_type' is not supported for model 'openai:text-embedding-3-small'"
+    mock.assert_not_called()
+
+    # Nothing was dispatched, so the reservation was refunded rather than left held.
+    user = client.get(f"{API_ROOT}/users/{api_key_obj['user_id']}", headers=master_key_header).json()
+    assert user["reserved"] == pytest.approx(0.0)
+    assert user["spend"] == pytest.approx(0.0)
+
+
+def test_embeddings_rejects_an_oversized_input_type(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """The field is a short enum-like value, so a long string is refused at validation."""
+    with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock) as mock:
+        resp = client.post(
+            f"{API_ROOT}/embeddings",
+            json={"model": "cohere:embed-english-v3.0", "input": "hi", "input_type": "x" * 65},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 422
+    mock.assert_not_called()
+
+
 def test_embeddings_cost_tracked_with_pricing(
     client: TestClient,
     master_key_header: dict[str, str],

@@ -58,7 +58,7 @@ from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
-from gateway.services.inference import IdempotencyService, PassthroughResponseService
+from gateway.services.inference import EmbeddingOptionsService, IdempotencyService, PassthroughResponseService
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.organization_pricing_service import OrganizationPricingService
@@ -731,6 +731,11 @@ def _file_backends(request: Request) -> FileBackends | None:
     if storage is None or provider_files is None:
         return None
     return FileBackends(storage=storage, provider_files=provider_files)
+
+
+def get_embedding_options_service() -> EmbeddingOptionsService:
+    """Build the service that decides which provider-specific options an embedding call carries."""
+    return EmbeddingOptionsService()
 
 
 def build_idempotency_service(uow: UnitOfWork, config: GatewayConfig) -> IdempotencyService:

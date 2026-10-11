@@ -5,13 +5,14 @@ from typing import Annotated, Any
 
 from any_llm import aembedding
 from any_llm.types.completion import CreateEmbeddingResponse
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     get_config,
     get_db,
+    get_embedding_options_service,
     get_log_writer,
     get_passthrough_response_service,
     verify_api_key_or_master_key,
@@ -19,11 +20,12 @@ from gateway.api.deps import (
 from gateway.api.routes._passthrough import BillingMeters, run_passthrough
 from gateway.api.routes._pipeline import record_inline_cost_settlement
 from gateway.core.config import GatewayConfig
+from gateway.exceptions.inference_exceptions import EmbeddingOptionUnsupportedError
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.schemas.inference import EmbeddingResponse
 from gateway.services.budgets import estimate_cost
-from gateway.services.inference import PassthroughResponseService
+from gateway.services.inference import EmbeddingOptionsService, PassthroughResponseService
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import input_token_cost
 from gateway.services.provider_kwargs import ResolvedProvider
@@ -42,6 +44,16 @@ class EmbeddingRequest(BaseModel):
     user: str | None = None
     encoding_format: str | None = None
     dimensions: int | None = None
+    input_type: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "What the input will be used for, for providers whose embedding depends on it: "
+            "Cohere (`search_document`, `search_query`, `classification`, `clustering`, `image`) "
+            "and Voyage (`query`, `document`). The provider validates the value. Any other provider "
+            "answers 400, rather than embedding the input as if the field were absent."
+        ),
+    )
 
 
 @router.post("/embeddings")
@@ -54,6 +66,7 @@ async def create_embedding(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     responses: Annotated[PassthroughResponseService, Depends(get_passthrough_response_service)],
+    options: Annotated[EmbeddingOptionsService, Depends(get_embedding_options_service)],
 ) -> EmbeddingResponse:
     """OpenAI-compatible embeddings endpoint.
 
@@ -109,6 +122,13 @@ async def create_embedding(
             embedding_kwargs["encoding_format"] = request.encoding_format
         if request.dimensions is not None:
             embedding_kwargs["dimensions"] = request.dimensions
+        try:
+            embedding_kwargs.update(
+                options.provider_options(resolved.provider, selector=request.model, input_type=request.input_type)
+            )
+        except EmbeddingOptionUnsupportedError as exc:
+            # An HTTPException is what the scaffold refunds and propagates unchanged.
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
         return await aembedding(**embedding_kwargs)
 
     outcome = await run_passthrough(

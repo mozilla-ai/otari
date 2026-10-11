@@ -67,6 +67,18 @@ Standalone mode also serves embeddings, images, audio, files, batches,
 moderations, rerank, search, and decisions. Provider support differs by endpoint, so use
 `GET /api/v1/models` and the OpenAPI document for the deployment you are calling.
 
+### Embedding input type
+
+Some embedding models embed a query differently from a document, so
+`POST /api/v1/embeddings` takes an optional `input_type` beside the OpenAI
+fields and passes it to the provider: Cohere (`search_document`,
+`search_query`, `classification`, `clustering`, `image`) and Voyage (`query`,
+`document`). The provider checks the value, and its own default applies when the
+field is omitted. A
+request that sets `input_type` for any other provider is refused with a `400`
+rather than embedded as if the field were absent. With the OpenAI SDK, send it
+through `extra_body={"input_type": "search_query"}`.
+
 ### Responses on providers without a Responses API
 
 `/api/v1/responses` also serves providers that only implement Chat Completions
