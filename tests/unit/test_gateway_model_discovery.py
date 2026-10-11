@@ -34,11 +34,27 @@ from gateway.services.model_discovery_service import (
     test_provider_credentials as run_credentials_test,  # aliased so pytest does not collect it
 )
 from gateway.services.provider_kwargs import _KEYLESS_PLACEHOLDER_API_KEY
+from gateway.services.providers import OrgProviderModelService
 
 
 def _make_model(model_id: str, owned_by: str = "openai", created: int = 1700000000) -> Model:
     """Create a minimal Model instance for testing."""
     return Model(id=model_id, object="model", created=created, owned_by=owned_by)
+
+
+def _cohere_catalog() -> list[Model]:
+    """A catalog longer than Cohere's default page, ending in the models that page drops."""
+    catalog = [_make_model(f"command-{n:02d}", owned_by="cohere") for n in range(40)]
+    return [*catalog, _make_model("rerank-v3.5", owned_by="cohere"), _make_model("embed-v4.0", owned_by="cohere")]
+
+
+def _paged_listing(catalog: list[Model]) -> Callable[..., Awaitable[list[Model]]]:
+    """A listing that pages like Cohere's: ``page_size`` models, 20 by default, and no second page."""
+
+    async def fake_alist(**kwargs: Any) -> list[Model]:
+        return catalog[: int(kwargs.get("page_size", 20))]
+
+    return fake_alist
 
 
 # ---------------------------------------------------------------------------
@@ -285,22 +301,12 @@ class TestDiscoverAllModels:
         assert result[0][0] == "openai"
         assert result[0][1].id == "gpt-4o"
 
-    @staticmethod
-    def _paged_listing(catalog: list[Model]) -> Callable[..., Awaitable[list[Model]]]:
-        """A listing that pages like Cohere's: ``page_size`` models, 20 by default, and no second page."""
-
-        async def fake_alist(**kwargs: Any) -> list[Model]:
-            return catalog[: int(kwargs.get("page_size", 20))]
-
-        return fake_alist
-
     @pytest.mark.asyncio
     async def test_cohere_discovery_reads_past_the_default_page(self) -> None:
         """Cohere lists 20 models a page; discovery asks for the whole listing so rerank models are offered."""
-        catalog = [_make_model(f"command-{n:02d}", owned_by="cohere") for n in range(40)]
-        catalog += [_make_model("rerank-v3.5", owned_by="cohere"), _make_model("embed-v4.0", owned_by="cohere")]
+        catalog = _cohere_catalog()
         config = self._make_config(providers={"cohere": {"api_key": "co-test"}})
-        listing = AsyncMock(side_effect=self._paged_listing(catalog))
+        listing = AsyncMock(side_effect=_paged_listing(catalog))
 
         with (
             patch("gateway.services.model_discovery_service.get_model_cache") as mock_cache_fn,
@@ -808,6 +814,54 @@ class TestKeylessProviderConnection:
 
         assert mock_alist.await_args is not None
         assert mock_alist.await_args.kwargs["api_key"] == "sk-real"
+
+
+class TestCredentialsListingKwargs:
+    """Stored keys and connection tests ask a provider for the same catalog a config-file instance gets."""
+
+    @pytest.mark.asyncio
+    async def test_cohere_connection_test_reads_past_the_default_page(self) -> None:
+        catalog = _cohere_catalog()
+        listing = AsyncMock(side_effect=_paged_listing(catalog))
+        with (
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", listing),
+        ):
+            result = await run_credentials_test("cohere", api_key="co-test")
+
+        assert result.error is None
+        assert [model.id for model in result.models] == [model.id for model in catalog]
+        assert listing.await_args is not None
+        assert listing.await_args.kwargs["page_size"] == 1000
+
+    @pytest.mark.asyncio
+    async def test_other_providers_test_without_a_page_size(self) -> None:
+        listing = AsyncMock(return_value=[_make_model("gpt-4o")])
+        with (
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", listing),
+        ):
+            await run_credentials_test("openai", api_key="sk-test")
+
+        assert listing.await_args is not None
+        assert "page_size" not in listing.await_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_organization_cohere_key_lists_rerank_models(self) -> None:
+        """An organization's stored Cohere key is dialed through the same listing, so rerank models are found."""
+        catalog = _cohere_catalog()
+        listing = AsyncMock(side_effect=_paged_listing(catalog))
+        key = SimpleNamespace(provider="cohere", api_base=None, client_args=None)
+        with (
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", listing),
+        ):
+            result = await OrgProviderModelService._dial(key, {"api_key": "co-test"}, timeout=5)  # type: ignore[arg-type]
+
+        assert result.error is None
+        assert {"rerank-v3.5", "embed-v4.0"} <= {model.id for model in result.models}
+        assert listing.await_args is not None
+        assert listing.await_args.kwargs["page_size"] == 1000
 
 
 class TestProviderApiBaseSsrfGate:

@@ -308,6 +308,15 @@ _LIST_MODELS_KWARGS: dict[LLMProvider, dict[str, Any]] = {
 }
 
 
+def _list_models_kwargs(provider: LLMProvider, configured: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The listing kwargs for ``provider``, with ``configured`` winning over the defaults.
+
+    Every ``alist_models`` call goes through here, so a stored key, a connection
+    test and a config-file instance ask a provider for the same catalog.
+    """
+    return {**_LIST_MODELS_KWARGS.get(provider, {}), **(configured or {})}
+
+
 async def _discover_for_provider(
     provider_name: str,
     config: GatewayConfig,
@@ -344,9 +353,7 @@ async def _discover_for_provider(
                 api_key=api_key,
                 api_base=api_base,
                 client_args=client_args,
-                # An instance's own kwargs win, and merging rather than spreading
-                # both keeps a ``page_size`` set in config from colliding.
-                **{**_LIST_MODELS_KWARGS.get(provider_enum, {}), **kwargs},
+                **_list_models_kwargs(provider_enum, kwargs),
             ),
             timeout=config.model_discovery_timeout_seconds,
         )
@@ -521,7 +528,8 @@ async def test_provider_credentials(
 ) -> ProviderDiscovery:
     """List models for ad-hoc credentials without storing them.
 
-    Backs the dashboard's "test connection" before a provider is saved. Reports
+    Backs the dashboard's "test connection" before a provider is saved, and the
+    model listing of an organization's stored provider keys. Reports
     failure rather than raising, and never echoes the api key (only sanitized,
     capped provider errors, which may include the api_base but never the key).
     ``timeout`` defaults to the module bound; the route passes
@@ -565,6 +573,7 @@ async def test_provider_credentials(
                 api_key=api_key,
                 api_base=api_base,
                 client_args=client_args,
+                **_list_models_kwargs(provider_enum),
             ),
             timeout=timeout,
         )
