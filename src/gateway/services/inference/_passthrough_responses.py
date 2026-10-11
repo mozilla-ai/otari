@@ -2,10 +2,20 @@
 
 from decimal import Decimal
 
+from any_llm.types.completion import CreateEmbeddingResponse
 from any_llm.types.rerank import RerankResponse as ProviderRerankResponse
 
 from gateway.core.metered_pricing import quantize_cost
-from gateway.schemas.inference import InlineCost, RerankMeta, RerankResponse, RerankResult, RerankUsage
+from gateway.schemas.inference import (
+    EmbeddingData,
+    EmbeddingResponse,
+    EmbeddingUsage,
+    InlineCost,
+    RerankMeta,
+    RerankResponse,
+    RerankResult,
+    RerankUsage,
+)
 from gateway.services.pricing_service import ResolvedPricing, metered_search_units
 
 
@@ -35,6 +45,28 @@ class PassthroughResponseService:
                 cost_usd=cost_fields.cost_usd,
                 pricing_source=cost_fields.pricing_source,
             ),
+        )
+
+    def embeddings(
+        self, result: CreateEmbeddingResponse, *, pricing: ResolvedPricing | None, cost: Decimal | None
+    ) -> EmbeddingResponse:
+        """The embeddings response for ``result``, in OpenAI's shape with the inline cost on ``usage``.
+
+        ``pricing`` and ``cost`` are as for :meth:`rerank`. A provider that
+        reported no usage gets none back, and so no inline cost.
+        """
+        cost_fields = _inline_cost(cost, pricing)
+        return EmbeddingResponse(
+            data=[EmbeddingData(index=item.index, embedding=item.embedding) for item in result.data],
+            model=result.model,
+            usage=EmbeddingUsage(
+                prompt_tokens=result.usage.prompt_tokens,
+                total_tokens=result.usage.total_tokens,
+                cost_usd=cost_fields.cost_usd,
+                pricing_source=cost_fields.pricing_source,
+            )
+            if result.usage is not None
+            else None,
         )
 
 

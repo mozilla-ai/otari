@@ -1,4 +1,4 @@
-"""Request and response models of the inference domain's decisions and rerank endpoints.
+"""Request and response models of the inference domain's decisions, rerank and embeddings endpoints.
 
 The decisions shape is TypeSafe's ``/v1/systemone``, which OpenRouter's alpha Decisions
 API also takes, so either provider's SDK can point at the gateway. Questions and
@@ -196,3 +196,31 @@ class RerankResponse(BaseModel):
     results: list[RerankResult] = Field(description="Results sorted by relevance_score, highest first")
     meta: RerankMeta | None = Field(default=None, description="The provider's own billing report, unchanged")
     usage: RerankUsage
+
+
+class EmbeddingData(BaseModel):
+    """One input's embedding, in OpenAI's shape."""
+
+    object: Literal["embedding"] = "embedding"
+    index: int
+    embedding: list[float] | str = Field(
+        description="The vector, or its base64 encoding when the request asked for `encoding_format: base64`"
+    )
+
+
+class EmbeddingUsage(InlineCost):
+    """What an embeddings request was metered at, and what it cost."""
+
+    prompt_tokens: int
+    total_tokens: int
+
+
+class EmbeddingResponse(BaseModel):
+    """An OpenAI-compatible embeddings response, with the gateway's inline cost on ``usage``."""
+
+    object: Literal["list"] = "list"
+    data: list[EmbeddingData]
+    model: str
+    usage: EmbeddingUsage | None = Field(
+        default=None, exclude_if=_is_none, description="Absent when the provider reported no usage"
+    )

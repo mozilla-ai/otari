@@ -111,8 +111,8 @@ it took, in `Otari-Provider`, `Otari-Attempt-Count`, `Otari-Fallback` and
 
 A priced response also carries its cost on the usage object it already returns,
 as `usage.cost_usd` (a six-decimal USD string) and `usage.pricing_source`. The
-standalone [rerank](#rerank) endpoint carries the same two fields on its
-`usage`. On a stream the fields ride the terminal usage event: the last usage chunk for Chat
+standalone [rerank](#rerank) and embeddings endpoints carry the same two fields
+on their `usage`. On a stream the fields ride the terminal usage event: the last usage chunk for Chat
 Completions, `message_delta` for Messages, and `response.completed` for
 Responses. The two fields always appear together, and an unpriced or
 unreported request carries neither.

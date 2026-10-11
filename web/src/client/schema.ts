@@ -1124,6 +1124,10 @@ export interface paths {
          *     - Master key + user field: Use specified user (must exist)
          *     - API key + user field: Use specified user (must exist)
          *     - API key without user field: Use the shared "default" user
+         *
+         *     A priced response carries its cost on `usage` as `cost_usd` (a six-decimal
+         *     USD string) and `pricing_source`, as a chat completion does; an unpriced one
+         *     carries neither.
          */
         post: operations["embeddings-create_embedding"];
         delete?: never;
@@ -8882,6 +8886,25 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * EmbeddingData
+         * @description One input's embedding, in OpenAI's shape.
+         */
+        EmbeddingData: {
+            /**
+             * Embedding
+             * @description The vector, or its base64 encoding when the request asked for `encoding_format: base64`
+             */
+            embedding: number[] | string;
+            /** Index */
+            index: number;
+            /**
+             * Object
+             * @default embedding
+             * @constant
+             */
+            object: "embedding";
+        };
+        /**
          * EmbeddingRequest
          * @description OpenAI-compatible embedding request.
          */
@@ -8899,6 +8922,44 @@ export interface components {
             model: string;
             /** User */
             user?: string | null;
+        };
+        /**
+         * EmbeddingResponse
+         * @description An OpenAI-compatible embeddings response, with the gateway's inline cost on ``usage``.
+         */
+        EmbeddingResponse: {
+            /** Data */
+            data: components["schemas"]["EmbeddingData"][];
+            /** Model */
+            model: string;
+            /**
+             * Object
+             * @default list
+             * @constant
+             */
+            object: "list";
+            /** @description Absent when the provider reported no usage */
+            usage?: components["schemas"]["EmbeddingUsage"] | null;
+        };
+        /**
+         * EmbeddingUsage
+         * @description What an embeddings request was metered at, and what it cost.
+         */
+        EmbeddingUsage: {
+            /**
+             * Cost Usd
+             * @description What the request cost, as a six-decimal USD string; absent when it was not priced
+             */
+            cost_usd?: string | null;
+            /**
+             * Pricing Source
+             * @description Which rate priced the request; absent when it was not priced
+             */
+            pricing_source?: ("organization" | "deployment" | "defaults") | null;
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Total Tokens */
+            total_tokens: number;
         };
         /**
          * EndUserPublic
@@ -17642,7 +17703,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["EmbeddingResponse"];
                 };
             };
             /** @description Validation Error */

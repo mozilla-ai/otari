@@ -6175,6 +6175,42 @@
         "title": "EmbeddedResource",
         "type": "object"
       },
+      "EmbeddingData": {
+        "description": "One input's embedding, in OpenAI's shape.",
+        "properties": {
+          "embedding": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "The vector, or its base64 encoding when the request asked for `encoding_format: base64`",
+            "title": "Embedding"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "object": {
+            "const": "embedding",
+            "default": "embedding",
+            "title": "Object",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "embedding"
+        ],
+        "title": "EmbeddingData",
+        "type": "object"
+      },
       "EmbeddingRequest": {
         "description": "OpenAI-compatible embedding request.",
         "properties": {
@@ -6236,6 +6272,94 @@
           "input"
         ],
         "title": "EmbeddingRequest",
+        "type": "object"
+      },
+      "EmbeddingResponse": {
+        "description": "An OpenAI-compatible embeddings response, with the gateway's inline cost on ``usage``.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/EmbeddingData"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "object": {
+            "const": "list",
+            "default": "list",
+            "title": "Object",
+            "type": "string"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmbeddingUsage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Absent when the provider reported no usage"
+          }
+        },
+        "required": [
+          "data",
+          "model"
+        ],
+        "title": "EmbeddingResponse",
+        "type": "object"
+      },
+      "EmbeddingUsage": {
+        "description": "What an embeddings request was metered at, and what it cost.",
+        "properties": {
+          "cost_usd": {
+            "anyOf": [
+              {
+                "pattern": "^-?\\d+\\.\\d{6}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the request cost, as a six-decimal USD string; absent when it was not priced",
+            "title": "Cost Usd"
+          },
+          "pricing_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "organization",
+                  "deployment",
+                  "defaults"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which rate priced the request; absent when it was not priced",
+            "title": "Pricing Source"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prompt_tokens",
+          "total_tokens"
+        ],
+        "title": "EmbeddingUsage",
         "type": "object"
       },
       "EndUserPublic": {
@@ -25049,7 +25173,7 @@
     },
     "/api/v1/embeddings": {
       "post": {
-        "description": "OpenAI-compatible embeddings endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+        "description": "OpenAI-compatible embeddings endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user\n\nA priced response carries its cost on `usage` as `cost_usd` (a six-decimal\nUSD string) and `pricing_source`, as a chat completion does; an unpriced one\ncarries neither.",
         "operationId": "embeddings-create_embedding",
         "requestBody": {
           "content": {
@@ -25065,7 +25189,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingResponse"
+                }
               }
             },
             "description": "Successful Response"

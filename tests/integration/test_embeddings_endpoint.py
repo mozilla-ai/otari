@@ -1,13 +1,18 @@
 """Tests for the POST /api/v1/embeddings endpoint."""
 
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from any_llm.types.completion import CreateEmbeddingResponse, Embedding, Usage
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from gateway.core.config import API_ROOT
+from gateway.metrics import REGISTRY
+from gateway.models.usage import UsageLog
 
 
 def _mock_embedding_response(prompt_tokens: int = 10) -> CreateEmbeddingResponse:
@@ -18,6 +23,12 @@ def _mock_embedding_response(prompt_tokens: int = 10) -> CreateEmbeddingResponse
         object="list",
         usage=Usage(prompt_tokens=prompt_tokens, total_tokens=prompt_tokens),
     )
+
+
+def _attached_settlements() -> float:
+    """How many inline costs this process has attached to a response."""
+    value = REGISTRY.get_sample_value("gateway_inline_cost_settlements_total", {"outcome": "attached"})
+    return value or 0.0
 
 
 def test_embeddings_requires_auth(client: TestClient) -> None:
@@ -307,3 +318,95 @@ def test_embeddings_billing_meters_tracked_with_pricing(
     assert logs[0]["billing_meters"] == {"total_input_tokens": 10}
     breakdown = logs[0]["pricing_breakdown"]
     assert breakdown == [{"meter": "input", "units": 10, "rate_per_million": 0.02, "cost": pytest.approx(2e-7)}]
+
+
+def test_embeddings_response_carries_inline_cost_when_priced(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """A priced embedding reports its cost and rate source on ``usage``, as chat does."""
+    client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openai:text-embedding-3-small",
+            "input_price_per_million": 0.02,
+            "output_price_per_million": 0.0,
+        },
+        headers=master_key_header,
+    )
+
+    mock_resp = _mock_embedding_response(prompt_tokens=1_000)
+    attached_before = _attached_settlements()
+    with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
+        resp = client.post(
+            f"{API_ROOT}/embeddings",
+            json={"model": "openai:text-embedding-3-small", "input": "hello"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+    assert _attached_settlements() == attached_before + 1
+    usage = resp.json()["usage"]
+    assert usage == {
+        "prompt_tokens": 1_000,
+        "total_tokens": 1_000,
+        "cost_usd": "0.000020",
+        "pricing_source": "deployment",
+    }
+
+    logs = client.get(f"{API_ROOT}/usage", params={"endpoint": "/v1/embeddings"}, headers=master_key_header).json()
+    assert logs[0]["cost"] == pytest.approx(float(usage["cost_usd"]))
+
+    # The row keeps the same provenance the response reports. The usage API does
+    # not expose the column, so it is read directly.
+    with db_session_factory() as db:
+        row = db.execute(select(UsageLog).where(UsageLog.id == logs[0]["id"])).scalar_one()
+        assert row.pricing_source == "deployment"
+
+
+def test_embeddings_response_reports_a_settled_zero_with_its_source(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """A charge below half a micro-dollar settles at zero, and the response says so rather than omitting it."""
+    client.post(
+        f"{API_ROOT}/pricing",
+        json={
+            "model_key": "openai:text-embedding-3-small",
+            "input_price_per_million": 0.02,
+            "output_price_per_million": 0.0,
+        },
+        headers=master_key_header,
+    )
+
+    mock_resp = _mock_embedding_response(prompt_tokens=2)
+    with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
+        resp = client.post(
+            f"{API_ROOT}/embeddings",
+            json={"model": "openai:text-embedding-3-small", "input": "hi"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+    usage = resp.json()["usage"]
+    assert usage["cost_usd"] == "0.000000"
+    assert usage["pricing_source"] == "deployment"
+
+
+def test_embeddings_response_carries_no_inline_cost_when_unpriced(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """An unpriced model's response carries neither field, matching chat's null semantics."""
+    mock_resp = _mock_embedding_response()
+    with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
+        resp = client.post(
+            f"{API_ROOT}/embeddings",
+            json={"model": "openai:otari-unlisted-embedder", "input": "hello"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+    usage = resp.json()["usage"]
+    assert "cost_usd" not in usage
+    assert "pricing_source" not in usage

@@ -1924,7 +1924,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"input\": \"string\"\n}"
             },
-            "description": "OpenAI-compatible embeddings endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+            "description": "OpenAI-compatible embeddings endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user\n\nA priced response carries its cost on `usage` as `cost_usd` (a six-decimal\nUSD string) and `pricing_source`, as a chat completion does; an unpriced one\ncarries neither.",
             "header": [
               {
                 "key": "Content-Type",
