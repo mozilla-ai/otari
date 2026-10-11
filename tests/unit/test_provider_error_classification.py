@@ -47,7 +47,7 @@ from gateway.api.routes._pipeline import (
     stream_error_code,
 )
 from gateway.api.routes._platform import _provider_failure_http_exc, get_shared_rejection, upstream_retry_after
-from gateway.core.error_codes import PROVIDER_NOT_CONFIGURED
+from gateway.core.error_codes import PROVIDER_CREDENTIAL_REJECTED, PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.provider_kwargs import MissingCredential
@@ -186,13 +186,14 @@ def test_rate_limit_message_is_still_redacted() -> None:
 @pytest.mark.parametrize(
     ("status_code", "expected"),
     [
-        (401, (502, PROVIDER_CREDENTIALS_DETAIL)),
-        (403, (502, PROVIDER_CREDENTIALS_DETAIL)),
+        (401, (424, PROVIDER_CREDENTIALS_DETAIL)),
+        (403, (424, PROVIDER_CREDENTIALS_DETAIL)),
     ],
 )
 def test_gateway_fault_statuses_keep_a_fixed_detail(status_code: int, expected: tuple[int, str]) -> None:
     """A rejected credential is not something the caller can act on, so the
-    detail stays fixed and the upstream text is never echoed."""
+    detail stays fixed and the upstream text is never echoed. It is a 424, not a
+    5xx: retrying cannot make the gateway's key valid."""
     assert classify_provider_error(_StatusError(status_code)) == expected
 
 
@@ -316,11 +317,11 @@ def test_retry_after_that_is_not_a_number_is_dropped(raw: str) -> None:
 
 
 def test_retry_after_is_not_forwarded_on_a_gateway_fault() -> None:
-    """A 401 surfaces as a fixed-detail 502. Its Retry-After would describe the
+    """A 401 surfaces as a fixed-detail 424. Its Retry-After would describe the
     gateway's own upstream account, which is not the caller's to read."""
     exc = _StatusError(401)
     exc.response = httpx.Response(401, headers={"Retry-After": "34"})  # type: ignore[attr-defined]
-    assert provider_error_headers(exc, 502) is None
+    assert provider_error_headers(exc, 424) == {"Otari-Error-Code": PROVIDER_CREDENTIAL_REJECTED}
 
 
 def test_retry_after_absent_sends_only_the_error_code() -> None:
@@ -416,6 +417,29 @@ def test_missing_credential_carries_its_error_code() -> None:
     assert failure_status_code(exc) == 424
 
 
+@pytest.mark.parametrize("status_code", [401, 403])
+def test_rejected_credential_carries_its_error_code(status_code: int) -> None:
+    exc = _StatusError(status_code)
+    assert provider_error_headers(exc, 424) == {"Otari-Error-Code": PROVIDER_CREDENTIAL_REJECTED}
+    assert refusal_code(exc) == PROVIDER_CREDENTIAL_REJECTED
+    assert stream_error_code(exc) == PROVIDER_CREDENTIAL_REJECTED
+    # The row keeps what the provider said, so misconfiguration stays countable.
+    assert failure_status_code(exc) == status_code
+
+
+def test_attempts_whose_credentials_were_all_rejected_or_missing_share_one_424() -> None:
+    rejection = get_shared_rejection([_StatusError(401), MissingApiKeyError("cohere", "COHERE_API_KEY")])
+    assert rejection is not None
+    assert rejection.status_code == 424
+    assert rejection.headers == {"Otari-Error-Code": PROVIDER_CREDENTIAL_REJECTED}
+    assert "2 attempts" in rejection.detail
+    assert _RAW not in rejection.detail
+
+
+def test_a_rejected_credential_beside_another_failure_shares_no_rejection() -> None:
+    assert get_shared_rejection([_StatusError(401), _StatusError(503)]) is None
+
+
 def test_missing_credential_error_code_is_not_sent_for_an_upstream_424() -> None:
     """A provider's own 424 is a different failure, so it keeps no code of ours."""
     assert provider_error_headers(_StatusError(424), 424) is None
@@ -439,8 +463,8 @@ def test_missing_credential_detail_without_a_variable() -> None:
 @pytest.mark.parametrize("status_code", [400, 401, 403, 404, 422, 429, 500, 503, 529])
 def test_failure_status_code_keeps_the_upstream_status(status_code: int) -> None:
     """The upstream status is recorded verbatim, including the codes the caller
-    never sees: an upstream 401/403 surfaces as a generic 502 (a provider
-    rejecting the gateway's credentials must not be echoed as a client error),
+    never sees: an upstream 401/403 surfaces as a fixed-detail 424 (a provider
+    rejecting the gateway's credentials must not be echoed as a 401 or 403),
     but the log has to keep the 401 or the misconfiguration is unattributable.
     """
     assert failure_status_code(_StatusError(status_code)) == status_code
@@ -863,7 +887,7 @@ def test_status_less_invalid_request_error_survives_wrapped_error() -> None:
 
 @pytest.mark.parametrize(
     ("status_code", "expected_status"),
-    [(401, 502), (403, 502), (429, 429)],
+    [(401, 424), (403, 424), (429, 429)],
 )
 def test_a_carried_status_wins_over_an_invalid_request_error_in_the_chain(
     status_code: int, expected_status: int
@@ -1043,7 +1067,7 @@ def test_bedrock_throttling_forwards_its_retry_after() -> None:
 def test_bedrock_access_denied_keeps_a_fixed_detail() -> None:
     exc = _bedrock_error("AccessDeniedException", f"User arn:aws:iam::123456789012:user/otari {_RAW}", 403)
 
-    assert classify_provider_error(exc) == (502, PROVIDER_CREDENTIALS_DETAIL)
+    assert classify_provider_error(exc) == (424, PROVIDER_CREDENTIALS_DETAIL)
     assert failure_status_code(exc) == 403
 
 

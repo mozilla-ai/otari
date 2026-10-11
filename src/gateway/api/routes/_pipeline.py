@@ -93,6 +93,7 @@ from gateway.api.routes._platform import (
     _resolve_platform_credentials,
     get_shared_rejection,
     is_provider_billing_error,
+    is_provider_credential_rejection,
     record_abandoned_attempt,
     run_platform_attempts,
     upstream_error_message,
@@ -122,6 +123,7 @@ from gateway.core.error_codes import (
     INVALID_MODEL,
     MODEL_NOT_ALLOWED,
     PRICING_REQUIRED,
+    PROVIDER_CREDENTIAL_REJECTED,
     PROVIDER_ERROR,
     UPSTREAM_RATE_LIMITED,
     error_code_of,
@@ -685,12 +687,12 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
         return None
     # Account billing exhaustion, which several providers report as a 400/422
     # rather than the 402 the condition deserves (and DeepSeek does report as a
-    # 402). Like a rejected credential this is a gateway-side account
-    # fault rather than anything wrong with the caller's request, so it surfaces as
-    # a 502 and never as a client-facing 400: telling the caller to "check the model
-    # name and parameters" for an empty wallet sends operators debugging the wrong
-    # thing. Checked ahead of the status branches so it wins over both the generic
-    # bad-request detail and the 402 fall-through to a bare 502.
+    # 402). This is a gateway-side account fault rather than anything wrong with
+    # the caller's request, so it surfaces as a 502 and never as a client-facing
+    # 400: telling the caller to "check the model name and parameters" for an
+    # empty wallet sends operators debugging the wrong thing. Checked ahead of the
+    # status branches so it wins over both the generic bad-request detail and the
+    # 402 fall-through to a bare 502.
     if is_provider_billing_error(exc):
         return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_BILLING_DETAIL)
     # An account quota is the operator's limit, like billing, even where the provider answers 400.
@@ -705,9 +707,10 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
             status.HTTP_404_NOT_FOUND, _upstream_message_detail(exc, PROVIDER_MODEL_NOT_FOUND_DETAIL)
         )
     # A provider rejecting the gateway's credentials is a gateway-config fault,
-    # not the caller's: surface it as a 502, never as a client-facing 401/403.
-    if status_code in (401, 403):
-        return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_CREDENTIALS_DETAIL)
+    # not the caller's, so never a client-facing 401/403. Nor a 5xx: no retry
+    # makes the key valid, so it is refused like a missing credential is.
+    if is_provider_credential_rejection(exc):
+        return ProviderErrorMapping(status.HTTP_424_FAILED_DEPENDENCY, PROVIDER_CREDENTIALS_DETAIL)
     # A 429 is not the caller's request to fix but is theirs to act on, and only
     # the provider's text names the exhausted quota and the retry window. Still
     # drops the upstream Retry-After: the (status, detail) pair cannot carry it,
@@ -727,13 +730,16 @@ def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, st
     the one piece of a provider's rate-limit response that its message body cannot
     always carry. Restricted to the 429: on the statuses that surface as a
     fixed-detail 502 the header would describe the gateway's own upstream
-    account, which is not the caller's to read.
+    account, which is not the caller's to read. A 424 names which of the
+    gateway's credentials failed it, missing or rejected, and nothing more.
     """
     if status_code == status.HTTP_400_BAD_REQUEST and _is_context_length_error(exc):
         return error_headers(CONTEXT_LENGTH_EXCEEDED)
     missing = missing_credential(exc)
     if missing is not None and status_code == missing.status_code:
         return error_headers(missing.code)
+    if status_code == status.HTTP_424_FAILED_DEPENDENCY and is_provider_credential_rejection(exc):
+        return error_headers(PROVIDER_CREDENTIAL_REJECTED)
     if status_code != status.HTTP_429_TOO_MANY_REQUESTS:
         return None
     headers = error_headers(UPSTREAM_RATE_LIMITED)
@@ -789,11 +795,10 @@ def failure_status_code(exc: BaseException) -> int:
 
     Prefers the status the provider actually returned, which is deliberately not
     always the status the caller saw: an upstream 401/403 surfaces to the caller
-    as a generic 502 (a provider rejecting the gateway's credentials is a
-    gateway-config fault, and the response must not say so), but the log keeps
-    the 401 so "how much of my error rate is my own misconfiguration" stays
-    answerable. When the provider returned no status at all (timeout,
-    unreachable), records the gateway's own classification instead, so an error
+    as a 424 (a provider rejecting the gateway's credentials is a gateway-config
+    fault, not the caller's key), but the log keeps the 401 so "how much of my
+    error rate is my own misconfiguration" stays answerable. When the provider
+    returned no status at all (timeout, unreachable), records the gateway's own classification instead, so an error
     row still carries a code to group on.
 
     The tool-loop cap is checked first because it is the gateway's own limit, not

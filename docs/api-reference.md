@@ -317,8 +317,9 @@ A decision is billed like a completion: the `<provider>:<model>` rate prices the
 reported tokens, the provider's own reported cost is used when no rate is set
 (only OpenRouter reports one), and it is subject to budgets, key allow-lists and
 `require_pricing`. A provider's refusal of the request (400, 422, or llama-server's
-501 for a model that cannot answer it) returns 400, its rate limit returns 429, and
-any other failure returns 502.
+501 for a model that cannot answer it) returns 400, its rate limit returns 429, its
+refusal of the gateway's credential (401 or 403) returns 424 `provider_credential_rejected`,
+and any other failure returns 502.
 
 ## Routing policies
 
@@ -361,6 +362,7 @@ reworded.
 | `all_candidates_rejected` | 400 | Every model a routing policy, a catalog ID or the control plane tried rejected the request as invalid | |
 | `pricing_required` | 402 | `require_pricing` is on and the model has no price | |
 | `provider_not_configured` | 424 | The gateway holds no credential for the model's provider, so nothing was sent upstream. Not a 5xx, so a client does not retry it: add the credential in `config.yml`, through the dashboard, or in the environment variable the detail names | |
+| `provider_credential_rejected` | 424 | The provider refused the credential the gateway holds for it (an upstream 401 or 403). It is the gateway's key, not the caller's, so it is never a 401 or 403; and not a 5xx, because no retry makes the key valid. Replace or fix the provider credential. The usage row keeps the provider's own status. A routing policy moves on to its next candidate first, and answers with this code when no candidate had a credential its provider accepted | |
 | `end_user_budget_not_allowed` | 403 | A service key named an end-user budget that is not on its `end_user_budget_ids` | |
 | `invalid_request` | 422 | The request body or a parameter failed schema validation. `detail` lists the failing fields, each with `loc`, `msg` and `type` | |
 | `provider_error` | 200, in a stream's error event only | The provider failed after the stream started, for a reason no other code names | |

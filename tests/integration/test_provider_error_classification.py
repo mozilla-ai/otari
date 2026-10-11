@@ -57,8 +57,8 @@ _CASES = [
     (422, 400, _RAW),
     (404, 404, _RAW),
     (429, 429, _RAW),
-    (401, 502, PROVIDER_CREDENTIALS_DETAIL),
-    (403, 502, PROVIDER_CREDENTIALS_DETAIL),
+    (401, 424, PROVIDER_CREDENTIALS_DETAIL),
+    (403, 424, PROVIDER_CREDENTIALS_DETAIL),
 ]
 
 
@@ -289,7 +289,7 @@ _MESSAGES_CASES = [
     (400, 400, _RAW, "invalid_request_error"),
     (404, 404, _RAW, "not_found_error"),
     (429, 429, _RAW, "rate_limit_error"),
-    (401, 502, PROVIDER_CREDENTIALS_DETAIL, "api_error"),
+    (401, 424, PROVIDER_CREDENTIALS_DETAIL, "api_error"),
 ]
 
 

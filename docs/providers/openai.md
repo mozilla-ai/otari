@@ -92,7 +92,7 @@ Hello, nice to meet you!
 
 | Symptom | Likely cause |
 |---------|--------------|
-| HTTP 502 `The provider rejected the gateway's credentials` | The `api_key` Otari sent to OpenAI is invalid or lacks access. Check the `api_key` (or `OPENAI_API_KEY`) configured on the gateway. |
+| HTTP 424 `The provider rejected the gateway's credentials` (code `provider_credential_rejected`) | The `api_key` Otari sent to OpenAI is invalid or lacks access. Check the `api_key` (or `OPENAI_API_KEY`) configured on the gateway. |
 | HTTP 404 (OpenAI's own "model not found" text) | The name after `openai:` is not a model your key can access, or the model name is misspelled. A rejection of your request carries OpenAI's own message, so the detail says which model it could not find. `The requested model was not found on the provider` appears instead when OpenAI sent no message at all. |
 | HTTP 502 `The upstream provider account is out of credit or over its billing limit.` | The provider rejected the call because the account Otari billed has no credit left or has hit its billing limit (for example OpenAI's "billing hard limit reached", or Anthropic's "credit balance is too low", which arrives as a 400). Top up the provider account, or point the model at a provider that has credit. The usage log keeps the status the provider actually returned, so these stay countable. |
 | HTTP 502 `LLM provider error` | Generic fallback: Otari reached the provider but the upstream call failed in a way it could not classify (for example a missing provider key, a provider-side 5xx, or a connection error). |

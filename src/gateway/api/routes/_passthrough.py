@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import ContainerDep, get_config, get_db, get_log_writer
 from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes._pipeline import (
+    PROVIDER_CREDENTIALS_DETAIL,
     _elapsed_ms,
     _raise_for_unresolvable_model,
     failure_status_code,
@@ -47,10 +48,10 @@ from gateway.api.routes._pipeline import (
     throttle_early_rejection,
     unresolvable_model_detail,
 )
-from gateway.api.routes._platform import _classify_upstream_error
+from gateway.api.routes._platform import _classify_upstream_error, is_provider_credential_rejection
 from gateway.core.config import GatewayConfig
 from gateway.core.database import release_session
-from gateway.core.error_codes import MODEL_NOT_ALLOWED, error_headers
+from gateway.core.error_codes import MODEL_NOT_ALLOWED, PROVIDER_CREDENTIAL_REJECTED, error_headers
 from gateway.core.metered_pricing import billable_usage, price_billable_usage, quantize_cost
 from gateway.inflight import track_request
 from gateway.log_config import logger
@@ -568,6 +569,16 @@ async def run_passthrough(
                 status_code=missing.status_code, detail=missing.detail, headers=error_headers(missing.code)
             ) from e
 
+        if is_provider_credential_rejection(e):
+            logger.warning(
+                "The provider rejected the credential configured for %s:%s", resolved.provider, resolved.model
+            )
+            raise HTTPException(
+                status_code=status.HTTP_424_FAILED_DEPENDENCY,
+                detail=PROVIDER_CREDENTIALS_DETAIL,
+                headers=error_headers(PROVIDER_CREDENTIAL_REJECTED),
+            ) from e
+
         mapped = map_provider_error(e) if map_provider_error else None
         if mapped is not None:
             raise mapped from e
@@ -693,6 +704,12 @@ def decision_status_error(status_code: int | None) -> HTTPException:
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_DECISION_UNSUPPORTED_DETAIL)
     if status_code == status.HTTP_429_TOO_MANY_REQUESTS:
         return HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=_DECISION_RATE_LIMITED_DETAIL)
+    if status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN):
+        return HTTPException(
+            status_code=status.HTTP_424_FAILED_DEPENDENCY,
+            detail=PROVIDER_CREDENTIALS_DETAIL,
+            headers=error_headers(PROVIDER_CREDENTIAL_REJECTED),
+        )
     return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=PASSTHROUGH_PROVIDER_ERROR_DETAIL)
 
 

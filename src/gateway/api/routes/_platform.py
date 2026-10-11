@@ -30,6 +30,7 @@ from gateway.core.config import ATTEMPT_ID_HEADER, GatewayConfig
 from gateway.core.error_codes import (
     ALL_CANDIDATES_REJECTED,
     CONTEXT_LENGTH_EXCEEDED,
+    PROVIDER_CREDENTIAL_REJECTED,
     error_code_of,
     error_headers,
 )
@@ -329,6 +330,11 @@ def no_attempt_served_detail(tried: int) -> str:
     return f"No model could serve the request ({tried} attempts)."
 
 
+def no_credential_accepted_detail(tried: int) -> str:
+    """424 detail for a request whose every attempt lacked a credential or had it rejected by the provider."""
+    return f"No provider accepted the gateway's credentials for this request ({tried} attempts)."
+
+
 def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | None:
     """The answer for attempts that all rejected the request alike, or ``None`` when they failed differently.
 
@@ -342,6 +348,13 @@ def get_shared_rejection(errors: Sequence[BaseException]) -> HTTPException | Non
             status_code=missing[0].status_code,
             detail=no_candidate_configured_detail(missing),
             headers=error_headers(missing[0].code),
+        )
+    rejected = sum(1 for error in errors if is_provider_credential_rejection(error))
+    if rejected and rejected + len(missing) == len(errors):
+        return HTTPException(
+            status_code=status.HTTP_424_FAILED_DEPENDENCY,
+            detail=no_credential_accepted_detail(len(errors)),
+            headers=error_headers(PROVIDER_CREDENTIAL_REJECTED),
         )
     answers = [_provider_failure_http_exc(error, fallback_detail="") for error in errors]
     statuses = {answer.status_code for answer in answers}
@@ -873,6 +886,14 @@ def upstream_retry_after(exc: BaseException) -> str | None:
             if seconds is not None:
                 return seconds
     return None
+
+
+def is_provider_credential_rejection(exc: BaseException) -> bool:
+    """Whether the provider refused the credential the gateway sent (an upstream 401 or 403)."""
+    if missing_credential(exc) is not None:
+        return False
+    kind, status_code = upstream_exception_shape(exc)
+    return kind != "timeout" and status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
 
 
 def is_provider_billing_error(exc: BaseException) -> bool:

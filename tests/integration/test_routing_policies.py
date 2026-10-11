@@ -349,8 +349,9 @@ def test_an_auth_failure_burns_the_chain(client: TestClient) -> None:
         direct = _chat(client, "openai:gpt-5-mini")
 
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
-    assert resp.status_code == 502
-    assert direct.status_code == 502
+    # The gateway's credentials are at fault, so neither answer is a retryable 5xx.
+    assert resp.status_code == 424
+    assert direct.status_code == 424
 
 
 def test_streaming_fails_over_before_any_bytes_are_flushed(client: TestClient) -> None:
