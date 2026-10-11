@@ -323,10 +323,10 @@ pricing or spend limits.
 
 Failover occurs only before response bytes reach the client. A streamed
 candidate that fails before its first chunk falls over like one that fails to
-open, as long as the failure comes within the keepalive interval
-(`streaming_keepalive_interval_ms`). A streaming failure after the stream begins
-is returned to the client because switching models mid-answer would corrupt the
-response.
+open, as long as the failure comes within `streaming_first_chunk_hold_ms`
+(15 seconds by default; `0` limits failover to candidates that fail to open). A
+streaming failure after the stream begins is returned to the client because
+switching models mid-answer would corrupt the response.
 
 A tool loop that has already produced assistant state cannot be replayed on
 another provider. Shared service failures, such as an unavailable mandatory

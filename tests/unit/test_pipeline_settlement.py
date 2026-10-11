@@ -3011,6 +3011,76 @@ async def test_standalone_stream_has_no_first_chunk_deadline(monkeypatch: pytest
     assert settlement.reconciled == [0.25]
 
 
+def test_the_first_chunk_hold_defaults_to_fifteen_seconds_and_rejects_a_negative() -> None:
+    assert GatewayConfig().streaming_first_chunk_hold_ms == 15000
+    assert GatewayConfig(streaming_first_chunk_hold_ms=0).streaming_first_chunk_hold_ms == 0
+    with pytest.raises(ValueError, match="greater than or equal to 0"):
+        GatewayConfig(streaming_first_chunk_hold_ms=-1)
+
+
+def _failing_on_first_read(started: list[bool]) -> Callable[..., Awaitable[AsyncIterator[ChatCompletionChunk]]]:
+    async def _acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        async def gen() -> AsyncIterator[ChatCompletionChunk]:
+            started.append(True)
+            raise TypeError("AsyncClientV2.chat_stream() got an unexpected keyword argument 'n'")
+            yield  # unreachable; makes this a generator
+
+        return gen()
+
+    return _acompletion
+
+
+@pytest.mark.asyncio
+async def test_a_held_stream_that_fails_before_its_first_chunk_raises_the_unstreamed_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    started: list[bool] = []
+    monkeypatch.setattr(chat, "acompletion", _failing_on_first_read(started))
+
+    config = GatewayConfig()
+    ctx = _ctx(config, db=object(), log_writer=object(), reservation=_reservation())
+    with pytest.raises(HTTPException) as raised:
+        await run_single_attempt_stream(
+            adapter=chat._ADAPTER,
+            ctx=ctx,
+            tool_ctx=_tool_ctx(config=config),
+            call_kwargs={"model": "cohere:command-r", "messages": [{"role": "user", "content": "hi"}], "n": 1},
+            provider=LLMProvider.COHERE,
+            model="command-r",
+        )
+
+    assert raised.value.status_code == 400
+    assert started == [True]
+
+
+@pytest.mark.asyncio
+async def test_with_the_hold_off_the_stream_is_not_read_before_the_response_is_returned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    started: list[bool] = []
+    monkeypatch.setattr(chat, "acompletion", _failing_on_first_read(started))
+
+    config = GatewayConfig(streaming_first_chunk_hold_ms=0)
+    ctx = _ctx(config, db=object(), log_writer=object(), reservation=_reservation())
+    response = await run_single_attempt_stream(
+        adapter=chat._ADAPTER,
+        ctx=ctx,
+        tool_ctx=_tool_ctx(config=config),
+        call_kwargs={"model": "cohere:command-r", "messages": [{"role": "user", "content": "hi"}], "n": 1},
+        provider=LLMProvider.COHERE,
+        model="command-r",
+    )
+
+    assert response.status_code == 200
+    assert started == []
+    chunks = await _drain(response)
+    assert any('"code": "provider_error"' in chunk for chunk in chunks)
+
+
 @pytest.mark.parametrize(
     ("reason", "status_code"),
     [

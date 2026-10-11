@@ -13,10 +13,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from gateway.core.config import API_ROOT
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.models.usage import UsageLog
 
-from .conftest import MODEL_NAME
+from .conftest import MODEL_NAME, build_test_client
 
 _STREAM_USER = "stream-error-user"
 _UPSTREAM_SECRET = "upstream detail sk-live-abc123 at https://internal.example/v1"
@@ -213,6 +213,24 @@ def test_an_upstream_outage_before_the_first_chunk_is_answered_with_a_502(
     row = _usage_row(db_session_factory)
     assert row.status == "error"
     assert row.status_code == 503
+
+
+def test_with_the_hold_off_a_failure_before_the_first_chunk_ends_a_200_in_a_coded_event(
+    test_config: GatewayConfig,
+    clean_database: None,
+    master_key_header: dict[str, str],
+) -> None:
+    """``streaming_first_chunk_hold_ms: 0`` commits the response as soon as the stream opens."""
+    exc = TypeError("AsyncClientV2.chat_stream() got an unexpected keyword argument 'n'")
+    for client in build_test_client(test_config.model_copy(update={"streaming_first_chunk_hold_ms": 0})):
+        response = _stream_chat_failing_before_its_first_chunk(client, master_key_header, exc)
+
+    assert response.status_code == 200, response.text
+    assert _error_event(response.text)["error"] == {
+        "message": "The provider serving this model does not accept the 'n' parameter",
+        "type": "server_error",
+        "code": "provider_error",
+    }
 
 
 def test_a_chat_stream_the_gateway_fails_is_not_blamed_on_the_provider(

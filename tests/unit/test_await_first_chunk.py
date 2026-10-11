@@ -68,3 +68,51 @@ async def test_a_failure_after_the_window_reaches_the_iterator() -> None:
 async def test_a_non_positive_window_waits_for_the_first_chunk() -> None:
     with pytest.raises(RuntimeError, match="slow failure"):
         await await_first_chunk(_stream(delay=0.05, chunks=(), fail=RuntimeError("slow failure")), 0)
+
+
+class _SlowStream:
+    """A stream whose reads never finish, recording whether it was closed."""
+
+    def __init__(self) -> None:
+        self.closed = False
+        self.read_cancelled = asyncio.Event()
+
+    def __aiter__(self) -> "_SlowStream":
+        return self
+
+    async def __anext__(self) -> str:
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            self.read_cancelled.set()
+            raise
+        return "never"
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_cancelling_the_wait_cancels_the_read_and_closes_the_stream() -> None:
+    stream = _SlowStream()
+    waiting = asyncio.ensure_future(await_first_chunk(stream, 3600))
+    await asyncio.sleep(0.01)
+
+    waiting.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiting
+
+    assert stream.read_cancelled.is_set()
+    assert stream.closed
+
+
+@pytest.mark.asyncio
+async def test_closing_the_iterator_after_the_window_cancels_the_pending_read() -> None:
+    stream = _SlowStream()
+    resumed = await await_first_chunk(stream, 0.01)
+    assert not stream.read_cancelled.is_set()
+
+    await resumed.aclose()  # type: ignore[attr-defined]
+
+    assert stream.read_cancelled.is_set()
+    assert stream.closed

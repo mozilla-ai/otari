@@ -4282,11 +4282,10 @@ async def open_stream(
 ) -> AsyncIterator[ChunkT]:
     """Open the upstream stream for a single-attempt streaming request.
 
-    A provider stream is held until its first chunk, for up to the keepalive
-    interval, so a provider failure before any output raises here and is
-    answered with the status the same request would get unstreamed. Until
-    that interval nothing but the headers would have reached the client, so
-    the wait costs the client nothing it could see.
+    A provider stream is held until its first chunk, for up to
+    ``streaming_first_chunk_hold_ms``, so a provider failure before any output
+    raises here and is answered with the status the same request would get
+    unstreamed.
 
     The sandbox and web_search backends are opened eagerly (their
     ``__aenter__`` runs before this function returns) so a backend-unreachable
@@ -4298,7 +4297,8 @@ async def open_stream(
 
     if not tool_ctx.use_tool_loop:
         stream = await adapter.open_provider_stream(kwargs)
-        return await await_first_chunk(stream, tool_ctx.config.streaming_keepalive_interval_ms / 1000)
+        hold_ms = tool_ctx.config.streaming_first_chunk_hold_ms
+        return await await_first_chunk(stream, hold_ms / 1000) if hold_ms > 0 else stream
 
     if tool_ctx.mcp_server_configs:
         return _lazy_mcp_stream(adapter, kwargs, tool_ctx.mcp_server_configs, tool_ctx)
@@ -4951,9 +4951,9 @@ async def run_single_attempt_stream(
     error event.
 
     Deliberately not included: falling over because the first *chunk* was slow.
-    The wait for it has no deadline that fails the attempt; when it outlasts the
-    keepalive interval the stream is committed and keeps waiting (see the
-    first-chunk regression test).
+    The wait for it has no deadline that fails the attempt; when it outlasts
+    ``streaming_first_chunk_hold_ms`` the stream is committed and keeps waiting
+    (see the first-chunk regression test).
     """
     try:
         if ctx.plan is not None and len(ctx.plan.attempts) > 1 and base_request_fields is not None:

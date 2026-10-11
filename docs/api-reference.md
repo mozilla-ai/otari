@@ -370,11 +370,11 @@ with an ordinary HTTP error, with the same status, `detail` and code the request
 would get unstreamed: a `400` for a parameter the provider does not accept, a
 `502` for a provider outage. Otari holds the response until the provider's first
 chunk to make that possible. A standalone gateway holds it for at most
-`streaming_keepalive_interval_ms` (15 seconds by default), the point at which it
-would otherwise start sending keepalives, and does not hold a stream that runs
-gateway tools (MCP, code execution, web search); a provider slower than that to
-start still streams, and a failure after that point is reported as below. A
-hybrid gateway holds every stream for its first-chunk failover timeout.
+`streaming_first_chunk_hold_ms` (15 seconds by default; `0` turns the hold off
+and commits the `200` as soon as the stream opens), and does not hold a stream
+that runs gateway tools (MCP, code execution, web search). A provider slower than
+that to start still streams, and a failure after that point is reported as
+below. A hybrid gateway holds every stream for its first-chunk failover timeout.
 
 A failure after a stream has started arrives as an error event, which carries
 the code as `error.code` on Chat Completions and Responses:

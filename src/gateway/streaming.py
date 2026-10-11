@@ -576,7 +576,7 @@ async def await_first_chunk(stream: AsyncIterator[C], window_seconds: float) -> 
         await _close_stream_quietly(stream)
         raise
     if not first.done():
-        return _after_pending(first, stream)
+        return _AfterPendingFirst(first, stream)
     try:
         chunk = first.result()
     except StopAsyncIteration:
@@ -587,17 +587,37 @@ async def await_first_chunk(stream: AsyncIterator[C], window_seconds: float) -> 
     return _stitched(chunk, stream)
 
 
-async def _after_pending(first: asyncio.Future[C], remaining: AsyncIterator[C]) -> AsyncIterator[C]:
-    try:
-        chunk = await first
-    except StopAsyncIteration:
-        return
-    finally:
-        if not first.done():
+class _AfterPendingFirst(AsyncIterator[C]):
+    """Resumes a first read still pending, then the rest of the stream.
+
+    A class rather than a generator so ``aclose`` reaches the pending read even
+    when iteration never started: closing an unstarted generator runs none of its body.
+    """
+
+    def __init__(self, first: asyncio.Future[C], remaining: AsyncIterator[C]) -> None:
+        self._first: asyncio.Future[C] | None = first
+        self._remaining = remaining
+
+    def __aiter__(self) -> AsyncIterator[C]:
+        return self
+
+    async def __anext__(self) -> C:
+        first, self._first = self._first, None
+        if first is None:
+            return await self._remaining.__anext__()
+        try:
+            return await first
+        finally:
+            if not first.done():
+                first.cancel()
+
+    async def aclose(self) -> None:
+        first, self._first = self._first, None
+        if first is not None and not first.done():
             first.cancel()
-    yield chunk
-    async for chunk in remaining:
-        yield chunk
+            with suppress(BaseException):
+                await first
+        await _close_stream_quietly(self._remaining)
 
 
 async def _stitched(first: C, remaining: AsyncIterator[C]) -> AsyncIterator[C]:
