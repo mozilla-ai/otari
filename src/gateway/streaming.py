@@ -79,11 +79,16 @@ _ANTHROPIC_ERROR = json.dumps(
 )
 
 
-def openai_error_event(fmt: StreamFormat, code: str | None) -> str:
-    """``fmt``'s error event, with ``code`` as the OpenAI error object's ``code`` when there is one."""
-    if code is None:
+def openai_error_event(fmt: StreamFormat, code: str | None, message: str | None = None) -> str:
+    """``fmt``'s error event, carrying ``code`` and ``message`` in the OpenAI error object where given.
+
+    ``message`` must already be safe to show the caller; without one the event says only that streaming failed.
+    """
+    if code is None and message is None:
         return fmt.error_payload
-    error = {"message": "An error occurred during streaming", "type": "server_error", "code": code}
+    error: dict[str, str] = {"message": message or "An error occurred during streaming", "type": "server_error"}
+    if code is not None:
+        error["code"] = code
     return fmt.error_payload.replace(_OPENAI_ERROR, json.dumps({"error": error}))
 
 
@@ -540,6 +545,59 @@ async def iterate_streaming_attempts(
     if last_exception is not None:
         raise last_exception
     raise RuntimeError("iterate_streaming_attempts: no attempts provided")
+
+
+async def await_first_chunk(stream: AsyncIterator[C], window_seconds: float) -> AsyncIterator[C]:
+    """Wait up to ``window_seconds`` for ``stream``'s first chunk, so a failure before it raises here.
+
+    A provider stream can fail before producing anything: an SDK that refuses a
+    keyword only once the stream is iterated, or an upstream that answers the
+    request with an error status. Raised here, before the caller has sent a
+    status line, that failure can be answered with its own status instead of a
+    ``200`` whose body is one error event.
+
+    Returns an iterator that re-emits the first chunk and then the rest of the
+    stream. When the window elapses first, the returned iterator resumes the
+    same pending read, so a chunk arriving just after the window is not lost and
+    a failure after it reaches the caller of the iterator, as it would have
+    without this wait. A non-positive window waits for the first chunk however
+    long it takes. Nothing here cuts a slow stream off.
+    """
+    first = asyncio.ensure_future(stream.__anext__())
+    # A read left pending is never awaited if the iterator is dropped unread;
+    # retrieve its outcome so a late failure is not reported as unhandled.
+    first.add_done_callback(lambda done: done.cancelled() or done.exception())
+    try:
+        await asyncio.wait((first,), timeout=window_seconds if window_seconds > 0 else None)
+    except BaseException:
+        first.cancel()
+        with suppress(BaseException):
+            await first
+        await _close_stream_quietly(stream)
+        raise
+    if not first.done():
+        return _after_pending(first, stream)
+    try:
+        chunk = first.result()
+    except StopAsyncIteration:
+        return _empty_async_iter()
+    except BaseException:
+        await _close_stream_quietly(stream)
+        raise
+    return _stitched(chunk, stream)
+
+
+async def _after_pending(first: asyncio.Future[C], remaining: AsyncIterator[C]) -> AsyncIterator[C]:
+    try:
+        chunk = await first
+    except StopAsyncIteration:
+        return
+    finally:
+        if not first.done():
+            first.cancel()
+    yield chunk
+    async for chunk in remaining:
+        yield chunk
 
 
 async def _stitched(first: C, remaining: AsyncIterator[C]) -> AsyncIterator[C]:

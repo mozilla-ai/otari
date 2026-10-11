@@ -388,6 +388,41 @@ def test_streaming_fails_over_before_any_bytes_are_flushed(client: TestClient) -
     assert '"model":"fast"' in body.replace(" ", "")
 
 
+def test_streaming_fails_over_when_the_stream_fails_on_its_first_read(client: TestClient) -> None:
+    """A provider whose stream opens and then fails before any chunk has sent the client nothing either."""
+    _create_user(client)
+    calls: list[str] = []
+
+    async def lazily_failing_stream(**kwargs: Any) -> Any:
+        calls.append(kwargs["model"])
+        failing = kwargs["model"] == "openai:gpt-5-mini"
+
+        async def chunks() -> Any:
+            from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice
+
+            if failing:
+                raise _http_error(503)
+            yield ChatCompletionChunk(
+                id="c1",
+                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason=None)],
+                created=0,
+                model="claude-haiku-4-5",
+                object="chat.completion.chunk",
+                usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            )
+
+        return chunks()
+
+    with patch("gateway.api.routes.chat.acompletion", new=lazily_failing_stream):
+        resp = _chat(client, "fast", stream=True)
+        body = resp.text
+
+    assert resp.status_code == 200
+    assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
+    assert _served_by(resp) == ("anthropic", "2", "true")
+    assert '"error"' not in body
+
+
 # ---------------------------------------------------------------------------
 # Model access: a policy must not become a way around an allow-list
 # ---------------------------------------------------------------------------

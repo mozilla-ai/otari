@@ -1056,7 +1056,9 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             "comment line on /api/v1/chat/completions and /api/v1/responses. Keeps an intermediary with a "
             "read timeout (Cloudflare's default Proxy Read Timeout is 125s) from severing a connection "
             "during a long time-to-first-token. Does not extend any first-chunk or failover deadline. "
-            "0 disables."
+            "A standalone gateway also holds a stream's status line this long for the provider's first "
+            "chunk, so a provider failure before any output is answered with its own HTTP status. "
+            "0 disables the keepalive and holds the status line until the first chunk."
         ),
     )
     model_discovery: Annotated[bool, Shown(SettingsGroup.MODELS)] = Field(

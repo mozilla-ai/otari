@@ -365,6 +365,17 @@ reworded.
 | `invalid_request` | 422 | The request body or a parameter failed schema validation. `detail` lists the failing fields, each with `loc`, `msg` and `type` | |
 | `provider_error` | 200, in a stream's error event only | The provider failed after the stream started, for a reason no other code names | |
 
+A streamed request whose provider fails before producing any output is answered
+with an ordinary HTTP error, with the same status, `detail` and code the request
+would get unstreamed: a `400` for a parameter the provider does not accept, a
+`502` for a provider outage. Otari holds the response until the provider's first
+chunk to make that possible. A standalone gateway holds it for at most
+`streaming_keepalive_interval_ms` (15 seconds by default), the point at which it
+would otherwise start sending keepalives, and does not hold a stream that runs
+gateway tools (MCP, code execution, web search); a provider slower than that to
+start still streams, and a failure after that point is reported as below. A
+hybrid gateway holds every stream for its first-chunk failover timeout.
+
 A failure after a stream has started arrives as an error event, which carries
 the code as `error.code` on Chat Completions and Responses:
 `{"error": {"message": "...", "type": "server_error", "code": "upstream_rate_limited"}}`.
@@ -372,9 +383,12 @@ The status line has already gone out as `200` by then, so the event is the only
 place the failure is named. It carries the code from the table above when one
 applies (`upstream_rate_limited`, `context_length_exceeded`), otherwise
 `provider_error` when the provider failed the stream, including one it ended
-early. The message stays fixed whatever the provider said. An event with no
-`code` is a failure inside the gateway. Either way, a standalone gateway records
-the request's usage row with status `error`.
+early. Its message is the `detail` the same failure would carry as an HTTP
+error where that names a cause (a rejected parameter, the provider's own
+explanation of a rejected request, redacted as described above), and a fixed
+`An error occurred during streaming` otherwise. An event with no `code` is a
+failure inside the gateway. Either way, a standalone gateway records the
+request's usage row with status `error`.
 On Messages, a stream the provider ends without `message_stop`, including one
 that sent no events at all, also ends in an `api_error` event rather than
 closing as if it had succeeded, and the request is settled as failed.

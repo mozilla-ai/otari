@@ -305,7 +305,7 @@ without reading the usage log:
 | `Otari-Provider` | The provider instance that served the request, by its configured name (`openai`, `azure-eu`). Never its base URL or credentials. |
 | `Otari-Attempt-Count` | How many candidates the request was sent to, including the one that served. A candidate skipped without being called, such as a model a rate limit had no room on, is not counted. |
 | `Otari-Fallback` | `true` when a candidate other than the plan's first served the request, whether the first failed or was skipped; otherwise `false`. |
-| `Otari-Response-Duration-Ms` | Whole milliseconds from the start of the handler preamble to the provider answering the request, failed candidates included. For a streamed response, to the stream opening, since the headers go out then. |
+| `Otari-Response-Duration-Ms` | Whole milliseconds from the start of the handler preamble to the provider answering the request, failed candidates included. For a streamed response, to the stream opening or its first chunk, since the headers go out then. |
 
 A request naming a model or an alias reports `1` and `false`. Streaming responses
 carry the same values: failover happens before the stream opens, so the serving
@@ -321,9 +321,12 @@ pricing or spend limits.
 
 ## Failure behavior
 
-Failover occurs only before response bytes reach the client. A streaming failure
-after the stream begins is returned to the client because switching models
-mid-answer would corrupt the response.
+Failover occurs only before response bytes reach the client. A streamed
+candidate that fails before its first chunk falls over like one that fails to
+open, as long as the failure comes within the keepalive interval
+(`streaming_keepalive_interval_ms`). A streaming failure after the stream begins
+is returned to the client because switching models mid-answer would corrupt the
+response.
 
 A tool loop that has already produced assistant state cannot be replayed on
 another provider. Shared service failures, such as an unavailable mandatory

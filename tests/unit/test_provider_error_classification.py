@@ -45,6 +45,7 @@ from gateway.api.routes._pipeline import (
     provider_error_headers,
     refusal_code,
     stream_error_code,
+    stream_error_message,
 )
 from gateway.api.routes._platform import _provider_failure_http_exc, get_shared_rejection, upstream_retry_after
 from gateway.core.error_codes import PROVIDER_NOT_CONFIGURED
@@ -927,6 +928,24 @@ def test_a_stream_error_event_carries_the_code_that_ended_it() -> None:
     assert openai_error_event(OPENAI_STREAM_FORMAT, None) == OPENAI_STREAM_FORMAT.error_payload
 
 
+def test_a_stream_error_event_names_a_cause_the_unstreamed_error_would() -> None:
+    exc = TypeError("AsyncClientV2.chat_stream() got an unexpected keyword argument 'n'")
+    event = openai_error_event(OPENAI_STREAM_FORMAT, stream_error_code(exc), stream_error_message(exc))
+
+    payload = json.loads(event.removeprefix("data: "))
+    assert payload["error"] == {
+        "message": "The provider serving this model does not accept the 'n' parameter",
+        "type": "server_error",
+        "code": "provider_error",
+    }
+
+
+def test_a_stream_error_event_keeps_the_fixed_message_for_an_unclassified_failure() -> None:
+    assert stream_error_message(_StatusError(503)) is None
+    assert stream_error_message(RuntimeError("bug")) is None
+    assert stream_error_message(HTTPException(status_code=400, detail="internal")) is None
+
+
 def test_a_stream_ended_by_a_more_specific_refusal_keeps_its_code() -> None:
     assert stream_error_code(_rate_limited_with("3")) == "upstream_rate_limited"
     assert stream_error_code(ContextLengthExceededError("prompt is too long", status_code=400)) == (
@@ -942,8 +961,9 @@ def test_a_stream_ended_by_a_more_specific_refusal_keeps_its_code() -> None:
         httpx.ConnectError("refused"),
         ProviderError("upstream broke"),
         IncompleteStreamError(3),
+        TypeError("AsyncClientV2.chat_stream() got an unexpected keyword argument 'n'"),
     ],
-    ids=["rejected", "unavailable", "unreachable", "any-llm", "incomplete"],
+    ids=["rejected", "unavailable", "unreachable", "any-llm", "incomplete", "rejected-param"],
 )
 def test_a_stream_the_provider_failed_is_coded_as_a_provider_error(exc: Exception) -> None:
     assert stream_error_code(exc) == "provider_error"

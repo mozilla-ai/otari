@@ -111,13 +111,22 @@ def test_streaming_creation_error_returns_http_error(
 
 
 @pytest.mark.parametrize(
-    ("exc", "code"),
+    ("exc", "code", "message"),
     [
-        (_UpstreamStatusError(503), "provider_error"),
-        (_UpstreamStatusError(429), "upstream_rate_limited"),
-        (ContextLengthExceededError("prompt is too long", status_code=400), "context_length_exceeded"),
+        (_UpstreamStatusError(503), "provider_error", "An error occurred during streaming"),
+        (_UpstreamStatusError(429), "upstream_rate_limited", "upstream detail [redacted] at [redacted]"),
+        (
+            ContextLengthExceededError("prompt is too long", status_code=400),
+            "context_length_exceeded",
+            "prompt is too long",
+        ),
+        (
+            TypeError("AsyncClientV2.chat_stream() got an unexpected keyword argument 'n'"),
+            "provider_error",
+            "The provider serving this model does not accept the 'n' parameter",
+        ),
     ],
-    ids=["provider", "rate-limited", "context-length"],
+    ids=["provider", "rate-limited", "context-length", "rejected-param"],
 )
 def test_a_chat_stream_the_provider_fails_ends_in_a_coded_error_event(
     client: TestClient,
@@ -125,20 +134,85 @@ def test_a_chat_stream_the_provider_fails_ends_in_a_coded_error_event(
     db_session_factory: Callable[[], Session],
     exc: Exception,
     code: str,
+    message: str,
 ) -> None:
-    """The status line has already gone out as 200, so the event is where the caller learns the code."""
+    """The status line has already gone out as 200, so the event is where the caller learns the code.
+
+    The message is the detail the same failure gets unstreamed, so it names a
+    cause where that detail does and stays fixed where it does not.
+    """
     response = _stream_chat_failing_with(client, master_key_header, exc)
 
     assert response.status_code == 200, response.text
     error = _error_event(response.text)["error"]
-    assert error == {"message": "An error occurred during streaming", "type": "server_error", "code": code}
+    assert error == {"message": message, "type": "server_error", "code": code}
     assert "sk-live-abc123" not in response.text
     assert "internal.example" not in response.text
     assert response.text.rstrip().endswith("data: [DONE]")
 
     row = _usage_row(db_session_factory)
     assert row.status == "error"
-    assert row.status_code == getattr(exc, "status_code", None)
+    assert row.status_code == getattr(exc, "status_code", 400)
+
+
+def _stream_chat_failing_before_its_first_chunk(client: TestClient, headers: dict[str, str], exc: Exception) -> Any:
+    """Stream a chat completion whose provider fails with ``exc`` when the stream is first read."""
+    created = client.post(f"{API_ROOT}/users", json={"user_id": _STREAM_USER}, headers=headers)
+    assert created.status_code == 200, created.text
+
+    async def _acompletion(**_kwargs: Any) -> Any:
+        async def _stream() -> AsyncIterator[ChatCompletionChunk]:
+            raise exc
+            yield  # pragma: no cover - makes this an async generator
+
+        return _stream()
+
+    with patch("gateway.api.routes.chat.acompletion", side_effect=_acompletion):
+        return client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "hi"}],
+                "user": _STREAM_USER,
+                "n": 1,
+                "stream": True,
+            },
+            headers=headers,
+        )
+
+
+def test_a_param_the_provider_refuses_before_the_first_chunk_is_answered_with_a_400(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """An SDK that refuses a keyword only once the stream is read gets the unstreamed status, not a 200."""
+    exc = TypeError("AsyncClientV2.chat_stream() got an unexpected keyword argument 'n'")
+    response = _stream_chat_failing_before_its_first_chunk(client, master_key_header, exc)
+
+    assert response.status_code == 400, response.text
+    assert response.json() == {"detail": "The provider serving this model does not accept the 'n' parameter"}
+    assert "chat_stream" not in response.text
+
+    row = _usage_row(db_session_factory)
+    assert row.status == "error"
+    assert row.status_code == 400
+
+
+def test_an_upstream_outage_before_the_first_chunk_is_answered_with_a_502(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    response = _stream_chat_failing_before_its_first_chunk(client, master_key_header, _UpstreamStatusError(503))
+
+    assert response.status_code == 502, response.text
+    assert response.json() == {"detail": "LLM provider error"}
+    assert "sk-live-abc123" not in response.text
+
+    row = _usage_row(db_session_factory)
+    assert row.status == "error"
+    assert row.status_code == 503
 
 
 def test_a_chat_stream_the_gateway_fails_is_not_blamed_on_the_provider(
@@ -179,4 +253,47 @@ def test_a_responses_stream_the_provider_fails_ends_in_a_coded_error_event(
     assert response.status_code == 200, response.text
     assert "event: error" in response.text
     assert _error_event(response.text)["error"]["code"] == "provider_error"
+    assert "sk-live-abc123" not in response.text
+
+
+def test_a_responses_stream_that_fails_before_its_first_event_is_answered_with_its_status(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    responses_request_body: dict[str, Any],
+) -> None:
+    async def _stream() -> AsyncIterator[_FakeStreamEvent]:
+        raise _UpstreamStatusError(400)
+        yield  # pragma: no cover - makes this an async generator
+
+    with patch("gateway.api.routes.responses.aresponses", new_callable=AsyncMock, return_value=_stream()):
+        response = client.post(
+            f"{API_ROOT}/responses", json={**responses_request_body, "stream": True}, headers=master_key_header
+        )
+
+    assert response.status_code == 400, response.text
+    assert "event: error" not in response.text
+    assert "sk-live-abc123" not in response.text
+
+
+def test_a_messages_stream_that_fails_before_its_first_event_is_answered_with_its_status(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    test_user: dict[str, Any],
+    messages_request_body: dict[str, Any],
+) -> None:
+    async def _amessages(**_kwargs: Any) -> Any:
+        async def _stream() -> AsyncIterator[Any]:
+            raise _UpstreamStatusError(503)
+            yield  # pragma: no cover - makes this an async generator
+
+        return _stream()
+
+    with patch("gateway.api.routes.messages.amessages", new=_amessages):
+        response = client.post(
+            f"{API_ROOT}/messages", json={**messages_request_body, "stream": True}, headers=api_key_header
+        )
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"]["error"]["type"] == "api_error"
+    assert "event: error" not in response.text
     assert "sk-live-abc123" not in response.text
