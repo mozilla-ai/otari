@@ -11,7 +11,7 @@ from any_llm import LLMProvider, acompletion
 
 from gateway.api.routes import chat
 from gateway.api.routes._pipeline import UPSTREAM_USER_FIELD
-from gateway.services.inference import chat_user_fields, upstream_user_identifier
+from gateway.services.inference import chat_user_fields, responses_user_fields, upstream_user_identifier
 
 _KEY = "k" * 32
 
@@ -137,6 +137,30 @@ def test_each_provider_gets_its_own_field(provider: LLMProvider, field: str | No
 def test_an_unknown_provider_gets_nothing() -> None:
     assert chat_user_fields("not-a-provider", "id") == {}
     assert chat_user_fields(None, "id") == {}
+    assert responses_user_fields("not-a-provider", "id") == {}
+    assert responses_user_fields(None, "id") == {}
+
+
+@pytest.mark.parametrize(
+    ("provider", "expected"),
+    [
+        # A native Responses API that documents it.
+        (LLMProvider.OPENAI, {"safety_identifier": "id"}),
+        (LLMProvider.AZUREOPENAI, {"safety_identifier": "id"}),
+        # Served as a chat completion, where the bridge puts it in the chat field.
+        (LLMProvider.ANTHROPIC, {"safety_identifier": "id"}),
+        (LLMProvider.BEDROCK, {"safety_identifier": "id"}),
+        (LLMProvider.MISTRAL, {"safety_identifier": "id"}),
+        # A native Responses API not known to take it.
+        (LLMProvider.GROQ, {}),
+        (LLMProvider.GEMINI, {}),
+        (LLMProvider.OPENROUTER, {}),
+    ],
+)
+def test_a_responses_call_carries_a_safety_identifier_where_it_is_read(
+    provider: LLMProvider, expected: dict[str, Any]
+) -> None:
+    assert responses_user_fields(provider, "id") == expected
 
 
 @pytest.mark.asyncio

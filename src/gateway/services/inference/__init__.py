@@ -27,6 +27,7 @@ from gateway.services.inference._responses_bridge import (
     REASONING_ITEM_ID_PREFIX,
     aresponses_via_chat_completions,
     call_responses,
+    responses_user_fields,
     serves_responses,
     uses_chat_completions_bridge,
 )
@@ -72,6 +73,7 @@ __all__ = [
     "keep_claim_alive",
     "reported_charge",
     "request_decision",
+    "responses_user_fields",
     "resolve_decision_provider",
     "run_idempotency_sweeper",
     "serves_responses",

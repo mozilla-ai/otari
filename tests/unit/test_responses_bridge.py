@@ -790,3 +790,26 @@ def test_only_message_and_function_call_items_are_kept() -> None:
     )
 
     assert bridge._messages([{"type": "item_reference", "id": "rs_1"}], None, "bedrock") == []
+
+
+# ---------- end-user identifier ----------
+
+
+@pytest.mark.parametrize(
+    ("provider", "expected"),
+    [
+        (LLMProvider.ANTHROPIC, {"metadata": {"user_id": "id"}}),
+        (LLMProvider.BEDROCK, {"requestMetadata": {"otari_user": "id"}}),
+        (LLMProvider.DEEPSEEK, {"user": "id"}),
+        (LLMProvider.MISTRAL, {}),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_safety_identifier_reaches_a_bridged_provider_in_its_own_field(
+    provider: LLMProvider, expected: dict[str, Any]
+) -> None:
+    captured: dict[str, Any] = {}
+    await _call(captured, _completion({"content": "ok"}), provider=provider, input_data="hi", safety_identifier="id")
+
+    assert "safety_identifier" not in captured
+    assert {key: captured[key] for key in ("user", "metadata", "requestMetadata") if key in captured} == expected

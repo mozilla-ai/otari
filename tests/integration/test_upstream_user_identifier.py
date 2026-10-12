@@ -1,4 +1,4 @@
-"""The end-user identifier a chat completion sends its provider."""
+"""The end-user identifier a completion sends its provider."""
 
 from collections.abc import Callable, Generator
 from typing import Any
@@ -327,3 +327,62 @@ def test_hybrid_turned_off_serves_an_unidentified_request(
     _chat(hybrid_client(provider_user_identifier_enabled=False), _TOKEN, model="gpt-4o-mini")
 
     assert not {"user", UPSTREAM_USER_FIELD} & set(hybrid_captured[0])
+
+
+# ---------------------------------------------------------------------------
+# Responses
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def responses_captured(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """What a Responses request handed any-llm, natively or through the chat bridge."""
+    calls: list[dict[str, Any]] = []
+
+    async def fake(**kwargs: Any) -> None:
+        calls.append(kwargs)
+        raise _Stop
+
+    monkeypatch.setattr("gateway.api.routes.responses.aresponses", fake)
+    monkeypatch.setattr("gateway.services.inference._responses_bridge.acompletion", fake)
+    return calls
+
+
+def _respond(client: TestClient, headers: dict[str, str], model: str = "openai:gpt-4o-mini", **body: Any) -> None:
+    client.post(f"{API_ROOT}/responses", json={"model": model, "input": "hi", **body}, headers=headers)
+
+
+def test_responses_sends_openai_a_safety_identifier_and_no_user(
+    make_client: ClientFactory, responses_captured: list[dict[str, Any]]
+) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _respond(client, headers, user="alice", safety_identifier="caller-chosen")
+
+    assert responses_captured[0]["safety_identifier"] == upstream_user_identifier(workspace, "alice", None)
+    assert not {"user", UPSTREAM_USER_FIELD} & set(responses_captured[0])
+
+
+def test_responses_to_anthropic_sends_metadata_user_id_and_never_user(
+    make_client: ClientFactory, responses_captured: list[dict[str, Any]]
+) -> None:
+    """Anthropic has no Responses API, so the bridge serves it as a chat completion, where ``user`` fails the call."""
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _respond(client, headers, model="anthropic:claude-sonnet-4-5")
+
+    assert responses_captured[0]["metadata"] == {"user_id": upstream_user_identifier(workspace, "alice", None)}
+    assert not {"user", "safety_identifier"} & set(responses_captured[0])
+
+
+def test_responses_turned_off_sends_no_identifier_at_all(
+    make_client: ClientFactory, responses_captured: list[dict[str, Any]]
+) -> None:
+    client = make_client(provider_user_identifier_enabled=False)
+    headers, _ = _keyed_user(client)
+
+    _respond(client, headers, user="alice", safety_identifier="caller-chosen")
+
+    assert not {"user", "safety_identifier", UPSTREAM_USER_FIELD} & set(responses_captured[0])

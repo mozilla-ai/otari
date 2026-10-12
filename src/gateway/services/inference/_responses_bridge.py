@@ -47,6 +47,7 @@ from openai.types.responses import (
 from pydantic import BaseModel
 
 from gateway.log_config import logger
+from gateway.services.inference._upstream_user import chat_user_fields
 
 # Same name and meaning on both APIs.
 _SHARED_FIELDS = frozenset(
@@ -82,6 +83,7 @@ _TRANSLATED_FIELDS = frozenset(
         "reasoning",
         "text",
         "stream",
+        "safety_identifier",
     }
 )
 
@@ -144,6 +146,25 @@ def uses_chat_completions_bridge(provider: str | LLMProvider | None) -> bool:
     return not getattr(provider_class, "SUPPORTS_RESPONSES", False) and bool(
         getattr(provider_class, "SUPPORTS_COMPLETION", False)
     )
+
+
+# Native Responses APIs that document ``safety_identifier``.
+_SAFETY_IDENTIFIER = frozenset({LLMProvider.OPENAI, LLMProvider.AZUREOPENAI})
+
+
+def responses_user_fields(provider: str | LLMProvider | None, identifier: str) -> dict[str, Any]:
+    """The Responses keyword arguments that carry an end-user identifier to ``provider``.
+
+    A provider served through the bridge gets ``safety_identifier`` too, which the
+    bridge turns into the field that provider's chat API reads.
+    """
+    if uses_chat_completions_bridge(provider):
+        return {"safety_identifier": identifier}
+    try:
+        resolved = LLMProvider(provider) if provider is not None else None
+    except ValueError:
+        return {}
+    return {"safety_identifier": identifier} if resolved in _SAFETY_IDENTIFIER else {}
 
 
 def serves_responses(provider: str | LLMProvider) -> bool:
@@ -246,6 +267,8 @@ def _completion_kwargs(kwargs: dict[str, Any], provider: str) -> dict[str, Any]:
             out["extra_body"] = extra_body
         else:
             del out["extra_body"]
+    if isinstance(identifier := kwargs.get("safety_identifier"), str):
+        out.update(chat_user_fields(kwargs["provider"], identifier))
     out["provider"] = kwargs["provider"]
     out["model"] = kwargs["model"]
     out["messages"] = _messages(kwargs.get("input_data"), kwargs.get("instructions"), provider)

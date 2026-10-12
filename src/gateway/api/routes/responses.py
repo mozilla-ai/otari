@@ -34,6 +34,7 @@ from gateway.api.routes._pipeline import (
     ToolBackends,
     _flush_pending_usage_reports,
     _PendingUsageReport,
+    bind_upstream_user,
     classify_provider_error,
     prepare_gateway_tools,
     provider_error_headers,
@@ -49,6 +50,7 @@ from gateway.api.routes._pipeline import (
     scope_prompt_cache_key,
     stream_error_code,
     stream_error_message,
+    with_upstream_user,
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost, build_attempt_client_args, with_retry_hint
 from gateway.api.routes._request_tags import RequestMetadata, forwarded_metadata, request_tags
@@ -60,7 +62,12 @@ from gateway.core.usage import GatewayUsage
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.services.files import StagedFile
-from gateway.services.inference import call_responses, serves_responses, strip_gateway_minted_items
+from gateway.services.inference import (
+    call_responses,
+    responses_user_fields,
+    serves_responses,
+    strip_gateway_minted_items,
+)
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_responses import (
@@ -325,10 +332,10 @@ class _ResponsesAdapter:
         )
 
     async def call_provider(self, kwargs: dict[str, Any]) -> ResponsesResponse:
-        return await call_responses(aresponses, kwargs)  # type: ignore[no-any-return]
+        return await call_responses(aresponses, _with_upstream_user(kwargs))  # type: ignore[no-any-return]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[ResponseStreamEvent]:
-        return await call_responses(aresponses, kwargs)  # type: ignore[no-any-return]
+        return await call_responses(aresponses, _with_upstream_user(kwargs))  # type: ignore[no-any-return]
 
     def prepare_stream_kwargs(
         self,
@@ -360,7 +367,7 @@ class _ResponsesAdapter:
         if native_tools:
             extra["native_tools"] = native_tools
         return await responses_tool_loop(
-            completion_kwargs=kwargs,
+            completion_kwargs=_with_upstream_user(kwargs),
             pool=pool,
             max_iterations=max_iterations,
             **extra,
@@ -381,7 +388,7 @@ class _ResponsesAdapter:
         if native_tools:
             extra["native_tools"] = native_tools
         return responses_tool_loop_stream(
-            completion_kwargs=kwargs,
+            completion_kwargs=_with_upstream_user(kwargs),
             pool=pool,
             max_iterations=max_iterations,
             **extra,
@@ -450,6 +457,11 @@ class _ResponsesAdapter:
         provider = LLMProvider(provider_str)
         kwargs["provider"] = provider
         return _with_codex_extra_body(kwargs, provider)
+
+
+def _with_upstream_user(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Put the carried end-user identifier in the field this call's provider reads."""
+    return with_upstream_user(kwargs, lambda out, identifier: responses_user_fields(out.get("provider"), identifier))
 
 
 _ADAPTER = _ResponsesAdapter()
@@ -648,9 +660,8 @@ async def create_response(
     input_payload, codex_extra_body = _codex_extra_body(request_fields.pop("input"), client_metadata)
     stream = bool(request_fields.pop("stream", False))
     request_fields.pop("model", None)
-    # The billed user is the gateway's attribution, as on Chat Completions, and
-    # some providers (Cohere) refuse the field.
-    request_fields.pop("user", None)
+    request_fields.pop("safety_identifier", None)
+    bind_upstream_user(request_fields, ctx)
 
     # base_request_fields is what gets merged with per-attempt creds; it
     # includes ``provider`` and ``input_data`` so each attempt has the full
