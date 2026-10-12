@@ -401,7 +401,7 @@ function DataTableGrid<Row extends object>({
   const rootRef = useRef<HTMLDivElement | null>(null)
 
   // The grid is as wide as its columns, so the empty message needs the visible
-  // width to centre in.
+  // width to center in.
   useLayoutEffect(() => {
     const root = rootRef.current
     if (!root) return
