@@ -62,6 +62,7 @@ from gateway.core.config import API_ROOT, OAUTH_PROVIDERS, GatewayConfig
 from gateway.exceptions.identity_exceptions import OAuthExchangeError, OAuthNotConfiguredError, OAuthStateError
 from gateway.log_config import logger
 from gateway.models.tenancy import OAUTH_STATE_TTL_SECONDS, OAuthPendingState
+from gateway.ports.identity_provider_port import EmailAssertion
 
 # Which scopes each provider is asked for, and what it calls itself.
 #
@@ -114,9 +115,10 @@ class OAuthIdentity:
     """
 
     provider: str
+    subject: str | None
     email: str | None
     full_name: str | None
-    email_verified: bool
+    email_verified: EmailAssertion
 
 
 def provider_label(provider: str) -> str:
@@ -392,15 +394,10 @@ async def exchange_code(
 
     return OAuthIdentity(
         provider=provider,
+        subject=profile.subject,
         email=profile.email,
         full_name=profile.name,
-        # apron-auth reports email_verified as tri-state (True, False, or
-        # unasserted). This edition resolves identity on a bool, so an
-        # unasserted value collapses to unverified rather than being laundered
-        # into a verified identity. mozilla-ai/otari-ai#1551 moves resolution
-        # onto the tri-state model, once, on the platform; it is deliberately
-        # not anticipated here.
-        email_verified=profile.email_verified is True,
+        email_verified=EmailAssertion.from_claim(profile.email_verified),
     )
 
 

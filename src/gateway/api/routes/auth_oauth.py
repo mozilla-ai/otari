@@ -64,6 +64,7 @@ from gateway.core.database import DATABASE_ERRORS
 from gateway.exceptions import TenancyError
 from gateway.exceptions.identity_exceptions import OAuthNotConfiguredError
 from gateway.log_config import logger
+from gateway.ports.identity_provider_port import EmailAssertion
 from gateway.services.dashboard_session_service import (
     apply_session_cookie,
     create_dashboard_session,
@@ -299,7 +300,7 @@ async def callback(
             provider=external.provider,
             email=external.email,
             full_name=external.full_name,
-            email_verified=external.email_verified,
+            email_verified=external.email_verified is EmailAssertion.VERIFIED,
         )
     except TenancyError:
         record_auth_failure("invalid_oauth")

@@ -33,6 +33,7 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.ports.growth_signal_port import GrowthActivationEvent, GrowthSignalPort
+from gateway.ports.identity_provider_port import EmailAssertion
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.oauth_service import OAuthIdentity
 
@@ -182,7 +183,13 @@ def test_a_second_signup_on_a_claimed_address_notifies_nothing(
 
 def _sign_in_with_google(client: TestClient, monkeypatch: pytest.MonkeyPatch, *, email: str) -> None:
     async def _exchange(_config: GatewayConfig, provider: str, **_: Any) -> OAuthIdentity:
-        return OAuthIdentity(provider=provider, email=email, full_name="Ada Lovelace", email_verified=True)
+        return OAuthIdentity(
+            provider=provider,
+            subject=f"{email}-subject",
+            email=email,
+            full_name="Ada Lovelace",
+            email_verified=EmailAssertion.VERIFIED,
+        )
 
     monkeypatch.setattr("gateway.api.routes.auth_oauth.exchange_code", _exchange)
     response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})

@@ -29,9 +29,28 @@ does not anticipate it. Overlay authors should pin a released tag and expect
 """
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Protocol
 
 from gateway.models.tenancy import User
+
+
+class EmailAssertion(StrEnum):
+    """What a provider says about the email address it returns.
+
+    NOTE: A provider that sends no claim is ``UNASSERTED``, not ``UNVERIFIED``.
+    """
+
+    UNASSERTED = "unasserted"
+    UNVERIFIED = "unverified"
+    VERIFIED = "verified"
+
+    @classmethod
+    def from_claim(cls, email_verified: bool | None) -> "EmailAssertion":
+        """Return the assertion for a provider's tri-state ``email_verified`` claim."""
+        if email_verified is None:
+            return cls.UNASSERTED
+        return cls.VERIFIED if email_verified else cls.UNVERIFIED
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,4 +106,4 @@ class IdentityProviderPort(Protocol):
         ...
 
 
-__all__ = ["IdentityProviderPort", "IdentityResolution"]
+__all__ = ["EmailAssertion", "IdentityProviderPort", "IdentityResolution"]

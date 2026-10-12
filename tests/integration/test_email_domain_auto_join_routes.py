@@ -232,6 +232,7 @@ def test_an_oauth_sign_in_joins_the_organization_that_proved_the_domain(
     monkeypatch: pytest.MonkeyPatch,
     claiming_organization: str,
 ) -> None:
+    from gateway.ports.identity_provider_port import EmailAssertion
     from gateway.services.oauth_service import OAuthIdentity
 
     monkeypatch.setattr(test_config, "public_base_url", ORIGIN)
@@ -241,7 +242,13 @@ def test_an_oauth_sign_in_joins_the_organization_that_proved_the_domain(
     async def _exchange(
         _config: GatewayConfig, provider: str, *, code: str, state: str, flow_secret: str | None, db: Any
     ) -> OAuthIdentity:
-        return OAuthIdentity(provider=provider, email=ADDRESS, full_name="Ada", email_verified=True)
+        return OAuthIdentity(
+            provider=provider,
+            subject="ada-subject",
+            email=ADDRESS,
+            full_name="Ada",
+            email_verified=EmailAssertion.VERIFIED,
+        )
 
     monkeypatch.setattr("gateway.api.routes.auth_oauth.exchange_code", _exchange)
     home = _active_organization(client, master_key_header)

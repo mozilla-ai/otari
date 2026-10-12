@@ -37,6 +37,7 @@ from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.models.tenancy import Organization, User, WebAuthnCredential
 from gateway.models.tools import WorkspaceCodeExecutionPolicy
+from gateway.ports.identity_provider_port import EmailAssertion
 from gateway.repositories.tenancy import UserRepository
 from gateway.services import oauth_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
@@ -63,9 +64,10 @@ def oauth_configured(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
 def stub_exchange(
     monkeypatch: pytest.MonkeyPatch,
     *,
+    subject: str | None = "ada-subject",
     email: str | None = "ada@example.com",
     full_name: str | None = "Ada Lovelace",
-    email_verified: bool = True,
+    email_verified: EmailAssertion = EmailAssertion.VERIFIED,
 ) -> list[str]:
     """Replace the provider round trip, and record every code it was handed.
 
@@ -80,6 +82,7 @@ def stub_exchange(
         spent.append(code)
         return OAuthIdentity(
             provider=provider,
+            subject=subject,
             email=email,
             full_name=full_name,
             email_verified=email_verified,
@@ -553,7 +556,7 @@ def test_open_signup_registers_nobody_from_an_address_the_provider_would_not_ver
     db_session: Session,
 ) -> None:
     # Creating an account for an unverified address would let anyone hold an account on another person's address.
-    stub_exchange(monkeypatch, email="stranger@example.com", email_verified=False)
+    stub_exchange(monkeypatch, email="stranger@example.com", email_verified=EmailAssertion.UNVERIFIED)
 
     response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
 
@@ -786,7 +789,7 @@ def test_an_unverified_provider_address_is_refused_even_when_it_is_on_the_roster
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     add_member(client, master_key_header, email="ada@example.com")
-    stub_exchange(monkeypatch, email_verified=False)
+    stub_exchange(monkeypatch, email_verified=EmailAssertion.UNVERIFIED)
 
     response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
 
@@ -1185,7 +1188,7 @@ def test_a_refusal_names_the_provider_the_way_it_writes_its_name(
 ) -> None:
     stub_exchange(monkeypatch, email="stranger@example.com")
     unknown = client.post(f"{API_ROOT}/auth/oauth/{provider}/callback", json={"code": "c", "state": "s"})
-    stub_exchange(monkeypatch, email_verified=False)
+    stub_exchange(monkeypatch, email_verified=EmailAssertion.UNVERIFIED)
     unverified = client.post(f"{API_ROOT}/auth/oauth/{provider}/callback", json={"code": "c", "state": "s"})
 
     assert unknown.json()["detail"].startswith(f"That {label} account")
@@ -1214,7 +1217,7 @@ def stub_token_endpoint(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]
         return {"access_token": "an-access-token", "token_type": "Bearer"}
 
     async def _fetch_identity(self: Any, _tokens: Any) -> Any:
-        return SimpleNamespace(email="ada@example.com", name="Ada Lovelace", email_verified=True)
+        return SimpleNamespace(subject="ada-subject", email="ada@example.com", name="Ada Lovelace", email_verified=True)
 
     monkeypatch.setattr(OAuthClient, "_token_request", _token_request)
     monkeypatch.setattr(OAuthClient, "fetch_identity", _fetch_identity)
