@@ -12,7 +12,7 @@ from gateway.exceptions.identity_exceptions import OAuthIdentityLinkConflictErro
 from gateway.models.identity import EmailAssertion, OAuthIdentityLink, ProviderIdentity
 from gateway.models.tenancy import User
 from gateway.ports.identity_provider_port import IdentityResolution
-from gateway.repositories.identity import OAuthIdentityLinkRepository
+from gateway.repositories.identity import IdentityRepositories, OAuthIdentityLinkRepository
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.identity import IdentityService
 from gateway.services.tenancy import OrganizationService, forget_unproven_access
@@ -34,9 +34,8 @@ def _service(db: AsyncSession, *, open_signup: bool) -> IdentityService:
     )
     return IdentityService(
         writes["uow"],
+        IdentityRepositories.on(writes["uow"]),
         identity_provider=adapter,
-        links=OAuthIdentityLinkRepository(writes["uow"]),
-        users=UserRepository(writes["uow"]),
     )
 
 
@@ -107,9 +106,8 @@ async def test_a_deactivated_account_from_the_policy_is_refused_and_not_linked(a
     uow = UnitOfWork(async_db)
     service = IdentityService(
         uow,
+        IdentityRepositories.on(uow),
         identity_provider=_ReturnsAccount(account),
-        links=OAuthIdentityLinkRepository(uow),
-        users=UserRepository(uow),
     )
 
     with pytest.raises(OAuthIdentityUnknownError):
@@ -147,9 +145,8 @@ async def test_an_identity_linked_elsewhere_during_the_sign_in_is_refused_as_a_c
     links = OAuthIdentityLinkRepository(uow)
     service = IdentityService(
         uow,
+        IdentityRepositories.on(uow),
         identity_provider=_LinksElsewhereFirst(account, elsewhere, links),
-        links=links,
-        users=UserRepository(uow),
     )
 
     with pytest.raises(OAuthIdentityLinkConflictError):

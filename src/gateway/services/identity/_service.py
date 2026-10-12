@@ -6,8 +6,7 @@ from gateway.log_config import logger
 from gateway.models.identity import EmailAssertion, ProviderIdentity
 from gateway.models.tenancy import User
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
-from gateway.repositories.identity import OAuthIdentityLinkRepository
-from gateway.repositories.tenancy import UserRepository
+from gateway.repositories.identity import IdentityRepositories
 from gateway.services.oauth_service import provider_label
 
 
@@ -18,17 +17,12 @@ class IdentityService:
     """
 
     def __init__(
-        self,
-        uow: UnitOfWork,
-        *,
-        identity_provider: IdentityProviderPort,
-        links: OAuthIdentityLinkRepository,
-        users: UserRepository,
+        self, uow: UnitOfWork, repositories: IdentityRepositories, *, identity_provider: IdentityProviderPort
     ) -> None:
         self._uow = uow
+        self._links = repositories.links
+        self._users = repositories.users
         self._identity_provider = identity_provider
-        self._links = links
-        self._users = users
 
     async def sign_in_with_oauth(self, external: ProviderIdentity) -> IdentityResolution:
         """Return the account that an identity a provider has proven signs in as.

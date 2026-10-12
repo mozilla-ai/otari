@@ -38,7 +38,7 @@ from gateway.ports.web_search_policy_port import WebSearchPolicyPort
 from gateway.repositories.api_keys import ApiKeyRepository
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.files import FileRepositories
-from gateway.repositories.identity import OAuthIdentityLinkRepository
+from gateway.repositories.identity import IdentityRepositories
 from gateway.repositories.inference import InferenceRepositories
 from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.repositories.providers import OrgProviderKeyModelRepository, ProviderEndpointRepository
@@ -46,7 +46,6 @@ from gateway.repositories.rate_limits import RateLimitRuleRepository
 from gateway.repositories.tenancy import (
     OrganizationGuardrailDefinitionRepository,
     OrgProviderKeyRepository,
-    UserRepository,
     WorkspaceRepository,
 )
 from gateway.repositories.tools import (
@@ -1290,12 +1289,7 @@ ModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_model_provider_p
 
 def get_identity_service(uow: UnitOfWorkDep, identity_provider: IdentityProviderPortDep) -> IdentityService:
     """Build the identity service on the request's Unit of Work."""
-    return IdentityService(
-        uow,
-        identity_provider=identity_provider,
-        links=OAuthIdentityLinkRepository(uow),
-        users=UserRepository(uow),
-    )
+    return IdentityService(uow, IdentityRepositories.on(uow), identity_provider=identity_provider)
 
 
 IdentityServiceDep = Annotated[IdentityService, Depends(get_identity_service)]
