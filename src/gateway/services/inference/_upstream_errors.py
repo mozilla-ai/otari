@@ -348,13 +348,12 @@ def is_provider_billing_error(exc: BaseException) -> bool:
 
 
 # Lowercase substrings of a rejection that says the model takes no image input.
+# Each is a provider's wording seen in a real response; add one only on the same footing.
 # Narrow for the same reason as the billing probes: each names images and says
 # they are refused, so a malformed request of any other kind cannot match.
 _IMAGE_REJECTION_PROBES: tuple[str, ...] = (
     "image content is not supported",  # cohere
     "unsupported chatmessagecontent type: image_url",  # fireworks
-    "image_url is only supported by certain models",  # openai
-    "unknown variant `image_url`",  # deepseek
 )
 
 

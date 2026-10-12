@@ -1631,6 +1631,15 @@ def test_an_image_mention_on_a_gateway_fault_is_not_an_image_rejection() -> None
     assert provider_error_headers(exc, 503) is None
 
 
+def test_an_image_refusal_in_wording_not_seen_yet_keeps_the_providers_sentence() -> None:
+    """Only wording seen in a real response is matched; anything else stays the provider's 400."""
+    message = "Invalid content type. image_url is only supported by certain models."
+    exc = _openai_status_error(400, _openai_error(message))
+
+    assert classify_provider_error(exc) == (400, message)
+    assert provider_error_headers(exc, 400) is None
+
+
 def test_attempts_that_all_refuse_the_image_share_one_400() -> None:
     fireworks, cohere = _image_rejections()[:2]
 
