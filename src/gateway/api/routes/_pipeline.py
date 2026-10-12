@@ -1732,9 +1732,8 @@ class EstimateInputs:
 async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) -> None:
     """Grow the reservation to cover ``attempt`` before dispatching it.
 
-    Called before every candidate after the first. A cheaper candidate is a no-op
-    (``increase_reservation`` ignores a non-positive delta), so the hold only ever
-    grows toward the candidate that actually serves.
+    Called before every candidate after the first.
+    Each leg grows only by what it lacks of the candidate's estimate, so the hold only ever grows.
 
     A refused top-up raises, which the walker treats as terminal: the chain stops
     rather than serving a model the caller cannot afford, and the caller's outer
@@ -1772,14 +1771,11 @@ async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) 
         default_output_tokens=ctx.estimate_inputs.default_output_tokens,
         cache_write_ttl=ctx.estimate_inputs.cache_write_ttl,
     )
-    delta = repriced - ctx.reservation.estimate
-    if delta <= ZERO:
-        return
     try:
         await increase_reservation(
             ctx.db,
             ctx.reservation,
-            delta,
+            estimate=repriced,
             model=f"{attempt.instance}:{attempt.model}",
             model_is_free=is_free_pricing(pricing),
             strategy=ctx.config.budget_strategy,
@@ -2582,14 +2578,15 @@ async def resolve_request_context(
                     max_output_tokens=estimate_inputs.max_output_tokens,
                     default_output_tokens=estimate_inputs.default_output_tokens,
                 )
-                await increase_reservation(
-                    db,
-                    reservation,
-                    post_estimate - estimate,
-                    additional_tokens=post_estimated_tokens - estimated_tokens,
-                    model=model,
-                    strategy=config.budget_strategy,
-                )
+                if post_estimate > estimate or post_estimated_tokens > estimated_tokens:
+                    await increase_reservation(
+                        db,
+                        reservation,
+                        estimate=post_estimate,
+                        tokens=post_estimated_tokens,
+                        model=model,
+                        strategy=config.budget_strategy,
+                    )
             except HTTPException:
                 await refund_reservation(db, reservation)
                 raise

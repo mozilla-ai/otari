@@ -309,7 +309,7 @@ async def test_a_top_up_grows_the_row_it_already_has(async_db: AsyncSession, ten
     await async_db.commit()
 
     handle = await reserve_budget(async_db, tenancy.user_id, 1.0, scope=tenancy.scope())
-    await increase_reservation(async_db, handle, 2.0)
+    await increase_reservation(async_db, handle, estimate=3.0)
 
     rows = await _rows(async_db, tenancy.user_id)
     assert len(rows) == 1
@@ -347,7 +347,7 @@ async def test_a_top_up_after_a_reclaim_returns_the_delta(async_db: AsyncSession
     await async_db.commit()
     assert await ledger.sweep_expired(async_db, batch_size=10) == 1
 
-    await increase_reservation(async_db, handle, 2.0)
+    await increase_reservation(async_db, handle, estimate=3.0)
 
     # The delta is back on both counters, and the row was not resurrected.
     assert (await _user(async_db, tenancy.user_id)).reserved == Decimal("0.000000")

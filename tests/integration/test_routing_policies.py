@@ -373,6 +373,19 @@ def test_an_auth_failure_burns_the_chain(client: TestClient) -> None:
     assert direct.status_code == 424
 
 
+def test_a_request_whose_size_did_not_grow_takes_no_top_up(client: TestClient) -> None:
+    """A top-up costs a lookup and a ledger write, so a request whose normalization added nothing skips it."""
+    _create_user(client)
+    with (
+        patch("gateway.api.routes._pipeline.increase_reservation", new=AsyncMock()) as top_up,
+        patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))),
+    ):
+        resp = _chat(client, "openai:gpt-5-mini")
+
+    assert resp.status_code == 200, resp.text
+    top_up.assert_not_awaited()
+
+
 def test_streaming_fails_over_before_any_bytes_are_flushed(client: TestClient) -> None:
     _create_user(client)
     calls: list[str] = []

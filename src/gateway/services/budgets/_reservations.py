@@ -1073,9 +1073,9 @@ async def refund_reservation(db: AsyncSession, handle: ReservationHandle) -> Non
 async def increase_reservation(
     db: AsyncSession,
     handle: ReservationHandle,
-    additional_estimate: Decimal | float,
     *,
-    additional_tokens: int = 0,
+    estimate: Decimal | float,
+    tokens: int = 0,
     model: str | None = None,
     model_is_free: bool | None = None,
     strategy: str = "for_update",
@@ -1083,8 +1083,10 @@ async def increase_reservation(
     """Grow an existing reservation atomically when the request size increases.
 
     Used when the billable size grows after the initial reservation, e.g. the
-    content normalizer expands an attachment into extracted prompt text. The
-    delta is reserved with the same atomic conditional UPDATE as
+    content normalizer expands an attachment into extracted prompt text.
+    ``estimate`` and ``tokens`` are the request's new size.
+    Each leg grows by what it lacks of that size, because the two legs can hold different amounts.
+    The delta is reserved with the same atomic conditional UPDATE as
     :func:`reserve_budget` (so the budget gate stays effective on the true
     size), then folded into ``handle`` so the existing reconcile/refund path
     releases the full held amount.
@@ -1092,7 +1094,7 @@ async def increase_reservation(
     Like :func:`reserve_budget`, this raises on budget rejection and does *not*
     clean up the prior hold: the caller owns refunding ``handle`` on failure (the
     request routes wrap the whole post-reservation setup in a refund-on-error
-    block). No-op only when neither the dollar nor the token delta is positive.
+    block). No-op when no leg lacks any of the new size.
 
     The scoped ceilings are grown on exactly the rows the original reservation
     took, not re-resolved: the request scope has not changed, and re-resolving
@@ -1102,24 +1104,27 @@ async def increase_reservation(
     the same request the original reserve already counted, and holding a second
     one would spend a request cap twice on it.
     """
-    # Both axes are normalized before either is tested, because they grow
-    # independently: attachments that expand the prompt raise the token estimate
-    # while a model priced at zero leaves the dollar one untouched, and returning
-    # on the dollar delta alone would let those tokens go unheld.
-    additional = max(to_usd(additional_estimate), ZERO)
     # Clamped here, not only inside the per-user call below: the scoped hold is
-    # taken first, so a delta bounded after it has already gone out is a delta the
+    # taken first, so a size bounded after it has already gone out is one the
     # ceilings added to a BIGINT unbounded. Same overflow that turns a 403 into a
     # 500 as the admission estimate's clamp prevents.
-    grown_tokens = min(max(additional_tokens, 0), MAX_COUNT_LIMIT)
-    if additional <= ZERO and grown_tokens == 0:
+    size = max(to_usd(estimate), ZERO)
+    size_tokens = min(max(tokens, 0), MAX_COUNT_LIMIT)
+    # Both axes are measured before either is tested, because they grow
+    # independently: attachments that expand the prompt raise the token estimate
+    # while a model priced at zero leaves the dollar one untouched.
+    additional = max(size - handle.scoped_estimate, ZERO) if handle.scoped_budgets else ZERO
+    grown_tokens = max(size_tokens - handle.scoped_token_estimate, 0) if handle.scoped_budgets else 0
+    user_additional = max(size - handle.estimate, ZERO)
+    user_grown_tokens = max(size_tokens - handle.token_estimate, 0)
+    if additional <= ZERO and grown_tokens == 0 and user_additional <= ZERO and user_grown_tokens == 0:
         return
     # A budget-exempt request never grows a reservation: there is nothing to hold and
     # nothing to gate. Without this, the top-up path would silently re-enter the
     # enforced flow and reserve against the user's budget.
     if not handle.counts_toward_budget:
         return
-    if handle.scoped_budgets:
+    if additional > ZERO or grown_tokens > 0:
         refused = await reserve_scoped(
             db, handle.scoped_budgets, additional, tokens=grown_tokens, requests=0, new_request=False
         )
@@ -1149,22 +1154,28 @@ async def increase_reservation(
     # ``record_reservation=False`` for the same reason in the ledger: this request
     # already has a row, and a second one would carry its own TTL and could be
     # reclaimed on its own, handing back part of a live hold.
-    delta = await reserve_budget(
-        db,
-        handle.user_id,
-        additional,
-        estimated_tokens=grown_tokens,
-        requests=0,
-        new_request=False,
-        model=model,
-        model_is_free=model_is_free,
-        strategy=strategy,
-        record_reservation=False,
-    )
-    if delta.reserved:
-        handle.estimate += delta.estimate
-        handle.token_estimate += delta.token_estimate
-        handle.reserved = True
+    delta: ReservationHandle | None = None
+    if user_additional > ZERO or user_grown_tokens > 0:
+        grown_user_leg = await reserve_budget(
+            db,
+            handle.user_id,
+            user_additional,
+            estimated_tokens=user_grown_tokens,
+            requests=0,
+            new_request=False,
+            model=model,
+            model_is_free=model_is_free,
+            strategy=strategy,
+            record_reservation=False,
+        )
+        if grown_user_leg.reserved:
+            delta = grown_user_leg
+            handle.estimate += delta.estimate
+            handle.token_estimate += delta.token_estimate
+            handle.reserved = True
+    # A per-user leg with no budget takes no hold, so the row has nothing to record when the ceilings took none either.
+    if delta is None and additional <= ZERO and grown_tokens == 0:
+        return
 
     # Fold both deltas into the row under one guard, after both holds have landed,
     # for the same reason the original reserve writes its row last: the ledger must
@@ -1179,10 +1190,10 @@ async def increase_reservation(
     grown = await ledger.grow(
         db,
         handle.reservation_id,
-        user_delta=delta.estimate if delta.reserved else ZERO,
-        scoped_delta=additional if handle.scoped_budgets else ZERO,
-        token_delta=delta.token_estimate if delta.reserved else 0,
-        scoped_token_delta=grown_tokens if handle.scoped_budgets else 0,
+        user_delta=delta.estimate if delta is not None else ZERO,
+        scoped_delta=additional,
+        token_delta=delta.token_estimate if delta is not None else 0,
+        scoped_token_delta=grown_tokens,
     )
     if not grown:
         logger.warning(
@@ -1190,11 +1201,11 @@ async def increase_reservation(
             "Raise budget_reservation_ttl_sec above the slowest request served.",
             handle.reservation_id,
         )
-        if handle.scoped_budgets:
+        if additional > ZERO or grown_tokens > 0:
             await release_scoped(db, handle.scoped_budget_ids, additional, tokens=grown_tokens, requests=0)
             handle.scoped_estimate -= additional
             handle.scoped_token_estimate -= grown_tokens
-        if delta.reserved:
+        if delta is not None:
             values: dict[str, object] = {"reserved": _release_reserved(delta.estimate)}
             if delta.token_estimate:
                 values["reserved_tokens"] = ledger.release_reserved_count_expression(

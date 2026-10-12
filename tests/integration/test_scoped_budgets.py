@@ -1126,6 +1126,42 @@ async def test_a_rolled_period_zeroes_every_axis_and_leaves_the_holds(async_db: 
 
 
 @pytest.mark.asyncio
+async def test_a_top_up_grows_a_ceiling_by_what_it_lacks_when_the_user_has_no_budget(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    cap = await _scoped(async_db, scope_type="workspace", scope_id=str(tenancy.workspace_id), max_budget=10.0)
+    async_db.add(cap)
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope())
+    assert not handle.reserved, "this fixture's user has no budget row"
+
+    await increase_reservation(async_db, handle, estimate=4.0)
+
+    assert await _counters(async_db, cap.id) == (0.0, 4.0)
+    assert handle.scoped_estimate == Decimal(4)
+
+
+@pytest.mark.asyncio
+async def test_a_top_up_the_ceilings_already_hold_writes_nothing_when_the_user_has_no_budget(
+    async_db: AsyncSession, tenancy: Fixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cap = await _scoped(async_db, scope_type="workspace", scope_id=str(tenancy.workspace_id), max_budget=10.0)
+    async_db.add(cap)
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope())
+
+    async def unexpected(*_args: Any, **_kwargs: Any) -> bool:
+        raise AssertionError("the ledger was written")
+
+    monkeypatch.setattr("gateway.services.budgets._ledger.grow", unexpected)
+
+    await increase_reservation(async_db, handle, estimate=3.0)
+
+    assert await _counters(async_db, cap.id) == (0.0, 3.0)
+    assert handle.scoped_estimate == Decimal(3)
+
+
+@pytest.mark.asyncio
 async def test_a_token_top_up_on_a_ceiling_is_released_when_the_user_has_no_budget(
     async_db: AsyncSession, tenancy: Fixture
 ) -> None:
@@ -1152,7 +1188,7 @@ async def test_a_token_top_up_on_a_ceiling_is_released_when_the_user_has_no_budg
     assert not handle.reserved, "this fixture's user has no budget row"
     assert await _token_counters(async_db, cap.id) == (0, 1_000)
 
-    await increase_reservation(async_db, handle, Decimal("0.5"), additional_tokens=500)
+    await increase_reservation(async_db, handle, estimate=Decimal("1.5"), tokens=1_500)
 
     assert handle.scoped_token_estimate == 1_500
     assert await _token_counters(async_db, cap.id) == (0, 1_500)
@@ -1180,7 +1216,7 @@ async def test_a_refused_top_up_leaves_no_token_hold_behind(async_db: AsyncSessi
     handle = await reserve_budget(async_db, tenancy.user_id, 0.0, estimated_tokens=1_000, scope=tenancy.scope())
 
     with pytest.raises(HTTPException):
-        await increase_reservation(async_db, handle, Decimal("0"), additional_tokens=500)
+        await increase_reservation(async_db, handle, estimate=Decimal("0"), tokens=1_500)
 
     # Refused, so nothing grew: the ceiling still holds only the original hold.
     assert await _token_counters(async_db, cap.id) == (0, 1_000)
