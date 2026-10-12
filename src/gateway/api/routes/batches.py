@@ -408,7 +408,9 @@ async def create_batch(
     # configured instance, the same condition `provider_kwargs.get_provider_kwargs`
     # uses to decide whether to consult the organization overlay at all.
     if workspace_id is not None and resolved.instance not in config.providers:
-        refusal = org_model_refusal(workspace_id, provider.value, model, selector=request.model)
+        refusal = org_model_refusal(
+            workspace_id, provider.value, model, selector=request.model, through_alias=resolved.alias is not None
+        )
         if refusal is not None:
             raise HTTPException(
                 status_code=refusal.status_code,

@@ -433,7 +433,13 @@ def _resolve_candidates(
         # `router`/`on_failure` fallover cannot serve a model the workspace's
         # organization key excludes just because the head candidate passed.
         if workspace_id is not None and resolved.instance not in config.providers:
-            refusal = org_model_refusal(workspace_id, resolved.provider.value, resolved.model, selector=selector)
+            refusal = org_model_refusal(
+                workspace_id,
+                resolved.provider.value,
+                resolved.model,
+                selector=selector,
+                through_alias=resolved.alias is not None,
+            )
             if refusal is not None:
                 dropped.append(DroppedCandidate(selector, "not_allowed", _ORG_REFUSAL_FRAGMENTS[refusal.code]))
                 continue

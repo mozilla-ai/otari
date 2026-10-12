@@ -2385,7 +2385,13 @@ async def resolve_request_context(
             and gate_instance not in config.providers
             and (resolved_provider is None or resolved_provider.owned_endpoint is None)
         ):
-            refusal = org_model_refusal(workspace_id, gate_impl.value, gate_model, selector=model)
+            refusal = org_model_refusal(
+                workspace_id,
+                gate_impl.value,
+                gate_model,
+                selector=model,
+                through_alias=resolved_provider is not None and resolved_provider.alias is not None,
+            )
             if refusal is not None:
                 await log_gateway_rejection(
                     db=db,

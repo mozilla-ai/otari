@@ -482,7 +482,13 @@ async def run_passthrough(
     # configured instance, the same condition `provider_kwargs.get_provider_kwargs`
     # uses to decide whether to consult the organization overlay at all.
     if workspace_id is not None and resolved.instance not in config.providers:
-        refusal = org_model_refusal(workspace_id, resolved.provider.value, resolved.model, selector=model)
+        refusal = org_model_refusal(
+            workspace_id,
+            resolved.provider.value,
+            resolved.model,
+            selector=model,
+            through_alias=resolved.alias is not None,
+        )
         if refusal is not None:
             await refund_reservation(db, reservation)
             await _log_rejection(

@@ -266,7 +266,9 @@ def key_model_refusal(allowlist: list[str] | None, canonical_key: str | None, *,
     )
 
 
-def org_model_refusal(workspace_id: uuid.UUID, provider: str, model: str, *, selector: str) -> ModelRefusal | None:
+def org_model_refusal(
+    workspace_id: uuid.UUID, provider: str, model: str, *, selector: str, through_alias: bool
+) -> ModelRefusal | None:
     """Why the active organization key's allow-list turns ``model`` away, or ``None`` when it does not.
 
     Reads the same list the catalog does (`cached_org_model_restriction`), so
@@ -283,7 +285,9 @@ def org_model_refusal(workspace_id: uuid.UUID, provider: str, model: str, *, sel
     An undated name reaches here only where the catalog could not resolve it
     to one serving dated build. Where every dated build of it is switched off
     it is not serving, and otherwise the detail names the builds to choose from.
-    It names them only to a caller who wrote the model, never behind an alias.
+    It names them only to a caller who wrote the model: ``through_alias`` says
+    the selector resolved through an alias, a policy or a catalog spelling,
+    whose target the detail keeps off the wire.
     """
     allowed = cached_org_model_restriction(workspace_id, provider)
     if allowed is None or model in allowed:
@@ -297,8 +301,7 @@ def org_model_refusal(workspace_id: uuid.UUID, provider: str, model: str, *, sel
     enabled = offer.offered.get(model)
     if enabled is None:
         builds = dated_builds(model, offer.offered)
-        prefix, _colon, written = selector.rpartition(":")
-        shown = tuple(f"{prefix}:{build}" if prefix else build for build in builds) if written == model else ()
+        shown = () if through_alias else tuple(f"{provider}:{build}" for build in builds)
         if builds and not any(offer.offered[build] for build in builds):
             return ModelRefusal(
                 code=MODEL_NOT_SERVING,

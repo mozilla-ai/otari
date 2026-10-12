@@ -146,3 +146,19 @@ def test_the_undated_name_of_a_dated_build_switched_off_is_not_serving(client: T
     assert response.status_code == status.HTTP_403_FORBIDDEN, response.text
     assert response.json()["code"] == MODEL_NOT_SERVING
     assert "as 'anthropic:claude-haiku-4-5-20251001' but not serving" in response.json()["detail"]
+
+
+def test_a_bare_alias_sharing_the_undated_name_does_not_disclose_the_dated_builds(client: TestClient) -> None:
+    """The alias's spelling matches its target's model, so only its provenance keeps the target off the wire."""
+    _offer_key(client)
+    _refresh_index(client)
+    aliased = client.post(
+        f"{API_ROOT}/aliases", json={"name": "claude-twin", "target": "anthropic:claude-twin"}, headers=_MASTER_HEADER
+    )
+    assert aliased.status_code == status.HTTP_200_OK, aliased.text
+
+    response = _chat(client, _api_key_header(client), "claude-twin")
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+    assert response.json()["code"] == MODEL_NOT_FOUND
+    assert "2025" not in response.json()["detail"]
