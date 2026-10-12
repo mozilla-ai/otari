@@ -162,9 +162,8 @@ def option_problems(kind: ToolKind, provider: str, options: Mapping[str, Any]) -
 
     Only names and the schema's fixed lists of values are checked, not types:
     a schema's type says what a provider usually takes, and some take more (an
-    Exa ``contents`` is an object, or ``false`` for none). The tool's shared
-    parameters are taken by every provider, and their values are checked as the
-    library checks them.
+    Exa ``contents`` is an object, or ``false`` for none). A shared parameter's
+    value is checked as its library checks it.
     """
     enums = _option_enums(kind, provider)
     if enums is None:

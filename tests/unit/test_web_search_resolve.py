@@ -4,18 +4,17 @@ Table-driven over both orders, with the libraries' ``fake`` and ``exa`` metadata
 """
 
 import logging
-import os
 from collections.abc import Iterator
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
-from unittest import mock
 
 import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.core.settings import tools as settings_tools
 from gateway.exceptions.tools_exceptions import (
+    SearchToolMisconfiguredError,
     SearchToolNotFoundError,
     WebSearchCredentialRefusedError,
     WebSearchOptionRefusedError,
@@ -34,21 +33,16 @@ _HYBRID = WebToolCredentialSource.HYBRID
 _EXA = {"provider": "exa", "api_key": "exa-instance-key"}
 _FAKE = {"provider": "fake"}
 _SEARXNG = {"provider": "searxng", "api_base": "http://searxng:8080"}
-_RUNTIME_ENV = (
-    "OTARI_WEB_SEARCH_URL",
-    "OTARI_WEB_SEARCH_ENGINES",
-    "OTARI_WEB_SEARCH_DEFAULT_TOOL",
-    "OTARI_WEB_FETCH_DEFAULT_TOOL",
-)
+# The settings read OTARI_ variables, so a developer's own must not leak in.
+pytestmark = pytest.mark.usefixtures("no_otari_env")
 
 
 @pytest.fixture(autouse=True)
-def _no_runtime_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """The settings fall back to the environment, so a developer's own must not leak in."""
-    for name in _RUNTIME_ENV:
-        monkeypatch.delenv(name, raising=False)
-    with mock.patch.dict(os.environ):
-        yield
+def _warnings_due_again() -> Iterator[None]:
+    """The resolver warns once per problem, so each test starts with none warned yet."""
+    _resolve._warn_once.cache_clear()
+    yield
+    _resolve._warn_once.cache_clear()
 
 
 def _policy(
@@ -197,7 +191,15 @@ _SEARCH_CASES = [
     _SearchCase(
         "a Tavily key on the old backend",
         {"search_tools": {"test": _FAKE}},
-        {"provider": "tavily", "runner": "old", "api_key": "tvly-org", "api_base": "", "label": "org:tavily"},
+        {
+            "provider": "tavily",
+            "runner": "old",
+            "api_key": "tvly-org",
+            "api_base": "",
+            # Design L: the old backend keeps recording the call under otari:web_search, with no label.
+            "label": None,
+            "rate_keys": ("otari:web_search",),
+        },
         policy=_policy(credential=WebSearchCredential(provider="tavily", source=_ORG, api_key="tvly-org")),
         options={},
     ),
@@ -251,7 +253,15 @@ _SEARCH_CASES = [
     _SearchCase(
         "an unnamed call on a Tavily key",
         {"search_tools": {"exa": _EXA}},
-        {"name": "exa", "provider": "tavily", "runner": "old", "api_key": "tvly-org", "timeout": 30.0},
+        {
+            "name": "exa",
+            "provider": "tavily",
+            "runner": "old",
+            "api_key": "tvly-org",
+            "timeout": 30.0,
+            "label": "org:tavily",
+            "rate_keys": ("otari:web_search",),
+        },
         requested="exa",
         direct_credential=WebSearchCredential(provider="tavily", source=_ORG, api_key="tvly-org"),
     ),
@@ -311,6 +321,24 @@ def test_the_search_order(case: _SearchCase) -> None:
 def test_a_name_no_search_instance_has_is_not_found() -> None:
     with pytest.raises(SearchToolNotFoundError):
         resolve_search(GatewayConfig(search_tools={"exa": _EXA}), None, requested="gone", request_options=None)
+
+
+def test_a_searxng_instance_with_no_address_to_search_is_misconfigured() -> None:
+    config = GatewayConfig(search_tools={"local": {"provider": "searxng"}})
+
+    with pytest.raises(SearchToolMisconfiguredError) as refused:
+        resolve_search(config, None, requested="local", request_options=None)
+    assert refused.value.status_code == 400
+    assert refused.value.message == "Search tool 'local' is not configured correctly."
+
+
+def test_a_base_url_is_passed_without_blanks_or_a_trailing_slash() -> None:
+    config = GatewayConfig(search_tools={"local": {"provider": "searxng", "api_base": " http://searxng:8080/ "}})
+
+    resolved = resolve_search(config, None, requested="local", request_options=None)
+
+    assert resolved is not None
+    assert resolved.api_base == "http://searxng:8080"
 
 
 def test_a_credential_for_a_provider_this_gateway_cannot_call_is_ignored(caplog: pytest.LogCaptureFixture) -> None:
@@ -486,6 +514,16 @@ def test_a_request_option_the_provider_does_not_take_from_a_request_is_refused(
         assert refused.value.status_code == 400
         assert refused.value.key == key
         assert f"option '{key}' {problem}" in refused.value.message
+
+
+def test_a_dropped_option_is_warned_about_once(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING, logger="gateway")
+    config = GatewayConfig(search_tools={"test": _FAKE})
+
+    for _ in range(3):
+        _in_loop(config, workspace={"nope": 1})
+
+    assert _warnings(caplog).count("'nope'") == 1
 
 
 def test_the_workspace_layer_drops_what_it_may_not_set_with_a_warning(caplog: pytest.LogCaptureFixture) -> None:
@@ -684,6 +722,16 @@ def test_the_fetch_order(case: _FetchCase) -> None:
 def test_a_name_no_fetch_instance_has_is_not_found() -> None:
     with pytest.raises(SearchToolNotFoundError):
         resolve_fetch(GatewayConfig(), None, requested="gone", for_search=None)
+
+
+def test_a_fetch_instance_any_fetch_no_longer_serves_names_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING, logger="gateway")
+    config = GatewayConfig(fetch_tools={"gone-fetch": {"provider": "retired"}}, web_fetch_default_tool="gone-fetch")
+
+    assert resolve_fetch(config, None, requested=None, for_search=None).name == "builtin_fetch"
+    assert "'gone-fetch'" in _warnings(caplog)
+    with pytest.raises(SearchToolNotFoundError):
+        resolve_fetch(config, None, requested="gone-fetch", for_search=None)
 
 
 def test_a_fetch_key_without_the_key_its_provider_needs_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:

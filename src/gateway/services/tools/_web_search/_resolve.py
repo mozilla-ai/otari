@@ -36,6 +36,7 @@ the layers unchecked and without otari's defaults, which that code applies
 itself.
 """
 
+import functools
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -44,6 +45,7 @@ from typing import Any, Literal
 import any_fetch
 import any_search
 from gateway.core.settings.tools import (
+    BUILTIN_FETCH,
     BUILTIN_FETCH_PROVIDER,
     PROVIDER_DEFAULT_OPTIONS,
     SEARCH_PROVIDERS_REQUIRING_API_BASE,
@@ -53,14 +55,15 @@ from gateway.core.settings.tools import (
     ToolInstance,
     ToolKind,
     ToolSettings,
+    configured_fetch_default,
     default_api_base,
     effective_fetch_instances,
     effective_search_instances,
-    fetch_default,
     in_loop_default,
     option_problems,
 )
 from gateway.exceptions.tools_exceptions import (
+    SearchToolMisconfiguredError,
     SearchToolNotFoundError,
     WebSearchCredentialRefusedError,
     WebSearchOptionRefusedError,
@@ -97,15 +100,14 @@ _NO_OPTIONS: Mapping[str, Any] = MappingProxyType({})
 
 
 @dataclass(frozen=True, kw_only=True)
-class ResolvedSearch:
-    """What one web search runs on.
+class _Resolved:
+    """What both results carry.
 
     ``name`` is the instance's, ``None`` where a credential serves an in-loop
     call. ``api_key`` and ``api_base`` go to the library as they are, ``""``
-    meaning none. ``options`` are the layered options without the count, which
-    is ``max_results``, for the caller to apply as its door does (design G,
-    item 3). ``label`` and ``rate_keys`` are what billing records (design L),
-    and ``fetch_tool`` is the instance's choice of fetch instance for enrichment.
+    meaning none. ``options`` are the layered options without the count, for
+    the caller to apply as its door does (design G, item 3). ``label`` and
+    ``rate_keys`` are what billing records (design L).
     """
 
     name: str | None
@@ -114,31 +116,24 @@ class ResolvedSearch:
     api_key: str = field(repr=False)
     api_base: str = field(repr=False)
     options: Mapping[str, Any] = field(repr=False, hash=False)
-    max_results: int | None
     timeout: float
     label: str | None
     rate_keys: tuple[str, ...]
+
+
+@dataclass(frozen=True, kw_only=True)
+class ResolvedSearch(_Resolved):
+    """What one web search runs on: the count is ``max_results``, and ``fetch_tool`` the instance's enrichment."""
+
+    max_results: int | None
     fetch_tool: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
-class ResolvedFetch:
-    """What one web fetch runs on, always through any-fetch, ``builtin_fetch`` included.
+class ResolvedFetch(_Resolved):
+    """What one web fetch runs on, always through any-fetch: the count is ``max_chars``."""
 
-    The fields mean what :class:`ResolvedSearch`'s do; the count is
-    ``max_chars``, the most characters of page text to return.
-    """
-
-    name: str | None
-    provider: str
-    runner: Runner
-    api_key: str = field(repr=False)
-    api_base: str = field(repr=False)
-    options: Mapping[str, Any] = field(repr=False, hash=False)
     max_chars: int | None
-    timeout: float
-    label: str | None
-    rate_keys: tuple[str, ...]
 
 
 def resolve_search(
@@ -157,8 +152,10 @@ def resolve_search(
 
     Raises :class:`WebSearchOptionRefusedError` for a request option the
     provider does not take from a request, :class:`WebSearchCredentialRefusedError`
-    for a credential without what its provider needs, and
-    :class:`SearchToolNotFoundError` for a ``requested`` name no search instance has.
+    for a credential its provider cannot be called with,
+    :class:`SearchToolNotFoundError` for a ``requested`` name no search instance
+    has, which the direct endpoint answers before it calls this, and
+    :class:`SearchToolMisconfiguredError` for a ``requested`` instance nothing can run.
     """
     request = request_options or _NO_OPTIONS
     if requested is not None:
@@ -167,14 +164,16 @@ def resolve_search(
             raise SearchToolNotFoundError(requested)
         timeout = instance.timeout or DIRECT_TIMEOUT_S
         if direct_credential is not None:
-            on_key = _search_on_credential(direct_credential, name=instance.name, timeout=timeout, request=request)
+            on_key = _search_on_credential(
+                direct_credential, name=instance.name, in_loop=False, timeout=timeout, request=request
+            )
             if on_key is not None:
                 return on_key
         return _search_on_instance(config, instance, in_loop=False, request=request)
     workspace = (policy.provider_options if policy is not None else None) or _NO_OPTIONS
     if policy is not None and policy.credential is not None:
         on_key = _search_on_credential(
-            policy.credential, name=None, timeout=IN_LOOP_TIMEOUT_S, workspace=workspace, request=request
+            policy.credential, name=None, in_loop=True, timeout=IN_LOOP_TIMEOUT_S, workspace=workspace, request=request
         )
         if on_key is not None:
             return on_key
@@ -200,7 +199,7 @@ def resolve_fetch(
     without what its provider needs, and :class:`SearchToolNotFoundError` for
     a ``requested`` name no fetch instance has.
     """
-    instances = effective_fetch_instances(config)
+    instances = _fetch_instances(config)
     if requested is not None:
         if (named := instances.get(requested)) is None:
             raise SearchToolNotFoundError(requested)
@@ -211,7 +210,21 @@ def resolve_fetch(
     if policy is not None and policy.fetch_credential is not None:
         if (on_key := _fetch_on_credential(policy.fetch_credential)) is not None:
             return on_key
-    return _fetch_on_instance(fetch_default(config))
+    return _fetch_on_instance(instances.get(configured_fetch_default(config)) or instances[BUILTIN_FETCH])
+
+
+def _fetch_instances(config: ToolSettings) -> dict[str, ToolInstance]:
+    """The fetch instances any-fetch can run, each other one left out with a warning, as if it named nothing."""
+    served = set(any_fetch.AnyFetch.get_supported_providers())
+    instances: dict[str, ToolInstance] = {}
+    for name, instance in effective_fetch_instances(config).items():
+        if instance.provider in served:
+            instances[name] = instance
+        else:
+            _warn_once(
+                f"Fetch instance '{name}' is left out: any-fetch does not serve its provider {instance.provider}"
+            )
+    return instances
 
 
 def _search_on_instance(
@@ -236,6 +249,10 @@ def _search_on_instance(
         workspace=workspace,
         request=request,
     )
+    api_base = _base(instance.api_base or default_api_base(config, instance.provider))
+    if runner == "old" and (instance.provider not in SEARCH_PROVIDERS_WITHOUT_ADAPTER or not api_base):
+        # A provider no code here serves any more, or a searxng instance with no address of its own or to inherit.
+        raise SearchToolMisconfiguredError(instance.name)
     max_results = _count(options, "max_results")
     label = f"{instance.provider}:{instance.name}"
     return ResolvedSearch(
@@ -243,7 +260,7 @@ def _search_on_instance(
         provider=instance.provider,
         runner=runner,
         api_key=instance.api_key or "",
-        api_base=instance.api_base or default_api_base(config, instance.provider) or "",
+        api_base=api_base,
         options=MappingProxyType(options),
         max_results=max_results,
         timeout=instance.timeout or (IN_LOOP_TIMEOUT_S if in_loop else DIRECT_TIMEOUT_S),
@@ -274,7 +291,7 @@ def _search_on_synthesized(
         provider=synthesized.provider,
         runner=runner,
         api_key=synthesized.api_key or "",
-        api_base=synthesized.api_base or "",
+        api_base=_base(synthesized.api_base),
         options=MappingProxyType(options),
         max_results=max_results,
         timeout=IN_LOOP_TIMEOUT_S,
@@ -287,6 +304,7 @@ def _search_on_credential(
     credential: WebSearchCredential,
     *,
     name: str | None,
+    in_loop: bool,
     timeout: float,
     workspace: Mapping[str, Any] = _NO_OPTIONS,
     request: Mapping[str, Any],
@@ -324,12 +342,15 @@ def _search_on_credential(
     )
     max_results = _count(options, "max_results")
     label, rate_keys = _credential_billing(credential, _SEARCH_FALLBACK_RATE)
+    if in_loop and runner == "old":
+        # Design L: in the loop, the old backend records an organization key's calls with no label.
+        label = None
     return ResolvedSearch(
         name=name,
         provider=provider,
         runner=runner,
         api_key=credential.api_key or "",
-        api_base=credential.api_base or default_base or "",
+        api_base=_base(credential.api_base or default_base),
         options=MappingProxyType(options),
         max_results=max_results,
         timeout=timeout,
@@ -353,9 +374,9 @@ def _fetch_on_instance(instance: ToolInstance) -> ResolvedFetch:
         provider=instance.provider,
         runner="library",
         api_key=instance.api_key or "",
-        api_base=instance.api_base
-        or any_fetch.AnyFetch.get_provider_metadata(instance.provider).default_api_base
-        or "",
+        api_base=_base(
+            instance.api_base or any_fetch.AnyFetch.get_provider_metadata(instance.provider).default_api_base
+        ),
         options=MappingProxyType(options),
         max_chars=max_chars,
         timeout=instance.timeout
@@ -391,7 +412,7 @@ def _fetch_on_credential(credential: WebFetchCredential) -> ResolvedFetch | None
         provider=provider,
         runner="library",
         api_key=credential.api_key or "",
-        api_base=credential.api_base or metadata.default_api_base or "",
+        api_base=_base(credential.api_base or metadata.default_api_base),
         options=MappingProxyType(options),
         max_chars=max_chars,
         timeout=IN_LOOP_TIMEOUT_S,
@@ -401,12 +422,8 @@ def _fetch_on_credential(credential: WebFetchCredential) -> ResolvedFetch | None
 
 
 def _ignore(credential: WebToolCredential, kind: ToolKind) -> None:
-    logger.warning(
-        "Ignoring %s for %s, a provider this gateway cannot %s with",
-        _credential_layer(credential),
-        credential.provider,
-        kind,
-    )
+    layer = _credential_layer(credential)
+    _warn_once(f"Ignoring {layer} for {credential.provider}, a provider this gateway cannot {kind} with")
 
 
 def _check(credential: WebToolCredential, *, requires_key: bool, requires_base: bool) -> None:
@@ -449,7 +466,8 @@ def _layered(
 
     ``instance`` is the instance's layer with the keys its load recorded as
     breaking the rules; ``credential`` is a credential's. Unless ``checked``,
-    the layers pass as they are, without otari's defaults.
+    the layers pass as they are, without otari's defaults. Each dropped option
+    is warned about once, not on every call.
     """
     instance_name, instance_options, broken = instance or ("", _NO_OPTIONS, frozenset())
     credential_name, credential_options = credential or ("", _NO_OPTIONS)
@@ -506,10 +524,21 @@ def _kept(options: Mapping[str, Any], layer: str, provider: str, problems: Mappi
     kept: dict[str, Any] = {}
     for key, value in options.items():
         if key in problems:
-            logger.warning("Dropping an option of %s for %s: %s.", layer, provider, problems[key])
+            _warn_once(f"Dropping an option of {layer} for {provider}: {problems[key]}.")
         else:
             kept[key] = value
     return kept
+
+
+@functools.lru_cache(maxsize=1024)
+def _warn_once(message: str) -> None:
+    """Log a warning the first time it is due, rather than on every call that meets the same problem."""
+    logger.warning("%s", message)
+
+
+def _base(api_base: str | None) -> str:
+    """A base URL as the library takes it: without surrounding blanks or a trailing slash, ``""`` for none."""
+    return (api_base or "").strip().rstrip("/")
 
 
 def _count(options: dict[str, Any], key: str) -> int | None:

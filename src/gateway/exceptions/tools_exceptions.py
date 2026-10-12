@@ -366,6 +366,13 @@ class SearchToolUntestableError(TenancyValidationError):
         )
 
 
+class SearchToolMisconfiguredError(TenancyValidationError):
+    """A search instance nothing can run as it stands, such as a ``searxng`` one with no address to search."""
+
+    def __init__(self, name: str):
+        super().__init__(f"Search tool '{name}' is not configured correctly.")
+
+
 class WebSearchOptionRefusedError(TenancyValidationError):
     """A request's ``provider_options`` key the provider serving it does not take from a request.
 
@@ -403,6 +410,7 @@ __all__ = [
     "McpSessionsInterruptedError",
     "SandboxImageNotAllowedError",
     "SandboxToolsUnrunnableError",
+    "SearchToolMisconfiguredError",
     "SearchToolNotFoundError",
     "SearchToolRefusedError",
     "SearchToolUntestableError",
