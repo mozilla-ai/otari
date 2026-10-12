@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from gateway.api.routes._pipeline import PROVIDER_TIMEOUT_DETAIL
 from gateway.core.config import API_ROOT
 from gateway.core.error_codes import ERROR_CODE_HEADER, UPSTREAM_RATE_LIMITED
+from gateway.exceptions import TenancyValidationError
 from gateway.metrics import REGISTRY
 from gateway.models.usage import UsageLog
 
@@ -284,6 +285,31 @@ def test_embeddings_rejects_input_type_for_a_provider_without_it(
     mock.assert_not_called()
 
     # Nothing was dispatched, so the reservation was refunded rather than left held.
+    user = client.get(f"{API_ROOT}/users/{api_key_obj['user_id']}", headers=master_key_header).json()
+    assert user["reserved"] == pytest.approx(0.0)
+    assert user["spend"] == pytest.approx(0.0)
+
+
+def test_a_domain_error_from_the_provider_call_is_refunded_and_rendered_by_its_status(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """A domain error raised in the call keeps its own status and detail, and the hold is refunded."""
+    with patch(
+        "gateway.api.routes.embeddings.aembedding",
+        new_callable=AsyncMock,
+        side_effect=TenancyValidationError("the domain refused this"),
+    ):
+        resp = client.post(
+            f"{API_ROOT}/embeddings",
+            json={"model": "openai:text-embedding-3-small", "input": "hi"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "the domain refused this"
+
     user = client.get(f"{API_ROOT}/users/{api_key_obj['user_id']}", headers=master_key_header).json()
     assert user["reserved"] == pytest.approx(0.0)
     assert user["spend"] == pytest.approx(0.0)

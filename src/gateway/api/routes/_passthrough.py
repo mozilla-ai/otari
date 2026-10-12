@@ -58,6 +58,7 @@ from gateway.core.database import release_session
 from gateway.core.error_codes import MODEL_NOT_ALLOWED, PROVIDER_CREDENTIAL_REJECTED, error_headers
 from gateway.core.metered_pricing import billable_usage, price_billable_usage, quantize_cost
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
+from gateway.exceptions import TenancyError
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.model_labeling import relabel_model
@@ -205,8 +206,9 @@ async def run_passthrough(
             text, while the resolved short name reaches the provider and logs.
         user: The request's ``user`` field, if any.
         call_provider: Awaits the provider call for the resolved selector. An
-            ``HTTPException`` raised here (e.g. an upload size check) refunds
-            the reservation and propagates unchanged.
+            ``HTTPException`` or a domain error (a ``TenancyError``, which
+            carries its own status) raised here, such as an upload size check,
+            refunds the reservation and propagates unchanged.
         lookup_pricing: Whether to resolve :class:`ModelPricing` for the model.
             Audio resolves it for per-request charge lines but the reservation
             estimate stays 0 (no measurable cost unit yet, so no pre-call spend).
@@ -582,7 +584,7 @@ async def run_passthrough(
             actual_tokens=max(total_tokens or 0, 0),
         )
 
-    except HTTPException:
+    except (HTTPException, TenancyError):
         await refund_reservation(db, reservation)
         raise
     except Exception as e:
