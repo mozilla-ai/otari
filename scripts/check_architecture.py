@@ -1446,7 +1446,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/repositories/tenancy/organization_member_repository.py",
             "gateway/services/budgets/_organization_surface.py",
             "gateway/services/budgets/_reservations.py",
-            "gateway/services/budgets/_scoped_enforcement.py",
         ),
     },
     "gateway.models.budgets.BudgetReservation": {
@@ -1473,7 +1472,6 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
             "gateway/services/budgets/_member_policies.py",
             "gateway/services/budgets/_organization_surface.py",
             "gateway/services/budgets/_retiming.py",
-            "gateway/services/budgets/_scoped_enforcement.py",
         ),
     },
     "gateway.models.budgets.WorkspaceBudgetDefault": {

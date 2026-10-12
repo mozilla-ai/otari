@@ -13,11 +13,9 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from sqlalchemy import and_, case, or_, select, update
-from sqlalchemy.orm import Mapped
-from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy import and_, select
 from sqlmodel import col
 
 from gateway.log_config import logger
@@ -28,10 +26,9 @@ from gateway.models.budgets import (
     SCOPE_ORGANIZATION,
     SCOPE_WORKSPACE,
     SCOPE_WORKSPACE_MEMBER,
-    Budget,
-    ScopedBudget,
 )
 from gateway.models.tenancy import OrganizationMember, Workspace, WorkspaceMember
+from gateway.repositories.budgets import ScopedBudgetRepository, ScopeIdSets
 from gateway.services.budgets._periods import period_window
 from gateway.services.budgets._refusals import BlockedAxis, blocked_on
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
@@ -41,10 +38,6 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-# The counters on this table are ``NUMERIC(18, 6)`` (mozilla-ai/otari#691), so
-# the constants the SQL is built from are ``Decimal``: a bare ``0.0`` in a CASE
-# arm or a ``.values()`` would make PostgreSQL resolve the expression as double
-# precision and hand a binary-rounded amount back to an exact column.
 ZERO = Decimal(0)
 
 # Most specific first, so the ceiling closest to the caller is the one that
@@ -141,8 +134,8 @@ async def _resolve_identities(
     *,
     user_id: str,
     scope: BudgetScopeRequest,
-) -> list[tuple[str, str]]:
-    """The ``(scope_type, scope_id)`` pairs a request bills to.
+) -> ScopeIdSets:
+    """The scopes a request bills to.
 
     Membership is read off the key's owner rather than the billed user. The two
     differ only for a service key billing an end user, and that end user spends
@@ -184,16 +177,13 @@ async def _resolve_identities(
             workspace_member_id = row[1]
             org_member_id = row[2]
 
-    identities: list[tuple[str, str]] = [(SCOPE_WORKSPACE, str(workspace_id))]
-    if organization_id is not None:
-        identities.append((SCOPE_ORGANIZATION, str(organization_id)))
-    if workspace_member_id is not None:
-        identities.append((SCOPE_WORKSPACE_MEMBER, str(workspace_member_id)))
-    if org_member_id is not None:
-        identities.append((SCOPE_ORG_MEMBER, str(org_member_id)))
-    if scope.api_key is not None:
-        identities.append((SCOPE_API_TOKEN, scope.api_key.id))
-    return identities
+    return ScopeIdSets(
+        organization_ids=() if organization_id is None else (str(organization_id),),
+        workspace_ids=(str(workspace_id),),
+        organization_member_ids=() if org_member_id is None else (str(org_member_id),),
+        workspace_member_ids=() if workspace_member_id is None else (str(workspace_member_id),),
+        api_key_ids=() if scope.api_key is None else (scope.api_key.id,),
+    )
 
 
 async def _roll_expired_periods(
@@ -226,21 +216,8 @@ async def _roll_expired_periods(
             )
             continue
         period_start, period_end = window if window is not None else (now, None)
-        await db.execute(
-            update(ScopedBudget)
-            .where(
-                ScopedBudget.id == budget_id,
-                ScopedBudget.period_end.is_not(None),
-                ScopedBudget.period_end <= now,
-            )
-            .values(
-                current_spend=ZERO,
-                current_tokens=0,
-                current_requests=0,
-                period_start=period_start,
-                period_end=period_end,
-            )
-            .execution_options(synchronize_session=False)
+        await ScopedBudgetRepository(db).roll_period(
+            budget_id, now=now, period_start=period_start, period_end=period_end
         )
     await db.commit()
 
@@ -258,60 +235,29 @@ async def applicable_budgets(
     window that has run out is rolled here, before the reservation reads the
     counters, so a request at the boundary is gated on the new period.
     """
-    identities = await _resolve_identities(db, user_id=user_id, scope=scope)
-    if not identities:
-        return ()
-
-    ident_clause = or_(
-        *[
-            and_(ScopedBudget.scope_type == scope_type, ScopedBudget.scope_id == scope_id)
-            for scope_type, scope_id in identities
-        ]
-    )
-    key_clause: ColumnElement[bool] = ScopedBudget.provider_key_id.is_(None)
-    if scope.provider_instance is not None:
-        key_clause = or_(
-            ScopedBudget.provider_key_id == scope.provider_instance,
-            ScopedBudget.provider_key_id.is_(None),
-        )
-
-    rows = (
-        await db.execute(
-            select(
-                ScopedBudget.id,
-                ScopedBudget.scope_type,
-                ScopedBudget.provider_key_id,
-                Budget.budget_duration_sec,
-                Budget.reset_alignment,
-                ScopedBudget.period_end,
-                Budget.token_limit,
-                Budget.request_limit,
-            )
-            .join(Budget, Budget.budget_id == ScopedBudget.budget_id)
-            .where(ident_clause, key_clause)
-        )
-    ).all()
-    if not rows:
+    scopes = await _resolve_identities(db, user_id=user_id, scope=scope)
+    ceilings = await ScopedBudgetRepository(db).list_applicable(scopes, scope.provider_instance)
+    if not ceilings:
         return ()
 
     now = datetime.now(UTC)
     expired = [
-        (budget_id, duration, alignment)
-        for budget_id, _scope_type, _provider, duration, alignment, period_end, _tokens, _requests in rows
-        if (parsed := _as_utc(period_end)) is not None and now >= parsed
+        (ceiling.scoped_budget_id, ceiling.budget_duration_sec, ceiling.reset_alignment)
+        for ceiling in ceilings
+        if (parsed := _as_utc(ceiling.period_end)) is not None and now >= parsed
     ]
     if expired:
         await _roll_expired_periods(db, expired, now)
 
     resolved = [
         ApplicableBudget(
-            budget_id=budget_id,
-            scope_type=scope_type,
-            provider_key_id=provider,
-            token_limit=token_limit,
-            request_limit=request_limit,
+            budget_id=ceiling.scoped_budget_id,
+            scope_type=ceiling.scope_type,
+            provider_key_id=ceiling.provider_key_id,
+            token_limit=ceiling.token_limit,
+            request_limit=ceiling.request_limit,
         )
-        for budget_id, scope_type, provider, _duration, _alignment, _period_end, token_limit, request_limit in rows
+        for ceiling in ceilings
     ]
     # Most specific first, provider-narrowed before aggregate within a scope, then
     # the id so the order stays total when two ceilings tie on both.
@@ -323,23 +269,6 @@ async def applicable_budgets(
         )
     )
     return tuple(resolved)
-
-
-def _release_expression(amount: Decimal) -> object:
-    """Subtract ``amount`` from the money hold, clamped at zero.
-
-    CASE rather than GREATEST, matching the per-user release, because SQLite has
-    no GREATEST. Both arms are ``Decimal`` so the CASE resolves as ``numeric``.
-    """
-    return case(
-        (ScopedBudget.reserved_spend - amount < ZERO, ZERO),
-        else_=ScopedBudget.reserved_spend - amount,
-    )
-
-
-def _release_count_expression(column: Mapped[int], amount: int) -> object:
-    """The same clamp for a token or request hold, whose arms are integers."""
-    return case((column - amount < 0, 0), else_=column - amount)
 
 
 async def release(
@@ -360,21 +289,9 @@ async def release(
     lets the reservation ledger land a hold's terminal status and the release it
     authorizes in one transaction instead of two.
     """
-    values: dict[str, object] = {}
-    if amount > ZERO:
-        values["reserved_spend"] = _release_expression(amount)
-    if tokens > 0:
-        values["reserved_tokens"] = _release_count_expression(ScopedBudget.reserved_tokens, tokens)
-    if requests > 0:
-        values["reserved_requests"] = _release_count_expression(ScopedBudget.reserved_requests, requests)
-    if not budget_ids or not values:
+    if not budget_ids or not (amount > ZERO or tokens > 0 or requests > 0):
         return
-    await db.execute(
-        update(ScopedBudget)
-        .where(ScopedBudget.id.in_(list(budget_ids)))
-        .values(**values)
-        .execution_options(synchronize_session=False)
-    )
+    await ScopedBudgetRepository(db).release_holds(budget_ids, amount, tokens=tokens, requests=requests)
     if commit:
         await db.commit()
 
@@ -393,8 +310,8 @@ async def reserve(
     One conditional UPDATE per ceiling, each committed before the next is
     attempted, so no lock spans two rows. A ceiling with no limit still takes the
     hold, which keeps the release arithmetic uniform and makes concurrent spend
-    visible immediately. Zero rows means the request does not fit, per
-    :func:`admits`: the holds already taken are released and the caller rejects.
+    visible immediately. When a ceiling has no room, the holds already taken are
+    released and the caller rejects.
 
     Every capped axis has to admit the request, and the hold is placed on all
     three at once so a later refusal gives back exactly what was taken. An axis
@@ -411,58 +328,13 @@ async def reserve(
     spend, while the token and request axes hold and gate as they do for any
     other request. It still consumes tokens and is still a request.
     """
+    ceilings = ScopedBudgetRepository(db)
     taken: list[str] = []
-    usd = amount if amount is not None else ZERO
-
-    # Each cap is a column on the budget this ceiling names, read as a correlated
-    # subquery so the whole check stays inside the one conditional UPDATE. Reading
-    # them first and comparing in Python would reintroduce the read-then-write
-    # race this service exists to close. Three subqueries over one row rather than
-    # a join: the row is the same buffered page for all three, and a join here
-    # would have to be an UPDATE ... FROM, which SQLite does not take.
-    def cap_of(column: Mapped[Decimal | None] | Mapped[int | None]) -> Any:
-        return select(column).where(Budget.budget_id == ScopedBudget.budget_id).scalar_subquery()
-
-    def admits(committed: Any, held: Any, cap: Any) -> ColumnElement[bool]:
-        """Whether one axis has room, or has no cap at all.
-
-        Two clauses on an arrival: it is refused when the axis is already at or
-        over its cap (which is what catches a request estimating nothing against
-        an exhausted ceiling), and refused when this hold would push it past.
-        Only the second on a top-up, per ``new_request``.
-        """
-        fits: ColumnElement[bool] = committed + held <= cap
-        if new_request:
-            fits = and_(committed < cap, fits)
-        return or_(cap.is_(None), fits)
-
-    # An axis whose amount is None is not part of this request and is not asked.
-    gates = [
-        admits(committed, held, cap)
-        for committed, held, cap in (
-            (ScopedBudget.current_spend + ScopedBudget.reserved_spend, amount, cap_of(Budget.max_budget)),
-            (ScopedBudget.current_tokens + ScopedBudget.reserved_tokens, tokens, cap_of(Budget.token_limit)),
-            (ScopedBudget.current_requests + ScopedBudget.reserved_requests, requests, cap_of(Budget.request_limit)),
-        )
-        if held is not None
-    ]
     for budget in budgets:
-        result = await db.execute(
-            update(ScopedBudget)
-            .where(
-                ScopedBudget.id == budget.budget_id,
-                *gates,
-            )
-            .values(
-                reserved_spend=ScopedBudget.reserved_spend + usd,
-                reserved_tokens=ScopedBudget.reserved_tokens + tokens,
-                reserved_requests=ScopedBudget.reserved_requests + requests,
-            )
-            .execution_options(synchronize_session=False)
-        )
+        held = await ceilings.hold(budget.budget_id, amount, tokens=tokens, requests=requests, new_request=new_request)
         await db.commit()
-        if not getattr(result, "rowcount", 0):
-            await release(db, taken, usd, tokens=tokens, requests=requests)
+        if not held:
+            await release(db, taken, amount if amount is not None else ZERO, tokens=tokens, requests=requests)
             return budget
         taken.append(budget.budget_id)
     return None
@@ -479,27 +351,12 @@ async def blocked_axis(
 ) -> BlockedAxis:
     """Return the capped axis that left this ceiling no room.
 
-    The test must mirror both clauses of the admission test in :func:`reserve`, or a refusal names the wrong axis.
+    The test must mirror both clauses of the admission test in ``ScopedBudgetRepository.hold``,
+    or a refusal names the wrong axis.
     ``amount=None`` skips the dollar axis, which is named "budget".
     """
-    row = (
-        await db.execute(
-            select(
-                Budget.max_budget,
-                ScopedBudget.current_spend,
-                ScopedBudget.reserved_spend,
-                Budget.token_limit,
-                ScopedBudget.current_tokens,
-                ScopedBudget.reserved_tokens,
-                Budget.request_limit,
-                ScopedBudget.current_requests,
-                ScopedBudget.reserved_requests,
-            )
-            .join(Budget, Budget.budget_id == ScopedBudget.budget_id)
-            .where(ScopedBudget.id == budget.budget_id)
-        )
-    ).first()
-    if row is None:
+    usage = await ScopedBudgetRepository(db).get_usage(budget.budget_id)
+    if usage is None:
         # The ceiling went away between the refusal and here, so there is no axis
         # to name and guessing one would be worse than saying nothing.
         return BlockedAxis("budget")
@@ -507,9 +364,15 @@ async def blocked_axis(
         # Skipped when the request has no dollar amount, which is a free-priced
         # model: :func:`reserve` does not gate that axis, so it cannot be what
         # refused, and naming it would point at the one cap with room.
-        ("budget", row[0] if amount is not None else None, row[1], row[2], amount or ZERO),
-        ("token", row[3], row[4], row[5], tokens),
-        ("request", row[6], row[7], row[8], requests),
+        (
+            "budget",
+            usage.max_budget if amount is not None else None,
+            usage.current_spend,
+            usage.reserved_spend,
+            amount or ZERO,
+        ),
+        ("token", usage.token_limit, usage.current_tokens, usage.reserved_tokens, tokens),
+        ("request", usage.request_limit, usage.current_requests, usage.reserved_requests, requests),
     )
     for name, cap, spent, reserved, wanted in axes:
         if cap is None:
@@ -553,28 +416,21 @@ async def settle(
     ``commit=False`` folds this into a surrounding unit of work; see
     :func:`release`.
     """
-    if not budget_ids:
+    spend = actual_cost if counts_toward_budget else ZERO
+    tokens = actual_tokens if counts_toward_budget else 0
+    counted_requests = requests if counts_toward_budget else 0
+    if not budget_ids or not (
+        spend > ZERO or held > ZERO or tokens > 0 or held_tokens > 0 or counted_requests > 0 or held_requests > 0
+    ):
         return
-    values: dict[str, object] = {}
-    if actual_cost > ZERO and counts_toward_budget:
-        values["current_spend"] = ScopedBudget.current_spend + actual_cost
-    if held > ZERO:
-        values["reserved_spend"] = _release_expression(held)
-    if actual_tokens > 0 and counts_toward_budget:
-        values["current_tokens"] = ScopedBudget.current_tokens + actual_tokens
-    if held_tokens > 0:
-        values["reserved_tokens"] = _release_count_expression(ScopedBudget.reserved_tokens, held_tokens)
-    if requests > 0 and counts_toward_budget:
-        values["current_requests"] = ScopedBudget.current_requests + requests
-    if held_requests > 0:
-        values["reserved_requests"] = _release_count_expression(ScopedBudget.reserved_requests, held_requests)
-    if not values:
-        return
-    await db.execute(
-        update(ScopedBudget)
-        .where(ScopedBudget.id.in_(list(budget_ids)))
-        .values(**values)
-        .execution_options(synchronize_session=False)
+    await ScopedBudgetRepository(db).settle(
+        budget_ids,
+        spend=spend,
+        held=held,
+        tokens=tokens,
+        held_tokens=held_tokens,
+        requests=counted_requests,
+        held_requests=held_requests,
     )
     if commit:
         await db.commit()
