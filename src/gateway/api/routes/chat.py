@@ -176,13 +176,25 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     metadata: RequestMetadata = None
 
 
-def _finishes_a_choice(chunk: ChatCompletionChunk) -> bool:
-    """Whether ``chunk`` reports a choice's ``finish_reason``, which every complete chat stream does.
+def _every_choice_finishes() -> Callable[[ChatCompletionChunk], bool]:
+    """A predicate, for one stream, matching the chunk after which every choice seen has a ``finish_reason``.
 
-    A usage-only final chunk has no choices and follows it, so it neither
+    Every complete chat stream reports one per choice, so with ``n`` above 1 a
+    stream that finishes one choice and cuts another is not complete. A
+    usage-only final chunk has no choices and follows them, so it neither
     completes a stream nor stands in for the chunk that does.
     """
-    return any(choice.finish_reason for choice in chunk.choices or ())
+    seen: set[int] = set()
+    finished: set[int] = set()
+
+    def completes(chunk: ChatCompletionChunk) -> bool:
+        for choice in chunk.choices or ():
+            seen.add(choice.index)
+            if choice.finish_reason:
+                finished.add(choice.index)
+        return bool(finished) and seen <= finished
+
+    return completes
 
 
 class _ChatAdapter:
@@ -227,7 +239,7 @@ class _ChatAdapter:
         )
 
     def stream_completion(self) -> Callable[[Any], bool] | None:
-        return _finishes_a_choice
+        return _every_choice_finishes()
 
     def stream_error_payload(self, exc: BaseException) -> str:
         return openai_error_event(self.stream_format, stream_error_code(exc), stream_error_message(exc))

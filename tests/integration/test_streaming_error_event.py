@@ -465,3 +465,33 @@ def test_a_chat_stream_that_finishes_ends_cleanly(
     assert response.status_code == 200, response.text
     assert '"error"' not in response.text
     assert response.text.rstrip().endswith("data: [DONE]")
+
+
+def _choice_chunk(index: int, content: str | None = None, finish_reason: Any = None) -> ChatCompletionChunk:
+    return ChatCompletionChunk(
+        id="chunk",
+        object="chat.completion.chunk",
+        created=0,
+        model=MODEL_NAME,
+        choices=[ChunkChoice(index=index, delta=ChoiceDelta(content=content), finish_reason=finish_reason)],
+    )
+
+
+@pytest.mark.parametrize(("second_finishes", "interrupted"), [(False, True), (True, False)])
+def test_a_chat_stream_with_several_choices_is_complete_only_when_each_finishes(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    second_finishes: bool,
+    interrupted: bool,
+) -> None:
+    """With ``n`` above 1, one finished choice does not stand in for another that was cut."""
+    chunks = [_choice_chunk(0, "a"), _choice_chunk(1, "b"), _choice_chunk(0, finish_reason="stop")]
+    if second_finishes:
+        chunks.append(_choice_chunk(1, finish_reason="stop"))
+    response = _stream_chat(client, master_key_header, chunks)
+
+    assert response.status_code == 200, response.text
+    if interrupted:
+        assert _error_event(response.text)["error"]["code"] == "provider_stream_interrupted"
+    else:
+        assert '"error"' not in response.text

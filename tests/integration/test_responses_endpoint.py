@@ -107,12 +107,18 @@ def test_responses_endpoint_does_not_send_the_user_upstream(
 ) -> None:
     """The billed user stays the gateway's, as on Chat Completions, so a provider refusing ``user`` still serves."""
     responses_request_body["stream"] = stream
-    reply: Any = _make_stream([]) if stream else _FakeResponse({"id": "resp_123", "output": []})
+    usage = _FakeUsage(5, 7)
+    completed = _FakeStreamEvent("response.completed", {"event": "completed"}, response=_FakeResponse({}, usage))
+    reply: Any = _make_stream([completed]) if stream else _FakeResponse({"id": "resp_123", "output": []}, usage)
     mock_aresponses = AsyncMock(return_value=reply)
 
     with patch("gateway.api.routes.responses.aresponses", new=mock_aresponses):
-        client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
+        result = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
 
+    assert result.status_code == 200, result.text
+    if stream:
+        assert "event: response.completed" in result.text
+        assert '"error"' not in result.text
     assert mock_aresponses.await_args is not None
     assert "user" not in mock_aresponses.await_args.kwargs
 
