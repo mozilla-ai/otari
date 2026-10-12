@@ -36,7 +36,21 @@ function Metrics({
 }
 
 const ROW =
-  "flex min-w-0 flex-1 flex-col py-0.5 pr-1 pl-1 text-left outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground"
+  "flex min-w-0 flex-1 flex-col py-0.5 pr-1 pl-2 text-left outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground"
+
+// A level indents 16px: an 8px elbow plus half a 16px mark, so every connector
+// runs through the centre of its parent's mark and meets its own at mid-height.
+const MARK =
+  "relative flex w-4 shrink-0 items-center justify-center self-stretch"
+
+function DropLine() {
+  return (
+    <span
+      aria-hidden="true"
+      className="absolute top-[calc(50%+0.625rem)] bottom-0 left-1/2 border-l border-border"
+    />
+  )
+}
 
 export function TraceTreeView({
   trace,
@@ -100,10 +114,10 @@ export function TraceTreeView({
               onClick={() => onSelect(obs.id)}
               className={`flex min-h-11 w-full items-center gap-1 px-3 text-left outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground ${selected ? "bg-primary-subtle" : "hover:bg-surface-alt"}`}
             >
-              <span className="grid size-6 shrink-0 place-items-center">
+              <span className={MARK}>
                 <TypeMark type={obs.type} />
               </span>
-              <span className="flex min-w-0 flex-1 flex-col py-0.5 pl-1">
+              <span className="flex min-w-0 flex-1 flex-col py-0.5 pl-2">
                 <span className="flex min-w-0 items-center gap-2">
                   <span className="truncate text-body">{obs.name}</span>
                   <LevelChip level={obs.level} />
@@ -129,8 +143,9 @@ export function TraceTreeView({
         aria-level={1}
         className={`flex min-h-11 items-center pl-3 ${selectedId === null ? "bg-primary-subtle" : "hover:bg-surface-alt"}`}
       >
-        <span className="grid size-6 shrink-0 place-items-center">
+        <span className={MARK}>
           <TypeMark type="TRACE" />
+          {items.length > 0 ? <DropLine /> : null}
         </span>
         <button
           type="button"
@@ -161,7 +176,7 @@ export function TraceTreeView({
             aria-level={node.depth + 2}
             aria-selected={selected}
             aria-expanded={hasChildren ? isOpen : undefined}
-            className={`flex min-h-11 items-stretch pl-3 ${selected ? "bg-primary-subtle" : "hover:bg-surface-alt"}`}
+            className={`flex min-h-11 items-stretch pl-5 ${selected ? "bg-primary-subtle" : "hover:bg-surface-alt"}`}
           >
             {treeLines.map((continues, level) => (
               <span
@@ -171,14 +186,15 @@ export function TraceTreeView({
                 className={`w-4 shrink-0 ${continues ? "border-l border-border" : ""}`}
               />
             ))}
-            <span aria-hidden="true" className="relative w-3 shrink-0">
-              <span className="absolute top-0 left-0 h-3.5 w-3 border-b border-l border-border" />
+            <span aria-hidden="true" className="relative w-2 shrink-0">
+              <span className="absolute top-0 left-0 h-1/2 w-1.5 border-b border-l border-border" />
               {!isLast ? (
-                <span className="absolute top-3.5 bottom-0 left-0 border-l border-border" />
+                <span className="absolute top-1/2 bottom-0 left-0 border-l border-border" />
               ) : null}
             </span>
-            <span className="grid size-6 shrink-0 place-items-center self-center">
+            <span className={MARK}>
               <TypeMark type={obs.type} />
+              {hasChildren && isOpen ? <DropLine /> : null}
             </span>
             <button
               type="button"
