@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import AsyncIterator
 from typing import Any, cast
 from unittest.mock import patch
@@ -660,6 +661,17 @@ async def test_streaming_request_falls_back_to_a_bridged_event_stream() -> None:
     assert types[-1] == "response.completed"
 
 
+@pytest.fixture
+def minted_items(monkeypatch: pytest.MonkeyPatch) -> OrderedDict[str, dict[str, Any]]:
+    """A fresh per-process item cache, so one test's minted items cannot resolve another's references."""
+    from gateway.services.inference import _responses_bridge as bridge
+
+    cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    monkeypatch.setattr(bridge, "_minted_items", cache)
+    return cache
+
+
+@pytest.mark.usefixtures("minted_items")
 def test_item_reference_resolves_to_a_minted_item_and_unknown_ones_are_dropped() -> None:
     from gateway.services.inference import _responses_bridge as bridge
 
@@ -680,8 +692,15 @@ def test_item_reference_resolves_to_a_minted_item_and_unknown_ones_are_dropped()
         None,
         "bedrock",
     )
-    assert [m["role"] for m in messages] == ["user", "assistant", "tool"]
-    assert messages[1]["tool_calls"][0]["id"] == "call_1"
+    assert messages == [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "earlier answer",
+            "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "42"},
+    ]
 
 
 def test_tool_result_without_its_call_becomes_user_text() -> None:
@@ -691,3 +710,83 @@ def test_tool_result_without_its_call_becomes_user_text() -> None:
         [{"type": "function_call_output", "call_id": "call_gone", "output": "42"}], None, "bedrock"
     )
     assert messages == [{"role": "user", "content": "[tool result]\n42"}]
+
+
+@pytest.mark.usefixtures("minted_items")
+@pytest.mark.asyncio
+async def test_a_bridged_response_s_items_resolve_as_references_on_the_next_turn() -> None:
+    tool_call = {"id": "call_1", "type": "function", "function": {"name": "lookup", "arguments": '{"q": 1}'}}
+    first = await _call(
+        {}, _completion({"content": "checking", "tool_calls": [tool_call]}, "tool_calls"), input_data="hi"
+    )
+    references = [{"type": "item_reference", "id": item.id} for item in first.output]
+    assert [item.type for item in first.output] == ["message", "function_call"]
+
+    captured: dict[str, Any] = {}
+    await _call(
+        captured,
+        _completion({"content": "done"}),
+        input_data=[
+            {"role": "user", "content": "hi"},
+            *references,
+            {"type": "function_call_output", "call_id": "call_1", "output": "one"},
+        ],
+    )
+
+    assert captured["messages"] == [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "checking",
+            "tool_calls": [
+                {"id": "call_1", "type": "function", "function": {"name": "lookup", "arguments": '{"q": 1}'}}
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": "one"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_response_s_items_are_kept_once_it_completes(
+    minted_items: OrderedDict[str, dict[str, Any]],
+) -> None:
+    chunks = [_chunk({"role": "assistant", "content": "po"}), _chunk({"content": "ng"}, "stop")]
+    stream = await _call({}, _aiter(chunks), input_data="hi", stream=True)
+    events = [event async for event in stream]
+
+    completed = events[-1]
+    assert completed.type == "response.completed"
+    [message] = completed.response.output
+    assert list(minted_items) == [message.id]
+    assert minted_items[message.id]["content"][0]["text"] == "pong"
+
+
+def test_the_minted_item_cache_evicts_the_least_recently_minted(
+    minted_items: OrderedDict[str, dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from gateway.services.inference import _responses_bridge as bridge
+
+    monkeypatch.setattr(bridge, "_MINTED_ITEMS_MAX", 2)
+    first, second, third = (bridge._message_item(f"msg_{n}", str(n), "completed") for n in range(3))
+
+    bridge._remember_minted_items([first, second])
+    # Minting an id again makes it the newest, so the next eviction takes the other one.
+    bridge._remember_minted_items([first])
+    bridge._remember_minted_items([third])
+
+    assert list(minted_items) == ["msg_0", "msg_2"]
+    messages = bridge._messages(
+        [{"type": "item_reference", "id": item_id} for item_id in ("msg_0", "msg_1", "msg_2")], None, "bedrock"
+    )
+    assert [m["content"] for m in messages] == ["0", "2"]
+
+
+@pytest.mark.usefixtures("minted_items")
+def test_only_message_and_function_call_items_are_kept() -> None:
+    from gateway.services.inference import _responses_bridge as bridge
+
+    bridge._remember_minted_items(
+        [bridge._reasoning_item("rs_1", "thinking", "completed"), {"type": "message", "role": "assistant"}]
+    )
+
+    assert bridge._messages([{"type": "item_reference", "id": "rs_1"}], None, "bedrock") == []

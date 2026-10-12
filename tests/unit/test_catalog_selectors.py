@@ -325,3 +325,5 @@ async def test_only_an_operator_triggered_rebuild_may_dial(fetch: bool, expected
     assert build.await_args.kwargs["include_offered"] is False
     # No port was handed in, so none is asked; the lifespan worker hands one in.
     assert build.await_args.kwargs["model_provider"] is None
+    # Indexed by real offering, so an aliased model keeps its selectors.
+    assert build.await_args.kwargs["withhold_alias_targets"] is False
