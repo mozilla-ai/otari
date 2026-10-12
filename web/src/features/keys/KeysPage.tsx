@@ -41,7 +41,10 @@ import {
   accessLabel,
   ModelScopeControl,
 } from "@/features/models/ModelScopeControl"
-import { useMemberAttributionLabels } from "@/features/organization/attribution"
+import {
+  useCurrentOwnerId,
+  useMemberAttributionLabels,
+} from "@/features/organization/attribution"
 import { organizationUsers } from "@/features/users/organizationUsers"
 import { UserComboBox } from "@/features/users/UserComboBox"
 import {
@@ -440,7 +443,10 @@ function CreateKeyDialog({
   const [keyName, setKeyName] = useState("")
   const [expiresAt, setExpiresAt] = useState("")
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [userId, setUserId] = useState("")
+  // Undefined until the operator touches the picker, so the default tracks the
+  // roster as it loads and a cleared field (an empty string) stays cleared.
+  const [pickedOwner, setPickedOwner] = useState<string | undefined>(undefined)
+  const currentOwnerId = useCurrentOwnerId()
   const [allowedModels, setAllowedModels] = useState<string[] | undefined>(
     undefined,
   )
@@ -466,6 +472,14 @@ function CreateKeyDialog({
   // id, which the API creates as a named user). This is what keeps the dashboard
   // from minting the anonymous virtual users an omitted id would. A member's key
   // is always their own, so there is nothing to require.
+  // The signed-in person owns the key unless the operator says otherwise, and
+  // only when the picker would offer them: an id outside the list is not a
+  // default worth guessing.
+  const defaultOwner =
+    currentOwnerId && ownerOptions.some((u) => u.user_id === currentOwnerId)
+      ? currentOwnerId
+      : ""
+  const userId = pickedOwner ?? defaultOwner
   const ownerMissing = isDeploymentWide && userId.trim() === ""
   // The workspace comes from the organization context, which resolves after the
   // form paints. Submitting before it does would send no workspace and land the
@@ -494,7 +508,7 @@ function CreateKeyDialog({
   const { isDirty } = useDirtySnapshot({
     keyName,
     expiresAt,
-    userId,
+    pickedOwner,
     allowedModels,
     excludeFromBudget,
     serviceKey,
@@ -506,7 +520,7 @@ function CreateKeyDialog({
     setKeyName("")
     setExpiresAt("")
     setShowAdvanced(false)
-    setUserId("")
+    setPickedOwner(undefined)
     setAllowedModels(undefined)
     setExcludeFromBudget(false)
     setServiceKey(NO_SERVICE_KEY)
@@ -647,7 +661,7 @@ function CreateKeyDialog({
       {isDeploymentWide ? (
         <UserComboBox
           value={userId}
-          onChange={setUserId}
+          onChange={setPickedOwner}
           users={ownerOptions}
           isRequired
         />

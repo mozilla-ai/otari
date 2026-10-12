@@ -1,7 +1,10 @@
 import { useMemo } from "react"
 
 import type { OrganizationMember } from "@/client"
-import { useOrganizationMembers } from "@/shared/api/organizations"
+import {
+  useOrganizationContext,
+  useOrganizationMembers,
+} from "@/shared/api/organizations"
 import { useSurfaces } from "@/shared/hooks/useDeployment"
 
 import { memberLabel } from "./roles"
@@ -66,4 +69,28 @@ export function useMemberAttributionEmails(): ReadonlyMap<string, string> {
     () => memberEmailsByAttributionId(members.data),
     [members.data],
   )
+}
+
+/**
+ * The owner id the signed-in person bills through, once the roster names it.
+ *
+ * Undefined while either read is pending or failed, and for an identity with no
+ * attribution row (a member whose `attribution_user_id` is null has no owner a
+ * key could be issued to), so a caller offering it as a default falls back to
+ * asking.
+ */
+export function useCurrentOwnerId(): string | undefined {
+  const hasSurface = useSurfaces()
+  const context = useOrganizationContext()
+  const members = useOrganizationMembers(hasSurface("organizations"))
+  const callerId = context.data?.caller?.user_id
+  const memberId = context.data?.organization_member_id
+  return useMemo(() => {
+    const me = (members.data ?? []).find(
+      (member) =>
+        (callerId && member.user_id === callerId) ||
+        (memberId && member.organization_member_id === memberId),
+    )
+    return me?.attribution_user_id ?? undefined
+  }, [members.data, callerId, memberId])
 }
