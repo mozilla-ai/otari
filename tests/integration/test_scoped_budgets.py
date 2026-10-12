@@ -20,6 +20,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.api.deps import get_budget_service
+from gateway.api.routes._pipeline import spend_ceiling_refusal
 from gateway.core.config import API_ROOT
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.budget_exceptions import ProviderSpendCeilingExceededError, SpendCeilingExceededError
@@ -1479,6 +1480,27 @@ async def test_a_move_the_new_providers_cap_refuses_changes_nothing(async_db: As
     assert await _counters(async_db, openai_cap.id) == (0.0, 3.0)
     assert await _counters(async_db, anthropic.id) == (0.0, 0.0)
     assert await _request_counters(async_db, anthropic.id) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_a_moves_refusal_answers_as_the_caps_refusal_at_admission(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """A client sees one of the two, depending on which candidate the cap binds, so they answer alike."""
+    await _anthropic_cap(async_db, tenancy, max_budget=1.0)
+    with pytest.raises(HTTPException) as admitted:
+        await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("anthropic"))
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+
+    with pytest.raises(SpendCeilingExceededError) as moved:
+        await move(async_db, handle, "anthropic", cost=3.0)
+
+    rendered = spend_ceiling_refusal(moved.value)
+    assert (rendered.status_code, rendered.detail, rendered.headers) == (
+        admitted.value.status_code,
+        admitted.value.detail,
+        admitted.value.headers,
+    )
 
 
 @pytest.mark.asyncio

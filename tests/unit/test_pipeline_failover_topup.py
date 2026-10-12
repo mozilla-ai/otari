@@ -23,11 +23,14 @@ from typing import Any, cast
 import pytest
 from any_llm import LLMProvider
 from fastapi import HTTPException
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import gateway.api.routes._pipeline as pipeline
+from gateway.api.routes._attempts import CandidateCannotServe
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import BUDGET_EXCEEDED, error_headers
+from gateway.exceptions.budget_exceptions import ProviderSpendCeilingExceededError, SpendCeilingExceededError
 from gateway.services import pricing_service
 from gateway.services.budgets import EstimateInputs, ReservationHandle
 from gateway.types.attempt import Attempt
@@ -68,6 +71,8 @@ def _ctx(
     """
     return SimpleNamespace(
         db=cast(AsyncSession, db) if db is not None else None,
+        uow=object(),
+        rate_limit_grant=None,
         # Resolved once in the preamble on a real request. None is "this
         # organization has no rate override", so the top-up prices against the
         # deployment list, which is what ``_PRICES`` below stands in for.
@@ -217,3 +222,82 @@ async def test_no_estimate_inputs_means_nothing_to_reprice(increases: list[Decim
     ctx.estimate_inputs = None
     await pipeline.top_up_reservation_for_attempt(ctx, _attempt(2, "anthropic", "pricey"))
     assert increases == []
+
+
+class _Budgets:
+    """Stands in for the budget service a move goes through, recording the provider of each move."""
+
+    def __init__(self) -> None:
+        self.moves: list[str] = []
+        self.error: BaseException | None = None
+
+    async def move_reservation(self, _handle: Any, attempt: Attempt, **_kwargs: Any) -> None:
+        self.moves.append(attempt.instance)
+        if self.error is not None:
+            raise self.error
+
+
+@pytest.fixture
+def budgets(monkeypatch: pytest.MonkeyPatch) -> _Budgets:
+    fake = _Budgets()
+    monkeypatch.setattr(pipeline, "get_budget_service", lambda _uow, _db: fake)
+    return fake
+
+
+def _refused_by(provider_key_id: str | None) -> SpendCeilingExceededError:
+    error = ProviderSpendCeilingExceededError if provider_key_id is not None else SpendCeilingExceededError
+    return error("Workspace has exceeded budget limit", scope_type="workspace")
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_is_moved_onto_its_providers_budgets(budgets: _Budgets) -> None:
+    await pipeline.move_reservation_for_attempt(_ctx(), _attempt(2, "anthropic", "pricey"))
+
+    assert budgets.moves == ["anthropic"]
+
+
+@pytest.mark.asyncio
+async def test_every_candidate_is_moved_when_the_walk_admits_it(budgets: _Budgets) -> None:
+    admit = pipeline._candidate_admission(_ctx())
+
+    await admit(_attempt(1, "openai", "cheap"))
+    await admit(_attempt(2, "anthropic", "pricey"))
+
+    assert budgets.moves == ["openai", "anthropic"]
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_whose_providers_budget_is_full_is_skipped(budgets: _Budgets) -> None:
+    """A full budget on the fallback's provider says nothing about the next candidate, so the walk moves on."""
+    budgets.error = _refused_by("anthropic")
+
+    with pytest.raises(CandidateCannotServe) as exc_info:
+        await pipeline.move_reservation_for_attempt(_ctx(), _attempt(2, "anthropic", "pricey"))
+
+    refusal = exc_info.value.refusal
+    assert (refusal.status_code, refusal.detail) == (403, "Workspace has exceeded budget limit")
+    assert refusal.headers == error_headers(BUDGET_EXCEEDED, budget_scope="workspace")
+
+
+@pytest.mark.asyncio
+async def test_a_full_budget_on_every_provider_stops_the_chain(budgets: _Budgets) -> None:
+    budgets.error = _refused_by(None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await pipeline.move_reservation_for_attempt(_ctx(), _attempt(2, "anthropic", "pricey"))
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == pipeline.budget_exhausted_mid_failover_detail()
+    assert exc_info.value.headers == error_headers(BUDGET_EXCEEDED, budget_scope="workspace")
+
+
+@pytest.mark.asyncio
+async def test_a_database_failure_during_a_move_stops_the_chain(budgets: _Budgets) -> None:
+    """A database failure is not the provider's, so the walk must not try the next candidate as if it were."""
+    budgets.error = OperationalError("UPDATE scoped_budgets", {}, Exception("connection lost"))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await pipeline.move_reservation_for_attempt(_ctx(), _attempt(2, "anthropic", "pricey"))
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == pipeline.BUDGETS_UNAVAILABLE_DETAIL
