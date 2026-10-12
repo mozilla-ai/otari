@@ -90,6 +90,7 @@ the corresponding startup value after the database is available.
 | `rate_limit_redis_url` | The Redis that the `redis` store counts in. |
 | `rate_limits` | Requests per minute, tokens per minute and requests in flight, per deployment, API key, user or model. Also managed from the dashboard. See [Rate limit rules](#rate-limit-rules). |
 | `provider_max_retries` | How many times a provider SDK retries a failed call before Otari sees the failure. Unset keeps each SDK's default. See [Provider retries](#provider-retries). |
+| `provider_user_identifier_enabled` | Send each provider call an opaque, per-end-user identifier, so a provider's policy block lands on one user rather than the whole account. Defaults to `true`. See [End-user identifiers](#end-user-identifiers). |
 | `streaming_keepalive_interval_ms` | Idle interval after which a streaming response sends a keepalive, so an intermediary with a read timeout does not cut a slow stream. Defaults to 15000; `0` disables keepalives. |
 | `streaming_first_chunk_hold_ms` | How long a standalone gateway holds a streaming response's status line for the provider's first chunk, so a provider failure before any output gets its own HTTP status, and falls over in a routing policy, rather than ending a `200` in an error event. A slower provider still streams. Defaults to 15000; `0` commits the response as soon as the stream opens. See [Error codes](api-reference.md#error-codes). |
 | `idempotency_retention_sec` | How long a completion sent with an `Idempotency-Key` is kept for a retry to replay. Defaults to a day; `0` ignores the header. Needs `OTARI_SECRET_KEY`, which encrypts the stored response. See [Retrying safely](api-reference.md#retrying-safely). |
@@ -335,6 +336,49 @@ master key or an `OTARI_SECRET_KEY` key. Generate one with
 `otari gen-provider-account-pepper` or `openssl rand -base64 32`, and keep it in
 your secret store. Rotating it costs nothing but a fresh copy of each file the
 next time a request uses it. Hybrid mode makes no copies and needs no pepper.
+
+### End-user identifiers
+
+Every request a deployment sends to a provider reaches it under one account. A
+provider that enforces its usage policy per end user needs an identifier for
+each one, or a block meant for one person lands on the account, and every user
+and workspace on the deployment loses that provider.
+
+So while `provider_user_identifier_enabled` is on, which it is by default, Otari
+sends each provider call a digest of the workspace and the user tag the caller
+sent Otari (`user` on chat completions and Responses, `metadata.user_id` on
+Messages), or of the workspace and the resolved user when the caller sent no
+tag. The table below names the field each provider receives it in. The
+provider never sees the tag, which may be personal data, or an Otari id. The
+same user in the same workspace always gets the same identifier, which is what
+a provider scopes enforcement by.
+
+| Provider | Field |
+| --- | --- |
+| OpenAI, Azure OpenAI | `user` on chat completions, `safety_identifier` on Responses |
+| Cerebras, DeepSeek, Fireworks, Groq, OpenRouter, xAI | `user` on chat completions (DeepSeek's `user_id`) |
+| Anthropic, including Azure and Vertex AI | `metadata.user_id` |
+| Bedrock | `requestMetadata.otari_user` |
+| Any other provider with a native Messages API, on Messages | `metadata.user_id` |
+
+Bedrock's abuse detection reads no end-user identifier, but `requestMetadata`
+lands in the account's invocation logs, which is where the prompt ids in an AWS
+abuse report are traced back to a user. Every other provider gets nothing: some
+have no such field (Gemini, Vertex AI, Mistral), some run your own models, and
+for the rest an unknown field can fail the call. A Responses or Messages request
+served as a chat completion gets that provider's chat field.
+
+Set `OTARI_PROVIDER_USER_IDENTIFIER_KEY` to a random value of at least 32
+characters (`openssl rand -base64 32`) to key the digest. Without it the digest
+is unkeyed, so the same workspace id and user give the same identifier on any
+deployment, and Otari logs a warning at startup. Otari refuses to start when the
+key equals the master key or an `OTARI_SECRET_KEY` key. Rotating it gives every
+user a new identifier.
+
+In hybrid mode the workspace and user come from otari.ai's resolve response,
+and Otari refuses a request with a `502` when it names no workspace, or no user
+for a caller that sent no tag, rather than send it unscoped. See
+[End-user identifier](hybrid-mode-protocol.md#end-user-identifier).
 
 ## Pricing
 
