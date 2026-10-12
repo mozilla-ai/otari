@@ -126,6 +126,22 @@ def test_chat_403_for_denied_model(client: TestClient, master_key_header: dict[s
     assert "not permitted" in str(resp.json())
 
 
+@pytest.mark.parametrize("restricted", [True, False])
+def test_chat_400_for_an_unresolvable_selector_whatever_the_allow_list(
+    client: TestClient, master_key_header: dict[str, str], restricted: bool
+) -> None:
+    """The selector is resolved before the allow-list, so a restricted key is not answered 403 for a bad name."""
+    headers = _make_key(client, master_key_header, [ALLOWED] if restricted else None)
+    resp = client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "no-such-model", "messages": [{"role": "user", "content": "hi"}]},
+        headers=headers,
+    )
+    assert resp.status_code == 400, resp.text
+    assert resp.headers["Otari-Error-Code"] == "invalid_model"
+    assert "provider:model" in str(resp.json())
+
+
 def test_chat_allowed_model_passes_the_gate(client: TestClient, master_key_header: dict[str, str]) -> None:
     from unittest.mock import patch
 

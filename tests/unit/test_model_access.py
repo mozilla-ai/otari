@@ -6,11 +6,12 @@ from collections.abc import Iterator
 import pytest
 
 from gateway.core.config import GatewayConfig
-from gateway.core.error_codes import MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
+from gateway.core.error_codes import INVALID_MODEL, MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
 from gateway.services.model_access import (
     effective_allowlist,
     is_allowlist_subset,
     is_model_allowed,
+    key_model_refusal,
     org_model_refusal,
     validate_allowed_models,
 )
@@ -196,3 +197,22 @@ def test_the_detail_names_the_selector_not_the_resolved_model(workspace_id: uuid
     assert refusal is not None
     assert "fast" in refusal.detail
     assert "gpt-4o" not in refusal.detail
+
+
+def test_an_unrestricted_key_is_never_refused_by_its_allow_list() -> None:
+    assert key_model_refusal(None, None, selector="no-such-model") is None
+    assert key_model_refusal(None, "openai:gpt-4o", selector="openai:gpt-4o") is None
+
+
+def test_a_restricted_key_is_told_an_unresolvable_selector_is_invalid_not_forbidden() -> None:
+    refusal = key_model_refusal(["openai:gpt-4o"], None, selector="no-such-model")
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (INVALID_MODEL, 400)
+    assert "no-such-model" in refusal.detail
+
+
+def test_a_restricted_key_is_refused_a_model_its_list_excludes() -> None:
+    refusal = key_model_refusal(["openai:gpt-4o"], "gemini:gemini-2.5-flash", selector="gemini:gemini-2.5-flash")
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (MODEL_NOT_ALLOWED, 403)
+    assert key_model_refusal(["openai:*"], "openai:gpt-4o", selector="fast") is None

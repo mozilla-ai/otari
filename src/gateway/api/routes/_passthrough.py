@@ -50,7 +50,6 @@ from gateway.api.routes._pipeline import (
     provider_error_headers,
     rate_limit_headers,
     throttle_early_rejection,
-    unresolvable_model_detail,
 )
 from gateway.api.routes._platform import _classify_upstream_error, with_retry_hint
 from gateway.core.config import GatewayConfig
@@ -93,6 +92,7 @@ from gateway.services.model_access import (
     model_not_allowed_detail,
     org_model_refusal,
     resolve_request_allowlist,
+    unresolvable_model_detail,
 )
 from gateway.services.pricing_service import (
     ResolvedPricing,

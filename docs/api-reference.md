@@ -445,7 +445,7 @@ reworded.
 | `user_not_found` | 404 | The billed user does not exist | |
 | `rate_limited` | 429 | A gateway rate limit is full | `Otari-Rate-Limit-Rule` for a `rate_limits` rule; `Retry-After` when waiting helps |
 | `upstream_rate_limited` | 429 | The provider rate limited the gateway | `Retry-After` when the provider sent one |
-| `invalid_model` | 400 | The model selector names no configured provider | |
+| `invalid_model` | 400 | The model selector names no configured provider, alias, policy or catalog model id; checked before the key's allow-list, so a restricted key gets it too | |
 | `model_not_allowed` | 403 | The key may not use the model | |
 | `model_not_serving` | 403 | The organization offers the model on a provider key, with its serving switch off | |
 | `model_not_found` | 404 | A provider key of the organization serves the provider, and none offers the model | |

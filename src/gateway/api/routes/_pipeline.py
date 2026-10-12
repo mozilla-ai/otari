@@ -116,7 +116,6 @@ from gateway.core.env import otari_env
 from gateway.core.error_codes import (
     CONTEXT_LENGTH_EXCEEDED,
     INVALID_MODEL,
-    MODEL_NOT_ALLOWED,
     PRICING_REQUIRED,
     PROVIDER_CREDENTIAL_REJECTED,
     PROVIDER_ERROR,
@@ -227,10 +226,11 @@ from gateway.services.mcp_loop import (
 )
 from gateway.services.mcp_stateless import failure_class
 from gateway.services.model_access import (
-    is_model_allowed,
+    key_model_refusal,
     model_not_allowed_detail,
     org_model_refusal,
     resolve_request_allowlist,
+    unresolvable_model_detail,
 )
 from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.pricing_service import (
@@ -1245,13 +1245,6 @@ def scope_prompt_cache_key(request_fields: dict[str, Any], ctx: RequestContext) 
     return request_fields
 
 
-def unresolvable_model_detail(model_selector: str) -> str:
-    """Human-readable 400 detail for a selector the gateway cannot resolve."""
-    return (
-        f"Unknown or unsupported model {model_selector!r}. Use the format 'provider:model' with a configured provider."
-    )
-
-
 def _raise_for_unresolvable_model(model_selector: str, exc: Exception) -> NoReturn:
     """Convert a selector-parse failure into an HTTP 400 with a helpful detail.
 
@@ -2191,9 +2184,9 @@ async def resolve_request_context(
         if not names_end_user:
             rate_limit_info = await check_rate_limit(raw_request, user_id)
 
-        # Tolerate an unparseable / unknown-provider selector here: the budget
-        # check below and the downstream provider call surface those with
-        # their own status codes. A model we can't parse simply has no pricing.
+        # Tolerate an unparseable / unknown-provider selector here: the key's
+        # allow-list, the budget check below and the downstream provider call
+        # surface it with their own status codes. It simply has no pricing.
         # Pricing/budget keys on the *instance* name (``instance:model``) while
         # capability detection needs the underlying implementation, so keep both.
         gate_instance: str | None
@@ -2239,16 +2232,17 @@ async def resolve_request_context(
                 gate_instance, gate_impl, gate_model = None, None, model
 
         # Model access control (per-key, standalone). None = unrestricted; a
-        # non-null list restricts. Fail closed: a selector we could not resolve is
-        # denied under a restriction rather than dispatched unchecked. Master-key
-        # callers have api_key None, so the allow-list is None and this is skipped.
+        # non-null list restricts. Master-key callers have api_key None, so the
+        # allow-list is None and this is skipped.
         # A key with no list of its own inherits its user's default here, and a
         # ``SessionPrincipal`` carries that same user default (it holds no key to
         # narrow it with). (Resolved above, before the plan compile, which needs it.)
-        if key_allowlist is not None and not (
-            gate_instance is not None and is_model_allowed(key_allowlist, f"{gate_instance}:{gate_model}")
-        ):
-            not_allowed_detail = model_not_allowed_detail(model)
+        key_refusal = key_model_refusal(
+            key_allowlist,
+            f"{gate_instance}:{gate_model}" if gate_instance is not None else None,
+            selector=model,
+        )
+        if key_refusal is not None:
             # Nothing is reserved yet (the reservation is taken below), so there
             # is no refund to do before recording the drop.
             await log_gateway_rejection(
@@ -2259,13 +2253,18 @@ async def resolve_request_context(
                 model=gate_model,
                 provider=gate_instance,
                 endpoint=adapter.endpoint,
-                detail=not_allowed_detail,
-                status_code=status.HTTP_403_FORBIDDEN,
+                detail=key_refusal.detail,
+                status_code=key_refusal.status_code,
                 started_at=started_at,
                 request_id=request_id,
                 tags=tags,
             )
-            raise adapter.error(403, not_allowed_detail, ErrorKind.PERMISSION, headers=error_headers(MODEL_NOT_ALLOWED))
+            raise adapter.error(
+                key_refusal.status_code,
+                key_refusal.detail,
+                error_kind_for_status(key_refusal.status_code),
+                headers=error_headers(key_refusal.code),
+            )
 
         # Organization-scoped model restriction (otari#643): the org key
         # resolved for this workspace+provider may narrow which models it

@@ -24,7 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
-from gateway.core.error_codes import MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
+from gateway.core.error_codes import INVALID_MODEL, MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
 from gateway.models.api_keys import APIKey
 from gateway.models.users import User
 from gateway.services.alias_service import all_alias_names
@@ -199,6 +199,13 @@ def model_not_allowed_detail(model: str) -> str:
     return f"Model '{model}' is not permitted for this API key."
 
 
+def unresolvable_model_detail(model_selector: str) -> str:
+    """Human-readable 400 detail for a selector the gateway cannot resolve."""
+    return (
+        f"Unknown or unsupported model {model_selector!r}. Use the format 'provider:model' with a configured provider."
+    )
+
+
 def model_not_serving_detail(model: str, key_name: str) -> str:
     """403 detail for a model an organization offers on a provider key with its serving switch off."""
     return (
@@ -213,15 +220,38 @@ def model_not_found_detail(model: str, key_name: str) -> str:
 
 
 @dataclass(frozen=True)
-class OrgModelRefusal:
-    """Why the organization-key path turns a model away, in wire terms."""
+class ModelRefusal:
+    """Why a request's model is turned away, in wire terms."""
 
     code: str
     status_code: int
     detail: str
 
 
-def org_model_refusal(workspace_id: uuid.UUID, provider: str, model: str, *, selector: str) -> OrgModelRefusal | None:
+def key_model_refusal(allowlist: list[str] | None, canonical_key: str | None, *, selector: str) -> ModelRefusal | None:
+    """Why a key's allow-list turns a request away, or ``None`` when it does not.
+
+    ``canonical_key`` is the ``instance:model`` the selector resolved to, or
+    ``None`` when it resolved to nothing. Such a selector is refused as an invalid
+    model rather than as one the key may not use: the allow-list cannot judge a
+    name that names nothing, and a restricted key would otherwise be told
+    something different from what an unrestricted one hears. ``selector`` is what
+    the caller wrote and is what the detail names.
+    """
+    if allowlist is None:
+        return None
+    if canonical_key is None:
+        return ModelRefusal(
+            code=INVALID_MODEL, status_code=HTTPStatus.BAD_REQUEST, detail=unresolvable_model_detail(selector)
+        )
+    if is_model_allowed(allowlist, canonical_key):
+        return None
+    return ModelRefusal(
+        code=MODEL_NOT_ALLOWED, status_code=HTTPStatus.FORBIDDEN, detail=model_not_allowed_detail(selector)
+    )
+
+
+def org_model_refusal(workspace_id: uuid.UUID, provider: str, model: str, *, selector: str) -> ModelRefusal | None:
     """Why the active organization key's allow-list turns ``model`` away, or ``None`` when it does not.
 
     Reads the same list the catalog does (`cached_org_model_restriction`), so
@@ -238,7 +268,7 @@ def org_model_refusal(workspace_id: uuid.UUID, provider: str, model: str, *, sel
     allowed = cached_org_model_restriction(workspace_id, provider)
     if allowed is None or model in allowed:
         return None
-    not_allowed = OrgModelRefusal(
+    not_allowed = ModelRefusal(
         code=MODEL_NOT_ALLOWED, status_code=HTTPStatus.FORBIDDEN, detail=model_not_allowed_detail(selector)
     )
     offer = cached_org_key_offer(workspace_id, provider)
@@ -246,13 +276,13 @@ def org_model_refusal(workspace_id: uuid.UUID, provider: str, model: str, *, sel
         return not_allowed
     enabled = offer.offered.get(model)
     if enabled is None:
-        return OrgModelRefusal(
+        return ModelRefusal(
             code=MODEL_NOT_FOUND,
             status_code=HTTPStatus.NOT_FOUND,
             detail=model_not_found_detail(selector, offer.key_name),
         )
     if not enabled:
-        return OrgModelRefusal(
+        return ModelRefusal(
             code=MODEL_NOT_SERVING,
             status_code=HTTPStatus.FORBIDDEN,
             detail=model_not_serving_detail(selector, offer.key_name),
