@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'linux'",
@@ -272,7 +272,7 @@ wheels = [
 
 [[package]]
 name = "any-llm-sdk"
-version = "1.33.3"
+version = "1.33.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
@@ -283,9 +283,9 @@ dependencies = [
     { name = "rich" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c9/e3/87c1648b8be2d3a76cb908b3f60408dea9cbb70e0e44734a92bf63e8cd80/any_llm_sdk-1.33.3.tar.gz", hash = "sha256:6e7da800ed83184bd5e0f72d990a9ae3de11295db21ff23337cdbd2e65e7c16f", size = 256176, upload-time = "2026-10-12T12:07:54.864Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/77/65/53a24c289414cc552bc55882d79c2d314199ec868b07832b8c7085b5bb59/any_llm_sdk-1.33.4.tar.gz", hash = "sha256:ccab3d3cccc99a416cb70f44867da8efdb59164d5db219ef5035cc08ce6b2526", size = 256536, upload-time = "2026-10-12T15:49:35.749Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/07/59/cf42ae8247fd54cdbb297d7fedef91bd16277def5fda8cbeb87ce04f350e/any_llm_sdk-1.33.3-py3-none-any.whl", hash = "sha256:0b50c507937ef0704f200ba3821a5d89b838ff1159d9f7fb568174a2bb08680a", size = 316261, upload-time = "2026-10-12T12:07:53.13Z" },
+    { url = "https://files.pythonhosted.org/packages/52/f4/96eb38090261e020c568ab31423e152c468426b7ffa6c15bbb854f9e22a5/any_llm_sdk-1.33.4-py3-none-any.whl", hash = "sha256:5bd6beb4e8af462f5bdb9ef176d6206d26232062df57caf8f91513f36594bec5", size = 316658, upload-time = "2026-10-12T15:49:33.775Z" },
 ]
 
 [package.optional-dependencies]
@@ -1352,7 +1352,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13.0" },
     { name = "any-fetch", editable = "any-fetch" },
     { name = "any-guardrail", extras = ["azure-content-safety", "bedrock", "openai", "watsonx"], specifier = ">=0.7.7,<0.8.0" },
-    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.33.3" },
+    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.33.4" },
     { name = "any-search", editable = "any-search" },
     { name = "apron-auth", specifier = ">=0.15.1,<0.16.0" },
     { name = "asyncpg", specifier = ">=0.29.0" },
