@@ -143,7 +143,10 @@ model of a `providers:` instance (see
 A refusal on that path says which narrowing turned the model away. A model the
 key offers with its switch off is a 403 with the code `model_not_serving`, naming
 the key and pointing at the switch. A model no key of the provider offers is a
-404 with `model_not_found`. A model the key serves that a workspace restriction
+404 with `model_not_found`. An undated name whose dated builds the key offers is
+answered for those builds: not serving where every one is switched off, and not
+found, naming them, where there is more than one to choose from (see
+[Catalog spellings](#catalog-spellings)). A model the key serves that a workspace restriction
 or the API key's own allow-list excludes keeps the 403 `model_not_allowed`. The
 Providers page shows each key's serving count beside it, so a key offering models
 and serving none is visible before the first request. See
@@ -286,6 +289,7 @@ what was sent, and pricing, budgets and usage key on the offering reached.
 
 - The model's catalog id (`z-ai/glm-5.3`, `deepseek/deepseek-v4.1-flash`) resolves to the first of the model's offerings in this order. Priced offerings come before unpriced ones, because a request an unpriced offering serves costs nothing and so escapes budgets. Among the priced ones, the organization's own provider key comes first, even where another offering is cheaper. Next is the vendor's own provider, where the id's vendor is also a provider (`openai/gpt-4o`), because the caller who names OpenAI's model while OpenAI is configured means OpenAI's price. Then come the other offerings, cheapest first at the caller's rates, with ties in A-Z order. To make an unpriced offering lead, such as an organization's own key or a local model, give it a price, even 0.
 - `instance:<catalog id>` (`nebius:deepseek/deepseek-v4.1-flash`) pins the instance and resolves to the model's first offering there by the same order, never elsewhere. This is the spelling the catalog shows as an offering's `short_selector`.
+- On an organization's own provider key, a provider's undated name (`anthropic:claude-haiku-4-5`) resolves to the dated build the key serves under it (`claude-haiku-4-5-20251001`), where exactly one serving model is that name plus a release date (`-YYYYMMDD` or `-YYYY-MM-DD`). The dated build's serving switch, price and allow-lists apply as if it had been sent. A name with two dated builds is refused as not found, and the detail names both. A `providers:` instance needs none of this, because it sends any id to the provider as written.
 
 A selector that already names an offering is never rewritten, so a provider's
 own id keeps working verbatim.

@@ -1,6 +1,7 @@
 """The caller's model catalog, and the spellings a request may use for a model."""
 
 from gateway.services.catalog._aliases import hide_alias_target
+from gateway.services.catalog._dated import dated_builds
 from gateway.services.catalog._query import query_catalog
 from gateway.services.catalog._selectors import (
     Identities,
@@ -26,6 +27,7 @@ __all__ = [
     "build_organization_selectors",
     "build_selector_index",
     "current_selector_index",
+    "dated_builds",
     "hide_alias_target",
     "model_selector_for_slug",
     "query_catalog",

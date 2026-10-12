@@ -217,3 +217,38 @@ def test_a_restricted_key_is_refused_a_model_its_list_excludes() -> None:
     assert refusal is not None
     assert (refusal.code, refusal.status_code) == (MODEL_NOT_ALLOWED, 403)
     assert key_model_refusal(["openai:*"], "openai:gpt-4o", selector="fast") is None
+
+
+def _narrow_anthropic(workspace_id: uuid.UUID, *, offered: dict[str, bool]) -> None:
+    org_store._org_model_restrictions[(workspace_id, "anthropic")] = [m for m, on in offered.items() if on]
+    org_store._org_key_offers[(workspace_id, "anthropic")] = KeyOffer(key_name="primary", offered=offered)
+
+
+def test_an_undated_name_whose_dated_builds_are_all_off_is_not_serving(workspace_id: uuid.UUID) -> None:
+    _narrow_anthropic(workspace_id, offered={"claude-haiku-4-5-20251001": False, "claude-sonnet-4-6": True})
+    refusal = org_model_refusal(workspace_id, "anthropic", "claude-haiku-4-5", selector="anthropic:claude-haiku-4-5")
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (MODEL_NOT_SERVING, 403)
+    assert refusal.detail == (
+        "Model 'anthropic:claude-haiku-4-5' is offered on provider key 'primary' as 'claude-haiku-4-5-20251001' "
+        "but not serving. Turn it on under Organization > Providers."
+    )
+
+
+def test_an_undated_name_with_two_dated_builds_is_not_found_and_names_them(workspace_id: uuid.UUID) -> None:
+    _narrow_anthropic(workspace_id, offered={"claude-x-20250101": True, "claude-x-20250601": True})
+    refusal = org_model_refusal(workspace_id, "anthropic", "claude-x", selector="anthropic:claude-x")
+    assert refusal is not None
+    assert (refusal.code, refusal.status_code) == (MODEL_NOT_FOUND, 404)
+    assert refusal.detail == (
+        "Provider key 'primary' does not offer 'anthropic:claude-x'. "
+        "It offers 'claude-x-20250101', 'claude-x-20250601'; send one of those."
+    )
+
+
+def test_an_undated_name_behind_an_alias_does_not_name_the_dated_builds(workspace_id: uuid.UUID) -> None:
+    _narrow_anthropic(workspace_id, offered={"claude-x-20250101": True, "claude-x-20250601": False})
+    refusal = org_model_refusal(workspace_id, "anthropic", "claude-x", selector="fast")
+    assert refusal is not None
+    assert refusal.code == MODEL_NOT_FOUND
+    assert "claude-x" not in refusal.detail
