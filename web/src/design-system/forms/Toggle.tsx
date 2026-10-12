@@ -32,10 +32,8 @@ export function Toggle({
       aria-label={label}
       disabled={isDisabled}
       onClick={() => onChange(!isSelected)}
-      // 44x24 with a 1px edge. Off is an outline on the page ground with a
-      // grey knob; on fills the whole track with the indicator teal and turns
-      // the knob white, so the states differ in the track's area and not only
-      // in the knob's color.
+      // 44x24 with a 1px edge. On fills the whole track and whitens the knob,
+      // so the states differ in area and not only in the knob's color.
       //
       // The visible track stays 24px, which is what the settings rows are drawn
       // around, while `before` carries the 44px touch floor the phone viewport

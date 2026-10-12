@@ -74,11 +74,7 @@ export interface FormDialogProps {
    * gone forever, so the acknowledgement is the only way out.
    */
   isDismissable?: boolean
-  /**
-   * Drops the footer's Cancel while leaving Escape and the close control. For
-   * a result screen, where the one action is an acknowledgement and a Cancel
-   * beside it would cancel nothing.
-   */
+  /** For a result screen: the footer's one action acknowledges, so no Cancel. */
   hideCancel?: boolean
   /**
    * Where focus goes if the frame's own restore has nowhere to land.

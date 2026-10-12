@@ -1211,9 +1211,8 @@ export function OrganizationMembersPage() {
               deployment's own pages, such as Settings and Accounts, which
               belong to whoever operates the gateway.
             </p>
-            {/* The model access under a member's name and the Spend column are
-                not shown to a caller who does not operate the deployment, so
-                the sentences about them are not told to one. */}
+            {/* Access and Spend are shown only to an operator, so only an
+                operator is told about them. */}
             {isOperator ? (
               <p>
                 Budgets and API keys do not attach to this list; they attach to
