@@ -5,23 +5,40 @@ import functools
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import SQLModel
 
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import OAuthIdentityLinkConflictError, OAuthIdentityUnknownError
+from gateway.models.base import Base
 from gateway.models.identity import EmailAssertion, OAuthIdentityLink, ProviderIdentity
 from gateway.models.tenancy import User
-from gateway.ports.identity_provider_port import IdentityResolution
+from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories, OAuthIdentityLinkRepository
 from gateway.repositories.tenancy import UserRepository
+from gateway.services.dashboard_session_service import create_dashboard_session
 from gateway.services.identity import IdentityService
 from gateway.services.tenancy import OrganizationService, forget_unproven_access
+from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
+from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 from .tenancy_helpers import create_organization, membership_writes
 
 pytestmark = pytest.mark.asyncio
 
 TENANT_PROVIDER = "acme-oidc"
+
+
+def _service_with(db: AsyncSession, uow: UnitOfWork, policy: IdentityProviderPort) -> IdentityService:
+    """Build the service as its request builder does, on ``policy``."""
+    return IdentityService(
+        uow,
+        IdentityRepositories.on(uow),
+        identity_provider=policy,
+        organization_domains=OrganizationDomainService(db),
+        organizations=OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
+        start_session=lambda user_id: create_dashboard_session(db, 1, user_id=user_id),
+    )
 
 
 def _service(db: AsyncSession, *, open_signup: bool) -> IdentityService:
@@ -32,11 +49,7 @@ def _service(db: AsyncSession, *, open_signup: bool) -> IdentityService:
         functools.partial(forget_unproven_access, db),
         open_signup=open_signup,
     )
-    return IdentityService(
-        writes["uow"],
-        IdentityRepositories.on(writes["uow"]),
-        identity_provider=adapter,
-    )
+    return _service_with(db, writes["uow"], adapter)
 
 
 def _verified(provider: str, email: str) -> ProviderIdentity:
@@ -49,7 +62,7 @@ def _verified(provider: str, email: str) -> ProviderIdentity:
     )
 
 
-async def _count(db: AsyncSession, model: type[User] | type[OAuthIdentityLink]) -> int:
+async def _count(db: AsyncSession, model: type[SQLModel] | type[Base]) -> int:
     return (await db.execute(select(func.count()).select_from(model))).scalar_one()
 
 
@@ -80,11 +93,12 @@ async def test_a_tenant_provider_registers_no_account_under_open_signup(async_db
 
 
 async def test_open_signup_links_the_account_it_registers(async_db: AsyncSession) -> None:
-    resolution = await _service(async_db, open_signup=True).sign_in_with_oauth(_verified("google", "nova@example.com"))
+    signed_in = await _service(async_db, open_signup=True).sign_in_with_oauth(_verified("google", "nova@example.com"))
 
     link = await async_db.get(OAuthIdentityLink, ("google", "provider-subject"))
     assert link is not None
-    assert link.user_id == resolution.identity.id
+    assert link.user_id == signed_in.account.id
+    assert signed_in.session_token
 
 
 class _ReturnsAccount:
@@ -103,12 +117,7 @@ async def test_a_deactivated_account_from_the_policy_is_refused_and_not_linked(a
         email="ada@example.com", full_name="Ada", active_organization_id=organization.id, is_active=False
     )
     await async_db.commit()
-    uow = UnitOfWork(async_db)
-    service = IdentityService(
-        uow,
-        IdentityRepositories.on(uow),
-        identity_provider=_ReturnsAccount(account),
-    )
+    service = _service_with(async_db, UnitOfWork(async_db), _ReturnsAccount(account))
 
     with pytest.raises(OAuthIdentityUnknownError):
         await service.sign_in_with_oauth(_verified("google", "ada@example.com"))
@@ -143,11 +152,7 @@ async def test_an_identity_linked_elsewhere_during_the_sign_in_is_refused_as_a_c
     await async_db.commit()
     uow = UnitOfWork(async_db)
     links = OAuthIdentityLinkRepository(uow)
-    service = IdentityService(
-        uow,
-        IdentityRepositories.on(uow),
-        identity_provider=_LinksElsewhereFirst(account, elsewhere, links),
-    )
+    service = _service_with(async_db, uow, _LinksElsewhereFirst(account, elsewhere, links))
 
     with pytest.raises(OAuthIdentityLinkConflictError):
         await service.sign_in_with_oauth(_verified("google", "ada@example.com"))

@@ -58,7 +58,11 @@ from gateway.repositories.users_repository import get_active_user
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetMembershipListener, BudgetService
 from gateway.services.code_execution import SandboxContainerRegistry
-from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
+from gateway.services.dashboard_session_service import (
+    SESSION_COOKIE_NAME,
+    create_dashboard_session,
+    resolve_dashboard_session,
+)
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
 from gateway.services.identity import IdentityService
@@ -78,6 +82,7 @@ from gateway.services.tenancy.authorization import WorkspaceAccess, resolve_visi
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, refresh_org_provider_cache
+from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
 )
@@ -1287,9 +1292,25 @@ McpServerPortDep = Annotated[McpServerPort, Depends(get_mcp_server_port)]
 ModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_model_provider_port)]
 
 
-def get_identity_service(uow: UnitOfWorkDep, identity_provider: IdentityProviderPortDep) -> IdentityService:
-    """Build the identity service on the request's Unit of Work."""
-    return IdentityService(uow, IdentityRepositories.on(uow), identity_provider=identity_provider)
+def get_identity_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    uow: UnitOfWorkDep,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    identity_provider: IdentityProviderPortDep,
+    organizations: OrganizationServiceDep,
+) -> IdentityService:
+    """Build the identity service on the request's Unit of Work.
+
+    NOTE: The organization domain service and the session starter must use the session the Unit of Work is over.
+    """
+    return IdentityService(
+        uow,
+        IdentityRepositories.on(uow),
+        identity_provider=identity_provider,
+        organization_domains=OrganizationDomainService(db),
+        organizations=organizations,
+        start_session=lambda user_id: create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=user_id),
+    )
 
 
 IdentityServiceDep = Annotated[IdentityService, Depends(get_identity_service)]

@@ -184,7 +184,7 @@ class _DatabaseStateStore:
     table that nothing else reads.
 
     Rows are staged on the caller's transaction and never committed here. The
-    route owns the commit boundary, which is what lets a callback that fails
+    caller owns the commit boundary, which is what lets a callback that fails
     after consuming a state roll the consumption back and leave the person a
     flow to retry.
     """

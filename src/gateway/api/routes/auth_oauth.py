@@ -47,7 +47,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import (
     GrowthSignalPortDep,
     IdentityServiceDep,
-    OrganizationServiceDep,
     get_config,
     get_db,
     record_auth_failure,
@@ -66,7 +65,6 @@ from gateway.exceptions.identity_exceptions import OAuthNotConfiguredError
 from gateway.log_config import logger
 from gateway.services.dashboard_session_service import (
     apply_session_cookie,
-    create_dashboard_session,
     request_is_https,
 )
 from gateway.services.maintenance_mode_service import is_maintenance_mode
@@ -81,7 +79,6 @@ from gateway.services.oauth_service import (
     require_configured,
 )
 from gateway.services.tenancy import report_new_account
-from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 
 router = APIRouter(prefix=OAUTH_ROUTE_PREFIX, tags=["auth"])
 
@@ -258,7 +255,6 @@ async def callback(
     background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    organizations: OrganizationServiceDep,
     flow_cookie: FlowCookie = None,
 ) -> OAuthSessionResponse:
     """Exchange an authorization code and set the HttpOnly session cookie.
@@ -295,40 +291,22 @@ async def callback(
         external = await exchange_code(
             config, provider, code=body.code, state=body.state, flow_secret=flow_cookie, db=db
         )
-        resolution = await identities.sign_in_with_oauth(external)
+        signed_in = await identities.sign_in_with_oauth(external)
     except TenancyError:
         record_auth_failure("invalid_oauth")
         raise
-
-    try:
-        # Staging the session row is inside this block, not just the commit:
-        # ``create_dashboard_session`` prunes expired rows with a DELETE before
-        # it stages anything, so it is a statement that can fail on its own. Left
-        # outside, that failure would skip the rollback and the log line below
-        # and surface as a bare 500 from the generic handler.
-        #
-        # NOTE: The identity service has already committed the account's sign-in changes.
-        # A failure here mints no session and leaves those changes in place.
-        # Before the session row and inside the same transaction, so a new
-        # membership and the sign-in that earned it land together or not at all.
-        # Not guarded: the only expected failure is two concurrent sign-ins
-        # racing, which the service settles on its own, and a database that
-        # cannot stage this cannot stage the session row either.
-        identity = resolution.identity
-        await OrganizationDomainService(db).auto_join_for_user(identity)
-        active_organization_id = await organizations.active_organization_id_for_sign_in(identity)
-        token, expires_at = await create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=identity.id)
-        await db.commit()
     except DATABASE_ERRORS as exc:
-        await db.rollback()
-        raise database_error(f"persist a dashboard session on a {provider} sign-in", exc) from None
+        raise database_error(f"persist a {provider} sign-in", exc) from None
+    identity = signed_in.account
     logger.info("Signed in %s with %s", identity.id, provider_label(provider))
-    await report_new_account(growth, identity, background_tasks=background_tasks, new_account=resolution.new_account)
-    apply_session_cookie(response, token, expires_at, secure=request_is_https(request))
+    await report_new_account(growth, identity, background_tasks=background_tasks, new_account=signed_in.new_account)
+    apply_session_cookie(
+        response, signed_in.session_token, signed_in.session_expires_at, secure=request_is_https(request)
+    )
     return OAuthSessionResponse(
-        expires_at=expires_at,
+        expires_at=signed_in.session_expires_at,
         user_id=identity.id,
-        active_organization_id=active_organization_id,
+        active_organization_id=signed_in.active_organization_id,
     )
 
 

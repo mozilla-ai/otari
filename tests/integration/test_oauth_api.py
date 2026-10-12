@@ -941,7 +941,7 @@ def test_a_database_failure_while_staging_the_session_rolls_back_and_says_nothin
     async def _explode(*_args: Any, **_kwargs: Any) -> tuple[str, Any]:
         raise SQLAlchemyError("pruning failed")
 
-    monkeypatch.setattr("gateway.api.routes.auth_oauth.create_dashboard_session", _explode)
+    monkeypatch.setattr("gateway.api.deps.create_dashboard_session", _explode)
 
     response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
 
@@ -951,6 +951,28 @@ def test_a_database_failure_while_staging_the_session_rolls_back_and_says_nothin
     assert response.json()["detail"] == "Database error"
     assert "pruning failed" not in response.text
     assert SESSION_COOKIE_NAME not in response.cookies
+
+
+def test_a_session_that_cannot_be_stored_leaves_the_account_and_its_links_as_they_were(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    user_id = add_member(client, master_key_header, email="ada@example.com")
+    stub_exchange(monkeypatch)
+
+    async def _explode(*_args: Any, **_kwargs: Any) -> tuple[str, Any]:
+        raise SQLAlchemyError("pruning failed")
+
+    monkeypatch.setattr("gateway.api.deps.create_dashboard_session", _explode)
+
+    assert _sign_in(client).status_code == 500
+
+    assert _links(db_session, user_id) == []
+    identity = _identity(db_session, "ada@example.com")
+    assert (identity.email_verified_at, identity.oauth_provider) == (None, None)
 
 
 @pytest.fixture
