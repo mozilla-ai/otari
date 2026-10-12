@@ -105,7 +105,7 @@ from gateway.services.pricing_service import (
     resolve_model_pricing,
 )
 from gateway.services.provider_kwargs import ResolvedProvider, missing_credential, resolve_provider_selector
-from gateway.services.providers import missing_provider_credential
+from gateway.services.providers import unpriced_model_refusal
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
 ResultT = TypeVar("ResultT")
@@ -439,34 +439,23 @@ async def run_passthrough(
             and pricing_required_but_missing(pricing, require_pricing=config.require_pricing)
         ):
             await refund_reservation(db, reservation)
-            # Pricing the model would not make a provider nothing can call servable,
-            # so that cause is the one named. This path never asks the hosted port.
-            missing = await missing_provider_credential(resolved, hosted=None, organization_id=organization_id)
-            if missing is not None:
-                await _log_rejection(
-                    missing.detail,
-                    row_model=resolved.model,
-                    row_provider=resolved.instance,
-                    status_code=missing.status_code,
-                )
-                raise HTTPException(
-                    status_code=missing.status_code, detail=missing.detail, headers=error_headers(missing.code)
-                )
-
-            no_pricing_detail = no_pricing_error_detail(model)
+            # This path never asks the hosted port, so none is passed.
+            unpriced = await unpriced_model_refusal(
+                model, resolved, plan=None, hosted=None, organization_id=organization_id
+            )
             # Record the rejection so dropped traffic is visible in the activity
             # log and countable as an error, rather than only reaching the
             # operator as a user complaint. cost stays null: nothing was spent.
             await _log_rejection(
-                no_pricing_detail,
+                unpriced.detail,
                 row_model=resolved.model,
                 row_provider=resolved.instance,
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                status_code=unpriced.status_code,
             )
             raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail=no_pricing_detail,
-                headers=error_headers(PRICING_REQUIRED),
+                status_code=unpriced.status_code,
+                detail=unpriced.detail,
+                headers=error_headers(unpriced.code),
             )
 
     # Model access control (per-key). The reservation is already taken above (the

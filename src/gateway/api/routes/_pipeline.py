@@ -258,7 +258,7 @@ from gateway.services.provider_kwargs import (
     resolve_provider_selector,
     with_failover_retries,
 )
-from gateway.services.providers import missing_provider_credential, owned_endpoint_http_client
+from gateway.services.providers import owned_endpoint_http_client, unpriced_model_refusal
 from gateway.services.routing import (
     BudgetState,
     CompiledPlan,
@@ -2541,38 +2541,9 @@ async def resolve_request_context(
         # cost=null when unpriced.
         if not budget_exempt and pricing_required_but_missing(gate_pricing, require_pricing=config.require_pricing):
             await refund_reservation(db, reservation)
-            # Pricing the model would not make a provider nothing can call servable,
-            # so that cause is the one named. Only a single candidate is checked,
-            # because only that one is offered to the hosted port at dispatch.
-            missing = (
-                await missing_provider_credential(
-                    resolved_provider, hosted=model_provider, organization_id=organization_id
-                )
-                if resolved_provider is not None and (plan is None or len(plan.attempts) == 1)
-                else None
+            refusal = await unpriced_model_refusal(
+                model, resolved_provider, plan=plan, hosted=model_provider, organization_id=organization_id
             )
-            if missing is not None:
-                await log_gateway_rejection(
-                    db=db,
-                    log_writer=log_writer,
-                    api_key_id=api_key_id,
-                    user_id=user_id,
-                    model=gate_model,
-                    provider=gate_instance,
-                    endpoint=adapter.endpoint,
-                    detail=missing.detail,
-                    status_code=missing.status_code,
-                    started_at=started_at,
-                    request_id=request_id,
-                    tags=tags,
-                )
-                raise adapter.error(
-                    missing.status_code,
-                    missing.detail,
-                    error_kind_for_status(missing.status_code),
-                    headers=error_headers(missing.code),
-                )
-            no_pricing_detail = no_pricing_error_detail(model)
             # Record the rejection after the refund, so an operator who flipped
             # require_pricing on can see that live traffic is being dropped.
             await log_gateway_rejection(
@@ -2583,17 +2554,19 @@ async def resolve_request_context(
                 model=gate_model,
                 provider=gate_instance,
                 endpoint=adapter.endpoint,
-                detail=no_pricing_detail,
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=refusal.detail,
+                status_code=refusal.status_code,
                 started_at=started_at,
                 request_id=request_id,
                 tags=tags,
             )
             raise adapter.error(
-                402,
-                no_pricing_detail,
-                ErrorKind.INVALID_REQUEST,
-                headers=error_headers(PRICING_REQUIRED),
+                refusal.status_code,
+                refusal.detail,
+                ErrorKind.INVALID_REQUEST
+                if refusal.code == PRICING_REQUIRED
+                else error_kind_for_status(refusal.status_code),
+                headers=error_headers(refusal.code),
             )
 
         # Resolve uploaded attachments only once the request is authorized
