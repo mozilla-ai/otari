@@ -70,24 +70,23 @@ def organization_index() -> Iterator[selectors.SelectorIndex]:
 
 @pytest.mark.usefixtures("organization_index")
 def test_the_undated_name_resolves_to_the_one_dated_build_for_the_organization() -> None:
-    assert selectors.resolve_catalog_selector("anthropic:claude-haiku-4-5", workspace_id=_WORKSPACE) == _HAIKU
-    assert selectors.resolve_catalog_selector("anthropic:claude-haiku-4-5", organization_id=_ORG) == _HAIKU
+    assert selectors.resolve_undated_selector("anthropic:claude-haiku-4-5", workspace_id=_WORKSPACE) == _HAIKU
 
 
 @pytest.mark.usefixtures("organization_index")
 def test_the_undated_name_resolves_for_nobody_else() -> None:
-    assert selectors.resolve_catalog_selector("anthropic:claude-haiku-4-5") is None
-    assert selectors.resolve_catalog_selector("anthropic:claude-haiku-4-5", workspace_id=_OTHER_WORKSPACE) is None
+    assert selectors.resolve_undated_selector("anthropic:claude-haiku-4-5") is None
+    assert selectors.resolve_undated_selector("anthropic:claude-haiku-4-5", workspace_id=_OTHER_WORKSPACE) is None
 
 
 @pytest.mark.usefixtures("organization_index")
 def test_ambiguous_and_already_named_offerings_are_left_alone() -> None:
-    assert selectors.resolve_catalog_selector("anthropic:claude-twin", workspace_id=_WORKSPACE) is None
+    assert selectors.resolve_undated_selector("anthropic:claude-twin", workspace_id=_WORKSPACE) is None
     # Listed undated, so it names an offering and is never rewritten.
-    assert selectors.resolve_catalog_selector(_SONNET_46, workspace_id=_WORKSPACE) is None
-    assert selectors.resolve_catalog_selector(_HAIKU, workspace_id=_WORKSPACE) is None
+    assert selectors.resolve_undated_selector(_SONNET_46, workspace_id=_WORKSPACE) is None
+    assert selectors.resolve_undated_selector(_HAIKU, workspace_id=_WORKSPACE) is None
     # A provider's own id keeps its casing.
-    assert selectors.resolve_catalog_selector("anthropic:Claude-Haiku-4-5", workspace_id=_WORKSPACE) is None
+    assert selectors.resolve_undated_selector("anthropic:Claude-Haiku-4-5", workspace_id=_WORKSPACE) is None
 
 
 @pytest.mark.usefixtures("organization_index")
@@ -101,3 +100,13 @@ def test_the_resolver_relabels_the_undated_name_like_an_alias() -> None:
     )
     verbatim = resolve_provider_selector(config, _SONNET_46, workspace_id=_WORKSPACE)
     assert (verbatim.model, verbatim.alias) == ("claude-sonnet-4-6", None)
+
+
+@pytest.mark.usefixtures("organization_index")
+def test_a_providers_instance_sends_the_undated_name_as_written() -> None:
+    """The organization's offer never reaches an instance-addressed selector, so it never rewrites one."""
+    config = GatewayConfig(master_key="k", providers={"anthropic": {"api_key": "x"}})
+    resolved = resolve_provider_selector(config, "anthropic:claude-haiku-4-5", workspace_id=_WORKSPACE)
+    assert (resolved.instance, resolved.model, resolved.alias) == ("anthropic", "claude-haiku-4-5", None)
+    # The catalog's own spellings are not part of this rule.
+    assert selectors.resolve_catalog_selector("anthropic:claude-haiku-4-5", workspace_id=_WORKSPACE) is None

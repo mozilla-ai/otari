@@ -18,12 +18,14 @@ from any_llm.types.model import Model
 from fastapi import status
 from fastapi.testclient import TestClient
 
-from gateway.core.config import API_KEY_HEADER, API_ROOT
+from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.error_codes import MODEL_NOT_FOUND, MODEL_NOT_SERVING
 from gateway.services import catalog as selectors
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy.org_provider_key_service import reset_org_provider_cache
+
+from .conftest import build_test_client
 
 _MASTER_HEADER = {API_KEY_HEADER: "Bearer test-master-key"}
 _KEYS = f"{API_ROOT}/organizations/me/provider-keys"
@@ -162,3 +164,28 @@ def test_a_bare_alias_sharing_the_undated_name_does_not_disclose_the_dated_build
     assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
     assert response.json()["code"] == MODEL_NOT_FOUND
     assert "2025" not in response.json()["detail"]
+
+
+@pytest.fixture
+def instance_client(postgres_url: str, clean_database: None) -> Generator[TestClient]:
+    """A gateway whose ``config.yml`` also declares an ``anthropic`` instance."""
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        auto_migrate=False,
+        require_pricing=False,
+        providers={"anthropic": {"api_key": "sk-ant-deployment"}},
+    )
+    yield from build_test_client(config)
+
+
+def test_a_providers_instance_receives_the_undated_name_as_written(instance_client: TestClient) -> None:
+    """The organization's offer is indexed, but an instance-addressed selector never reaches its key."""
+    _offer_key(instance_client)
+    _refresh_index(instance_client)
+    captured: dict[str, Any] = {}
+
+    response = _chat(instance_client, _api_key_header(instance_client), "anthropic:claude-haiku-4-5", captured)
+
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert (captured["model"], captured["api_key"]) == ("anthropic:claude-haiku-4-5", "sk-ant-deployment")

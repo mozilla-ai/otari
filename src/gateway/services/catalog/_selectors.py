@@ -172,10 +172,22 @@ def resolve_catalog_selector(
             return str(hit)
         if (hit := getattr(index, attr).get(spelling)) is not None:
             return str(hit)
-    # A provider's own id, so its casing is kept.
-    if view is not None:
-        return view.undated.get(model_selector)
     return None
+
+
+def resolve_undated_selector(model_selector: str, *, workspace_id: uuid.UUID | None = None) -> str | None:
+    """The dated build an undated ``instance:<name>`` stands for on the caller's organization's key, or None.
+
+    Separate from :func:`resolve_catalog_selector` because it applies only to
+    a selector that reaches an organization's key: the caller asks it only
+    when the selector names no ``providers:`` instance, which sends any id as
+    written. Matched case-sensitively, because it is a provider's own id.
+    """
+    index = _index
+    view = _organization_view(index, workspace_id, None)
+    if view is None or _names_an_offering(index, view, model_selector):
+        return None
+    return view.undated.get(model_selector)
 
 
 def resolve_catalog_offerings(

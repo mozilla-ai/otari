@@ -15,6 +15,7 @@ from gateway.services.catalog._selectors import (
     reset_selector_index,
     resolve_catalog_offerings,
     resolve_catalog_selector,
+    resolve_undated_selector,
     set_selector_index,
     short_selector_for,
 )
@@ -34,6 +35,7 @@ __all__ = [
     "reset_selector_index",
     "resolve_catalog_offerings",
     "resolve_catalog_selector",
+    "resolve_undated_selector",
     "set_selector_index",
     "short_selector_for",
 ]
