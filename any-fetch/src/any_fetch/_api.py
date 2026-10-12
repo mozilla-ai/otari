@@ -16,6 +16,9 @@ from any_fetch._types import BuiltinFactory, FetchedPage, ProviderMetadata
 DEFAULT_TIMEOUT = 15.0
 """Seconds per request when the caller names no timeout."""
 
+SHARED_PARAMETERS = ("max_chars",)
+"""The parameters every provider takes beside its native options, which a host tells apart by this list."""
+
 
 class AnyFetch(ABC):
     """A web fetch provider. Build one with ``AnyFetch.create``.

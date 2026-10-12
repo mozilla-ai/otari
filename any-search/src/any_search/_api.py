@@ -16,6 +16,9 @@ from any_search._types import ProviderMetadata, SearchResult, TimeRange
 DEFAULT_TIMEOUT = 15.0
 """Seconds per request when the caller names no timeout."""
 
+SHARED_PARAMETERS = ("max_results", "time_range")
+"""The parameters every provider takes beside its native options, which a host tells apart by this list."""
+
 
 class AnySearch(ABC):
     """A web search provider. Build one with ``AnySearch.create``.

@@ -7,6 +7,7 @@ while no factory is registered, and the host checks its own (in otari, the
 fetch backend's tests).
 """
 
+import inspect
 import json
 import logging
 from collections.abc import AsyncIterator, Callable
@@ -19,6 +20,7 @@ import httpx
 import pytest
 
 from any_fetch import (
+    SHARED_PARAMETERS,
     AnyFetch,
     BuiltinNotRegisteredError,
     FetchedPage,
@@ -199,6 +201,18 @@ async def test_an_error_inside_a_successful_answer_is_returned(provider: str) ->
 async def test_an_unknown_option_is_refused(provider: str) -> None:
     with pytest.raises(UnsupportedParameterError):
         await _fetch(provider, "normal", not_an_option=1)
+
+
+def test_the_shared_parameters_are_the_keywords_fetch_takes() -> None:
+    parameters = inspect.signature(AnyFetch.fetch).parameters.values()
+    keywords = [parameter.name for parameter in parameters if parameter.kind is inspect.Parameter.KEYWORD_ONLY]
+    assert keywords == list(SHARED_PARAMETERS)
+
+
+@pytest.mark.parametrize("provider", PROVIDERS)
+def test_no_native_option_takes_a_shared_parameters_name(provider: str) -> None:
+    names = {option.name for option in AnyFetch.get_provider_metadata(provider).options}
+    assert names.isdisjoint(SHARED_PARAMETERS)
 
 
 @pytest.mark.asyncio
