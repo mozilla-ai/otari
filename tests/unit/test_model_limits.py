@@ -3,7 +3,8 @@
 from typing import Any
 
 from gateway.core.config import GatewayConfig
-from gateway.services.merged_catalog_service import ModelLimits, ModelObject, apply_model_limits, model_limits
+from gateway.services.catalog._limits import ModelLimits, apply_model_limits, model_limits
+from gateway.services.merged_catalog_service import ModelObject
 
 # Limits that differ from genai-prices' wherever both know the model, so a test can tell which one answered.
 MODELS_DEV: dict[str, Any] = {

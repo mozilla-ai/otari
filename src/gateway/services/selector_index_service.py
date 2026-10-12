@@ -28,6 +28,7 @@ from gateway.services.catalog import (
     OrganizationSelectors,
     build_organization_selectors,
     build_selector_index,
+    metadata_entry,
     set_selector_index,
 )
 from gateway.services.merged_catalog_service import (
@@ -36,7 +37,7 @@ from gateway.services.merged_catalog_service import (
     ModelObject,
     build_merged_catalog,
 )
-from gateway.services.model_catalog_service import ModelCatalogEntry, metadata_entry
+from gateway.services.model_catalog_service import ModelCatalogEntry
 from gateway.services.model_identity import ModelIdentity, OfferingSeed, group_offerings
 from gateway.services.pricing_service import (
     OverridePeriod,

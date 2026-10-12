@@ -204,19 +204,6 @@ def background_catalog_enabled(config: GatewayConfig) -> bool:
     return config.models_dev_metadata and config.models_dev_cache_ttl_seconds > 0
 
 
-async def load_catalog_metadata(config: GatewayConfig, *, cached_only: bool = False) -> dict[str, Any] | None:
-    """The models.dev catalog a model listing joins, or ``None`` without one.
-
-    Answers from the cache whenever the refresher keeps it warm, so a listing
-    waits on models.dev only before the first fetch has finished. ``cached_only``
-    never fetches, for a caller off the request path; see
-    :func:`cached_models_dev_catalog`.
-    """
-    if cached_only:
-        return cached_models_dev_catalog(config)
-    return await load_models_dev_catalog(config, serve_stale=background_catalog_enabled(config))
-
-
 def _catalog_refresh_interval(config: GatewayConfig) -> float:
     return max(_MIN_REFRESH_INTERVAL_SECONDS, float(config.models_dev_cache_ttl_seconds))
 
@@ -252,8 +239,12 @@ def _as_str(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _as_limit(value: Any) -> int | None:
-    """A positive token limit, else ``None``: models.dev writes 0 for a limit it does not know."""
+def token_limit(value: Any) -> int | None:
+    """A token limit, or ``None`` for anything but a positive integer.
+
+    models.dev writes 0 for a limit it does not know, and a client would read
+    0 as no tokens at all.
+    """
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
@@ -292,8 +283,8 @@ def parse_entry(model: dict[str, Any]) -> ModelCatalogEntry:
         structured_output=bool(model.get("structured_output")),
         attachment=bool(model.get("attachment")),
         temperature=bool(model.get("temperature")),
-        context_window=_as_limit(limit.get("context")),
-        max_output_tokens=_as_limit(limit.get("output")),
+        context_window=token_limit(limit.get("context")),
+        max_output_tokens=token_limit(limit.get("output")),
         knowledge_cutoff=_as_str(model.get("knowledge")),
         release_date=_as_str(model.get("release_date")),
         last_updated=_as_str(model.get("last_updated")),
@@ -325,30 +316,6 @@ _MODELS_DEV_PROVIDER_IDS: dict[str, str] = {
 def models_dev_provider_id(provider_type: str) -> str:
     """The models.dev provider id for an any-llm implementation."""
     return _MODELS_DEV_PROVIDER_IDS.get(provider_type, provider_type)
-
-
-# Gemini's listing names a model ``models/<id>``, where models.dev keys the bare id.
-_LISTING_PREFIX = "models/"
-
-
-def metadata_entry(catalog: dict[str, Any] | None, provider_type: str, model_id: str) -> ModelCatalogEntry | None:
-    """models.dev's entry for a model under a provider type, or None.
-
-    Looked up directly rather than through ``build_metadata_map`` so an
-    organization's key, which is not a ``providers:`` instance, is enriched too.
-    """
-    if not catalog:
-        return None
-    provider = catalog.get(models_dev_provider_id(provider_type))
-    if not isinstance(provider, dict):
-        return None
-    models = provider.get("models")
-    if not isinstance(models, dict):
-        return None
-    model = models.get(model_id)
-    if model is None and model_id.startswith(_LISTING_PREFIX):
-        model = models.get(model_id.removeprefix(_LISTING_PREFIX))
-    return parse_entry(model) if isinstance(model, dict) else None
 
 
 def build_metadata_map(config: GatewayConfig, catalog: dict[str, Any] | None) -> dict[str, ModelCatalogEntry]:

@@ -23,12 +23,12 @@ from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.services.catalog import apply_model_limits, load_catalog_metadata
 from gateway.services.control_plane import UNAVAILABLE_DETAIL, ResolveEndpoint, resolve
 from gateway.services.merged_catalog_service import (
     ModelObject,
     alias_model,
     apply_default_pricing,
-    apply_model_limits,
     apply_organization_pricing,
     build_merged_catalog,
     catalog_aliases,
@@ -49,8 +49,8 @@ from gateway.services.model_catalog_service import (
     ModelCatalogEntry,
     background_catalog_enabled,
     build_metadata_map,
-    load_catalog_metadata,
     load_models_dev_catalog,
+    token_limit,
 )
 from gateway.services.model_discovery_service import (
     background_discovery_enabled,
@@ -434,11 +434,6 @@ async def _find_model(
     ), aliases
 
 
-def _token_limit(value: object) -> int | None:
-    """A token limit the control plane reported, or ``None`` when it is not a positive integer."""
-    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
-
-
 def _model_from_platform(entry: object) -> ModelObject:
     """One ``models`` entry from the control plane, or ``ControlPlaneUnavailableError`` when unreadable."""
     if not isinstance(entry, dict) or not isinstance(entry.get("id"), str) or not entry["id"]:
@@ -449,8 +444,8 @@ def _model_from_platform(entry: object) -> ModelObject:
         id=entry["id"],
         created=created if isinstance(created, int) and not isinstance(created, bool) else 0,
         owned_by=owned_by if isinstance(owned_by, str) and owned_by else owner_from_key(entry["id"]),
-        context_window=_token_limit(entry.get("context_window")),
-        max_output_tokens=_token_limit(entry.get("max_output_tokens")),
+        context_window=token_limit(entry.get("context_window")),
+        max_output_tokens=token_limit(entry.get("max_output_tokens")),
     )
 
 
