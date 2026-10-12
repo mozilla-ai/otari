@@ -78,7 +78,6 @@ from gateway.models.tools import (
     WebToolCredential,
     WebToolCredentialSource,
 )
-from gateway.services.pricing_service import gateway_tool_pricing_key
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 from gateway.services.web_retrieval_network import NETWORK_DEADLINE_SECONDS
 
@@ -93,9 +92,11 @@ Runner = Literal["library", "old"]
 DIRECT_TIMEOUT_S = 30.0
 IN_LOOP_TIMEOUT_S = 15.0
 
-# The rows that price any backend of each tool (design L).
-_SEARCH_FALLBACK_RATE = gateway_tool_pricing_key(WEB_SEARCH_TOOL_NAME)
-_FETCH_FALLBACK_RATE = gateway_tool_pricing_key(WEB_FETCH_TOOL_NAME)
+# The rows that price any backend of each tool (design L), under the key the
+# pricing service gives a gateway-run tool. Spelled out here rather than imported,
+# since the pricing modules import this package.
+_SEARCH_FALLBACK_RATE = f"otari:{WEB_SEARCH_TOOL_NAME}"
+_FETCH_FALLBACK_RATE = f"otari:{WEB_FETCH_TOOL_NAME}"
 # The label of a call an organization key serves, before the provider: never a pricing row.
 _ORG_LABEL_PREFIX = "org"
 _NO_OPTIONS: Mapping[str, Any] = MappingProxyType({})

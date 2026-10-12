@@ -25,6 +25,7 @@ from gateway.models.tools import (
     WebSearchCredential,
     WebToolCredentialSource,
 )
+from gateway.services.pricing_service import gateway_tool_pricing_key
 from gateway.services.tools import ResolvedFetch, ResolvedSearch, resolve_fetch, resolve_search
 from gateway.services.tools._web_search import _resolve
 
@@ -316,6 +317,15 @@ def test_the_search_order(case: _SearchCase) -> None:
     assert {key: getattr(resolved, key) for key in case.expected} == case.expected
     if case.options is not None:
         assert dict(resolved.options) == case.options
+
+
+def test_the_fallback_rate_keys_are_the_pricing_services_keys_for_the_tools() -> None:
+    search = resolve_search(GatewayConfig(search_tools={"test": _FAKE}), None, requested=None, request_options=None)
+    fetch = resolve_fetch(GatewayConfig(), None, requested=None, for_search=None)
+
+    assert search is not None
+    assert search.rate_keys[-1] == gateway_tool_pricing_key("web_search")
+    assert fetch.rate_keys[-1] == gateway_tool_pricing_key("web_fetch")
 
 
 def test_a_name_no_search_instance_has_is_not_found() -> None:
