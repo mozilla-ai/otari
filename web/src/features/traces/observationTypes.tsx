@@ -1,56 +1,56 @@
 import type { IconType } from "react-icons"
 import {
-  LuBot,
-  LuCircleDot,
-  LuFan,
-  LuListTree,
-  LuMoveHorizontal,
-  LuWrench,
-} from "react-icons/lu"
+  FiArrowRight,
+  FiDisc,
+  FiGitBranch,
+  FiMessageSquare,
+  FiTerminal,
+  FiTool,
+} from "react-icons/fi"
 
 import type { ObservationType } from "./types"
 
 export type TypeKey = ObservationType | "TRACE"
 
-// Lucide glyphs for these six marks only: they are Langfuse's identity for an
-// observation type. Full class strings, so Tailwind sees every one.
+// The trace, generation and tool marks are the shell's own Sessions,
+// Playground and Tools glyphs. Full class strings, so Tailwind sees every one.
 export const OBSERVATION_TYPES: Record<
   TypeKey,
   { label: string; icon: IconType; inkClass: string; barClass: string | null }
 > = {
   TRACE: {
     label: "Trace",
-    icon: LuListTree,
+    icon: FiGitBranch,
     inkClass: "text-foreground",
     barClass: null,
   },
   GENERATION: {
     label: "Generation",
-    icon: LuFan,
+    icon: FiMessageSquare,
     inkClass: "text-chart-cat-5",
     barClass: "bg-[var(--trace-bar-generation)]",
   },
   SPAN: {
     label: "Span",
-    icon: LuMoveHorizontal,
+    icon: FiArrowRight,
     inkClass: "text-chart-cat-6",
     barClass: "bg-[var(--trace-bar-span)]",
   },
   AGENT: {
     label: "Agent",
-    icon: LuBot,
+    icon: FiTerminal,
     inkClass: "text-chart-cat-3",
     barClass: "bg-[var(--trace-bar-agent)]",
   },
   TOOL: {
     label: "Tool",
-    icon: LuWrench,
+    icon: FiTool,
     inkClass: "text-chart-cat-2",
     barClass: "bg-[var(--trace-bar-tool)]",
   },
   EVENT: {
     label: "Event",
-    icon: LuCircleDot,
+    icon: FiDisc,
     inkClass: "text-subtle",
     barClass: null,
   },
