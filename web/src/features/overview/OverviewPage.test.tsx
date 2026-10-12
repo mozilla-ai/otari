@@ -167,7 +167,6 @@ function mockApi(b: Bodies) {
       return jsonResponse(b.activation ?? workspaceActivation())
     }
     if (url.includes(`${API_ROOT}/models`)) {
-      if (b.modelsFail) return jsonResponse({ detail: "catalog down" }, 500)
       return jsonResponse(modelCatalog(b.models ?? ["openai:gpt-4o-mini"]))
     }
     if (url.includes(`${API_ROOT}/usage/summary`)) {
@@ -813,10 +812,9 @@ describe("OverviewIndex routing", () => {
   })
 
   it("shows a getting-started overview and links to providers on a fresh gateway", async () => {
-    // The deployment's own credentials. Standalone serves both provider pages
-    // now, and this one stays right because only a deployment operator is sent
-    // to `/providers`: a caller who is not one gets `OrganizationOverview`,
-    // whose own strip names the organization's provider-key page.
+    // The deployment's own credentials: only a deployment operator is sent to
+    // `/providers`, since `OrganizationOverview` links to the organization's
+    // provider-key page.
     mockApi({ providers: [] })
     const user = userEvent.setup()
     renderPage(<OverviewIndex />)
@@ -979,6 +977,7 @@ function mockScopedApi(b: Bodies): string[] {
       return jsonResponse(b.activation ?? workspaceActivation())
     }
     if (url.includes(`${API_ROOT}/models`)) {
+      if (b.modelsFail) return jsonResponse({ detail: "catalog down" }, 500)
       return jsonResponse(modelCatalog(b.models ?? ["openai:gpt-4o-mini"]))
     }
     return jsonResponse({ detail: "forbidden" }, 403)

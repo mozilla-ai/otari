@@ -830,13 +830,13 @@ function OverviewHeader({
 // both provider pages and this prefers the deployment's own, which is not the
 // obvious answer once there are two. It is the right one because of who reaches
 // this button: `OverviewIndex` hands a caller who does not operate the
-// deployment to `OrganizationOverview`, whose strip names the organization's
-// provider-key page instead, so the only person who can press this is the
-// operator, and `/providers` is where a fresh gateway is set up and carries the
-// first-run panel that continues the flow. Gating on the caller here too would
-// restate a rule already guaranteed one level up. Hosted and a control plane report no `providers` surface, so
-// naming it unconditionally would point an operator at the shell's "not
-// available here" panel.
+// deployment to `OrganizationOverview`, which links to the organization's
+// provider-key page, so the only person who can press this is the operator, and
+// `/providers` is where a fresh gateway is set up and carries the first-run
+// panel that continues the flow. Gating on the caller here too would restate a
+// rule already guaranteed one level up. Hosted and a control plane report no
+// `providers` surface, so naming it unconditionally would point an operator at
+// the shell's "not available here" panel.
 //
 // Only correct for *adding* one, which is why provider health does not use it:
 // `/providers/health` reports on `config.providers`, the process-global
