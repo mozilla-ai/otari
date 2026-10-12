@@ -665,7 +665,8 @@ are required, and at most 255, the limit a choice question has. The defaults
 are Claude Code's `haiku`, `sonnet` and `opus` aliases with descriptions along
 the lines above. The list is Claude Code's alone: a pi request sends its own
 `candidates` in the same shape, as Otari model ids (`<provider>:<model>`),
-because pi-otari decides them on the laptop.
+because [pi-otari](https://github.com/mozilla-ai/pi-otari) decides them on the
+laptop.
 
 ## Mail
 
