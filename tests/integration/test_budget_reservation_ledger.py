@@ -125,7 +125,8 @@ async def test_a_hold_becomes_a_row_on_both_mechanisms(async_db: AsyncSession, t
 
     lines = await _lines(async_db, handle.reservation_id)
     assert [line.scoped_budget_id for line in lines] == [cap.id]
-    assert lines[0].amount == Decimal("2.000000")
+    assert (lines[0].amount, lines[0].request_amount) == (Decimal("2.000000"), 1)
+    assert rows[0].request_estimate == 1
 
 
 @pytest.mark.asyncio

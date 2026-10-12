@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -60,13 +61,10 @@ async def record(
     db: AsyncSession,
     *,
     user_id: str,
-    estimate: Decimal,
     user_reserved: bool,
+    user_held: HeldAmounts,
     scoped_budgets: Sequence[ApplicableBudget],
-    scoped_estimate: Decimal,
-    token_estimate: int = 0,
-    scoped_token_estimate: int = 0,
-    request_estimate: int = 0,
+    ceiling_held: HeldAmounts,
     ttl_seconds: int,
     commit: bool = True,
 ) -> str | None:
@@ -79,11 +77,9 @@ async def record(
     budget row: there is no hold to make reclaimable, so a row would be pure
     write amplification on the hot path.
 
-    Every amount is per leg, as the caller knows them: ``token_estimate`` is what
-    the per-user leg holds and ``scoped_token_estimate`` what each ceiling does,
-    and the two diverge whenever a top-up grows one and not the other. The request
-    count takes one figure because it never grows, so both legs hold what they
-    held at admission; the row records it only when that leg holds at all.
+    ``user_held`` is what the per-user leg holds and ``ceiling_held`` what each ceiling does,
+    and the two diverge whenever a top-up grows one and not the other.
+    The row records the per-user leg's request count only when that leg holds at all.
     """
     if not user_reserved and not scoped_budgets:
         return None
@@ -93,12 +89,8 @@ async def record(
         reservation_id,
         user_id=user_id,
         user_reserved=user_reserved,
-        user_held=HeldAmounts(
-            amount=estimate,
-            tokens=token_estimate,
-            requests=request_estimate if user_reserved else 0,
-        ),
-        ceiling_held=HeldAmounts(amount=scoped_estimate, tokens=scoped_token_estimate, requests=request_estimate),
+        user_held=user_held if user_reserved else replace(user_held, requests=0),
+        ceiling_held=ceiling_held,
         scoped_budget_ids=[applicable.budget_id for applicable in scoped_budgets],
         expires_at=datetime.now(UTC) + timedelta(seconds=ttl_seconds),
     )
@@ -113,9 +105,7 @@ async def release_unrecorded(
     *,
     user_id: str,
     scoped_budget_ids: Sequence[str],
-    amount: Decimal,
-    tokens: int,
-    requests: int,
+    held: HeldAmounts,
 ) -> bool:
     """Give back the ceilings' holds of a row whose commit reported failure, unless it landed.
 
@@ -127,7 +117,9 @@ async def release_unrecorded(
     """
     try:
         await ReservationRepository(db).add_released(reservation_id, user_id=user_id)
-        await release_scoped(db, scoped_budget_ids, amount, tokens=tokens, requests=requests, commit=False)
+        await release_scoped(
+            db, scoped_budget_ids, held.amount, tokens=held.tokens, requests=held.requests, commit=False
+        )
         await db.commit()
     except IntegrityError:
         await db.rollback()

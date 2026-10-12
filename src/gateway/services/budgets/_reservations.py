@@ -29,6 +29,7 @@ from gateway.models.budgets import (
 from gateway.models.money import to_usd
 from gateway.models.pricing import ModelPricing
 from gateway.models.users import User
+from gateway.repositories.budgets import HeldAmounts
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.budgets import _ledger as ledger
 from gateway.services.budgets._periods import budget_window
@@ -328,9 +329,8 @@ class ReservationHandle:
     # it, so the ceiling loses that headroom for the rest of its window.
     token_estimate: int = 0
     scoped_token_estimate: int = 0
-    # Not split, because a request count never grows: a top-up belongs to a
-    # request already counted, so both legs hold what they held at admission.
     request_estimate: int = 0
+    scoped_request_estimate: int = 0
     # This is None when the request holds nothing: a free model, a budget-exempt key, or no budget and no ceiling.
     reservation_id: str | None = None
 
@@ -412,19 +412,23 @@ def rerank_estimate(pricing: ModelPricing | None, *, prompt_chars: int) -> Decim
     return estimate_cost(pricing, prompt_chars=prompt_chars, max_output_tokens=None, default_output_tokens=0)
 
 
+def _ceiling_held(scoped: tuple[ApplicableBudget, ...], usd: Decimal | None, tokens: int, requests: int) -> HeldAmounts:
+    """Return what each of ``scoped`` holds, which is nothing when the request holds no ceiling."""
+    if not scoped:
+        return HeldAmounts(amount=ZERO, tokens=0, requests=0)
+    return HeldAmounts(amount=usd or ZERO, tokens=tokens, requests=requests)
+
+
 async def _held_handle(
     db: AsyncSession,
     *,
     user_id: str,
-    estimate: Decimal,
     user_reserved: bool,
+    user_held: HeldAmounts,
     strategy: str,
     counts_toward_budget: bool,
     scoped: tuple[ApplicableBudget, ...],
-    scoped_estimate: Decimal,
-    token_estimate: int,
-    scoped_token_estimate: int,
-    request_estimate: int,
+    ceiling_held: HeldAmounts,
     ttl_seconds: int,
     record_reservation: bool,
     user_hold_uncommitted: bool = False,
@@ -455,13 +459,10 @@ async def _held_handle(
                 reservation_id = await ledger.record(
                     db,
                     user_id=user_id,
-                    estimate=estimate,
                     user_reserved=user_reserved,
+                    user_held=user_held,
                     scoped_budgets=scoped,
-                    scoped_estimate=scoped_estimate,
-                    token_estimate=token_estimate,
-                    scoped_token_estimate=scoped_token_estimate,
-                    request_estimate=request_estimate,
+                    ceiling_held=ceiling_held,
                     ttl_seconds=ttl_seconds,
                     commit=False,
                 )
@@ -474,9 +475,9 @@ async def _held_handle(
                 await release_scoped(
                     db,
                     [item.budget_id for item in scoped],
-                    scoped_estimate,
-                    tokens=scoped_token_estimate,
-                    requests=request_estimate,
+                    ceiling_held.amount,
+                    tokens=ceiling_held.tokens,
+                    requests=ceiling_held.requests,
                 )
             raise
         try:
@@ -494,9 +495,7 @@ async def _held_handle(
                         reservation_id,
                         user_id=user_id,
                         scoped_budget_ids=[item.budget_id for item in scoped],
-                        amount=scoped_estimate,
-                        tokens=scoped_token_estimate,
-                        requests=request_estimate,
+                        held=ceiling_held,
                     )
                 except DATABASE_ERRORS:
                     with contextlib.suppress(*DATABASE_ERRORS):
@@ -512,13 +511,10 @@ async def _held_handle(
             reservation_id = await ledger.record(
                 db,
                 user_id=user_id,
-                estimate=estimate,
                 user_reserved=user_reserved,
+                user_held=user_held,
                 scoped_budgets=scoped,
-                scoped_estimate=scoped_estimate,
-                token_estimate=token_estimate,
-                scoped_token_estimate=scoped_token_estimate,
-                request_estimate=request_estimate,
+                ceiling_held=ceiling_held,
                 ttl_seconds=ttl_seconds,
             )
         except SQLAlchemyError:
@@ -534,15 +530,16 @@ async def _held_handle(
             )
     return ReservationHandle(
         user_id=user_id,
-        estimate=estimate,
+        estimate=user_held.amount,
         reserved=user_reserved,
         strategy=strategy,
         counts_toward_budget=counts_toward_budget,
         scoped_budgets=scoped,
-        scoped_estimate=scoped_estimate,
-        token_estimate=token_estimate,
-        scoped_token_estimate=scoped_token_estimate,
-        request_estimate=request_estimate,
+        scoped_estimate=ceiling_held.amount,
+        token_estimate=user_held.tokens,
+        scoped_token_estimate=ceiling_held.tokens,
+        request_estimate=user_held.requests,
+        scoped_request_estimate=ceiling_held.requests,
         reservation_id=reservation_id,
     )
 
@@ -724,17 +721,14 @@ async def reserve_budget(
         return await _held_handle(
             db,
             user_id=user_id,
-            estimate=ZERO,
             user_reserved=False,
+            # Reachable only with ceilings held and no per-user budget, so the
+            # user leg holds nothing on any axis and the ceilings hold everything.
+            user_held=HeldAmounts(amount=ZERO, tokens=0, requests=held_requests),
             strategy=normalized,
             counts_toward_budget=counts_toward_budget,
             scoped=scoped,
-            scoped_estimate=usd or ZERO,
-            # Reachable only with ceilings held and no per-user budget, so the
-            # user leg holds nothing on any axis and the ceilings hold everything.
-            token_estimate=0,
-            scoped_token_estimate=held_tokens,
-            request_estimate=held_requests,
+            ceiling_held=HeldAmounts(amount=usd or ZERO, tokens=held_tokens, requests=held_requests),
             ttl_seconds=reservation_ttl_sec,
             record_reservation=record_reservation,
         )
@@ -755,16 +749,13 @@ async def reserve_budget(
         return await _held_handle(
             db,
             user_id=user_id,
-            estimate=usd or ZERO,
             user_reserved=True,
             user_hold_uncommitted=True,
+            user_held=HeldAmounts(amount=usd or ZERO, tokens=held_tokens, requests=held_requests),
             strategy=normalized,
             counts_toward_budget=counts_toward_budget,
             scoped=scoped,
-            scoped_estimate=(usd or ZERO) if scoped else ZERO,
-            token_estimate=held_tokens,
-            scoped_token_estimate=held_tokens if scoped else 0,
-            request_estimate=held_requests,
+            ceiling_held=_ceiling_held(scoped, usd, held_tokens, held_requests),
             ttl_seconds=reservation_ttl_sec,
             record_reservation=record_reservation,
         )
@@ -852,16 +843,13 @@ async def reserve_budget(
     return await _held_handle(
         db,
         user_id=user_id,
-        estimate=usd or ZERO,
         user_reserved=True,
         user_hold_uncommitted=True,
+        user_held=HeldAmounts(amount=usd or ZERO, tokens=held_tokens, requests=held_requests),
         strategy=normalized,
         counts_toward_budget=counts_toward_budget,
         scoped=scoped,
-        scoped_estimate=(usd or ZERO) if scoped else ZERO,
-        token_estimate=held_tokens,
-        scoped_token_estimate=held_tokens if scoped else 0,
-        request_estimate=held_requests,
+        ceiling_held=_ceiling_held(scoped, usd, held_tokens, held_requests),
         ttl_seconds=reservation_ttl_sec,
         record_reservation=record_reservation,
     )
@@ -989,8 +977,8 @@ async def reconcile_reservation(
         held=ZERO if reclaimed_early else handle.scoped_estimate,
         actual_tokens=settled_tokens,
         held_tokens=0 if reclaimed_early else handle.scoped_token_estimate,
-        requests=handle.request_estimate,
-        held_requests=0 if reclaimed_early else handle.request_estimate,
+        requests=handle.scoped_request_estimate,
+        held_requests=0 if reclaimed_early else handle.scoped_request_estimate,
         counts_toward_budget=handle.counts_toward_budget,
         commit=False,
     )
@@ -1063,7 +1051,7 @@ async def refund_reservation(db: AsyncSession, handle: ReservationHandle) -> Non
         handle.scoped_budget_ids,
         handle.scoped_estimate,
         tokens=handle.scoped_token_estimate,
-        requests=handle.request_estimate,
+        requests=handle.scoped_request_estimate,
         commit=False,
     )
     # One commit, for the reason given in :func:`reconcile_reservation`.
