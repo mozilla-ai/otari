@@ -76,7 +76,8 @@ export function UserComboBox({
       (option) =>
         !q ||
         option.value.toLowerCase().includes(q) ||
-        option.label.toLowerCase().includes(q),
+        option.label.toLowerCase().includes(q) ||
+        option.hint?.toLowerCase().includes(q),
     )
     .slice(0, 50)
 

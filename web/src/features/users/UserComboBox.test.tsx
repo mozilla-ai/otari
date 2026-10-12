@@ -115,6 +115,26 @@ describe("UserComboBox", () => {
     expect(screen.getByRole("option", { name: "ci-bot" })).toBeInTheDocument()
   })
 
+  it("finds a member by the email shown under their name", async () => {
+    mockRoster([member(UUID, "Alice Example", "alice@example.com")])
+    renderBox(
+      <UserComboBox
+        value=""
+        onChange={() => {}}
+        users={[user(UUID), user("ci-bot")]}
+      />,
+    )
+
+    await userEvent.type(screen.getByRole("combobox"), "alice@example")
+
+    expect(
+      await screen.findByRole("option", {
+        name: "Alice Example (alice@example.com)",
+      }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "ci-bot" })).toBeNull()
+  })
+
   it("shows no second line for a member without an email", async () => {
     mockRoster([member(UUID, "Operator")])
     renderBox(
