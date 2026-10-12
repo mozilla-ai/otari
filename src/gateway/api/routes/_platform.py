@@ -43,6 +43,7 @@ from gateway.services.control_plane import ResolveEndpoint, resolve, transport
 from gateway.services.inference import (
     is_provider_billing_error,
     is_retry_futile,
+    is_upstream_request_fault,
     upstream_exception_shape,
 )
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
@@ -687,11 +688,19 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
 
 
 def is_provider_credential_rejection(exc: BaseException) -> bool:
-    """Whether the provider refused the credential the gateway sent (an upstream 401 or 403)."""
+    """Whether the provider refused the credential the gateway sent.
+
+    An upstream 401, or a 403 that is not the provider refusing the request itself
+    (see :func:`is_upstream_request_fault`).
+    """
     if missing_credential(exc) is not None:
         return False
     kind, status_code = upstream_exception_shape(exc)
-    return kind != "timeout" and status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN)
+    if kind == "timeout":
+        return False
+    if status_code == status.HTTP_401_UNAUTHORIZED:
+        return True
+    return status_code == status.HTTP_403_FORBIDDEN and not is_upstream_request_fault(exc)
 
 
 # The OpenAI and Anthropic SDKs read this header before their own retry rule

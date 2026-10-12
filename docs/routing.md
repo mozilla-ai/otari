@@ -32,7 +32,7 @@ retryable failure.
 A candidate whose provider has no credential configured counts as one, so the
 policy moves on to the next. When no candidate has a credential, the request is
 refused with `424 provider_not_configured`. A candidate whose provider rejects
-the configured credential (401 or 403) counts as one too; when every candidate
+the configured credential (401, or a 403 that does not reject the request itself) counts as one too; when every candidate
 either lacks a credential or had it rejected, and at least one was rejected, the
 request is refused with `424 provider_credential_rejected`.
 

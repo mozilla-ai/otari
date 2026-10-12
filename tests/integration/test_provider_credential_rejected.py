@@ -231,3 +231,79 @@ def test_a_policy_with_no_usable_credential_is_refused_with_a_424(failover_clien
     _assert_credential_rejected(response)
     assert response.json()["code"] == PROVIDER_CREDENTIAL_REJECTED
     assert "2 attempts" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# A 403 that refuses the request is the caller's 400, not a rejected credential
+# ---------------------------------------------------------------------------
+
+_LOGPROBS_MSG = "You are not allowed to request logprobs from this model"
+
+
+def _request_fault_403() -> Exception:
+    """OpenAI's 403 for logprobs on a model without them, sent with a valid key."""
+    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    error = {"message": _LOGPROBS_MSG, "type": "invalid_request_error", "param": None, "code": None}
+    upstream = openai.PermissionDeniedError(
+        f"Error code: 403 - {{'error': {error}}}",
+        response=httpx.Response(403, request=request, json={"error": error}),
+        body=error,
+    )
+    return convert_exception(upstream, "openai")
+
+
+def _assert_request_fault(response: Any) -> None:
+    assert response.status_code == 400, response.text
+    assert response.headers.get(ERROR_CODE_HEADER) != PROVIDER_CREDENTIAL_REJECTED
+    assert response.json()["detail"] == _LOGPROBS_MSG
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_chat_answers_a_request_fault_403_with_a_400_carrying_the_providers_sentence(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    test_user: dict[str, Any],
+    db_session: Session,
+    stream: bool,
+) -> None:
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=_request_fault_403())):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": "openai:gpt-5-mini",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "logprobs": True,
+                "stream": stream,
+            },
+            headers=api_key_header,
+        )
+    _assert_request_fault(response)
+    row = db_session.query(UsageLog).filter(UsageLog.api_key_id == api_key_obj["id"]).one()
+    assert row.status_code == 403
+
+
+def test_a_passthrough_route_answers_a_request_fault_403_with_a_400(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    test_user: dict[str, Any],
+) -> None:
+    with patch("gateway.api.routes.embeddings.aembedding", new=AsyncMock(side_effect=_request_fault_403())):
+        response = client.post(
+            f"{API_ROOT}/embeddings", json={"model": "openai:gpt-5-mini", "input": "hello"}, headers=api_key_header
+        )
+    _assert_request_fault(response)
+
+
+def test_a_policy_whose_attempts_all_refuse_the_request_is_not_a_credential_failure(
+    failover_client: TestClient,
+) -> None:
+    assert failover_client.post(f"{API_ROOT}/users", json={"user_id": "test-user"}, headers=_MASTER).status_code == 200
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=_request_fault_403())):
+        response = failover_client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": "fast", "messages": [{"role": "user", "content": "hi"}], "user": "test-user"},
+            headers=_MASTER,
+        )
+    assert response.status_code == 400, response.text
+    assert response.headers.get(ERROR_CODE_HEADER) != PROVIDER_CREDENTIAL_REJECTED

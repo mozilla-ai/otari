@@ -211,6 +211,7 @@ from gateway.services.inference import (
     StillInFlight,
     UnknownCaller,
     is_provider_billing_error,
+    is_upstream_request_fault,
     upstream_body_messages,
     upstream_error_message,
     upstream_exception_chain,
@@ -721,7 +722,9 @@ def classify_provider_error(
     # An account quota is the operator's limit, like billing, even where the provider answers 400.
     if _is_account_quota_error(exc):
         return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_ACCOUNT_QUOTA_DETAIL)
-    if status_code in (400, 422):
+    # OpenAI answers some request faults with a 403 (logprobs on a model without
+    # them), which is the caller's to fix and not the gateway's key.
+    if status_code in (400, 422) or is_upstream_request_fault(exc):
         return ProviderErrorMapping(
             status.HTTP_400_BAD_REQUEST, _upstream_message_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
         )

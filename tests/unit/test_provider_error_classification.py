@@ -54,12 +54,14 @@ from gateway.api.routes._platform import (
     SHOULD_RETRY_HEADER,
     _provider_failure_http_exc,
     get_shared_rejection,
+    is_provider_credential_rejection,
     with_retry_hint,
 )
 from gateway.core.error_codes import PROVIDER_CREDENTIAL_REJECTED, PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.services.inference import (
     is_retry_futile,
+    is_upstream_request_fault,
     upstream_retry_after,
 )
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
@@ -1447,3 +1449,62 @@ def test_a_credential_rejection_never_echoes_its_body() -> None:
     upstream = _openai_status_error(401, _openai_error("Incorrect API key provided: sk-proj-ABCDEFGHIJKLMNOP"))
 
     assert classify_provider_error(upstream) == (424, PROVIDER_CREDENTIALS_DETAIL)
+
+
+# ---------------------------------------------------------------------------
+# An upstream 403 that refuses the request, not the gateway's key
+# ---------------------------------------------------------------------------
+
+_OPENAI_LOGPROBS_MSG = "You are not allowed to request logprobs from this model"
+
+
+def _anthropic_forbidden() -> anthropic.PermissionDeniedError:
+    body = {"type": "error", "error": {"type": "permission_error", "message": "Your API key does not have permission"}}
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    return anthropic.PermissionDeniedError(
+        f"Error code: 403 - {body}", response=httpx.Response(403, request=request, json=body), body=body
+    )
+
+
+@pytest.mark.parametrize("unified", [False, True], ids=["raw", "unified"])
+def test_an_openai_403_invalid_request_is_the_callers_400_with_the_providers_sentence(unified: bool) -> None:
+    upstream = _openai_status_error(403, _openai_error(_OPENAI_LOGPROBS_MSG))
+    exc = convert_exception(upstream, "openai") if unified else upstream
+
+    assert is_upstream_request_fault(exc)
+    assert not is_provider_credential_rejection(exc)
+    assert classify_provider_error(exc) == (400, _OPENAI_LOGPROBS_MSG)
+    assert provider_error_headers(exc, 400) is None
+    assert stream_error_code(exc) != PROVIDER_CREDENTIAL_REJECTED
+    # The row keeps the provider's own status.
+    assert failure_status_code(exc) == 403
+
+
+@pytest.mark.parametrize(
+    "upstream",
+    [
+        _openai_status_error(403, _openai_error("Project `proj_abc` does not have access to model `gpt-5`")),
+        _openai_status_error(403, {"message": "Country not supported", "type": "request_forbidden", "code": None}),
+        _anthropic_forbidden(),
+        _StatusError(403),
+    ],
+    ids=["openai-project", "openai-request-forbidden", "anthropic-permission", "no-body"],
+)
+def test_a_403_about_the_key_stays_a_rejected_credential(upstream: Exception) -> None:
+    assert not is_upstream_request_fault(upstream)
+    assert is_provider_credential_rejection(upstream)
+    assert classify_provider_error(upstream) == (424, PROVIDER_CREDENTIALS_DETAIL)
+
+
+def test_a_401_is_a_rejected_credential_whatever_its_body_says() -> None:
+    upstream = _openai_status_error(401, _openai_error("Incorrect API key provided"))
+    assert not is_upstream_request_fault(upstream)
+    assert classify_provider_error(upstream) == (424, PROVIDER_CREDENTIALS_DETAIL)
+
+
+def test_attempts_that_all_hit_a_request_fault_403_share_the_callers_400() -> None:
+    errors = [_openai_status_error(403, _openai_error(_OPENAI_LOGPROBS_MSG)) for _ in range(2)]
+    rejection = get_shared_rejection(errors)
+    assert rejection is not None
+    assert rejection.status_code == 400
+    assert rejection.headers != {"Otari-Error-Code": PROVIDER_CREDENTIAL_REJECTED}

@@ -398,13 +398,17 @@ The provider's `param` and `code` fields are not copied into the response.
 The completion routes and the pass-through routes (embeddings, images, audio,
 moderations, rerank) classify a provider failure the same way. A provider that
 rejects the request (its own 400 or 422) answers 400, and an unknown model 404.
+OpenAI answers some request faults with a 403 instead, with the error type
+`invalid_request_error` (logprobs requested from a model that does not return
+them, an embedding model sent to chat); that is a rejection of the request too,
+and answers 400 with OpenAI's sentence.
 A model whose provider has no such operation (rerank on a chat model, for
 example) or whose SDK has no parameter for a field the caller sent answers 400,
 naming the operation or the field. An OpenAI-compatible client does not retry a
 400 or a 404. The provider's rate limit answers 429 with
 `Otari-Error-Code: upstream_rate_limited` and the provider's `Retry-After` when
 it sent one, which a client may retry after waiting. A provider that refuses the
-gateway's own credential (its 401 or 403) answers 424 with
+gateway's own credential (its 401, or a 403 that is not a rejection of the request) answers 424 with
 `Otari-Error-Code: provider_credential_rejected`, which a client does not retry
 either. A provider timeout answers 504, and any other provider failure 502
 (500 on Messages).
@@ -453,7 +457,7 @@ reworded.
 | `all_candidates_rejected` | 400 | Every model a routing policy, a catalog ID or the control plane tried rejected the request as invalid | |
 | `pricing_required` | 402 | `require_pricing` is on and the model has no price | |
 | `provider_not_configured` | 424 | The gateway holds no credential for the model's provider, so nothing was sent upstream. Not a 5xx, so a client does not retry it: add the credential in `config.yml`, through the dashboard, or in the environment variable the detail names | |
-| `provider_credential_rejected` | 424 | The provider refused the credential the gateway holds for it (an upstream 401 or 403). It is the gateway's key, not the caller's, so it is never a 401 or 403; and not a 5xx, because no retry makes the key valid. Replace or fix the provider credential. The usage row keeps the provider's own status. A routing policy moves on to its next candidate first, and answers with this code when every candidate either had no credential or had it rejected, and at least one was rejected | |
+| `provider_credential_rejected` | 424 | The provider refused the credential the gateway holds for it (an upstream 401, or a 403 other than one rejecting the request, which is a 400). It is the gateway's key, not the caller's, so it is never a 401 or 403; and not a 5xx, because no retry makes the key valid. Replace or fix the provider credential. The usage row keeps the provider's own status. A routing policy moves on to its next candidate first, and answers with this code when every candidate either had no credential or had it rejected, and at least one was rejected | |
 | `end_user_budget_not_allowed` | 403 | A service key named an end-user budget that is not on its `end_user_budget_ids` | |
 | `invalid_request` | 422 | The request body or a parameter failed schema validation. `detail` lists the failing fields, each with `loc`, `msg` and `type` | |
 | `provider_error` | 200, in a stream's error event only | The provider failed after the stream started, for a reason no other code names | |
