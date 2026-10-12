@@ -86,6 +86,82 @@ from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 _VERIFICATION_TOKEN_BYTES = 24
 
 
+class DomainAutoJoinListener:
+    """Add a person who signs in to the organization that has proven their email domain."""
+
+    def __init__(self, domains: OrganizationDomainRepository, members: OrganizationMemberRepository) -> None:
+        self.domains = domains
+        self.members = members
+
+    async def account_signed_in(self, account: User) -> None:
+        """Run the domain auto-join for an account that has just signed in."""
+        await self.join(account)
+
+    async def join(self, user: User) -> OrganizationMember | None:
+        """Add ``user`` to the organization that has proven their email domain.
+
+        Called on every successful sign-in. Returns the membership it created or
+        found, or ``None`` when nothing matched, which is the ordinary answer.
+
+        Conservative at every step, because this is the one path that grants
+        access without a person deciding to:
+
+        - An unverified address is skipped. Otherwise signing up as
+          ``anyone@theircompany.com`` without ever reading the mail would be
+          enough to get in. So is a vouched one (``email_vouched_at``), or an
+          admin of any organization could invite that address and claim it.
+        - A claim that is disabled, whose DNS proof has not landed, or whose
+          proof has aged out past ``DOMAIN_PROOF_TTL``, is skipped.
+        - An existing membership is returned untouched. A ``suspended`` row
+          means somebody was removed on purpose and must not be re-added by
+          their next sign-in, and an established role is never overwritten by
+          the claim's ``default_role``.
+        - ``active_organization_id`` is never moved. Auto-join adds a
+          membership; hijacking where the caller is pointed on every sign-in is
+          a different and much ruder thing.
+
+        Rows are staged, not committed: the caller owns the transaction, and the
+        sign-in that triggered this commits the membership and the session
+        together.
+        """
+        # An identity with no address at all is the deployment's master-key
+        # operator, which signs in through the same route. It has no domain to
+        # match and no verification to have done, so it falls out here rather
+        # than at the address check below.
+        # A vouched address is one an organization admin asserted, not one the
+        # person proved, and any organization can vouch for any address.
+        if user.email is None or user.email_verified_at is None or user.email_vouched_at is not None:
+            return None
+
+        domain = email_domain(user.email)
+        if domain is None:
+            return None
+
+        claim = await self.domains.get_verified_by_domain(domain)
+        # A proof that has aged out admits nobody until an admin re-verifies.
+        # Fails closed on purpose: the domain may have changed hands since, and
+        # the cost of being wrong is admitting a stranger to a tenant.
+        if claim is None or not claim.enabled or claim.proof_expired(now=datetime.now(UTC)):
+            return None
+
+        existing = await self.members.get_by_organization_and_user(claim.organization_id, user.id)
+        if existing is not None:
+            return existing
+
+        membership, created = await self.members.add_if_absent(
+            organization_id=claim.organization_id, user_id=user.id, role=claim.default_role
+        )
+        if created:
+            logger.info(
+                "Identity %s auto-joined organization %s as %s by email domain %s",
+                user.id,
+                claim.organization_id,
+                claim.default_role,
+                domain,
+            )
+        return membership
+
+
 class OrganizationDomainService:
     """Business logic for the organization email-domain surface."""
 
@@ -291,81 +367,8 @@ class OrganizationDomainService:
     # ------------------------------------------------------------------
 
     async def auto_join_for_user(self, user: User) -> OrganizationMember | None:
-        """Add ``user`` to the organization that has proven their email domain.
-
-        Called on every successful sign-in. Returns the membership it created or
-        found, or ``None`` when nothing matched, which is the ordinary answer.
-
-        Conservative at every step, because this is the one path that grants
-        access without a person deciding to:
-
-        - An unverified address is skipped. Otherwise signing up as
-          ``anyone@theircompany.com`` without ever reading the mail would be
-          enough to get in. So is a vouched one (``email_vouched_at``), or an
-          admin of any organization could invite that address and claim it.
-        - A claim that is disabled, whose DNS proof has not landed, or whose
-          proof has aged out past ``DOMAIN_PROOF_TTL``, is skipped.
-        - An existing membership is returned untouched. A ``suspended`` row
-          means somebody was removed on purpose and must not be re-added by
-          their next sign-in, and an established role is never overwritten by
-          the claim's ``default_role``.
-        - ``active_organization_id`` is never moved. Auto-join adds a
-          membership; hijacking where the caller is pointed on every sign-in is
-          a different and much ruder thing.
-
-        Rows are staged, not committed: the caller owns the transaction, and the
-        sign-in that triggered this commits the membership and the session
-        together. That is a change from the platform, where auto-join committed
-        for itself and had to unwind on failure.
-        """
-        # An identity with no address at all is the deployment's master-key
-        # operator, which signs in through the same route. It has no domain to
-        # match and no verification to have done, so it falls out here rather
-        # than at the address check below.
-        # A vouched address is one an organization admin asserted, not one the
-        # person proved, and any organization can vouch for any address.
-        if user.email is None or user.email_verified_at is None or user.email_vouched_at is not None:
-            return None
-
-        domain = email_domain(user.email)
-        if domain is None:
-            return None
-
-        claim = await self.domains.get_verified_by_domain(domain)
-        # A proof that has aged out admits nobody until an admin re-verifies.
-        # Fails closed on purpose: the domain may have changed hands since, and
-        # the cost of being wrong is admitting a stranger to a tenant.
-        if claim is None or not claim.enabled or claim.proof_expired(now=datetime.now(UTC)):
-            return None
-
-        existing = await self.members.get_by_organization_and_user(claim.organization_id, user.id)
-        if existing is not None:
-            return existing
-
-        try:
-            # The unique (organization_id, user_id) constraint settles two
-            # concurrent sign-ins. The savepoint is what keeps the loser's
-            # IntegrityError from poisoning the transaction the session row is
-            # also being written in, which would turn a lost race into a failed
-            # sign-in.
-            async with self.db.begin_nested():
-                membership = await self.members.create_membership(
-                    organization_id=claim.organization_id,
-                    user_id=user.id,
-                    role=claim.default_role,
-                    status="active",
-                )
-        except IntegrityError:
-            return await self.members.get_by_organization_and_user(claim.organization_id, user.id)
-
-        logger.info(
-            "Identity %s auto-joined organization %s as %s by email domain %s",
-            user.id,
-            claim.organization_id,
-            claim.default_role,
-            domain,
-        )
-        return membership
+        """Add ``user`` to the organization that has proven their email domain, as ``DomainAutoJoinListener`` does."""
+        return await DomainAutoJoinListener(self.domains, self.members).join(user)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -413,4 +416,4 @@ class OrganizationDomainService:
         )
 
 
-__all__ = ["OrganizationDomainService"]
+__all__ = ["DomainAutoJoinListener", "OrganizationDomainService"]

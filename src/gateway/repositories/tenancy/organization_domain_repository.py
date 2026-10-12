@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import OrganizationDomain, OrganizationDomainCreate, OrganizationDomainUpdate
 from gateway.repositories.base_repository import BaseRepository
 
@@ -17,7 +18,7 @@ class OrganizationDomainRepository(
 ):
     """Repository for organization domain rows."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession | UnitOfWork):
         super().__init__(db, OrganizationDomain)
 
     async def get_verified_by_domain(self, domain: str) -> OrganizationDomain | None:

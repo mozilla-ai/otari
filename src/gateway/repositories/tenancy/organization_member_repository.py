@@ -5,9 +5,11 @@ from collections.abc import Iterable
 from typing import Any
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.budgets import Budget, ScopedBudget
 from gateway.models.tenancy import (
     Organization,
@@ -49,7 +51,7 @@ class OrganizationMemberRepository(
 ):
     """Repository for organization membership rows."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession | UnitOfWork):
         super().__init__(db, OrganizationMember)
 
     async def get_by_organization_and_user(
@@ -191,6 +193,23 @@ class OrganizationMemberRepository(
         await self.db.flush()
         await self.db.refresh(member)
         return member
+
+    async def add_if_absent(
+        self, *, organization_id: uuid.UUID, user_id: uuid.UUID, role: str
+    ) -> tuple[OrganizationMember, bool]:
+        """Stage an active membership unless one exists, and say whether this call created it.
+
+        A concurrent insert of the same membership is settled in a savepoint, so the loser's conflict
+        does not end the caller's transaction.
+        """
+        try:
+            async with self.db.begin_nested():
+                return await self.create_membership(organization_id=organization_id, user_id=user_id, role=role), True
+        except IntegrityError:
+            existing = await self.get_by_organization_and_user(organization_id, user_id)
+            if existing is None:
+                raise
+            return existing, False
 
     async def update_membership(
         self,

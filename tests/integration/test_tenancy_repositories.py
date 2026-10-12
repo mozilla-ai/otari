@@ -303,6 +303,23 @@ async def test_membership_is_unique_per_user_and_organization(async_db: AsyncSes
         await repository.create_membership(organization_id=organization.id, user_id=user.id, role="member")
 
 
+async def test_a_membership_added_if_absent_is_created_once(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    user = await _identity(async_db, organization)
+    repository = OrganizationMemberRepository(async_db)
+
+    first, created = await repository.add_if_absent(organization_id=organization.id, user_id=user.id, role="member")
+    second, created_again = await repository.add_if_absent(
+        organization_id=organization.id, user_id=user.id, role="admin"
+    )
+
+    assert (created, created_again) == (True, False)
+    assert second.id == first.id
+    assert second.role == "member"
+    # The conflict was settled in a savepoint, so the transaction still accepts writes.
+    assert await OrganizationRepository(async_db).get_by_slug(organization.slug) is not None
+
+
 async def test_active_membership_lookup_ignores_suspended_rows(async_db: AsyncSession) -> None:
     """Removal suspends a membership, and a suspended member is not a member."""
     organization = await _organization(async_db)
