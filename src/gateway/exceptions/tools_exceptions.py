@@ -369,8 +369,8 @@ class SearchToolUntestableError(TenancyValidationError):
 class SearchToolMisconfiguredError(TenancyValidationError):
     """A search instance nothing can run as it stands, such as a ``searxng`` one with no address to search."""
 
-    def __init__(self, name: str):
-        super().__init__(f"Search tool '{name}' is not configured correctly.")
+    def __init__(self, name: str, problem: str | None = None):
+        super().__init__(problem or f"Search tool '{name}' is not configured correctly.")
 
 
 class WebSearchOptionRefusedError(TenancyValidationError):
@@ -385,20 +385,21 @@ class WebSearchOptionRefusedError(TenancyValidationError):
         self.key = key
 
 
-class WebSearchCredentialRefusedError(Exception):
+class WebSearchCredentialRefusedError(TenancyError):
     """A workspace's search or fetch credential its provider cannot be called with as it is.
 
     One without a key or base URL its provider needs, which the library or the
     old code would fill from the server's own settings, so the deployment's key
     or endpoint would serve the tenant; or one naming a base URL the code that
     serves its provider cannot use, which would send the tenant's key to the
-    provider's public endpoint instead. The caller decides the status.
+    provider's public endpoint instead. A 502, the status a malformed
+    credential from the control plane gets (design K).
     """
 
+    status_code = status.HTTP_502_BAD_GATEWAY
+
     def __init__(self, provider: str, problem: str) -> None:
-        message = f"The workspace's {provider} credential {problem}."
-        super().__init__(message)
-        self.message = message
+        super().__init__(f"The workspace's {provider} credential {problem}.")
         self.provider = provider
 
 

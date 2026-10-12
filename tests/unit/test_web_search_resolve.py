@@ -7,7 +7,7 @@ import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -332,6 +332,17 @@ def test_a_searxng_instance_with_no_address_to_search_is_misconfigured() -> None
     assert refused.value.message == "Search tool 'local' is not configured correctly."
 
 
+def test_a_key_never_goes_to_an_inherited_plain_http_endpoint() -> None:
+    config = GatewayConfig(
+        search_tools={"local": {"provider": "searxng", "api_key": "searxng-key"}}, web_search_url="http://plain:8080"
+    )
+
+    with pytest.raises(SearchToolMisconfiguredError) as refused:
+        resolve_search(config, None, requested="local", request_options=None)
+    assert "https" in refused.value.message
+    assert "searxng-key" not in refused.value.message
+
+
 def test_a_base_url_is_passed_without_blanks_or_a_trailing_slash() -> None:
     config = GatewayConfig(search_tools={"local": {"provider": "searxng", "api_base": " http://searxng:8080/ "}})
 
@@ -365,6 +376,7 @@ def test_a_credential_for_a_provider_this_gateway_cannot_call_is_ignored(caplog:
         WebSearchCredential(provider="exa", source=_HYBRID, api_key=""),
         WebSearchCredential(provider="tavily", source=_ORG),
         WebSearchCredential(provider="searxng", source=_HYBRID),
+        WebSearchCredential(provider="searxng", source=_HYBRID, api_base=" / "),
         WebSearchCredential(provider="tavily", source=_HYBRID, api_key="k", api_base="https://tavily-proxy.example"),
     ],
     ids=[
@@ -372,6 +384,7 @@ def test_a_credential_for_a_provider_this_gateway_cannot_call_is_ignored(caplog:
         "exa-with-an-empty-key",
         "tavily-without-key",
         "searxng-without-endpoint",
+        "searxng-with-a-blank-endpoint",
         "tavily-with-an-endpoint",
     ],
 )
@@ -387,6 +400,16 @@ def test_a_credential_its_provider_cannot_be_called_with_is_refused(
     with pytest.raises(WebSearchCredentialRefusedError):
         resolve_search(config, None, requested="exa", request_options=None, direct_credential=credential)
     assert credential.provider in refused.value.message
+
+
+def test_a_credentials_source_counts_by_value() -> None:
+    """One built from data, its source a plain string, is still the control plane's."""
+    credential = WebSearchCredential(provider="exa", source=cast(WebToolCredentialSource, "hybrid"), api_key="k")
+
+    resolved = resolve_search(GatewayConfig(), _policy(credential=credential), requested=None, request_options=None)
+
+    assert resolved is not None
+    assert (resolved.label, resolved.rate_keys) == (None, ())
 
 
 def test_a_resolved_search_never_prints_its_key_endpoint_or_options() -> None:
@@ -466,6 +489,7 @@ def test_the_count_is_taken_out_as_the_cap() -> None:
 
     assert _in_loop(config).max_results == 3
     assert _in_loop(config, request={"max_results": 2, "time_range": "week"}).max_results == 2
+    assert _in_loop(config, request={"max_results": 1_000_000}).max_results == 20
     resolved = _in_loop(config, request={"time_range": "week"})
     assert dict(resolved.options) == {"time_range": "week"}
 

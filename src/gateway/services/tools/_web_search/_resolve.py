@@ -47,6 +47,7 @@ import any_search
 from gateway.core.settings.tools import (
     BUILTIN_FETCH,
     BUILTIN_FETCH_PROVIDER,
+    MAX_RESULTS_CAP,
     PROVIDER_DEFAULT_OPTIONS,
     SEARCH_PROVIDERS_REQUIRING_API_BASE,
     SEARCH_PROVIDERS_WITHOUT_ADAPTER,
@@ -61,6 +62,7 @@ from gateway.core.settings.tools import (
     effective_search_instances,
     in_loop_default,
     option_problems,
+    validate_search_tool_transport,
 )
 from gateway.exceptions.tools_exceptions import (
     SearchToolMisconfiguredError,
@@ -222,7 +224,7 @@ def _fetch_instances(config: ToolSettings) -> dict[str, ToolInstance]:
             instances[name] = instance
         else:
             _warn_once(
-                f"Fetch instance '{name}' is left out: any-fetch does not serve its provider {instance.provider}"
+                "Fetch instance '%s' is left out: any-fetch does not serve its provider %s", name, instance.provider
             )
     return instances
 
@@ -238,7 +240,7 @@ def _search_on_instance(
     runner: Runner = "library" if instance.library_backed else "old"
     own = dict(instance.options)
     # Contract C8: a searxng instance that names no engines searches the deployment's.
-    if instance.provider in SEARCH_PROVIDERS_WITHOUT_ADAPTER and "engines" not in own and config.web_search_engines:
+    if instance.provider in SEARCH_PROVIDERS_REQUIRING_API_BASE and "engines" not in own and config.web_search_engines:
         own["engines"] = config.web_search_engines
     options = _layered(
         "search",
@@ -253,7 +255,12 @@ def _search_on_instance(
     if runner == "old" and (instance.provider not in SEARCH_PROVIDERS_WITHOUT_ADAPTER or not api_base):
         # A provider no code here serves any more, or a searxng instance with no address of its own or to inherit.
         raise SearchToolMisconfiguredError(instance.name)
-    max_results = _count(options, "max_results")
+    try:
+        # Load checks the instance's own base; an inherited one is checked here.
+        validate_search_tool_transport(instance.name, api_base, instance.api_key)
+    except ValueError as exc:
+        raise SearchToolMisconfiguredError(instance.name, str(exc)) from None
+    max_results = _count(options, "max_results", cap=MAX_RESULTS_CAP)
     label = f"{instance.provider}:{instance.name}"
     return ResolvedSearch(
         name=instance.name,
@@ -285,7 +292,7 @@ def _search_on_synthesized(
         workspace=workspace,
         request=request,
     )
-    max_results = _count(options, "max_results")
+    max_results = _count(options, "max_results", cap=MAX_RESULTS_CAP)
     return ResolvedSearch(
         name=synthesized.name,
         provider=synthesized.provider,
@@ -326,7 +333,7 @@ def _search_on_credential(
         _ignore(credential, "search")
         return None
     _check(credential, requires_key=requires_key, requires_base=requires_base)
-    if provider in WEB_SEARCH_PROVIDERS and credential.api_base:
+    if runner == "old" and provider in WEB_SEARCH_PROVIDERS and _base(credential.api_base):
         # The old code calls Tavily and Brave at their public endpoints, where the key would go instead.
         raise WebSearchCredentialRefusedError(
             provider, f"names a base URL, which this gateway's {provider} client cannot use"
@@ -340,7 +347,7 @@ def _search_on_credential(
         workspace=workspace,
         request=request,
     )
-    max_results = _count(options, "max_results")
+    max_results = _count(options, "max_results", cap=MAX_RESULTS_CAP)
     label, rate_keys = _credential_billing(credential, _SEARCH_FALLBACK_RATE)
     if in_loop and runner == "old":
         # Design L: in the loop, the old backend records an organization key's calls with no label.
@@ -422,20 +429,24 @@ def _fetch_on_credential(credential: WebFetchCredential) -> ResolvedFetch | None
 
 
 def _ignore(credential: WebToolCredential, kind: ToolKind) -> None:
-    layer = _credential_layer(credential)
-    _warn_once(f"Ignoring {layer} for {credential.provider}, a provider this gateway cannot {kind} with")
+    _warn_once(
+        "Ignoring %s for %s, a provider this gateway cannot %s with",
+        _credential_layer(credential),
+        credential.provider,
+        kind,
+    )
 
 
 def _check(credential: WebToolCredential, *, requires_key: bool, requires_base: bool) -> None:
     """Refuse a credential the library or the old code would complete from the server's own settings."""
     if requires_key and not credential.api_key:
         raise WebSearchCredentialRefusedError(credential.provider, "carries no API key, which the provider requires")
-    if requires_base and not credential.api_base:
+    if requires_base and not _base(credential.api_base):
         raise WebSearchCredentialRefusedError(credential.provider, "carries no base URL, which the provider requires")
 
 
 def _credential_layer(credential: WebToolCredential) -> str:
-    if credential.source is WebToolCredentialSource.HYBRID:
+    if credential.source == WebToolCredentialSource.HYBRID:
         return "the control plane's credential"
     return "the organization's key"
 
@@ -446,7 +457,7 @@ def _credential_billing(credential: WebToolCredential, fallback: str) -> tuple[s
     A hybrid data plane settles nothing itself, so the control plane's
     credential carries neither (design K).
     """
-    if credential.source is WebToolCredentialSource.HYBRID:
+    if credential.source == WebToolCredentialSource.HYBRID:
         return None, ()
     return f"{_ORG_LABEL_PREFIX}:{credential.provider}", (fallback,)
 
@@ -524,16 +535,16 @@ def _kept(options: Mapping[str, Any], layer: str, provider: str, problems: Mappi
     kept: dict[str, Any] = {}
     for key, value in options.items():
         if key in problems:
-            _warn_once(f"Dropping an option of {layer} for {provider}: {problems[key]}.")
+            _warn_once("Dropping an option of %s for %s: %s.", layer, provider, problems[key])
         else:
             kept[key] = value
     return kept
 
 
 @functools.lru_cache(maxsize=1024)
-def _warn_once(message: str) -> None:
+def _warn_once(template: str, *args: str) -> None:
     """Log a warning the first time it is due, rather than on every call that meets the same problem."""
-    logger.warning("%s", message)
+    logger.warning(template, *args)
 
 
 def _base(api_base: str | None) -> str:
@@ -541,9 +552,9 @@ def _base(api_base: str | None) -> str:
     return (api_base or "").strip().rstrip("/")
 
 
-def _count(options: dict[str, Any], key: str) -> int | None:
-    """Take the count out of the options: a positive whole number, else nothing."""
+def _count(options: dict[str, Any], key: str, *, cap: int | None = None) -> int | None:
+    """Take the count out of the options: a positive whole number, within ``cap``, else nothing."""
     value = options.pop(key, None)
     if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-        return value
+        return value if cap is None else min(value, cap)
     return None
