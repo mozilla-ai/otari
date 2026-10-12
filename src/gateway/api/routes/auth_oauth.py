@@ -61,7 +61,7 @@ from gateway.api.routes.auth_session import MAINTENANCE_MODE_REFUSAL
 from gateway.core.config import OAUTH_PROVIDERS, GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
 from gateway.exceptions import TenancyError
-from gateway.exceptions.identity_exceptions import OAuthNotConfiguredError
+from gateway.exceptions.identity_exceptions import OAuthIdentityLinkConflictError, OAuthNotConfiguredError
 from gateway.log_config import logger
 from gateway.services.dashboard_session_service import (
     apply_session_cookie,
@@ -292,6 +292,9 @@ async def callback(
             config, provider, code=body.code, state=body.state, flow_secret=flow_cookie, db=db
         )
         signed_in = await identities.sign_in_with_oauth(external)
+    except OAuthIdentityLinkConflictError:
+        # A concurrent sign-in finished first, so nobody failed to authenticate.
+        raise
     except TenancyError:
         record_auth_failure("invalid_oauth")
         raise

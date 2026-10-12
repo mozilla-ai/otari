@@ -34,6 +34,7 @@ from sqlmodel import col, delete
 
 from gateway.api.routes import auth_oauth
 from gateway.core.config import API_ROOT, GatewayConfig
+from gateway.exceptions.identity_exceptions import OAuthIdentityLinkConflictError
 from gateway.log_config import logger as gateway_logger
 from gateway.models.identity import EmailAssertion, OAuthIdentityLink, ProviderIdentity
 from gateway.models.tenancy import Organization, User, WebAuthnCredential
@@ -41,6 +42,7 @@ from gateway.models.tools import WorkspaceCodeExecutionPolicy
 from gateway.repositories.tenancy import UserRepository
 from gateway.services import oauth_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
+from gateway.services.identity import IdentityService
 from gateway.services.oauth_service import FLOW_COOKIE_NAME, FLOW_COOKIE_PATH
 from gateway.services.tenancy.organization_service import OrganizationService, SignupRegistration
 
@@ -951,6 +953,28 @@ def test_a_database_failure_while_staging_the_session_rolls_back_and_says_nothin
     assert response.json()["detail"] == "Database error"
     assert "pruning failed" not in response.text
     assert SESSION_COOKIE_NAME not in response.cookies
+
+
+def test_a_sign_in_that_loses_a_race_is_not_counted_as_an_auth_failure(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    add_member(client, master_key_header, email="ada@example.com")
+    stub_exchange(monkeypatch)
+    failures: list[str] = []
+    monkeypatch.setattr("gateway.api.routes.auth_oauth.record_auth_failure", failures.append)
+
+    async def _lose(*_args: Any, **_kwargs: Any) -> Any:
+        raise OAuthIdentityLinkConflictError("google")
+
+    monkeypatch.setattr(IdentityService, "sign_in_with_oauth", _lose)
+
+    response = _sign_in(client)
+
+    assert response.status_code == 409, response.text
+    assert failures == []
 
 
 def test_a_session_that_cannot_be_stored_leaves_the_account_and_its_links_as_they_were(
