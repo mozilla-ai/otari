@@ -64,7 +64,7 @@ def oauth_configured(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
 def stub_exchange(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    subject: str | None = "ada-subject",
+    subject: str = "ada-subject",
     email: str | None = "ada@example.com",
     full_name: str | None = "Ada Lovelace",
     email_verified: EmailAssertion = EmailAssertion.VERIFIED,

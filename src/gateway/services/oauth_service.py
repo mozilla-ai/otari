@@ -110,12 +110,13 @@ class OAuthIdentity:
     """What a completed exchange says about the person who just consented.
 
     Narrower than apron-auth's ``IdentityProfile`` on purpose: this is the
-    subset that crosses ``IdentityProviderPort``, so what an adapter may key on
-    is visible here rather than being whatever the library happened to return.
+    subset that sign-in may use, so what it keys on is visible here rather than
+    being whatever the library happened to return. ``(provider, subject)`` names
+    the person at the provider.
     """
 
     provider: str
-    subject: str | None
+    subject: str
     email: str | None
     full_name: str | None
     email_verified: EmailAssertion
@@ -369,8 +370,9 @@ async def exchange_code(
         OAuthStateError: If ``state`` names no authorization this deployment is
             still waiting on, for ``provider``, from this browser.
         OAuthExchangeError: If the exchange or the identity fetch fails, for any
-            reason. The provider's own words stay on the traceback and out of
-            the response; see that error's docstring.
+            reason, or the identity carries no subject. The provider's own words
+            stay on the traceback and out of the response; see that error's
+            docstring.
 
     """
     if flow_secret is None:
@@ -391,6 +393,9 @@ async def exchange_code(
         # error and description, which the response deliberately does not carry.
         logger.warning("OAuth code exchange with %s failed", provider, exc_info=True)
         raise OAuthExchangeError(provider_label(provider)) from error
+    if not profile.subject:
+        logger.warning("Refused a %s identity that carried no subject", provider)
+        raise OAuthExchangeError(provider_label(provider))
 
     return OAuthIdentity(
         provider=provider,

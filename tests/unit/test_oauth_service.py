@@ -582,6 +582,18 @@ class TestExchange:
         assert identity.email_verified is EmailAssertion.UNASSERTED
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("subject", [None, ""])
+    async def test_an_identity_with_no_subject_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch, subject: str | None
+    ) -> None:
+        self._stub_client(monkeypatch, self._profile(subject=subject))
+
+        with pytest.raises(OAuthExchangeError):
+            await oauth_service.exchange_code(
+                configured(), "google", code="c", state="s", flow_secret=FLOW_SECRET, db=fake_db()
+            )
+
+    @pytest.mark.asyncio
     async def test_an_explicit_false_is_unverified(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self._stub_client(monkeypatch, self._profile(email_verified=False))
 
