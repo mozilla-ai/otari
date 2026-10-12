@@ -13,6 +13,7 @@ from gateway.models import (  # noqa: F401
     budgets,
     files,
     guardrails,
+    identity,
     inference,
     platform,
     playground,

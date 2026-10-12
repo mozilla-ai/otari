@@ -1503,6 +1503,10 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         "repository": None,
         "baseline": ("gateway/services/tenancy/organization_guardrail_service.py",),
     },
+    "gateway.models.identity.OAuthIdentityLink": {
+        "repository": "gateway/repositories/identity/oauth_identity_link_repository.py",
+        "baseline": (),
+    },
     "gateway.models.inference.BatchRecord": {
         "repository": None,
         "baseline": ("gateway/services/batch_service.py",),

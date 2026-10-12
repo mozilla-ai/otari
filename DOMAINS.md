@@ -81,7 +81,8 @@ Who a person is and how they sign in: passwords, passkeys, OAuth, dashboard
 sessions, email verification and reset, the profile, and deployment-wide
 account administration.
 
-Its tables sit in `models/tenancy.py` today, which organizations holds.
+Its tables sit in `models/tenancy.py` today, which organizations holds, except
+`oauth_identity_link` in `models/identity.py`.
 
 ### organizations
 
