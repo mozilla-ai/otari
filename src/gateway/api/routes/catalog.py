@@ -64,6 +64,7 @@ from gateway.services.merged_catalog_service import (
     ModelPricingInfo,
     build_real_model_catalog,
     served_on_deployment_key,
+    viewer_organization,
     viewer_price,
 )
 from gateway.services.model_catalog_service import (
@@ -91,7 +92,6 @@ from gateway.services.selector_index_service import (
     real_offerings,
     rebuild_selector_index,
 )
-from gateway.services.workspace_scope import organization_for_key_id
 
 # ``verify_catalog_reader_or_public`` rather than ``verify_catalog_reader``: a
 # visitor reads too while ``public_catalog`` is on, and is answered from what
@@ -238,23 +238,6 @@ class _Offering:
     """The provider's own id, which a usage row carries beside the instance."""
 
 
-async def _viewer_organization(
-    db: AsyncSession, caller: CatalogCaller, session_identity: TenancyUser | None
-) -> uuid.UUID | None:
-    """The organization whose overrides price this viewer's requests.
-
-    Resolved the way settlement resolves it: a session acts in its active
-    organization, an API key in its workspace's, and a master key in the default
-    workspace's. Never from the request. A visitor has none.
-    """
-    if session_identity is not None:
-        return session_identity.active_organization_id
-    if caller is None:
-        return None
-    api_key, _ = caller
-    return await organization_for_key_id(db, api_key.id if api_key is not None else None)
-
-
 async def _usage_by_selector(
     db: AsyncSession, organization_id: uuid.UUID, offerings: Iterable[tuple[str, str, str]]
 ) -> dict[str, OfferingUsage]:
@@ -373,7 +356,7 @@ async def _group(
     now = normalize_effective_at(None)
     real = real_offerings(merged)
 
-    organization_id = await _viewer_organization(db, caller, session_identity)
+    organization_id = await viewer_organization(db, caller, session_identity)
     overrides = (
         await load_organization_override_index(
             db, organization_id, (key for obj in real for key in pricing_key_forms(obj.id))

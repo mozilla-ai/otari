@@ -39,6 +39,7 @@ from gateway.services.pricing_service import (
     default_model_pricing,
     default_pricing_enabled,
     default_pricing_reference,
+    load_organization_override_index,
     model_context_window,
     normalize_effective_at,
     pricing_key_forms,
@@ -57,7 +58,11 @@ from gateway.services.tenancy.organization_model_access import (
     resolve_workspace_byo_providers,
     resolve_workspace_offered_keys,
 )
-from gateway.services.workspace_scope import lookup_default_workspace_id, organization_for_workspace_id
+from gateway.services.workspace_scope import (
+    lookup_default_workspace_id,
+    organization_for_key_id,
+    organization_for_workspace_id,
+)
 
 if TYPE_CHECKING:
     from any_llm.types.model import Model
@@ -123,8 +128,9 @@ class ModelObject(BaseModel):
     created: int
     owned_by: str
     pricing: ModelPricingInfo | None = None
-    # Where ``pricing`` came from: "configured" (DB), "default" (genai-prices
-    # fallback, only when default_pricing is enabled), or "none".
+    # Where ``pricing`` came from: "organization" (the caller's organization's
+    # own rate), "configured" (DB), "default" (genai-prices fallback, only when
+    # default_pricing is enabled), "dynamic" (a policy priced per request), or "none".
     pricing_source: str = "none"
     # Context-window token limit from the bundled genai-prices dataset, when it
     # knows the model. Metadata only (independent of the default_pricing toggle);
@@ -905,3 +911,56 @@ def viewer_price(
     if obj.pricing is not None and obj.pricing_source == "default":
         return ViewerPrice(obj.pricing, "defaults", default_pricing_reference(instance, model_id, as_of))
     return ViewerPrice(None, None, None)
+
+
+async def viewer_organization(
+    db: AsyncSession, caller: tuple[APIKey | None, bool] | None, session_identity: TenancyUser | None
+) -> uuid.UUID | None:
+    """The organization whose overrides price this viewer's requests.
+
+    Resolved the way settlement resolves it: a session acts in its active
+    organization, an API key in its workspace's, and a master key in the default
+    workspace's. Never from the request. A visitor has none.
+    """
+    if session_identity is not None:
+        return session_identity.active_organization_id
+    if caller is None:
+        return None
+    api_key, _ = caller
+    return await organization_for_key_id(db, api_key.id if api_key is not None else None)
+
+
+async def apply_organization_pricing(
+    db: AsyncSession,
+    config: GatewayConfig,
+    models: Sequence[ModelObject],
+    aliases: dict[str, str],
+    organization_id: uuid.UUID | None,
+) -> None:
+    """Price each of ``models`` at the organization's own rate where it holds one.
+
+    Settlement charges an organization's override ahead of the deployment's
+    stored row and the genai-prices default, so a listing that stopped at those
+    two would state a rate, and a ``pricing_source``, the request is not billed
+    at. An alias is priced from its target, as everywhere else in the catalog;
+    a dynamic policy has no single target and keeps no price.
+    """
+    if organization_id is None:
+        return
+    keys = {
+        obj.id: normalize_pricing_key(config, aliases[obj.id]) if obj.id in aliases else obj.id
+        for obj in models
+        if obj.pricing_source != "dynamic"
+    }
+    overrides = await load_organization_override_index(
+        db, organization_id, (form for key in keys.values() for form in pricing_key_forms(key))
+    )
+    if not overrides:
+        return
+    now = normalize_effective_at(None)
+    for obj in models:
+        key = keys.get(obj.id)
+        override = resolve_organization_override(overrides, pricing_key_forms(key), now) if key else None
+        if override is not None:
+            obj.pricing = pricing_info(override)
+            obj.pricing_source = "organization"

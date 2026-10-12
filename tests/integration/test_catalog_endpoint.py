@@ -345,12 +345,7 @@ def test_an_api_key_sees_only_the_models_its_allow_list_permits(
 def test_a_session_is_priced_at_its_organizations_override(
     priced: TestClient, master_header: dict[str, str], db_session_factory: Callable[[], Session]
 ) -> None:
-    """The one thing the flat listing gets wrong for a tenant.
-
-    ``GET /api/v1/models`` prices from the deployment list; a member of an
-    organization holding a negotiated rate is billed at that rate, and the
-    catalog has to say so.
-    """
+    """A member of an organization holding a negotiated rate is billed at that rate, and the catalog says so."""
     assert priced.get(f"{API_ROOT}/organizations/me", headers=master_header).status_code == status.HTTP_200_OK
     session = db_session_factory()
     try:

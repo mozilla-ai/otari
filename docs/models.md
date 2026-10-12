@@ -99,6 +99,13 @@ does, is read to the last page.
 Discovery is cached and bounded; an unreachable provider does not block the
 catalog indefinitely.
 
+Each listed model carries the rate a request from the caller would be billed at,
+and `pricing_source` says which price list it came from: `organization` for the
+caller's organization's own override, `configured` for the deployment's stored
+rate, `default` for the genai-prices fallback, `dynamic` for a routing policy
+that picks its model per request, and `none` for an unpriced model. An alias is
+priced from its target.
+
 Set `model_discovery: false` to publish a curated catalog made from aliases and
 explicitly priced models. For a backend with no listing API, use the instance's
 `models` list.
