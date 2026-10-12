@@ -43,7 +43,7 @@ from gateway.services.budgets import (
 )
 
 from .conftest import _to_async_url
-from .test_scoped_budgets import Fixture, _build_tenancy, _counters, _scoped
+from .test_scoped_budgets import Fixture, _build_tenancy, _counters, _scoped, move
 
 
 @pytest_asyncio.fixture
@@ -706,3 +706,55 @@ async def test_a_commit_that_reports_failure_gives_the_ceilings_back_only_if_it_
         assert rows[0].status == RESERVATION_RELEASED
         user = await _user(async_db, user_id)
         assert (user.reserved, user.reserved_requests) == (Decimal(0), 0)
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_returns_what_a_move_took(async_db: AsyncSession, tenancy: Fixture) -> None:
+    openai_cap = await _scoped(
+        async_db, scope_type="workspace", scope_id=str(tenancy.workspace_id), max_budget=5.0, provider_key_id="openai"
+    )
+    anthropic = await _scoped(
+        async_db,
+        scope_type="workspace",
+        scope_id=str(tenancy.workspace_id),
+        max_budget=5.0,
+        provider_key_id="anthropic",
+    )
+    async_db.add_all([openai_cap, anthropic])
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope("openai"))
+    await move(async_db, handle, "anthropic", cost=2.0)
+    assert handle.reservation_id is not None
+    row = await async_db.get_one(BudgetReservation, handle.reservation_id)
+    row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    await async_db.commit()
+
+    assert await ledger.sweep_expired(async_db, batch_size=10) == 1
+
+    assert await _counters(async_db, openai_cap.id) == (0.0, 0.0)
+    assert await _counters(async_db, anthropic.id) == (0.0, 0.0)
+
+
+@pytest.mark.asyncio
+async def test_a_top_up_that_first_holds_the_user_leg_marks_its_row(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """A move writes the row of a request that held nothing, and the sweep must release what a top-up adds to it."""
+    await _with_budget(async_db, tenancy)
+    anthropic = await _scoped(
+        async_db,
+        scope_type="workspace",
+        scope_id=str(tenancy.workspace_id),
+        max_budget=5.0,
+        provider_key_id="anthropic",
+    )
+    async_db.add(anthropic)
+    await async_db.commit()
+    handle = await reserve_budget(async_db, tenancy.user_id, 0.0, model_is_free=True, scope=tenancy.scope("openai"))
+    assert handle.reservation_id is None
+    await move(async_db, handle, "anthropic", cost=2.0)
+    assert handle.reservation_id is not None
+
+    await increase_reservation(async_db, handle, estimate=2.0, tokens=100)
+
+    row = await async_db.get_one(BudgetReservation, handle.reservation_id)
+    await async_db.refresh(row)
+    assert (row.user_reserved, row.estimate, row.token_estimate) == (True, Decimal(2), 100)

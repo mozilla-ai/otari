@@ -335,6 +335,8 @@ class ReservationHandle:
     scoped_request_estimate: int = 0
     # This is None when the request holds nothing: a free model, a budget-exempt key, or no budget and no ceiling.
     reservation_id: str | None = None
+    # The time to live of a ledger row written for this reservation after admission.
+    reservation_ttl_sec: int = DEFAULT_RESERVATION_TTL_SEC
     # Every ceiling on the request's scopes, whichever provider it caps, so a fallback finds its own without a query.
     # It has no default, so a construction site cannot leave out the ceilings a fallback must pass.
     scope_ceilings: tuple[ApplicableCeiling, ...] = field(kw_only=True)
@@ -343,6 +345,22 @@ class ReservationHandle:
     def scoped_budget_ids(self) -> tuple[str, ...]:
         """The ids of the scoped ceilings this reservation holds against."""
         return tuple(applicable.budget_id for applicable in self.scoped_budgets)
+
+
+@dataclass(frozen=True)
+class EstimateInputs:
+    """The size of a request, which its budget estimate on any model is computed from."""
+
+    prompt_chars: int
+    max_output_tokens: int | None
+    default_output_tokens: int
+    cache_write_ttl: Literal["5m", "1h"] | None = None
+
+    def get_reserved_output_tokens(self, pricing: ModelPricing | None) -> int | None:
+        """Return the output tokens an estimate on ``pricing`` assumes, or None where a lower limit cannot shrink it."""
+        if pricing is None or priced_per_request(pricing) or pricing.output_price_per_million <= 0:
+            return None
+        return self.max_output_tokens if self.max_output_tokens is not None else self.default_output_tokens
 
 
 def estimate_tokens(
@@ -547,6 +565,7 @@ async def _held_handle(
         request_estimate=user_held.requests,
         scoped_request_estimate=ceiling_held.requests,
         reservation_id=reservation_id,
+        reservation_ttl_sec=ttl_seconds,
         scope_ceilings=scope_ceilings,
     )
 
@@ -658,7 +677,12 @@ async def reserve_budget(
         ceilings = await get_scope_ceilings(db, user_id=user_id, scope=scope)
         scoped = await roll_and_list_applicable(db, get_provider_ceilings(ceilings, scope.provider_instance))
     no_reservation = ReservationHandle(
-        user_id=user_id, estimate=ZERO, reserved=False, strategy=normalized, scope_ceilings=ceilings
+        user_id=user_id,
+        estimate=ZERO,
+        reserved=False,
+        strategy=normalized,
+        reservation_ttl_sec=reservation_ttl_sec,
+        scope_ceilings=ceilings,
     )
     if budget is None and not scoped:
         return no_reservation
@@ -737,7 +761,7 @@ async def reserve_budget(
             user_reserved=False,
             # Reachable only with ceilings held and no per-user budget, so the
             # user leg holds nothing on any axis and the ceilings hold everything.
-            user_held=HeldAmounts(amount=ZERO, tokens=0, requests=held_requests),
+            user_held=HeldAmounts(amount=ZERO, tokens=0, requests=0),
             strategy=normalized,
             counts_toward_budget=counts_toward_budget,
             scoped=scoped,
@@ -1195,6 +1219,7 @@ async def increase_reservation(
         db,
         handle.reservation_id,
         user_delta=delta.estimate if delta is not None else ZERO,
+        user_grew=delta is not None,
         scoped_delta=additional,
         token_delta=delta.token_estimate if delta is not None else 0,
         scoped_token_delta=grown_tokens,

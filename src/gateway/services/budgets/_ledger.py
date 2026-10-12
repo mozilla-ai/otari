@@ -132,6 +132,7 @@ async def grow(
     reservation_id: str | None,
     *,
     user_delta: Decimal,
+    user_grew: bool,
     scoped_delta: Decimal,
     token_delta: int = 0,
     scoped_token_delta: int = 0,
@@ -142,6 +143,7 @@ async def grow(
     because the top-up belongs to a request the ceiling has already counted. Each
     token delta is the one its own leg took: the ceilings grow whenever the
     request has any, and the per-user leg only when it has a budget to grow.
+    ``user_grew`` says the per-user leg took its first hold in this top-up, which the row must then record.
 
     ``increase_reservation`` grows the counters in place, so the ledger grows the
     same row rather than opening a second one: two rows for one request would
@@ -161,6 +163,7 @@ async def grow(
     if not await ReservationRepository(db).grow(
         reservation_id,
         user_delta=user_delta,
+        user_grew=user_grew,
         scoped_delta=scoped_delta,
         token_delta=token_delta,
         scoped_token_delta=scoped_token_delta,

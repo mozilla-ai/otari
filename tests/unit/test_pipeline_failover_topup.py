@@ -29,7 +29,7 @@ import gateway.api.routes._pipeline as pipeline
 from gateway.core.config import GatewayConfig
 from gateway.core.error_codes import BUDGET_EXCEEDED, error_headers
 from gateway.services import pricing_service
-from gateway.services.budgets import ReservationHandle
+from gateway.services.budgets import EstimateInputs, ReservationHandle
 from gateway.types.attempt import Attempt
 
 # Cost the stubbed estimator returns per (instance, model), standing in for the
@@ -86,7 +86,7 @@ def _ctx(
         estimate_inputs=(
             estimate_inputs
             if estimate_inputs is not None
-            else pipeline.EstimateInputs(prompt_chars=400, max_output_tokens=100, default_output_tokens=100)
+            else EstimateInputs(prompt_chars=400, max_output_tokens=100, default_output_tokens=100)
         ),
         config=GatewayConfig(require_pricing=require_pricing),
     )

@@ -4,7 +4,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Never
 
-from sqlalchemy import case, delete, select, update
+from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
@@ -99,6 +100,26 @@ class ReservationRepository(BaseRepository[BudgetReservation, Never, Never]):
         )
         await self.db.flush()
 
+    async def add_released_unless_exists(self, reservation_id: str, *, user_id: str) -> bool:
+        """Stage a released row under ``reservation_id`` unless a row has that ID, and report whether it was staged.
+
+        The insert waits for a transaction that inserts the same ID, so the answer reflects that transaction's outcome.
+        """
+        try:
+            async with self.db.begin_nested():
+                self.db.add(
+                    BudgetReservation(
+                        id=reservation_id,
+                        user_id=user_id,
+                        status=RESERVATION_RELEASED,
+                        expires_at=datetime.now(UTC),
+                    )
+                )
+                await self.db.flush()
+        except IntegrityError:
+            return False
+        return True
+
     async def delete_by_ids(self, reservation_ids: Sequence[str]) -> None:
         """Delete these rows, and their lines with them."""
         await self.db.execute(
@@ -112,25 +133,28 @@ class ReservationRepository(BaseRepository[BudgetReservation, Never, Never]):
         reservation_id: str,
         *,
         user_delta: Decimal,
+        user_grew: bool,
         scoped_delta: Decimal,
         token_delta: int,
         scoped_token_delta: int,
     ) -> bool:
         """Add the deltas to an active row and its lines, and report whether the row was active.
 
-        The token delta reaches the row only when the row's per-user leg holds.
+        ``user_grew`` marks the row's per-user leg as holding, for a top-up that is the first to hold on it.
         """
+        values: dict[str, object] = {
+            "estimate": BudgetReservation.estimate + user_delta,
+            "token_estimate": BudgetReservation.token_estimate + token_delta,
+        }
+        if user_grew:
+            values["user_reserved"] = True
         result = await self.db.execute(
             update(BudgetReservation)
             .where(
                 BudgetReservation.id == reservation_id,
                 BudgetReservation.status == RESERVATION_ACTIVE,
             )
-            .values(
-                estimate=BudgetReservation.estimate + user_delta,
-                token_estimate=BudgetReservation.token_estimate
-                + case((BudgetReservation.user_reserved, token_delta), else_=0),
-            )
+            .values(**values)
             .execution_options(synchronize_session=False)
         )
         if not getattr(result, "rowcount", 0):
@@ -184,6 +208,49 @@ class ReservationRepository(BaseRepository[BudgetReservation, Never, Never]):
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    async def lock_active(self, reservation_id: str) -> bool:
+        """Lock this row until the transaction ends when it is active, and report whether it is.
+
+        The lock waits for a transaction that holds the row, so the answer reflects that transaction's outcome.
+        """
+        result = await self.db.execute(
+            select(BudgetReservation.id)
+            .where(BudgetReservation.id == reservation_id, BudgetReservation.status == RESERVATION_ACTIVE)
+            .with_for_update()
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def move_lines(
+        self, reservation_id: str, *, dropped: Sequence[str], added: Sequence[str], held: HeldAmounts
+    ) -> None:
+        """Drop the lines on ``dropped``, set the others to ``held``, and add a line holding it on each of ``added``."""
+        if dropped:
+            await self.db.execute(
+                delete(BudgetReservationScope)
+                .where(
+                    BudgetReservationScope.reservation_id == reservation_id,
+                    BudgetReservationScope.scoped_budget_id.in_(list(dropped)),
+                )
+                .execution_options(synchronize_session=False)
+            )
+        await self.db.execute(
+            update(BudgetReservationScope)
+            .where(BudgetReservationScope.reservation_id == reservation_id)
+            .values(amount=held.amount, token_amount=held.tokens, request_amount=held.requests)
+            .execution_options(synchronize_session=False)
+        )
+        for scoped_budget_id in added:
+            self.db.add(
+                BudgetReservationScope(
+                    reservation_id=reservation_id,
+                    scoped_budget_id=scoped_budget_id,
+                    amount=held.amount,
+                    token_amount=held.tokens,
+                    request_amount=held.requests,
+                )
+            )
+        await self.db.flush()
 
     async def try_settle_reclaimed(self, reservation_id: str) -> bool:
         """Move an expired row to settled, and report whether this call moved it."""

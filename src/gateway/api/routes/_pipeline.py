@@ -187,6 +187,7 @@ from gateway.rate_limit import (
 from gateway.services.budgets import (
     ZERO,
     BudgetScopeRequest,
+    EstimateInputs,
     ReservationHandle,
     estimate_cost,
     estimate_tokens,
@@ -1129,7 +1130,7 @@ class RequestContext:
         workspace_id: uuid.UUID | None = None,
         resolved_provider: ResolvedProvider | None = None,
         plan: CompiledPlan | None = None,
-        estimate_inputs: "EstimateInputs | None" = None,
+        estimate_inputs: EstimateInputs | None = None,
         prices: RequestPrices | None = None,
         request_group_id: str | None = None,
         organization_id: uuid.UUID | None = None,
@@ -1712,22 +1713,6 @@ def _row_status(*, error: str | None, attribution: RoutingAttribution | None) ->
     if attribution is not None and attribution.absorbed:
         return "absorbed"
     return "error"
-
-
-@dataclass(frozen=True)
-class EstimateInputs:
-    """The inputs a budget estimate was computed from.
-
-    Kept on the request context so a fallover can recompute the estimate for a
-    differently priced candidate. Without it, a chain that fell over to a pricier
-    model would run against the cheaper model's reservation and could take spend
-    past a cap the gate had already approved.
-    """
-
-    prompt_chars: int
-    max_output_tokens: int | None
-    default_output_tokens: int
-    cache_write_ttl: Literal["5m", "1h"] | None = None
 
 
 async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) -> None:
@@ -2437,17 +2422,7 @@ async def resolve_request_context(
                 # own TTL; the batch, search and pass-through sites take the
                 # module default.
                 reservation_ttl_sec=config.budget_reservation_ttl_sec,
-                # Named by a refusal whose hold does not fit, and only where output
-                # tokens are priced: elsewhere a lower limit cannot shrink the estimate.
-                reserved_output_tokens=(
-                    estimate_inputs.max_output_tokens
-                    if estimate_inputs.max_output_tokens is not None
-                    else estimate_inputs.default_output_tokens
-                )
-                if gate_pricing is not None
-                and not priced_per_request(gate_pricing)
-                and gate_pricing.output_price_per_million > 0
-                else None,
+                reserved_output_tokens=estimate_inputs.get_reserved_output_tokens(gate_pricing),
             )
         except HTTPException as exc:
             # A blocked or over-budget user is refused inside reserve_budget,

@@ -1,6 +1,7 @@
 """Errors that the budgets domain may raise.
 
-The surface errors carry the HTTP status each renders as.
+Most surface errors carry the HTTP status each renders as.
+A surface error that carries none is mapped to a status by the API layer.
 The repository errors are internal: a service translates each into a surface error and never renders it.
 """
 
@@ -11,6 +12,7 @@ from gateway.exceptions import (
     TenancyNotFoundError,
     TenancyValidationError,
 )
+from gateway.models.budgets import ScopeType
 
 
 class WorkspaceBudgetDefaultNotFoundError(TenancyNotFoundError):
@@ -201,6 +203,18 @@ class SpendCeilingAlreadyExistsError(Exception):
         super().__init__(f"A spend ceiling already exists for {scope_type} {scope_id}")
 
 
+class SpendCeilingExceededError(Exception):
+    """A scoped ceiling has no room for a request on one of its axes."""
+
+    def __init__(self, detail: str, *, scope_type: ScopeType) -> None:
+        super().__init__(detail)
+        self.scope_type = scope_type
+
+
+class ProviderSpendCeilingExceededError(SpendCeilingExceededError):
+    """A scoped ceiling on one provider has no room for a request, which may still fit on another provider."""
+
+
 class EndUserBudgetNotFoundError(TenancyNotFoundError):
     """A service key names an end-user budget that does not exist, or that a tenant owns.
 
@@ -272,7 +286,9 @@ __all__ = [
     "OrganizationScopeNotFoundError",
     "OrganizationScopedBudgetAlreadyExistsError",
     "OrganizationScopedBudgetNotFoundError",
+    "ProviderSpendCeilingExceededError",
     "SpendCeilingAlreadyExistsError",
+    "SpendCeilingExceededError",
     "WorkspaceBudgetDefaultAlreadyExistsError",
     "WorkspaceBudgetDefaultBudgetNotFoundError",
     "WorkspaceBudgetDefaultNotFoundError",
