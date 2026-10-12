@@ -470,10 +470,9 @@ function OrganizationOverview() {
           deployment is this caller. It decides for itself whether to render. */}
       <SetupGuide canServeRequests={(models.data?.data.length ?? 0) > 0} />
 
-      {/* The guide above holds back until a request could succeed, so a brand
-          new account with nothing to route to would otherwise land on a page of
-          zeros with no next step. Gated on the catalog and the log both having
-          answered, so it never flashes in for an account that is already set up. */}
+      {/* The guide holds back until a request could succeed; without this a new
+          account with nothing to route to has no next step. Waits for the
+          catalog and the log so it never flashes in on a set-up account. */}
       {needsFirstSteps ? (
         <GetStartedStrip
           description={
@@ -834,8 +833,8 @@ function OverviewHeader({
 // deployment to `OrganizationOverview`, whose strip names the organization's
 // provider-key page instead, so the only person who can press this is the
 // operator, and `/providers` is where a fresh gateway is set up and carries the
-// first-run panel that continues the flow. Gating on the caller here too would restate a rule already guaranteed
-// one level up. Hosted and a control plane report no `providers` surface, so
+// first-run panel that continues the flow. Gating on the caller here too would
+// restate a rule already guaranteed one level up. Hosted and a control plane report no `providers` surface, so
 // naming it unconditionally would point an operator at the shell's "not
 // available here" panel.
 //
