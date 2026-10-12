@@ -1281,6 +1281,7 @@ export function OrganizationMembersPage() {
 
       <TableScrollFrame className="otari-members-table">
         <DataTable
+          mobileLayout="cards"
           ariaLabel="Organization members"
           columns={columns}
           rows={rows}

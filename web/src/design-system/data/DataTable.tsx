@@ -17,7 +17,8 @@ import type { Key, Selection, SortDescriptor } from "react-aria-components"
 import { Checkbox as AriaCheckbox } from "react-aria-components"
 import { createPortal } from "react-dom"
 import { EmptyMessage } from "@/design-system/feedback/EmptyMessage"
-import { CheckboxVisual } from "@/design-system/forms/Checkbox"
+import { Checkbox, CheckboxVisual } from "@/design-system/forms/Checkbox"
+import { useIsMobile } from "@/design-system/hooks/useIsMobile"
 
 // react-aria's own Checkbox drives table row/all selection through
 // `slot="selection"`. HeroUI's Checkbox splits the control across subcomponents
@@ -114,6 +115,12 @@ export interface DataTableProps<Row> {
    */
   detailKey?: string | null
   renderDetail?: (row: Row) => ReactNode
+  /**
+   * What a phone-width viewport gets. `"cards"` swaps the grid for one card per
+   * row (see `DataCardList`), for a table too wide to read without a sideways
+   * scroll. The default keeps the grid, scrolling and all.
+   */
+  mobileLayout?: "table" | "cards"
 }
 
 const SELECTION_COLUMN_WIDTH = 44
@@ -154,7 +161,220 @@ function hasTextSelectionIn(root: HTMLElement | null): boolean {
 // `overflow: hidden` stays on the root. It no longer clips a corner, but it is
 // what keeps a wide table from painting outside the region it was given.
 
-export function DataTable<Row extends object>({
+// Anything inside a card that is its own control keeps its own press, so a tap
+// on Edit does not also open the card.
+const OWN_PRESS = "button, a, input, select, textarea, label"
+
+function isSelected(selected: Selection | undefined, key: string): boolean {
+  return selected === "all" || (selected?.has(key) ?? false)
+}
+
+/**
+ * `DataTable`'s phone layout: one card per row. The row-header column is the
+ * title, a column with id `actions` sits beside it, and every other column is a
+ * label and value pair, so a row keeps its fields and its actions in the width
+ * of the screen instead of in a horizontal scroll.
+ *
+ * Selection, a row action and an inline detail carry over. Sorting and column
+ * resize do not: a phone has no header row to hang them on.
+ */
+function DataCardList<Row extends object>({
+  ariaLabel,
+  columns,
+  rows,
+  getRowKey,
+  isLoading,
+  emptyContent,
+  showSelection,
+  selectedKeys,
+  onSelectionChange,
+  disabledKeys,
+  onRowAction,
+  rowClassName,
+  detailKey,
+  renderDetail,
+}: {
+  ariaLabel: string
+  columns: DataTableColumn<Row>[]
+  rows: Row[]
+  getRowKey: (row: Row) => string
+  isLoading: boolean
+  emptyContent: ReactNode
+  showSelection: boolean
+  selectedKeys?: Selection
+  onSelectionChange?: (keys: Selection) => void
+  disabledKeys?: Iterable<Key>
+  onRowAction?: (key: string) => void
+  rowClassName?: (row: Row) => string | undefined
+  detailKey: string | null
+  renderDetail?: (row: Row) => ReactNode
+}) {
+  const title = columns.find((col) => col.isRowHeader) ?? columns[0]
+  const actions = columns.find((col) => col.id === "actions")
+  const fields = columns.filter((col) => col !== title && col !== actions)
+  const disabled = new Set(Array.from(disabledKeys ?? [], String))
+  const selectable = rows.map(getRowKey).filter((key) => !disabled.has(key))
+  const selectedCount = selectable.filter((key) =>
+    isSelected(selectedKeys, key),
+  ).length
+
+  const toggle = (key: string, checked: boolean) => {
+    const next = new Set<Key>(
+      selectedKeys === "all" ? selectable : (selectedKeys ?? []),
+    )
+    if (checked) next.add(key)
+    else next.delete(key)
+    onSelectionChange?.(next)
+  }
+
+  if (rows.length === 0) {
+    return (
+      <section aria-label={ariaLabel}>
+        <EmptyMessage>
+          {isLoading ? (
+            <span className="inline-flex items-center gap-2">
+              <Spinner size="sm" aria-hidden="true" /> Loading…
+            </span>
+          ) : (
+            emptyContent
+          )}
+        </EmptyMessage>
+      </section>
+    )
+  }
+
+  return (
+    <section aria-label={ariaLabel}>
+      {showSelection ? (
+        <div className="flex min-h-11 items-center border-b border-border-subtle">
+          <Checkbox
+            hasTouchTarget
+            ariaLabel="Select all rows"
+            isSelected={
+              selectable.length > 0 && selectedCount === selectable.length
+            }
+            onChange={(checked) =>
+              onSelectionChange?.(checked ? new Set(selectable) : new Set())
+            }
+          >
+            <span className="sr-only">Select all rows</span>
+          </Checkbox>
+          <span className="text-caption">
+            {selectedCount > 0
+              ? `${selectedCount} selected`
+              : `${rows.length} ${rows.length === 1 ? "row" : "rows"}`}
+          </span>
+        </div>
+      ) : null}
+      <ul className="flex flex-col">
+        {rows.map((row) => {
+          const key = getRowKey(row)
+          const open = detailKey === key && renderDetail != null
+          const picked = isSelected(selectedKeys, key)
+          return (
+            <li
+              key={key}
+              data-key={key}
+              tabIndex={onRowAction ? 0 : undefined}
+              onClick={
+                onRowAction
+                  ? (event: ReactMouseEvent<HTMLLIElement>) => {
+                      if (!(event.target as Element).closest(OWN_PRESS))
+                        onRowAction(key)
+                    }
+                  : undefined
+              }
+              onKeyDown={
+                onRowAction
+                  ? (event: ReactKeyboardEvent<HTMLLIElement>) => {
+                      if (
+                        event.key === "Enter" &&
+                        event.target === event.currentTarget
+                      )
+                        onRowAction(key)
+                    }
+                  : undefined
+              }
+              className={[
+                "flex flex-col gap-2 border-b border-border-subtle py-3",
+                onRowAction ? "cursor-pointer" : null,
+                picked ? "bg-primary-subtle" : null,
+                rowClassName?.(row),
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            >
+              <div className="flex items-start gap-2">
+                {showSelection ? (
+                  <div className="flex min-h-11 shrink-0 items-center">
+                    <Checkbox
+                      hasTouchTarget
+                      ariaLabel="Select row"
+                      isSelected={picked}
+                      isDisabled={disabled.has(key)}
+                      onChange={(checked) => toggle(key, checked)}
+                    >
+                      <span className="sr-only">Select row</span>
+                    </Checkbox>
+                  </div>
+                ) : null}
+                <div className="flex min-h-11 min-w-0 flex-1 items-center">
+                  <div className="min-w-0 flex-1">{title.cell(row)}</div>
+                </div>
+                {actions ? (
+                  <div className="flex shrink-0 items-center">
+                    {actions.cell(row)}
+                  </div>
+                ) : null}
+              </div>
+              {fields.length > 0 ? (
+                <dl className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-4 gap-y-1.5">
+                  {fields.map((col) => (
+                    <div
+                      key={col.id}
+                      className="col-span-2 grid grid-cols-subgrid items-baseline"
+                    >
+                      <dt className="text-overline">{col.header}</dt>
+                      <dd className="min-w-0 text-sm">{col.cell(row)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+              {open ? <div>{renderDetail(row)}</div> : null}
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
+
+export function DataTable<Row extends object>(props: DataTableProps<Row>) {
+  const isMobile = useIsMobile()
+  if (props.mobileLayout === "cards" && isMobile) {
+    return (
+      <DataCardList
+        ariaLabel={props.ariaLabel}
+        columns={props.columns}
+        rows={props.rows}
+        getRowKey={props.getRowKey}
+        isLoading={props.isLoading ?? false}
+        emptyContent={props.emptyContent ?? "No rows."}
+        showSelection={props.selectionMode === "multiple"}
+        selectedKeys={props.selectedKeys}
+        onSelectionChange={props.onSelectionChange}
+        disabledKeys={props.disabledKeys}
+        onRowAction={props.onRowAction}
+        rowClassName={props.rowClassName}
+        detailKey={props.detailKey ?? null}
+        renderDetail={props.renderDetail}
+      />
+    )
+  }
+  return <DataTableGrid {...props} />
+}
+
+function DataTableGrid<Row extends object>({
   ariaLabel,
   columns,
   rows,
@@ -180,6 +400,21 @@ export function DataTable<Row extends object>({
   const columnCount = columns.length + (showSelection ? 1 : 0)
 
   const rootRef = useRef<HTMLDivElement | null>(null)
+
+  // The width the table is allowed to show, for the empty message: the grid
+  // inside is as wide as its columns, and a message centred in it is centred
+  // off-screen on a phone.
+  useLayoutEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    const sync = () =>
+      root.style.setProperty("--table-viewport-width", `${root.clientWidth}px`)
+    sync()
+    if (typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(sync)
+    observer.observe(root)
+    return () => observer.disconnect()
+  }, [])
   const [detailHost, setDetailHost] = useState<HTMLTableCellElement | null>(
     null,
   )
@@ -528,17 +763,22 @@ export function DataTable<Row extends object>({
             items={isLoading && rows.length === 0 ? [] : rows}
             dependencies={[renderRow]}
             renderEmptyState={() => (
-              <EmptyMessage>
-                {isLoading ? (
-                  <span className="inline-flex items-center gap-2">
-                    {/* Decorative beside its own label: HeroUI's spinner is a
-                        role="status" region announcing "Loading" on its own. */}
-                    <Spinner size="sm" aria-hidden="true" /> Loading…
-                  </span>
-                ) : (
-                  emptyContent
-                )}
-              </EmptyMessage>
+              <div
+                className="sticky left-0"
+                style={{ width: "var(--table-viewport-width, 100%)" }}
+              >
+                <EmptyMessage>
+                  {isLoading ? (
+                    <span className="inline-flex items-center gap-2">
+                      {/* Decorative beside its own label: HeroUI's spinner is a
+                          role="status" region announcing "Loading" on its own. */}
+                      <Spinner size="sm" aria-hidden="true" /> Loading…
+                    </span>
+                  ) : (
+                    emptyContent
+                  )}
+                </EmptyMessage>
+              </div>
             )}
           >
             {renderRow}

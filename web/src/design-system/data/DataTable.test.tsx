@@ -8,7 +8,7 @@ import {
 import userEvent from "@testing-library/user-event"
 import { useEffect, useState } from "react"
 import type { Selection, SortDescriptor } from "react-aria-components"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { DataTable, type DataTableColumn } from "./DataTable"
 
@@ -661,5 +661,150 @@ describe("DataTable", () => {
     render(<Harness />)
     await user.click(screen.getByRole("columnheader", { name: "Cost" }))
     expect(screen.getByTestId("sort")).toHaveTextContent("cost:ascending")
+  })
+})
+
+describe('DataTable on a phone with mobileLayout="cards"', () => {
+  const realMatchMedia = window.matchMedia
+
+  function stubPhone(matches: boolean) {
+    window.matchMedia = ((query: string) => ({
+      matches,
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    })) as typeof window.matchMedia
+  }
+
+  afterEach(() => {
+    window.matchMedia = realMatchMedia
+  })
+
+  const columns: DataTableColumn<Row>[] = [
+    ...COLUMNS,
+    {
+      id: "actions",
+      header: "Actions",
+      cell: (r) => <button type="button">Edit {r.name}</button>,
+    },
+  ]
+
+  it("renders each row as a card with its title, fields and actions", () => {
+    stubPhone(true)
+    render(<DataTable {...base({ columns, mobileLayout: "cards" })} />)
+
+    expect(screen.queryByRole("grid")).not.toBeInTheDocument()
+    const alpha = screen.getByText("Alpha").closest("li")
+    expect(alpha).not.toBeNull()
+    expect(within(alpha as HTMLElement).getByText("Cost")).toBeInTheDocument()
+    expect(within(alpha as HTMLElement).getByText("3")).toBeInTheDocument()
+    expect(
+      within(alpha as HTMLElement).getByRole("button", { name: "Edit Alpha" }),
+    ).toBeInTheDocument()
+  })
+
+  it("keeps the grid on a wide viewport", () => {
+    stubPhone(false)
+    render(<DataTable {...base({ columns, mobileLayout: "cards" })} />)
+    expect(screen.getByRole("grid")).toBeInTheDocument()
+  })
+
+  it("keeps the grid on a phone when the table did not ask for cards", () => {
+    stubPhone(true)
+    render(<DataTable {...base({ columns })} />)
+    expect(screen.getByRole("grid")).toBeInTheDocument()
+  })
+
+  it("opens a card from a tap but not from its own action", async () => {
+    stubPhone(true)
+    const user = userEvent.setup()
+    const onRowAction = vi.fn()
+    render(
+      <DataTable {...base({ columns, onRowAction, mobileLayout: "cards" })} />,
+    )
+
+    await user.click(screen.getByRole("button", { name: "Edit Alpha" }))
+    expect(onRowAction).not.toHaveBeenCalled()
+    await user.click(screen.getByText("Bravo"))
+    expect(onRowAction).toHaveBeenCalledWith("b")
+  })
+
+  it("selects cards and reports the keys, leaving a disabled card alone", async () => {
+    stubPhone(true)
+    const user = userEvent.setup()
+    const onSelectionChange = vi.fn()
+    render(
+      <DataTable
+        {...base({
+          columns,
+          mobileLayout: "cards",
+          selectionMode: "multiple",
+          selectedKeys: new Set<string>(),
+          onSelectionChange,
+          disabledKeys: ["c"],
+        })}
+      />,
+    )
+
+    const boxes = screen.getAllByRole("checkbox", { name: "Select row" })
+    await user.click(boxes[0])
+    expect(onSelectionChange).toHaveBeenLastCalledWith(new Set(["a"]))
+    expect(boxes[2]).toBeDisabled()
+    await user.click(screen.getByRole("checkbox", { name: "Select all rows" }))
+    expect(onSelectionChange).toHaveBeenLastCalledWith(new Set(["a", "b"]))
+  })
+
+  it("renders the inline detail under the open card", () => {
+    stubPhone(true)
+    render(
+      <DataTable
+        {...base({
+          columns,
+          mobileLayout: "cards",
+          detailKey: "b",
+          renderDetail: (r: Row) => <p>Detail for {r.name}</p>,
+        })}
+      />,
+    )
+    expect(screen.getByText("Detail for Bravo")).toBeInTheDocument()
+    expect(screen.queryByText("Detail for Alpha")).not.toBeInTheDocument()
+  })
+
+  it("shows the empty message, wrapped, instead of a card", () => {
+    stubPhone(true)
+    render(
+      <DataTable
+        {...base({
+          columns,
+          rows: [],
+          mobileLayout: "cards",
+          emptyContent: "No rows yet.",
+        })}
+      />,
+    )
+    expect(screen.getByText("No rows yet.")).toBeInTheDocument()
+    expect(screen.queryByRole("listitem")).not.toBeInTheDocument()
+  })
+
+  it("shows a loading state while the first page loads", () => {
+    stubPhone(true)
+    render(
+      <DataTable
+        {...base({ columns, rows: [], isLoading: true, mobileLayout: "cards" })}
+      />,
+    )
+    expect(screen.getByText(/Loading/)).toBeInTheDocument()
+  })
+
+  it("pins the grid's empty message to the visible width", () => {
+    stubPhone(false)
+    render(<DataTable {...base({ rows: [], emptyContent: "No rows yet." })} />)
+    const message = screen.getByText("No rows yet.").parentElement
+    expect(message).toHaveStyle({ width: "var(--table-viewport-width, 100%)" })
+    expect(message).toHaveClass("sticky")
   })
 })
