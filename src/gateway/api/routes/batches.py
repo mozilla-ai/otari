@@ -21,6 +21,7 @@ from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes._pipeline import (
     PROVIDER_CREDENTIALS_DETAIL,
     _raise_for_unresolvable_model,
+    classify_provider_error,
     failure_status_code,
 )
 from gateway.api.routes._platform import is_provider_credential_rejection
@@ -47,6 +48,7 @@ from gateway.services.budgets import (
     refund_reservation,
     reserve_budget,
 )
+from gateway.services.inference import is_upstream_request_fault
 from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import (
     is_model_allowed,
@@ -292,7 +294,14 @@ def _authorize_legacy_batch(
 
 
 def _provider_failure(exc: Exception) -> HTTPException:
-    """The answer to a failed provider call: a rejected credential is a 424, anything else a 502."""
+    """The answer to a failed provider call.
+
+    A rejected credential is a 424, and a 403 that rejects the request itself the
+    caller's 400 with the provider's sentence, as on the completion routes.
+    Anything else is a 502.
+    """
+    if is_upstream_request_fault(exc) and (mapping := classify_provider_error(exc)) is not None:
+        return HTTPException(status_code=mapping.status_code, detail=mapping.detail)
     if is_provider_credential_rejection(exc):
         return HTTPException(
             status_code=status.HTTP_424_FAILED_DEPENDENCY,

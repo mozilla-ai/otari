@@ -240,6 +240,30 @@ def test_list_batches_rejected_credential_is_a_424(
     _assert_credential_rejected(resp)
 
 
+def test_list_batches_answers_a_request_fault_403_with_the_providers_400(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """A 403 that rejects the request is the caller's to fix: neither a rejected credential nor a retryable 502."""
+    error = {"message": "This operation is not allowed for this request", "type": "invalid_request_error"}
+    upstream = openai.PermissionDeniedError(
+        f"Error code: 403 - {{'error': {error}}}",
+        response=httpx.Response(
+            403, request=httpx.Request("GET", "https://api.openai.com/v1/batches"), json={"error": error}
+        ),
+        body=error,
+    )
+    with patch(
+        "gateway.api.routes.batches.alist_batches",
+        new_callable=AsyncMock,
+        side_effect=convert_exception(upstream, "openai"),
+    ):
+        resp = client.get(f"{API_ROOT}/batches?provider=openai", headers=api_key_header)
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"] == "This operation is not allowed for this request"
+    assert ERROR_CODE_HEADER not in resp.headers
+
+
 def test_create_batch_logs_usage(
     client: TestClient,
     master_key_header: dict[str, str],
