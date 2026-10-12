@@ -389,6 +389,8 @@ gateway's own credential (its 401 or 403) answers 424 with
 `Otari-Error-Code: provider_credential_rejected`, which a client does not retry
 either. A provider timeout answers 504, and any other provider failure 502
 (500 on Messages).
+When the request named a model alias,
+a provider message that names the alias's target names the alias instead.
 
 A 5xx that resending the same request cannot fix also carries
 `x-should-retry: false`, the header the OpenAI and Anthropic SDKs read before
@@ -404,9 +406,6 @@ ordinary HTTP error (see [Error codes](#error-codes)). A routing policy still
 moves on to its next candidate on either failure: the header describes only the
 answer the caller receives, and a policy that tried several candidates and saw
 every one fail answers without it.
-
-When the request named a model alias,
-a provider message that names the alias's target names the alias instead.
 
 Gateway-side failures use fixed public messages. Diagnose them with protected
 logs and safe metadata such as request ID, provider, model, and status. Do not
