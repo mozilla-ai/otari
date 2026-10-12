@@ -32,7 +32,7 @@ _ZERO = Decimal(0)
 
 @dataclass(frozen=True)
 class ApplicableCeiling:
-    """A ceiling on one of a request's scopes, with what its budget caps and when its window ends."""
+    """A ceiling on one of a request's scopes, with its provider, its budget's caps and when its window ends."""
 
     scoped_budget_id: str
     scope_type: str
@@ -313,11 +313,8 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
             staged.append(ceiling)
         return staged
 
-    async def list_applicable(self, scopes: ScopeIdSets, provider_key_id: str | None) -> list[ApplicableCeiling]:
-        """Return the ceilings on these scopes that cap every provider or, when one is named, this provider."""
-        provider_match: ColumnElement[bool] = ScopedBudget.provider_key_id.is_(None)
-        if provider_key_id is not None:
-            provider_match = or_(ScopedBudget.provider_key_id == provider_key_id, provider_match)
+    async def list_applicable(self, scopes: ScopeIdSets) -> list[ApplicableCeiling]:
+        """Return the ceilings on these scopes, whichever provider each caps."""
         result = await self.db.execute(
             select(
                 ScopedBudget.id,
@@ -330,7 +327,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                 Budget.request_limit,
             )
             .join(Budget, Budget.budget_id == ScopedBudget.budget_id)
-            .where(_in_scopes(scopes), provider_match)
+            .where(_in_scopes(scopes))
         )
         return [ApplicableCeiling(*row) for row in result.tuples().all()]
 

@@ -1675,6 +1675,7 @@ async def _bill_vision_side_call(
             reserved=False,
             strategy=config.budget_strategy,
             counts_toward_budget=counts_toward_budget,
+            scope_ceilings=(),
         ),
         cost or Decimal(0),
     )

@@ -273,6 +273,24 @@ async def test_provider_narrowed_cap_binds_only_that_provider(async_db: AsyncSes
 
 
 @pytest.mark.asyncio
+async def test_a_handle_keeps_the_ceilings_of_every_provider(async_db: AsyncSession, tenancy: Fixture) -> None:
+    narrowed = await _scoped(
+        async_db,
+        scope_type="workspace",
+        scope_id=str(tenancy.workspace_id),
+        max_budget=1.0,
+        provider_key_id="openai",
+    )
+    async_db.add(narrowed)
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, tenancy.user_id, 5.0, scope=tenancy.scope("anthropic"))
+
+    assert handle.scoped_budget_ids == ()
+    assert [ceiling.scoped_budget_id for ceiling in handle.scope_ceilings] == [narrowed.id]
+
+
+@pytest.mark.asyncio
 async def test_narrowed_and_aggregate_caps_both_apply(async_db: AsyncSession, tenancy: Fixture) -> None:
     """A provider-narrowed cap and the workspace's aggregate cap are independent
     ceilings, and a request on that provider holds against both."""
@@ -567,7 +585,9 @@ async def test_settle_is_inert_for_a_handle_that_held_nothing(async_db: AsyncSes
     async_db.add(User(user_id="plain-user"))
     await async_db.commit()
 
-    handle = ReservationHandle(user_id="plain-user", estimate=Decimal(0), reserved=False, strategy="disabled")
+    handle = ReservationHandle(
+        user_id="plain-user", estimate=Decimal(0), reserved=False, strategy="disabled", scope_ceilings=()
+    )
     await reconcile_reservation(async_db, handle, 3.0)
 
     async_db.expire_all()

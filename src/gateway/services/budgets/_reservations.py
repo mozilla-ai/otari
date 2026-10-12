@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Literal
@@ -29,7 +29,7 @@ from gateway.models.budgets import (
 from gateway.models.money import to_usd
 from gateway.models.pricing import ModelPricing
 from gateway.models.users import User
-from gateway.repositories.budgets import HeldAmounts
+from gateway.repositories.budgets import ApplicableCeiling, HeldAmounts
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.budgets import _ledger as ledger
 from gateway.services.budgets._periods import budget_window
@@ -37,8 +37,10 @@ from gateway.services.budgets._refusals import BlockedAxis, blocked_on, refusal_
 from gateway.services.budgets._scoped_enforcement import (
     ApplicableBudget,
     BudgetScopeRequest,
-    applicable_budgets,
     blocked_axis,
+    get_provider_ceilings,
+    get_scope_ceilings,
+    roll_and_list_applicable,
 )
 from gateway.services.budgets._scoped_enforcement import release as release_scoped
 from gateway.services.budgets._scoped_enforcement import reserve as reserve_scoped
@@ -333,6 +335,9 @@ class ReservationHandle:
     scoped_request_estimate: int = 0
     # This is None when the request holds nothing: a free model, a budget-exempt key, or no budget and no ceiling.
     reservation_id: str | None = None
+    # Every ceiling on the request's scopes, whichever provider it caps, so a fallback finds its own without a query.
+    # It has no default, so a construction site cannot leave out the ceilings a fallback must pass.
+    scope_ceilings: tuple[ApplicableCeiling, ...] = field(kw_only=True)
 
     @property
     def scoped_budget_ids(self) -> tuple[str, ...]:
@@ -429,6 +434,7 @@ async def _held_handle(
     counts_toward_budget: bool,
     scoped: tuple[ApplicableBudget, ...],
     ceiling_held: HeldAmounts,
+    scope_ceilings: tuple[ApplicableCeiling, ...],
     ttl_seconds: int,
     record_reservation: bool,
     user_hold_uncommitted: bool = False,
@@ -541,6 +547,7 @@ async def _held_handle(
         request_estimate=user_held.requests,
         scoped_request_estimate=ceiling_held.requests,
         reservation_id=reservation_id,
+        scope_ceilings=scope_ceilings,
     )
 
 
@@ -625,12 +632,11 @@ async def reserve_budget(
             reserved=False,
             strategy=normalized,
             counts_toward_budget=False,
+            scope_ceilings=(),
         )
 
-    no_reservation = ReservationHandle(user_id=user_id, estimate=ZERO, reserved=False, strategy=normalized)
-
     if normalized == "disabled":
-        return no_reservation
+        return ReservationHandle(user_id=user_id, estimate=ZERO, reserved=False, strategy=normalized, scope_ceilings=())
 
     budget = attached_budget
 
@@ -646,7 +652,14 @@ async def reserve_budget(
     # Resolved after the per-user lookup so a caller that passes no scope keeps
     # the original fast path exactly, and skipped entirely when there is nothing
     # to hold against on either mechanism.
-    scoped = await applicable_budgets(db, user_id=user_id, scope=scope) if scope is not None else ()
+    ceilings: tuple[ApplicableCeiling, ...] = ()
+    scoped: tuple[ApplicableBudget, ...] = ()
+    if scope is not None:
+        ceilings = await get_scope_ceilings(db, user_id=user_id, scope=scope)
+        scoped = await roll_and_list_applicable(db, get_provider_ceilings(ceilings, scope.provider_instance))
+    no_reservation = ReservationHandle(
+        user_id=user_id, estimate=ZERO, reserved=False, strategy=normalized, scope_ceilings=ceilings
+    )
     if budget is None and not scoped:
         return no_reservation
 
@@ -729,6 +742,7 @@ async def reserve_budget(
             counts_toward_budget=counts_toward_budget,
             scoped=scoped,
             ceiling_held=HeldAmounts(amount=usd or ZERO, tokens=held_tokens, requests=held_requests),
+            scope_ceilings=ceilings,
             ttl_seconds=reservation_ttl_sec,
             record_reservation=record_reservation,
         )
@@ -756,6 +770,7 @@ async def reserve_budget(
             counts_toward_budget=counts_toward_budget,
             scoped=scoped,
             ceiling_held=_ceiling_held(scoped, usd, held_tokens, held_requests),
+            scope_ceilings=ceilings,
             ttl_seconds=reservation_ttl_sec,
             record_reservation=record_reservation,
         )
@@ -850,6 +865,7 @@ async def reserve_budget(
         counts_toward_budget=counts_toward_budget,
         scoped=scoped,
         ceiling_held=_ceiling_held(scoped, usd, held_tokens, held_requests),
+        scope_ceilings=ceilings,
         ttl_seconds=reservation_ttl_sec,
         record_reservation=record_reservation,
     )
@@ -1010,7 +1026,7 @@ async def record_external_spend(db: AsyncSession, user_id: str, cost: Decimal | 
     batch-heavy workloads in dollars. Moving that boundary means giving this path
     a window to count over, not passing a token count through it.
     """
-    handle = ReservationHandle(user_id=user_id, estimate=ZERO, reserved=False, strategy="disabled")
+    handle = ReservationHandle(user_id=user_id, estimate=ZERO, reserved=False, strategy="disabled", scope_ceilings=())
     await reconcile_reservation(db, handle, cost)
 
 

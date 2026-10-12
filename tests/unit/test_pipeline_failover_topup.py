@@ -81,6 +81,7 @@ def _ctx(
             reserved=True,
             strategy="for_update",
             counts_toward_budget=counts_toward_budget,
+            scope_ceilings=(),
         ),
         estimate_inputs=(
             estimate_inputs

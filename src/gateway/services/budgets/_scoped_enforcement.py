@@ -28,7 +28,7 @@ from gateway.models.budgets import (
     SCOPE_WORKSPACE_MEMBER,
 )
 from gateway.models.tenancy import OrganizationMember, Workspace, WorkspaceMember
-from gateway.repositories.budgets import ScopedBudgetRepository, ScopeIdSets
+from gateway.repositories.budgets import ApplicableCeiling, ScopedBudgetRepository, ScopeIdSets
 from gateway.services.budgets._periods import period_window
 from gateway.services.budgets._refusals import BlockedAxis, blocked_on
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
@@ -235,11 +235,14 @@ async def applicable_budgets(
     window that has run out is rolled here, before the reservation reads the
     counters, so a request at the boundary is gated on the new period.
     """
-    scopes = await _resolve_identities(db, user_id=user_id, scope=scope)
-    ceilings = await ScopedBudgetRepository(db).list_applicable(scopes, scope.provider_instance)
-    if not ceilings:
-        return ()
+    ceilings = await get_scope_ceilings(db, user_id=user_id, scope=scope)
+    return await roll_and_list_applicable(db, get_provider_ceilings(ceilings, scope.provider_instance))
 
+
+async def roll_and_list_applicable(
+    db: AsyncSession, ceilings: Sequence[ApplicableCeiling]
+) -> tuple[ApplicableBudget, ...]:
+    """Return ``ceilings`` as the budgets a request must pass, in order, after rolling any window that has ended."""
     now = datetime.now(UTC)
     expired = [
         (ceiling.scoped_budget_id, ceiling.budget_duration_sec, ceiling.reset_alignment)
@@ -248,8 +251,7 @@ async def applicable_budgets(
     ]
     if expired:
         await _roll_expired_periods(db, expired, now)
-
-    resolved = [
+    return tuple(
         ApplicableBudget(
             budget_id=ceiling.scoped_budget_id,
             scope_type=ceiling.scope_type,
@@ -258,17 +260,37 @@ async def applicable_budgets(
             request_limit=ceiling.request_limit,
         )
         for ceiling in ceilings
+    )
+
+
+def get_provider_ceilings(
+    ceilings: Sequence[ApplicableCeiling], provider_instance: str | None
+) -> tuple[ApplicableCeiling, ...]:
+    """Return the ceilings among ``ceilings`` that cap every provider or ``provider_instance``, in reservation order.
+
+    Most specific first, provider-narrowed before aggregate within a scope, then the ID, so the order is total.
+    """
+    bound = [
+        ceiling
+        for ceiling in ceilings
+        if ceiling.provider_key_id is None or ceiling.provider_key_id == provider_instance
     ]
-    # Most specific first, provider-narrowed before aggregate within a scope, then
-    # the id so the order stays total when two ceilings tie on both.
-    resolved.sort(
-        key=lambda budget: (
-            _SCOPE_PRECEDENCE.get(budget.scope_type, len(_SCOPE_PRECEDENCE)),
-            0 if budget.provider_key_id is not None else 1,
-            budget.budget_id,
+    bound.sort(
+        key=lambda ceiling: (
+            _SCOPE_PRECEDENCE.get(ceiling.scope_type, len(_SCOPE_PRECEDENCE)),
+            0 if ceiling.provider_key_id is not None else 1,
+            ceiling.scoped_budget_id,
         )
     )
-    return tuple(resolved)
+    return tuple(bound)
+
+
+async def get_scope_ceilings(
+    db: AsyncSession, *, user_id: str, scope: BudgetScopeRequest
+) -> tuple[ApplicableCeiling, ...]:
+    """Return every ceiling on the scopes a request bills to, whichever provider it caps."""
+    scopes = await _resolve_identities(db, user_id=user_id, scope=scope)
+    return tuple(await ScopedBudgetRepository(db).list_applicable(scopes))
 
 
 async def release(
@@ -441,6 +463,9 @@ __all__ = [
     "BudgetScopeRequest",
     "applicable_budgets",
     "blocked_axis",
+    "roll_and_list_applicable",
+    "get_provider_ceilings",
+    "get_scope_ceilings",
     "release",
     "reserve",
     "settle",

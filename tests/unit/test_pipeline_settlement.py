@@ -547,7 +547,9 @@ def _chunk(usage: CompletionUsage | None = None) -> ChatCompletionChunk:
 
 
 def _reservation(estimate: Decimal = Decimal("0.5")) -> ReservationHandle:
-    return ReservationHandle(user_id="user-1", estimate=estimate, reserved=True, strategy="for_update")
+    return ReservationHandle(
+        user_id="user-1", estimate=estimate, reserved=True, strategy="for_update", scope_ceilings=()
+    )
 
 
 def _build(
@@ -2928,7 +2930,12 @@ async def test_standalone_non_stream_marks_budget_exempt_rows(monkeypatch: pytes
     settlement.install(monkeypatch)
 
     exempt = ReservationHandle(
-        user_id="user-1", estimate=Decimal(0), reserved=False, strategy="for_update", counts_toward_budget=False
+        user_id="user-1",
+        estimate=Decimal(0),
+        reserved=False,
+        strategy="for_update",
+        counts_toward_budget=False,
+        scope_ceilings=(),
     )
     await _run_standalone(monkeypatch, result=_completion(usage=_usage()), reservation=exempt)
 
