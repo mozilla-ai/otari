@@ -59,7 +59,7 @@ import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session, init_db
-from gateway.ports.identity_provider_port import EmailAssertion
+from gateway.models.identity import EmailAssertion
 from gateway.services import oauth_service
 
 pytestmark = pytest.mark.skipif(

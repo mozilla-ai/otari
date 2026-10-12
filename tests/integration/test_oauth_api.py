@@ -35,14 +35,13 @@ from sqlmodel import col, delete
 from gateway.api.routes import auth_oauth
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
-from gateway.models.identity import OAuthIdentityLink
+from gateway.models.identity import EmailAssertion, OAuthIdentityLink, ProviderIdentity
 from gateway.models.tenancy import Organization, User, WebAuthnCredential
 from gateway.models.tools import WorkspaceCodeExecutionPolicy
-from gateway.ports.identity_provider_port import EmailAssertion
 from gateway.repositories.tenancy import UserRepository
 from gateway.services import oauth_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
-from gateway.services.oauth_service import FLOW_COOKIE_NAME, FLOW_COOKIE_PATH, OAuthIdentity
+from gateway.services.oauth_service import FLOW_COOKIE_NAME, FLOW_COOKIE_PATH
 from gateway.services.tenancy.organization_service import OrganizationService, SignupRegistration
 
 ORIGIN = "http://testserver"
@@ -79,9 +78,9 @@ def stub_exchange(
 
     async def _exchange(
         _config: GatewayConfig, provider: str, *, code: str, state: str, flow_secret: str | None, db: Any
-    ) -> OAuthIdentity:
+    ) -> ProviderIdentity:
         spent.append(code)
-        return OAuthIdentity(
+        return ProviderIdentity(
             provider=provider,
             subject=subject,
             email=email,

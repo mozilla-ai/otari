@@ -61,8 +61,8 @@ from sqlmodel import col
 from gateway.core.config import API_ROOT, OAUTH_PROVIDERS, GatewayConfig
 from gateway.exceptions.identity_exceptions import OAuthExchangeError, OAuthNotConfiguredError, OAuthStateError
 from gateway.log_config import logger
+from gateway.models.identity import EmailAssertion, ProviderIdentity
 from gateway.models.tenancy import OAUTH_STATE_TTL_SECONDS, OAuthPendingState
-from gateway.ports.identity_provider_port import EmailAssertion
 
 # Which scopes each provider is asked for, and what it calls itself.
 #
@@ -103,23 +103,6 @@ _PROVIDERS: dict[str, _Provider] = {
 # to one of the two lists and not the other fails on the way up rather than on
 # the first request that names it.
 assert set(_PROVIDERS) == set(OAUTH_PROVIDERS), "OAUTH_PROVIDERS and _PROVIDERS must name the same providers"
-
-
-@dataclass(frozen=True)
-class OAuthIdentity:
-    """What a completed exchange says about the person who just consented.
-
-    Narrower than apron-auth's ``IdentityProfile`` on purpose: this is the
-    subset that sign-in may use, so what it keys on is visible here rather than
-    being whatever the library happened to return. ``(provider, subject)`` names
-    the person at the provider.
-    """
-
-    provider: str
-    subject: str
-    email: str | None
-    full_name: str | None
-    email_verified: EmailAssertion
 
 
 def provider_label(provider: str) -> str:
@@ -352,7 +335,7 @@ async def exchange_code(
     state: str,
     flow_secret: str | None,
     db: AsyncSession,
-) -> OAuthIdentity:
+) -> ProviderIdentity:
     """Trade an authorization code for the identity the provider vouches for.
 
     ``state`` is claimed before the code is sent anywhere, so a callback this
@@ -397,7 +380,7 @@ async def exchange_code(
         logger.warning("Refused a %s identity that carried no subject", provider)
         raise OAuthExchangeError(provider_label(provider))
 
-    return OAuthIdentity(
+    return ProviderIdentity(
         provider=provider,
         subject=profile.subject,
         email=profile.email,
@@ -487,7 +470,6 @@ __all__ = [
     "FLOW_COOKIE_NAME",
     "FLOW_COOKIE_PATH",
     "OAUTH_ROUTE_PREFIX",
-    "OAuthIdentity",
     "apply_flow_cookie",
     "authorization_url",
     "base_url",

@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import OAUTH_PROVIDERS, GatewayConfig
 from gateway.exceptions.identity_exceptions import OAuthExchangeError, OAuthNotConfiguredError, OAuthStateError
 from gateway.log_config import logger as gateway_logger
-from gateway.ports.identity_provider_port import EmailAssertion
+from gateway.models.identity import EmailAssertion
 from gateway.services import oauth_service
 
 

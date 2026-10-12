@@ -8,13 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
 from gateway.exceptions.identity_exceptions import OAuthIdentityUnknownError
-from gateway.models.identity import OAuthIdentityLink
+from gateway.models.identity import EmailAssertion, OAuthIdentityLink, ProviderIdentity
 from gateway.models.tenancy import User
-from gateway.ports.identity_provider_port import EmailAssertion
 from gateway.repositories.identity import OAuthIdentityLinkRepository
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.identity import IdentityService
-from gateway.services.oauth_service import OAuthIdentity
 from gateway.services.tenancy import OrganizationService, forget_unproven_access
 
 from .tenancy_helpers import create_organization, membership_writes
@@ -40,8 +38,8 @@ def _service(db: AsyncSession, *, open_signup: bool) -> IdentityService:
     )
 
 
-def _verified(provider: str, email: str) -> OAuthIdentity:
-    return OAuthIdentity(
+def _verified(provider: str, email: str) -> ProviderIdentity:
+    return ProviderIdentity(
         provider=provider,
         subject="provider-subject",
         email=email,

@@ -1,12 +1,47 @@
 """Tables the identity domain owns."""
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 
 from sqlalchemy import ForeignKey, String, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
+
+
+class EmailAssertion(StrEnum):
+    """What a provider says about the email address it returns.
+
+    NOTE: A provider that sends no claim is ``UNASSERTED``, not ``UNVERIFIED``.
+    """
+
+    UNASSERTED = "unasserted"
+    UNVERIFIED = "unverified"
+    VERIFIED = "verified"
+
+    @classmethod
+    def from_claim(cls, email_verified: bool | None) -> "EmailAssertion":
+        """Return the assertion for a provider's tri-state ``email_verified`` claim."""
+        if email_verified is None:
+            return cls.UNASSERTED
+        return cls.VERIFIED if email_verified else cls.UNVERIFIED
+
+
+@dataclass(frozen=True)
+class ProviderIdentity:
+    """What a provider has proven about the person who signed in.
+
+    ``(provider, subject)`` names the person at the provider.
+    ``provider`` is an open string, because a customer's own OIDC connections are not enumerable.
+    """
+
+    provider: str
+    subject: str
+    email: str | None
+    full_name: str | None
+    email_verified: EmailAssertion
 
 
 class OAuthIdentityLink(Base):
@@ -33,4 +68,4 @@ class OAuthIdentityLink(Base):
     )
 
 
-__all__ = ["OAuthIdentityLink"]
+__all__ = ["EmailAssertion", "OAuthIdentityLink", "ProviderIdentity"]

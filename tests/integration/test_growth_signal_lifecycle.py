@@ -31,11 +31,10 @@ from sqlmodel import col
 
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
+from gateway.models.identity import EmailAssertion, ProviderIdentity
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.ports.growth_signal_port import GrowthActivationEvent, GrowthSignalPort
-from gateway.ports.identity_provider_port import EmailAssertion
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
-from gateway.services.oauth_service import OAuthIdentity
 
 PASSWORD = "a-real-password"  # pragma: allowlist secret
 _KEYS = f"{API_ROOT}/organizations/me/keys"
@@ -182,8 +181,8 @@ def test_a_second_signup_on_a_claimed_address_notifies_nothing(
 
 
 def _sign_in_with_google(client: TestClient, monkeypatch: pytest.MonkeyPatch, *, email: str) -> None:
-    async def _exchange(_config: GatewayConfig, provider: str, **_: Any) -> OAuthIdentity:
-        return OAuthIdentity(
+    async def _exchange(_config: GatewayConfig, provider: str, **_: Any) -> ProviderIdentity:
+        return ProviderIdentity(
             provider=provider,
             subject=f"{email}-subject",
             email=email,

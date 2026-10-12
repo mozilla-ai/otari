@@ -9,7 +9,8 @@ from gateway.exceptions.identity_exceptions import (
     OAuthEmailNotVerifiedError,
     OAuthIdentityUnknownError,
 )
-from gateway.ports.identity_provider_port import EmailAssertion, IdentityProviderPort, IdentityResolution
+from gateway.models.identity import EmailAssertion, ProviderIdentity
+from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.oauth_service import provider_label
 from gateway.services.tenancy import OrganizationService, unverified_identity_is_claimable
@@ -39,15 +40,7 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         self._forget_unproven_access = forget_unproven_access
         self._open_signup = open_signup
 
-    async def resolve(
-        self,
-        *,
-        provider: str,
-        subject: str,
-        email: str | None,
-        full_name: str | None,
-        email_verified: EmailAssertion,
-    ) -> IdentityResolution:
+    async def resolve(self, external: ProviderIdentity) -> IdentityResolution:
         """Return the account that holds the address of an OAuth identity with no link.
 
         Only a provider whose email claim no tenant can set signs in here.
@@ -89,21 +82,23 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
                 or no active account holds the address and ``open_signup`` does not register a new one.
 
         """
-        label = provider_label(provider)
-        if provider not in _EMAIL_TRUSTED_PROVIDERS:
+        label = provider_label(external.provider)
+        if external.provider not in _EMAIL_TRUSTED_PROVIDERS:
             raise OAuthIdentityUnknownError(label)
-        if email_verified is not EmailAssertion.VERIFIED or not email:
+        if external.email_verified is not EmailAssertion.VERIFIED or not external.email:
             raise OAuthEmailNotVerifiedError(label)
         # An address this gateway would never store names no account, so it is refused as unknown.
         try:
-            address = validated_email(email)
+            address = validated_email(external.email)
         except InvalidEmailError as error:
             raise OAuthIdentityUnknownError(label) from error
 
         created = False
         identity = await self._users.get_by_email(address)
         if identity is None and self._open_signup:
-            registration = await self._organizations.provision_signup_tenancy(email=address, full_name=full_name)
+            registration = await self._organizations.provision_signup_tenancy(
+                email=address, full_name=external.full_name
+            )
             identity = registration.identity
             created = registration.created
         if identity is None:
@@ -123,13 +118,13 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
 
         first_claim = identity.hashed_password is None and identity.email_verified_at is None
         if not created and self._open_signup and identity.email_verified_at is None:
-            await self._organizations.provision_tenancy_for_claim(identity, full_name=full_name)
+            await self._organizations.provision_tenancy_for_claim(identity, full_name=external.full_name)
             # Provisioning pointed the account at its new organization, so it is read again.
             identity = await self._users.get_locked(identity.id)
             if identity is None or not identity.is_active:
                 raise OAuthIdentityUnknownError(label)
         if identity.oauth_provider is None:
-            identity.oauth_provider = provider
+            identity.oauth_provider = external.provider
         if identity.email_verified_at is None or identity.email_vouched_at is not None:
             identity.email_verified_at = datetime.now(UTC)
             identity.email_vouched_at = None
@@ -140,8 +135,8 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
             identity.password_reset_token_hash = None
             identity.password_reset_token_expires_at = None
             await self._forget_unproven_access(identity.id)
-        if not identity.full_name and full_name:
-            identity.full_name = full_name
+        if not identity.full_name and external.full_name:
+            identity.full_name = external.full_name
         self._users.stage(identity)
         return IdentityResolution(identity=identity, new_account=created or first_claim)
 

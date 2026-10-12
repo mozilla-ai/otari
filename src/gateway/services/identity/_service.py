@@ -1,10 +1,11 @@
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import OAuthEmailNotVerifiedError, OAuthIdentityUnknownError
 from gateway.log_config import logger
-from gateway.ports.identity_provider_port import EmailAssertion, IdentityProviderPort, IdentityResolution
+from gateway.models.identity import EmailAssertion, ProviderIdentity
+from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import OAuthIdentityLinkRepository
 from gateway.repositories.tenancy import UserRepository
-from gateway.services.oauth_service import OAuthIdentity, provider_label
+from gateway.services.oauth_service import provider_label
 
 
 class IdentityService:
@@ -26,7 +27,7 @@ class IdentityService:
         self._links = links
         self._users = users
 
-    async def sign_in_with_oauth(self, external: OAuthIdentity) -> IdentityResolution:
+    async def sign_in_with_oauth(self, external: ProviderIdentity) -> IdentityResolution:
         """Return the account that an identity a provider has proven signs in as.
 
         An identity linked to an account signs in as that account, and the sign-in changes nothing on it.
@@ -51,13 +52,7 @@ class IdentityService:
                     raise OAuthIdentityUnknownError(label)
                 return IdentityResolution(identity=account, new_account=False)
 
-            resolution = await self._identity_provider.resolve(
-                provider=external.provider,
-                subject=external.subject,
-                email=external.email,
-                full_name=external.full_name,
-                email_verified=external.email_verified,
-            )
+            resolution = await self._identity_provider.resolve(external)
             account = resolution.identity
             # A concurrent first sign-in can link this same identity after the lookup above.
             existing = await self._links.get_for_user(account.id, external.provider)

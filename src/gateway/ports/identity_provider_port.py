@@ -28,28 +28,10 @@ Overlay authors should pin a released tag.
 """
 
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import Protocol
 
+from gateway.models.identity import ProviderIdentity
 from gateway.models.tenancy import User
-
-
-class EmailAssertion(StrEnum):
-    """What a provider says about the email address it returns.
-
-    NOTE: A provider that sends no claim is ``UNASSERTED``, not ``UNVERIFIED``.
-    """
-
-    UNASSERTED = "unasserted"
-    UNVERIFIED = "unverified"
-    VERIFIED = "verified"
-
-    @classmethod
-    def from_claim(cls, email_verified: bool | None) -> "EmailAssertion":
-        """Return the assertion for a provider's tri-state ``email_verified`` claim."""
-        if email_verified is None:
-            return cls.UNASSERTED
-        return cls.VERIFIED if email_verified else cls.UNVERIFIED
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,28 +49,14 @@ class IdentityResolution:
 class IdentityProviderPort(Protocol):
     """Which account here, if any, an external OAuth identity with no link signs in as."""
 
-    async def resolve(
-        self,
-        *,
-        provider: str,
-        subject: str,
-        email: str | None,
-        full_name: str | None,
-        email_verified: EmailAssertion,
-    ) -> IdentityResolution:
+    async def resolve(self, external: ProviderIdentity) -> IdentityResolution:
         """Return the account that an identity with no link here signs in as.
 
         ``IdentityResolution.new_account`` says whether this sign-in created the
         account or is the first way in to one nobody had claimed, which the
         caller reports as a signup.
 
-        ``provider`` names the provider or connection and is an open string
-        rather than a closed enum, because a customer's own OIDC connections are
-        not enumerable by this tree. ``subject`` is the provider's own ID for
-        the person, and ``email_verified`` is what the provider says about
-        ``email``.
-
-        NOTE: No account is linked to ``(provider, subject)`` when this is called.
+        NOTE: No account is linked to the identity's ``(provider, subject)`` when this is called.
         The account this returns gains that link.
         An adapter must return an account only when this identity may sign in as it from then on.
 
@@ -104,4 +72,4 @@ class IdentityProviderPort(Protocol):
         ...
 
 
-__all__ = ["EmailAssertion", "IdentityProviderPort", "IdentityResolution"]
+__all__ = ["IdentityProviderPort", "IdentityResolution"]
