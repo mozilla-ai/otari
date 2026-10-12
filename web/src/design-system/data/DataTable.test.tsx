@@ -778,6 +778,27 @@ describe('DataTable on a phone with mobileLayout="cards"', () => {
     expect(onSelectionChange).toHaveBeenLastCalledWith(new Set(["elsewhere"]))
   })
 
+  it("does not open a card on the click that finished a text selection in it", () => {
+    stubPhone(true)
+    const onRowAction = vi.fn()
+    render(
+      <DataTable {...base({ columns, onRowAction, mobileLayout: "cards" })} />,
+    )
+    const name = screen.getByText("Bravo")
+    const range = document.createRange()
+    range.selectNodeContents(name)
+    const selection = document.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+
+    fireEvent.click(name)
+    expect(onRowAction).not.toHaveBeenCalled()
+
+    selection?.removeAllRanges()
+    fireEvent.click(name)
+    expect(onRowAction).toHaveBeenCalledWith("b")
+  })
+
   it("keeps a click inside the open detail from toggling the card", async () => {
     stubPhone(true)
     const user = userEvent.setup()

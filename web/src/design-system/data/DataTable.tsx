@@ -286,7 +286,10 @@ function DataCardList<Row extends object>({
               onClick={
                 onRowAction
                   ? (event: ReactMouseEvent<HTMLLIElement>) => {
-                      if (!(event.target as Element).closest(OWN_PRESS))
+                      if (
+                        !(event.target as Element).closest(OWN_PRESS) &&
+                        !hasTextSelectionIn(event.currentTarget)
+                      )
                         onRowAction(key)
                     }
                   : undefined
