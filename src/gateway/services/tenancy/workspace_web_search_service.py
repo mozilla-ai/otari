@@ -25,7 +25,6 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.settings.tools import MAX_RESULTS_CAP
 from gateway.models.tenancy import User, Workspace
 from gateway.models.tools import ResolvedWebSearchConfig, WorkspaceWebSearchConfig
 from gateway.services.tenancy import authorization
@@ -33,11 +32,13 @@ from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.web_retrieval_policy import read_domain_list
 
-# The backend's own ceiling on returned hits. A stored value above it would read
-# as a configured limit and do nothing, since the backend clamps to this anyway,
-# so it is refused at the write rather than silently clamped at resolve time.
-# Same call as the code execution policy service makes for its two.
-_MAX_RESULTS = MAX_RESULTS_CAP
+# The old in-loop backend's ceiling on returned hits, repeated rather than
+# imported because that backend imports the tools package, which imports this
+# package. A stored value above it would read as a configured limit and do
+# nothing, since the backend clamps to this anyway, so it is refused at the
+# write rather than silently clamped at resolve time. Same call as the code
+# execution policy service makes for its two.
+_MAX_RESULTS = 20
 # Bound the opaque bag so one workspace's row cannot grow without limit; the
 # same numbers the hosted `WorkspaceWebSearchConfigUpdate` uses, since this is
 # the same configuration.

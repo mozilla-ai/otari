@@ -16,11 +16,10 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from opentelemetry import trace
 
-from gateway.core.settings.tools import DEFAULT_MAX_RESULTS as DEFAULT_MAX_RESULTS
 from gateway.core.settings.tools import DEFAULT_SEARXNG_ENGINES
-from gateway.core.settings.tools import MAX_RESULTS_CAP as MAX_RESULTS_CAP
 from gateway.services._tool_loop import MaxToolIterationsExceeded
 from gateway.services.tool_usage import ToolUsageTally
+from gateway.services.tools import DEFAULT_MAX_RESULTS as DEFAULT_MAX_RESULTS
 from gateway.services.tools import WEB_FETCH_TOOL_NAME as WEB_FETCH_TOOL_NAME
 from gateway.services.tools import WEB_RETRIEVAL_RESULT_MAX_BYTES as WEB_RETRIEVAL_RESULT_MAX_BYTES
 from gateway.services.tools import WEB_SEARCH_NATIVE_TYPE_PREFIX as WEB_SEARCH_NATIVE_TYPE_PREFIX
@@ -65,6 +64,9 @@ MAX_WEB_RETRIEVAL_CALLS = 10
 _RESERVED_SEARCH_PARAMS = frozenset({"q", "format", "engines"})
 
 _DEFAULT_SEARCH_TIMEOUT_S = 15.0
+# Public because the `/web_search` route bounds its query by it. The workspace
+# web search policy repeats it (`services/tenancy/workspace_web_search_service.py`).
+MAX_RESULTS_CAP = 20
 _DEFAULT_EXTRACT_CONCURRENCY = 5
 _RESULT_TRUNCATION_NOTICE = "\n\n[Content truncated at the 50 KiB tool-result limit.]"
 _SOURCE_TRUNCATION_NOTICE = "\n\n[Source content truncated at the 5 MiB response limit.]"

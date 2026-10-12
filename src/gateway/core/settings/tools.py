@@ -77,13 +77,6 @@ NO_SEARCH_DEFAULT = "none"
 RESERVED_INSTANCE_NAMES = frozenset({BUILTIN_FETCH, NO_SEARCH_DEFAULT})
 
 DEFAULT_WEB_SEARCH_MAX_CALLS = 10
-# How many results the in-loop tool returns when neither the deployment nor the request names a number.
-DEFAULT_MAX_RESULTS = 5
-# The most results a search returns. A workspace's stored web search ceiling is
-# validated against it (`services/tenancy/workspace_web_search_service.py`): a
-# value above what the backend honors could never take effect, so it is refused
-# at the write.
-MAX_RESULTS_CAP = 20
 # The engines the old in-loop backend asks a SearXNG service for when
 # ``web_search_engines`` is unset; why these four is said where it uses them.
 DEFAULT_SEARXNG_ENGINES = ("duckduckgo", "mojeek", "qwant", "wikipedia")

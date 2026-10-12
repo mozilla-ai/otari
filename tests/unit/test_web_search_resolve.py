@@ -494,17 +494,17 @@ def test_the_old_code_takes_the_layers_without_otaris_defaults() -> None:
     assert dict(resolved.options) == {"topic": "finance", "search_depth": "basic"}
 
 
-def test_the_count_is_taken_out_as_the_cap() -> None:
+def test_the_count_is_taken_out_of_the_options_uncapped() -> None:
     config = GatewayConfig(search_tools={"test": {"provider": "fake", "options": {"max_results": 3}}})
 
     assert _in_loop(config).max_results == 3
     assert _in_loop(config, request={"max_results": 2, "time_range": "week"}).max_results == 2
-    assert _in_loop(config, request={"max_results": 1_000_000}).max_results == 20
+    assert _in_loop(config, request={"max_results": 100}).max_results == 100
     resolved = _in_loop(config, request={"time_range": "week"})
     assert dict(resolved.options) == {"time_range": "week"}
 
 
-def test_a_workspace_count_the_library_refuses_leaves_the_instances_cap(caplog: pytest.LogCaptureFixture) -> None:
+def test_a_workspace_count_the_library_refuses_leaves_the_instances_count(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.WARNING, logger="gateway")
     config = GatewayConfig(search_tools={"test": {"provider": "fake", "options": {"max_results": 3}}})
 
@@ -515,7 +515,7 @@ def test_a_workspace_count_the_library_refuses_leaves_the_instances_cap(caplog: 
 
 
 @pytest.mark.parametrize("count", [0, True, "5", 2.5])
-def test_on_the_old_code_a_count_that_is_not_a_positive_whole_number_sets_no_cap(count: object) -> None:
+def test_on_the_old_code_a_count_that_is_not_a_positive_whole_number_sets_no_count(count: object) -> None:
     config = GatewayConfig(web_search_provider="brave", web_search_provider_api_key="brv")
 
     resolved = _in_loop(config, request={"max_results": count})

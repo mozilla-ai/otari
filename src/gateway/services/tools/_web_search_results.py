@@ -5,11 +5,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from gateway.core.env import otari_env
-from gateway.core.settings.tools import DEFAULT_MAX_RESULTS
 from gateway.log_config import logger
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
+
+# How many results the in-loop tool returns when neither the deployment nor the request names a number.
+DEFAULT_MAX_RESULTS = 5
 
 
 def web_search_max_results_baseline(config: GatewayConfig | None) -> int:

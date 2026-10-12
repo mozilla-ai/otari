@@ -26,8 +26,8 @@ Options are layered lowest first: otari's defaults for the provider, the
 instance's, the credential's, the workspace's and the request's. The direct
 endpoint leaves out the workspace's, and the instance's when an organization
 key serves the call. Fetch takes neither a workspace nor a request layer,
-since both hold search options. The count the layers name is taken out as
-the result's cap, for the caller to apply as its door does. Where a library
+since both hold search options. The count the layers name is taken out of
+the options, for the caller to apply as its door does. Where a library
 runs the call, each option is checked as the instance's are (design E): a
 request's option the provider does not take, or takes only from the
 deployment, is refused, and the other layers' are dropped with a warning that
@@ -47,7 +47,6 @@ import any_search
 from gateway.core.settings.tools import (
     BUILTIN_FETCH,
     BUILTIN_FETCH_PROVIDER,
-    MAX_RESULTS_CAP,
     PROVIDER_DEFAULT_OPTIONS,
     SEARCH_PROVIDERS_REQUIRING_API_BASE,
     SEARCH_PROVIDERS_WITHOUT_ADAPTER,
@@ -261,7 +260,7 @@ def _search_on_instance(
         validate_search_tool_transport(instance.name, api_base, instance.api_key)
     except ValueError as exc:
         raise SearchToolMisconfiguredError(instance.name, str(exc)) from None
-    max_results = _count(options, "max_results", cap=MAX_RESULTS_CAP)
+    max_results = _count(options, "max_results")
     label = f"{instance.provider}:{instance.name}"
     return ResolvedSearch(
         name=instance.name,
@@ -293,7 +292,7 @@ def _search_on_synthesized(
         workspace=workspace,
         request=request,
     )
-    max_results = _count(options, "max_results", cap=MAX_RESULTS_CAP)
+    max_results = _count(options, "max_results")
     return ResolvedSearch(
         name=synthesized.name,
         provider=synthesized.provider,
@@ -348,7 +347,7 @@ def _search_on_credential(
         workspace=workspace,
         request=request,
     )
-    max_results = _count(options, "max_results", cap=MAX_RESULTS_CAP)
+    max_results = _count(options, "max_results")
     label, rate_keys = _credential_billing(credential, _SEARCH_FALLBACK_RATE)
     if in_loop and runner == "old":
         # Design L: in the loop, the old backend records an organization key's calls with no label.
@@ -553,9 +552,9 @@ def _base(api_base: str | None) -> str:
     return (api_base or "").strip().rstrip("/")
 
 
-def _count(options: dict[str, Any], key: str, *, cap: int | None = None) -> int | None:
-    """Take the count out of the options: a positive whole number, within ``cap``, else nothing."""
+def _count(options: dict[str, Any], key: str) -> int | None:
+    """Take the count out of the options: a positive whole number, else nothing."""
     value = options.pop(key, None)
     if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-        return value if cap is None else min(value, cap)
+        return value
     return None

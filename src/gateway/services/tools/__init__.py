@@ -93,7 +93,7 @@ from gateway.services.tools._web_names import (
 from gateway.services.tools._web_search import ResolvedFetch, ResolvedSearch, resolve_fetch, resolve_search
 from gateway.services.tools._web_search_keys import WebSearchKeyService, WorkspaceSearchKeys
 from gateway.services.tools._web_search_responses import WEB_SEARCH_CALL_ID_PREFIX
-from gateway.services.tools._web_search_results import web_search_max_results_baseline
+from gateway.services.tools._web_search_results import DEFAULT_MAX_RESULTS, web_search_max_results_baseline
 from gateway.services.tools._workspace_defaults import CodeExecutionWorkspaceDefaults
 
 __all__ = [
@@ -145,6 +145,7 @@ __all__ = [
     "resolve_code_executor_preference",
     "web_search_declaration_forms",
     "web_search_intercept_enabled",
+    "DEFAULT_MAX_RESULTS",
     "web_search_max_results_baseline",
     "search_provider_catalog",
     "DefaultPin",
