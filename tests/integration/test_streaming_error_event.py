@@ -6,9 +6,10 @@ from collections.abc import AsyncIterator, Callable
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from any_llm.exceptions import ContextLengthExceededError
-from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice
+from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice, CompletionUsage
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -367,3 +368,100 @@ def test_a_messages_stream_that_fails_before_its_first_event_is_answered_with_it
     assert response.json()["detail"]["error"]["type"] == "api_error"
     assert "event: error" not in response.text
     assert "sk-live-abc123" not in response.text
+
+
+# ---------------------------------------------------------------------------
+# A provider stream that ends without finishing is an error, not a success
+# ---------------------------------------------------------------------------
+
+
+def _chunk(content: str | None = None, *, finish_reason: Any = None, usage: bool = False) -> ChatCompletionChunk:
+    choices = (
+        []
+        if content is None and finish_reason is None
+        else [ChunkChoice(index=0, delta=ChoiceDelta(content=content), finish_reason=finish_reason)]
+    )
+    return ChatCompletionChunk(
+        id="chunk",
+        object="chat.completion.chunk",
+        created=0,
+        model=MODEL_NAME,
+        choices=choices,
+        usage=CompletionUsage(prompt_tokens=3, completion_tokens=3, total_tokens=6) if usage else None,
+    )
+
+
+def _stream_chat(
+    client: TestClient, headers: dict[str, str], chunks: list[ChatCompletionChunk], exc: Exception | None = None
+) -> Any:
+    """Stream a chat completion whose provider sends ``chunks`` and then ends, or raises ``exc``."""
+    created = client.post(f"{API_ROOT}/users", json={"user_id": _STREAM_USER}, headers=headers)
+    assert created.status_code == 200, created.text
+
+    async def _acompletion(**_kwargs: Any) -> Any:
+        async def _stream() -> AsyncIterator[ChatCompletionChunk]:
+            for chunk in chunks:
+                yield chunk
+            if exc is not None:
+                raise exc
+
+        return _stream()
+
+    with patch("gateway.api.routes.chat.acompletion", side_effect=_acompletion):
+        return client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "hi"}],
+                "user": _STREAM_USER,
+                "stream": True,
+            },
+            headers=headers,
+        )
+
+
+_CONTENT = [_chunk("one"), _chunk("two"), _chunk("three")]
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [None, httpx.RemoteProtocolError("peer closed connection without sending complete message body")],
+    ids=["closed-without-finishing", "chunked-body-cut"],
+)
+def test_a_chat_stream_the_provider_ends_early_is_an_interrupted_stream_error(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    exc: Exception | None,
+) -> None:
+    """Three content chunks and no ``finish_reason``: the client is told the text is truncated."""
+    response = _stream_chat(client, master_key_header, _CONTENT, exc)
+
+    assert response.status_code == 200, response.text
+    assert _error_event(response.text)["error"] == {
+        "message": "The provider's stream ended before it finished",
+        "type": "server_error",
+        "code": "provider_stream_interrupted",
+    }
+    assert _usage_row(db_session_factory).status == "error"
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        [_chunk(finish_reason="stop")],
+        [_chunk(finish_reason="stop"), _chunk(usage=True)],
+        [_chunk(finish_reason="tool_calls", usage=True)],
+    ],
+    ids=["finish", "finish-then-usage-only", "tool-calls-with-usage"],
+)
+def test_a_chat_stream_that_finishes_ends_cleanly(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    tail: list[ChatCompletionChunk],
+) -> None:
+    response = _stream_chat(client, master_key_header, [*_CONTENT, *tail])
+
+    assert response.status_code == 200, response.text
+    assert '"error"' not in response.text
+    assert response.text.rstrip().endswith("data: [DONE]")

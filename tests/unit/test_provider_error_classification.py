@@ -81,6 +81,15 @@ _REASONING_TOOLS_MSG = (
 )
 
 
+def _openai_connection_error(cause: Exception) -> openai.APIConnectionError:
+    """The OpenAI SDK's connection error, raised from the httpx error as the SDK does."""
+    request = httpx.Request("POST", "https://internal-proxy.example:8443/v1/chat/completions")
+    try:
+        raise openai.APIConnectionError(request=request) from cause
+    except openai.APIConnectionError as exc:
+        return exc
+
+
 class _StatusError(Exception):
     """Upstream error exposing a top-level status_code, like any-llm surfaces."""
 
@@ -1037,13 +1046,27 @@ def test_a_stream_ended_by_a_more_specific_refusal_keeps_its_code() -> None:
         _StatusError(503),
         httpx.ConnectError("refused"),
         ProviderError("upstream broke"),
-        IncompleteStreamError(3),
         TypeError("AsyncClientV2.chat_stream() got an unexpected keyword argument 'n'"),
     ],
-    ids=["rejected", "unavailable", "unreachable", "any-llm", "incomplete", "rejected-param"],
+    ids=["rejected", "unavailable", "unreachable", "any-llm", "rejected-param"],
 )
 def test_a_stream_the_provider_failed_is_coded_as_a_provider_error(exc: Exception) -> None:
     assert stream_error_code(exc) == "provider_error"
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        IncompleteStreamError(3),
+        httpx.RemoteProtocolError("peer closed connection without sending complete message body"),
+        httpx.ReadError("connection reset"),
+        _openai_connection_error(httpx.RemoteProtocolError("Server disconnected")),
+    ],
+    ids=["no-finish", "chunked-body-cut", "reset", "sdk-wrapped"],
+)
+def test_a_stream_the_provider_ended_early_has_its_own_code_and_message(exc: Exception) -> None:
+    assert stream_error_code(exc) == "provider_stream_interrupted"
+    assert stream_error_message(exc) == "The provider's stream ended before it finished"
 
 
 @pytest.mark.parametrize(
@@ -1517,15 +1540,6 @@ def test_attempts_that_all_hit_a_request_fault_403_share_the_callers_400() -> No
 # ---------------------------------------------------------------------------
 
 
-def _openai_connection_error(cause: Exception) -> openai.APIConnectionError:
-    """The OpenAI SDK's connection error, raised from the httpx error as the SDK does."""
-    request = httpx.Request("POST", "https://internal-proxy.example:8443/v1/chat/completions")
-    try:
-        raise openai.APIConnectionError(request=request) from cause
-    except openai.APIConnectionError as exc:
-        return exc
-
-
 @pytest.mark.parametrize("unified", [False, True], ids=["raw", "unified"])
 @pytest.mark.parametrize(
     ("upstream", "expected"),
@@ -1553,7 +1567,6 @@ def test_a_provider_failure_left_to_the_502_says_what_happened_upstream(
     assert detail == expected
     assert _RAW not in detail
     assert "internal-proxy" not in detail
-    assert stream_error_message(exc) == expected
 
 
 def test_a_failure_inside_the_gateway_keeps_the_fixed_detail() -> None:

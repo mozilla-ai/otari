@@ -176,6 +176,15 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     metadata: RequestMetadata = None
 
 
+def _finishes_a_choice(chunk: ChatCompletionChunk) -> bool:
+    """Whether ``chunk`` reports a choice's ``finish_reason``, which every complete chat stream does.
+
+    A usage-only final chunk has no choices and follows it, so it neither
+    completes a stream nor stands in for the chunk that does.
+    """
+    return any(choice.finish_reason for choice in chunk.choices or ())
+
+
 class _ChatAdapter:
     """OpenAI Chat Completions edges of the shared pipeline.
 
@@ -186,7 +195,6 @@ class _ChatAdapter:
 
     name = Dialect.CHAT
     stream_format: StreamFormat = OPENAI_STREAM_FORMAT
-    stream_completion_event: str | None = None
     log_success_without_usage = True
 
     def __init__(self, endpoint: str = USAGE_ENDPOINT) -> None:
@@ -217,6 +225,9 @@ class _ChatAdapter:
             detail=provider_failure_detail(exc),
             headers=with_retry_hint(exc, status.HTTP_502_BAD_GATEWAY, None),
         )
+
+    def stream_completion(self) -> Callable[[Any], bool] | None:
+        return _finishes_a_choice
 
     def stream_error_payload(self, exc: BaseException) -> str:
         return openai_error_event(self.stream_format, stream_error_code(exc), stream_error_message(exc))

@@ -38,6 +38,9 @@ INVALID_REQUEST = "invalid_request"
 # Sent only in a stream's error event: the provider failed after the stream
 # started, for a reason no more specific code names.
 PROVIDER_ERROR = "provider_error"
+# Sent only in a stream's error event: the provider's stream ended before it
+# finished, by closing without its final event or cutting the connection.
+PROVIDER_STREAM_INTERRUPTED = "provider_stream_interrupted"
 
 
 def error_headers(code: str, *, budget_scope: str | None = None, rule: str | None = None) -> dict[str, str]:

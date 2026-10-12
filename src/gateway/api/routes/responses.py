@@ -253,7 +253,6 @@ class _ResponsesAdapter:
     name = Dialect.RESPONSES
     endpoint = USAGE_ENDPOINT
     stream_format: StreamFormat = RESPONSES_STREAM_FORMAT
-    stream_completion_event: str | None = None
     log_success_without_usage = True
 
     def error(
@@ -278,6 +277,11 @@ class _ResponsesAdapter:
             detail=provider_failure_detail(exc),
             headers=with_retry_hint(exc, status.HTTP_502_BAD_GATEWAY, None),
         )
+
+    def stream_completion(self) -> Callable[[Any], bool] | None:
+        # Not checked yet: the chat-completions bridge synthesizes the terminal
+        # event whatever the upstream sent, so it cannot tell a cut stream here.
+        return None
 
     def stream_error_payload(self, exc: BaseException) -> str:
         return openai_error_event(self.stream_format, stream_error_code(exc), stream_error_message(exc))

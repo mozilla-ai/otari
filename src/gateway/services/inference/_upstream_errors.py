@@ -371,6 +371,23 @@ def is_upstream_connect_failure(exc: BaseException) -> bool:
     return any(isinstance(link, httpx.ConnectError) for link in _causal_chain(exc))
 
 
+def is_upstream_stream_interrupted(exc: BaseException) -> bool:
+    """Whether a provider's stream ended before it finished.
+
+    It ended without the chunk that completes it, or the connection carrying it
+    was cut, which httpx reports as a protocol error (a chunked body cut short)
+    or a network error. A connection that never opened carried no stream.
+    """
+    if is_upstream_connect_failure(exc):
+        return False
+    if upstream_exception_shape(exc)[0] == "conn_err":
+        return True
+    return any(
+        isinstance(link, (IncompleteStreamError, httpx.RemoteProtocolError, httpx.NetworkError))
+        for link in _causal_chain(exc)
+    )
+
+
 def _causal_chain(exc: BaseException) -> Iterator[BaseException]:
     """``exc`` and every exception behind it, through any-llm's wrapper and Python's own chaining."""
     pending: list[BaseException] = [exc]

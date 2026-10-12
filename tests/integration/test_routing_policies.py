@@ -387,7 +387,7 @@ def test_streaming_fails_over_before_any_bytes_are_flushed(client: TestClient) -
 
             yield ChatCompletionChunk(
                 id="c1",
-                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason=None)],
+                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason="stop")],
                 created=0,
                 model="claude-haiku-4-5",
                 object="chat.completion.chunk",
@@ -424,7 +424,7 @@ def test_streaming_fails_over_when_the_stream_fails_on_its_first_read(client: Te
                 raise _http_error(503)
             yield ChatCompletionChunk(
                 id="c1",
-                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason=None)],
+                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason="stop")],
                 created=0,
                 model="claude-haiku-4-5",
                 object="chat.completion.chunk",
@@ -1486,7 +1486,7 @@ def test_a_streamed_fallover_correlates_both_of_its_rows(client: TestClient) -> 
 
             yield ChatCompletionChunk(
                 id="c1",
-                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason=None)],
+                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason="stop")],
                 created=0,
                 model="claude-haiku-4-5",
                 object="chat.completion.chunk",
@@ -1525,7 +1525,7 @@ def test_messages_endpoint_fails_over(client: TestClient, stream: bool) -> None:
 
             yield ChatCompletionChunk(
                 id="c1",
-                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason=None)],
+                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason="stop")],
                 created=0,
                 model="claude-haiku-4-5",
                 object="chat.completion.chunk",

@@ -535,9 +535,10 @@ class _Settlement:
 
 
 def _chunk(usage: CompletionUsage | None = None) -> ChatCompletionChunk:
+    """A chunk that finishes its choice, so a stream of these is complete."""
     return ChatCompletionChunk(
         id="c1",
-        choices=[],
+        choices=[ChunkChoice(delta=ChoiceDelta(), finish_reason="stop", index=0)],
         created=0,
         model="m",
         object="chat.completion.chunk",
@@ -1281,11 +1282,9 @@ def _build_platform(
     )
 
 
-@pytest.mark.parametrize("yields_chunk", [True, False], ids=["no-usage-chunk", "zero-chunk"])
 @pytest.mark.asyncio
 async def test_platform_stream_without_usage_reports_final_success(
     monkeypatch: pytest.MonkeyPatch,
-    yields_chunk: bool,
 ) -> None:
     reports: list[dict[str, Any]] = []
 
@@ -1304,8 +1303,7 @@ async def test_platform_stream_without_usage_reports_final_success(
     monkeypatch.setattr(pipeline, "_schedule_usage_report", fake_schedule)
 
     async def stream() -> AsyncIterator[ChatCompletionChunk]:
-        if yields_chunk:
-            yield _chunk()
+        yield _chunk()
 
     await _drain(_build_platform(stream()))
 
@@ -1624,11 +1622,15 @@ def _content_chunk(chunk_id: str, text: str) -> ChatCompletionChunk:
     )
 
 
-def _usage_chunk(chunk_id: str, prompt_tokens: int) -> ChatCompletionChunk:
-    """An OpenAI ``include_usage`` chunk: usage, no choices."""
+def _usage_chunk(chunk_id: str, prompt_tokens: int, *, finishes: bool = False) -> ChatCompletionChunk:
+    """An OpenAI ``include_usage`` chunk: usage, no choices.
+
+    ``finishes`` puts the finished choice on it as well, as Cohere and Gemini
+    report usage, so a stream ending on it is complete.
+    """
     return ChatCompletionChunk(
         id=chunk_id,
-        choices=[],
+        choices=[ChunkChoice(delta=ChoiceDelta(), finish_reason="stop", index=0)] if finishes else [],
         created=0,
         model="gpt-4",
         object="chat.completion.chunk",
@@ -1695,7 +1697,7 @@ async def test_intermediate_usage_chunk_does_not_hold_the_final_answer(
         yield _usage_chunk("u1", 10)  # iteration 1's usage chunk, not terminal
         yield _content_chunk("c1", "final")
         yield _content_chunk("c2", "answer")
-        yield _usage_chunk("u2", 20)  # the real terminal carrier
+        yield _usage_chunk("u2", 20, finishes=True)  # the real terminal carrier
 
     iterator = _build_platform_stream(stream())
 
@@ -1742,7 +1744,7 @@ async def test_carrier_overflow_resumes_streaming_and_settles_on_a_later_carrier
         yield _usage_chunk("u1", 10)
         for index in range(6):
             yield _content_chunk(f"c{index}", f"part-{index}")
-        yield _usage_chunk("u2", 20)
+        yield _usage_chunk("u2", 20, finishes=True)
 
     emitted = [part async for part in _build_platform_stream(stream())]
 
@@ -1778,7 +1780,7 @@ async def test_buffered_terminal_carrier_is_relabeled_to_the_display_model(
 
     async def stream() -> AsyncIterator[ChatCompletionChunk]:
         yield _content_chunk("c0", "hi")
-        yield _usage_chunk("u1", 10)
+        yield _usage_chunk("u1", 10, finishes=True)
 
     emitted = [part async for part in _build_platform_stream(stream(), display_model="my-alias")]
 
@@ -1817,7 +1819,7 @@ async def test_keepalives_continue_while_terminal_settlement_is_pending(
     reporter.install(monkeypatch)
 
     async def stream() -> AsyncIterator[ChatCompletionChunk]:
-        yield _usage_chunk("u1", 10)
+        yield _usage_chunk("u1", 10, finishes=True)
 
     iterator = _build_platform_stream(
         stream(),
@@ -1846,7 +1848,7 @@ async def test_cancellation_while_settling_leaves_the_report_running(
     reporter.install(monkeypatch)
 
     async def stream() -> AsyncIterator[ChatCompletionChunk]:
-        yield _usage_chunk("u1", 10)
+        yield _usage_chunk("u1", 10, finishes=True)
 
     iterator = _build_platform_stream(stream())
     pending = asyncio.ensure_future(iterator.__anext__())

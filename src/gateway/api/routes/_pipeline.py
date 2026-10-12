@@ -120,6 +120,7 @@ from gateway.core.error_codes import (
     PRICING_REQUIRED,
     PROVIDER_CREDENTIAL_REJECTED,
     PROVIDER_ERROR,
+    PROVIDER_STREAM_INTERRUPTED,
     UPSTREAM_RATE_LIMITED,
     error_code_of,
     error_headers,
@@ -213,6 +214,7 @@ from gateway.services.inference import (
     is_provider_billing_error,
     is_upstream_connect_failure,
     is_upstream_request_fault,
+    is_upstream_stream_interrupted,
     upstream_body_messages,
     upstream_error_message,
     upstream_exception_chain,
@@ -808,6 +810,8 @@ def stream_error_code(exc: BaseException) -> str | None:
     code = refusal_code(exc)
     if code is not None or isinstance(exc, HTTPException):
         return code
+    if is_upstream_stream_interrupted(exc):
+        return PROVIDER_STREAM_INTERRUPTED
     if _is_upstream_failure(exc) or classify_provider_error(exc) is not None:
         return PROVIDER_ERROR
     return None
@@ -826,6 +830,8 @@ def stream_error_message(exc: BaseException) -> str | None:
     mapping = classify_provider_error(exc)
     if mapping is not None:
         return mapping.detail
+    if is_upstream_stream_interrupted(exc):
+        return PROVIDER_STREAM_INTERRUPTED_DETAIL
     return _provider_failure_cause(exc)
 
 
@@ -951,10 +957,14 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
     name: Dialect
     endpoint: str
     stream_format: StreamFormat
-    # The ``type`` of the event that completes a well-formed stream, or None where
-    # a stream may end without one. A stream that ends without it is failed with an
-    # SSE error rather than closed as a success.
-    stream_completion_event: str | None
+
+    def stream_completion(self) -> Callable[[Any], bool] | None:
+        """Matches the chunk that completes a well-formed stream, or None where a stream may end without one.
+
+        A stream that ends without such a chunk is failed with an SSE error rather
+        than closed as a success.
+        """
+        ...
 
     def error(
         self,
@@ -4819,18 +4829,11 @@ def build_streaming_response(
             attach_settlement=_attach_inline_cost if settles_inline else None,
             on_first_chunk=_on_first_chunk,
             error_payload=adapter.stream_error_payload,
-            completes_stream=_completes_stream(adapter.stream_completion_event),
+            completes_stream=adapter.stream_completion(),
         ),
         media_type="text/event-stream",
         headers=headers,
     )
-
-
-def _completes_stream(event_type: str | None) -> Callable[[Any], bool] | None:
-    """A predicate matching chunks whose ``type`` is ``event_type``, or None when there is none."""
-    if event_type is None:
-        return None
-    return lambda chunk: getattr(chunk, "type", None) == event_type
 
 
 def stream_first_chunk_timeout_seconds(config: GatewayConfig, *, tool_mode: bool) -> float:

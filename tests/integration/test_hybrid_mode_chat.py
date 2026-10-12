@@ -989,7 +989,7 @@ def test_hybrid_mode_streaming_returns_inline_cost_and_forces_usage(
 ) -> None:
     from collections.abc import AsyncIterator
 
-    from any_llm.types.completion import ChatCompletionChunk
+    from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice
 
     attempt_id = "3f1b6a1e-0000-4000-8000-000000000005"
 
@@ -1036,7 +1036,7 @@ def test_hybrid_mode_streaming_returns_inline_cost_and_forces_usage(
         async def stream() -> AsyncIterator[ChatCompletionChunk]:
             yield ChatCompletionChunk(
                 id="chunk-usage",
-                choices=[],
+                choices=[ChunkChoice(delta=ChoiceDelta(), index=0, finish_reason="stop")],
                 created=0,
                 model="gpt-4o-mini",
                 object="chat.completion.chunk",
