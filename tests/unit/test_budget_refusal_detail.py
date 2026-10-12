@@ -37,9 +37,10 @@ def test_the_amounts_never_round_to_equal() -> None:
 def test_the_output_allowance_is_named_only_when_known() -> None:
     blocked = BlockedAxis("budget", remaining=Decimal("1"), held=Decimal("2"))
 
-    assert "max_tokens" not in refusal_detail("User 'u'", blocked, new_request=True, reserved_output_tokens=0)
+    assert "output tokens" not in refusal_detail("User 'u'", blocked, new_request=True, reserved_output_tokens=0)
+    assert "output tokens" not in refusal_detail("User 'u'", blocked, new_request=True)
     assert refusal_detail("User 'u'", blocked, new_request=True, reserved_output_tokens=512).endswith(
-        ". The estimate assumes 512 output tokens; a lower output token limit (max_tokens) lowers it"
+        ". The estimate assumes 512 output tokens; a lower output token limit on the request may let it fit"
     )
 
 

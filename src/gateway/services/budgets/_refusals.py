@@ -64,7 +64,8 @@ def refusal_detail(
     fit says so, with both amounts: the estimate is rounded up and the remainder
     down, so the two never print as equal. ``reserved_output_tokens`` is the
     output allowance the estimate was priced at, named only where the caller's
-    ``max_tokens`` decided it.
+    output token limit decided it. The field is not named, because each API
+    spells it differently.
     """
     if blocked.remaining is None or blocked.held is None:
         return f"{subject} has exceeded {blocked.name} limit"
@@ -79,6 +80,6 @@ def refusal_detail(
     if reserved_output_tokens is not None and reserved_output_tokens > 0:
         detail += (
             f". The estimate assumes {reserved_output_tokens} output tokens; "
-            "a lower output token limit (max_tokens) lowers it"
+            "a lower output token limit on the request may let it fit"
         )
     return detail

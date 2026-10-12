@@ -457,7 +457,7 @@ async def test_a_hold_larger_than_the_headroom_names_both_amounts(async_db: Any)
     assert refusal.value.status_code == 403
     assert refusal.value.detail == (
         "User 'too-large-user' has $0.0015 of budget remaining, less than this request's estimated cost "
-        "of $0.0021. The estimate assumes 2000 output tokens; a lower output token limit (max_tokens) lowers it"
+        "of $0.0021. The estimate assumes 2000 output tokens; a lower output token limit on the request may let it fit"
     )
     assert refusal.value.headers is not None
     assert refusal.value.headers["Otari-Budget-Scope"] == "user"

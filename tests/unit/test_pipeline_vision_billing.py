@@ -220,9 +220,9 @@ async def test_reservation_uses_the_resolved_provider_for_pricing(monkeypatch: p
             max_output_tokens=None,
             default_output_tokens=_config().budget_estimate_default_output_tokens,
         ),
-        # The output allowance the estimate was priced at, named in a refusal
-        # whose hold does not fit; the default here, since the request sets none.
-        "reserved_output_tokens": _config().budget_estimate_default_output_tokens,
+        # The output allowance a refusal names, left out here because the stub
+        # above prices nothing, so a lower output limit could not shrink the estimate.
+        "reserved_output_tokens": None,
     }
     # The scoped ceilings narrow on the same resolved provider the pricing does,
     # and bill to the key that authenticated the request.

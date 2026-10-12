@@ -219,9 +219,10 @@ A request whose dollar hold is larger than what remains is refused even when
 nothing has been spent yet, and the refusal says so with both amounts:
 `User 'alice' has $0.0015 of budget remaining, less than this request's
 estimated cost of $0.01025`. On chat completions, messages and responses the
-estimate prices the request's `max_tokens` (or
-`budget_estimate_default_output_tokens` when it sets none), and the refusal names
-that figure, so a lower `max_tokens` is usually what lets the request fit. A
+estimate prices the request's output token limit (`max_tokens`, or
+`max_output_tokens` on responses; `budget_estimate_default_output_tokens` when it
+sets none), and where the model charges for output the refusal names that
+figure, so a lower limit may let the request fit. A
 budget already at its cap is refused as `has exceeded budget limit`.
 Endpoints that hold no token estimate (embeddings, rerank, and the other
 pass-through routes) are refused once a token cap is exhausted rather than

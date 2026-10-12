@@ -1279,7 +1279,7 @@ async def test_a_ceiling_too_small_for_the_hold_names_both_amounts(async_db: Asy
     assert refusal.value.status_code == 403
     assert refusal.value.detail == (
         "Workspace has $0.75 of budget remaining, less than this request's estimated cost of $5.00. "
-        "The estimate assumes 1024 output tokens; a lower output token limit (max_tokens) lowers it"
+        "The estimate assumes 1024 output tokens; a lower output token limit on the request may let it fit"
     )
     assert refusal.value.headers is not None
     assert refusal.value.headers["Otari-Budget-Scope"] == "workspace"
