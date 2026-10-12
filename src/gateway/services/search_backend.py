@@ -59,6 +59,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from any_search import SHARED_PARAMETERS
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.settings.tools import (
     SEARCH_PROVIDERS,
@@ -318,12 +319,14 @@ async def run_keyed_search(credential: WebSearchCredential, query: SearchQuery, 
 def build_exa_payload(tool: SearchTool, query: SearchQuery) -> dict[str, Any]:
     """Build Exa's ``POST /search`` body from the neutral request.
 
-    The tool's ``options`` are the base, so an operator can pin Exa-native knobs
-    (``type``, ``category``, ``moderation``) that the LiteLLM-shaped request has
-    no field for. Request-derived fields are layered on top, and ``query`` is
-    written last so no configured option can displace the caller's query.
+    The tool's native ``options`` are the base, so an operator can pin Exa-native
+    knobs (``type``, ``category``, ``moderation``) that the LiteLLM-shaped request
+    has no field for. Its shared parameters (``max_results``, ``time_range``) are
+    any-search's to map, never Exa body fields, so they are left out. Request-derived
+    fields are layered on top, and ``query`` is written last so no configured option
+    can displace the caller's query.
     """
-    payload: dict[str, Any] = dict(tool.options)
+    payload: dict[str, Any] = {key: value for key, value in tool.options.items() if key not in SHARED_PARAMETERS}
 
     requested = query.max_results or payload.get("numResults") or DEFAULT_MAX_RESULTS
     payload["numResults"] = max(1, min(int(requested), MAX_RESULTS_CAP))

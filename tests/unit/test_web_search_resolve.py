@@ -7,12 +7,14 @@ import logging
 import os
 from collections.abc import Iterator
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 from unittest import mock
 
 import pytest
 
 from gateway.core.config import GatewayConfig
+from gateway.core.settings import tools as settings_tools
 from gateway.exceptions.tools_exceptions import (
     SearchToolNotFoundError,
     WebSearchCredentialRefusedError,
@@ -25,6 +27,7 @@ from gateway.models.tools import (
     WebToolCredentialSource,
 )
 from gateway.services.tools import ResolvedFetch, ResolvedSearch, resolve_fetch, resolve_search
+from gateway.services.tools._web_search import _resolve
 
 _ORG = WebToolCredentialSource.ORG
 _HYBRID = WebToolCredentialSource.HYBRID
@@ -135,19 +138,19 @@ _SEARCH_CASES = [
             "rate_keys": ("otari:web_search",),
             "timeout": 15.0,
         },
-        options={"include_raw_content": True},
+        options={},
     ),
     _SearchCase(
         "the legacy URL, with the four engines",
         {"web_search_url": "http://searxng:8080"},
         {"name": "searxng", "provider": "searxng", "runner": "old", "api_base": "http://searxng:8080"},
-        options={"method": "get", "engines": "duckduckgo,mojeek,qwant,wikipedia"},
+        options={"engines": "duckduckgo,mojeek,qwant,wikipedia"},
     ),
     _SearchCase(
         "the legacy URL with its engines",
         {"web_search_url": "http://searxng:8080", "web_search_engines": "brave, wikipedia"},
         {"provider": "searxng"},
-        options={"method": "get", "engines": "brave,wikipedia"},
+        options={"engines": "brave,wikipedia"},
     ),
     _SearchCase("the one instance", {"search_tools": {"test": _FAKE}}, {"name": "test", "runner": "library"}),
     _SearchCase("the one instance, any-search not serving it yet", {"search_tools": {"local": _SEARXNG}}, None),
@@ -196,7 +199,7 @@ _SEARCH_CASES = [
         {"search_tools": {"test": _FAKE}},
         {"provider": "tavily", "runner": "old", "api_key": "tvly-org", "api_base": "", "label": "org:tavily"},
         policy=_policy(credential=WebSearchCredential(provider="tavily", source=_ORG, api_key="tvly-org")),
-        options={"include_raw_content": True},
+        options={},
     ),
     _SearchCase(
         "a SearXNG key on its own endpoint, never the deployment's",
@@ -205,7 +208,7 @@ _SEARCH_CASES = [
         policy=_policy(
             credential=WebSearchCredential(provider="searxng", source=_ORG, api_base="https://org-searxng.example")
         ),
-        options={"method": "get"},
+        options={},
     ),
     # The direct endpoint's pick, named or not.
     _SearchCase(
@@ -267,14 +270,14 @@ _SEARCH_CASES = [
             "label": "searxng:local",
         },
         requested="local",
-        options={"method": "get", "engines": "brave"},
+        options={"engines": "brave"},
     ),
     _SearchCase(
         "a SearXNG instance's own engines",
         {"search_tools": {"local": {**_SEARXNG, "options": {"engines": "qwant"}}}, "web_search_engines": "brave"},
         {"api_base": "http://searxng:8080"},
         requested="local",
-        options={"method": "get", "engines": "qwant"},
+        options={"engines": "qwant"},
     ),
     _SearchCase(
         "a SearXNG instance opts into POST over otari's default",
@@ -334,13 +337,20 @@ def test_a_credential_for_a_provider_this_gateway_cannot_call_is_ignored(caplog:
         WebSearchCredential(provider="exa", source=_HYBRID, api_key=""),
         WebSearchCredential(provider="tavily", source=_ORG),
         WebSearchCredential(provider="searxng", source=_HYBRID),
+        WebSearchCredential(provider="tavily", source=_HYBRID, api_key="k", api_base="https://tavily-proxy.example"),
     ],
-    ids=["exa-without-key", "exa-with-an-empty-key", "tavily-without-key", "searxng-without-endpoint"],
+    ids=[
+        "exa-without-key",
+        "exa-with-an-empty-key",
+        "tavily-without-key",
+        "searxng-without-endpoint",
+        "tavily-with-an-endpoint",
+    ],
 )
-def test_a_credential_without_what_its_provider_needs_is_refused(
+def test_a_credential_its_provider_cannot_be_called_with_is_refused(
     credential: WebSearchCredential, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Never handed on, so neither the library nor the old backend fills the gap from the server's settings."""
+    """Never handed on: the server's own key or endpoint would serve the tenant, or the key would go elsewhere."""
     monkeypatch.setenv("EXA_API_KEY", "the-servers-own-key")
     config = GatewayConfig(search_tools={"exa": _EXA}, web_search_url="http://searxng:8080")
 
@@ -403,14 +413,24 @@ def test_layers_apply_lowest_first() -> None:
     assert dict(resolved.options) == {"cost": 1, "delay": 0.2, "error": "c"}
 
 
-def test_a_credentials_options_sit_between_otaris_defaults_and_the_workspaces() -> None:
-    credential = WebSearchCredential(
-        provider="tavily", source=_ORG, api_key="k", options={"include_raw_content": False, "topic": "news"}
-    )
+def test_otaris_defaults_sit_below_every_layer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Design E, rule 5. No provider a library serves has defaults yet, so the test gives ``fake`` some."""
+    defaults = MappingProxyType({"fake": MappingProxyType({"cost": 1, "delay": 0.1, "error": "default"})})
+    monkeypatch.setattr(settings_tools, "PROVIDER_DEFAULT_OPTIONS", defaults)
+    monkeypatch.setattr(_resolve, "PROVIDER_DEFAULT_OPTIONS", defaults)
+    config = GatewayConfig(search_tools={"test": {"provider": "fake", "options": {"delay": 0.2}}})
+    credential = WebSearchCredential(provider="fake", source=_ORG, options={"delay": 0.3})
 
-    resolved = _in_loop(GatewayConfig(), credential=credential, workspace={"topic": "finance"})
+    assert dict(_in_loop(config, request={"error": "request"}).options) == {"cost": 1, "delay": 0.2, "error": "request"}
+    assert dict(_in_loop(config, credential=credential).options) == {"cost": 1, "delay": 0.3, "error": "default"}
 
-    assert dict(resolved.options) == {"include_raw_content": False, "topic": "finance"}
+
+def test_the_old_code_takes_the_layers_without_otaris_defaults() -> None:
+    credential = WebSearchCredential(provider="tavily", source=_ORG, api_key="k", options={"topic": "news"})
+
+    resolved = _in_loop(GatewayConfig(), credential=credential, workspace={"topic": "finance", "search_depth": "basic"})
+
+    assert dict(resolved.options) == {"topic": "finance", "search_depth": "basic"}
 
 
 def test_the_count_is_taken_out_as_the_cap() -> None:
@@ -422,28 +442,50 @@ def test_the_count_is_taken_out_as_the_cap() -> None:
     assert dict(resolved.options) == {"time_range": "week"}
 
 
-@pytest.mark.parametrize("count", [0, -1, True, "5", 2.5])
-def test_a_count_that_is_not_a_positive_whole_number_sets_no_cap(count: object) -> None:
-    resolved = _in_loop(GatewayConfig(search_tools={"test": _FAKE}), request={"max_results": count})
+def test_a_workspace_count_the_library_refuses_leaves_the_instances_cap(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING, logger="gateway")
+    config = GatewayConfig(search_tools={"test": {"provider": "fake", "options": {"max_results": 3}}})
+
+    resolved = _in_loop(config, workspace={"max_results": "10"})
+
+    assert resolved.max_results == 3
+    assert "'max_results'" in _warnings(caplog)
+
+
+@pytest.mark.parametrize("count", [0, True, "5", 2.5])
+def test_on_the_old_code_a_count_that_is_not_a_positive_whole_number_sets_no_cap(count: object) -> None:
+    config = GatewayConfig(web_search_provider="brave", web_search_provider_api_key="brv")
+
+    resolved = _in_loop(config, request={"max_results": count})
 
     assert resolved.max_results is None
     assert "max_results" not in resolved.options
 
 
 @pytest.mark.parametrize(
-    ("key", "operator_only"),
-    [("nope", False), ("max_chars", False), ("account", True)],
-    ids=["unknown", "fetchs-shared-parameter", "operator-only"],
+    ("option", "problem"),
+    [
+        ({"nope": 1}, "is not one the provider knows"),
+        ({"max_chars": 1}, "is not one the provider knows"),
+        ({"account": "a"}, "is set only by the deployment"),
+        ({"time_range": "decade"}, "has a value the provider refuses"),
+        ({"max_results": 0}, "has a value the provider refuses"),
+        ({"max_results": "5"}, "has a value the provider refuses"),
+    ],
+    ids=["unknown", "fetchs-shared-parameter", "operator-only", "time-range", "count-zero", "count-text"],
 )
-def test_a_request_option_the_provider_does_not_take_from_a_request_is_refused(key: str, operator_only: bool) -> None:
+def test_a_request_option_the_provider_does_not_take_from_a_request_is_refused(
+    option: dict[str, Any], problem: str
+) -> None:
     config = GatewayConfig(search_tools={"test": _FAKE})
+    (key,) = option
 
     for requested in (None, "test"):
         with pytest.raises(WebSearchOptionRefusedError) as refused:
-            resolve_search(config, None, requested=requested, request_options={key: 1})
+            resolve_search(config, None, requested=requested, request_options=option)
         assert refused.value.status_code == 400
-        assert f"'{key}'" in refused.value.message
-        assert ("only by the deployment" in refused.value.message) is operator_only
+        assert refused.value.key == key
+        assert f"option '{key}' {problem}" in refused.value.message
 
 
 def test_the_workspace_layer_drops_what_it_may_not_set_with_a_warning(caplog: pytest.LogCaptureFixture) -> None:
@@ -451,30 +493,35 @@ def test_the_workspace_layer_drops_what_it_may_not_set_with_a_warning(caplog: py
 
     resolved = _in_loop(
         GatewayConfig(search_tools={"test": _FAKE}),
-        workspace={"nope": "secret-value", "account": "secret-account", "cost": 2},
+        workspace={"nope": "secret-value", "account": "secret-account", "time_range": "decade", "cost": 2},
     )
 
     assert dict(resolved.options) == {"cost": 2}
     warnings = _warnings(caplog)
     assert "'nope'" in warnings
     assert "'account'" in warnings
+    assert "'time_range'" in warnings
+    assert "decade" not in warnings
     assert "workspace" in warnings
     assert "secret-value" not in warnings
     assert "secret-account" not in warnings
 
 
-def test_a_credentials_unknown_keys_are_dropped_and_its_operator_only_ones_kept(
+def test_a_credentials_options_the_provider_refuses_are_dropped_and_its_operator_only_ones_kept(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.WARNING, logger="gateway")
     credential = WebSearchCredential(
-        provider="fake", source=_HYBRID, options={"nope": "secret-value", "account": "the-orgs-account"}
+        provider="fake",
+        source=_HYBRID,
+        options={"nope": "secret-value", "max_results": 0, "account": "the-orgs-account"},
     )
 
     resolved = _in_loop(GatewayConfig(), credential=credential)
 
     assert dict(resolved.options) == {"account": "the-orgs-account"}
     assert "'nope'" in _warnings(caplog)
+    assert "'max_results'" in _warnings(caplog)
     assert "control plane" in _warnings(caplog)
     assert "secret-value" not in _warnings(caplog)
 
@@ -552,7 +599,8 @@ _FETCH_CASES = [
             "api_base": "",
             "label": "builtin:builtin_fetch",
             "rate_keys": ("builtin:builtin_fetch", "otari:web_fetch"),
-            "timeout": 15.0,
+            # The built-in fetcher's own deadline.
+            "timeout": 5.0,
         },
     ),
     _FetchCase(
@@ -565,6 +613,7 @@ _FETCH_CASES = [
             "api_base": "https://api.exa.ai",
             "label": "exa:exa-fetch",
             "rate_keys": ("exa:exa-fetch", "otari:web_fetch"),
+            "timeout": 15.0,
         },
     ),
     _FetchCase(

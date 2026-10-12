@@ -467,6 +467,15 @@ def test_each_tools_shared_parameters_pass_for_every_provider() -> None:
     assert effective_fetch_instances(config)["test-fetch"].dropped_options == frozenset()
 
 
+def test_a_shared_parameters_value_is_checked_as_its_library_checks_it() -> None:
+    config = GatewayConfig(
+        search_tools={"test": {"provider": "fake", "options": {"max_results": 0, "time_range": "decade"}}},
+        fetch_tools={"test-fetch": {"provider": "fake", "options": {"max_chars": "5"}}},
+    )
+    assert effective_search_instances(config)["test"].dropped_options == frozenset({"max_results", "time_range"})
+    assert effective_fetch_instances(config)["test-fetch"].dropped_options == frozenset({"max_chars"})
+
+
 def test_one_tools_shared_parameter_is_unknown_to_the_other() -> None:
     config = GatewayConfig(
         search_tools={"test": {"provider": "fake", "options": {"max_chars": 500}}},

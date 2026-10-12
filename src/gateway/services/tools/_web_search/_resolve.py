@@ -28,14 +28,15 @@ endpoint leaves out the workspace's, and the instance's when an organization
 key serves the call. Fetch takes neither a workspace nor a request layer,
 since both hold search options. The count the layers name is taken out as
 the result's cap, for the caller to apply as its door does. Where a library
-runs the call, each key is checked against the provider's schema and the
-tool's shared parameters: a request's unknown or operator-only key is
-refused, and the other layers' are dropped with a warning that names the
-layer and the key, never the value. What runs on the old backend takes its
-options unchecked, as today.
+runs the call, each option is checked as the instance's are (design E): a
+request's option the provider does not take, or takes only from the
+deployment, is refused, and the other layers' are dropped with a warning that
+names the layer and the key, never the value. What the old code runs takes
+the layers unchecked and without otari's defaults, which that code applies
+itself.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Literal
@@ -57,7 +58,7 @@ from gateway.core.settings.tools import (
     effective_search_instances,
     fetch_default,
     in_loop_default,
-    shared_parameters,
+    option_problems,
 )
 from gateway.exceptions.tools_exceptions import (
     SearchToolNotFoundError,
@@ -74,14 +75,16 @@ from gateway.models.tools import (
 )
 from gateway.services.pricing_service import gateway_tool_pricing_key
 from gateway.services.tools._web_names import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
+from gateway.services.web_retrieval_network import NETWORK_DEADLINE_SECONDS
 
 # What runs a resolved call: one of the libraries, or the old code, which in
 # the loop is the old backend and on the direct endpoint the old SearXNG client
 # or the organization key's own search.
 Runner = Literal["library", "old"]
 
-# How long a call may take when its instance sets no timeout: today's wait on
-# each door, 30 seconds on the direct endpoint and 15 in the loop.
+# How long a call may take when its instance sets no timeout: 30 seconds on
+# the direct endpoint and 15 in the loop. The built-in fetcher keeps its own
+# deadline.
 DIRECT_TIMEOUT_S = 30.0
 IN_LOOP_TIMEOUT_S = 15.0
 
@@ -245,7 +248,7 @@ def _search_on_instance(
         max_results=max_results,
         timeout=instance.timeout or (IN_LOOP_TIMEOUT_S if in_loop else DIRECT_TIMEOUT_S),
         label=label,
-        # On the direct endpoint, the instance's own row alone, as today (contract C5).
+        # On the direct endpoint, the instance's own row alone (contract C5).
         rate_keys=(label, _SEARCH_FALLBACK_RATE) if in_loop else (label,),
         fetch_tool=instance.fetch_tool,
     )
@@ -305,6 +308,11 @@ def _search_on_credential(
         _ignore(credential, "search")
         return None
     _check(credential, requires_key=requires_key, requires_base=requires_base)
+    if provider in WEB_SEARCH_PROVIDERS and credential.api_base:
+        # The old code calls Tavily and Brave at their public endpoints, where the key would go instead.
+        raise WebSearchCredentialRefusedError(
+            provider, f"names a base URL, which this gateway's {provider} client cannot use"
+        )
     options = _layered(
         "search",
         provider,
@@ -350,7 +358,8 @@ def _fetch_on_instance(instance: ToolInstance) -> ResolvedFetch:
         or "",
         options=MappingProxyType(options),
         max_chars=max_chars,
-        timeout=instance.timeout or IN_LOOP_TIMEOUT_S,
+        timeout=instance.timeout
+        or (NETWORK_DEADLINE_SECONDS if instance.provider == BUILTIN_FETCH_PROVIDER else IN_LOOP_TIMEOUT_S),
         label=label,
         rate_keys=(label, _FETCH_FALLBACK_RATE),
     )
@@ -403,9 +412,9 @@ def _ignore(credential: WebToolCredential, kind: ToolKind) -> None:
 def _check(credential: WebToolCredential, *, requires_key: bool, requires_base: bool) -> None:
     """Refuse a credential the library or the old code would complete from the server's own settings."""
     if requires_key and not credential.api_key:
-        raise WebSearchCredentialRefusedError(credential.provider, "API key")
+        raise WebSearchCredentialRefusedError(credential.provider, "carries no API key, which the provider requires")
     if requires_base and not credential.api_base:
-        raise WebSearchCredentialRefusedError(credential.provider, "base URL")
+        raise WebSearchCredentialRefusedError(credential.provider, "carries no base URL, which the provider requires")
 
 
 def _credential_layer(credential: WebToolCredential) -> str:
@@ -440,60 +449,71 @@ def _layered(
 
     ``instance`` is the instance's layer with the keys its load recorded as
     breaking the rules; ``credential`` is a credential's. Unless ``checked``,
-    every layer passes as it is.
+    the layers pass as they are, without otari's defaults.
     """
     instance_name, instance_options, broken = instance or ("", _NO_OPTIONS, frozenset())
     credential_name, credential_options = credential or ("", _NO_OPTIONS)
     if not checked:
-        return {**defaults, **instance_options, **credential_options, **workspace, **request}
-    metadata = (
-        any_search.AnySearch.get_provider_metadata(provider)
-        if kind == "search"
-        else any_fetch.AnyFetch.get_provider_metadata(provider)
-    )
-    operator_only = {option.name: option.operator_only for option in metadata.options}
-    shared = shared_parameters(kind)
-
-    def unknown(key: str) -> str | None:
-        return None if key in shared or key in operator_only else "the provider does not take it"
-
-    def tenant_problem(key: str) -> str | None:
-        return unknown(key) or ("only the deployment sets it" if operator_only.get(key) else None)
-
-    for key in request:
-        if unknown(key) is not None:
-            raise WebSearchOptionRefusedError(provider, key, operator_only=False)
-        if operator_only.get(key):
-            raise WebSearchOptionRefusedError(provider, key, operator_only=True)
+        return {**instance_options, **credential_options, **workspace, **request}
+    operator_only = _operator_only(kind, provider)
+    if refused := _tenant_problems(kind, provider, request, operator_only):
+        key, problem = next(iter(refused.items()))
+        raise WebSearchOptionRefusedError(key, problem)
     return {
         **defaults,
         **_kept(
             instance_options,
             instance_name,
             provider,
-            lambda key: "it broke the rules at load" if key in broken else None,
+            {key: f"option '{key}' broke the rules at load" for key in broken},
         ),
-        **_kept(credential_options, credential_name, provider, unknown),
-        **_kept(workspace, "the workspace's provider_options", provider, tenant_problem),
+        **_kept(credential_options, credential_name, provider, option_problems(kind, provider, credential_options)),
+        **_kept(
+            workspace,
+            "the workspace's provider_options",
+            provider,
+            _tenant_problems(kind, provider, workspace, operator_only),
+        ),
         **request,
     }
 
 
-def _kept(
-    options: Mapping[str, Any], layer: str, provider: str, problem_with: Callable[[str], str | None]
-) -> dict[str, Any]:
-    """The layer's options the call may take; each other one is dropped with a warning that never shows its value."""
+def _operator_only(kind: ToolKind, provider: str) -> frozenset[str]:
+    metadata = (
+        any_search.AnySearch.get_provider_metadata(provider)
+        if kind == "search"
+        else any_fetch.AnyFetch.get_provider_metadata(provider)
+    )
+    return frozenset(option.name for option in metadata.options if option.operator_only)
+
+
+def _tenant_problems(
+    kind: ToolKind, provider: str, options: Mapping[str, Any], operator_only: frozenset[str]
+) -> dict[str, str]:
+    """Why each of a workspace's or a request's options cannot reach the provider.
+
+    The provider does not take it or its value, or only the deployment sets it.
+    """
+    problems = option_problems(kind, provider, options)
+    for key in options:
+        if key in operator_only and key not in problems:
+            problems[key] = f"option '{key}' is set only by the deployment"
+    return problems
+
+
+def _kept(options: Mapping[str, Any], layer: str, provider: str, problems: Mapping[str, str]) -> dict[str, Any]:
+    """The layer's options without those that have a problem, each dropped with a warning that never shows its value."""
     kept: dict[str, Any] = {}
     for key, value in options.items():
-        if (problem := problem_with(key)) is not None:
-            logger.warning("Dropping option '%s' of %s for %s: %s.", key, layer, provider, problem)
+        if key in problems:
+            logger.warning("Dropping an option of %s for %s: %s.", layer, provider, problems[key])
         else:
             kept[key] = value
     return kept
 
 
 def _count(options: dict[str, Any], key: str) -> int | None:
-    """Take the count out of the options: a positive whole number, as today's code reads one, else nothing."""
+    """Take the count out of the options: a positive whole number, else nothing."""
     value = options.pop(key, None)
     if isinstance(value, int) and not isinstance(value, bool) and value > 0:
         return value

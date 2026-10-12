@@ -369,28 +369,27 @@ class SearchToolUntestableError(TenancyValidationError):
 class WebSearchOptionRefusedError(TenancyValidationError):
     """A request's ``provider_options`` key the provider serving it does not take from a request.
 
-    Either the provider's option schema does not know the key, or the schema
-    marks it operator-only. A 400 on either door (design G).
+    The provider's schema does not know the key or refuses its value, or marks
+    the key operator-only. A 400 on either door (design G).
     """
 
-    def __init__(self, provider: str, key: str, *, operator_only: bool):
-        reason = "is set only by the deployment" if operator_only else f"is not one the '{provider}' provider takes"
-        super().__init__(f"provider_options key '{key}' {reason}.")
-        self.provider = provider
+    def __init__(self, key: str, problem: str):
+        super().__init__(f"provider_options: {problem}.")
         self.key = key
 
 
 class WebSearchCredentialRefusedError(Exception):
-    """A workspace's search or fetch credential lacks what its provider needs to be called.
+    """A workspace's search or fetch credential its provider cannot be called with as it is.
 
-    A key for a provider that requires one, or a base URL for one that has no
-    default. Refused rather than passed on, because the library would fill
-    the gap from the server's environment, and the deployment's own key or
-    endpoint would then serve the tenant. The caller decides the status.
+    One without a key or base URL its provider needs, which the library or the
+    old code would fill from the server's own settings, so the deployment's key
+    or endpoint would serve the tenant; or one naming a base URL the code that
+    serves its provider cannot use, which would send the tenant's key to the
+    provider's public endpoint instead. The caller decides the status.
     """
 
-    def __init__(self, provider: str, missing: str) -> None:
-        message = f"The workspace's {provider} credential carries no {missing}, which the provider requires."
+    def __init__(self, provider: str, problem: str) -> None:
+        message = f"The workspace's {provider} credential {problem}."
         super().__init__(message)
         self.message = message
         self.provider = provider

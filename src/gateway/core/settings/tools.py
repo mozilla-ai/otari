@@ -151,22 +151,31 @@ def shared_parameters(kind: ToolKind) -> tuple[str, ...]:
     return any_search.SHARED_PARAMETERS if kind == "search" else any_fetch.SHARED_PARAMETERS
 
 
+def _shared_parameter_problems(kind: ToolKind, options: Mapping[str, Any]) -> dict[str, str]:
+    if kind == "search":
+        return any_search.shared_parameter_problems(options)
+    return any_fetch.shared_parameter_problems(options)
+
+
 def option_problems(kind: ToolKind, provider: str, options: Mapping[str, Any]) -> dict[str, str]:
     """Each option the provider's schema does not know or refuses the value of, with why.
 
     Only names and the schema's fixed lists of values are checked, not types:
     a schema's type says what a provider usually takes, and some take more (an
     Exa ``contents`` is an object, or ``false`` for none). The tool's shared
-    parameters are accepted for every provider, and the library checks their
-    values when it is called.
+    parameters are taken by every provider, and their values are checked as the
+    library checks them.
     """
     enums = _option_enums(kind, provider)
     if enums is None:
         return {}
     shared = shared_parameters(kind)
+    refused_shared = _shared_parameter_problems(kind, options)
     problems: dict[str, str] = {}
     for key, value in options.items():
         if key in shared:
+            if key in refused_shared:
+                problems[key] = f"option '{key}' has a value the provider refuses"
             continue
         if key not in enums:
             problems[key] = f"option '{key}' is not one the provider knows"

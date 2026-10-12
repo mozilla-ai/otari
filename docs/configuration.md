@@ -565,9 +565,9 @@ Rules for instances:
   enriches its results; without one, `web_fetch_default_tool` does.
 - A name contains no `/` or `:`, is not `builtin_fetch` or `none` in any case
   (`None` and `BUILTIN_FETCH` are reserved too), and is unique across both maps.
-- `options` are checked against the provider's options. Every provider also takes
-  its tool's shared parameters: `max_results` and `time_range` on a search
-  instance, `max_chars` on a fetch instance.
+- `options` are checked against the provider's options. A search instance may also
+  set `max_results` and `time_range`, and a fetch instance `max_chars`: the
+  parameters every provider of that tool takes.
 - A `search_tools` entry that breaks the name rules, or whose `options` carry a key
   the provider does not know or a value it refuses, still loads, with a warning
   that names the entry and the problem. Fix it: a later release refuses it, and

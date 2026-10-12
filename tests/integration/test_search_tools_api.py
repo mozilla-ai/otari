@@ -573,6 +573,11 @@ def test_options_are_checked_against_the_providers_schema(
     crossed = _create(client, master_key_header, name="i", provider="fake", api_base=None, options={"max_chars": 500})
     assert crossed.status_code == 422
     assert "option 'max_chars' is not one the provider knows" in crossed.json()["detail"]
+    bad_value = _create(
+        client, master_key_header, name="j", provider="fake", api_base=None, options={"time_range": "decade"}
+    )
+    assert bad_value.status_code == 422
+    assert "option 'time_range' has a value the provider refuses" in bad_value.json()["detail"]
 
 
 def test_a_key_rotation_leaves_options_that_predate_the_rules_alone(
