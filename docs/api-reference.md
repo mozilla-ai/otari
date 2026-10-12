@@ -183,6 +183,27 @@ GET /api/v1/usage/summary?group_by_tag=purpose&dimensions=none
 
 Tags are recorded in standalone mode only.
 
+### The `user` field
+
+OpenAI's `user` field is a free-form end-user identifier, and OpenAI examples
+often fill it with one. In Otari it names the user a request is billed to, so it
+is not free-form. A request made with an API key may name only that key's own
+user: any other value is refused with
+`403 'user' field does not match the authenticated API key's user`. A key's
+`reject_user_mismatch` (see [API keys](access-control.md#api-keys)), or the
+deployment-wide setting of the same name, can accept other values instead, in
+which case the value is ignored and spend stays with the key's user. A
+[service key](access-control.md#service-keys-and-end-users) may name its own end
+users, and a master-key request must name the user to bill. Chat Completions
+and Responses never send `user` to the provider.
+
+To tag a request with a free-form end-user ID, put it in `metadata`
+(see [Request tags](#request-tags)) rather than in `user`:
+
+```json
+{"model": "openai:gpt-4o", "messages": [...], "metadata": {"end_user": "customer-42"}}
+```
+
 ### Cost of a failed or interrupted request
 
 A stream that fails mid-response ends in an error event, and one the client
