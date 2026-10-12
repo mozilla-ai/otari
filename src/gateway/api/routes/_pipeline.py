@@ -92,14 +92,9 @@ from gateway.api.routes._platform import (
     _report_platform_usage,
     _resolve_platform_credentials,
     get_shared_rejection,
-    is_provider_billing_error,
     is_provider_credential_rejection,
     record_abandoned_attempt,
     run_platform_attempts,
-    upstream_error_message,
-    upstream_exception_chain,
-    upstream_exception_shape,
-    upstream_retry_after,
     with_attempt_id,
 )
 from gateway.api.routes._platform import (
@@ -215,6 +210,11 @@ from gateway.services.inference import (
     Replay,
     StillInFlight,
     UnknownCaller,
+    is_provider_billing_error,
+    upstream_error_message,
+    upstream_exception_chain,
+    upstream_exception_shape,
+    upstream_retry_after,
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool

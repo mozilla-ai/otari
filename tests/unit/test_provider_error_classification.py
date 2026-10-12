@@ -51,12 +51,14 @@ from gateway.api.routes._platform import (
     SHOULD_RETRY_HEADER,
     _provider_failure_http_exc,
     get_shared_rejection,
-    is_retry_futile,
-    upstream_retry_after,
     with_retry_hint,
 )
 from gateway.core.error_codes import PROVIDER_CREDENTIAL_REJECTED, PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
+from gateway.services.inference import (
+    is_retry_futile,
+    upstream_retry_after,
+)
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.provider_kwargs import MissingCredential
 from gateway.services.upstream_redaction import MAX_EXPOSED_DETAIL_CHARS, redact_upstream_message
