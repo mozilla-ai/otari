@@ -50,7 +50,7 @@ from gateway.api.routes._pipeline import (
     stream_error_code,
     stream_error_message,
 )
-from gateway.api.routes._platform import ResolvedAttempt, SettledCost
+from gateway.api.routes._platform import ResolvedAttempt, SettledCost, with_retry_hint
 from gateway.api.routes._request_tags import RequestMetadata, request_tags
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
@@ -209,11 +209,12 @@ class _ChatAdapter:
             return HTTPException(
                 status_code=mapping.status_code,
                 detail=mapping.detail,
-                headers=provider_error_headers(exc, mapping.status_code),
+                headers=with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
             )
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=PROVIDER_ERROR_DETAIL,
+            headers=with_retry_hint(exc, status.HTTP_502_BAD_GATEWAY, None),
         )
 
     def stream_error_payload(self, exc: BaseException) -> str:

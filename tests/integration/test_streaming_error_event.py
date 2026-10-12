@@ -209,10 +209,62 @@ def test_an_upstream_outage_before_the_first_chunk_is_answered_with_a_502(
     assert response.status_code == 502, response.text
     assert response.json() == {"detail": "LLM provider error"}
     assert "sk-live-abc123" not in response.text
+    assert "x-should-retry" not in response.headers
 
     row = _usage_row(db_session_factory)
     assert row.status == "error"
     assert row.status_code == 503
+
+
+def test_a_local_adapter_fault_before_the_first_chunk_tells_a_client_not_to_retry(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """An adapter that breaks converting the request fails the same way on every resend.
+
+    An OpenAI or Anthropic SDK client would otherwise retry the 502 with backoff.
+    """
+    response = _stream_chat_failing_before_its_first_chunk(client, master_key_header, KeyError("content"))
+
+    assert response.status_code == 502, response.text
+    assert response.json() == {"detail": "LLM provider error"}
+    assert response.headers["x-should-retry"] == "false"
+
+    row = _usage_row(db_session_factory)
+    assert row.status == "error"
+    assert row.status_code == 502
+
+
+def test_an_unstreamed_local_adapter_fault_tells_a_client_not_to_retry(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    test_user: dict[str, Any],
+) -> None:
+    with patch("gateway.api.routes.chat.acompletion", new_callable=AsyncMock, side_effect=KeyError("content")):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": MODEL_NAME, "messages": [{"role": "user", "content": "hi"}]},
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 502, response.text
+    assert response.json() == {"detail": "LLM provider error"}
+    assert response.headers["x-should-retry"] == "false"
+
+
+def test_a_messages_local_adapter_fault_tells_a_client_not_to_retry(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    test_user: dict[str, Any],
+    messages_request_body: dict[str, Any],
+) -> None:
+    with patch("gateway.api.routes.messages.amessages", new_callable=AsyncMock, side_effect=KeyError("content")):
+        response = client.post(f"{API_ROOT}/messages", json=messages_request_body, headers=api_key_header)
+
+    assert response.status_code == 500, response.text
+    assert response.json()["detail"]["error"]["type"] == "api_error"
+    assert response.headers["x-should-retry"] == "false"
 
 
 def test_with_the_hold_off_a_failure_before_the_first_chunk_ends_a_200_in_a_coded_event(

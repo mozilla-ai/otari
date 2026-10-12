@@ -304,6 +304,25 @@ def test_failover_serves_the_next_candidate_and_bills_it_once(client: TestClient
     assert served[0]["request_group_id"] is not None
 
 
+def test_a_local_adapter_fault_still_fails_over(client: TestClient) -> None:
+    """A fault no retry of the same candidate fixes can still be one the next candidate does not have."""
+    _create_user(client)
+    calls: list[str] = []
+
+    async def broken_adapter(**kwargs: Any) -> ChatCompletion:
+        calls.append(kwargs["model"])
+        if kwargs["model"] == "openai:gpt-5-mini":
+            raise KeyError("content")
+        return _completion("claude-haiku-4-5")
+
+    with patch("gateway.api.routes.chat.acompletion", new=broken_adapter):
+        resp = _chat(client, "fast")
+
+    assert resp.status_code == 200, resp.text
+    assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
+    assert "x-should-retry" not in resp.headers
+
+
 def test_all_candidates_failing_is_a_generic_502(client: TestClient) -> None:
     """A multi-candidate fallthrough must not attribute one provider's status to
     the whole plan.

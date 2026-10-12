@@ -49,6 +49,7 @@ from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.provider_kwargs import missing_credential, no_candidate_configured_detail, split_selector
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_retrieval_backend import WebSearchNotReachableError
+from gateway.streaming import IncompleteStreamError
 
 T = TypeVar("T")
 
@@ -305,12 +306,16 @@ def _provider_failure_http_exc(
             HTTPException(
                 status_code=mapping.status_code,
                 detail=mapping.detail,
-                headers=provider_error_headers(exc, mapping.status_code),
+                headers=with_retry_hint(exc, mapping.status_code, provider_error_headers(exc, mapping.status_code)),
             ),
             attempt_id,
         )
     return with_attempt_id(
-        HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=fallback_detail),
+        HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=fallback_detail,
+            headers=with_retry_hint(exc, status.HTTP_502_BAD_GATEWAY, None),
+        ),
         attempt_id,
     )
 
@@ -921,6 +926,66 @@ def is_provider_billing_error(exc: BaseException) -> bool:
         return False
     message = upstream_error_message(exc).lower()
     return any(probe in message for probe in _BILLING_MESSAGE_PROBES)
+
+
+# The OpenAI and Anthropic SDKs read this header before their own retry rule
+# (``_should_retry`` in each SDK's ``_base_client.py``), so ``false`` stops them
+# retrying a 5xx they would otherwise retry. The name is theirs, not Otari's.
+SHOULD_RETRY_HEADER = "x-should-retry"
+
+# Exceptions that only a bug or a mismatch in the code making the call raises,
+# never an upstream: the request fails the same way however often it is resent.
+_LOCAL_FAULTS: tuple[type[BaseException], ...] = (LookupError, AttributeError, TypeError)
+
+
+def is_retry_futile(exc: BaseException) -> bool:
+    """Whether resending the same request cannot change how ``exc`` ends it.
+
+    True for an exhausted provider account (:func:`is_provider_billing_error`),
+    which no retry within seconds tops up, and for a local fault: an exception
+    the code making the call raised with no upstream signal anywhere behind it,
+    such as a ``KeyError`` in a provider adapter's message conversion before the
+    request left. A timeout, a dropped connection, an upstream 5xx or 429, and a
+    stream the provider cut short are transient, and so is any failure this
+    cannot place, so those stay retryable.
+    """
+    if is_provider_billing_error(exc):
+        return True
+    links = list(_causal_chain(exc))
+    if any(_carries_upstream_signal(link) for link in links):
+        return False
+    return any(isinstance(link, _LOCAL_FAULTS) for link in links)
+
+
+def with_retry_hint(exc: BaseException, status_code: int, headers: dict[str, str] | None) -> dict[str, str] | None:
+    """``headers`` for a provider failure answered with ``status_code``, telling the client not to retry a futile 5xx.
+
+    Only a 5xx carries it: an SDK does not retry the 4xx answers anyway.
+    """
+    if status_code < status.HTTP_500_INTERNAL_SERVER_ERROR or not is_retry_futile(exc):
+        return headers
+    return {**(headers or {}), SHOULD_RETRY_HEADER: "false"}
+
+
+def _causal_chain(exc: BaseException) -> Iterator[BaseException]:
+    """``exc`` and every exception behind it, through any-llm's wrapper and Python's own chaining."""
+    pending: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        yield current
+        linked = (getattr(current, "original_exception", None), current.__cause__, current.__context__)
+        pending.extend(link for link in linked if isinstance(link, BaseException))
+
+
+def _carries_upstream_signal(exc: BaseException) -> bool:
+    """Whether ``exc`` came from talking to the provider, and so may not recur."""
+    if isinstance(exc, (IncompleteStreamError, OSError, httpx.HTTPError)):
+        return True
+    return upstream_exception_shape(exc) != (None, None)
 
 
 def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:

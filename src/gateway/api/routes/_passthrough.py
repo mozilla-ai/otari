@@ -52,7 +52,7 @@ from gateway.api.routes._pipeline import (
     throttle_early_rejection,
     unresolvable_model_detail,
 )
-from gateway.api.routes._platform import _classify_upstream_error
+from gateway.api.routes._platform import _classify_upstream_error, with_retry_hint
 from gateway.core.config import GatewayConfig
 from gateway.core.database import release_session
 from gateway.core.error_codes import MODEL_NOT_ALLOWED, PROVIDER_CREDENTIAL_REJECTED, error_headers
@@ -617,7 +617,7 @@ async def run_passthrough(
                     model=resolved.model,
                     dispatch_model=resolved.dispatch_model,
                 ),
-                headers=provider_error_headers(e, mapping.status_code),
+                headers=with_retry_hint(e, mapping.status_code, provider_error_headers(e, mapping.status_code)),
             ) from e
 
         _, error_class = _classify_upstream_error(e)
@@ -625,6 +625,7 @@ async def run_passthrough(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=PASSTHROUGH_PROVIDER_ERROR_DETAIL,
+            headers=with_retry_hint(e, status.HTTP_502_BAD_GATEWAY, None),
         ) from e
 
     headers = rate_limit_headers(rate_limit_info) if rate_limit_info else {}

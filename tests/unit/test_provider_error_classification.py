@@ -47,7 +47,14 @@ from gateway.api.routes._pipeline import (
     stream_error_code,
     stream_error_message,
 )
-from gateway.api.routes._platform import _provider_failure_http_exc, get_shared_rejection, upstream_retry_after
+from gateway.api.routes._platform import (
+    SHOULD_RETRY_HEADER,
+    _provider_failure_http_exc,
+    get_shared_rejection,
+    is_retry_futile,
+    upstream_retry_after,
+    with_retry_hint,
+)
 from gateway.core.error_codes import PROVIDER_CREDENTIAL_REJECTED, PROVIDER_NOT_CONFIGURED
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
@@ -1144,3 +1151,113 @@ def test_bedrock_status_is_read_through_the_unified_exception_wrapper() -> None:
     assert mapping is not None
     assert mapping.status_code == 400
     assert mapping.detail == _BEDROCK_INVALID_MODEL
+
+
+# ---------------------------------------------------------------------------
+# Whether a client's SDK should retry a provider failure
+# ---------------------------------------------------------------------------
+
+_NO_RETRY = {SHOULD_RETRY_HEADER: "false"}
+
+
+def _key_error_during(cause: BaseException) -> KeyError:
+    """A ``KeyError`` raised while handling ``cause``, as in an SDK's own error path."""
+    exc = KeyError("content")
+    exc.__context__ = cause
+    return exc
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        KeyError("content"),
+        IndexError("list index out of range"),
+        AttributeError("'NoneType' object has no attribute 'text'"),
+        TypeError("unsupported operand type(s)"),
+        convert_exception(KeyError("content"), "cohere"),
+    ],
+    ids=["key", "index", "attribute", "type", "wrapped-by-any-llm"],
+)
+def test_a_local_fault_is_not_worth_retrying(exc: BaseException) -> None:
+    """An adapter that fails before the request leaves fails the same way on every resend."""
+    assert is_retry_futile(exc)
+    assert with_retry_hint(exc, 502, None) == _NO_RETRY
+    assert with_retry_hint(exc, 500, None) == _NO_RETRY
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        _StatusError(500),
+        _StatusError(503),
+        _StatusError(429),
+        OpenAIAPITimeoutError(request=httpx.Request("POST", "https://api.example.com")),
+        httpx.ConnectError("connection refused"),
+        httpx.RemoteProtocolError("server disconnected"),
+        ConnectionResetError("reset by peer"),
+        IncompleteStreamError(0),
+        Exception(_RAW),
+        ValueError(_RAW),
+        _key_error_during(httpx.ReadError("read failed")),
+        _key_error_during(_StatusError(503)),
+    ],
+    ids=[
+        "upstream-500",
+        "upstream-503",
+        "upstream-429",
+        "sdk-timeout",
+        "connect-error",
+        "remote-protocol-error",
+        "connection-reset",
+        "incomplete-stream",
+        "unknown",
+        "value-error",
+        "local-fault-while-handling-a-network-error",
+        "local-fault-while-handling-an-upstream-status",
+    ],
+)
+def test_a_transient_or_unplaced_failure_stays_retryable(exc: BaseException) -> None:
+    assert not is_retry_futile(exc)
+    assert with_retry_hint(exc, 502, None) is None
+
+
+def test_an_exhausted_provider_account_is_not_worth_retrying() -> None:
+    billing = _ParamError(400, None, "Your credit balance is too low to access the Anthropic API.")
+    mapping = classify_provider_error(billing)
+    assert mapping is not None
+    assert mapping.status_code == 502
+    assert is_retry_futile(billing)
+    assert with_retry_hint(billing, mapping.status_code, provider_error_headers(billing, 502)) == _NO_RETRY
+
+
+def test_an_account_quota_stays_retryable() -> None:
+    """A service quota can be a rate quota that frees up in seconds, so the client keeps retrying it."""
+    quota = _bedrock_error("ServiceQuotaExceededException", "Too many tokens", 400)
+    assert not is_retry_futile(quota)
+
+
+def test_the_retry_hint_keeps_the_refusal_headers() -> None:
+    headers = {"Otari-Error-Code": "provider_error"}
+    assert with_retry_hint(KeyError("content"), 502, headers) == {**headers, **_NO_RETRY}
+
+
+def test_no_retry_is_not_sent_below_500() -> None:
+    """A client SDK does not retry a 4xx it answers, so the header would say nothing there."""
+    rejected = TypeError("create() got an unexpected keyword argument 'seed'")
+    mapping = classify_provider_error(rejected)
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert with_retry_hint(rejected, mapping.status_code, None) is None
+
+
+def test_platform_terminal_exc_tells_a_client_not_to_retry_a_local_fault() -> None:
+    exc = _provider_failure_http_exc(KeyError("content"), fallback_detail="LLM provider error")
+    assert exc.status_code == 502
+    assert exc.detail == "LLM provider error"
+    assert exc.headers == _NO_RETRY
+
+
+def test_platform_terminal_exc_keeps_retries_for_an_upstream_outage() -> None:
+    exc = _provider_failure_http_exc(_StatusError(503), fallback_detail="LLM provider error")
+    assert exc.status_code == 502
+    assert exc.headers is None

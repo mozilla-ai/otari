@@ -128,6 +128,22 @@ def test_embeddings_provider_error(
         )
     assert resp.status_code == 502
     assert "provider" in resp.json()["detail"].lower()
+    assert "x-should-retry" not in resp.headers
+
+
+def test_embeddings_tells_a_client_not_to_retry_a_local_adapter_fault(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """A provider adapter that fails before sending anything fails the same way on every resend."""
+    with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, side_effect=KeyError("data")):
+        resp = client.post(
+            f"{API_ROOT}/embeddings",
+            json={"model": "openai:text-embedding-3-small", "input": "hello"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 502
+    assert resp.headers["x-should-retry"] == "false"
 
 
 def test_embeddings_logs_usage(
