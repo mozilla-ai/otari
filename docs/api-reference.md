@@ -138,6 +138,12 @@ rate that priced the model: `organization` (an organization's override),
 genai-prices dataset). Hybrid mode attaches the platform's settlement instead;
 see [Hybrid mode protocol](hybrid-mode-protocol.md#inline-response-fields).
 
+Each request's cost is settled to the micro-dollar, half-up, so a request that
+costs less than half a micro-dollar, such as a few tokens of a cheap embedding
+model, is recorded, debited and reported as `"0.000000"`. The usage row and
+the inline field always agree, and `pricing_source` still says the request was
+priced.
+
 ### Provider-specific fields
 
 A field a provider adds to a chat completion's message beyond the OpenAI schema
