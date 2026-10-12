@@ -79,9 +79,7 @@ def _chat(client: TestClient, model: str) -> Any:
     )
 
 
-def test_chat_typo_on_a_configured_provider_points_at_the_name(
-    readme_client: TestClient, db_session: Session
-) -> None:
+def test_chat_typo_on_a_configured_provider_points_at_the_name(readme_client: TestClient, db_session: Session) -> None:
     with patch("gateway.api.routes.chat.acompletion", new=AsyncMock()) as dispatch:
         response = _chat(readme_client, "openai:gpt5-mini")
     detail = _assert_typo_402(response, "openai:gpt5-mini")
