@@ -207,6 +207,8 @@ Two budget forms exist:
 - A scoped budget limits an organization, workspace, membership, or API key and
   can optionally narrow the limit to one provider.
 
+A routing fallback to another provider must also pass that provider's budgets, as [Routing](routing.md#what-is-billed-and-what-the-caller-sees) describes.
+
 A budget caps up to three things over its period, each set independently and
 each unlimited when left unset: spend in USD (`max_budget`), total tokens
 (`token_limit`), and requests (`request_limit`). A request must have room on

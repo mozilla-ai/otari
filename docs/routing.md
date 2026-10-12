@@ -322,9 +322,7 @@ request's cost is `usage.cost_usd` in the body, as described in the
 [API reference](api-reference.md#request-id-and-inline-cost). These headers are
 sent by a standalone gateway.
 
-Built-in tool charges settle on the final row. Candidate price and remaining
-budget are checked before each attempt, so a fallback cannot silently bypass
-pricing or spend limits.
+Built-in tool charges settle on the final row. Candidate price and remaining budget, including a budget narrowed to that candidate's provider, are checked before each attempt, so a fallback cannot silently bypass pricing or spend limits. A fallback is skipped when a budget narrowed to its provider has no room, and the next candidate is tried. A budget on every provider that cannot cover a pricier fallback stops the chain instead. What a fallback spends counts against its own provider's budgets.
 
 ## Failure behavior
 

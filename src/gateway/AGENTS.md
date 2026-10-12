@@ -159,6 +159,8 @@ settlement. Work that depends on the account a candidate's credential reaches
 runs in its `prepare_kwargs` step, once per candidate, and a candidate that step
 cannot serve is skipped without reordering the plan (`CandidateCannotServe`).
 
+The walker's `admit_attempt` step moves the reservation onto the budgets of each candidate's provider through `BudgetService.move_reservation`, and a budget on that provider alone with no room skips the candidate the same way.
+
 ## Tools, MCP, and guardrails
 
 An `otari_*` tool type always runs in the gateway. Who runs a provider-native
