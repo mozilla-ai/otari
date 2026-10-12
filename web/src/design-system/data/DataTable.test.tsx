@@ -758,6 +758,70 @@ describe('DataTable on a phone with mobileLayout="cards"', () => {
     expect(onSelectionChange).toHaveBeenLastCalledWith(new Set(["a", "b"]))
   })
 
+  it("adds the page's selection to another page's, and removes only its own", async () => {
+    stubPhone(true)
+    const user = userEvent.setup()
+    const onSelectionChange = vi.fn()
+    render(
+      <DataTable
+        {...base({
+          columns,
+          mobileLayout: "cards",
+          selectionMode: "multiple",
+          selectedKeys: new Set<string>(["elsewhere", "a", "b", "c"]),
+          onSelectionChange,
+        })}
+      />,
+    )
+
+    await user.click(screen.getByRole("checkbox", { name: "Select all rows" }))
+    expect(onSelectionChange).toHaveBeenLastCalledWith(new Set(["elsewhere"]))
+  })
+
+  it("keeps a click inside the open detail from toggling the card", async () => {
+    stubPhone(true)
+    const user = userEvent.setup()
+    const onRowAction = vi.fn()
+    render(
+      <DataTable
+        {...base({
+          columns,
+          mobileLayout: "cards",
+          onRowAction,
+          detailKey: "b",
+          renderDetail: () => <p>Detail text</p>,
+        })}
+      />,
+    )
+
+    await user.click(screen.getByText("Detail text"))
+    expect(onRowAction).not.toHaveBeenCalled()
+  })
+
+  it("opens a card from a named button that reflects whether it is open", async () => {
+    stubPhone(true)
+    const user = userEvent.setup()
+    const onRowAction = vi.fn()
+    render(
+      <DataTable
+        {...base({
+          columns,
+          mobileLayout: "cards",
+          onRowAction,
+          detailKey: "b",
+          renderDetail: () => <p>Detail text</p>,
+        })}
+      />,
+    )
+
+    const buttons = screen.getAllByRole("button", { name: /details/ })
+    expect(buttons[0]).toHaveAttribute("aria-expanded", "false")
+    expect(buttons[1]).toHaveAttribute("aria-expanded", "true")
+    await user.click(buttons[0])
+    expect(onRowAction).toHaveBeenCalledTimes(1)
+    expect(onRowAction).toHaveBeenCalledWith("a")
+  })
+
   it("renders the inline detail under the open card", () => {
     stubPhone(true)
     render(
@@ -804,7 +868,9 @@ describe('DataTable on a phone with mobileLayout="cards"', () => {
     stubPhone(false)
     render(<DataTable {...base({ rows: [], emptyContent: "No rows yet." })} />)
     const message = screen.getByText("No rows yet.").parentElement
-    expect(message).toHaveStyle({ width: "var(--table-viewport-width, 100%)" })
-    expect(message).toHaveClass("sticky")
+    expect(message).toHaveClass(
+      "sticky",
+      "w-[var(--table-viewport-width,100%)]",
+    )
   })
 })

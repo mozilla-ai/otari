@@ -86,8 +86,24 @@ const OPERATOR = deploymentUser({
   last_sign_in_at: "2026-01-01T00:00:00+00:00",
 })
 
+const realMatchMedia = window.matchMedia
+
+function stubPhone() {
+  window.matchMedia = ((query: string) => ({
+    matches: true,
+    media: query,
+    onchange: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false,
+  })) as typeof window.matchMedia
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
+  window.matchMedia = realMatchMedia
 })
 
 describe("DeploymentAccountsPage", () => {
@@ -107,6 +123,17 @@ describe("DeploymentAccountsPage", () => {
     expect(
       within(rowFor("Operator")).getByText("BOOTSTRAP OPERATOR"),
     ).toBeInTheDocument()
+  })
+
+  it("keeps an account's actions on its card on a phone", async () => {
+    stubPhone()
+    mockApi({ accounts: [OPERATOR, ANALYST] })
+    renderPage(<DeploymentAccountsPage />)
+
+    expect(await screen.findByText("Analyst")).toBeInTheDocument()
+    expect(screen.queryByRole("grid")).not.toBeInTheDocument()
+    const card = screen.getByText("Analyst").closest("li") as HTMLElement
+    expect(within(card).getAllByRole("button").length).toBeGreaterThan(0)
   })
 
   it("marks a membership the organization roster would have dropped", async () => {

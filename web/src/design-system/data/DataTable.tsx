@@ -162,7 +162,8 @@ function hasTextSelectionIn(root: HTMLElement | null): boolean {
 
 // Anything inside a card that is its own control keeps its own press, so a tap
 // on Edit does not also open the card.
-const OWN_PRESS = "button, a, input, select, textarea, label"
+const OWN_PRESS =
+  "button, a, input, select, textarea, label, [data-card-detail]"
 
 function isSelected(selected: Selection | undefined, key: string): boolean {
   return selected === "all" || (selected?.has(key) ?? false)
@@ -252,9 +253,16 @@ function DataCardList<Row extends object>({
             isSelected={
               selectable.length > 0 && selectedCount === selectable.length
             }
-            onChange={(checked) =>
-              onSelectionChange?.(checked ? new Set(selectable) : new Set())
-            }
+            onChange={(checked) => {
+              const next = new Set<Key>(
+                selectedKeys === "all" ? [] : (selectedKeys ?? []),
+              )
+              for (const key of selectable) {
+                if (checked) next.add(key)
+                else next.delete(key)
+              }
+              onSelectionChange?.(next)
+            }}
           >
             <span className="sr-only">Select all rows</span>
           </Checkbox>
@@ -271,25 +279,14 @@ function DataCardList<Row extends object>({
           const open = detailKey === key && renderDetail != null
           const picked = isSelected(selectedKeys, key)
           return (
+            // biome-ignore lint/a11y/useKeyWithClickEvents: the button below is the keyboard and screen-reader path; the card tap is a pointer shortcut
             <li
               key={key}
               data-key={key}
-              tabIndex={onRowAction ? 0 : undefined}
               onClick={
                 onRowAction
                   ? (event: ReactMouseEvent<HTMLLIElement>) => {
                       if (!(event.target as Element).closest(OWN_PRESS))
-                        onRowAction(key)
-                    }
-                  : undefined
-              }
-              onKeyDown={
-                onRowAction
-                  ? (event: ReactKeyboardEvent<HTMLLIElement>) => {
-                      if (
-                        event.key === "Enter" &&
-                        event.target === event.currentTarget
-                      )
                         onRowAction(key)
                     }
                   : undefined
@@ -339,7 +336,21 @@ function DataCardList<Row extends object>({
                   ))}
                 </dl>
               ) : null}
-              {open ? <div>{renderDetail(row)}</div> : null}
+              {onRowAction ? (
+                <button
+                  type="button"
+                  aria-expanded={renderDetail ? open : undefined}
+                  className="sr-only focus-visible:not-sr-only focus-visible:text-caption"
+                  onClick={() => onRowAction(key)}
+                >
+                  {renderDetail
+                    ? open
+                      ? "Hide details"
+                      : "Show details"
+                    : "Open"}
+                </button>
+              ) : null}
+              {open ? <div data-card-detail>{renderDetail(row)}</div> : null}
             </li>
           )
         })}
@@ -761,10 +772,7 @@ function DataTableGrid<Row extends object>({
             items={isLoading && rows.length === 0 ? [] : rows}
             dependencies={[renderRow]}
             renderEmptyState={() => (
-              <div
-                className="sticky left-0"
-                style={{ width: "var(--table-viewport-width, 100%)" }}
-              >
+              <div className="sticky left-0 w-[var(--table-viewport-width,100%)]">
                 <EmptyMessage>
                   {isLoading ? (
                     <span className="inline-flex items-center gap-2">
