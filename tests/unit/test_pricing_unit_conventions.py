@@ -13,9 +13,8 @@ import pytest
 from gateway.core.metered_pricing import price_request
 from gateway.models.pricing import ModelPricing
 from gateway.services.budgets import count_estimate, estimate_cost, rerank_estimate
-from gateway.services.pricing import price_usage
+from gateway.services.pricing import billed_search_units, price_usage
 from gateway.services.pricing_service import (
-    billed_search_units,
     flat_request_cost,
     metered_search_units,
     search_unit_cost,

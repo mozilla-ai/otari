@@ -4,7 +4,6 @@ import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from math import ceil, isfinite
 from typing import NamedTuple
 
 from genai_prices import Usage, calc_price
@@ -15,9 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.core.config import API_ROOT
 from gateway.core.metered_pricing import priced_per_request, quantize_cost
 from gateway.log_config import logger
-from gateway.models.pricing import MAX_REPORTED_UNITS, ModelPricing, OrganizationModelPricing, PriceSource
+from gateway.models.pricing import ModelPricing, OrganizationModelPricing, PriceSource
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
-from gateway.services.pricing import request_rate
+from gateway.services.pricing import billed_search_units, request_rate
 
 # A zero-token usage is enough to resolve a model's per-million rates from
 # genai-prices without depending on real token counts.
@@ -843,19 +842,6 @@ def flat_request_cost(pricing: ModelPricing | None) -> Decimal:
 def search_unit_cost(units: int, pricing: ModelPricing | None) -> Decimal:
     """USD for ``units`` search units, each priced as one request is."""
     return max(units, 0) * request_rate(pricing)
-
-
-def billed_search_units(billed_units: Mapping[str, float] | None) -> int:
-    """How many search units a rerank request bills, at least one.
-
-    Reported under ``meta.billed_units`` by providers that bill rerank per query
-    batch rather than per token. A fraction rounds up, because the provider
-    billed it, and a request that reports none bills one unit: the request itself.
-    """
-    reported = billed_units.get("search_units") if billed_units else None
-    if reported is None or not isfinite(reported) or reported <= 0:
-        return 1
-    return min(ceil(reported), MAX_REPORTED_UNITS)
 
 
 def metered_search_units(pricing: ModelPricing | None, billed_units: Mapping[str, float] | None) -> int | None:

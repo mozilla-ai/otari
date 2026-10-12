@@ -9,7 +9,7 @@ from any_llm.types.completion import CreateEmbeddingResponse
 from any_llm.types.image import ImagesResponse
 from any_llm.types.rerank import RerankResponse
 
-from gateway.services.pricing_service import billed_search_units
+from gateway.services.pricing import billed_search_units
 
 
 @dataclass(frozen=True)

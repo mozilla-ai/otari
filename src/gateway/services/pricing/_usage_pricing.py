@@ -11,6 +11,7 @@ through :func:`price_usage`, which is how one request costs the same on either.
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
+from math import ceil, isfinite
 
 from gateway.core.metered_pricing import (
     BillableUsage,
@@ -123,6 +124,19 @@ def can_price(rate: ModelPricing | None, *, meter: str | None, reports_tokens: b
 def request_rate(rate: ModelPricing | None) -> Decimal:
     """USD for one request at a per-request rate, or zero when the rate is absent or unusable."""
     return (_request_rate(rate) if rate is not None else None) or Decimal(0)
+
+
+def billed_search_units(billed_units: Mapping[str, float] | None) -> int:
+    """How many search units a rerank request bills, at least one.
+
+    Reported under ``meta.billed_units`` by providers that bill rerank per query
+    batch rather than per token. A fraction rounds up, because the provider
+    billed it, and a request that reports none bills one unit: the request itself.
+    """
+    reported = billed_units.get("search_units") if billed_units else None
+    if reported is None or not isfinite(reported) or reported <= 0:
+        return 1
+    return min(ceil(reported), MAX_REPORTED_UNITS)
 
 
 def _request_rate(rate: ModelPricing) -> Decimal | None:

@@ -2,10 +2,11 @@
 
 from gateway.services.pricing._usage_pricing import (
     UsageCharge,
+    billed_search_units,
     can_price,
     price_usage,
     request_rate,
     validated_units,
 )
 
-__all__ = ["UsageCharge", "can_price", "price_usage", "request_rate", "validated_units"]
+__all__ = ["UsageCharge", "billed_search_units", "can_price", "price_usage", "request_rate", "validated_units"]
