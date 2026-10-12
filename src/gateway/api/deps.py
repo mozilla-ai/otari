@@ -734,7 +734,10 @@ def _file_backends(request: Request) -> FileBackends | None:
 
 
 def build_inference_service(uow: UnitOfWork, config: GatewayConfig) -> InferenceService:
-    """Build the inference service for a request or a worker job, such as the idempotency sweep."""
+    """Build the inference service for a request or a worker job, such as the idempotency sweep.
+
+    It receives the Unit of Work and its own domain's repositories over it, never the session.
+    """
     return InferenceService(uow, InferenceRepositories.on(uow), config)
 
 
