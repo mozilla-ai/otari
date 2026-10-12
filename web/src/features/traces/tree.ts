@@ -1,4 +1,4 @@
-import type { Observation } from "./types"
+import { type Observation, observationCost } from "./types"
 
 export interface TreeNode {
   obs: Observation
@@ -62,7 +62,7 @@ export function flattenTreeOrder(
 export function rolledUpCosts(roots: TreeNode[]): Map<string, number> {
   const totals = new Map<string, number>()
   const walk = (node: TreeNode): number => {
-    const own = (node.obs.inputCost ?? 0) + (node.obs.outputCost ?? 0)
+    const own = observationCost(node.obs)
     const total = node.children.reduce((sum, child) => sum + walk(child), own)
     totals.set(node.obs.id, total)
     return total

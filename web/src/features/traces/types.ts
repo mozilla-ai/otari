@@ -1,6 +1,6 @@
 // Shapes modeled on Langfuse's trace and observation records
 // (MIT, Copyright (c) 2023-2026 ClickHouse, Inc.), carrying Otari-shaped
-// fields on generations. Mock data only on this branch.
+// fields on generations. Filled from the trace API by `fromApi.ts`.
 
 export type ObservationType = "SPAN" | "GENERATION" | "AGENT" | "TOOL" | "EVENT"
 
@@ -22,6 +22,7 @@ export interface Observation {
   provider?: string
   promptTokens?: number
   completionTokens?: number
+  /** The whole cost, when the record does not split it into input and output. */
   cost?: number
   inputCost?: number
   outputCost?: number
@@ -59,12 +60,17 @@ export interface TraceSummary {
   level: ObservationLevel
 }
 
+export function observationCost(o: Observation): number {
+  return o.cost ?? (o.inputCost ?? 0) + (o.outputCost ?? 0)
+}
+
 export function summarizeTrace(trace: Trace): TraceSummary {
   let latencyMs = 0
   let promptTokens = 0
   let completionTokens = 0
   let inputCost = 0
   let outputCost = 0
+  let totalCost = 0
   let errorCount = 0
   let warningCount = 0
   let level: ObservationLevel = "DEFAULT"
@@ -75,6 +81,7 @@ export function summarizeTrace(trace: Trace): TraceSummary {
     completionTokens += o.completionTokens ?? 0
     inputCost += o.inputCost ?? 0
     outputCost += o.outputCost ?? 0
+    totalCost += observationCost(o)
     if (o.level === "ERROR") errorCount += 1
     if (o.level === "WARNING") warningCount += 1
     if (o.model) models.add(o.model)
@@ -86,7 +93,7 @@ export function summarizeTrace(trace: Trace): TraceSummary {
     promptTokens,
     completionTokens,
     totalTokens: promptTokens + completionTokens,
-    totalCost: inputCost + outputCost,
+    totalCost,
     inputCost,
     outputCost,
     errorCount,

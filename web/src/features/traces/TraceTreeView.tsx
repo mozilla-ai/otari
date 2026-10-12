@@ -10,7 +10,7 @@ import { LevelChip } from "./LevelChip"
 import { TypeMark } from "./observationTypes"
 import { matchesSearch } from "./search"
 import { buildTree, flattenTreeOrder } from "./tree"
-import { summarizeTrace, type Trace } from "./types"
+import { observationCost, summarizeTrace, type Trace } from "./types"
 
 function Metrics({
   durationMs,
@@ -110,7 +110,7 @@ export function TraceTreeView({
                 </span>
                 <Metrics
                   durationMs={obs.endMs - obs.startMs}
-                  cost={(obs.inputCost ?? 0) + (obs.outputCost ?? 0)}
+                  cost={observationCost(obs)}
                   tokens={(obs.promptTokens ?? 0) + (obs.completionTokens ?? 0)}
                 />
               </span>
@@ -192,7 +192,7 @@ export function TraceTreeView({
               </span>
               <Metrics
                 durationMs={obs.endMs - obs.startMs}
-                cost={(obs.inputCost ?? 0) + (obs.outputCost ?? 0)}
+                cost={observationCost(obs)}
                 tokens={tokens}
               />
             </button>

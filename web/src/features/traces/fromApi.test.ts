@@ -1,0 +1,124 @@
+import { describe, expect, it } from "vitest"
+
+import { traceDetail, traceSpan, traceSummary } from "@/tests/traceFixtures"
+
+import { toTrace } from "./fromApi"
+import { summarizeTrace } from "./types"
+
+describe("toTrace", () => {
+  it("draws a session's spans as observations under the steps they belong to", () => {
+    const trace = toTrace(traceSummary(), traceDetail())
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    // One turn is not wrapped in a turn of its own.
+    expect(trace.observations.some((o) => o.id.startsWith("turn-"))).toBe(false)
+    expect(byId.get("req-1")).toMatchObject({
+      type: "SPAN",
+      name: "Request",
+      parentObservationId: null,
+      startMs: 0,
+      endMs: 10_000,
+    })
+    expect(byId.get("llm-1")).toMatchObject({
+      type: "GENERATION",
+      name: "gpt-5",
+      parentObservationId: "req-1",
+      promptTokens: 10,
+      completionTokens: 2,
+      cost: 0.01,
+      level: "DEFAULT",
+    })
+    expect(byId.get("call-toolu_1")).toMatchObject({
+      type: "TOOL",
+      name: "Bash",
+      parentObservationId: "req-1",
+      startMs: 10_000,
+      endMs: 60_000,
+    })
+    expect(byId.get("call-toolu_1")?.metadata?.Timing).toBe("Approximate")
+  })
+
+  it("marks a failure a fallback recovered as a warning, not an error", () => {
+    const trace = toTrace(traceSummary(), traceDetail())
+    const recovered = trace.observations.find((o) => o.id === "llm-2")
+
+    expect(recovered?.level).toBe("WARNING")
+    expect(recovered?.statusMessage).toBe("error, recovered by a fallback")
+    expect(summarizeTrace(trace)).toMatchObject({
+      errorCount: 0,
+      warningCount: 1,
+      totalCost: 0.01,
+    })
+  })
+
+  it("puts each turn's steps under the turn once a session has several", () => {
+    const base = traceDetail()
+    const detail = traceDetail({
+      turns: [
+        { ...base.turns[0], step_ids: ["req-1"] },
+        {
+          ...base.turns[0],
+          index: 1,
+          state: "failed",
+          started_at: "2026-10-07T12:01:00Z",
+          step_ids: ["req-2"],
+        },
+      ],
+    })
+
+    const trace = toTrace(traceSummary(), detail)
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    expect(byId.get("turn-0")).toMatchObject({
+      name: "Turn 1",
+      level: "DEFAULT",
+    })
+    expect(byId.get("turn-1")).toMatchObject({
+      name: "Turn 2",
+      level: "ERROR",
+      startMs: 60_000,
+    })
+    expect(byId.get("req-1")?.parentObservationId).toBe("turn-0")
+    expect(byId.get("req-2")?.parentObservationId).toBe("turn-1")
+    expect(byId.get("llm-2")?.parentObservationId).toBe("req-2")
+  })
+
+  it("keeps an instrumented agent's own span tree", () => {
+    const detail = traceDetail({
+      turns: [],
+      spans: [
+        traceSpan({ span_id: "a1", kind: "agent", name: "invoke_agent" }),
+        traceSpan({
+          span_id: "x1",
+          parent_span_id: "a1",
+          kind: "tool",
+          tool_name: "grep",
+          outcome: "error",
+          error_class: "timeout",
+        }),
+      ],
+    })
+
+    const [agent, tool] = toTrace(traceSummary(), detail).observations
+
+    expect(agent).toMatchObject({ type: "AGENT", parentObservationId: null })
+    expect(tool).toMatchObject({
+      type: "TOOL",
+      parentObservationId: "a1",
+      level: "ERROR",
+      statusMessage: "timeout",
+    })
+  })
+
+  it("is the list row alone, with no observations, before the spans arrive", () => {
+    const trace = toTrace(traceSummary({ session_source: "none" }))
+
+    expect(trace).toMatchObject({
+      id: traceSummary().trace_id,
+      name: "claude-code",
+      userId: "alice",
+      tags: ["Request"],
+      observations: [],
+    })
+  })
+})

@@ -5,6 +5,7 @@ import {
   FiBox,
   FiCode,
   FiDollarSign,
+  FiGitBranch,
   FiGlobe,
   FiGrid,
   FiHome,
@@ -89,6 +90,13 @@ const BASE_NAV_SECTIONS = [
         label: "Activity",
         surface: "usage",
         icon: FiActivity,
+      },
+      // Agent sessions, read from the trace API rather than the usage log.
+      {
+        to: "/sessions",
+        label: "Sessions",
+        surface: "traces",
+        icon: FiGitBranch,
       },
       {
         to: "/usage",

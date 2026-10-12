@@ -22,11 +22,16 @@ import {
 } from "./format"
 import { type Format, IOBlock } from "./IOBlock"
 import { LogView } from "./LogView"
-import { TypeMark } from "./observationTypes"
 import { NavHeader, type NavView } from "./NavHeader"
+import { TypeMark } from "./observationTypes"
 import { TraceTimelineView } from "./TraceTimelineView"
 import { TraceTreeView } from "./TraceTreeView"
-import { type Observation, summarizeTrace, type Trace } from "./types"
+import {
+  type Observation,
+  observationCost,
+  summarizeTrace,
+  type Trace,
+} from "./types"
 
 type PeekTab = "preview" | "attributes" | "log"
 
@@ -203,10 +208,8 @@ function Attributes({
     ],
     [
       "Total cost",
-      observation.inputCost != null
-        ? formatCost(
-            (observation.inputCost ?? 0) + (observation.outputCost ?? 0),
-          )
+      observation.cost != null || observation.inputCost != null
+        ? formatCost(observationCost(observation))
         : undefined,
     ],
     ["Start", formatRelativeTime(observation.startMs, true)],
@@ -299,7 +302,7 @@ export function TracePeek({
         latencyMs: observation.endMs - observation.startMs,
         inputCost: observation.inputCost ?? 0,
         outputCost: observation.outputCost ?? 0,
-        totalCost: (observation.inputCost ?? 0) + (observation.outputCost ?? 0),
+        totalCost: observationCost(observation),
         promptTokens: observation.promptTokens ?? 0,
         completionTokens: observation.completionTokens ?? 0,
         totalTokens:
@@ -458,7 +461,9 @@ export function TracePeek({
           {formatDuration(shown.latencyMs) ? (
             <span>{formatDuration(shown.latencyMs)}</span>
           ) : null}
-          {shown.totalCost > 0 ? (
+          {shown.totalCost > 0 && shown.inputCost + shown.outputCost === 0 ? (
+            <span>{formatCost(shown.totalCost)}</span>
+          ) : shown.totalCost > 0 ? (
             <Tooltip
               content={
                 <Breakdown
