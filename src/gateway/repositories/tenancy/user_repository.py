@@ -12,6 +12,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
 from gateway.core.sql import dialect_name
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.models.tenancy import User, UserBase, UserCreate
 from gateway.repositories.base_repository import BaseRepository
 
@@ -35,7 +36,7 @@ def user_alphabetical_order() -> ColumnElement[str]:
 class UserRepository(BaseRepository[User, UserCreate, UserBase]):
     """Repository for identity rows."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession | UnitOfWork):
         super().__init__(db, User)
 
     async def get_by_email(self, email: str) -> User | None:

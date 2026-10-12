@@ -35,6 +35,7 @@ from sqlmodel import col, delete
 from gateway.api.routes import auth_oauth
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.log_config import logger as gateway_logger
+from gateway.models.identity import OAuthIdentityLink
 from gateway.models.tenancy import Organization, User, WebAuthnCredential
 from gateway.models.tools import WorkspaceCodeExecutionPolicy
 from gateway.ports.identity_provider_port import EmailAssertion
@@ -1068,7 +1069,6 @@ def test_a_second_provider_sign_in_leaves_the_identity_as_the_first_left_it(
 # ---------- the provider's subject names the account, not the address ----------
 
 
-@pytest.mark.xfail(strict=True, reason="sign-in resolves an account by its email address")
 def test_a_second_identity_at_one_provider_cannot_sign_in_to_a_linked_account(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -1087,7 +1087,6 @@ def test_a_second_identity_at_one_provider_cannot_sign_in_to_a_linked_account(
     assert SESSION_COOKIE_NAME not in response.cookies
 
 
-@pytest.mark.xfail(strict=True, reason="sign-in resolves an account by its email address")
 def test_a_linked_account_still_signs_in_after_the_provider_changes_its_address(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -1104,6 +1103,156 @@ def test_a_linked_account_still_signs_in_after_the_provider_changes_its_address(
 
     assert response.status_code == 200, response.text
     assert response.json()["user_id"] == user_id
+
+
+def _links(db_session: Session, user_id: str) -> list[tuple[str, str]]:
+    """The ``(provider, subject)`` pairs linked to an account, in provider order."""
+    rows = db_session.execute(
+        select(OAuthIdentityLink.provider, OAuthIdentityLink.subject)
+        .where(OAuthIdentityLink.user_id == uuid.UUID(user_id))
+        .order_by(OAuthIdentityLink.provider)
+    )
+    return [(provider, subject) for provider, subject in rows.all()]
+
+
+def _sign_in(client: TestClient, provider: str = "google") -> Any:
+    """Finish a stubbed sign-in and drop the session cookie it set."""
+    response = client.post(f"{API_ROOT}/auth/oauth/{provider}/callback", json={"code": "c", "state": "s"})
+    client.cookies.clear()
+    return response
+
+
+def test_a_first_sign_in_links_the_account_to_the_provider_identity(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    user_id = add_member(client, master_key_header, email="ada@example.com")
+    stub_exchange(monkeypatch, subject="ada-subject")
+
+    assert _sign_in(client).status_code == 200
+
+    assert _links(db_session, user_id) == [("google", "ada-subject")]
+    link = db_session.execute(select(OAuthIdentityLink)).scalar_one()
+    assert (link.email_at_link, link.email_verified_at_link) == ("ada@example.com", True)
+
+
+def test_one_account_holds_a_link_at_each_provider(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    user_id = add_member(client, master_key_header, email="ada@example.com")
+    stub_exchange(monkeypatch, subject="ada-at-google")
+    assert _sign_in(client, "google").status_code == 200
+    stub_exchange(monkeypatch, subject="ada-at-github")
+    assert _sign_in(client, "github").status_code == 200
+    stub_exchange(monkeypatch, subject="ada-at-github", email="ada@elsewhere.example.com")
+
+    response = _sign_in(client, "github")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["user_id"] == user_id
+    assert _links(db_session, user_id) == [("github", "ada-at-github"), ("google", "ada-at-google")]
+
+
+def test_a_linked_identity_is_refused_when_the_provider_denies_its_address(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    add_member(client, master_key_header, email="ada@example.com")
+    stub_exchange(monkeypatch)
+    assert _sign_in(client).status_code == 200
+    stub_exchange(monkeypatch, email_verified=EmailAssertion.UNVERIFIED)
+
+    response = _sign_in(client)
+
+    assert response.status_code == 401
+    assert "did not confirm that address is yours" in response.json()["detail"]
+
+
+def test_a_linked_identity_signs_in_when_the_provider_says_nothing_about_its_address(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = add_member(client, master_key_header, email="ada@example.com")
+    stub_exchange(monkeypatch)
+    assert _sign_in(client).status_code == 200
+    stub_exchange(monkeypatch, email_verified=EmailAssertion.UNASSERTED)
+
+    response = _sign_in(client)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["user_id"] == user_id
+
+
+def test_an_address_the_provider_says_nothing_about_links_no_account(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    user_id = add_member(client, master_key_header, email="ada@example.com")
+    stub_exchange(monkeypatch, email_verified=EmailAssertion.UNASSERTED)
+
+    response = _sign_in(client)
+
+    assert response.status_code == 401
+    assert _links(db_session, user_id) == []
+    assert _identity(db_session, "ada@example.com").email_verified_at is None
+
+
+def test_a_deactivated_account_is_refused_through_its_link(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    add_member(client, master_key_header, email="ada@example.com")
+    stub_exchange(monkeypatch)
+    assert _sign_in(client).status_code == 200
+    identity = _identity(db_session, "ada@example.com")
+    identity.is_active = False
+    db_session.add(identity)
+    db_session.commit()
+
+    response = _sign_in(client)
+
+    assert response.status_code == 401
+    assert "not registered on this gateway" in response.json()["detail"]
+
+
+def test_a_refused_second_identity_leaves_the_account_and_its_link_as_they_were(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    signup_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    user_id = add_member(client, master_key_header, email="ada@example.com")
+    sign_up(client, email="ada@example.com", password=UNPROVEN_PASSWORD)
+    stub_exchange(monkeypatch, subject="ada-subject")
+    assert client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"}).status_code == 200
+    assert client.put(f"{API_ROOT}/auth/password", json={"new_password": PASSWORD}).status_code == 200
+    client.cookies.clear()
+    before = _identity(db_session, "ada@example.com").hashed_password
+    db_session.expire_all()
+    stub_exchange(monkeypatch, subject="another-subject")
+
+    assert _sign_in(client).status_code == 401
+
+    assert _identity(db_session, "ada@example.com").hashed_password == before
+    assert _links(db_session, user_id) == [("google", "ada-subject")]
 
 
 def test_a_refused_provider_sign_in_writes_nothing_to_a_deactivated_identity(

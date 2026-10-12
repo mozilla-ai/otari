@@ -9,6 +9,11 @@ edition, so it stays a plain service (``gateway.services.oauth_service``, on
 apron-auth). What varies is the *policy* applied to the proven identity, and
 that is the whole of this port.
 
+Every edition keys a sign-in on the provider's ``(provider, subject)`` pair,
+and that rule is not behind the port either.
+An identity already linked to an account signs in as that account without asking the port.
+The port decides only which account an identity with no link signs in as, and that account gains the link.
+
 An overlay can bind its own policy to this port without editing any file in this tree.
 For example, an enterprise edition can map an OIDC directory group to an organization.
 
@@ -18,14 +23,8 @@ with an optional email and no email-verified signal, and SCIM is out-of-band
 provisioning rather than interactive sign-in. Each arrives as its own port or
 method when its adapter does.
 
-**Stability: this interface is not frozen while Otari is pre-1.0.** The
-anticipated change is named and already scheduled elsewhere:
-mozilla-ai/otari-ai#1551 moves identity resolution onto apron-auth's own model,
-keying on ``(provider, subject)`` rather than on an address and reading
-``email_verified`` as the tri-state it really is. That work lands once, on the
-platform, and arrives here with the shape it settles on; this port deliberately
-does not anticipate it. Overlay authors should pin a released tag and expect
-``resolve`` to gain a subject and lose the boolean.
+**Stability: this interface is not frozen while Otari is pre-1.0.**
+Overlay authors should pin a released tag.
 """
 
 from dataclasses import dataclass
@@ -66,17 +65,18 @@ class IdentityResolution:
 
 
 class IdentityProviderPort(Protocol):
-    """Which identity here, if any, an external OAuth identity signs in as."""
+    """Which account here, if any, an external OAuth identity with no link signs in as."""
 
     async def resolve(
         self,
         *,
         provider: str,
+        subject: str,
         email: str | None,
         full_name: str | None,
-        email_verified: bool,
+        email_verified: EmailAssertion,
     ) -> IdentityResolution:
-        """Return the identity this external OAuth identity signs in as, as an ``IdentityResolution``.
+        """Return the account that an identity with no link here signs in as.
 
         ``IdentityResolution.new_account`` says whether this sign-in created the
         account or is the first way in to one nobody had claimed, which the
@@ -84,15 +84,13 @@ class IdentityProviderPort(Protocol):
 
         ``provider`` names the provider or connection and is an open string
         rather than a closed enum, because a customer's own OIDC connections are
-        not enumerable by this tree.
+        not enumerable by this tree. ``subject`` is the provider's own ID for
+        the person, and ``email_verified`` is what the provider says about
+        ``email``.
 
-        ``email_verified`` is the provider's assertion about ``email``, already
-        collapsed to a boolean by the caller. apron-auth reports it as
-        tri-state (true, false, or unasserted), and an unasserted value arrives
-        here as ``False``: an adapter must be able to read this argument as "the
-        provider affirmatively vouched for this address", so silence has to
-        collapse to the unverified side rather than be laundered into a verified
-        identity. See the module docstring for where the tri-state model lands.
+        NOTE: No account is linked to ``(provider, subject)`` when this is called.
+        The account this returns gains that link.
+        An adapter must return an account only when this identity may sign in as it from then on.
 
         Each adapter decides whether to refuse an unknown identity or create an account for it.
         An adapter does not have to write anything.
@@ -100,7 +98,7 @@ class IdentityProviderPort(Protocol):
         Raises:
             TenancyError: If this identity may not sign in to this deployment.
                 The concrete subclass carries the status and the message the
-                caller sees, so the sign-in route stays thin.
+                caller sees.
 
         """
         ...

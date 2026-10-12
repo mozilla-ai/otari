@@ -9,7 +9,7 @@ from gateway.exceptions.identity_exceptions import (
     OAuthEmailNotVerifiedError,
     OAuthIdentityUnknownError,
 )
-from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
+from gateway.ports.identity_provider_port import EmailAssertion, IdentityProviderPort, IdentityResolution
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.oauth_service import provider_label
 from gateway.services.tenancy import OrganizationService, unverified_identity_is_claimable
@@ -19,9 +19,7 @@ from gateway.services.tenancy.email_address import validated_email
 class DeploymentIdentityProviderAdapter(IdentityProviderPort):
     """Applies this deployment's ``open_signup`` setting to an OAuth sign-in.
 
-    The adapter leaves its changes to the account for the caller to commit. The one exception is the
-    organization and workspace a new or reclaimed account gets, which ``OrganizationService`` commits in
-    its own Unit of Work block before the account itself is changed.
+    The adapter leaves its changes for the caller's Unit of Work block to commit.
     """
 
     def __init__(
@@ -42,20 +40,21 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         self,
         *,
         provider: str,
+        subject: str,
         email: str | None,
         full_name: str | None,
-        email_verified: bool,
+        email_verified: EmailAssertion,
     ) -> IdentityResolution:
-        """Return the account for this OAuth sign-in.
+        """Return the account that holds the address of an OAuth identity with no link.
 
         The provider must have verified the email address.
         If the provider sent no address, or did not verify it, the sign-in is refused and no account is created.
 
-        If ``open_signup`` is enabled and there is no existing account for the address, a new account is created
-        and committed. The new account has its own organization and workspace.
+        If ``open_signup`` is enabled and there is no existing account for the address, a new account is created.
+        The new account has its own organization and workspace.
         No verification email is sent, because the provider has already verified the address.
 
-        A successful call then stages these changes on the account and commits none of them:
+        A successful call then stages these changes on the account:
 
         - It records ``provider`` if the account names none.
           An account that already names a provider keeps it.
@@ -74,8 +73,8 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
 
         Under ``open_signup``, claiming an unverified account that no organization still wants (its
         invitation revoked, declined or lapsed, or the member removed) gives it an organization and
-        workspace of its own and points it at them, the way a new account is created. That tenancy is
-        committed first, and the account is read again under a lock before this sign-in changes it.
+        workspace of its own and points it at them, the way a new account is created. The account is then
+        read again under a lock before this sign-in changes it.
 
         ``new_account`` is true when this sign-in created the account, or is the first way in to one an
         organization added and nobody had claimed.
@@ -87,7 +86,7 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
 
         """
         label = provider_label(provider)
-        if not email_verified or not email:
+        if email_verified is not EmailAssertion.VERIFIED or not email:
             raise OAuthEmailNotVerifiedError(label)
         # An address this gateway would never store names no account, so it is refused as unknown.
         try:
@@ -119,7 +118,7 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         first_claim = identity.hashed_password is None and identity.email_verified_at is None
         if not created and self._open_signup and identity.email_verified_at is None:
             await self._organizations.provision_tenancy_for_claim(identity, full_name=full_name)
-            # That block committed, which released the lock taken above.
+            # Provisioning pointed the account at its new organization, so it is read again.
             identity = await self._users.get_locked(identity.id)
             if identity is None or not identity.is_active:
                 raise OAuthIdentityUnknownError(label)

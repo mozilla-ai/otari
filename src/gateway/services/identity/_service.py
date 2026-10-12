@@ -1,6 +1,10 @@
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.identity_exceptions import OAuthEmailNotVerifiedError, OAuthIdentityUnknownError
+from gateway.log_config import logger
 from gateway.ports.identity_provider_port import EmailAssertion, IdentityProviderPort, IdentityResolution
-from gateway.services.oauth_service import OAuthIdentity
+from gateway.repositories.identity import OAuthIdentityLinkRepository
+from gateway.repositories.tenancy import UserRepository
+from gateway.services.oauth_service import OAuthIdentity, provider_label
 
 
 class IdentityService:
@@ -9,21 +13,67 @@ class IdentityService:
     Each method runs in a Unit of Work block, so what it and the ports it calls stage commits together.
     """
 
-    def __init__(self, uow: UnitOfWork, *, identity_provider: IdentityProviderPort) -> None:
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        *,
+        identity_provider: IdentityProviderPort,
+        links: OAuthIdentityLinkRepository,
+        users: UserRepository,
+    ) -> None:
         self._uow = uow
         self._identity_provider = identity_provider
+        self._links = links
+        self._users = users
 
     async def sign_in_with_oauth(self, external: OAuthIdentity) -> IdentityResolution:
         """Return the account that an identity a provider has proven signs in as.
 
+        An identity linked to an account signs in as that account, and the sign-in changes nothing on it.
+        An identity with no link signs in as the account the identity provider policy returns, and is linked to it.
+        An account holds at most one link for each provider.
+
         Raises:
-            TenancyError: If this identity may not sign in to this deployment.
+            OAuthEmailNotVerifiedError: If the provider says the address is not verified.
+            OAuthIdentityUnknownError: If the linked account is deactivated or gone,
+                or the account the policy returns is linked to another identity at the same provider.
+            TenancyError: If the identity provider policy refuses the identity.
 
         """
+        label = provider_label(external.provider)
+        if external.email_verified is EmailAssertion.UNVERIFIED:
+            raise OAuthEmailNotVerifiedError(label)
         async with self._uow:
-            return await self._identity_provider.resolve(
+            link = await self._links.get_by_identity(external.provider, external.subject)
+            if link is not None:
+                account = await self._users.get_locked(link.user_id)
+                if account is None or not account.is_active:
+                    raise OAuthIdentityUnknownError(label)
+                return IdentityResolution(identity=account, new_account=False)
+
+            resolution = await self._identity_provider.resolve(
                 provider=external.provider,
+                subject=external.subject,
                 email=external.email,
                 full_name=external.full_name,
-                email_verified=external.email_verified is EmailAssertion.VERIFIED,
+                email_verified=external.email_verified,
             )
+            account = resolution.identity
+            # A concurrent first sign-in can link this same identity after the lookup above.
+            existing = await self._links.get_for_user(account.id, external.provider)
+            if existing is None:
+                await self._links.add(
+                    provider=external.provider,
+                    subject=external.subject,
+                    user_id=account.id,
+                    email=external.email,
+                    email_verified=external.email_verified is EmailAssertion.VERIFIED,
+                )
+            elif existing.subject != external.subject:
+                logger.warning(
+                    "Refused a %s sign-in to account %s, which is linked to another identity at that provider",
+                    external.provider,
+                    account.id,
+                )
+                raise OAuthIdentityUnknownError(label)
+            return resolution

@@ -61,6 +61,7 @@ from gateway.models.tenancy import (
     WorkspaceMember,
     WorkspacePublic,
 )
+from gateway.ports.identity_provider_port import EmailAssertion
 from gateway.repositories.api_keys import ApiKeyRepository
 from gateway.repositories.budgets import BudgetRepositories
 from gateway.repositories.tenancy import (
@@ -1199,9 +1200,10 @@ async def test_concurrent_first_oauth_sign_ins_of_one_address_share_one_identity
             open_signup=True,
         ).resolve(
             provider="google",
+            subject="nova-subject",
             email="nova@example.com",
             full_name=None,
-            email_verified=True,
+            email_verified=EmailAssertion.VERIFIED,
         )
         await session.commit()
         return resolution.identity.id
@@ -1283,7 +1285,13 @@ async def test_concurrent_oauth_claims_of_an_unwanted_identity_found_one_organiz
             OrganizationService(session, **membership_writes(session)),
             functools.partial(user_service.forget_unproven_access, session),
             open_signup=True,
-        ).resolve(provider="google", email="nova@example.com", full_name=None, email_verified=True)
+        ).resolve(
+            provider="google",
+            subject="nova-subject",
+            email="nova@example.com",
+            full_name=None,
+            email_verified=EmailAssertion.VERIFIED,
+        )
         await session.commit()
         return resolution.identity.id
 
