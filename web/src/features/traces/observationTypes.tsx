@@ -13,7 +13,9 @@ import type { ObservationType } from "./types"
 export type TypeKey = ObservationType | "TRACE"
 
 // The trace, generation and tool marks are the shell's own Sessions,
-// Playground and Tools glyphs. Full class strings, so Tailwind sees every one.
+// Playground and Tools glyphs. The types that do work take chart slots 1 to 3
+// in order; a span only groups them, so it stays neutral. Full class strings,
+// so Tailwind sees every one.
 export const OBSERVATION_TYPES: Record<
   TypeKey,
   { label: string; icon: IconType; inkClass: string; barClass: string | null }
@@ -27,13 +29,13 @@ export const OBSERVATION_TYPES: Record<
   GENERATION: {
     label: "Generation",
     icon: FiMessageSquare,
-    inkClass: "text-chart-cat-5",
+    inkClass: "text-chart-cat-1",
     barClass: "bg-[var(--trace-bar-generation)]",
   },
   SPAN: {
     label: "Span",
     icon: FiArrowRight,
-    inkClass: "text-chart-cat-6",
+    inkClass: "text-muted",
     barClass: "bg-[var(--trace-bar-span)]",
   },
   AGENT: {

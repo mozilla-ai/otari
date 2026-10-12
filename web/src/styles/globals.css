@@ -104,12 +104,12 @@
 .light,
 [data-theme="light"] {
 
-  /* Trace timeline bar fills (features/traces only). Pastel, with one dark ink
-     for the in-bar duration. */
+  /* Trace timeline bar fills (features/traces only): each type's chart slot hue
+     at one lightness, light enough for the one dark ink of the in-bar duration. */
   --trace-bar-tool: #c67f4d;
   --trace-bar-agent: #a280c8;
-  --trace-bar-generation: #c77595;
-  --trace-bar-span: #5b97d3;
+  --trace-bar-generation: #20a3bc;
+  --trace-bar-span: #899499;
   --trace-bar-ink: #08090a;
   --trace-switch-track: var(--color-surface-subtle);
   --trace-switch-thumb: var(--color-surface);
@@ -485,8 +485,8 @@
 
   --trace-bar-tool: #e89960;
   --trace-bar-agent: #c09aeb;
-  --trace-bar-generation: #ea8db1;
-  --trace-bar-span: #70b3f7;
+  --trace-bar-generation: #37c1de;
+  --trace-bar-span: #a5b0b5;
   --trace-bar-ink: #08090a;
   --trace-switch-track: var(--color-surface-alt);
   --trace-switch-thumb: color-mix(
