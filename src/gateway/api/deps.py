@@ -58,7 +58,7 @@ from gateway.services.code_execution import SandboxContainerRegistry
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
-from gateway.services.inference import EmbeddingOptionsService, IdempotencyService, PassthroughResponseService
+from gateway.services.inference import InferenceService
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.organization_pricing_service import OrganizationPricingService
@@ -733,19 +733,9 @@ def _file_backends(request: Request) -> FileBackends | None:
     return FileBackends(storage=storage, provider_files=provider_files)
 
 
-def get_embedding_options_service() -> EmbeddingOptionsService:
-    """Build the service that decides which provider-specific options an embedding call carries."""
-    return EmbeddingOptionsService()
-
-
-def build_idempotency_service(uow: UnitOfWork, config: GatewayConfig) -> IdempotencyService:
-    """Build idempotency-key handling for a completion request or the expiry sweep."""
-    return IdempotencyService(uow, InferenceRepositories.on(uow), config)
-
-
-def get_passthrough_response_service() -> PassthroughResponseService:
-    """Build the service that shapes a pass-through endpoint's response."""
-    return PassthroughResponseService()
+def build_inference_service(uow: UnitOfWork, config: GatewayConfig) -> InferenceService:
+    """Build the inference service for a request or a worker job, such as the idempotency sweep."""
+    return InferenceService(uow, InferenceRepositories.on(uow), config)
 
 
 def build_sandbox_file_bridge(
@@ -838,6 +828,14 @@ def get_unit_of_work_if_needed(
 
 
 UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
+
+
+def get_inference_service(
+    uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> InferenceService:
+    """The request's inference service."""
+    return build_inference_service(uow, config)
 
 
 def get_membership_listener(uow: UnitOfWorkDep) -> MembershipListener:

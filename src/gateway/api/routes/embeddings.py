@@ -12,9 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import (
     get_config,
     get_db,
-    get_embedding_options_service,
+    get_inference_service,
     get_log_writer,
-    get_passthrough_response_service,
     verify_api_key_or_master_key,
 )
 from gateway.api.routes._passthrough import BillingMeters, run_passthrough
@@ -24,7 +23,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.schemas.inference import EmbeddingResponse
 from gateway.services.budgets import estimate_cost
-from gateway.services.inference import EmbeddingOptionsService, PassthroughResponseService
+from gateway.services.inference import InferenceService
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import input_token_cost
 from gateway.services.provider_kwargs import ResolvedProvider
@@ -64,8 +63,7 @@ async def create_embedding(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
-    responses: Annotated[PassthroughResponseService, Depends(get_passthrough_response_service)],
-    options: Annotated[EmbeddingOptionsService, Depends(get_embedding_options_service)],
+    inference: Annotated[InferenceService, Depends(get_inference_service)],
 ) -> EmbeddingResponse:
     """OpenAI-compatible embeddings endpoint.
 
@@ -122,7 +120,9 @@ async def create_embedding(
         if request.dimensions is not None:
             embedding_kwargs["dimensions"] = request.dimensions
         embedding_kwargs.update(
-            options.provider_options(resolved.provider, selector=request.model, input_type=request.input_type)
+            inference.embedding_provider_options(
+                resolved.provider, selector=request.model, input_type=request.input_type
+            )
         )
         return await aembedding(**embedding_kwargs)
 
@@ -144,7 +144,7 @@ async def create_embedding(
         compute_cost=compute_cost,
         compute_meters=compute_meters,
     )
-    body = responses.embeddings(outcome.result, pricing=outcome.pricing, cost=outcome.cost)
+    body = inference.embeddings_response(outcome.result, pricing=outcome.pricing, cost=outcome.cost)
     if outcome.cost is not None and outcome.pricing is not None:
         record_inline_cost_settlement("attached" if body.usage is not None else "unattached")
     return body

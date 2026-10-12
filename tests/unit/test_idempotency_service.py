@@ -8,7 +8,7 @@ import pytest
 
 from gateway.core.config import GatewayConfig
 from gateway.models.inference import IdempotencyState
-from gateway.services.inference import IdempotencyService, IdempotentRequest, StillInFlight
+from gateway.services.inference import IdempotentRequest, InferenceService, StillInFlight
 from gateway.services.inference._idempotency import _CHANGES_BEFORE_CONFLICT
 from gateway.services.secret_box import generate_secret_key
 
@@ -27,7 +27,7 @@ def test_keys_are_honored_only_with_a_retention_and_a_secret(
 
     config = GatewayConfig(idempotency_retention_sec=retention_sec)
 
-    assert IdempotencyService.is_enabled(config) is enabled
+    assert InferenceService.is_enabled(config) is enabled
 
 
 class _NoUnitOfWork:
@@ -46,7 +46,7 @@ async def test_a_claim_that_keeps_changing_does_not_spin() -> None:
     keys.find = AsyncMock(return_value=None)
     keys.get_database_time = AsyncMock(return_value=datetime.now(UTC))
     keys.get_caller = AsyncMock(return_value=MagicMock(blocked=False))
-    service = IdempotencyService(
+    service = InferenceService(
         _NoUnitOfWork(),  # type: ignore[arg-type]
         MagicMock(idempotency=keys),
         GatewayConfig(),
@@ -62,7 +62,7 @@ async def test_a_claim_that_keeps_changing_does_not_spin() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("batch_size", [0, -1])
 async def test_a_sweep_needs_a_positive_batch_size(batch_size: int) -> None:
-    service = IdempotencyService(
+    service = InferenceService(
         _NoUnitOfWork(),  # type: ignore[arg-type]
         MagicMock(idempotency=MagicMock()),
         GatewayConfig(),
@@ -88,7 +88,7 @@ async def test_a_retry_of_a_running_request_is_answered_at_once() -> None:
     keys.get_database_time = AsyncMock(return_value=now)
     keys.insert_claim = AsyncMock(return_value=False)
     keys.find = AsyncMock(return_value=running)
-    service = IdempotencyService(
+    service = InferenceService(
         _NoUnitOfWork(),  # type: ignore[arg-type]
         MagicMock(idempotency=keys),
         GatewayConfig(),

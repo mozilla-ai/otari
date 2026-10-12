@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.services.inference import Claimed, IdempotencyService, IdempotentRequest, keep_claim_alive
+from gateway.services.inference import Claimed, IdempotentRequest, InferenceService, keep_claim_alive
 from gateway.services.inference import _lease as lease_module
 
 _REQUEST = IdempotentRequest(scope="master:u", key="k", request_hash="0" * 64, user_id="u", api_key_id=None)
@@ -42,7 +42,7 @@ async def test_failed_renewals_are_retried_before_the_lease_runs_out(monkeypatch
             raise OSError("connection refused")
         yield MagicMock(spec=UnitOfWork)
 
-    service = MagicMock(spec=IdempotencyService)
+    service = MagicMock(spec=InferenceService)
     service.renew = AsyncMock(return_value=False)
     monkeypatch.setattr(lease_module, "create_unit_of_work", failing_unit_of_work)
     monkeypatch.setattr(lease_module, "time", SimpleNamespace(monotonic=clock.monotonic))
@@ -64,7 +64,7 @@ async def test_renewal_goes_on_after_an_unexpected_error(monkeypatch: pytest.Mon
             raise OSError("connection refused")
         yield MagicMock(spec=UnitOfWork)
 
-    service = MagicMock(spec=IdempotencyService)
+    service = MagicMock(spec=InferenceService)
     service.renew = AsyncMock(return_value=False)
     monkeypatch.setattr(lease_module, "create_unit_of_work", unit_of_work)
 

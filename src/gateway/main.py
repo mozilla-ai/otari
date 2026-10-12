@@ -23,7 +23,7 @@ import any_search
 from gateway import features
 from gateway.api.deps import (
     build_file_service,
-    build_idempotency_service,
+    build_inference_service,
     get_membership_listener,
     get_workspace_code_execution_policies,
     get_workspace_listener,
@@ -241,7 +241,7 @@ def _start_file_sweeper(config: GatewayConfig, container: Container) -> Coroutin
 def _start_idempotency_sweeper(config: GatewayConfig, _container: Container) -> Coroutine[Any, Any, None]:
     """Return the idempotency record sweep, which runs even while the header is ignored so stored records expire."""
     return run_idempotency_sweeper(
-        config.idempotency_sweep_interval_sec, lambda uow: build_idempotency_service(uow, config)
+        config.idempotency_sweep_interval_sec, lambda uow: build_inference_service(uow, config)
     )
 
 

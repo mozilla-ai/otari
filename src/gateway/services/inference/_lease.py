@@ -8,14 +8,14 @@ from collections.abc import Callable
 
 from gateway.core.unit_of_work import UnitOfWork, create_unit_of_work
 from gateway.log_config import logger
-from gateway.services.inference._idempotency import Claimed, IdempotencyService, IdempotentRequest
+from gateway.services.inference._idempotency import Claimed, IdempotentRequest, InferenceService
 
 
 async def keep_claim_alive(
     request: IdempotentRequest,
     claimed: Claimed,
     lease_sec: float,
-    build_service: Callable[[UnitOfWork], IdempotencyService],
+    build_service: Callable[[UnitOfWork], InferenceService],
 ) -> None:
     """Renew the claim every third of its lease until canceled, or until the claim is no longer this request's.
 

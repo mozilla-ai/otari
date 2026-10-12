@@ -20,7 +20,12 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any, ClassVar
+
+from any_llm import LLMProvider
+from any_llm.types.completion import CreateEmbeddingResponse
+from any_llm.types.rerank import RerankResponse as ProviderRerankResponse
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import DATABASE_ERRORS
@@ -28,6 +33,10 @@ from gateway.core.unit_of_work import UnitOfWork
 from gateway.log_config import logger
 from gateway.models.inference import IdempotencyRecord, IdempotencyState
 from gateway.repositories.inference import InferenceRepositories
+from gateway.schemas.inference import EmbeddingResponse, RerankResponse
+from gateway.services.inference._embeddings import embedding_provider_options
+from gateway.services.inference._passthrough_responses import embeddings_response, rerank_response
+from gateway.services.pricing_service import ResolvedPricing
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
@@ -158,8 +167,12 @@ def _as_utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-class IdempotencyService:
-    """Claim, replay and settle idempotency keys, one Unit of Work block per step."""
+class InferenceService:
+    """The inference domain's service.
+
+    It claims, replays and settles idempotency keys, one Unit of Work block per
+    step, and shapes what a pass-through endpoint sends and returns.
+    """
 
     def __init__(
         self,
@@ -170,6 +183,29 @@ class IdempotencyService:
         self._uow = uow
         self._keys = repositories.idempotency
         self._config = config
+
+    @staticmethod
+    def embedding_provider_options(provider: LLMProvider, *, selector: str, input_type: str | None) -> dict[str, Any]:
+        """The provider-specific keywords to add to an embedding call for ``provider``.
+
+        Raises:
+            EmbeddingOptionUnsupportedError: ``provider`` does not take an option that was sent.
+        """
+        return embedding_provider_options(provider, selector=selector, input_type=input_type)
+
+    @staticmethod
+    def rerank_response(
+        result: ProviderRerankResponse, *, pricing: ResolvedPricing | None, cost: Decimal | None
+    ) -> RerankResponse:
+        """The rerank response the gateway publishes for ``result``, with its metering and inline cost."""
+        return rerank_response(result, pricing=pricing, cost=cost)
+
+    @staticmethod
+    def embeddings_response(
+        result: CreateEmbeddingResponse, *, pricing: ResolvedPricing | None, cost: Decimal | None
+    ) -> EmbeddingResponse:
+        """The embeddings response the gateway publishes for ``result``, in OpenAI's shape with the inline cost."""
+        return embeddings_response(result, pricing=pricing, cost=cost)
 
     @staticmethod
     def is_enabled(config: GatewayConfig) -> bool:

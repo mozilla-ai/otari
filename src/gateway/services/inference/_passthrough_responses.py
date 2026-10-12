@@ -19,55 +19,53 @@ from gateway.schemas.inference import (
 from gateway.services.pricing_service import ResolvedPricing, metered_search_units
 
 
-class PassthroughResponseService:
-    """Turns a pass-through provider result into the response the gateway publishes."""
+def rerank_response(
+    result: ProviderRerankResponse, *, pricing: ResolvedPricing | None, cost: Decimal | None
+) -> RerankResponse:
+    """The rerank response for ``result``, with what the request was metered at and cost.
 
-    def rerank(
-        self, result: ProviderRerankResponse, *, pricing: ResolvedPricing | None, cost: Decimal | None
-    ) -> RerankResponse:
-        """The rerank response for ``result``, with what the request was metered at and cost.
+    ``pricing`` is the rate found for the request and ``cost`` the amount
+    written to its usage row. ``meta`` is the provider's billing report as it
+    sent it; ``usage`` reports the provider's tokens, the search units billed
+    when the model is priced per request, and the inline cost.
+    """
+    billed_units = result.meta.billed_units if result.meta else None
+    cost_fields = _inline_cost(cost, pricing)
+    return RerankResponse(
+        id=result.id,
+        model=result.model,
+        results=[RerankResult(index=r.index, relevance_score=r.relevance_score) for r in result.results],
+        meta=RerankMeta(billed_units=result.meta.billed_units, tokens=result.meta.tokens) if result.meta else None,
+        usage=RerankUsage(
+            total_tokens=result.usage.total_tokens if result.usage else None,
+            search_units=metered_search_units(pricing.pricing if pricing else None, billed_units),
+            cost_usd=cost_fields.cost_usd,
+            pricing_source=cost_fields.pricing_source,
+        ),
+    )
 
-        ``pricing`` is the rate found for the request and ``cost`` the amount
-        written to its usage row. ``meta`` is the provider's billing report as it
-        sent it; ``usage`` reports the provider's tokens, the search units billed
-        when the model is priced per request, and the inline cost.
-        """
-        billed_units = result.meta.billed_units if result.meta else None
-        cost_fields = _inline_cost(cost, pricing)
-        return RerankResponse(
-            id=result.id,
-            model=result.model,
-            results=[RerankResult(index=r.index, relevance_score=r.relevance_score) for r in result.results],
-            meta=RerankMeta(billed_units=result.meta.billed_units, tokens=result.meta.tokens) if result.meta else None,
-            usage=RerankUsage(
-                total_tokens=result.usage.total_tokens if result.usage else None,
-                search_units=metered_search_units(pricing.pricing if pricing else None, billed_units),
-                cost_usd=cost_fields.cost_usd,
-                pricing_source=cost_fields.pricing_source,
-            ),
+
+def embeddings_response(
+    result: CreateEmbeddingResponse, *, pricing: ResolvedPricing | None, cost: Decimal | None
+) -> EmbeddingResponse:
+    """The embeddings response for ``result``, in OpenAI's shape with the inline cost on ``usage``.
+
+    ``pricing`` and ``cost`` are as for :func:`rerank_response`. A provider that
+    reported no usage gets none back, and so no inline cost.
+    """
+    cost_fields = _inline_cost(cost, pricing)
+    return EmbeddingResponse(
+        data=[EmbeddingData(index=item.index, embedding=item.embedding) for item in result.data],
+        model=result.model,
+        usage=EmbeddingUsage(
+            prompt_tokens=result.usage.prompt_tokens,
+            total_tokens=result.usage.total_tokens,
+            cost_usd=cost_fields.cost_usd,
+            pricing_source=cost_fields.pricing_source,
         )
-
-    def embeddings(
-        self, result: CreateEmbeddingResponse, *, pricing: ResolvedPricing | None, cost: Decimal | None
-    ) -> EmbeddingResponse:
-        """The embeddings response for ``result``, in OpenAI's shape with the inline cost on ``usage``.
-
-        ``pricing`` and ``cost`` are as for :meth:`rerank`. A provider that
-        reported no usage gets none back, and so no inline cost.
-        """
-        cost_fields = _inline_cost(cost, pricing)
-        return EmbeddingResponse(
-            data=[EmbeddingData(index=item.index, embedding=item.embedding) for item in result.data],
-            model=result.model,
-            usage=EmbeddingUsage(
-                prompt_tokens=result.usage.prompt_tokens,
-                total_tokens=result.usage.total_tokens,
-                cost_usd=cost_fields.cost_usd,
-                pricing_source=cost_fields.pricing_source,
-            )
-            if result.usage is not None
-            else None,
-        )
+        if result.usage is not None
+        else None,
+    )
 
 
 def _inline_cost(cost: Decimal | None, pricing: ResolvedPricing | None) -> InlineCost:

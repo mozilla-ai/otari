@@ -11,19 +11,16 @@ from gateway.exceptions.inference_exceptions import EmbeddingOptionUnsupportedEr
 _INPUT_TYPE_PROVIDERS = frozenset({LLMProvider.COHERE, LLMProvider.VOYAGE})
 
 
-class EmbeddingOptionsService:
-    """Decides which provider-specific options an embedding call may carry."""
+def embedding_provider_options(provider: LLMProvider, *, selector: str, input_type: str | None) -> dict[str, Any]:
+    """The provider-specific keywords to add to an embedding call for ``provider``.
 
-    def provider_options(self, provider: LLMProvider, *, selector: str, input_type: str | None) -> dict[str, Any]:
-        """The provider-specific keywords to add to an embedding call for ``provider``.
-
-        Raises:
-            EmbeddingOptionUnsupportedError: an option was sent that ``provider``
-                does not take. ``selector`` is the model the caller asked for,
-                which the error names.
-        """
-        if input_type is None:
-            return {}
-        if provider not in _INPUT_TYPE_PROVIDERS:
-            raise EmbeddingOptionUnsupportedError("input_type", selector)
-        return {"input_type": input_type}
+    Raises:
+        EmbeddingOptionUnsupportedError: an option was sent that ``provider``
+            does not take. ``selector`` is the model the caller asked for,
+            which the error names.
+    """
+    if input_type is None:
+        return {}
+    if provider not in _INPUT_TYPE_PROVIDERS:
+        raise EmbeddingOptionUnsupportedError("input_type", selector)
+    return {"input_type": input_type}
