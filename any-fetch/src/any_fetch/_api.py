@@ -1,6 +1,7 @@
 """The provider interface and the one-call helper."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from types import TracebackType
 from typing import Any, ClassVar, Self
 
@@ -18,6 +19,17 @@ DEFAULT_TIMEOUT = 15.0
 
 SHARED_PARAMETERS = ("max_chars",)
 """The parameters every provider takes beside its native options, which a host tells apart by this list."""
+
+
+def shared_parameter_problems(parameters: Mapping[str, Any]) -> dict[str, str]:
+    """Each shared parameter in ``parameters`` whose value ``fetch`` refuses, with why.
+
+    Other names, and a value of ``None``, which means unset, are not checked.
+    """
+    count = parameters.get("max_chars")
+    if count is not None and (not isinstance(count, int) or isinstance(count, bool) or count < 1):
+        return {"max_chars": "max_chars must be a whole number of at least 1"}
+    return {}
 
 
 class AnyFetch(ABC):
@@ -92,8 +104,8 @@ class AnyFetch(ABC):
         for name in options:
             if name not in known:
                 raise UnsupportedParameterError(self.METADATA.name, name)
-        if max_chars is not None and max_chars < 1:
-            raise ValueError("max_chars must be at least 1")
+        if problems := shared_parameter_problems({"max_chars": max_chars}):
+            raise ValueError("; ".join(problems.values()))
         with provider_call(self.METADATA.name):
             return await self._fetch(url, max_chars=max_chars, options=options)
 
