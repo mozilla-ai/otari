@@ -1450,12 +1450,12 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         ),
     },
     "gateway.models.budgets.BudgetReservation": {
-        "repository": None,
-        "baseline": ("gateway/services/budgets/_ledger.py",),
+        "repository": "gateway/repositories/budgets/reservation_repository.py",
+        "baseline": (),
     },
     "gateway.models.budgets.BudgetReservationScope": {
-        "repository": None,
-        "baseline": ("gateway/services/budgets/_ledger.py",),
+        "repository": "gateway/repositories/budgets/reservation_repository.py",
+        "baseline": (),
     },
     "gateway.models.budgets.BudgetResetLog": {
         "repository": "gateway/repositories/budgets/budget_repository.py",

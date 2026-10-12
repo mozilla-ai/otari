@@ -17,22 +17,15 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import case, delete, select, update
+from sqlalchemy import case, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped
 
 from gateway.core.database import create_session
 from gateway.log_config import logger
-from gateway.models.budgets import (
-    RESERVATION_ACTIVE,
-    RESERVATION_EXPIRED,
-    RESERVATION_RELEASED,
-    RESERVATION_SETTLED,
-    BudgetReservation,
-    BudgetReservationScope,
-    ReservationStatus,
-)
+from gateway.models.budgets import RESERVATION_EXPIRED, ReservationStatus
 from gateway.models.users import User
+from gateway.repositories.budgets import HeldAmounts, ReservationRepository
 from gateway.services.budgets._scoped_enforcement import release as release_scoped
 
 if TYPE_CHECKING:
@@ -40,16 +33,10 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from gateway.models.budgets import BudgetReservation
     from gateway.services.budgets._scoped_enforcement import ApplicableBudget
 
 ZERO = Decimal(0)
-
-# The three a row can rest in. Written out as a set the retention query can ask
-# for by equality: ``status != ACTIVE`` reads the same but is an inequality on
-# the leading column of ``ix_budget_reservations_status_expires_at``, which the
-# planner cannot use, so it degenerated into a full scan of a table that gains a
-# row per billable request.
-TERMINAL_STATUSES = (RESERVATION_SETTLED, RESERVATION_RELEASED, RESERVATION_EXPIRED)
 
 
 def release_reserved_expression(estimate: Decimal) -> object:
@@ -102,28 +89,19 @@ async def record(
         return None
 
     reservation_id = str(uuid.uuid4())
-    db.add(
-        BudgetReservation(
-            id=reservation_id,
-            user_id=user_id,
-            estimate=estimate,
-            token_estimate=token_estimate,
-            request_estimate=request_estimate if user_reserved else 0,
-            user_reserved=user_reserved,
-            status=RESERVATION_ACTIVE,
-            expires_at=datetime.now(UTC) + timedelta(seconds=ttl_seconds),
-        )
+    await ReservationRepository(db).add(
+        reservation_id,
+        user_id=user_id,
+        user_reserved=user_reserved,
+        user_held=HeldAmounts(
+            amount=estimate,
+            tokens=token_estimate,
+            requests=request_estimate if user_reserved else 0,
+        ),
+        ceiling_held=HeldAmounts(amount=scoped_estimate, tokens=scoped_token_estimate, requests=request_estimate),
+        scoped_budget_ids=[applicable.budget_id for applicable in scoped_budgets],
+        expires_at=datetime.now(UTC) + timedelta(seconds=ttl_seconds),
     )
-    for applicable in scoped_budgets:
-        db.add(
-            BudgetReservationScope(
-                reservation_id=reservation_id,
-                scoped_budget_id=applicable.budget_id,
-                amount=scoped_estimate,
-                token_amount=scoped_token_estimate,
-                request_amount=request_estimate,
-            )
-        )
     if commit:
         await db.commit()
     return reservation_id
@@ -147,15 +125,8 @@ async def release_unrecorded(
     with the release, so the holds are given back at most once. Returns whether
     this call gave them back.
     """
-    db.add(
-        BudgetReservation(
-            id=reservation_id,
-            user_id=user_id,
-            status=RESERVATION_RELEASED,
-            expires_at=datetime.now(UTC),
-        )
-    )
     try:
+        await ReservationRepository(db).add_released(reservation_id, user_id=user_id)
         await release_scoped(db, scoped_budget_ids, amount, tokens=tokens, requests=requests, commit=False)
         await db.commit()
     except IntegrityError:
@@ -194,40 +165,16 @@ async def grow(
     """
     if reservation_id is None:
         return True
-    result = await db.execute(
-        update(BudgetReservation)
-        .where(
-            BudgetReservation.id == reservation_id,
-            BudgetReservation.status == RESERVATION_ACTIVE,
-        )
-        .values(
-            estimate=BudgetReservation.estimate + user_delta,
-            # Gated on the row's own record of whether the per-user leg holds, not
-            # on the dollar delta: a top-up can grow tokens alone (a model priced
-            # at zero, an expanded prompt), and reading ``user_delta > 0`` as "the
-            # user leg grew" would drop exactly that hold.
-            token_estimate=BudgetReservation.token_estimate
-            + case((BudgetReservation.user_reserved, token_delta), else_=0),
-        )
-        .execution_options(synchronize_session=False)
-    )
-    if not getattr(result, "rowcount", 0):
+    # The row and its lines grow in one transaction, so the lines cannot grow against a row that turned terminal.
+    if not await ReservationRepository(db).grow(
+        reservation_id,
+        user_delta=user_delta,
+        scoped_delta=scoped_delta,
+        token_delta=token_delta,
+        scoped_token_delta=scoped_token_delta,
+    ):
         # A rollback here would expire every ORM instance in the session and force sync IO on the caller's next read.
         return False
-    if scoped_delta > ZERO or scoped_token_delta > 0:
-        # In the same transaction as the guarded UPDATE above, so the lines cannot
-        # grow against a row that turned terminal between the two statements. Each
-        # axis grows only by what it was actually given, so a token-only top-up
-        # leaves the dollar amount alone and a dollar-only one leaves the tokens.
-        await db.execute(
-            update(BudgetReservationScope)
-            .where(BudgetReservationScope.reservation_id == reservation_id)
-            .values(
-                amount=BudgetReservationScope.amount + scoped_delta,
-                token_amount=BudgetReservationScope.token_amount + scoped_token_delta,
-            )
-            .execution_options(synchronize_session=False)
-        )
     await db.commit()
     return True
 
@@ -254,16 +201,7 @@ async def try_terminate(db: AsyncSession, reservation_id: str | None, status: Re
     """
     if reservation_id is None:
         return True
-    result = await db.execute(
-        update(BudgetReservation)
-        .where(
-            BudgetReservation.id == reservation_id,
-            BudgetReservation.status == RESERVATION_ACTIVE,
-        )
-        .values(status=status)
-        .execution_options(synchronize_session=False)
-    )
-    return bool(getattr(result, "rowcount", 0))
+    return await ReservationRepository(db).try_terminate(reservation_id, status)
 
 
 async def try_settle_reclaimed(db: AsyncSession, reservation_id: str | None) -> bool:
@@ -281,16 +219,7 @@ async def try_settle_reclaimed(db: AsyncSession, reservation_id: str | None) -> 
     """
     if reservation_id is None:
         return False
-    result = await db.execute(
-        update(BudgetReservation)
-        .where(
-            BudgetReservation.id == reservation_id,
-            BudgetReservation.status == RESERVATION_EXPIRED,
-        )
-        .values(status=RESERVATION_SETTLED)
-        .execution_options(synchronize_session=False)
-    )
-    return bool(getattr(result, "rowcount", 0))
+    return await ReservationRepository(db).try_settle_reclaimed(reservation_id)
 
 
 async def _release_holds(db: AsyncSession, reservation: BudgetReservation) -> None:
@@ -301,25 +230,11 @@ async def _release_holds(db: AsyncSession, reservation: BudgetReservation) -> No
     releases together, so a row can never end up terminal with its hold still
     outstanding.
     """
-    lines = (
-        (
-            await db.execute(
-                select(
-                    BudgetReservationScope.scoped_budget_id,
-                    BudgetReservationScope.amount,
-                    BudgetReservationScope.token_amount,
-                    BudgetReservationScope.request_amount,
-                ).where(BudgetReservationScope.reservation_id == reservation.id)
-            )
-        )
-        .tuples()
-        .all()
-    )
     # ``release_scoped`` takes one figure per axis for a set of ceilings, so the lines group by their amounts.
-    by_amounts: dict[tuple[Decimal, int, int], list[str]] = {}
-    for scoped_budget_id, amount, token_amount, request_amount in lines:
-        if amount > ZERO or token_amount > 0 or request_amount > 0:
-            by_amounts.setdefault((amount, token_amount, request_amount), []).append(scoped_budget_id)
+    by_amounts: dict[HeldAmounts, list[str]] = {}
+    for line in await ReservationRepository(db).list_lines(reservation.id):
+        if line.held.amount > ZERO or line.held.tokens > 0 or line.held.requests > 0:
+            by_amounts.setdefault(line.held, []).append(line.scoped_budget_id)
     # The user's row first, the ceilings last, the order every settlement locks them in.
     if reservation.user_reserved:
         values: dict[str, object] = {}
@@ -341,13 +256,13 @@ async def _release_holds(db: AsyncSession, reservation: BudgetReservation) -> No
                 .execution_options(synchronize_session=False)
             )
 
-    for (amount, token_amount, request_amount), budget_ids in by_amounts.items():
+    for held, budget_ids in by_amounts.items():
         await release_scoped(
             db,
             budget_ids,
-            amount,
-            tokens=token_amount,
-            requests=request_amount,
+            held.amount,
+            tokens=held.tokens,
+            requests=held.requests,
             commit=False,
         )
 
@@ -377,22 +292,7 @@ async def reclaim_expired_for_user(db: AsyncSession, user_id: str, *, limit: int
     residue. Bounded by ``limit`` so a pathological backlog cannot turn one
     request into an unbounded scan; the scheduled sweep drains the rest.
     """
-    expired = (
-        (
-            await db.execute(
-                select(BudgetReservation)
-                .where(
-                    BudgetReservation.user_id == user_id,
-                    BudgetReservation.status == RESERVATION_ACTIVE,
-                    BudgetReservation.expires_at < datetime.now(UTC),
-                )
-                .order_by(BudgetReservation.expires_at)
-                .limit(limit)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    expired = await ReservationRepository(db).list_expired(limit=limit, user_id=user_id)
     if not expired:
         return 0
     reclaimed = await _reclaim(db, expired)
@@ -409,21 +309,7 @@ async def sweep_expired(db: AsyncSession, *, batch_size: int) -> int:
     ever releasing it. This drains those. Returns how many it reclaimed; a caller
     working through a backlog loops while the count equals ``batch_size``.
     """
-    expired = (
-        (
-            await db.execute(
-                select(BudgetReservation)
-                .where(
-                    BudgetReservation.status == RESERVATION_ACTIVE,
-                    BudgetReservation.expires_at < datetime.now(UTC),
-                )
-                .order_by(BudgetReservation.expires_at)
-                .limit(batch_size)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    expired = await ReservationRepository(db).list_expired(limit=batch_size)
     if not expired:
         return 0
     reclaimed = await _reclaim(db, expired)
@@ -456,28 +342,13 @@ async def prune_terminal(db: AsyncSession, *, older_than_sec: int, batch_size: i
     """
     if older_than_sec <= 0:
         return 0
-    cutoff = datetime.now(UTC) - timedelta(seconds=older_than_sec)
-    ids = (
-        (
-            await db.execute(
-                select(BudgetReservation.id)
-                .where(
-                    BudgetReservation.status.in_(TERMINAL_STATUSES),
-                    BudgetReservation.expires_at < cutoff,
-                )
-                .limit(batch_size)
-            )
-        )
-        .scalars()
-        .all()
+    reservations = ReservationRepository(db)
+    ids = await reservations.list_terminal_ids(
+        expired_before=datetime.now(UTC) - timedelta(seconds=older_than_sec), limit=batch_size
     )
     if not ids:
         return 0
-    await db.execute(
-        delete(BudgetReservation)
-        .where(BudgetReservation.id.in_(list(ids)))
-        .execution_options(synchronize_session=False)
-    )
+    await reservations.delete_by_ids(ids)
     await db.commit()
     return len(ids)
 
@@ -535,7 +406,6 @@ __all__ = [
     "record",
     "run_reservation_sweeper",
     "release_reserved_expression",
-    "TERMINAL_STATUSES",
     "sweep_expired",
     "try_settle_reclaimed",
     "try_terminate",
