@@ -116,9 +116,8 @@ export interface DataTableProps<Row> {
   detailKey?: string | null
   renderDetail?: (row: Row) => ReactNode
   /**
-   * What a phone-width viewport gets. `"cards"` swaps the grid for one card per
-   * row (see `DataCardList`), for a table too wide to read without a sideways
-   * scroll. The default keeps the grid, scrolling and all.
+   * `"cards"` swaps the grid for one card per row on a phone-width viewport,
+   * for a table too wide to read without a sideways scroll.
    */
   mobileLayout?: "table" | "cards"
 }
@@ -401,9 +400,8 @@ function DataTableGrid<Row extends object>({
 
   const rootRef = useRef<HTMLDivElement | null>(null)
 
-  // The width the table is allowed to show, for the empty message: the grid
-  // inside is as wide as its columns, and a message centred in it is centred
-  // off-screen on a phone.
+  // The grid is as wide as its columns, so the empty message needs the visible
+  // width to centre in.
   useLayoutEffect(() => {
     const root = rootRef.current
     if (!root) return
