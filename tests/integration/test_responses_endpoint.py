@@ -4,6 +4,7 @@ import json
 from typing import Any, AsyncIterator
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT
@@ -95,6 +96,25 @@ def test_responses_endpoint_scopes_prompt_cache_key(
     scoped_cache_key = mock_aresponses.await_args.kwargs["prompt_cache_key"]
     assert scoped_cache_key != "tenant-session-123"
     assert len(scoped_cache_key) == 64
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_responses_endpoint_does_not_send_the_user_upstream(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    responses_request_body: dict[str, Any],
+    stream: bool,
+) -> None:
+    """The billed user stays the gateway's, as on Chat Completions, so a provider refusing ``user`` still serves."""
+    responses_request_body["stream"] = stream
+    reply: Any = _make_stream([]) if stream else _FakeResponse({"id": "resp_123", "output": []})
+    mock_aresponses = AsyncMock(return_value=reply)
+
+    with patch("gateway.api.routes.responses.aresponses", new=mock_aresponses):
+        client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
+
+    assert mock_aresponses.await_args is not None
+    assert "user" not in mock_aresponses.await_args.kwargs
 
 
 def test_responses_endpoint_master_key_requires_user(

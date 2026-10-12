@@ -643,12 +643,9 @@ async def create_response(
     input_payload, codex_extra_body = _codex_extra_body(request_fields.pop("input"), client_metadata)
     stream = bool(request_fields.pop("stream", False))
     request_fields.pop("model", None)
+    # The billed user is the gateway's attribution, as on Chat Completions, and
+    # some providers (Cohere) refuse the field.
     request_fields.pop("user", None)
-    # Standalone mode forwards the resolved user_id to the upstream provider
-    # for analytics; hybrid mode handles attribution server-side via the
-    # correlation id.
-    if not ctx.hybrid_mode and ctx.user_id:
-        request_fields["user"] = ctx.user_id
 
     # base_request_fields is what gets merged with per-attempt creds; it
     # includes ``provider`` and ``input_data`` so each attempt has the full
