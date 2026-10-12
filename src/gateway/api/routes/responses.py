@@ -536,6 +536,7 @@ async def create_response(
             normalize_messages=_normalize,
             tools=request_body.tools,
             code_execution_policies=tool_ports.code_execution_policy,
+            model_provider=model_provider,
             idempotency=None if bool(request_body.stream) else idempotency,
             tags=request_tags(request_body.metadata),
         )

@@ -359,7 +359,12 @@ review and accept newer snapshots.
 
 Default pricing is off because provider catalogs and reseller rates change.
 With `require_pricing: true`, a budgeted request with no effective price is
-rejected instead of bypassing the budget.
+rejected instead of bypassing the budget. The 402 says what to do: with
+`default_pricing` on, a model the bundled list does not price is most often a
+misspelled name, so it points at `GET /api/v1/models` and at adding a price;
+with it off, it offers both adding a price and turning the fallback on. A model
+whose provider has no credential at all is refused as `provider_not_configured`
+instead, since pricing it would not make it servable.
 
 With `require_pricing: false`, such a request is served, its model tokens carry
 no cost, and its response carries no inline `cost_usd`. The usage row records no

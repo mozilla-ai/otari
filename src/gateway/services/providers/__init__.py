@@ -7,6 +7,7 @@ are still in the flat modules beside `services/`, and move here when the
 domain's migration reaches them (`DOMAINS.md`).
 """
 
+from gateway.services.providers._missing_credential import missing_provider_credential
 from gateway.services.providers._org_provider_model_service import OrgProviderModelService
 from gateway.services.providers._owned_endpoint_network import owned_endpoint_http_client
 from gateway.services.providers._provider_clients import (
@@ -35,6 +36,7 @@ __all__ = [
     "aresponses",
     "cached_owned_endpoint",
     "load_provider_endpoints_at_startup",
+    "missing_provider_credential",
     "owned_endpoint_http_client",
     "provider_for",
     "refresh_provider_endpoint_cache",

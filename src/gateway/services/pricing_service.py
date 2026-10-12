@@ -1212,12 +1212,21 @@ def no_pricing_error_detail(model: str) -> str:
     """The 402 body for an unpriced model: what went wrong, why, and how to fix it.
 
     A new operator adding a provider in the dashboard hits this on their first
-    request; the cause and both fixes live only in a startup log they never see,
-    so spell them out in the response.
+    request; the cause and its fixes live only in a startup log they never see,
+    so spell them out in the response. With default pricing already on, the
+    bundled price list missed the name, most often because it is misspelled, so
+    that is named first and enabling the fallback is not offered again.
     """
+    cause = f"No pricing is configured for model '{model}', and require_pricing is on, so it cannot be billed. "
+    if default_pricing_enabled():
+        return (
+            f"{cause}Default pricing is on, and its bundled price list has no entry for this model. "
+            f"Check the model name for a typo (GET {API_ROOT}/models lists the models this gateway serves), "
+            f"or add pricing for a model the list does not cover (POST {API_ROOT}/pricing, "
+            "or the pricing section of config.yml)."
+        )
     return (
-        f"No pricing is configured for model '{model}', and require_pricing is on, so it cannot be billed. "
-        f"Fix it either way: add pricing (POST {API_ROOT}/pricing, or the pricing section of config.yml), "
+        f"{cause}Fix it either way: add pricing (POST {API_ROOT}/pricing, or the pricing section of config.yml), "
         f'or enable the default-pricing fallback (PATCH {API_ROOT}/settings {{"default_pricing": true}}) '
         "to meter with public list prices."
     )

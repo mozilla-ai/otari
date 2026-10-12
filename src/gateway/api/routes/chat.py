@@ -559,6 +559,7 @@ async def run_chat_completion(
             normalize_messages=_normalize,
             tools=request.tools,
             code_execution_policies=tool_ports.code_execution_policy,
+            model_provider=model_provider,
             idempotency=None if request.stream else idempotency,
             tags=request_tags(request.metadata),
         )

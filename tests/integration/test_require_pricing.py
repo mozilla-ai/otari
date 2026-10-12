@@ -9,6 +9,7 @@ i.e. budget is reserved before the pricing gate is enforced.
 
 from collections.abc import Generator
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,7 +28,9 @@ def strict_pricing_client(postgres_url: str) -> Generator[TestClient]:
 
     Default pricing is disabled so these tests exercise the missing-pricing gate
     in isolation: otherwise genai-prices would price well-known models (gpt-4o)
-    and the 402 branch would never be reached.
+    and the 402 branch would never be reached. OpenAI holds a credential, because
+    an unpriced model whose provider has none is refused as unconfigured instead,
+    and the provider call fails in place of reaching OpenAI.
     """
     config = GatewayConfig(
         database_url=postgres_url,
@@ -38,8 +41,11 @@ def strict_pricing_client(postgres_url: str) -> Generator[TestClient]:
         require_pricing=True,
         default_pricing=False,
         web_fetch_enabled=True,
+        model_discovery=False,
+        providers={"openai": {"api_key": "sk-test"}},
     )
-    yield from build_test_client(config)
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=RuntimeError("provider down"))):
+        yield from build_test_client(config)
 
 
 def _chat(client: TestClient, *, model: str, user: str) -> int:
@@ -157,8 +163,8 @@ def test_budget_exempt_key_writes_no_pricing_rejection_row(strict_pricing_client
     test_gateway_rejection_logging.py; the shared writer fixes the flag at True.)
 
     Structured as an A/B against an enforced key rather than as a bare "no row
-    appeared": this fixture configures no providers, so an exempt request fails
-    before any provider call and logs nothing either way. Without the control, the
+    appeared": this fixture's provider call fails, so an exempt request logs no
+    pricing rejection either way. Without the control, the
     negative would pass even if the gate had stopped writing rows entirely.
     """
     c = strict_pricing_client
