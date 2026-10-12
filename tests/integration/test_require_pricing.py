@@ -28,9 +28,9 @@ def strict_pricing_client(postgres_url: str) -> Generator[TestClient]:
 
     Default pricing is disabled so these tests exercise the missing-pricing gate
     in isolation: otherwise genai-prices would price well-known models (gpt-4o)
-    and the 402 branch would never be reached. OpenAI holds a credential, because
-    an unpriced model whose provider has none is refused as unconfigured instead,
-    and the provider call fails in place of reaching OpenAI.
+    and the 402 branch would never be reached. OpenAI and Cohere hold a credential,
+    because an unpriced model whose provider has none is refused as unconfigured
+    instead, and the chat provider call fails in place of reaching OpenAI.
     """
     config = GatewayConfig(
         database_url=postgres_url,
@@ -42,7 +42,7 @@ def strict_pricing_client(postgres_url: str) -> Generator[TestClient]:
         default_pricing=False,
         web_fetch_enabled=True,
         model_discovery=False,
-        providers={"openai": {"api_key": "sk-test"}},
+        providers={"openai": {"api_key": "sk-test"}, "cohere": {"api_key": "co-test"}},
     )
     with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=RuntimeError("provider down"))):
         yield from build_test_client(config)

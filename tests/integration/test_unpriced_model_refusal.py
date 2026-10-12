@@ -53,6 +53,8 @@ def readme_client(postgres_url: str) -> Generator[TestClient]:
 
 def _assert_typo_402(response: Any, model: str) -> str:
     assert response.status_code == 402, response.text
+    assert response.headers[ERROR_CODE_HEADER] == PRICING_REQUIRED
+    assert response.json()["code"] == PRICING_REQUIRED
     detail = str(response.json()["detail"])
     assert f"'{model}'" in detail
     assert "Default pricing is on" in detail
@@ -83,8 +85,6 @@ def test_chat_typo_on_a_configured_provider_points_at_the_name(readme_client: Te
     with patch("gateway.api.routes.chat.acompletion", new=AsyncMock()) as dispatch:
         response = _chat(readme_client, "openai:gpt5-mini")
     detail = _assert_typo_402(response, "openai:gpt5-mini")
-    assert response.headers[ERROR_CODE_HEADER] == PRICING_REQUIRED
-    assert response.json()["code"] == PRICING_REQUIRED
     dispatch.assert_not_awaited()
     row = db_session.query(UsageLog).filter(UsageLog.user_id == _USER).one()
     assert (row.status_code, row.error_message) == (402, detail)
