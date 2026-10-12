@@ -15,6 +15,9 @@ from gateway.services.oauth_service import provider_label
 from gateway.services.tenancy import OrganizationService, unverified_identity_is_claimable
 from gateway.services.tenancy.email_address import validated_email
 
+# NOTE: A provider joins this set only when no tenant can set its email_verified claim.
+_EMAIL_TRUSTED_PROVIDERS = frozenset({"github", "google"})
+
 
 class DeploymentIdentityProviderAdapter(IdentityProviderPort):
     """Applies this deployment's ``open_signup`` setting to an OAuth sign-in.
@@ -47,6 +50,7 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
     ) -> IdentityResolution:
         """Return the account that holds the address of an OAuth identity with no link.
 
+        Only a provider whose email claim no tenant can set signs in here.
         The provider must have verified the email address.
         If the provider sent no address, or did not verify it, the sign-in is refused and no account is created.
 
@@ -81,11 +85,13 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
 
         Raises:
             OAuthEmailNotVerifiedError: If the provider returned no address, or one it did not verify.
-            OAuthIdentityUnknownError: If no active account holds the address,
-                and ``open_signup`` does not register a new one.
+            OAuthIdentityUnknownError: If a tenant can set the provider's email claim,
+                or no active account holds the address and ``open_signup`` does not register a new one.
 
         """
         label = provider_label(provider)
+        if provider not in _EMAIL_TRUSTED_PROVIDERS:
+            raise OAuthIdentityUnknownError(label)
         if email_verified is not EmailAssertion.VERIFIED or not email:
             raise OAuthEmailNotVerifiedError(label)
         # An address this gateway would never store names no account, so it is refused as unknown.
