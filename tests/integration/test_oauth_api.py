@@ -1135,7 +1135,7 @@ def test_a_first_sign_in_links_the_account_to_the_provider_identity(
 
     assert _links(db_session, user_id) == [("google", "ada-subject")]
     link = db_session.execute(select(OAuthIdentityLink)).scalar_one()
-    assert (link.email_at_link, link.email_verified_at_link) == ("ada@example.com", True)
+    assert (link.email_at_link, link.email_assertion_at_link) == ("ada@example.com", EmailAssertion.VERIFIED)
 
 
 def test_one_account_holds_a_link_at_each_provider(

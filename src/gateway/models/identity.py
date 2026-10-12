@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import ForeignKey, String, UniqueConstraint, Uuid, func
+from sqlalchemy import Enum, ForeignKey, String, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
@@ -66,7 +66,7 @@ class OAuthIdentityLink(Base):
     The primary key is the provider's ``(provider, subject)`` pair, which names one person at that provider.
     An account holds at most one link per provider.
 
-    NOTE: ``email_at_link`` and ``email_verified_at_link`` record what the provider said when the link was made.
+    NOTE: ``email_at_link`` and ``email_assertion_at_link`` record what the provider said when the link was made.
     They must not be used to look an account up.
     """
 
@@ -78,7 +78,15 @@ class OAuthIdentityLink(Base):
     # The unique constraint above leads with this column, so it also serves as the column's index.
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
     email_at_link: Mapped[str | None] = mapped_column(String(MAX_EMAIL_LENGTH))
-    email_verified_at_link: Mapped[bool]
+    email_assertion_at_link: Mapped[EmailAssertion] = mapped_column(
+        Enum(
+            EmailAssertion,
+            native_enum=False,
+            length=16,
+            values_callable=lambda members: [member.value for member in members],
+            validate_strings=True,
+        )
+    )
     linked_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
     )

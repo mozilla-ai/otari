@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import OAuthIdentityLinkConflictError
-from gateway.models.identity import OAuthIdentityLink
+from gateway.models.identity import OAuthIdentityLink, ProviderIdentity
 from gateway.repositories.base_repository import BaseRepository
 
 
@@ -29,9 +29,7 @@ class OAuthIdentityLinkRepository(BaseRepository[OAuthIdentityLink, Never, Never
         )
         return result.scalar_one_or_none()
 
-    async def add(
-        self, *, provider: str, subject: str, user_id: uuid.UUID, email: str | None, email_verified: bool
-    ) -> OAuthIdentityLink:
+    async def add(self, external: ProviderIdentity, *, user_id: uuid.UUID) -> OAuthIdentityLink:
         """Stage a link from a provider identity to an account.
 
         Raises:
@@ -39,15 +37,15 @@ class OAuthIdentityLinkRepository(BaseRepository[OAuthIdentityLink, Never, Never
 
         """
         link = OAuthIdentityLink(
-            provider=provider,
-            subject=subject,
+            provider=external.provider,
+            subject=external.subject,
             user_id=user_id,
-            email_at_link=email,
-            email_verified_at_link=email_verified,
+            email_at_link=external.email,
+            email_assertion_at_link=external.email_verified,
         )
         self.db.add(link)
         try:
             await self.db.flush()
         except IntegrityError as error:
-            raise OAuthIdentityLinkConflictError(provider) from error
+            raise OAuthIdentityLinkConflictError(external.provider) from error
         return link

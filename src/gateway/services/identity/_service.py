@@ -58,13 +58,7 @@ class IdentityService:
             # A concurrent first sign-in can link this identity, or this account at the provider, after that lookup.
             existing = await self._links.get_for_user(account.id, external.provider)
             if existing is None:
-                await self._links.add(
-                    provider=external.provider,
-                    subject=external.subject,
-                    user_id=account.id,
-                    email=external.email,
-                    email_verified=external.email_verified is EmailAssertion.VERIFIED,
-                )
+                await self._links.add(external, user_id=account.id)
             elif existing.subject != external.subject:
                 logger.warning(
                     "Refused a %s sign-in to account %s, which is linked to another identity at that provider",

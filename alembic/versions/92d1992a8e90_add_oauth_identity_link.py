@@ -27,7 +27,7 @@ def upgrade() -> None:
         sa.Column("subject", sa.String(length=255), nullable=False),
         sa.Column("user_id", sa.Uuid(), nullable=False),
         sa.Column("email_at_link", sa.String(length=255), nullable=True),
-        sa.Column("email_verified_at_link", sa.Boolean(), nullable=False),
+        sa.Column("email_assertion_at_link", sa.String(length=16), nullable=False),
         sa.Column("linked_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.PrimaryKeyConstraint("provider", "subject"),
         sa.ForeignKeyConstraint(["user_id"], ["user.id"], ondelete="CASCADE"),

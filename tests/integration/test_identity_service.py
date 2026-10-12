@@ -127,13 +127,7 @@ class _LinksElsewhereFirst:
         self._links = links
 
     async def resolve(self, external: ProviderIdentity) -> IdentityResolution:
-        await self._links.add(
-            provider=external.provider,
-            subject=external.subject,
-            user_id=self._elsewhere.id,
-            email=None,
-            email_verified=True,
-        )
+        await self._links.add(external, user_id=self._elsewhere.id)
         return IdentityResolution(identity=self._account, new_account=False)
 
 
