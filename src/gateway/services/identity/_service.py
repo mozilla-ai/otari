@@ -49,14 +49,14 @@ class IdentityService:
         if external.email_verified is EmailAssertion.UNVERIFIED:
             raise OAuthEmailNotVerifiedError(label)
         async with self._uow:
-            link = await self._links.get_by_identity(external.provider, external.subject)
+            link = await self._links.get_by_identity(provider=external.provider, subject=external.subject)
             if link is not None:
                 return IdentityResolution(identity=await self._active_account(link.user_id, label), new_account=False)
 
             resolution = await self._identity_provider.resolve(external)
             account = await self._active_account(resolution.identity.id, label)
             # A concurrent first sign-in can link this identity, or this account at the provider, after that lookup.
-            existing = await self._links.get_for_user(account.id, external.provider)
+            existing = await self._links.get_for_user(provider=external.provider, user_id=account.id)
             if existing is None:
                 await self._links.add(external, user_id=account.id)
             elif existing.subject != external.subject:

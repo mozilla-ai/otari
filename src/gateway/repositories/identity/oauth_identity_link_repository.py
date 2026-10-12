@@ -16,11 +16,11 @@ class OAuthIdentityLinkRepository(BaseRepository[OAuthIdentityLink, Never, Never
     def __init__(self, uow: UnitOfWork) -> None:
         super().__init__(uow, OAuthIdentityLink)
 
-    async def get_by_identity(self, provider: str, subject: str) -> OAuthIdentityLink | None:
+    async def get_by_identity(self, *, provider: str, subject: str) -> OAuthIdentityLink | None:
         """Return the link for one provider identity, or None."""
         return await self.get((provider, subject))
 
-    async def get_for_user(self, user_id: uuid.UUID, provider: str) -> OAuthIdentityLink | None:
+    async def get_for_user(self, *, provider: str, user_id: uuid.UUID) -> OAuthIdentityLink | None:
         """Return an account's link at one provider, or None."""
         result = await self.db.execute(
             select(OAuthIdentityLink).where(

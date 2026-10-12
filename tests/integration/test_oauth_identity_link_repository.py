@@ -29,9 +29,9 @@ async def test_a_link_is_found_by_its_provider_identity_and_by_its_account(async
         await links.add(_identity("ada-subject", email="ada@example.com"), user_id=member.id)
 
     async with uow:
-        by_identity = await links.get_by_identity("google", "ada-subject")
-        by_account = await links.get_for_user(member.id, "google")
-        elsewhere = await links.get_for_user(member.id, "github")
+        by_identity = await links.get_by_identity(provider="google", subject="ada-subject")
+        by_account = await links.get_for_user(provider="google", user_id=member.id)
+        elsewhere = await links.get_for_user(provider="github", user_id=member.id)
 
     assert by_identity is not None
     assert by_identity.user_id == member.id
