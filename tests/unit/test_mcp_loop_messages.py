@@ -42,8 +42,12 @@ from gateway.services.tool_format import (
     inject_purpose_hints_anthropic,
     openai_to_anthropic_tools,
 )
-from gateway.services.tools import SERVER_TOOL_USE_ID_PREFIX, ToolUseBudget
-from gateway.services.web_retrieval_backend import WEB_RETRIEVAL_RESULT_MAX_BYTES, WEB_SEARCH_TOOL_NAME
+from gateway.services.tools import (
+    SERVER_TOOL_USE_ID_PREFIX,
+    WEB_RETRIEVAL_RESULT_MAX_BYTES,
+    WEB_SEARCH_TOOL_NAME,
+    ToolUseBudget,
+)
 from gateway.types.code_execution import ResultBlock
 
 

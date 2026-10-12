@@ -295,7 +295,7 @@ async def run_keyed_search(credential: WebSearchCredential, query: SearchQuery, 
     try:
         raw = await provider_search(
             provider=credential.provider,
-            api_key=credential.api_key,
+            api_key=credential.api_key or "",
             query=query.query,
             options=options,
             client=get_search_client(),

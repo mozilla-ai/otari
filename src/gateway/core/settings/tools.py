@@ -77,6 +77,13 @@ NO_SEARCH_DEFAULT = "none"
 RESERVED_INSTANCE_NAMES = frozenset({BUILTIN_FETCH, NO_SEARCH_DEFAULT})
 
 DEFAULT_WEB_SEARCH_MAX_CALLS = 10
+# How many results the in-loop tool returns when neither the deployment nor the request names a number.
+DEFAULT_MAX_RESULTS = 5
+# The most results a search returns. A workspace's stored web search ceiling is
+# validated against it (`services/tenancy/workspace_web_search_service.py`): a
+# value above what the backend honors could never take effect, so it is refused
+# at the write.
+MAX_RESULTS_CAP = 20
 # The engines the old in-loop backend asks a SearXNG service for when
 # ``web_search_engines`` is unset; why these four is said where it uses them.
 DEFAULT_SEARXNG_ENGINES = ("duckduckgo", "mojeek", "qwant", "wikipedia")
@@ -139,18 +146,28 @@ def _option_enums(kind: ToolKind, provider: str) -> dict[str, list[str] | None] 
     return {spec.name: spec.enum for spec in any_search.AnySearch.get_provider_metadata(provider).options}
 
 
+def shared_parameters(kind: ToolKind) -> tuple[str, ...]:
+    """The parameters every provider of the tool takes beside its native options, as its library lists them."""
+    return any_search.SHARED_PARAMETERS if kind == "search" else any_fetch.SHARED_PARAMETERS
+
+
 def option_problems(kind: ToolKind, provider: str, options: Mapping[str, Any]) -> dict[str, str]:
     """Each option the provider's schema does not know or refuses the value of, with why.
 
     Only names and the schema's fixed lists of values are checked, not types:
     a schema's type says what a provider usually takes, and some take more (an
-    Exa ``contents`` is an object, or ``false`` for none).
+    Exa ``contents`` is an object, or ``false`` for none). The tool's shared
+    parameters are accepted for every provider, and the library checks their
+    values when it is called.
     """
     enums = _option_enums(kind, provider)
     if enums is None:
         return {}
+    shared = shared_parameters(kind)
     problems: dict[str, str] = {}
     for key, value in options.items():
+        if key in shared:
+            continue
         if key not in enums:
             problems[key] = f"option '{key}' is not one the provider knows"
         elif (allowed := enums[key]) is not None and value not in allowed:

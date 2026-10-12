@@ -12,8 +12,16 @@ from gateway.api.routes.usage import GATEWAY_TOOL_NAMES
 from gateway.core.config import GatewayConfig
 from gateway.services._tool_loop import ToolBackend
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, SandboxBackend
-from gateway.services.tools import BUILTIN_TOOLS, BuiltinTool, Dialect, Tool, native_rendering
-from gateway.services.web_retrieval_backend import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME, WebRetrievalBackend
+from gateway.services.tools import (
+    BUILTIN_TOOLS,
+    WEB_FETCH_TOOL_NAME,
+    WEB_SEARCH_TOOL_NAME,
+    BuiltinTool,
+    Dialect,
+    Tool,
+    native_rendering,
+)
+from gateway.services.web_retrieval_backend import WebRetrievalBackend
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = REPO_ROOT / "src" / "gateway" / "services" / "tools" / "_registry.py"

@@ -12,6 +12,8 @@ and ``apply_web_access_policy`` narrows its web access to what its workspace per
 ``check_tool_entry``, ``check_tool_write``, ``check_kind_unchanged``, ``check_tool_name_is_free`` and
 ``default_to_pin`` hold a write through ``/api/v1/search-tools`` to the instance rules, and
 ``run_connection_test`` tests an instance with one search or fetch.
+``resolve_search`` and ``resolve_fetch`` say which provider, key and options a web search or fetch runs with.
+``WEB_SEARCH_TOOL_NAME``, ``WEB_FETCH_TOOL_NAME`` and the two tool definitions name the web tools to the model.
 """
 
 from gateway.services.tools._builtin_tool import BuiltinTool
@@ -80,6 +82,15 @@ from gateway.services.tools._web_declarations import (
     web_search_declaration_forms,
     web_search_intercept_enabled,
 )
+from gateway.services.tools._web_names import (
+    WEB_FETCH_TOOL_NAME,
+    WEB_RETRIEVAL_RESULT_MAX_BYTES,
+    WEB_SEARCH_NATIVE_TYPE_PREFIX,
+    WEB_SEARCH_TOOL_NAME,
+    web_fetch_tool_definition,
+    web_search_tool_definition,
+)
+from gateway.services.tools._web_search import ResolvedFetch, ResolvedSearch, resolve_fetch, resolve_search
 from gateway.services.tools._web_search_keys import WebSearchKeyService, WorkspaceSearchKeys
 from gateway.services.tools._web_search_responses import WEB_SEARCH_CALL_ID_PREFIX
 from gateway.services.tools._web_search_results import web_search_max_results_baseline
@@ -146,4 +157,14 @@ __all__ = [
     "instance_to_test",
     "run_connection_test",
     "unsaved_instance_to_test",
+    "WEB_FETCH_TOOL_NAME",
+    "WEB_RETRIEVAL_RESULT_MAX_BYTES",
+    "WEB_SEARCH_NATIVE_TYPE_PREFIX",
+    "WEB_SEARCH_TOOL_NAME",
+    "web_fetch_tool_definition",
+    "web_search_tool_definition",
+    "ResolvedFetch",
+    "ResolvedSearch",
+    "resolve_fetch",
+    "resolve_search",
 ]

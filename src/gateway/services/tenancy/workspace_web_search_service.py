@@ -25,12 +25,12 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.settings.tools import MAX_RESULTS_CAP
 from gateway.models.tenancy import User, Workspace
 from gateway.models.tools import ResolvedWebSearchConfig, WorkspaceWebSearchConfig
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
-from gateway.services.web_retrieval_backend import MAX_RESULTS_CAP
 from gateway.services.web_retrieval_policy import read_domain_list
 
 # The backend's own ceiling on returned hits. A stored value above it would read

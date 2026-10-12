@@ -1,9 +1,11 @@
 """ORM tables for gateway-run tools, the executor column's vocabulary, and the web search policy a request reads."""
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Any
 
 from sqlalchemy import (
@@ -456,16 +458,44 @@ class WorkspaceWebSearchKeyOverride(Base):
     )
 
 
-@dataclass(frozen=True)
-class WebSearchCredential:
-    """The search provider and key a workspace's searches use in place of the deployment's.
+class WebToolCredentialSource(StrEnum):
+    """Where a workspace's web search or fetch credential came from."""
 
-    ``api_key`` is left out of the ``repr``, so a log line or an error that prints the
-    record never prints the key.
+    # The organization's own key, read from this deployment's rows.
+    ORG = "org"
+    # The control plane's answer to a hybrid data plane's resolve.
+    HYBRID = "hybrid"
+
+
+@dataclass(frozen=True)
+class WebToolCredential:
+    """A provider and key a workspace's web tool uses in place of the deployment's instance.
+
+    The base of :class:`WebSearchCredential` and :class:`WebFetchCredential`,
+    which are distinct types so a search key never serves a fetch, nor a fetch
+    key a search: each one's ``options`` are its own tool's.
+
+    ``api_key`` is ``None`` for a provider that takes none, such as ``searxng``.
+    The key, ``api_base`` and ``options`` are left out of the ``repr``, so a log
+    line or an error that prints the record never prints the key, nor a tenant's
+    endpoint, which can name a private host or carry userinfo.
     """
 
     provider: str
-    api_key: str = field(repr=False)
+    source: WebToolCredentialSource
+    api_key: str | None = field(default=None, repr=False)
+    api_base: str | None = field(default=None, repr=False)
+    options: Mapping[str, Any] = field(default=MappingProxyType({}), repr=False, hash=False)
+
+
+@dataclass(frozen=True)
+class WebSearchCredential(WebToolCredential):
+    """The search provider and key a workspace's searches use in place of the deployment's."""
+
+
+@dataclass(frozen=True)
+class WebFetchCredential(WebToolCredential):
+    """The fetch provider and key a workspace's fetches, and the enrichment of its searches, use."""
 
 
 @dataclass(frozen=True)
@@ -509,6 +539,8 @@ class ResolvedWebSearchConfig:
     authorized_tools: frozenset[str] | None
     # The workspace's own search key, which its searches use in place of the deployment's.
     credential: WebSearchCredential | None = None
+    # The workspace's own fetch key, which its fetches and the enrichment of its searches use.
+    fetch_credential: WebFetchCredential | None = None
 
 
 class SandboxContainer(Base):

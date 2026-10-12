@@ -41,10 +41,11 @@ from pydantic import BaseModel, Field
 
 from gateway.api.deps import get_config
 from gateway.core.config import GatewayConfig
+from gateway.core.settings.tools import MAX_RESULTS_CAP
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.services.search_backend import get_search_client
-from gateway.services.web_retrieval_backend import MAX_RESULTS_CAP, WEB_SEARCH_TOOL_NAME
+from gateway.services.tools import WEB_SEARCH_TOOL_NAME
 from gateway.services.web_search_providers import WebSearchProviderError, provider_search
 
 router = APIRouter(prefix="/web-search", tags=["web-search"])

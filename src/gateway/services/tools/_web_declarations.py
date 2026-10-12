@@ -25,7 +25,7 @@ from gateway.core.env import otari_env
 from gateway.models.tools import CodeExecutor
 from gateway.services.tools._declarations import Tool, extract_first_matching_tool
 from gateway.services.tools._native import Dialect
-from gateway.services.web_retrieval_backend import WEB_SEARCH_NATIVE_TYPE_PREFIX
+from gateway.services.tools._web_names import WEB_SEARCH_NATIVE_TYPE_PREFIX
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig

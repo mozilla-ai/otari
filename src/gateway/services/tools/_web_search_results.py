@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from gateway.core.env import otari_env
+from gateway.core.settings.tools import DEFAULT_MAX_RESULTS
 from gateway.log_config import logger
-from gateway.services.web_retrieval_backend import DEFAULT_MAX_RESULTS
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig

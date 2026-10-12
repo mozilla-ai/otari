@@ -38,8 +38,7 @@ from fastapi.testclient import TestClient
 from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX, MCP_CLIENT_BETA
-from gateway.services.tools import WEB_SEARCH_HEADER
-from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
+from gateway.services.tools import WEB_SEARCH_HEADER, WEB_SEARCH_TOOL_NAME
 from gateway.types.normalization_target import NormalizationTarget
 
 from .conftest import MODEL_NAME

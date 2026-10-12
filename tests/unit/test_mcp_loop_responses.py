@@ -41,8 +41,12 @@ from gateway.services.tool_format import (
     inject_purpose_hints_responses,
     openai_to_responses_tools,
 )
-from gateway.services.tools import CODE_INTERPRETER_CALL_ID_PREFIX, WEB_SEARCH_CALL_ID_PREFIX, ToolUseBudget
-from gateway.services.web_retrieval_backend import WEB_SEARCH_TOOL_NAME
+from gateway.services.tools import (
+    CODE_INTERPRETER_CALL_ID_PREFIX,
+    WEB_SEARCH_CALL_ID_PREFIX,
+    WEB_SEARCH_TOOL_NAME,
+    ToolUseBudget,
+)
 from gateway.types.code_execution import ResultBlock
 
 _SEARCH = frozenset({WEB_SEARCH_TOOL_NAME})

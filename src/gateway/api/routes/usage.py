@@ -43,6 +43,7 @@ from gateway.services.external_usage_service import (
 )
 from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tool_usage import TOOL_METER_NAMESPACE
+from gateway.services.tools import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 from gateway.services.usage_admin_service import (
     UsageDeleteRequest,
     UsageDeleteResult,
@@ -51,7 +52,6 @@ from gateway.services.usage_admin_service import (
     delete_usage,
     set_usage_price,
 )
-from gateway.services.web_retrieval_backend import WEB_FETCH_TOOL_NAME, WEB_SEARCH_TOOL_NAME
 
 # Two routers under one prefix, because the two planes that meet here
 # authenticate differently. Reading or amending every tenant's usage rows is

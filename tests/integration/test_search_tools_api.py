@@ -563,6 +563,16 @@ def test_options_are_checked_against_the_providers_schema(
     assert "option 'type' has a value the provider refuses" in refused.json()["detail"]
     # Until any-search has its SearXNG adapter, a searxng instance's options are passed as today.
     assert _create(client, master_key_header, options={"engines": "brave", "anything": 1}).status_code == 201
+    # Each tool's shared parameters pass for every provider, and only that tool's.
+    shared = _create(client, master_key_header, name="g", provider="fake", api_base=None, options={"max_results": 3})
+    assert shared.status_code == 201, shared.text
+    fetch_count = _create(
+        client, master_key_header, name="h", kind="fetch", provider="fake", api_base=None, options={"max_chars": 500}
+    )
+    assert fetch_count.status_code == 201, fetch_count.text
+    crossed = _create(client, master_key_header, name="i", provider="fake", api_base=None, options={"max_chars": 500})
+    assert crossed.status_code == 422
+    assert "option 'max_chars' is not one the provider knows" in crossed.json()["detail"]
 
 
 def test_a_key_rotation_leaves_options_that_predate_the_rules_alone(
