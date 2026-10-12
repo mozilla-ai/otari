@@ -613,6 +613,11 @@ function CreateKeyDialog({
       onSubmit={submit}
       isPending={create.isPending}
       isSubmitDisabled={isBlocked}
+      footerStart={
+        ownerMissing ? (
+          <p className="text-caption">Choose an owner to create this key.</p>
+        ) : undefined
+      }
       error={create.error}
       isDirty={isDirty}
     >
@@ -644,6 +649,7 @@ function CreateKeyDialog({
           value={userId}
           onChange={setUserId}
           users={ownerOptions}
+          isRequired
         />
       ) : (
         <p className="text-caption">

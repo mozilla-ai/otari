@@ -44,3 +44,26 @@ export function useMemberAttributionLabels(): ReadonlyMap<string, string> {
     [members.data],
   )
 }
+
+/** Sign-in addresses by the owner id they bill through, for members who have one. */
+export function memberEmailsByAttributionId(
+  members: OrganizationMember[] | undefined,
+): ReadonlyMap<string, string> {
+  return new Map(
+    (members ?? []).flatMap((member): [string, string][] =>
+      member.attribution_user_id && member.email
+        ? [[member.attribution_user_id, member.email]]
+        : [],
+    ),
+  )
+}
+
+/** The addresses behind `useMemberAttributionLabels`, from the same roster read. */
+export function useMemberAttributionEmails(): ReadonlyMap<string, string> {
+  const hasSurface = useSurfaces()
+  const members = useOrganizationMembers(hasSurface("organizations"))
+  return useMemo(
+    () => memberEmailsByAttributionId(members.data),
+    [members.data],
+  )
+}

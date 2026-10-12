@@ -1286,12 +1286,20 @@ describe("KeysPage", () => {
     await user.click(
       screen.getByRole("button", { name: "Create your first key" }),
     )
-    // Owner is empty: Create is blocked.
+    // Owner is empty: Create is blocked, and the dialog says why and which
+    // field to fill rather than leaving a dead button.
     expect(screen.getByRole("button", { name: "Create key" })).toBeDisabled()
+    expect(screen.getByRole("combobox", { name: /Owner/ })).toBeRequired()
+    expect(
+      screen.getByText("Choose an owner to create this key."),
+    ).toBeInTheDocument()
 
     await user.type(screen.getByPlaceholderText(/Pick a user/), "team-checkout")
     await user.keyboard("{Escape}")
     expect(screen.getByRole("button", { name: "Create key" })).toBeEnabled()
+    expect(
+      screen.queryByText("Choose an owner to create this key."),
+    ).not.toBeInTheDocument()
   })
 
   it("frames the per-key scope as narrowing within the owner's access", async () => {
@@ -1602,6 +1610,9 @@ describe("KeysPage", () => {
         screen.queryByPlaceholderText(/Pick a user/),
       ).not.toBeInTheDocument()
       expect(screen.getByRole("button", { name: "Create key" })).toBeEnabled()
+      expect(
+        screen.queryByText("Choose an owner to create this key."),
+      ).not.toBeInTheDocument()
 
       await usr.click(screen.getByRole("button", { name: "Advanced" }))
       expect(
