@@ -13,7 +13,7 @@ service is in `services/providers/` for that reason among others.
 
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService
-from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
+from gateway.services.tenancy.organization_domain_service import DomainAutoJoinListener, OrganizationDomainService
 from gateway.services.tenancy.organization_service import InvitationClaimSettings, OrganizationService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.user_service import (
@@ -25,6 +25,7 @@ from gateway.services.tenancy.workspace_service import WorkspaceService
 
 __all__ = [
     "DeploymentUserService",
+    "DomainAutoJoinListener",
     "InvitationClaimSettings",
     "OrgProviderKeyService",
     "OrganizationDomainService",

@@ -39,6 +39,7 @@ from gateway.log_config import logger as gateway_logger
 from gateway.models.identity import EmailAssertion, OAuthIdentityLink, ProviderIdentity
 from gateway.models.tenancy import Organization, User, WebAuthnCredential
 from gateway.models.tools import WorkspaceCodeExecutionPolicy
+from gateway.repositories.identity import DashboardSessionRepository
 from gateway.repositories.tenancy import UserRepository
 from gateway.services import oauth_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
@@ -932,7 +933,7 @@ def test_a_database_failure_while_staging_the_session_rolls_back_and_says_nothin
 ) -> None:
     """Staging the session row is inside the route's error handling, not beside it.
 
-    ``create_dashboard_session`` prunes expired rows with a DELETE before it
+    Starting a session prunes expired rows with a DELETE before it
     stages anything, so it can fail on its own rather than only at commit time.
     Outside the handled block that failure skipped the rollback and surfaced as
     a bare 500 from the generic handler.
@@ -943,7 +944,7 @@ def test_a_database_failure_while_staging_the_session_rolls_back_and_says_nothin
     async def _explode(*_args: Any, **_kwargs: Any) -> tuple[str, Any]:
         raise SQLAlchemyError("pruning failed")
 
-    monkeypatch.setattr("gateway.api.deps.create_dashboard_session", _explode)
+    monkeypatch.setattr(DashboardSessionRepository, "prune_expired", _explode)
 
     response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
 
@@ -990,7 +991,7 @@ def test_a_session_that_cannot_be_stored_leaves_the_account_and_its_links_as_the
     async def _explode(*_args: Any, **_kwargs: Any) -> tuple[str, Any]:
         raise SQLAlchemyError("pruning failed")
 
-    monkeypatch.setattr("gateway.api.deps.create_dashboard_session", _explode)
+    monkeypatch.setattr(DashboardSessionRepository, "prune_expired", _explode)
 
     assert _sign_in(client).status_code == 500
 

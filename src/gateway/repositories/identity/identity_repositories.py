@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Self
 
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.repositories.identity.dashboard_session_repository import DashboardSessionRepository
 from gateway.repositories.identity.oauth_identity_link_repository import OAuthIdentityLinkRepository
 from gateway.repositories.tenancy import UserRepository
 
@@ -11,9 +12,14 @@ class IdentityRepositories:
     """The identity domain's repositories, all on one Unit of Work."""
 
     links: OAuthIdentityLinkRepository
+    sessions: DashboardSessionRepository
     users: UserRepository
 
     @classmethod
     def on(cls, uow: UnitOfWork) -> Self:
         """Build every repository on this Unit of Work."""
-        return cls(links=OAuthIdentityLinkRepository(uow), users=UserRepository(uow))
+        return cls(
+            links=OAuthIdentityLinkRepository(uow),
+            sessions=DashboardSessionRepository(uow),
+            users=UserRepository(uow),
+        )

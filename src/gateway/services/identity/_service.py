@@ -1,7 +1,7 @@
 import uuid
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Protocol
 
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import (
@@ -14,12 +14,21 @@ from gateway.models.identity import EmailAssertion, ProviderIdentity
 from gateway.models.tenancy import User
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories
+from gateway.services.dashboard_session_service import start_dashboard_session
 from gateway.services.oauth_service import provider_label
 from gateway.services.tenancy import OrganizationService
-from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 
-# Stages a dashboard session for an account and returns its token and expiry.
-SessionStarter = Callable[[uuid.UUID], Awaitable[tuple[str, datetime]]]
+
+class SignInListener(Protocol):
+    """Reacts to a sign-in inside the transaction that records it.
+
+    NOTE: An implementation must not commit or roll back.
+    The caller owns the transaction, so a refused sign-in takes the listener's writes back with it.
+    """
+
+    async def account_signed_in(self, account: User) -> None:
+        """React to ``account`` signing in."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -50,17 +59,18 @@ class IdentityService:
         repositories: IdentityRepositories,
         *,
         identity_provider: IdentityProviderPort,
-        organization_domains: OrganizationDomainService,
         organizations: OrganizationService,
-        start_session: SessionStarter,
+        sign_in_listener: SignInListener,
+        session_ttl_hours: int,
     ) -> None:
         self._uow = uow
         self._links = repositories.links
+        self._sessions = repositories.sessions
         self._users = repositories.users
         self._identity_provider = identity_provider
-        self._organization_domains = organization_domains
         self._organizations = organizations
-        self._start_session = start_session
+        self._sign_in_listener = sign_in_listener
+        self._session_ttl_hours = session_ttl_hours
 
     async def sign_in_with_oauth(self, external: ProviderIdentity) -> SignIn:
         """Sign in the account that an identity a provider has proven belongs to.
@@ -68,8 +78,8 @@ class IdentityService:
         An identity linked to an account signs in as that account, and its password and verification stay as they are.
         An identity with no link signs in as the account the identity provider policy returns, and is linked to it.
         An account holds at most one link for each provider.
-        The account's changes, any membership it joins by its address's domain, its active organization,
-        and the session commit together.
+        The account's changes, what the sign-in listener stages, its active organization, and the session commit
+        together.
 
         Raises:
             OAuthEmailNotVerifiedError: If the provider says the address is not verified.
@@ -86,9 +96,11 @@ class IdentityService:
         async with self._uow:
             resolution = await self._account_for(external, label)
             account = resolution.identity
-            await self._organization_domains.auto_join_for_user(account)
+            await self._sign_in_listener.account_signed_in(account)
             active_organization_id = await self._organizations.active_organization_id_for_sign_in(account)
-            token, expires_at = await self._start_session(account.id)
+            token, expires_at = await start_dashboard_session(
+                self._sessions, self._users, self._session_ttl_hours, user_id=account.id
+            )
         return SignIn(
             account=account,
             active_organization_id=active_organization_id,

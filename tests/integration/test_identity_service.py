@@ -15,11 +15,9 @@ from gateway.models.identity import EmailAssertion, OAuthIdentityLink, ProviderI
 from gateway.models.tenancy import User
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import IdentityRepositories, OAuthIdentityLinkRepository
-from gateway.repositories.tenancy import UserRepository
-from gateway.services.dashboard_session_service import create_dashboard_session
+from gateway.repositories.tenancy import OrganizationDomainRepository, OrganizationMemberRepository, UserRepository
 from gateway.services.identity import IdentityService
-from gateway.services.tenancy import OrganizationService, forget_unproven_access
-from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
+from gateway.services.tenancy import DomainAutoJoinListener, OrganizationService, forget_unproven_access
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 
 from .tenancy_helpers import create_organization, membership_writes
@@ -35,9 +33,9 @@ def _service_with(db: AsyncSession, uow: UnitOfWork, policy: IdentityProviderPor
         uow,
         IdentityRepositories.on(uow),
         identity_provider=policy,
-        organization_domains=OrganizationDomainService(db),
         organizations=OrganizationService(db, membership_listener=None, workspace_listener=NullWorkspaceListener()),
-        start_session=lambda user_id: create_dashboard_session(db, 1, user_id=user_id),
+        sign_in_listener=DomainAutoJoinListener(OrganizationDomainRepository(uow), OrganizationMemberRepository(uow)),
+        session_ttl_hours=1,
     )
 
 

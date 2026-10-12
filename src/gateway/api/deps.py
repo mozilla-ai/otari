@@ -44,7 +44,9 @@ from gateway.repositories.overview.overview_repository import OverviewRepository
 from gateway.repositories.providers import OrgProviderKeyModelRepository, ProviderEndpointRepository
 from gateway.repositories.rate_limits import RateLimitRuleRepository
 from gateway.repositories.tenancy import (
+    OrganizationDomainRepository,
     OrganizationGuardrailDefinitionRepository,
+    OrganizationMemberRepository,
     OrgProviderKeyRepository,
     WorkspaceRepository,
 )
@@ -58,11 +60,7 @@ from gateway.repositories.users_repository import get_active_user
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.budgets import BudgetMembershipListener, BudgetService
 from gateway.services.code_execution import SandboxContainerRegistry
-from gateway.services.dashboard_session_service import (
-    SESSION_COOKIE_NAME,
-    create_dashboard_session,
-    resolve_dashboard_session,
-)
+from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.feedback import FeedbackService
 from gateway.services.files import FileBackends, FileService, SandboxFileBridge, StagedFile
 from gateway.services.identity import IdentityService
@@ -77,12 +75,16 @@ from gateway.services.playground_service import ForwardedToolOffer, LocalToolOff
 from gateway.services.providers import OrgProviderModelService, ProviderEndpointService, refresh_provider_endpoint_cache
 from gateway.services.rate_limits import RateLimitService
 from gateway.services.routing import clear_router_backend_cache
-from gateway.services.tenancy import InvitationClaimSettings, OrganizationService, organization_guardrail_runner
+from gateway.services.tenancy import (
+    DomainAutoJoinListener,
+    InvitationClaimSettings,
+    OrganizationService,
+    organization_guardrail_runner,
+)
 from gateway.services.tenancy.authorization import WorkspaceAccess, resolve_visible_workspace_scope
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.membership_listener import MembershipListener
 from gateway.services.tenancy.org_provider_key_service import OrgProviderKeyService, refresh_org_provider_cache
-from gateway.services.tenancy.organization_domain_service import OrganizationDomainService
 from gateway.services.tenancy.organization_guardrail_definition_service import (
     OrganizationGuardrailDefinitionService,
 )
@@ -1293,23 +1295,19 @@ ModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_model_provider_p
 
 
 def get_identity_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
     uow: UnitOfWorkDep,
     config: Annotated[GatewayConfig, Depends(get_config)],
     identity_provider: IdentityProviderPortDep,
     organizations: OrganizationServiceDep,
 ) -> IdentityService:
-    """Build the identity service on the request's Unit of Work.
-
-    NOTE: The organization domain service and the session starter must use the session the Unit of Work is over.
-    """
+    """Build the identity service on the request's Unit of Work."""
     return IdentityService(
         uow,
         IdentityRepositories.on(uow),
         identity_provider=identity_provider,
-        organization_domains=OrganizationDomainService(db),
         organizations=organizations,
-        start_session=lambda user_id: create_dashboard_session(db, config.dashboard_session_ttl_hours, user_id=user_id),
+        sign_in_listener=DomainAutoJoinListener(OrganizationDomainRepository(uow), OrganizationMemberRepository(uow)),
+        session_ttl_hours=config.dashboard_session_ttl_hours,
     )
 
 
