@@ -253,7 +253,7 @@ def _as_str(value: Any) -> str | None:
 
 
 def _as_limit(value: Any) -> int | None:
-    # models.dev writes 0 for a limit it does not know, which a client would read as no tokens at all.
+    """A positive token limit, else ``None``: models.dev writes 0 for a limit it does not know."""
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 

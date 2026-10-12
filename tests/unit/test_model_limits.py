@@ -20,6 +20,7 @@ def _config(**providers: dict[str, Any]) -> GatewayConfig:
 
 
 def test_models_dev_answers_first() -> None:
+    """Where both datasets know a model, models.dev's numbers win over genai-prices' 128000."""
     assert model_limits(_config(), MODELS_DEV, "openai:gpt-4o") == ModelLimits(64000, 16384)
 
 
@@ -48,6 +49,7 @@ def test_models_dev_is_looked_up_by_the_instance_provider_type() -> None:
 
 
 def test_a_gemini_listing_id_finds_its_entry() -> None:
+    """Gemini lists ``models/<id>``, where models.dev keys the bare id."""
     assert model_limits(_config(), MODELS_DEV, "gemini:models/gemini-3.5-flash-lite") == ModelLimits(1048576, 65536)
 
 

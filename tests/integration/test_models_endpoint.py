@@ -291,6 +291,7 @@ _MODELS_DEV: dict[str, Any] = {
 
 @pytest.fixture
 def limits_config(postgres_url: str) -> GatewayConfig:
+    """Nebius, which genai-prices does not know; Gemini, whose ids carry ``models/``; and an alias to Gemini."""
     return GatewayConfig(
         database_url=postgres_url,
         master_key="test-master-key",
@@ -304,6 +305,7 @@ def limits_config(postgres_url: str) -> GatewayConfig:
 
 @pytest.fixture
 def limits_client(limits_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
+    """Each model gets a price row, which is what lists it while discovery is off."""
     for client in build_test_client(limits_config):
         for key in (_QWEN, _GEMINI, _UNKNOWN, "openai:gpt-4o"):
             _price(client, key)
@@ -311,6 +313,7 @@ def limits_client(limits_config: GatewayConfig, clean_database: None) -> Generat
 
 
 def _read(client: TestClient, path: str) -> Any:
+    """GET ``path`` as the master key, with models.dev answering ``_MODELS_DEV``."""
     with patch.object(mcs, "_fetch", new=AsyncMock(return_value=_MODELS_DEV)):
         response = client.get(path, headers={API_KEY_HEADER: "Bearer test-master-key"})
     assert response.status_code == 200, response.text
@@ -361,6 +364,7 @@ def test_without_models_dev_the_window_comes_from_genai_prices(limits_client: Te
 
 
 def test_disabled_models_dev_is_never_fetched_by_the_listing(postgres_url: str, clean_database: None) -> None:
+    """Switched off, models.dev is not fetched at all, so a model only it describes has no limits."""
     config = GatewayConfig(
         database_url=postgres_url,
         master_key="test-master-key",

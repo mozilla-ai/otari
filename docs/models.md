@@ -106,10 +106,6 @@ rate, `default` for the genai-prices fallback, `dynamic` for a routing policy
 that picks its model per request, and `none` for an unpriced model. An alias is
 priced from its target.
 
-Set `model_discovery: false` to publish a curated catalog made from aliases and
-explicitly priced models. For a backend with no listing API, use the instance's
-`models` list.
-
 Each model carries its token limits, `context_window` and `max_output_tokens`,
 so a client does not have to guess them. Both come from models.dev's entry for
 the model under the provider serving it. Where that entry has no context window,
@@ -120,6 +116,10 @@ limits, and the grouped catalog reports the same values for each offering. An
 instance declared `openai-compatible` is looked up under OpenAI, so a model it
 serves under another name usually has no models.dev entry. With
 `models_dev_metadata: false`, the context window comes from genai-prices alone.
+
+Set `model_discovery: false` to publish a curated catalog made from aliases and
+explicitly priced models. For a backend with no listing API, use the instance's
+`models` list.
 
 Hosted mode keeps `GET /api/v1/models` for control-plane discovery. Hybrid mode
 does not serve the local catalog: it relays the control plane's list, limits

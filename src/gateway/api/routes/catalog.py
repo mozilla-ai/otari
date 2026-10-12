@@ -350,6 +350,7 @@ async def _group(
     caller: CatalogCaller,
     session_identity: TenancyUser | None,
 ) -> _Grouped:
+    """The merged catalog's offerings grouped into models, each priced at the viewer's rate."""
     catalog = merged.models_dev
     now = normalize_effective_at(None)
     real = real_offerings(merged)
