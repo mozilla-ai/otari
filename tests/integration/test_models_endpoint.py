@@ -377,7 +377,7 @@ def test_disabled_models_dev_is_never_fetched_by_the_listing(postgres_url: str, 
             response = client.get(f"{API_ROOT}/models", headers={API_KEY_HEADER: "Bearer test-master-key"})
         assert response.status_code == 200, response.text
         assert {model["id"]: _limits(model) for model in response.json()["data"]}[_QWEN] == (None, None)
-    fetch.assert_not_awaited()
+    fetch.assert_not_called()
 
 
 def test_an_unknown_model_is_refused_without_fetching_models_dev(limits_client: TestClient) -> None:
@@ -389,4 +389,4 @@ def test_an_unknown_model_is_refused_without_fetching_models_dev(limits_client: 
         )
 
     assert response.status_code == 404, response.text
-    fetch.assert_not_awaited()
+    fetch.assert_not_called()

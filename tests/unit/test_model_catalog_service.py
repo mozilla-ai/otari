@@ -73,6 +73,13 @@ def test_parse_entry_tolerates_missing_fields() -> None:
     assert entry.deprecated is False
 
 
+def test_parse_entry_reads_a_zero_or_negative_limit_as_unknown() -> None:
+    """models.dev writes 0 where it does not know a limit; a client must not read that as no tokens."""
+    entry = parse_entry({"limit": {"context": 0, "output": -1}})
+
+    assert (entry.context_window, entry.max_output_tokens) == (None, None)
+
+
 def test_parse_entry_marks_deprecated_status() -> None:
     assert parse_entry({"id": "old", "status": "deprecated"}).deprecated is True
 
@@ -188,7 +195,7 @@ async def test_catalog_metadata_fetches_only_when_a_read_may() -> None:
 
     with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)) as fetch:
         assert await mcs.load_catalog_metadata(config, cached_only=True) is None
-        fetch.assert_not_awaited()
+        fetch.assert_not_called()
 
         assert await mcs.load_catalog_metadata(config) == CATALOG
         fetch.assert_awaited_once()
