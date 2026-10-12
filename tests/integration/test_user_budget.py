@@ -352,6 +352,46 @@ def test_user_exceeded_budget_blocked_on_paid_model(
     assert "budget" in response.json()["detail"].lower()
 
 
+def test_a_first_request_too_large_for_the_budget_says_so(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_messages: list[dict[str, str]],
+) -> None:
+    """Nothing is spent, so the refusal names the estimate and what remains, not an exceeded limit.
+
+    The estimate prices the default output allowance when the request sets no
+    max_tokens, which is what the refusal points the caller at.
+    """
+    budget_id = client.post(f"{API_ROOT}/budgets", json={"max_budget": 0.0015}, headers=master_key_header).json()[
+        "budget_id"
+    ]
+    client.post(
+        f"{API_ROOT}/users",
+        json={"user_id": "too-large-user", "budget_id": budget_id},
+        headers=master_key_header,
+    )
+    client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": "openai:gpt-4o", "input_price_per_million": 2.5, "output_price_per_million": 10.0},
+        headers=master_key_header,
+    )
+
+    response = client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "openai:gpt-4o", "messages": test_messages, "user": "too-large-user"},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "budget_exceeded"
+    assert response.headers["Otari-Budget-Scope"] == "user"
+    detail = response.json()["detail"]
+    assert detail.startswith("User 'too-large-user' has $0.0015 of budget remaining, less than this request's")
+    assert "exceeded" not in detail
+    assert "1024 output tokens" in detail
+    assert "max_tokens" in detail
+
+
 def test_user_exceeded_budget_allowed_on_free_model(
     client: TestClient,
     master_key_header: dict[str, str],

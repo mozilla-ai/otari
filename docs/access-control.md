@@ -215,6 +215,14 @@ dispatch and reconciled to the measured figures afterwards; only the unused part
 of an over-estimate is released, and what the request measurably used stays
 charged. A request counts as one request when it is admitted. A model priced at
 zero spends no dollars, and still spends tokens and one request.
+A request whose dollar hold is larger than what remains is refused even when
+nothing has been spent yet, and the refusal says so with both amounts:
+`User 'alice' has $0.0015 of budget remaining, less than this request's
+estimated cost of $0.01025`. On chat completions, messages and responses the
+estimate prices the request's `max_tokens` (or
+`budget_estimate_default_output_tokens` when it sets none), and the refusal names
+that figure, so a lower `max_tokens` is usually what lets the request fit. A
+budget already at its cap is refused as `has exceeded budget limit`.
 Endpoints that hold no token estimate (embeddings, rerank, and the other
 pass-through routes) are refused once a token cap is exhausted rather than
 reserving headroom for themselves, so a token cap can be passed by the requests

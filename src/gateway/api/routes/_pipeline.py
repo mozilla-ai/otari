@@ -2397,6 +2397,10 @@ async def resolve_request_context(
                 # own TTL; the batch, search and pass-through sites take the
                 # module default.
                 reservation_ttl_sec=config.budget_reservation_ttl_sec,
+                # Named by a refusal whose hold does not fit, since max_tokens drives the estimate.
+                reserved_output_tokens=estimate_inputs.max_output_tokens
+                if estimate_inputs.max_output_tokens is not None
+                else estimate_inputs.default_output_tokens,
             )
         except HTTPException as exc:
             # A blocked or over-budget user is refused inside reserve_budget,

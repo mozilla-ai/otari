@@ -458,6 +458,11 @@ reworded.
 | `invalid_request` | 422 | The request body or a parameter failed schema validation. `detail` lists the failing fields, each with `loc`, `msg` and `type` | |
 | `provider_error` | 200, in a stream's error event only | The provider failed after the stream started, for a reason no other code names | |
 
+A `budget_exceeded` refusal's `detail` tells a spent budget (`... has exceeded
+budget limit`) from a request whose estimated cost is larger than the budget it
+has left (`... has $X of budget remaining, less than this request's estimated
+cost of $Y`); see [Budgets](access-control.md#budgets).
+
 A streamed request whose provider fails before producing any output is answered
 with an ordinary HTTP error, with the same status, `detail` and code the request
 would get unstreamed: a `400` for a parameter the provider does not accept, a

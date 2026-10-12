@@ -33,6 +33,7 @@ from gateway.models.budgets import (
 )
 from gateway.models.tenancy import OrganizationMember, Workspace, WorkspaceMember
 from gateway.services.budgets._periods import period_window
+from gateway.services.budgets._refusals import BlockedAxis, blocked_on
 from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
 if TYPE_CHECKING:
@@ -475,8 +476,8 @@ async def blocked_axis(
     tokens: int,
     requests: int,
     new_request: bool,
-) -> str:
-    """Return the name of the capped axis that left this ceiling no room.
+) -> BlockedAxis:
+    """Return the capped axis that left this ceiling no room.
 
     The test must mirror both clauses of the admission test in :func:`reserve`, or a refusal names the wrong axis.
     ``amount=None`` skips the dollar axis, which is named "budget".
@@ -501,7 +502,7 @@ async def blocked_axis(
     if row is None:
         # The ceiling went away between the refusal and here, so there is no axis
         # to name and guessing one would be worse than saying nothing.
-        return "budget"
+        return BlockedAxis("budget")
     axes = (
         # Skipped when the request has no dollar amount, which is a free-priced
         # model: :func:`reserve` does not gate that axis, so it cannot be what
@@ -516,13 +517,16 @@ async def blocked_axis(
         # Compared as Decimals whatever the driver handed back: a NUMERIC column
         # arrives as Decimal on PostgreSQL and can arrive as a float on SQLite,
         # and adding one of each raises rather than comparing.
-        committed = Decimal(str(spent)) + Decimal(str(reserved))
-        limit = Decimal(str(cap))
-        if committed + Decimal(str(wanted)) > limit:
-            return name
-        if new_request and committed >= limit:
-            return name
-    return "budget"
+        blocked = blocked_on(
+            name,
+            committed=Decimal(str(spent)) + Decimal(str(reserved)),
+            cap=Decimal(str(cap)),
+            wanted=Decimal(str(wanted)),
+            new_request=new_request,
+        )
+        if blocked is not None:
+            return blocked
+    return BlockedAxis("budget")
 
 
 async def settle(

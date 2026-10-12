@@ -32,6 +32,7 @@ from gateway.models.users import User
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.budgets import _ledger as ledger
 from gateway.services.budgets._periods import budget_window
+from gateway.services.budgets._refusals import BlockedAxis, blocked_on, refusal_detail
 from gateway.services.budgets._scoped_enforcement import (
     ApplicableBudget,
     BudgetScopeRequest,
@@ -227,7 +228,7 @@ def _blocked_axis(
     held_tokens: int,
     held_requests: int,
     new_request: bool,
-) -> str:
+) -> BlockedAxis:
     """Which capped axis had no room, for the refusal message.
 
     The gate is one conditional UPDATE that matches no row, so nothing in its
@@ -246,7 +247,8 @@ def _blocked_axis(
     dollar refusal has always sent byte for byte, which callers and their tests
     key on, and the ask this answers was for signal on the two axes that had
     none. A refusal that changes wording for the case that already worked buys
-    nothing and breaks readers.
+    nothing and breaks readers. The one dollar refusal it was false for, a hold
+    larger than the headroom left, carries both amounts instead (``BlockedAxis``).
 
     ``amount=None`` is the free-model request, whose dollar axis the gate does not
     ask about at all. It is skipped here for the same reason: naming an axis the
@@ -272,18 +274,19 @@ def _blocked_axis(
     for name, cap, committed, wanted in axes:
         if cap is None:
             continue
-        # The second clause of the gate: this hold would push the axis past its
-        # cap. Exact for a top-up, which is asked only that.
-        if committed + wanted > cap:
-            return name
-        # And the first, which only an arrival is asked: the axis is already at or
-        # over its cap, so even a hold of nothing is refused.
-        if new_request and committed >= cap:
-            return name
+        blocked = blocked_on(
+            name,
+            committed=Decimal(str(committed)),
+            cap=Decimal(str(cap)),
+            wanted=Decimal(str(wanted)),
+            new_request=new_request,
+        )
+        if blocked is not None:
+            return blocked
     # Every capped axis has room, so the row moved under this request between the
     # gate and here, or the user was deleted. Neither is an axis, and naming one
     # would be a guess.
-    return "budget"
+    return BlockedAxis("budget")
 
 
 def _normalize_strategy(strategy: str | None) -> str:
@@ -561,6 +564,7 @@ async def reserve_budget(
     model_is_free: bool | None = None,
     reservation_ttl_sec: int = DEFAULT_RESERVATION_TTL_SEC,
     record_reservation: bool = True,
+    reserved_output_tokens: int | None = None,
 ) -> ReservationHandle:
     """Atomically pre-debit an estimated cost against every budget that applies.
 
@@ -575,6 +579,7 @@ async def reserve_budget(
     ``scope`` adds the tenancy-scoped ceilings, and every one of them must also admit the estimate.
     The scoped ceilings are held first and released if the per-user gate refuses, so a refused request leaves no hold.
     ``record_reservation=False`` writes no ledger row, for a top-up whose request already has one.
+    ``reserved_output_tokens`` is the output allowance ``estimate`` was priced at, for a refusal to name.
 
     NOTE: The caller must pass the returned handle to :func:`reconcile_reservation` or :func:`refund_reservation`.
     """
@@ -694,7 +699,7 @@ async def reserve_budget(
         )
         if refused is not None:
             BUDGET_EXCEEDED.inc()
-            axis = await blocked_axis(
+            blocked = await blocked_axis(
                 db,
                 refused,
                 amount=usd,
@@ -704,7 +709,12 @@ async def reserve_budget(
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"{refused.subject} has exceeded {axis} limit",
+                detail=refusal_detail(
+                    refused.subject,
+                    blocked,
+                    new_request=new_request,
+                    reserved_output_tokens=reserved_output_tokens,
+                ),
                 headers=error_codes.error_headers(error_codes.BUDGET_EXCEEDED, budget_scope=refused.scope_type),
             )
 
@@ -811,7 +821,7 @@ async def reserve_budget(
         # are the ones on the row now, and the refusal path can afford a query
         # where the admission path cannot.
         refused_on = await get_active_user(db, user_id)
-        axis = (
+        blocked = (
             _blocked_axis(
                 budget,
                 spend=refused_on.spend,
@@ -826,11 +836,16 @@ async def reserve_budget(
                 new_request=new_request,
             )
             if refused_on is not None
-            else "budget"
+            else BlockedAxis("budget")
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"User '{user_id}' has exceeded {axis} limit",
+            detail=refusal_detail(
+                f"User '{user_id}'",
+                blocked,
+                new_request=new_request,
+                reserved_output_tokens=reserved_output_tokens,
+            ),
             headers=error_codes.error_headers(error_codes.BUDGET_EXCEEDED, budget_scope="user"),
         )
 
@@ -1110,7 +1125,7 @@ async def increase_reservation(
         )
         if refused is not None:
             BUDGET_EXCEEDED.inc()
-            axis = await blocked_axis(
+            blocked = await blocked_axis(
                 db,
                 refused,
                 amount=additional,
@@ -1120,7 +1135,7 @@ async def increase_reservation(
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"{refused.subject} has exceeded {axis} limit",
+                detail=refusal_detail(refused.subject, blocked, new_request=False),
                 headers=error_codes.error_headers(error_codes.BUDGET_EXCEEDED, budget_scope=refused.scope_type),
             )
         # Recorded here, next to the hold it describes, and before the per-user
