@@ -28,11 +28,11 @@ from gateway.services.merged_catalog_service import (
     ModelObject,
     alias_model,
     apply_default_pricing,
+    apply_model_limits,
     apply_organization_pricing,
     build_merged_catalog,
     catalog_aliases,
     catalog_scope,
-    context_window_for_key,
     created_timestamp,
     get_pricing_map,
     mark_deployment_managed,
@@ -49,6 +49,7 @@ from gateway.services.model_catalog_service import (
     ModelCatalogEntry,
     background_catalog_enabled,
     build_metadata_map,
+    load_catalog_metadata,
     load_models_dev_catalog,
 )
 from gateway.services.model_discovery_service import (
@@ -200,8 +201,10 @@ async def list_models(
     """List all available models.
 
     Returns models auto-discovered from configured providers, enriched with
-    pricing data from the model_pricing table when available. Models that only
-    exist in the pricing table are also included for backward compatibility.
+    pricing data from the model_pricing table when available, and with each
+    model's context window and output limit where models.dev or genai-prices
+    knows them. Models that only exist in the pricing table are also included
+    for backward compatibility.
     """
     catalog = await build_merged_catalog(
         db, config, auth=auth, session_identity=session_identity, provider=provider, model_provider=model_provider
@@ -334,13 +337,17 @@ async def _find_model(
     if model_id not in aliases and withheld_as_unadvertised(config, scope, normalize_pricing_key(config, model_id)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{model_id}' not found")
 
+    models_dev = await load_catalog_metadata(config)
+
     # An alias resolves to its own entry, with pricing read from the resolved
     # target so the underlying provider/model stays hidden. Only the target's own
     # rows are loaded rather than the whole pricing table.
     alias_target = aliases.get(model_id)
     if alias_target is not None:
         pricing_map = await get_pricing_map(db, model_keys=pricing_key_candidates(config, alias_target))
-        return alias_model(config, model_id, alias_target, normalized_pricing_lookup(config, pricing_map)), aliases
+        return alias_model(
+            config, model_id, alias_target, normalized_pricing_lookup(config, pricing_map), models_dev=models_dev
+        ), aliases
 
     # Check the pricing table first.
     stmt = (
@@ -386,14 +393,10 @@ async def _find_model(
         # consults the same fallback. Reporting 404 for a model that is being
         # charged for is the lie phase 3 of the listing exists to avoid, so
         # answer with the effective rate when there is one.
-        fallback = ModelObject(
-            id=model_id,
-            created=0,
-            owned_by=owner_from_key(model_id),
-            context_window=context_window_for_key(model_id),
-        )
+        fallback = ModelObject(id=model_id, created=0, owned_by=owner_from_key(model_id))
         apply_default_pricing(fallback)
         if fallback.pricing is not None:
+            apply_model_limits(config, models_dev, fallback)
             return mark_deployment_managed(
                 config, fallback, deployment_supplied_providers=scope.deployment_supplied_providers
             ), aliases
@@ -412,18 +415,25 @@ async def _find_model(
             owned_by=discovered_provider,
             pricing=pricing_info(pricing) if pricing else None,
             pricing_source="configured" if pricing else "none",
-            context_window=context_window_for_key(model_key),
         )
         apply_default_pricing(obj)
+        apply_model_limits(config, models_dev, obj)
         return mark_deployment_managed(
             config, obj, deployment_supplied_providers=scope.deployment_supplied_providers
         ), aliases
 
     # Pricing-only model (no discovery data).
     assert pricing is not None
+    obj = model_from_pricing(pricing)
+    apply_model_limits(config, models_dev, obj)
     return mark_deployment_managed(
-        config, model_from_pricing(pricing), deployment_supplied_providers=scope.deployment_supplied_providers
+        config, obj, deployment_supplied_providers=scope.deployment_supplied_providers
     ), aliases
+
+
+def _token_limit(value: object) -> int | None:
+    """A token limit the control plane reported, or ``None`` when it is not a positive integer."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
 def _model_from_platform(entry: object) -> ModelObject:
@@ -436,6 +446,8 @@ def _model_from_platform(entry: object) -> ModelObject:
         id=entry["id"],
         created=created if isinstance(created, int) and not isinstance(created, bool) else 0,
         owned_by=owned_by if isinstance(owned_by, str) and owned_by else owner_from_key(entry["id"]),
+        context_window=_token_limit(entry.get("context_window")),
+        max_output_tokens=_token_limit(entry.get("max_output_tokens")),
     )
 
 

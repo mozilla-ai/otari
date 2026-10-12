@@ -166,3 +166,32 @@ def test_background_catalog_requires_caching_and_enrichment() -> None:
     assert (
         mcs.background_catalog_enabled(GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=60)) is True
     )
+
+
+def test_metadata_entry_reads_a_gemini_listing_id_as_the_bare_one() -> None:
+    """Gemini lists ``models/<id>``; models.dev keys the bare id under ``google``."""
+    catalog = {"google": {"models": {"gemini-3.5-flash-lite": {"limit": {"context": 1048576, "output": 65536}}}}}
+
+    entry = mcs.metadata_entry(catalog, "gemini", "models/gemini-3.5-flash-lite")
+
+    assert entry is not None
+    assert (entry.context_window, entry.max_output_tokens) == (1048576, 65536)
+    assert mcs.metadata_entry(catalog, "gemini", "gemini-3.5-flash-lite") is not None
+    assert mcs.metadata_entry(catalog, "gemini", "models/gemini-9") is None
+    assert mcs.metadata_entry(None, "gemini", "gemini-3.5-flash-lite") is None
+
+
+@pytest.mark.asyncio
+async def test_catalog_metadata_fetches_only_when_a_read_may() -> None:
+    """A request-time read fetches on a cold cache; a read off the request path never does."""
+    config = GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=60)
+
+    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=CATALOG)) as fetch:
+        assert await mcs.load_catalog_metadata(config, cached_only=True) is None
+        fetch.assert_not_awaited()
+
+        assert await mcs.load_catalog_metadata(config) == CATALOG
+        fetch.assert_awaited_once()
+
+        assert await mcs.load_catalog_metadata(config, cached_only=True) == CATALOG
+    assert await mcs.load_catalog_metadata(GatewayConfig(models_dev_metadata=False)) is None

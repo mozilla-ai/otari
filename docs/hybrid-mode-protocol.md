@@ -522,7 +522,13 @@ Content-Type: application/json
 ```json
 {
   "models": [
-    {"id": "openai:gpt-4o", "created": 1715367049, "owned_by": "openai"}
+    {
+      "id": "openai:gpt-4o",
+      "created": 1715367049,
+      "owned_by": "openai",
+      "context_window": 128000,
+      "max_output_tokens": 16384
+    }
   ]
 }
 ```
@@ -531,9 +537,11 @@ The peer returns only the models the key may use, so it owns entitlement: a
 managed model is listed only for a key entitled to it, and the key's
 `allowed_models` narrows the list. Otari relays the list, sorted by `id`, and
 filters nothing itself. It reads `id` (required, the selector to send as
-`model`), `created` (integer, `0` when absent) and `owned_by` (the provider
-prefix of `id` when absent). Every answer must carry the `models` key; an empty
-list means the key may use none.
+`model`), `created` (integer, `0` when absent), `owned_by` (the provider
+prefix of `id` when absent), and the model's token limits, `context_window` and
+`max_output_tokens` (each a positive integer, `null` when absent or not one).
+Every answer must carry the `models` key; an empty list means the key may use
+none.
 
 ### Failure
 

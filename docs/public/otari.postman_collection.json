@@ -2875,7 +2875,7 @@
         {
           "name": "List Models",
           "request": {
-            "description": "List all available models.\n\nReturns models auto-discovered from configured providers, enriched with\npricing data from the model_pricing table when available. Models that only\nexist in the pricing table are also included for backward compatibility.",
+            "description": "List all available models.\n\nReturns models auto-discovered from configured providers, enriched with\npricing data from the model_pricing table when available, and with each\nmodel's context window and output limit where models.dev or genai-prices\nknows them. Models that only exist in the pricing table are also included\nfor backward compatibility.",
             "header": [],
             "method": "GET",
             "url": {

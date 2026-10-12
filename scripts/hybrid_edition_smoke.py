@@ -460,7 +460,15 @@ class _ControlPlaneHandler(_RecordingHandler):
         elif route == "code-execution/resolve":
             self._respond(200, code_execution_policy)
         elif route == "models/resolve":
-            self._respond(200, {"models": [{"id": MODELS_LISTED[1]}, {"id": MODELS_LISTED[0], "created": 1}]})
+            self._respond(
+                200,
+                {
+                    "models": [
+                        {"id": MODELS_LISTED[1], "context_window": 262144, "max_output_tokens": 8192},
+                        {"id": MODELS_LISTED[0], "created": 1},
+                    ]
+                },
+            )
         else:
             self._respond(404, {"detail": f"fake control plane has no route {route}"})
 
@@ -1377,11 +1385,16 @@ def check_platform_refusals(base_url: str, fakes: Fakes) -> None:
 
 
 def run_models(base_url: str, fakes: Fakes) -> None:
-    """GET /models relays the control plane's list for the caller's token, and refuses an unknown one."""
+    """GET /models relays the control plane's list and limits for the caller's token, and refuses an unknown one."""
     status, body, _ = _request("GET", f"{base_url}{API_ROOT}/models", headers={KEY_HEADER: USER_TOKEN_OK})
     _expect(status, 200, "listing models", body)
     listed = [m.get("id") for m in body.get("data", [])]
     _check(listed == sorted(MODELS_LISTED), f"model list was {listed!r}")
+    limits = {m.get("id"): (m.get("context_window"), m.get("max_output_tokens")) for m in body.get("data", [])}
+    _check(
+        limits == {MODELS_LISTED[1]: (262144, 8192), MODELS_LISTED[0]: (None, None)},
+        f"model limits were {limits!r}",
+    )
     resolves = fakes.control_plane.recorder.all("models/resolve")
     _check(len(resolves) == 1 and resolves[0].body == {}, f"models resolve: {[r.body for r in resolves]!r}")
 

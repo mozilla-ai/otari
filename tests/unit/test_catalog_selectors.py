@@ -315,7 +315,6 @@ async def test_only_an_operator_triggered_rebuild_may_dial(fetch: bool, expected
     with (
         patch.object(selector_index_service, "build_merged_catalog", new=AsyncMock(return_value=empty)) as build,
         patch.object(selector_index_service, "resolve_all_organizations_offered_keys", new=AsyncMock(return_value={})),
-        patch.object(selector_index_service, "load_models_dev_catalog", new=AsyncMock(return_value=None)),
     ):
         await selector_index_service.rebuild_selector_index(AsyncMock(), config, fetch=fetch)
 

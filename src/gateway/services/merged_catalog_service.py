@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -31,6 +31,7 @@ from gateway.models.tenancy import User as TenancyUser
 from gateway.ports.model_provider_port import HostedModels, ModelProviderPort
 from gateway.services.alias_service import effective_aliases
 from gateway.services.model_access import is_model_allowed, resolve_request_allowlist
+from gateway.services.model_catalog_service import load_catalog_metadata, metadata_entry
 from gateway.services.model_discovery_service import background_discovery_enabled, discover_all_models
 from gateway.services.policy_store import effective_policies
 from gateway.services.pricing_service import (
@@ -132,10 +133,11 @@ class ModelObject(BaseModel):
     # own rate), "configured" (DB), "default" (genai-prices fallback, only when
     # default_pricing is enabled), "dynamic" (a policy priced per request), or "none".
     pricing_source: str = "none"
-    # Context-window token limit from the bundled genai-prices dataset, when it
-    # knows the model. Metadata only (independent of the default_pricing toggle);
-    # ``None`` when the dataset has no value for the model.
+    # Token limits, from models.dev and then genai-prices (see ``model_limits``).
+    # Metadata only, independent of the default_pricing toggle; ``None`` when
+    # neither dataset knows the model.
     context_window: int | None = None
+    max_output_tokens: int | None = None
     # True when the deployment pays the upstream bill for this model, so the organization may not set its own rate.
     # An alias or policy is a name, not a model, so it is always False.
     deployment_managed: bool = False
@@ -173,16 +175,38 @@ def created_timestamp(model: "Model") -> int:
         return 0
 
 
-def context_window_for_key(model_key: str) -> int | None:
-    """genai-prices context-window for a ``provider:model`` (or bare) key.
+class ModelLimits(NamedTuple):
+    """A model's token limits, ``None`` where neither dataset knows one."""
 
-    Metadata, so it is filled whether or not the default-pricing fallback is on;
-    ``None`` when the dataset does not know the model or lists no window for it.
+    context_window: int | None
+    max_output_tokens: int | None
+
+
+def model_limits(config: GatewayConfig, models_dev: dict[str, Any] | None, model_key: str) -> ModelLimits:
+    """The token limits of a ``provider:model`` (or bare) key.
+
+    models.dev first, because it describes the model as that provider serves
+    it, then genai-prices for the context window. genai-prices lists no output
+    limit, so without a models.dev entry there is none. A bare key names no
+    provider to look models.dev up under.
     """
-    provider_part, separator, model_part = model_key.partition(":")
-    provider = provider_part if separator else None
-    model_name = model_part if separator else model_key
-    return model_context_window(provider, model_name)
+    instance, separator, model_id = model_key.partition(":")
+    if not separator:
+        return ModelLimits(model_context_window(None, model_key), None)
+    metadata = metadata_entry(models_dev, config.provider_instance_type(instance), model_id)
+    return ModelLimits(
+        context_window=(metadata.context_window if metadata else None) or model_context_window(instance, model_id),
+        max_output_tokens=metadata.max_output_tokens if metadata else None,
+    )
+
+
+def apply_model_limits(
+    config: GatewayConfig, models_dev: dict[str, Any] | None, obj: ModelObject, limits_selector: str | None = None
+) -> None:
+    """Fill ``obj``'s token limits from ``limits_selector``, or from its own id."""
+    limits = model_limits(config, models_dev, limits_selector or obj.id)
+    obj.context_window = limits.context_window
+    obj.max_output_tokens = limits.max_output_tokens
 
 
 def model_from_pricing(pricing: ModelPricing) -> ModelObject:
@@ -194,11 +218,17 @@ def model_from_pricing(pricing: ModelPricing) -> ModelObject:
         owned_by=owner_from_key(pricing.model_key),
         pricing=pricing_info(pricing),
         pricing_source="configured",
-        context_window=context_window_for_key(pricing.model_key),
     )
 
 
-def alias_model(config: GatewayConfig, alias: str, target: str, pricing_lookup: dict[str, ModelPricing]) -> ModelObject:
+def alias_model(
+    config: GatewayConfig,
+    alias: str,
+    target: str,
+    pricing_lookup: dict[str, ModelPricing],
+    *,
+    models_dev: dict[str, Any] | None,
+) -> ModelObject:
     """Build a ModelObject for an alias, from config.yml or from storage.
 
     The alias id is what the caller sees; pricing is looked up from the resolved
@@ -215,15 +245,14 @@ def alias_model(config: GatewayConfig, alias: str, target: str, pricing_lookup: 
         owned_by=ALIAS_OWNED_BY,
         pricing=pricing_info(pricing) if pricing else None,
         pricing_source="configured" if pricing else "none",
-        # From the resolved target, like pricing: an alias's display name is not a
-        # model the dataset knows. Exposing the window does not reveal the target.
-        context_window=context_window_for_key(canonical_target),
     )
     # Priced from the target, never from the alias's display name: the fallback
     # keys on a real provider/model, and the display name is neither. Without
     # this an alias to an unpriced model would report no price while the gateway
     # billed it at the default rate.
     apply_default_pricing(obj, pricing_selector=canonical_target)
+    # Limits from the target too, for the same reason. Exposing them does not reveal the target.
+    apply_model_limits(config, models_dev, obj, limits_selector=canonical_target)
     return obj
 
 
@@ -615,6 +644,8 @@ class MergedCatalog:
     """The selectors phase 1 heard from a provider, as opposed to only priced."""
     deployment_key_models: HostedModels = field(default_factory=dict)
     """What the caller reaches on a deployment-owned key; see :attr:`CatalogScope.deployment_key_models`."""
+    models_dev: dict[str, Any] | None = None
+    """The models.dev catalog the limits were read from, for a reader that joins more of it."""
 
 
 async def build_merged_catalog(
@@ -635,8 +666,9 @@ async def build_merged_catalog(
     ``anonymous`` is the public catalog's visitor, who is answered from what
     the deployment itself serves; see :func:`catalog_scope`.
 
-    ``cached_only`` builds the view without dialing any provider, for a caller
-    that runs off the request path; see :func:`discover_all_models`.
+    ``cached_only`` builds the view without dialing any provider or fetching
+    models.dev, for a caller that runs off the request path; see
+    :func:`discover_all_models`.
 
     Passing ``None`` as ``model_provider`` lists no hosted providers, and
     ``include_offered=False`` leaves out the caller's organization's offered
@@ -708,6 +740,7 @@ async def build_merged_catalog(
     # rate, and the single-model read served the same model with its price all
     # along, so nothing was actually kept off the wire.
     alias_targets = alias_target_keys(config, configured_aliases) if withhold_alias_targets else set()
+    models_dev = await load_catalog_metadata(config, cached_only=cached_only)
 
     merged: dict[str, ModelObject] = {}
     discovered_keys: set[str] = set()
@@ -742,7 +775,6 @@ async def build_merged_catalog(
                 owned_by=provider_name,
                 pricing=pricing_info(pricing) if pricing else None,
                 pricing_source="configured" if pricing else "none",
-                context_window=context_window_for_key(model_key),
             )
 
     # Phase 2: pricing-only models (not discovered but have pricing entries).
@@ -791,17 +823,17 @@ async def build_merged_catalog(
             owned_by=owner,
             pricing=None,
             pricing_source="none",
-            context_window=context_window_for_key(model_key),
         )
 
     # Phase 3: fill the genai-prices default for unpriced models, so the catalog
-    # shows the effective rate when the fallback is active. Database pricing
-    # (phases 1-2) always wins; this only touches models still without a price.
-    # Runs before aliases are added: this fills from ``id``, and an alias's id is
-    # a display name the fallback must never be asked to price. Aliases fill
-    # their own default from the resolved target in phase 4.
+    # shows the effective rate when the fallback is active, and every model's
+    # token limits. Database pricing (phases 1-2) always wins; this only touches
+    # models still without a price. Runs before aliases are added: this fills
+    # from ``id``, and an alias's id is a display name the fallback must never be
+    # asked to price. Aliases fill both from the resolved target in phase 4.
     for obj in merged.values():
         apply_default_pricing(obj)
+        apply_model_limits(config, models_dev, obj)
 
     # Phase 4: aliases, from config.yml and from storage alike. An alias is a
     # display name, not a provider, so it is only listed for the unfiltered
@@ -809,7 +841,7 @@ async def build_merged_catalog(
     # must not leak the alias mapping.
     if provider is None:
         for alias, target in aliases.items():
-            merged[alias] = alias_model(config, alias, target, pricing_lookup)
+            merged[alias] = alias_model(config, alias, target, pricing_lookup, models_dev=models_dev)
         # Phase 5: policies whose candidate is decided per request. Listed last so
         # nothing else can price them, and excluded from a ``?provider=`` filter
         # for the same reason aliases are.
@@ -849,6 +881,7 @@ async def build_merged_catalog(
         dynamic_policies=dynamic_policies,
         discovered_keys=discovered_keys,
         deployment_key_models=scope.deployment_key_models,
+        models_dev=models_dev,
     )
 
 

@@ -69,8 +69,6 @@ from gateway.services.merged_catalog_service import (
 )
 from gateway.services.model_catalog_service import (
     ModelCatalogEntry,
-    background_catalog_enabled,
-    load_models_dev_catalog,
     models_dev_provider_id,
 )
 from gateway.services.model_identity import (
@@ -352,7 +350,7 @@ async def _group(
     caller: CatalogCaller,
     session_identity: TenancyUser | None,
 ) -> _Grouped:
-    catalog = await load_models_dev_catalog(config, serve_stale=background_catalog_enabled(config))
+    catalog = merged.models_dev
     now = normalize_effective_at(None)
     real = real_offerings(merged)
 
@@ -385,8 +383,9 @@ async def _group(
                     hosted=obj.deployment_managed or served_on_deployment_key(merged.deployment_key_models, obj.id),
                 ),
                 discovered=obj.id in merged.discovered_keys,
-                context_window=(metadata.context_window if metadata else None) or obj.context_window,
-                max_output_tokens=metadata.max_output_tokens if metadata else None,
+                # From the merged catalog, so the flat listing reports the same limits.
+                context_window=obj.context_window,
+                max_output_tokens=obj.max_output_tokens,
                 quantization=clean_model_id(model_id).quantization,
                 pricing=pricing,
                 price_source=source,

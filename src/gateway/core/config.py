@@ -1093,10 +1093,11 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
     models_dev_metadata: Annotated[bool, Shown(SettingsGroup.MODELS)] = Field(
         default=True,
         description=(
-            "Enrich the dashboard's model detail with metadata (modalities, "
-            "capabilities, knowledge cutoff) fetched from the public models.dev "
-            "catalog. Set false to disable the outbound call; the gateway then "
-            "falls back to the bundled genai-prices data."
+            "Enrich the model listing and the dashboard's model detail with metadata "
+            "(token limits, modalities, capabilities, knowledge cutoff) fetched from "
+            "the public models.dev catalog. Set false to disable the outbound call; "
+            "the gateway then falls back to the bundled genai-prices data, which "
+            "lists a context window for some models and no output limit."
         ),
     )
     models_dev_cache_ttl_seconds: Annotated[int, Shown(SettingsGroup.MODELS)] = Field(
@@ -1104,9 +1105,10 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
         ge=0,
         description=(
             "TTL in seconds for the cached models.dev catalog, and the interval at which a "
-            "background task refetches it (floored at 5 minutes). Above 0, GET /api/v1/models/metadata "
-            "answers from the cache instead of waiting on the fetch; a failed fetch is held for one "
-            "minute rather than the refresh interval. 0 disables caching, so every read fetches."
+            "background task refetches it (floored at 5 minutes). Above 0, the model listing, the "
+            "catalog and GET /api/v1/models/metadata answer from the cache instead of waiting on the "
+            "fetch; a failed fetch is held for one minute rather than the refresh interval. 0 "
+            "disables caching, so every read fetches."
         ),
     )
     public_catalog: Annotated[bool, Shown(SettingsGroup.MODELS)] = Field(
