@@ -51,6 +51,7 @@ from gateway.api.routes._pipeline import (
     error_kind_for_status,
     prepare_gateway_tools,
     provider_error_headers,
+    provider_failure_detail,
     raise_all_streaming_attempts_failed,
     release_reservation,
     resolve_dispatch_provider,
@@ -618,7 +619,7 @@ class _MessagesAdapter:
             )
         return _anthropic_error(
             _ERR_API,
-            _PROVIDER_ERROR,
+            provider_failure_detail(exc, _PROVIDER_ERROR),
             status.HTTP_500_INTERNAL_SERVER_ERROR,
             with_retry_hint(exc, status.HTTP_500_INTERNAL_SERVER_ERROR, None),
         )

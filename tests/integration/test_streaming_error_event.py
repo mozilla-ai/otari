@@ -113,7 +113,7 @@ def test_streaming_creation_error_returns_http_error(
 @pytest.mark.parametrize(
     ("exc", "code", "message"),
     [
-        (_UpstreamStatusError(503), "provider_error", "An error occurred during streaming"),
+        (_UpstreamStatusError(503), "provider_error", "The provider failed the request with HTTP 503"),
         (_UpstreamStatusError(429), "upstream_rate_limited", "upstream detail [redacted] at [redacted]"),
         (
             ContextLengthExceededError("prompt is too long", status_code=400),
@@ -207,7 +207,7 @@ def test_an_upstream_outage_before_the_first_chunk_is_answered_with_a_502(
     response = _stream_chat_failing_before_its_first_chunk(client, master_key_header, _UpstreamStatusError(503))
 
     assert response.status_code == 502, response.text
-    assert response.json() == {"detail": "LLM provider error"}
+    assert response.json() == {"detail": "The provider failed the request with HTTP 503"}
     assert "sk-live-abc123" not in response.text
     assert "x-should-retry" not in response.headers
 

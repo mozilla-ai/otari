@@ -19,7 +19,6 @@ from fastapi.testclient import TestClient
 
 from gateway.api.routes._pipeline import (
     PROVIDER_CREDENTIALS_DETAIL,
-    PROVIDER_ERROR_DETAIL,
     PROVIDER_RATE_LIMITED_DETAIL,
 )
 from gateway.core.config import API_ROOT
@@ -173,7 +172,7 @@ def test_chat_surfaces_unsupported_prompt_cache_key_as_client_error(
     assert response.json()["detail"] == "'prompt_cache_key' is not supported for anthropic"
 
 
-def test_chat_unknown_status_stays_generic_502(
+def test_chat_unknown_status_is_a_502_naming_only_the_upstream_status(
     client: TestClient,
     api_key_header: dict[str, str],
     test_user: dict[str, Any],
@@ -190,8 +189,9 @@ def test_chat_unknown_status_stays_generic_502(
         )
 
     assert response.status_code == 502
-    assert response.json()["detail"] == PROVIDER_ERROR_DETAIL
+    assert response.json()["detail"] == "The provider failed the request with HTTP 500"
     assert "SECRET" not in response.text
+    assert "x-should-retry" not in response.headers
 
 
 def test_chat_surfaces_reasoning_effort_tools_conflict(
@@ -411,3 +411,41 @@ def test_messages_answers_a_provider_400_with_the_providers_sentence(
         "type": "invalid_request_error",
         "message": "max_tokens: Field required",
     }
+
+
+def _dropped_connection() -> openai.APIConnectionError:
+    request = httpx.Request("POST", "https://internal-proxy.example/v1/chat/completions")
+    try:
+        raise openai.APIConnectionError(request=request) from httpx.RemoteProtocolError(
+            "Server disconnected without sending a response."
+        )
+    except openai.APIConnectionError as exc:
+        return exc
+
+
+@pytest.mark.parametrize(
+    ("path", "target", "body"),
+    [
+        (
+            "chat/completions",
+            "gateway.api.routes.chat.acompletion",
+            {"model": "openai:gpt-5-mini", "messages": [{"role": "user", "content": "Hi"}]},
+        ),
+        ("embeddings", "gateway.api.routes.embeddings.aembedding", {"model": "openai:gpt-5-mini", "input": "Hi"}),
+    ],
+)
+def test_a_dropped_connection_is_a_502_saying_the_provider_closed_it(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    test_user: dict[str, Any],
+    path: str,
+    target: str,
+    body: dict[str, Any],
+) -> None:
+    with patch(target, new_callable=AsyncMock, side_effect=_dropped_connection()):
+        response = client.post(f"{API_ROOT}/{path}", json=body, headers=api_key_header)
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "The provider closed the connection before answering"
+    assert "internal-proxy" not in response.text
+    assert "x-should-retry" not in response.headers

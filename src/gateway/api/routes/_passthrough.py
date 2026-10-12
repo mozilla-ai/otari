@@ -48,6 +48,7 @@ from gateway.api.routes._pipeline import (
     failure_status_code,
     log_gateway_rejection,
     provider_error_headers,
+    provider_failure_detail,
     rate_limit_headers,
     throttle_early_rejection,
     unresolvable_model_detail,
@@ -626,7 +627,7 @@ async def run_passthrough(
         logger.error("Provider call failed for %s:%s (%s): %s", resolved.provider, resolved.model, error_class, e)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=PASSTHROUGH_PROVIDER_ERROR_DETAIL,
+            detail=provider_failure_detail(e, PASSTHROUGH_PROVIDER_ERROR_DETAIL),
             headers=with_retry_hint(e, status.HTTP_502_BAD_GATEWAY, None),
         ) from e
 

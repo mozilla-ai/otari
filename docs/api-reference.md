@@ -411,7 +411,11 @@ it sent one, which a client may retry after waiting. A provider that refuses the
 gateway's own credential (its 401, or a 403 that is not a rejection of the request) answers 424 with
 `Otari-Error-Code: provider_credential_rejected`, which a client does not retry
 either. A provider timeout answers 504, and any other provider failure 502
-(500 on Messages).
+(500 on Messages), whose detail says what happened upstream and nothing more:
+`The provider failed the request with HTTP 500` (the provider's own status),
+`The provider closed the connection before answering`, or
+`The gateway could not connect to the provider`. A failure Otari cannot place
+keeps the fixed `LLM provider error`.
 When the request named a model alias,
 a provider message that names the alias's target names the alias instead.
 
@@ -482,7 +486,8 @@ applies (`upstream_rate_limited`, `context_length_exceeded`), otherwise
 `provider_error` when the provider failed the stream, including one it ended
 early. Its message is the `detail` the same failure would carry as an HTTP
 error where that names a cause (a rejected parameter, the provider's own
-explanation of a rejected request, redacted as described above), and a fixed
+explanation of a rejected request, redacted as described above, or what
+happened upstream, such as the provider's error status), and a fixed
 `An error occurred during streaming` otherwise. An event with no `code` is a
 failure inside the gateway. Either way, a standalone gateway records the
 request's usage row with status `error`.

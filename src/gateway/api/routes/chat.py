@@ -29,7 +29,6 @@ from gateway.api.routes._idempotency import IdempotencyGuard, IdempotencyGuardDe
 from gateway.api.routes._normalize import normalize_request_messages, sandbox_requested
 from gateway.api.routes._pipeline import (
     NO_RESOLVABLE_PROVIDER_DETAIL,
-    PROVIDER_ERROR_DETAIL,
     DeclaredTools,
     ErrorKind,
     ToolBackends,
@@ -38,6 +37,7 @@ from gateway.api.routes._pipeline import (
     log_usage,
     prepare_gateway_tools,
     provider_error_headers,
+    provider_failure_detail,
     raise_all_streaming_attempts_failed,
     rate_limit_headers,
     resolve_dispatch_provider,
@@ -214,7 +214,7 @@ class _ChatAdapter:
             )
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=PROVIDER_ERROR_DETAIL,
+            detail=provider_failure_detail(exc),
             headers=with_retry_hint(exc, status.HTTP_502_BAD_GATEWAY, None),
         )
 

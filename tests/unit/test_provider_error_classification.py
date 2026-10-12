@@ -40,12 +40,14 @@ from gateway.api.routes._pipeline import (
     PROVIDER_BAD_REQUEST_DETAIL,
     PROVIDER_BILLING_DETAIL,
     PROVIDER_CREDENTIALS_DETAIL,
+    PROVIDER_ERROR_DETAIL,
     PROVIDER_MODEL_NOT_FOUND_DETAIL,
     PROVIDER_RATE_LIMITED_DETAIL,
     PROVIDER_TIMEOUT_DETAIL,
     classify_provider_error,
     failure_status_code,
     provider_error_headers,
+    provider_failure_detail,
     refusal_code,
     stream_error_code,
     stream_error_message,
@@ -1015,8 +1017,8 @@ def test_a_stream_error_event_names_a_cause_the_unstreamed_error_would() -> None
     }
 
 
-def test_a_stream_error_event_keeps_the_fixed_message_for_an_unclassified_failure() -> None:
-    assert stream_error_message(_StatusError(503)) is None
+def test_a_stream_error_event_keeps_the_fixed_message_for_a_failure_that_names_no_cause() -> None:
+    assert stream_error_message(_StatusError(503)) == "The provider failed the request with HTTP 503"
     assert stream_error_message(RuntimeError("bug")) is None
     assert stream_error_message(HTTPException(status_code=400, detail="internal")) is None
 
@@ -1508,3 +1510,60 @@ def test_attempts_that_all_hit_a_request_fault_403_share_the_callers_400() -> No
     assert rejection is not None
     assert rejection.status_code == 400
     assert rejection.headers != {"Otari-Error-Code": PROVIDER_CREDENTIAL_REJECTED}
+
+
+# ---------------------------------------------------------------------------
+# provider_failure_detail: what the 502 says happened upstream
+# ---------------------------------------------------------------------------
+
+
+def _openai_connection_error(cause: Exception) -> openai.APIConnectionError:
+    """The OpenAI SDK's connection error, raised from the httpx error as the SDK does."""
+    request = httpx.Request("POST", "https://internal-proxy.example:8443/v1/chat/completions")
+    try:
+        raise openai.APIConnectionError(request=request) from cause
+    except openai.APIConnectionError as exc:
+        return exc
+
+
+@pytest.mark.parametrize("unified", [False, True], ids=["raw", "unified"])
+@pytest.mark.parametrize(
+    ("upstream", "expected"),
+    [
+        (_StatusError(500), "The provider failed the request with HTTP 500"),
+        (_StatusError(503), "The provider failed the request with HTTP 503"),
+        (
+            _openai_connection_error(httpx.RemoteProtocolError("Server disconnected without sending a response.")),
+            "The provider closed the connection before answering",
+        ),
+        (
+            _openai_connection_error(httpx.ConnectError("[Errno 61] Connection refused")),
+            "The gateway could not connect to the provider",
+        ),
+    ],
+    ids=["500", "503", "closed", "unreachable"],
+)
+def test_a_provider_failure_left_to_the_502_says_what_happened_upstream(
+    upstream: Exception, expected: str, unified: bool
+) -> None:
+    exc = convert_exception(upstream, "openai") if unified else upstream
+
+    assert classify_provider_error(exc) is None
+    detail = provider_failure_detail(exc)
+    assert detail == expected
+    assert _RAW not in detail
+    assert "internal-proxy" not in detail
+    assert stream_error_message(exc) == expected
+
+
+def test_a_failure_inside_the_gateway_keeps_the_fixed_detail() -> None:
+    assert provider_failure_detail(RuntimeError("bug at /srv/otari")) == PROVIDER_ERROR_DETAIL
+    assert provider_failure_detail(RuntimeError("bug"), "fallback") == "fallback"
+
+
+def test_the_502_keeps_its_retry_behavior() -> None:
+    """Only the detail changed: a provider 5xx still carries no x-should-retry, so a client retries it."""
+    answer = _provider_failure_http_exc(_StatusError(500), fallback_detail="LLM provider error")
+    assert answer.status_code == 502
+    assert answer.detail == "The provider failed the request with HTTP 500"
+    assert SHOULD_RETRY_HEADER not in (answer.headers or {})

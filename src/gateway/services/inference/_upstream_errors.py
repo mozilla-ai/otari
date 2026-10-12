@@ -366,6 +366,11 @@ def is_retry_futile(exc: BaseException) -> bool:
     return any(isinstance(link, _LOCAL_FAULTS) for link in links)
 
 
+def is_upstream_connect_failure(exc: BaseException) -> bool:
+    """Whether the connection to the provider was never opened, as opposed to dropped once open."""
+    return any(isinstance(link, httpx.ConnectError) for link in _causal_chain(exc))
+
+
 def _causal_chain(exc: BaseException) -> Iterator[BaseException]:
     """``exc`` and every exception behind it, through any-llm's wrapper and Python's own chaining."""
     pending: list[BaseException] = [exc]

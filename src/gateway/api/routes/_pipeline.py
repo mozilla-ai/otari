@@ -211,6 +211,7 @@ from gateway.services.inference import (
     StillInFlight,
     UnknownCaller,
     is_provider_billing_error,
+    is_upstream_connect_failure,
     is_upstream_request_fault,
     upstream_body_messages,
     upstream_error_message,
@@ -385,6 +386,7 @@ API_KEY_NO_USER_DETAIL = "API key has no associated user"
 NO_RESOLVABLE_PROVIDER_DETAIL = "Authorization service returned no resolvable provider"
 PROVIDER_ERROR_DETAIL = "LLM provider error"
 PROVIDER_TIMEOUT_DETAIL = "LLM provider timeout"
+PROVIDER_STREAM_INTERRUPTED_DETAIL = "The provider's stream ended before it finished"
 # Fixed details for the provider failures that are the gateway's fault rather
 # than the caller's. These never embed the upstream message: a rejected
 # credential or an exhausted account is where provider internals concentrate,
@@ -814,14 +816,43 @@ def stream_error_code(exc: BaseException) -> str | None:
 def stream_error_message(exc: BaseException) -> str | None:
     """The message of the event that ends a stream on ``exc``, or None for the format's fixed one.
 
-    The detail the same failure gets as an HTTP error, where
-    :func:`classify_provider_error` gives it one, since that detail is already
-    safe for the caller to read.
+    The detail the same failure gets as an HTTP error, where that names a cause
+    (:func:`classify_provider_error`, or :func:`provider_failure_detail` for a
+    provider failure it leaves to the 502), since that detail is already safe
+    for the caller to read.
     """
     if isinstance(exc, HTTPException):
         return None
     mapping = classify_provider_error(exc)
-    return mapping.detail if mapping is not None else None
+    if mapping is not None:
+        return mapping.detail
+    return _provider_failure_cause(exc)
+
+
+def provider_failure_detail(exc: BaseException, fallback: str = PROVIDER_ERROR_DETAIL) -> str:
+    """The detail of the 502 for a provider failure :func:`classify_provider_error` leaves unclassified.
+
+    It says what happened upstream (the provider's error status, a connection it
+    closed or never opened, a stream it cut short) and nothing else: no host,
+    message or body, since those are the gateway's own topology. ``fallback`` when
+    the failure says none of that, such as a fault in the gateway itself.
+    """
+    return _provider_failure_cause(exc) or fallback
+
+
+def _provider_failure_cause(exc: BaseException) -> str | None:
+    if isinstance(exc, IncompleteStreamError):
+        return PROVIDER_STREAM_INTERRUPTED_DETAIL
+    kind, status_code = upstream_exception_shape(exc)
+    if status_code is not None:
+        return f"The provider failed the request with HTTP {status_code}"
+    if kind == "conn_err":
+        if is_upstream_connect_failure(exc):
+            return "The gateway could not connect to the provider"
+        return "The provider closed the connection before answering"
+    if kind == "timeout":
+        return "The provider did not answer in time"
+    return None
 
 
 def _is_upstream_failure(exc: BaseException) -> bool:

@@ -261,8 +261,9 @@ def _provider_failure_http_exc(
 
     Reuses the shared provider-error classifier so platform-mode failures get
     the same specific-but-safe statuses (400/404/429/504) the standalone
-    adapters return, instead of a blanket 502. Falls back to a 502 carrying
-    ``fallback_detail`` when the failure has no signal we can safely surface.
+    adapters return, instead of a blanket 502. Falls back to a 502 whose detail
+    says what happened upstream, or is ``fallback_detail`` when the failure has
+    no signal we can safely surface.
     The classifier applies its caller-fault versus gateway-fault detail split,
     so caller-fault details are sanitized provider diagnostics and gateway-fault
     details remain fixed strings. ``attempt_id``, when given, names the attempt
@@ -270,7 +271,7 @@ def _provider_failure_http_exc(
     """
     # Deferred import: _pipeline imports this module, so importing it at module
     # scope would be circular.
-    from gateway.api.routes._pipeline import classify_provider_error, provider_error_headers
+    from gateway.api.routes._pipeline import classify_provider_error, provider_error_headers, provider_failure_detail
 
     mapping = classify_provider_error(exc)
     if mapping is not None:
@@ -285,7 +286,7 @@ def _provider_failure_http_exc(
     return with_attempt_id(
         HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=fallback_detail,
+            detail=provider_failure_detail(exc, fallback_detail),
             headers=with_retry_hint(exc, status.HTTP_502_BAD_GATEWAY, None),
         ),
         attempt_id,
