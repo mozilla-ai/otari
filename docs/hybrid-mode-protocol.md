@@ -737,6 +737,8 @@ Content-Type: application/json
     "cache_read_tokens": 8,            // provider cache-read input tokens
     "cache_write_tokens": 0           // cache-write (creation) input tokens; Anthropic only
   },
+  "units": {"images": 2},              // optional on success; counts in a unit
+                                       // other than tokens. See Units below.
   "error_class": "http_401",           // optional on error; omitted when the
                                        // Otari can't classify the failure
                                        // (e.g. mid-stream errors). See below.
@@ -758,6 +760,41 @@ A successful attempt that completes without provider usage data still sends a
 final report, but omits `usage` so the platform can record it as unavailable
 rather than as an explicit zero-token result.
 
+#### Units
+
+The pass-through endpoints are billed in tokens, in counts, or both. A success
+report carries the counts in `units`, an object beside `usage`. Its keys are
+meters, `requests`, `search_units` and `images`, and its values are JSON integers
+from 0 to 1,000,000. A receiver ignores a key it does not know, as the extension
+policy says, and refuses a report whose known key carries anything else with a
+422.
+
+| Endpoint | `units` | `usage` |
+|---|---|---|
+| `POST /api/v1/embeddings` | absent | input tokens |
+| `POST /api/v1/rerank` | `search_units`: the units the provider billed, at least 1 | tokens where the provider reports them |
+| `POST /api/v1/images/generations` | `images`: the images returned | tokens where the provider reports them |
+| `POST /api/v1/audio/transcriptions` | `requests`: 1 | tokens where the provider reports token usage |
+| `POST /api/v1/audio/speech`, `POST /api/v1/moderations` | `requests`: 1 | absent |
+
+A receiver prices an attempt by its rate's unit, and the rate prices one thing:
+
+- A rate in `requests` bills the `requests` count, or else the `search_units`
+  count, at `input_price_per_million / 1,000,000` each. An attempt that reports
+  neither, such as a completion, is billed one request.
+- A rate in `images` bills the `images` count at `input_price_per_million` each,
+  read as USD per image. With no `images` count it prices nothing.
+- A rate in `tokens` bills `usage` and never a count. With no tokens it prices
+  nothing.
+
+Counts are never summed across meters. An attempt the rate prices nothing for is
+recorded unpriced. The cost is rounded once, half-up, to the micro-dollar.
+
+`units` sits beside `usage`, not in it, so a report whose provider returned no
+token counts still omits `usage`, and a receiver that does not read `units`
+records it as unavailable. A gateway does not negotiate this: it relies on its
+control plane reading `units` before it serves these endpoints.
+
 | Platform response | Gateway behavior |
 |---|---|
 | Completed success with `usage_status: "reported"` and non-null `pricing.source` | Validate the correlation id and attach `cost_usd` plus `pricing_source`. |
@@ -765,6 +802,7 @@ rather than as an explicit zero-token result.
 | `202` or legacy `204` | Return the provider response without inline cost. |
 | Terminal 4xx, including `404` and `410` | Do not retry or attach inline cost. |
 | Invalid body, correlation mismatch, reporting failure, or expired inline budget | Preserve the provider response and omit inline cost. |
+| A negative `cost_usd`, or a `pricing.source` that is not 1 to 32 lowercase letters and underscores | Treated as an invalid body. |
 
 ### Inline response fields
 

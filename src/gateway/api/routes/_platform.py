@@ -125,22 +125,28 @@ class ResolvedAttempt(BaseModel):
     ``default_attempt_kwargs``, which merges these in non-overridably."""
 
 
+# What the gateway attaches from a peer's settlement, checked at this edge: a
+# negative amount or a source name of any shape reaches a client otherwise.
+_SETTLED_COST_PATTERN = r"^\d+\.\d{6}$"
+_PRICING_SOURCE_PATTERN = r"^[a-z_]{1,32}$"
+
+
 class SettledCost(BaseModel):
     """An attachable platform settlement: a priced cost and the basis for it."""
 
-    cost_usd: str = Field(pattern=r"^-?\d+\.\d{6}$")
-    pricing_source: str
+    cost_usd: str = Field(pattern=_SETTLED_COST_PATTERN)
+    pricing_source: str = Field(pattern=_PRICING_SOURCE_PATTERN)
 
 
 class _UsagePricing(BaseModel):
-    source: str | None
+    source: str | None = Field(pattern=_PRICING_SOURCE_PATTERN)
 
 
 class _CompletedUsageSettlement(BaseModel):
     correlation_id: str
     status: Literal["completed"]
     outcome: Literal["success"]
-    cost_usd: str = Field(pattern=r"^-?\d+\.\d{6}$")
+    cost_usd: str = Field(pattern=_SETTLED_COST_PATTERN)
     currency: Literal["USD"]
     usage_status: Literal["reported", "unavailable"]
     pricing: _UsagePricing

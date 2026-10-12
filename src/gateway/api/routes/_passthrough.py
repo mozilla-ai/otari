@@ -4,8 +4,9 @@ The pass-through endpoints (audio, images, embeddings, moderations, rerank)
 follow one scaffold: resolve the billed user, rate limit, resolve the provider
 selector, reserve budget, call the provider, write a usage log, and reconcile
 (success) or refund (failure) the reservation. :func:`run_passthrough` owns
-that scaffold; each route supplies only its endpoint-specific pieces (budget
-estimate, provider call, token extraction, cost computation) as callbacks.
+that scaffold; each route supplies only its endpoint-specific pieces: the budget
+estimate, the provider call, and its ``PassthroughBilling``, which says what the
+result reports. The pricing domain prices that report; no route prices itself.
 
 Provider failures are classified by ``classify_provider_error``, the helper the
 chat, messages, and responses routes use, so a provider's refusal of the
@@ -56,7 +57,7 @@ from gateway.api.routes._platform import _classify_upstream_error, with_retry_hi
 from gateway.core.config import GatewayConfig
 from gateway.core.database import release_session
 from gateway.core.error_codes import MODEL_NOT_ALLOWED, PRICING_REQUIRED, PROVIDER_CREDENTIAL_REJECTED, error_headers
-from gateway.core.metered_pricing import billable_usage, price_billable_usage, quantize_cost
+from gateway.core.metered_pricing import BillableUsage, billable_usage, price_billable_usage
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.exceptions import TenancyError
 from gateway.inflight import track_request
@@ -82,6 +83,8 @@ from gateway.services.catalog import hide_alias_target
 from gateway.services.inference import (
     DecisionProvider,
     DecisionProviderError,
+    PassthroughBilling,
+    ReportedUsage,
     UnknownDecisionProviderError,
     decision_body,
     reported_charge,
@@ -96,6 +99,7 @@ from gateway.services.model_access import (
     resolve_request_allowlist,
     unresolvable_model_detail,
 )
+from gateway.services.pricing import UsageCharge, can_price, price_usage
 from gateway.services.pricing_service import (
     ResolvedPricing,
     find_model_pricing,
@@ -111,11 +115,6 @@ from gateway.services.workspace_scope import organization_for_workspace_id, reso
 ResultT = TypeVar("ResultT")
 
 PASSTHROUGH_PROVIDER_ERROR_DETAIL = "The request could not be completed by the provider"
-
-# A route's non-token charge lines: the meters dict and the auditable breakdown,
-# matching the shape ``price_billable_usage`` and ``price_tool_calls`` already
-# write for the chat and tool-charge paths.
-BillingMeters = tuple[dict[str, Any], list[dict[str, Any]]]
 
 
 def resolve_passthrough_user_id(
@@ -182,9 +181,7 @@ async def run_passthrough(
     pricing_use_defaults: bool = True,
     estimate: Callable[[ModelPricing | None], Decimal] | None = None,
     enforce_require_pricing: bool = False,
-    usage_tokens: Callable[[ResultT], tuple[int | None, int | None, int | None]] | None = None,
-    compute_cost: Callable[[ResultT, ModelPricing | None], Decimal | None] | None = None,
-    compute_meters: Callable[[ResultT, ModelPricing | None, Decimal], BillingMeters | None] | None = None,
+    billing: PassthroughBilling,
     map_provider_error: Callable[[Exception], HTTPException | None] | None = None,
     request_params: Collection[str] = (),
     reserve_before_resolve: bool = False,
@@ -231,15 +228,9 @@ async def run_passthrough(
             resolve-first path: a ``reserve_before_resolve`` route resolves
             pricing after its reservation and skips this gate, so setting both
             silently serves an unpriced model. No route sets both today.
-        usage_tokens: Maps the provider result to ``(prompt, completion,
-            total)`` token counts for the usage log. Defaults to ``(0, 0, 0)``.
-        compute_cost: Maps the result and pricing to the final USD cost, or
-            ``None`` to leave the log's cost unset and reconcile at 0.0.
-        compute_meters: Maps the result, pricing, and the cost ``compute_cost``
-            just returned to this request's billing meters and charge lines, or
-            ``None`` to leave both unset. Only called when ``compute_cost``
-            returned a cost, so a route with no priced unit never needs to guard
-            against a missing cost itself.
+        billing: How the endpoint is billed: what its result reports, which
+            the pricing domain prices at the rate found, and whether an attempt
+            no rate prices is free or unpriced.
         map_provider_error: Route-specific provider-exception mapping checked
             before the shared classification (the error log and refund happen
             either way).
@@ -436,7 +427,10 @@ async def run_passthrough(
         if (
             enforce_require_pricing
             and not budget_exempt
-            and pricing_required_but_missing(pricing, require_pricing=config.require_pricing)
+            and config.require_pricing
+            and not can_price(
+                pricing, meter=billing.meter, reports_tokens=billing.reports_tokens, legacy_unit_reading=True
+            )
         ):
             await refund_reservation(db, reservation)
             # This path never asks the hosted port, so none is passed.
@@ -558,31 +552,27 @@ async def run_passthrough(
     try:
         result = await call_provider(resolved)
 
-        prompt_tokens, completion_tokens, total_tokens = usage_tokens(result) if usage_tokens else (0, 0, 0)
+        reported = billing.report(result)
         usage_log = _usage_row(
             "success",
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
+            prompt_tokens=reported.input_tokens,
+            completion_tokens=reported.output_tokens,
+            total_tokens=reported.total_tokens,
         )
 
-        # Rounded here, once, so the row and the spend it reconciles settle at the
-        # same amount: the column would round the row on its own, and the ledger
-        # would then hold a fraction of a micro-dollar the row does not show.
-        raw_cost = compute_cost(result, pricing) if compute_cost else None
-        cost = quantize_cost(raw_cost) if raw_cost is not None else None
-        if cost is not None and raw_cost is not None:
-            usage_log.cost = cost
+        charge = price_usage(pricing, tokens=_billable_tokens(reported), units=reported.units, legacy_unit_reading=True)
+        if charge is None and billing.unpriced_is_free:
+            charge = UsageCharge(Decimal(0), {}, [])
+        cost = charge.cost if charge is not None else None
+        if charge is not None:
+            usage_log.cost = charge.cost
             usage_log.calculated_at = usage_log.timestamp
             if found_pricing is not None:
                 usage_log.pricing_source, usage_log.pricing_reference, usage_log.pricing_effective_at = (
                     pricing_provenance(found_pricing)
                 )
-            # The charge lines get the unrounded amount, the same way the token
-            # path's do: the column is the amount, the lines explain it.
-            billing = compute_meters(result, pricing, raw_cost) if compute_meters else None
-            if billing is not None:
-                usage_log.billing_meters, usage_log.pricing_breakdown = billing
+            if charge.meters:
+                usage_log.billing_meters, usage_log.pricing_breakdown = charge.meters, charge.lines
 
         await log_writer.put(usage_log)
         # The measured total, so a token ceiling counts this endpoint's traffic.
@@ -593,7 +583,7 @@ async def run_passthrough(
             db,
             reservation,
             cost if cost is not None else 0.0,
-            actual_tokens=max(total_tokens or 0, 0),
+            actual_tokens=max(reported.total_tokens or 0, 0),
         )
 
     except (HTTPException, TenancyError):
@@ -656,6 +646,17 @@ async def run_passthrough(
         headers=headers,
         pricing=found_pricing,
         cost=cost,
+    )
+
+
+def _billable_tokens(reported: ReportedUsage) -> BillableUsage | None:
+    """The tokens a result reported, as the cost core meters them, or ``None`` when it reported none."""
+    if not reported.input_tokens and not reported.output_tokens:
+        return None
+    return billable_usage(
+        input_tokens=reported.input_tokens or 0,
+        output_tokens=reported.output_tokens or 0,
+        cache_tokens_included=True,
     )
 
 

@@ -504,9 +504,36 @@ accepted shape.
 
 ### Per-request pricing (audio, moderations, rerank, and completion models)
 
-Audio, moderations, and direct search do not use token pricing. They reuse
-`input_price_per_million` as USD per million requests. An unpriced request on
-these endpoints is served at zero cost.
+A rate's `unit` decides what it bills. A rate in `tokens` bills the tokens the
+provider reports, a rate in `images` bills each image returned, and a rate in
+`requests` bills each request (or each search unit, for rerank). The rate reuses
+`input_price_per_million`: USD per million tokens, USD per million requests, or
+raw USD per image without million-unit scaling. A rate never bills a count of
+another unit, so a per-request price is never read as a price per image.
+
+| Endpoint | What it reports | Rates that price it |
+|---|---|---|
+| Embeddings | Input tokens | `tokens`; `requests` bills one request |
+| Rerank | Search units, and tokens where the provider reports them | `requests` per search unit, or `tokens` |
+| Image generation | Images returned, and tokens for a token-billed model such as `gpt-image-1` | `images` per image, `requests` per request, or `tokens` |
+| Audio transcription | One request, and tokens for a token-billed model such as `gpt-4o-transcribe` | `requests`, or `tokens` |
+| Audio speech, moderations | One request | `requests` |
+
+A rate in `tokens` on image generation, audio or moderations is still read in
+that endpoint's unit (per image, or per million requests), as this guide used to
+document, and logs a warning once per model. A later release reads such a rate
+strictly, as tokens, so set `unit: images` or `unit: requests` on those rates
+now. A token-billed model (`gpt-image-1`, `gpt-4o-transcribe`) can then be priced
+in `tokens`, because its tokens are recorded on the usage row.
+
+A flat per-image or per-request rate cannot follow what the caller chooses: an
+image's size and quality, or an audio file's length. Set it at the dearest
+option you allow.
+
+An unpriced request on audio or moderations is served at zero cost. Image
+generation, embeddings and rerank are subject to `require_pricing`, which also
+refuses a rate that cannot price the endpoint, such as an `images` rate on
+embeddings, rather than serving it unpriced.
 
 A search tool's rate is keyed `provider:tool` (`exa:exa-search` for a tool named
 `exa-search` backed by `exa`), and its provider needs no entry under
@@ -517,14 +544,14 @@ provider's reported charge when it reports one, and at the rate otherwise.
 
 Rerank accepts either unit. A rerank model priced `unit: tokens` is charged
 on the input tokens the provider reports. Providers that bill reranking per
-search unit (one query over a batch of documents) report that count and no
-tokens, so give such a model `unit: requests` and it is charged the reported
-units at `input_price_per_million / 1,000,000` each, or one unit when the
-provider reports none. The budget reservation holds one unit and settles at
-the reported count. The default-pricing dataset carries no rerank rates, so a
-rerank model needs its own pricing row, for example `cohere:rerank-v3.5` at
-`input_price_per_million: 2000` (USD 2 per 1,000 searches) with
-`unit: requests`.
+search unit (one query over up to 100 documents, a long document counting as
+several) report that count and no tokens, so give such a model `unit: requests`
+and it is charged the reported units at `input_price_per_million / 1,000,000`
+each, or one unit when the provider reports none. The budget reservation holds
+the units the documents imply, from their count and length, and settles at the
+reported count. The default-pricing dataset carries no rerank rates, so a rerank
+model needs its own pricing row, for example `cohere:rerank-v3.5` at
+`input_price_per_million: 2000` (USD 2 per 1,000 searches) with `unit: requests`.
 
 A model served over chat completions, the Responses API, or Messages can be
 priced the same way, for an upstream that bills per call and reports little or
@@ -552,12 +579,10 @@ model needs its own pricing row.
 
 ### Per-image pricing (image generation)
 
-Image generation uses `input_price_per_million` as raw USD per image, without
-million-unit scaling. Image generation is subject to `require_pricing` and
-reserves the requested image count before dispatch.
-
-These overloaded units are retained for schema compatibility. Do not apply a
-token price to a request-priced or image-priced endpoint.
+Image generation reserves the requested image count before dispatch at an
+`images` rate, then settles on the images the provider returned. Audio holds
+nothing before dispatch, so a priced audio request can exceed a budget by one
+request's price.
 
 ## Search tools
 

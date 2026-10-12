@@ -173,7 +173,14 @@ def test_a_token_priced_model_still_bills_reported_tokens(
     row = _row(db_session_factory)
     assert row.cost == Decimal("0.003")
     assert row.prompt_tokens == 1000
-    assert row.billing_meters == {"total_input_tokens": 1000}
+    assert row.billing_meters == {
+        "total_input_tokens": 1000,
+        "fresh_input_tokens": 1000,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cache_write_1h_tokens": 0,
+        "completion_tokens": 0,
+    }
 
 
 def test_a_token_priced_model_with_only_search_units_stays_unpriced(

@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from math import ceil
+from math import ceil, isfinite
 from typing import NamedTuple
 
 from genai_prices import Usage, calc_price
@@ -13,10 +13,11 @@ from sqlalchemy import case, distinct, func, inspect, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_ROOT
-from gateway.core.metered_pricing import meter_cost, priced_per_request, quantize_cost, request_charge_line, to_decimal
+from gateway.core.metered_pricing import priced_per_request, quantize_cost
 from gateway.log_config import logger
-from gateway.models.pricing import ModelPricing, OrganizationModelPricing, PriceSource
+from gateway.models.pricing import MAX_REPORTED_UNITS, ModelPricing, OrganizationModelPricing, PriceSource
 from gateway.models.usage import PRICING_REFERENCE_MAX_LENGTH
+from gateway.services.pricing import request_rate
 
 # A zero-token usage is enough to resolve a model's per-million rates from
 # genai-prices without depending on real token counts.
@@ -828,95 +829,20 @@ async def resolve_model_pricing(
     return None
 
 
-# ``ModelPricing`` only has per-million-token rate columns, so endpoints whose
-# billable unit is not a token overload ``input_price_per_million`` with a
-# different unit convention. Each convention gets a named helper below so the
-# unit is visible at the call site instead of an anonymous expression that can
-# be miscopied into a new route and misbill by a factor of a million. Dedicated
-# per-unit columns would need a schema migration (deferred; see issue #259).
-
-
-def _input_rate(pricing: ModelPricing) -> Decimal:
-    """The row's input rate, coerced the way the cost core coerces one.
-
-    A stored row hands back a ``Decimal`` and every construction site in the
-    tree now builds one, so this is defensive rather than load-bearing. It is
-    here because these three helpers are the only rate readers that do not go
-    through ``effective_rates``: without it, a transient row built from a JSON
-    number would raise ``TypeError`` deep in an arithmetic expression on a live
-    billing route, or (for :func:`per_image_cost`) return a ``float`` that
-    quietly contradicts the annotation.
-    """
-    rate = to_decimal(pricing.input_price_per_million)
-    if rate is None:
-        raise ValueError("Pricing carries no usable input rate")
-    return rate
-
-
-def input_token_cost(tokens: int, pricing: ModelPricing) -> Decimal:
-    """USD cost of ``tokens`` input tokens at the per-million-token rate.
-
-    The standard convention: ``input_price_per_million`` is USD per million
-    input tokens. Used by embeddings and rerank, which bill input tokens only.
-    """
-    return meter_cost(tokens, _input_rate(pricing))
+# ``ModelPricing`` only has per-million-token rate columns, so a rate in another
+# unit overloads ``input_price_per_million``. Which meter a rate prices, and how
+# it reads that column, is the pricing domain's rule (``gateway.services.pricing``);
+# these two read a per-request rate through it for the callers that only hold one.
 
 
 def flat_request_cost(pricing: ModelPricing | None) -> Decimal:
-    """Flat USD cost of one request for a model priced per request.
-
-    Moderations convention: ``input_price_per_million`` stores the per-request
-    rate scaled by 1e6 (USD per million requests), so one request costs the
-    stored rate divided by 1e6. Unpriced models are treated as free.
-    """
-    if pricing is None or not pricing.input_price_per_million:
-        return Decimal(0)
-    # An unreadable rate reads as unpriced here rather than raising: every route
-    # on this convention is exempt from ``require_pricing`` and settles an
-    # unpriced model at $0 by design.
-    rate = to_decimal(pricing.input_price_per_million)
-    return Decimal(0) if rate is None else meter_cost(1, rate)
-
-
-PerRequestMeters = tuple[dict[str, int], list[dict[str, float | int | str]]]
-
-
-def per_request_meters(cost: Decimal) -> PerRequestMeters | None:
-    """This request's billing meters and charge line, priced per request.
-
-    One request is one billed meter, so the per-request rate is the cost itself.
-    Charge lines carry ``unit_rate`` rather than ``rate_per_million``, the same
-    shape :func:`price_tool_calls` writes, which is what tells a reader and the
-    dashboard which unit convention applies.
-
-    Returns ``None`` when the request is free, the common case on these routes
-    since they are exempt from ``require_pricing`` and an unset or ``0.0`` rate
-    both settle at $0: a zero charge line would render in Activity as a billed
-    meter explaining a charge that never happened. Shared by every route billing
-    per request (audio transcription, audio speech, moderations), and built from
-    the same charge line a chat model priced per request settles with, so the
-    shape cannot drift between them, for the reason the unit conventions above are
-    named helpers rather than inline expressions.
-    """
-    if not cost:
-        return None
-    return {"requests": 1}, [request_charge_line(cost)]
-
-
-SEARCH_UNITS_METER = "search_units"
+    """USD for one request at a per-request rate, or zero when unpriced: USD per million requests, read once."""
+    return request_rate(pricing)
 
 
 def search_unit_cost(units: int, pricing: ModelPricing | None) -> Decimal:
-    """USD for ``units`` search units at a per-request rate.
-
-    Rerank convention: a provider that bills by search unit (one query over a
-    batch of documents) reports how many it billed, and a rate whose ``unit``
-    is ``requests`` prices each one at ``input_price_per_million / 1e6``. A
-    provider that reports no count is billed one unit, the request itself, as
-    the other per-request routes are. Unpriced settles at $0, as
-    :func:`flat_request_cost` does.
-    """
-    return max(units, 0) * flat_request_cost(pricing)
+    """USD for ``units`` search units, each priced as one request is."""
+    return max(units, 0) * request_rate(pricing)
 
 
 def billed_search_units(billed_units: Mapping[str, float] | None) -> int:
@@ -927,9 +853,9 @@ def billed_search_units(billed_units: Mapping[str, float] | None) -> int:
     billed it, and a request that reports none bills one unit: the request itself.
     """
     reported = billed_units.get("search_units") if billed_units else None
-    if reported is None or reported <= 0:
+    if reported is None or not isfinite(reported) or reported <= 0:
         return 1
-    return ceil(reported)
+    return min(ceil(reported), MAX_REPORTED_UNITS)
 
 
 def metered_search_units(pricing: ModelPricing | None, billed_units: Mapping[str, float] | None) -> int | None:
@@ -942,55 +868,6 @@ def metered_search_units(pricing: ModelPricing | None, billed_units: Mapping[str
     if not priced_per_request(pricing):
         return None
     return billed_search_units(billed_units)
-
-
-def rerank_cost(pricing: ModelPricing | None, *, search_units: int, total_tokens: int | None) -> Decimal | None:
-    """USD a rerank request costs, or ``None`` when nothing it reported is priced.
-
-    A per-request rate bills the search units the provider reported (see
-    :func:`search_unit_cost`). A per-token rate bills the input tokens the
-    provider reported, and a provider that reports none leaves the row unpriced.
-    """
-    if priced_per_request(pricing):
-        return search_unit_cost(search_units, pricing)
-    if pricing and total_tokens:
-        return input_token_cost(total_tokens, pricing)
-    return None
-
-
-def rerank_meters(
-    pricing: ModelPricing | None, *, search_units: int, total_tokens: int | None, cost: Decimal
-) -> PerRequestMeters | None:
-    """Billing meters and charge lines for a rerank request priced by :func:`rerank_cost`."""
-    if priced_per_request(pricing):
-        return search_unit_meters(search_units, cost)
-    if not pricing or not total_tokens:
-        return None
-    rate = float(pricing.input_price_per_million)
-    breakdown: list[dict[str, float | int | str]] = [
-        {"meter": "input", "units": total_tokens, "rate_per_million": rate, "cost": float(cost)}
-    ]
-    # See embeddings: the canonical meter name is what the billed-token SQL and
-    # the dashboard read.
-    return {"total_input_tokens": total_tokens}, breakdown
-
-
-def search_unit_meters(units: int, cost: Decimal) -> PerRequestMeters | None:
-    """Billing meters and charge line for ``units`` search units costing ``cost``.
-
-    The line carries ``unit_rate`` like every per-request line, so the
-    dashboard renders it on that branch; the meter name says what was counted.
-    ``None`` when free, for the reason :func:`per_request_meters` gives.
-    """
-    if not cost or units <= 0:
-        return None
-    line: dict[str, float | int | str] = {
-        "meter": SEARCH_UNITS_METER,
-        "units": units,
-        "unit_rate": float(cost / units),
-        "cost": float(cost),
-    }
-    return {SEARCH_UNITS_METER: units}, [line]
 
 
 GATEWAY_TOOL_PRICING_PROVIDER = "otari"
@@ -1183,15 +1060,6 @@ async def _tool_rates(
             found[keys[override.model_key]] = override_as_model_pricing(override)
 
     return found
-
-
-def per_image_cost(n_images: int, pricing: ModelPricing) -> Decimal:
-    """USD cost of ``n_images`` generated images.
-
-    Images convention: despite the name, ``input_price_per_million`` stores raw
-    USD per image (no scaling, no division).
-    """
-    return n_images * _input_rate(pricing)
 
 
 def pricing_required_but_missing(pricing: ModelPricing | None, *, require_pricing: bool) -> bool:

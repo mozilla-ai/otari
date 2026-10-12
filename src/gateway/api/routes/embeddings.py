@@ -16,16 +16,15 @@ from gateway.api.deps import (
     get_log_writer,
     verify_api_key_or_master_key,
 )
-from gateway.api.routes._passthrough import BillingMeters, run_passthrough
+from gateway.api.routes._passthrough import run_passthrough
 from gateway.api.routes._pipeline import record_inline_cost_settlement
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
 from gateway.schemas.inference import EmbeddingResponse
 from gateway.services.budgets import estimate_cost
-from gateway.services.inference import InferenceService
+from gateway.services.inference import EMBEDDINGS_BILLING, InferenceService
 from gateway.services.log_writer import LogWriter
-from gateway.services.pricing_service import input_token_cost
 from gateway.services.provider_kwargs import ResolvedProvider
 
 router = APIRouter(tags=["embeddings"])
@@ -82,32 +81,6 @@ async def create_embedding(
     def estimate(pricing: ModelPricing | None) -> Decimal:
         return estimate_cost(pricing, prompt_chars=prompt_chars, max_output_tokens=None, default_output_tokens=0)
 
-    def usage_tokens(result: CreateEmbeddingResponse) -> tuple[int | None, int | None, int | None]:
-        return (
-            result.usage.prompt_tokens if result.usage else None,
-            0,
-            result.usage.total_tokens if result.usage else None,
-        )
-
-    def compute_cost(result: CreateEmbeddingResponse, pricing: ModelPricing | None) -> Decimal | None:
-        if result.usage and pricing:
-            return input_token_cost(result.usage.prompt_tokens, pricing)
-        return None
-
-    def compute_meters(
-        result: CreateEmbeddingResponse, pricing: ModelPricing | None, cost: Decimal
-    ) -> BillingMeters | None:
-        if not result.usage or pricing is None:
-            return None
-        tokens = result.usage.prompt_tokens
-        rate = float(pricing.input_price_per_million)
-        breakdown = [{"meter": "input", "units": tokens, "rate_per_million": rate, "cost": float(cost)}]
-        # ``total_input_tokens`` rather than a route-local name: it is the meter the
-        # billed-token SQL and the dashboard's token bar already read by name, so
-        # the row's own meter becomes the source they use instead of the raw-column
-        # fallback (same value here, but the fallback stops being load-bearing).
-        return {"total_input_tokens": tokens}, breakdown
-
     async def call_provider(resolved: ResolvedProvider) -> CreateEmbeddingResponse:
         embedding_kwargs: dict[str, Any] = {
             "model": resolved.model,
@@ -140,9 +113,7 @@ async def create_embedding(
         request_params=request.model_fields_set,
         estimate=estimate,
         enforce_require_pricing=True,
-        usage_tokens=usage_tokens,
-        compute_cost=compute_cost,
-        compute_meters=compute_meters,
+        billing=EMBEDDINGS_BILLING,
     )
     body = inference.embeddings_response(outcome.result, pricing=outcome.pricing, cost=outcome.cost)
     if outcome.cost is not None and outcome.pricing is not None:
