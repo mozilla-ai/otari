@@ -239,7 +239,10 @@ talks to its provider directly can still ask Otari which model a new subagent
 should run on, through `POST /api/v1/routing/recommend`. A standalone
 deployment puts one choice question to the decision model it configured and
 recommends the candidate it picks; on otari.ai a managed recommender answers
-instead. Either way the recommendation is billed to the caller, and nothing
+instead. The harness that asks picks the candidates: Claude Code chooses among
+its own `haiku`, `sonnet` and `opus` aliases, and pi among the Otari model ids
+it sends with the request.
+Either way the recommendation is billed to the caller, and nothing
 else is dispatched. See
 [Use with Claude Code](use-with-claude-code.md#let-otari-choose-a-subagents-model).
 

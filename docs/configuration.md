@@ -659,11 +659,13 @@ These are a standalone deployment's settings. On otari.ai a managed
 recommender answers behind the same route, so neither applies there.
 `agent_recommender_model` is a `decision_providers` selector, resolved per
 request, so a deployment that never asks need not configure the provider.
-`agent_recommender_candidates` maps each model name, as the asking harness
-spells it, to what it is for; `null` is allowed when the name says enough. At
-least two are required, and at most 255, the limit a choice question has. The
-defaults are Claude Code's `haiku`, `sonnet` and `opus` aliases with
-descriptions along the lines above.
+`agent_recommender_candidates` maps each model name, as Claude Code spells it,
+to what it is for; `null` is allowed when the name says enough. At least two
+are required, and at most 255, the limit a choice question has. The defaults
+are Claude Code's `haiku`, `sonnet` and `opus` aliases with descriptions along
+the lines above. The list is Claude Code's alone: a pi request sends its own
+`candidates` in the same shape, as Otari model ids (`<provider>:<model>`),
+because pi-otari decides them on the laptop.
 
 ## Mail
 
