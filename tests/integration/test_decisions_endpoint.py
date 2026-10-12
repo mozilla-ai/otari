@@ -297,4 +297,5 @@ def test_decisions_require_pricing_refuses_an_unpriced_model(
     finally:
         test_config.require_pricing = False
     assert resp.status_code == 402
+    assert resp.json()["code"] == "pricing_required"
     mock.assert_not_awaited()

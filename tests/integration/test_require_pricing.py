@@ -126,6 +126,27 @@ def test_passthrough_missing_pricing_rejection_is_recorded_too(strict_pricing_cl
     assert rows[0]["provider"] == "openai"
 
 
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("chat/completions", {"model": "openai:gpt-4o", "messages": _MESSAGES}),
+        ("embeddings", {"model": "openai:text-embedding-3-small", "input": "hi"}),
+        ("rerank", {"model": "cohere:rerank-v3.5", "query": "q", "documents": ["a", "b"]}),
+        ("images/generations", {"model": "openai:dall-e-3", "prompt": "a cat"}),
+    ],
+)
+def test_missing_pricing_refusal_carries_its_code_on_every_route(
+    strict_pricing_client: TestClient, path: str, body: dict[str, Any]
+) -> None:
+    """Chat and the pass-through routes name the refusal the same way, in the body and the header."""
+    c = strict_pricing_client
+    c.post(f"{API_ROOT}/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
+    resp = c.post(f"{API_ROOT}/{path}", json={**body, "user": "priced-user"}, headers=_MASTER_HEADER)
+    assert resp.status_code == 402
+    assert resp.json()["code"] == "pricing_required"
+    assert resp.headers["Otari-Error-Code"] == "pricing_required"
+
+
 def test_budget_exempt_key_writes_no_pricing_rejection_row(strict_pricing_client: TestClient) -> None:
     """A budget-exempt key skips the gate, so no missing-pricing row is written.
 

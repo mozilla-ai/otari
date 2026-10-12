@@ -55,7 +55,7 @@ from gateway.api.routes._pipeline import (
 from gateway.api.routes._platform import _classify_upstream_error, with_retry_hint
 from gateway.core.config import GatewayConfig
 from gateway.core.database import release_session
-from gateway.core.error_codes import MODEL_NOT_ALLOWED, PROVIDER_CREDENTIAL_REJECTED, error_headers
+from gateway.core.error_codes import MODEL_NOT_ALLOWED, PRICING_REQUIRED, PROVIDER_CREDENTIAL_REJECTED, error_headers
 from gateway.core.metered_pricing import billable_usage, price_billable_usage, quantize_cost
 from gateway.core.provider_params import SENSITIVE_PARAM_FIELDS
 from gateway.exceptions import TenancyError
@@ -451,6 +451,7 @@ async def run_passthrough(
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail=no_pricing_detail,
+                headers=error_headers(PRICING_REQUIRED),
             )
 
     # Model access control (per-key). The reservation is already taken above (the
@@ -953,7 +954,11 @@ async def run_decision(
         await refund_reservation(db, reservation)
         no_pricing_detail = no_pricing_error_detail(selector)
         await log_rejection(no_pricing_detail, row_model=model, row_provider=provider_name, status_code=402)
-        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=no_pricing_detail)
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=no_pricing_detail,
+            headers=error_headers(PRICING_REQUIRED),
+        )
 
     funding: _Funding | None = None
     if quote.charge is not None and organization_id is not None:
