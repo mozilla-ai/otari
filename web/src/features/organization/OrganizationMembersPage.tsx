@@ -277,7 +277,7 @@ function InviteMemberForm({
         onOpenChange={(open) => {
           if (!open) onClose()
         }}
-        title="Invitations sent"
+        title="Invitations"
         // Same rule as the single result: a link that was not emailed is shown
         // only here, so the acknowledgement is the way out.
         isDismissable={unsent === 0}
@@ -333,7 +333,7 @@ function InviteMemberForm({
         onOpenChange={(open) => {
           if (!open) onClose()
         }}
-        title="Invitation sent"
+        title="Invitation"
         // Dismissable only once the email carried the link. When it did not,
         // this is the only place the link is shown, so the acknowledgement is
         // the way out rather than one of two.

@@ -688,7 +688,7 @@ describe("OrganizationMembersPage", () => {
 
     const dialog = screen.getByRole("dialog")
     expect(
-      within(dialog).getByRole("heading", { name: "Invitation sent" }),
+      within(dialog).getByRole("heading", { name: "Invitation" }),
     ).toBeInTheDocument()
     expect(
       within(dialog).getByRole("button", { name: "Done" }),
