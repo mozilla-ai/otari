@@ -10,10 +10,10 @@ from fastapi.testclient import TestClient
 
 from conftest import InstallControlPlane
 from gateway.api.deps import reset_config
-from gateway.api.routes._pipeline import NO_UPSTREAM_USER_DETAIL, UPSTREAM_USER_FIELD
+from gateway.api.routes._pipeline import NO_UPSTREAM_USER_DETAIL
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.database import reset_db
-from gateway.services.inference import upstream_user_identifier
+from gateway.services.inference import UPSTREAM_USER_FIELD, upstream_user_identifier
 
 from .conftest import app_for, build_test_client
 

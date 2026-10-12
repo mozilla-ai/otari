@@ -10,8 +10,15 @@ import pytest
 from any_llm import LLMProvider, acompletion
 
 from gateway.api.routes import chat
-from gateway.api.routes._pipeline import UPSTREAM_USER_FIELD
-from gateway.services.inference import chat_user_fields, responses_user_fields, upstream_user_identifier
+from gateway.services.inference import (
+    UPSTREAM_USER_FIELD,
+    UnidentifiedEndUserError,
+    chat_user_fields,
+    end_user_identifier,
+    messages_user_fields,
+    responses_user_fields,
+    upstream_user_identifier,
+)
 
 _KEY = "k" * 32
 
@@ -227,3 +234,42 @@ async def test_the_bedrock_converse_call_receives_request_metadata() -> None:
 
     assert captured["requestMetadata"] == {"otari_user": "id"}
     assert "user" not in captured
+
+
+def _identifier(**overrides: Any) -> str | None:
+    inputs: dict[str, Any] = {"enabled": True, "key": None, "workspace_id": "ws", "tag": None, "user_id": "alice"}
+    return end_user_identifier(**{**inputs, **overrides})
+
+
+def test_the_tag_wins_over_the_resolved_user() -> None:
+    assert _identifier(tag="end-user-7") == upstream_user_identifier("ws", "end-user-7", None)
+    assert _identifier() == upstream_user_identifier("ws", "alice", None)
+
+
+def test_turned_off_there_is_no_identifier_and_no_refusal() -> None:
+    assert _identifier(enabled=False, workspace_id=None, user_id=None) is None
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [{"workspace_id": None}, {"user_id": None}, {"workspace_id": None, "tag": "end-user-7"}],
+    ids=["no-workspace", "no-user-no-tag", "tag-but-no-workspace"],
+)
+def test_turned_on_a_request_with_nothing_to_derive_it_from_is_refused(missing: dict[str, Any]) -> None:
+    with pytest.raises(UnidentifiedEndUserError):
+        _identifier(**missing)
+
+
+@pytest.mark.parametrize(
+    ("provider", "native", "expected"),
+    [
+        (LLMProvider.ANTHROPIC, True, {"metadata": {"user_id": "id"}}),
+        (LLMProvider.OPENAI, False, {"user": "id"}),
+        (LLMProvider.BEDROCK, False, {"requestMetadata": {"otari_user": "id"}}),
+        (LLMProvider.GEMINI, False, {}),
+    ],
+)
+def test_messages_use_metadata_natively_and_the_chat_field_otherwise(
+    provider: LLMProvider, native: bool, expected: dict[str, Any]
+) -> None:
+    assert messages_user_fields(provider, "id", native=native) == expected

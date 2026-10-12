@@ -34,7 +34,6 @@ from gateway.api.routes._pipeline import (
     ToolBackends,
     _flush_pending_usage_reports,
     _PendingUsageReport,
-    bind_upstream_user,
     classify_provider_error,
     prepare_gateway_tools,
     provider_error_headers,
@@ -50,7 +49,6 @@ from gateway.api.routes._pipeline import (
     scope_prompt_cache_key,
     stream_error_code,
     stream_error_message,
-    with_upstream_user,
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost, build_attempt_client_args, with_retry_hint
 from gateway.api.routes._request_tags import RequestMetadata, forwarded_metadata, request_tags
@@ -63,10 +61,12 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
+    bind_upstream_user,
     call_responses,
     responses_user_fields,
     serves_responses,
     strip_gateway_minted_items,
+    with_upstream_user,
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
@@ -661,7 +661,7 @@ async def create_response(
     stream = bool(request_fields.pop("stream", False))
     request_fields.pop("model", None)
     request_fields.pop("safety_identifier", None)
-    bind_upstream_user(request_fields, ctx)
+    bind_upstream_user(request_fields, ctx.upstream_user)
 
     # base_request_fields is what gets merged with per-attempt creds; it
     # includes ``provider`` and ``input_data`` so each attempt has the full

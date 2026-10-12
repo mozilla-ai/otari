@@ -45,7 +45,6 @@ from gateway.api.routes._pipeline import (
     DeclaredTools,
     ErrorKind,
     ToolBackends,
-    bind_upstream_user,
     classify_provider_error,
     default_attempt_kwargs,
     domain_error,
@@ -62,7 +61,6 @@ from gateway.api.routes._pipeline import (
     run_standalone_non_stream,
     run_streaming_with_fallback,
     scope_prompt_cache_key,
-    with_upstream_user,
 )
 from gateway.api.routes._platform import (
     ResolvedAttempt,
@@ -88,9 +86,11 @@ from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.services.code_execution import ContainerLease, check_container_on_credential
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
-    chat_user_fields,
+    bind_upstream_user,
+    messages_user_fields,
     upstream_exception_chain,
     upstream_exception_shape,
+    with_upstream_user,
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
@@ -162,13 +162,9 @@ def _serves_messages_natively(dispatch_model: Any) -> bool:
 
 
 def _user_fields(kwargs: dict[str, Any], identifier: str) -> dict[str, Any]:
-    # any-llm drops ``metadata`` when it serves the request as a chat completion,
-    # and forwards extra keyword arguments to that call instead.
     model = kwargs.get("model")
-    if _serves_messages_natively(model):
-        return {"metadata": {ANTHROPIC_USER_KEY: identifier}}
     implementation, _, _ = str(model).partition(":")
-    return chat_user_fields(implementation, identifier)
+    return messages_user_fields(implementation, identifier, native=_serves_messages_natively(model))
 
 
 def _with_upstream_user(kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -992,7 +988,7 @@ async def create_message(
     # Only ``user_id`` means anything to a provider here, and the identifier replaces it.
     request_fields.pop("metadata", None)
     scope_prompt_cache_key(request_fields, ctx)
-    bind_upstream_user(request_fields, ctx)
+    bind_upstream_user(request_fields, ctx.upstream_user)
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
     if tool_ctx.use_sandbox:

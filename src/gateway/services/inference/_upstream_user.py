@@ -9,11 +9,19 @@ personal data) nor an Otari id reaches the provider.
 import hashlib
 import hmac
 import json
+from collections.abc import Callable
 from typing import Any
 
 from any_llm import LLMProvider
 
 _DIGEST_VERSION = "otari-upstream-user-v1"
+
+UPSTREAM_USER_FIELD = "_otari_upstream_user"
+"""Carries the end-user identifier from the route to each attempt's provider call.
+
+Never a caller field: each format adapter turns it into the field its provider
+reads just before the call.
+"""
 
 # Chat APIs that document ``user`` as an end-user id for abuse monitoring. any-llm
 # sends DeepSeek's as DeepSeek's own ``user_id``. A provider not named in this module
@@ -51,6 +59,47 @@ def upstream_user_identifier(workspace_id: str, subject: str, key: str | None) -
     return hmac.new(key.encode(), payload, hashlib.sha256).hexdigest()
 
 
+class UnidentifiedEndUserError(Exception):
+    """There is no workspace, or neither a user tag nor a user, to derive the identifier from."""
+
+
+def end_user_identifier(
+    *, enabled: bool, key: str | None, workspace_id: str | None, tag: str | None, user_id: str | None
+) -> str | None:
+    """The identifier a request's provider calls carry, or ``None`` while the feature is off.
+
+    The caller's own user tag wins over the resolved user. While the feature is on,
+    a request with nothing to derive it from raises :class:`UnidentifiedEndUserError`
+    rather than going upstream unscoped, where a block would land on the whole account.
+    """
+    if not enabled:
+        return None
+    subject = tag or user_id
+    if not workspace_id or not subject:
+        raise UnidentifiedEndUserError
+    return upstream_user_identifier(workspace_id, subject, key)
+
+
+def bind_upstream_user(request_fields: dict[str, Any], identifier: str | None) -> dict[str, Any]:
+    """Replace the caller's ``user`` with ``identifier``, in place."""
+    request_fields.pop("user", None)
+    request_fields.pop(UPSTREAM_USER_FIELD, None)
+    if identifier is not None:
+        request_fields[UPSTREAM_USER_FIELD] = identifier
+    return request_fields
+
+
+def with_upstream_user(
+    kwargs: dict[str, Any], fields_for: Callable[[dict[str, Any], str], dict[str, Any]]
+) -> dict[str, Any]:
+    """A copy of ``kwargs`` with the carried identifier in the fields ``fields_for`` names for this call."""
+    if UPSTREAM_USER_FIELD not in kwargs:
+        return kwargs
+    out = {key: value for key, value in kwargs.items() if key != UPSTREAM_USER_FIELD}
+    out.update(fields_for(out, kwargs[UPSTREAM_USER_FIELD]))
+    return out
+
+
 def chat_user_fields(provider: LLMProvider | str | None, identifier: str) -> dict[str, Any]:
     """The chat-completion keyword arguments that carry ``identifier`` to ``provider``."""
     try:
@@ -64,3 +113,15 @@ def chat_user_fields(provider: LLMProvider | str | None, identifier: str) -> dic
     if resolved == LLMProvider.BEDROCK:
         return {"requestMetadata": {_BEDROCK_METADATA_KEY: identifier}}
     return {}
+
+
+def messages_user_fields(provider: LLMProvider | str | None, identifier: str, *, native: bool) -> dict[str, Any]:
+    """The Messages keyword arguments that carry ``identifier`` to ``provider``.
+
+    ``native`` says ``provider`` has a Messages API of its own. any-llm serves any
+    other as a chat completion, where it drops ``metadata`` and forwards extra
+    keyword arguments to that call, so the provider's chat field is used instead.
+    """
+    if native:
+        return {"metadata": {"user_id": identifier}}
+    return chat_user_fields(provider, identifier)

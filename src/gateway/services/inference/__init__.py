@@ -47,10 +47,20 @@ from gateway.services.inference._upstream_errors import (
     upstream_exception_shape,
     upstream_retry_after,
 )
-from gateway.services.inference._upstream_user import chat_user_fields, upstream_user_identifier
+from gateway.services.inference._upstream_user import (
+    UPSTREAM_USER_FIELD,
+    UnidentifiedEndUserError,
+    bind_upstream_user,
+    chat_user_fields,
+    end_user_identifier,
+    messages_user_fields,
+    upstream_user_identifier,
+    with_upstream_user,
+)
 
 __all__ = [
     "REASONING_ITEM_ID_PREFIX",
+    "UPSTREAM_USER_FIELD",
     "Admission",
     "BlockedCaller",
     "Claimed",
@@ -63,14 +73,18 @@ __all__ = [
     "Replay",
     "StillInFlight",
     "UnknownDecisionProviderError",
+    "UnidentifiedEndUserError",
     "UnknownCaller",
     "aresponses_via_chat_completions",
+    "bind_upstream_user",
     "call_responses",
     "chat_user_fields",
     "close_decision_client",
     "decision_body",
+    "end_user_identifier",
     "is_chat_stream_cost_carrier",
     "keep_claim_alive",
+    "messages_user_fields",
     "reported_charge",
     "request_decision",
     "responses_user_fields",
@@ -80,6 +94,7 @@ __all__ = [
     "strip_gateway_minted_items",
     "upstream_user_identifier",
     "uses_chat_completions_bridge",
+    "with_upstream_user",
     "UpstreamErrorKind",
     "is_provider_billing_error",
     "is_retry_futile",

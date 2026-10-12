@@ -32,7 +32,6 @@ from gateway.api.routes._pipeline import (
     DeclaredTools,
     ErrorKind,
     ToolBackends,
-    bind_upstream_user,
     classify_provider_error,
     default_attempt_kwargs,
     log_usage,
@@ -50,7 +49,6 @@ from gateway.api.routes._pipeline import (
     scope_prompt_cache_key,
     stream_error_code,
     stream_error_message,
-    with_upstream_user,
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost, with_retry_hint
 from gateway.api.routes._request_tags import RequestMetadata, request_tags
@@ -66,7 +64,12 @@ from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.provider_fields import surface_provider_fields
 from gateway.services.files import FileService, StagedFile
-from gateway.services.inference import chat_user_fields, is_chat_stream_cost_carrier
+from gateway.services.inference import (
+    bind_upstream_user,
+    chat_user_fields,
+    is_chat_stream_cost_carrier,
+    with_upstream_user,
+)
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import (
     MAX_TOOL_ITERATIONS_CAP,
@@ -621,7 +624,7 @@ async def run_chat_completion(
     )
     request_fields.pop("metadata", None)
     scope_prompt_cache_key(request_fields, ctx)
-    bind_upstream_user(request_fields, ctx)
+    bind_upstream_user(request_fields, ctx.upstream_user)
     # Dispatch one cap, under the name any-llm understands and knows how to map to
     # any provider (via BaseOpenAIProvider._convert_completion_params). Popped
     # unconditionally so exactly one spelling reaches the provider call, whether
