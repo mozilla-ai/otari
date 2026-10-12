@@ -1065,6 +1065,47 @@ def test_a_second_provider_sign_in_leaves_the_identity_as_the_first_left_it(
     assert password_sign_in.status_code == 200, password_sign_in.text
 
 
+# ---------- the provider's subject names the account, not the address ----------
+
+
+@pytest.mark.xfail(strict=True, reason="sign-in resolves an account by its email address")
+def test_a_second_identity_at_one_provider_cannot_sign_in_to_a_linked_account(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    add_member(client, master_key_header, email="ada@example.com")
+    stub_exchange(monkeypatch, subject="ada-subject")
+    assert client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"}).status_code == 200
+    client.cookies.clear()
+    stub_exchange(monkeypatch, subject="another-subject")
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c2", "state": "s"})
+
+    assert response.status_code == 401, response.text
+    assert SESSION_COOKIE_NAME not in response.cookies
+
+
+@pytest.mark.xfail(strict=True, reason="sign-in resolves an account by its email address")
+def test_a_linked_account_still_signs_in_after_the_provider_changes_its_address(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_id = add_member(client, master_key_header, email="ada@example.com")
+    stub_exchange(monkeypatch, subject="ada-subject")
+    assert client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"}).status_code == 200
+    client.cookies.clear()
+    stub_exchange(monkeypatch, subject="ada-subject", email="ada@elsewhere.example.com")
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c2", "state": "s"})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["user_id"] == user_id
+
+
 def test_a_refused_provider_sign_in_writes_nothing_to_a_deactivated_identity(
     client: TestClient,
     master_key_header: dict[str, str],
