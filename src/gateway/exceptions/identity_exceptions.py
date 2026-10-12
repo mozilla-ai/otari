@@ -307,6 +307,13 @@ class OAuthIdentityUnknownError(TenancyError):
         )
 
 
+class OAuthIdentityLinkConflictError(TenancyConflictError):
+    """Another sign-in linked the provider identity, or the account at that provider, first."""
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(f"Another sign-in with that {provider} account finished first. Sign in again.")
+
+
 class CurrentPasswordIncorrectError(TenancyValidationError):
     """The current password given with a password change does not match.
 
@@ -452,6 +459,7 @@ __all__ = [
     "InvalidEmailError",
     "OAuthEmailNotVerifiedError",
     "OAuthExchangeError",
+    "OAuthIdentityLinkConflictError",
     "OAuthIdentityUnknownError",
     "OAuthNotConfiguredError",
     "OAuthStateError",

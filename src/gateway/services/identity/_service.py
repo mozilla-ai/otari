@@ -41,6 +41,7 @@ class IdentityService:
             OAuthEmailNotVerifiedError: If the provider says the address is not verified.
             OAuthIdentityUnknownError: If the account is deactivated or gone,
                 or the account the policy returns is linked to another identity at the same provider.
+            OAuthIdentityLinkConflictError: If a concurrent sign-in linked the identity to another account first.
             TenancyError: If the identity provider policy refuses the identity.
 
         """
@@ -54,7 +55,7 @@ class IdentityService:
 
             resolution = await self._identity_provider.resolve(external)
             account = await self._active_account(resolution.identity.id, label)
-            # A concurrent first sign-in can link this same identity after the lookup above.
+            # A concurrent first sign-in can link this identity, or this account at the provider, after that lookup.
             existing = await self._links.get_for_user(account.id, external.provider)
             if existing is None:
                 await self._links.add(

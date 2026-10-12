@@ -2,8 +2,10 @@ import uuid
 from typing import Never
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.identity_exceptions import OAuthIdentityLinkConflictError
 from gateway.models.identity import OAuthIdentityLink
 from gateway.repositories.base_repository import BaseRepository
 
@@ -30,7 +32,12 @@ class OAuthIdentityLinkRepository(BaseRepository[OAuthIdentityLink, Never, Never
     async def add(
         self, *, provider: str, subject: str, user_id: uuid.UUID, email: str | None, email_verified: bool
     ) -> OAuthIdentityLink:
-        """Stage a link from a provider identity to an account."""
+        """Stage a link from a provider identity to an account.
+
+        Raises:
+            OAuthIdentityLinkConflictError: If the identity, or the account at that provider, is already linked.
+
+        """
         link = OAuthIdentityLink(
             provider=provider,
             subject=subject,
@@ -39,5 +46,8 @@ class OAuthIdentityLinkRepository(BaseRepository[OAuthIdentityLink, Never, Never
             email_verified_at_link=email_verified,
         )
         self.db.add(link)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError as error:
+            raise OAuthIdentityLinkConflictError(provider) from error
         return link

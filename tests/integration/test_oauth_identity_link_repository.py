@@ -1,10 +1,10 @@
 """Provider identity links, read and written in a Unit of Work."""
 
 import pytest
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.unit_of_work import UnitOfWork
+from gateway.exceptions.identity_exceptions import OAuthIdentityLinkConflictError
 from gateway.repositories.identity import OAuthIdentityLinkRepository
 
 from .tenancy_helpers import create_member, create_organization
@@ -45,8 +45,22 @@ async def test_an_account_holds_one_link_per_provider(async_db: AsyncSession) ->
     async with uow:
         await links.add(provider="google", subject="ada-subject", user_id=member.id, email=None, email_verified=True)
 
-    with pytest.raises(IntegrityError):
+    with pytest.raises(OAuthIdentityLinkConflictError):
         async with uow:
             await links.add(
                 provider="google", subject="another-subject", user_id=member.id, email=None, email_verified=True
             )
+
+
+async def test_an_identity_links_to_one_account(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    first = await create_member(async_db, organization, role="member", full_name="Ada")
+    second = await create_member(async_db, organization, role="member", full_name="Grace")
+    uow = UnitOfWork(async_db)
+    links = OAuthIdentityLinkRepository(uow)
+    async with uow:
+        await links.add(provider="google", subject="a-subject", user_id=first.id, email=None, email_verified=True)
+
+    with pytest.raises(OAuthIdentityLinkConflictError):
+        async with uow:
+            await links.add(provider="google", subject="a-subject", user_id=second.id, email=None, email_verified=True)
