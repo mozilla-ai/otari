@@ -131,7 +131,7 @@ def test_a_name_with_two_dated_builds_is_not_found_and_both_are_named(client: Te
     assert response.json()["code"] == MODEL_NOT_FOUND
     assert response.json()["detail"] == (
         "Provider key 'primary' does not offer 'anthropic:claude-twin'. "
-        "It offers 'claude-twin-20250101', 'claude-twin-20250601'; send one of those."
+        "It offers 'anthropic:claude-twin-20250101', 'anthropic:claude-twin-20250601'; send one of those."
     )
 
 
@@ -145,4 +145,4 @@ def test_the_undated_name_of_a_dated_build_switched_off_is_not_serving(client: T
 
     assert response.status_code == status.HTTP_403_FORBIDDEN, response.text
     assert response.json()["code"] == MODEL_NOT_SERVING
-    assert "as 'claude-haiku-4-5-20251001' but not serving" in response.json()["detail"]
+    assert "as 'anthropic:claude-haiku-4-5-20251001' but not serving" in response.json()["detail"]

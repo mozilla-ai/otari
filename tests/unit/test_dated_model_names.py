@@ -60,7 +60,9 @@ def organization_index() -> Iterator[selectors.SelectorIndex]:
         for selector in (_HAIKU, _SONNET_46, _TWIN_EARLY, _TWIN_LATE)
     ]
     view = selectors.build_organization_selectors([], own, {})
-    built = selectors.build_selector_index([], {}, organizations={_ORG: view}, workspace_organization={_WORKSPACE: _ORG})
+    built = selectors.build_selector_index(
+        [], {}, organizations={_ORG: view}, workspace_organization={_WORKSPACE: _ORG}
+    )
     selectors.set_selector_index(built)
     yield built
     selectors.reset_selector_index()

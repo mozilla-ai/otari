@@ -230,8 +230,8 @@ def test_an_undated_name_whose_dated_builds_are_all_off_is_not_serving(workspace
     assert refusal is not None
     assert (refusal.code, refusal.status_code) == (MODEL_NOT_SERVING, 403)
     assert refusal.detail == (
-        "Model 'anthropic:claude-haiku-4-5' is offered on provider key 'primary' as 'claude-haiku-4-5-20251001' "
-        "but not serving. Turn it on under Organization > Providers."
+        "Model 'anthropic:claude-haiku-4-5' is offered on provider key 'primary' "
+        "as 'anthropic:claude-haiku-4-5-20251001' but not serving. Turn it on under Organization > Providers."
     )
 
 
@@ -242,7 +242,7 @@ def test_an_undated_name_with_two_dated_builds_is_not_found_and_names_them(works
     assert (refusal.code, refusal.status_code) == (MODEL_NOT_FOUND, 404)
     assert refusal.detail == (
         "Provider key 'primary' does not offer 'anthropic:claude-x'. "
-        "It offers 'claude-x-20250101', 'claude-x-20250601'; send one of those."
+        "It offers 'anthropic:claude-x-20250101', 'anthropic:claude-x-20250601'; send one of those."
     )
 
 

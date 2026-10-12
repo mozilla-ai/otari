@@ -297,7 +297,8 @@ def org_model_refusal(workspace_id: uuid.UUID, provider: str, model: str, *, sel
     enabled = offer.offered.get(model)
     if enabled is None:
         builds = dated_builds(model, offer.offered)
-        shown = builds if selector.rpartition(":")[2] == model else ()
+        prefix, _colon, written = selector.rpartition(":")
+        shown = tuple(f"{prefix}:{build}" if prefix else build for build in builds) if written == model else ()
         if builds and not any(offer.offered[build] for build in builds):
             return ModelRefusal(
                 code=MODEL_NOT_SERVING,
