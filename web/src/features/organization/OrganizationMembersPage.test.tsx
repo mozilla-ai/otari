@@ -686,6 +686,15 @@ describe("OrganizationMembersPage", () => {
     expect(screen.queryByText(/Otari did not send the email/)).toBeNull()
     expect(screen.queryByText(/#\/accept-invitation/)).toBeNull()
 
+    const dialog = screen.getByRole("dialog")
+    expect(
+      within(dialog).getByRole("heading", { name: "Invitation sent" }),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole("button", { name: "Done" }),
+    ).toBeInTheDocument()
+    expect(within(dialog).queryByRole("button", { name: "Cancel" })).toBeNull()
+
     await user.keyboard("{Escape}")
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
   })
@@ -1253,5 +1262,17 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     await screen.findByText("Analyst")
     expect((await screen.findAllByText("All models")).length).toBeGreaterThan(0)
     expect(screen.getByText("Spend")).toBeInTheDocument()
+  })
+
+  it("keeps the intro to the essentials and puts the rest behind How roles work", async () => {
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />, { mail_ready: true })
+
+    expect(
+      await screen.findByText(/Owners and admins manage it/),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "How roles work" }))
+    expect(screen.getByText(/Roles are fixed\./)).toBeInTheDocument()
+    expect(screen.getByText(/Settings and Accounts/)).toBeInTheDocument()
   })
 })

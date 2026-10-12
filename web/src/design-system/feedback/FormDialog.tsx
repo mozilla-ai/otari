@@ -75,6 +75,12 @@ export interface FormDialogProps {
    */
   isDismissable?: boolean
   /**
+   * Drops the footer's Cancel while leaving Escape and the close control. For
+   * a result screen, where the one action is an acknowledgement and a Cancel
+   * beside it would cancel nothing.
+   */
+  hideCancel?: boolean
+  /**
    * Where focus goes if the frame's own restore has nowhere to land.
    *
    * react-aria returns focus to the control that opened the dialog, which is
@@ -131,6 +137,7 @@ export function FormDialog({
   error,
   isDirty = false,
   isDismissable = true,
+  hideCancel = false,
   returnFocusRef,
   isSubmitDisabled = false,
   footerStart,
@@ -321,7 +328,7 @@ export function FormDialog({
                       {/* Cancel IS the dismiss, so it goes with it: a dialog
                           that cannot be dismissed has one way out and the
                           primary is it. */}
-                      {isDismissable ? (
+                      {isDismissable && !hideCancel ? (
                         <Button isDisabled={isPending} onPress={requestClose}>
                           Cancel
                         </Button>

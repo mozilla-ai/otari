@@ -21,8 +21,8 @@ export function CheckEmailPage({ hash }: { hash: string }) {
       title="Check your email"
       description={
         type === "resend"
-          ? "If that address is registered and still unverified, a fresh verification link is on its way."
-          : "If that address is on this gateway's roster and unclaimed, a verification link is on its way."
+          ? "If that address has an account waiting to be verified, we have sent it a new verification link."
+          : "If you can sign up with that address, we have sent it a verification link."
       }
       footer={
         <>

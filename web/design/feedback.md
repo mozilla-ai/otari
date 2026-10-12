@@ -51,7 +51,7 @@ ConfirmDialog: { isOpen, onOpenChange, heading, body, confirmLabel, onConfirm,
   confirmVariant = "danger", isPending?, error? }
 FormDialog: { isOpen, onOpenChange, title, description?, size = "md",
   submitLabel, onSubmit, isPending, error?, isDirty?, isDismissable = true,
-  isSubmitDisabled?, returnFocusRef?, footerStart?, tabs?, children }
+  hideCancel?, isSubmitDisabled?, returnFocusRef?, footerStart?, tabs?, children }
 Dialog: { isOpen, onOpenChange, title, description?, size = "md",
   mark?, isAnnouncement?, isScanning?, scanTone = "accent" | "danger",
   isDismissable = true, status?, footerStart?, actions?, children }

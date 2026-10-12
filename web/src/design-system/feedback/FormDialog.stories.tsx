@@ -342,6 +342,24 @@ export const SubmitBlocked: Story = {
 }
 
 /**
+ * A result screen: the form is done and the one action is an acknowledgement.
+ * Escape and the close control still work, but a Cancel beside Done would
+ * cancel nothing, so the footer drops it.
+ */
+export const ResultWithoutCancel: Story = {
+  args: {
+    hideCancel: true,
+    title: "Invitation sent",
+    submitLabel: "Done",
+  },
+  render: (args) => (
+    <FormDialog {...args}>
+      <p className="text-sm">An email with an accept link was sent.</p>
+    </FormDialog>
+  ),
+}
+
+/**
  * Content that cannot be recovered once the frame closes, which is the one case
  * for taking the dismiss away: a key's plaintext secret is shown once. There is
  * no close control and no Cancel, because both are dismissals; the footer's one
