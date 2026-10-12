@@ -12,12 +12,9 @@ from gateway.exceptions.identity_exceptions import (
 from gateway.models.identity import EmailAssertion, ProviderIdentity
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.tenancy import UserRepository
-from gateway.services.oauth_service import provider_label
+from gateway.services.oauth_service import provider_label, trusts_email_claim
 from gateway.services.tenancy import OrganizationService, unverified_identity_is_claimable
 from gateway.services.tenancy.email_address import validated_email
-
-# NOTE: A provider joins this set only when no tenant can set its email_verified claim.
-_EMAIL_TRUSTED_PROVIDERS = frozenset({"github", "google"})
 
 
 class DeploymentIdentityProviderAdapter(IdentityProviderPort):
@@ -83,7 +80,7 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
 
         """
         label = provider_label(external.provider)
-        if external.provider not in _EMAIL_TRUSTED_PROVIDERS:
+        if not trusts_email_claim(external.provider):
             raise OAuthIdentityUnknownError(label)
         if external.email_verified is not EmailAssertion.VERIFIED or not external.email:
             raise OAuthEmailNotVerifiedError(label)

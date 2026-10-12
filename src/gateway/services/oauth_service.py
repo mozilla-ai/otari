@@ -77,10 +77,14 @@ from gateway.models.tenancy import OAUTH_STATE_TTL_SECONDS, OAuthPendingState
 
 @dataclass(frozen=True)
 class _Provider:
-    """One provider's scopes, and the name it writes itself under."""
+    """One provider's scopes, the name it writes itself under, and whether its email claim can be trusted.
+
+    ``email_claim_trusted`` is true only when no tenant can set what the provider says about an address.
+    """
 
     label: str
     scopes: tuple[str, ...]
+    email_claim_trusted: bool
 
 
 # The resource the OAuth routes are mounted at. The router takes its prefix from
@@ -96,8 +100,8 @@ FLOW_COOKIE_PATH = f"{API_ROOT}{OAUTH_ROUTE_PREFIX}"
 _FLOW_SECRET_LENGTH = 43
 
 _PROVIDERS: dict[str, _Provider] = {
-    "google": _Provider(label="Google", scopes=("openid", "email", "profile")),
-    "github": _Provider(label="GitHub", scopes=("read:user", "user:email")),
+    "google": _Provider(label="Google", scopes=("openid", "email", "profile"), email_claim_trusted=True),
+    "github": _Provider(label="GitHub", scopes=("read:user", "user:email"), email_claim_trusted=True),
 }
 # Kept honest by a unit test as well, but asserted at import so a provider added
 # to one of the two lists and not the other fails on the way up rather than on
@@ -114,6 +118,15 @@ def provider_label(provider: str) -> str:
     """
     known = _PROVIDERS.get(provider)
     return known.label if known else provider
+
+
+def trusts_email_claim(provider: str) -> bool:
+    """Say whether no tenant can set what this provider says about an address.
+
+    An unknown provider is not trusted.
+    """
+    known = _PROVIDERS.get(provider)
+    return known is not None and known.email_claim_trusted
 
 
 def redirect_uri(config: GatewayConfig, provider: str) -> str:
@@ -479,4 +492,5 @@ __all__ = [
     "provider_label",
     "redirect_uri",
     "require_configured",
+    "trusts_email_claim",
 ]

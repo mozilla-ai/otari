@@ -674,3 +674,8 @@ class TestProviderLabel:
         # The only caller is a refusal, and one that fails to render is worse
         # than one naming a provider nobody configured.
         assert oauth_service.provider_label("acme-oidc") == "acme-oidc"
+
+
+@pytest.mark.parametrize(("provider", "trusted"), [("github", True), ("google", True), ("acme-oidc", False)])
+def test_only_a_known_provider_has_a_trusted_email_claim(provider: str, trusted: bool) -> None:
+    assert oauth_service.trusts_email_claim(provider) is trusted
