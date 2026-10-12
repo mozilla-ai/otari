@@ -17,7 +17,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.settings.tools import WEB_SEARCH_PROVIDERS
 from gateway.exceptions.tools_exceptions import WebSearchPolicyResolutionFailedError, WebSearchPolicyResolutionFailure
 from gateway.log_config import logger
-from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential, WebTool
+from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential, WebTool, WebToolCredentialSource
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.services.control_plane import ResolveEndpoint, resolve
 from gateway.services.tenancy.workspace_web_search_service import (
@@ -108,7 +108,7 @@ def _credential(answer: dict[str, Any]) -> WebSearchCredential | None:
     if provider not in WEB_SEARCH_PROVIDERS:
         logger.warning("Ignoring a workspace web search key for a provider this gateway cannot call: %s", provider)
         return None
-    return WebSearchCredential(provider=provider, api_key=api_key)
+    return WebSearchCredential(provider=provider, source=WebToolCredentialSource.HYBRID, api_key=api_key)
 
 
 def _authorized_tools(answer: dict[str, Any]) -> frozenset[str]:
