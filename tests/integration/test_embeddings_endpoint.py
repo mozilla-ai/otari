@@ -546,7 +546,7 @@ def test_embeddings_upstream_bad_request_is_a_400(
             headers=api_key_header,
         )
     assert resp.status_code == 400
-    assert "input cannot be an empty string" in resp.json()["detail"]
+    assert resp.json() == {"detail": "input cannot be an empty string"}
 
     rows = _error_rows(client, master_key_header, api_key_obj["user_id"])
     assert [row["status_code"] for row in rows] == [400]

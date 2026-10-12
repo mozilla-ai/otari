@@ -16,7 +16,9 @@ import asyncio
 import json
 from typing import Any
 
+import anthropic
 import httpx
+import openai
 import pytest
 from anthropic import APITimeoutError as AnthropicAPITimeoutError
 from any_llm.exceptions import (
@@ -28,6 +30,7 @@ from any_llm.exceptions import (
 )
 from any_llm.utils.exception_handler import convert_exception
 from botocore.exceptions import ClientError
+from cohere.errors import BadRequestError as CohereBadRequestError
 from fastapi import HTTPException
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
@@ -804,10 +807,26 @@ def test_redaction_strips_prefixless_32_character_api_keys() -> None:
         "messages.0.content: input_value='private prompt'",
         "content=private prompt",
         "input_value=private prompt",
+        "request: {'model': 'command-a', 'query': 'private'}",
+        'response="private completion"',
+        "request: private prompt",
+        "response: private completion",
+        "Request = private prompt",
+        "invalid response: private completion",
+        "invalid request: {'query': 'private'}",
+        "invalid request: 'private prompt'",
     ],
 )
 def test_redaction_rejects_validation_payload_echoes(raw: str) -> None:
     assert redact_upstream_message(raw) == ""
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["invalid request: query must be a non-empty string", "Invalid request: documents must not be empty"],
+)
+def test_redaction_keeps_a_rejection_phrased_as_invalid_request(raw: str) -> None:
+    assert redact_upstream_message(raw) == raw
 
 
 # The exact upstream Anthropic message for an out-of-credit account. Anthropic
@@ -1263,3 +1282,168 @@ def test_platform_terminal_exc_keeps_retries_for_an_upstream_outage() -> None:
     exc = _provider_failure_http_exc(_StatusError(503), fallback_detail="LLM provider error")
     assert exc.status_code == 502
     assert exc.headers is None
+
+
+# Provider SDKs that parse the error body onto ``exc.body`` frame it differently
+# in their string form: OpenAI and Anthropic as ``Error code: 400 - {...}`` with a
+# Python dict repr, Cohere with the response headers ahead of the body. The
+# caller gets the sentence inside the body, and never that framing.
+
+_OPENAI_TEMPERATURE_MSG = (
+    "Unsupported value: 'temperature' does not support 0.5 with this model. Only the default (1) value is supported."
+)
+_OPENAI_CONTEXT_MSG = (
+    "This model's maximum context length is 128000 tokens. However, your messages resulted in 130000 tokens. "
+    "Please reduce the length of the messages."
+)
+_OPENAI_EMPTY_INPUT_MSG = "Invalid 'input[0]': input cannot be an empty string."
+_COHERE_SCHEMA_MSG = "invalid validation: invalid 'json_schema': missing required field 'type'"
+_COHERE_HEADERS = {"x-debug-trace-id": "f3a9c2", "x-endpoint-monthly-call-limit": "1000", "server": "envoy"}
+
+
+def _openai_status_error(status_code: int, error: dict[str, Any]) -> openai.APIStatusError:
+    """An OpenAI SDK status error built the way the SDK builds it from a response."""
+    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    response = httpx.Response(status_code, request=request, json={"error": error})
+    error_class = openai.BadRequestError if status_code == 400 else openai.APIStatusError
+    return error_class(f"Error code: {status_code} - {{'error': {error}}}", response=response, body=error)
+
+
+def _anthropic_bad_request(message: str) -> anthropic.BadRequestError:
+    """An Anthropic SDK 400, whose body keeps the ``{"type": "error", "error": {...}}`` envelope."""
+    body = {"type": "error", "error": {"type": "invalid_request_error", "message": message}}
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    return anthropic.BadRequestError(
+        f"Error code: 400 - {body}", response=httpx.Response(400, request=request, json=body), body=body
+    )
+
+
+def _openai_error(message: str, *, param: str | None = None, code: str | None = None) -> dict[str, Any]:
+    return {"message": message, "type": "invalid_request_error", "param": param, "code": code}
+
+
+@pytest.mark.parametrize("unified", [False, True], ids=["raw", "unified"])
+@pytest.mark.parametrize(
+    ("upstream", "expected"),
+    [
+        (
+            _openai_status_error(
+                400, _openai_error(_OPENAI_TEMPERATURE_MSG, param="temperature", code="unsupported_value")
+            ),
+            _OPENAI_TEMPERATURE_MSG,
+        ),
+        (_openai_status_error(400, _openai_error(_OPENAI_EMPTY_INPUT_MSG, param="input")), _OPENAI_EMPTY_INPUT_MSG),
+        (_anthropic_bad_request("max_tokens: Field required"), "max_tokens: Field required"),
+        (
+            CohereBadRequestError(body={"id": "a1b2", "message": _COHERE_SCHEMA_MSG}, headers=_COHERE_HEADERS),
+            _COHERE_SCHEMA_MSG,
+        ),
+    ],
+    ids=["openai-unsupported-value", "openai-empty-embedding-input", "anthropic", "cohere"],
+)
+def test_a_provider_rejection_reaches_the_caller_as_the_providers_own_sentence(
+    upstream: Exception, expected: str, unified: bool
+) -> None:
+    exc = convert_exception(upstream, "provider") if unified else upstream
+
+    assert classify_provider_error(exc) == (400, expected)
+    assert stream_error_message(exc) == expected
+
+
+def test_a_prompt_too_long_reaches_the_caller_unwrapped_and_keeps_its_code() -> None:
+    upstream = _openai_status_error(
+        400, _openai_error(_OPENAI_CONTEXT_MSG, param="messages", code="context_length_exceeded")
+    )
+    exc = convert_exception(upstream, "openai")
+
+    assert classify_provider_error(exc) == (400, _OPENAI_CONTEXT_MSG)
+    assert provider_error_headers(exc, 400) == {"Otari-Error-Code": "context_length_exceeded"}
+
+
+def test_a_provider_404_and_429_read_the_body_too() -> None:
+    not_found = _openai_status_error(404, _openai_error("The model `gpt-9` does not exist", code="model_not_found"))
+    rate_limited = _openai_status_error(429, _openai_error("Rate limit reached for gpt-4o on tokens per min"))
+
+    assert classify_provider_error(not_found) == (404, "The model `gpt-9` does not exist")
+    assert classify_provider_error(rate_limited) == (429, "Rate limit reached for gpt-4o on tokens per min")
+
+
+def test_cohere_response_headers_never_reach_the_caller() -> None:
+    """Cohere's string form leads with the response headers; a body with no message falls back."""
+    for upstream in (
+        CohereBadRequestError(body={"id": "a1b2", "message": _COHERE_SCHEMA_MSG}, headers=_COHERE_HEADERS),
+        CohereBadRequestError(body={"id": "a1b2"}, headers=_COHERE_HEADERS),
+    ):
+        for exc in (upstream, convert_exception(upstream, "cohere")):
+            mapping = classify_provider_error(exc)
+            assert mapping is not None
+            assert "x-debug-trace-id" not in mapping.detail
+            assert "f3a9c2" not in mapping.detail
+            assert "headers" not in mapping.detail
+
+    assert classify_provider_error(CohereBadRequestError(body={"id": "a1b2"}, headers=_COHERE_HEADERS)) == (
+        400,
+        PROVIDER_BAD_REQUEST_DETAIL,
+    )
+
+
+def test_a_body_message_is_still_redacted() -> None:
+    upstream = _openai_status_error(
+        400, _openai_error("Invalid key sk-proj-ABCDEFGHIJKLMNOP for https://proxy.internal/v1")
+    )
+
+    mapping = classify_provider_error(upstream)
+
+    assert mapping is not None
+    assert "sk-proj-ABCDEFGHIJKLMNOP" not in mapping.detail
+    assert "proxy.internal" not in mapping.detail
+    assert mapping.detail.startswith("Invalid key [redacted]")
+
+
+def test_a_body_message_echoing_the_request_falls_back_without_reading_the_sdk_string() -> None:
+    """When the body's message is refused as a payload echo, the dict repr around it is not tried instead."""
+    upstream = _openai_status_error(400, _openai_error("messages: [{'role': 'user', 'content': 'my secret prompt'}]"))
+
+    assert classify_provider_error(upstream) == (400, PROVIDER_BAD_REQUEST_DETAIL)
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ('{"object": "error", "message": "Invalid model: foo", "type": "invalid_model"}', "Invalid model: foo"),
+        ("Unknown field 'foo'", "Unknown field 'foo'"),
+        ("<html><body><h1>400 Bad Request</h1></body></html>", PROVIDER_BAD_REQUEST_DETAIL),
+        ("{not json", PROVIDER_BAD_REQUEST_DETAIL),
+        ({"error": "model is required"}, "model is required"),
+        ({"error": "invalid_request_error", "message": "model is required"}, "model is required"),
+        ({"error": {"code": 400}}, PROVIDER_BAD_REQUEST_DETAIL),
+        (["not", "a", "mapping"], PROVIDER_BAD_REQUEST_DETAIL),
+    ],
+    ids=[
+        "json-text",
+        "plain-text",
+        "html",
+        "broken-json",
+        "error-string",
+        "error-type-beside-message",
+        "no-message",
+        "list",
+    ],
+)
+def test_body_shapes_other_sdks_attach(body: object, expected: str) -> None:
+    exc = _StatusError(400)
+    exc.body = body  # type: ignore[attr-defined]
+
+    assert classify_provider_error(exc) == (400, expected)
+
+
+def test_a_billing_message_in_the_body_is_still_the_gateways_fault() -> None:
+    upstream = _anthropic_bad_request("Your credit balance is too low to access the Anthropic API.")
+
+    assert classify_provider_error(upstream) == (502, PROVIDER_BILLING_DETAIL)
+
+
+def test_a_credential_rejection_never_echoes_its_body() -> None:
+    upstream = _openai_status_error(401, _openai_error("Incorrect API key provided: sk-proj-ABCDEFGHIJKLMNOP"))
+
+    assert classify_provider_error(upstream) == (424, PROVIDER_CREDENTIALS_DETAIL)

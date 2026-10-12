@@ -56,9 +56,12 @@ _SECRET_SHAPES: tuple[re.Pattern[str], ...] = (
 # which belongs in a client-facing error. Parameter paths such as
 # ``messages.0.content`` stay useful, while field/value pairs, including common
 # validation-error spellings, and JSON payloads are rejected as a whole and make
-# the caller-fault classifier use its fallback.
+# the caller-fault classifier use its fallback. The one exemption is the text
+# after "invalid request:", which is how Cohere phrases a rejection ("invalid
+# request: query must not be empty") rather than an echo; a payload opener after
+# it (a quote, brace or bracket) is still refused.
 _PAYLOAD_ECHO = re.compile(
-    r"(?:[\"']?(?:messages|input|prompt|tools?|tool_calls|response|request(?:_body)?|body|content|input_value)[\"']?\s*[:=]|\b(?:messages|input|tools?|tool_calls)(?:\.\d+|\[[^]]+\])+\.(?:content|input_value)\s*:\s*(?:(?:input_)?value\s*=|[\"'{[]))",
+    r"(?:[\"']?(?:messages|input|prompt|tools?|tool_calls|response|request_body|body|content|input_value)[\"']?\s*[:=]|(?<!invalid\s)[\"']?request[\"']?\s*[:=]|[\"']?request[\"']?\s*[:=]\s*[\"'{[]|\b(?:messages|input|tools?|tool_calls)(?:\.\d+|\[[^]]+\])+\.(?:content|input_value)\s*:\s*(?:(?:input_)?value\s*=|[\"'{[]))",
     re.IGNORECASE,
 )
 

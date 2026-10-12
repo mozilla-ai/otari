@@ -9,7 +9,6 @@ from any_llm.utils.exception_handler import convert_exception
 from cohere.errors import BadRequestError as CohereBadRequestError
 from fastapi.testclient import TestClient
 
-from gateway.api.routes._pipeline import PROVIDER_BAD_REQUEST_DETAIL
 from gateway.core.config import API_ROOT
 
 
@@ -311,11 +310,13 @@ def test_rerank_upstream_bad_request_is_a_400(
 ) -> None:
     """The provider rejecting the request (here an empty query) is the caller's to fix.
 
-    Cohere's SDK puts its message in a ``body`` dict and stringifies the whole
-    response, which the redaction refuses as a payload echo, so the detail is
-    the fixed bad-request one rather than Cohere's sentence.
+    Cohere's SDK puts its message in a ``body`` dict and stringifies it after the
+    response headers, so the detail is the sentence from the body and nothing else.
     """
-    upstream = CohereBadRequestError(body={"message": "invalid request: query must be a non-empty string"})
+    upstream = CohereBadRequestError(
+        body={"id": "c0ffee", "message": "invalid request: query must be a non-empty string"},
+        headers={"x-debug-trace-id": "trace-9f3a"},
+    )
     with patch(
         "gateway.api.routes.rerank.arerank",
         new_callable=AsyncMock,
@@ -323,7 +324,7 @@ def test_rerank_upstream_bad_request_is_a_400(
     ):
         resp = client.post(f"{API_ROOT}/rerank", json={**RERANK_PAYLOAD, "query": ""}, headers=api_key_header)
     assert resp.status_code == 400
-    assert resp.json()["detail"] == PROVIDER_BAD_REQUEST_DETAIL
+    assert resp.json() == {"detail": "invalid request: query must be a non-empty string"}
 
     usage_resp = client.get(
         f"{API_ROOT}/usage",

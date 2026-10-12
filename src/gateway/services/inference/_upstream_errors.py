@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Iterator, Mapping
 from typing import Literal
 
@@ -200,6 +201,51 @@ def upstream_error_message(exc: BaseException) -> str:
                 seen.add(stripped)
                 parts.append(stripped)
     return " ".join(parts)
+
+
+def upstream_body_messages(exc: BaseException) -> list[str] | None:
+    """The messages in the error bodies provider SDKs attached across the chain, or ``None``.
+
+    ``None`` means no exception in the ``original_exception`` chain carries a
+    ``body``. A list, even an empty one, means at least one does, and then the
+    provider's message is only what is inside a body. The OpenAI, Anthropic, Groq
+    and Cohere SDKs keep the parsed body there, and their ``message`` and string
+    forms are framing around it: a status prefix and a Python dict repr, or
+    Cohere's response headers.
+    """
+    bodied = [current for current in upstream_exception_chain(exc) if getattr(current, "body", None) is not None]
+    if not bodied:
+        return None
+    return [message for current in bodied if (message := upstream_body_message(current)) is not None]
+
+
+def upstream_body_message(exc: BaseException) -> str | None:
+    """The human message in the error body a provider SDK attached to ``exc``, or ``None``.
+
+    Reads ``error.message`` ahead of a top-level ``message``, because Anthropic
+    nests the error in an envelope while the OpenAI SDK unwraps it first and
+    Cohere never had one. A string ``error`` comes last: beside a ``message`` it
+    is usually a type name rather than the explanation. A body the SDK left as text (Mistral's) is parsed when
+    it is JSON and read whole otherwise, unless it is markup such as a proxy's
+    HTML error page.
+    """
+    body = getattr(exc, "body", None)
+    if isinstance(body, str):
+        text = body.strip()
+        if not text.startswith("{"):
+            return text if text and not text.startswith("<") else None
+        try:
+            body = json.loads(text)
+        except ValueError:
+            return None
+    if not isinstance(body, Mapping):
+        return None
+    error = body.get("error")
+    nested = error.get("message") if isinstance(error, Mapping) else None
+    for candidate in (nested, body.get("message"), error):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
 
 
 def upstream_retry_after(exc: BaseException) -> str | None:

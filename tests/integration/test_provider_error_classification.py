@@ -9,9 +9,12 @@ gateway's own fault keeps a fixed detail and never echoes upstream text.
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import anthropic
 import httpx
+import openai
 import pytest
 from any_llm.exceptions import UnsupportedParameterError
+from cohere.errors import BadRequestError as CohereBadRequestError
 from fastapi.testclient import TestClient
 
 from gateway.api.routes._pipeline import (
@@ -320,3 +323,91 @@ def test_messages_classifies_provider_error(
     assert detail["error"]["message"] == expected_detail
     if expected_detail != _RAW:
         assert "SECRET" not in response.text
+
+
+_TEMPERATURE_MSG = (
+    "Unsupported value: 'temperature' does not support 0.5 with this model. Only the default (1) value is supported."
+)
+
+
+def _openai_bad_request() -> openai.BadRequestError:
+    """OpenAI's 400 as its SDK raises it: the message is ``Error code: 400 - `` and a dict repr."""
+    error = {
+        "message": _TEMPERATURE_MSG,
+        "type": "invalid_request_error",
+        "param": "temperature",
+        "code": "unsupported_value",
+    }
+    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    return openai.BadRequestError(
+        f"Error code: 400 - {{'error': {error}}}",
+        response=httpx.Response(400, request=request, json={"error": error}),
+        body=error,
+    )
+
+
+def _cohere_bad_request() -> CohereBadRequestError:
+    """Cohere's 400, whose string form leads with the response headers."""
+    return CohereBadRequestError(
+        body={"id": "c0ffee", "message": "invalid validation: invalid 'json_schema'"},
+        headers={"x-debug-trace-id": "trace-SECRET-9f3a", "server": "envoy"},
+    )
+
+
+@pytest.mark.parametrize(
+    ("upstream", "expected"),
+    [(_openai_bad_request(), _TEMPERATURE_MSG), (_cohere_bad_request(), "invalid validation: invalid 'json_schema'")],
+    ids=["openai", "cohere"],
+)
+def test_chat_answers_a_provider_400_with_the_providers_sentence(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    test_user: dict[str, Any],
+    upstream: Exception,
+    expected: str,
+) -> None:
+    with patch("gateway.api.routes.chat.acompletion", new_callable=AsyncMock, side_effect=upstream):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={"model": "openai:gpt-5.6-sol", "messages": [{"role": "user", "content": "Hi"}], "temperature": 0.5},
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": expected}
+    assert "SECRET" not in response.text
+
+
+def test_responses_answers_a_provider_400_with_the_providers_sentence(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    responses_request_body: dict[str, Any],
+) -> None:
+    with patch("gateway.api.routes.responses.aresponses", new_callable=AsyncMock, side_effect=_openai_bad_request()):
+        response = client.post(f"{API_ROOT}/responses", json=responses_request_body, headers=master_key_header)
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": _TEMPERATURE_MSG}
+
+
+def test_messages_answers_a_provider_400_with_the_providers_sentence(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_user: dict[str, Any],
+    messages_request_body: dict[str, Any],
+) -> None:
+    body = {"type": "error", "error": {"type": "invalid_request_error", "message": "max_tokens: Field required"}}
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    upstream = anthropic.BadRequestError(
+        f"Error code: 400 - {body}", response=httpx.Response(400, request=request, json=body), body=body
+    )
+    messages_request_body["metadata"] = {"user_id": "test-user"}
+
+    with patch("gateway.api.routes.messages.amessages", new_callable=AsyncMock, side_effect=upstream):
+        response = client.post(f"{API_ROOT}/messages", json=messages_request_body, headers=master_key_header)
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error"] == {
+        "type": "invalid_request_error",
+        "message": "max_tokens: Field required",
+    }

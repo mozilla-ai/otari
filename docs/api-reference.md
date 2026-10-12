@@ -378,6 +378,23 @@ provider rejects something the caller can fix, such as a model name or request
 parameter. Credentials, URLs, account identifiers, and reflected payloads are
 removed.
 
+The diagnostic is the provider's own sentence, taken from the error body it
+sent, and not the provider SDK's rendering of that error. An OpenAI 400 for a
+model that only accepts its default temperature answers:
+
+```json
+{"detail": "Unsupported value: 'temperature' does not support 0.5 with this model. Only the default (1) value is supported."}
+```
+
+rather than a detail that begins `Error code: 400 - {'error': {...}}`. The same
+holds for Anthropic, Cohere and the other providers whose SDKs keep the parsed
+body: only the body's message can reach the caller, never a status prefix, the
+body's other fields, or the response headers. When that body has no message, or
+its message is redacted away, the caller gets the fixed detail for the status
+instead (for a 400,
+`The provider rejected the request as invalid (check the model name and parameters)`).
+The provider's `param` and `code` fields are not copied into the response.
+
 The completion routes and the pass-through routes (embeddings, images, audio,
 moderations, rerank) classify a provider failure the same way. A provider that
 rejects the request (its own 400 or 422) answers 400, and an unknown model 404.

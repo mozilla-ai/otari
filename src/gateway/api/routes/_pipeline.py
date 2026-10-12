@@ -211,6 +211,7 @@ from gateway.services.inference import (
     StillInFlight,
     UnknownCaller,
     is_provider_billing_error,
+    upstream_body_messages,
     upstream_error_message,
     upstream_exception_chain,
     upstream_exception_shape,
@@ -586,7 +587,13 @@ def _upstream_message_detail(exc: BaseException, fallback: str) -> str:
     Returns the provider's own message, redacted and length-capped, because the
     provider is the only party that knows what it objected to.
 
-    A message the provider put on an exception wins over the joined chain.
+    An error body an SDK parsed onto the exception is read first, and when one
+    is there nothing else is: the message inside it is what the provider wrote,
+    while the same exception's ``message`` and string form wrap that body in a
+    status prefix and a Python dict repr (OpenAI, Anthropic) or prepend the
+    response headers (Cohere).
+
+    Otherwise a message the provider put on an exception wins over the joined chain.
     An SDK's string form can repeat that message, add its own labels, or append the response body.
     A wrapper's message is its original's string form, so a message deeper in the chain wins over it.
 
@@ -598,6 +605,12 @@ def _upstream_message_detail(exc: BaseException, fallback: str) -> str:
     A message made entirely of redaction placeholders is empty for this
     purpose, too.
     """
+    body_messages = upstream_body_messages(exc)
+    if body_messages is not None:
+        for body_message in body_messages:
+            if detail := _redacted_upstream_detail(body_message, ""):
+                return detail
+        return fallback
     wrapper_message: str | None = None
     for candidate in upstream_exception_chain(exc):
         message = _carried_message(candidate)
