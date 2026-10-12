@@ -1129,6 +1129,7 @@ def test_a_second_identity_at_one_provider_cannot_sign_in_to_a_linked_account(
     response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c2", "state": "s"})
 
     assert response.status_code == 401, response.text
+    assert "signs in with a different Google account" in response.json()["detail"]
     assert SESSION_COOKIE_NAME not in response.cookies
 
 

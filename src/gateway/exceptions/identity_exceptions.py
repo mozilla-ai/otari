@@ -307,6 +307,22 @@ class OAuthIdentityUnknownError(TenancyError):
         )
 
 
+class OAuthAccountLinkedElsewhereError(TenancyError):
+    """The account that holds the address is linked to another identity at the same provider.
+
+    401, and named, for the reason ``OAuthEmailNotVerifiedError`` gives: the provider has confirmed that the
+    person at the browser holds the address, so the reason tells them about their own account.
+    """
+
+    status_code = status.HTTP_401_UNAUTHORIZED
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(
+            f"The account for that address signs in with a different {provider} account. "
+            f"Sign in with that {provider} account, or with your password or passkey."
+        )
+
+
 class OAuthIdentityLinkConflictError(TenancyConflictError):
     """Another sign-in linked the provider identity, or the account at that provider, first."""
 
@@ -457,6 +473,7 @@ __all__ = [
     "EmptyDeploymentUserUpdateError",
     "InvalidCredentialsError",
     "InvalidEmailError",
+    "OAuthAccountLinkedElsewhereError",
     "OAuthEmailNotVerifiedError",
     "OAuthExchangeError",
     "OAuthIdentityLinkConflictError",

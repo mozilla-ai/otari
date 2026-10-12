@@ -4,7 +4,11 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from gateway.core.unit_of_work import UnitOfWork
-from gateway.exceptions.identity_exceptions import OAuthEmailNotVerifiedError, OAuthIdentityUnknownError
+from gateway.exceptions.identity_exceptions import (
+    OAuthAccountLinkedElsewhereError,
+    OAuthEmailNotVerifiedError,
+    OAuthIdentityUnknownError,
+)
 from gateway.log_config import logger
 from gateway.models.identity import EmailAssertion, ProviderIdentity
 from gateway.models.tenancy import User
@@ -69,8 +73,9 @@ class IdentityService:
 
         Raises:
             OAuthEmailNotVerifiedError: If the provider says the address is not verified.
-            OAuthIdentityUnknownError: If the account is deactivated or gone,
-                or the account the policy returns is linked to another identity at the same provider.
+            OAuthAccountLinkedElsewhereError: If the account the policy returns is linked to another identity
+                at the same provider.
+            OAuthIdentityUnknownError: If the account is deactivated or gone.
             OAuthIdentityLinkConflictError: If a concurrent sign-in linked the identity to another account first.
             TenancyError: If the identity provider policy refuses the identity.
 
@@ -109,7 +114,7 @@ class IdentityService:
                 external.provider,
                 account.id,
             )
-            raise OAuthIdentityUnknownError(label)
+            raise OAuthAccountLinkedElsewhereError(label)
         return IdentityResolution(identity=account, new_account=resolution.new_account)
 
     async def _active_account(self, user_id: uuid.UUID, label: str) -> User:
