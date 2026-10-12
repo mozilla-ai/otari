@@ -30,9 +30,9 @@ The code and the state share one redirect URL that the access log and browser
 history both record; the cookie is the half of the flow that neither does. See
 ``gateway.services.oauth_service``.
 
-**What this route decides, and what it does not.** It proves the person holds
-the provider account. ``IdentityProviderPort`` decides which account that person
-signs in as here, so an overlay can change that policy without editing this file.
+**What this route decides, and what it does not.** It proves the person holds the provider account.
+``IdentityService`` decides which account that person signs in as here, through ``IdentityProviderPort``,
+so an overlay can change that policy without editing this file.
 """
 
 import uuid
@@ -46,7 +46,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     GrowthSignalPortDep,
-    IdentityProviderPortDep,
+    IdentityServiceDep,
     OrganizationServiceDep,
     get_config,
     get_db,
@@ -64,7 +64,6 @@ from gateway.core.database import DATABASE_ERRORS
 from gateway.exceptions import TenancyError
 from gateway.exceptions.identity_exceptions import OAuthNotConfiguredError
 from gateway.log_config import logger
-from gateway.ports.identity_provider_port import EmailAssertion
 from gateway.services.dashboard_session_service import (
     apply_session_cookie,
     create_dashboard_session,
@@ -254,7 +253,7 @@ async def callback(
     body: OAuthCallbackRequest,
     request: Request,
     response: Response,
-    identity_provider: IdentityProviderPortDep,
+    identities: IdentityServiceDep,
     growth: GrowthSignalPortDep,
     background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -296,12 +295,7 @@ async def callback(
         external = await exchange_code(
             config, provider, code=body.code, state=body.state, flow_secret=flow_cookie, db=db
         )
-        resolution = await identity_provider.resolve(
-            provider=external.provider,
-            email=external.email,
-            full_name=external.full_name,
-            email_verified=external.email_verified is EmailAssertion.VERIFIED,
-        )
+        resolution = await identities.sign_in_with_oauth(external)
     except TenancyError:
         record_auth_failure("invalid_oauth")
         raise
@@ -313,10 +307,8 @@ async def callback(
         # outside, that failure would skip the rollback and the log line below
         # and surface as a bare 500 from the generic handler.
         #
-        # One commit for the sign-in: the adapter's link and verification stamp
-        # are on this same session, so they land with the session row or with
-        # neither. Only the tenancy a new or reclaimed account gets is committed
-        # earlier, by the adapter, before it changes the account.
+        # NOTE: The identity service has already committed the account's sign-in changes.
+        # A failure here mints no session and leaves those changes in place.
         # Before the session row and inside the same transaction, so a new
         # membership and the sign-in that earned it land together or not at all.
         # Not guarded: the only expected failure is two concurrent sign-ins
