@@ -18,10 +18,9 @@ export interface UserOptionText {
  * same forms, and somebody who reads as a name in one and as a UUID in the
  * other reads as two different people (otari-ai#2101).
  *
- * The second line is the person's email, which is what tells two people apart
- * and something an operator recognizes. A member with no address gets none: the
- * id is an internal UUID, so it is shown only where two rows would otherwise
- * read the same (`userOptionTexts`).
+ * The second line is the person's email. A member with no address gets none:
+ * the id is an internal UUID, shown only to tell apart rows that would read the
+ * same (`userOptionTexts`).
  */
 export function userOptionText(
   user: User,
@@ -42,11 +41,7 @@ export function userOptionText(
   }
 }
 
-/**
- * `userOptionText` for a whole list, with the id as the hint on any roster row
- * that still shares its label and second line with another: the one case where
- * the UUID is the only thing that distinguishes them.
- */
+/** `userOptionText` for a list, with the id as the hint on roster rows that would otherwise read the same. */
 export function userOptionTexts(
   users: User[],
   memberLabels: ReadonlyMap<string, string>,
@@ -55,14 +50,12 @@ export function userOptionTexts(
   const texts = users.map((user) =>
     userOptionText(user, memberLabels, memberEmails),
   )
+  const keyOf = (t: UserOptionText) => `${t.label}\u0000${t.hint ?? ""}`
   const seen = new Map<string, number>()
-  for (const t of texts) {
-    const key = `${t.label}\u0000${t.hint ?? ""}`
-    seen.set(key, (seen.get(key) ?? 0) + 1)
-  }
+  for (const t of texts) seen.set(keyOf(t), (seen.get(keyOf(t)) ?? 0) + 1)
   return texts.map((t, i) => {
     const user = users[i]
-    const isShared = (seen.get(`${t.label}\u0000${t.hint ?? ""}`) ?? 0) > 1
+    const isShared = (seen.get(keyOf(t)) ?? 0) > 1
     return isShared && memberLabels.has(user.user_id)
       ? { label: t.label, hint: user.user_id }
       : t

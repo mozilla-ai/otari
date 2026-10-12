@@ -443,9 +443,8 @@ function CreateKeyDialog({
   const [keyName, setKeyName] = useState("")
   const [expiresAt, setExpiresAt] = useState("")
   const [showAdvanced, setShowAdvanced] = useState(false)
-  // Undefined until the operator touches the picker, so the default tracks the
-  // roster as it loads and a cleared field (an empty string) stays cleared.
-  const [pickedOwner, setPickedOwner] = useState<string | undefined>(undefined)
+  // Undefined until the operator touches the picker; "" is a deliberate clear.
+  const [pickedOwner, setPickedOwner] = useState<string>()
   const currentOwnerId = useCurrentOwnerId()
   const [allowedModels, setAllowedModels] = useState<string[] | undefined>(
     undefined,
@@ -468,18 +467,16 @@ function CreateKeyDialog({
 
   const expiresInPast =
     expiresAt !== "" && new Date(expiresAt).getTime() < Date.now()
-  // User-first: an operator's key must name its owner (an existing user or a new
-  // id, which the API creates as a named user). This is what keeps the dashboard
-  // from minting the anonymous virtual users an omitted id would. A member's key
-  // is always their own, so there is nothing to require.
-  // The signed-in person owns the key unless the operator says otherwise, and
-  // only when the picker would offer them: an id outside the list is not a
-  // default worth guessing.
+  // Defaults to the signed-in user, but only if the picker offers them.
   const defaultOwner =
     currentOwnerId && ownerOptions.some((u) => u.user_id === currentOwnerId)
       ? currentOwnerId
       : ""
   const userId = pickedOwner ?? defaultOwner
+  // User-first: an operator's key must name its owner (an existing user or a new
+  // id, which the API creates as a named user). This is what keeps the dashboard
+  // from minting the anonymous virtual users an omitted id would. A member's key
+  // is always their own, so there is nothing to require.
   const ownerMissing = isDeploymentWide && userId.trim() === ""
   // The workspace comes from the organization context, which resolves after the
   // form paints. Submitting before it does would send no workspace and land the

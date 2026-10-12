@@ -49,7 +49,7 @@ export function useMemberAttributionLabels(): ReadonlyMap<string, string> {
 }
 
 /** Sign-in addresses by the owner id they bill through, for members who have one. */
-export function memberEmailsByAttributionId(
+function memberEmailsByAttributionId(
   members: OrganizationMember[] | undefined,
 ): ReadonlyMap<string, string> {
   return new Map(
@@ -72,12 +72,8 @@ export function useMemberAttributionEmails(): ReadonlyMap<string, string> {
 }
 
 /**
- * The owner id the signed-in person bills through, once the roster names it.
- *
- * Undefined while either read is pending or failed, and for an identity with no
- * attribution row (a member whose `attribution_user_id` is null has no owner a
- * key could be issued to), so a caller offering it as a default falls back to
- * asking.
+ * The owner id the signed-in person bills through. Undefined while the reads
+ * are pending or failed, and for a member with no attribution row.
  */
 export function useCurrentOwnerId(): string | undefined {
   const hasSurface = useSurfaces()

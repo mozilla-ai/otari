@@ -36,7 +36,6 @@ export function UserMultiSelect({
   description?: ReactNode
 }) {
   const memberLabels = useMemberAttributionLabels()
-
   const memberEmails = useMemberAttributionEmails()
 
   const people = users.filter((user) => !user.user_id.startsWith("apikey-"))
