@@ -1634,7 +1634,7 @@ MODEL_ACCESS: dict[str, ModelAccess] = {
         ),
     },
     "gateway.models.tenancy.DashboardSession": {
-        "repository": None,
+        "repository": "gateway/repositories/identity/dashboard_session_repository.py",
         "baseline": ("gateway/services/dashboard_session_service.py",),
     },
     "gateway.models.tenancy.Invitation": {

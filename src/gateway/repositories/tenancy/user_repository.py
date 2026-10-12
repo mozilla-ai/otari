@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, func, nulls_last, select, update
+from sqlalchemy import CursorResult, func, nulls_last, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -216,6 +216,15 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         land. A deployment that needs this guarantee runs PostgreSQL.
         """
         await self.db.execute(select(col(User.id)).where(col(User.id) == user_id).with_for_update())
+
+    async def record_sign_in(self, user_id: uuid.UUID, *, at: datetime) -> None:
+        """Stage ``at`` as the identity's last sign-in, unless a later one is already recorded."""
+        await self.db.execute(
+            update(User)
+            .where(col(User.id) == user_id)
+            .where(or_(col(User.last_sign_in_at).is_(None), col(User.last_sign_in_at) < at))
+            .values(last_sign_in_at=at)
+        )
 
     async def get_locked(self, user_id: uuid.UUID) -> User | None:
         """Return the identity read fresh under a row lock, or None.
