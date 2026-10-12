@@ -45,6 +45,7 @@ from gateway.api.routes._pipeline import (
     DeclaredTools,
     ErrorKind,
     ToolBackends,
+    bind_upstream_user,
     classify_provider_error,
     default_attempt_kwargs,
     domain_error,
@@ -61,6 +62,7 @@ from gateway.api.routes._pipeline import (
     run_standalone_non_stream,
     run_streaming_with_fallback,
     scope_prompt_cache_key,
+    with_upstream_user,
 )
 from gateway.api.routes._platform import (
     ResolvedAttempt,
@@ -71,7 +73,6 @@ from gateway.api.routes._platform import (
 from gateway.api.routes._request_tags import (
     ANTHROPIC_USER_KEY,
     AnthropicRequestMetadata,
-    anthropic_metadata,
     request_tags,
 )
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
@@ -87,6 +88,7 @@ from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
 from gateway.services.code_execution import ContainerLease, check_container_on_credential
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
+    chat_user_fields,
     upstream_exception_chain,
     upstream_exception_shape,
 )
@@ -157,6 +159,21 @@ def _serves_messages_natively(dispatch_model: Any) -> bool:
         return native is not getattr(AnyLLM, "_amessages", None)
     except Exception:  # noqa: BLE001 - any-llm raises its own types for an unknown provider
         return True
+
+
+def _user_fields(kwargs: dict[str, Any], identifier: str) -> dict[str, Any]:
+    # any-llm drops ``metadata`` when it serves the request as a chat completion,
+    # and forwards extra keyword arguments to that call instead.
+    model = kwargs.get("model")
+    if _serves_messages_natively(model):
+        return {"metadata": {ANTHROPIC_USER_KEY: identifier}}
+    implementation, _, _ = str(model).partition(":")
+    return chat_user_fields(implementation, identifier)
+
+
+def _with_upstream_user(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Put the carried end-user identifier in the field this call's provider reads."""
+    return with_upstream_user(kwargs, _user_fields)
 
 
 def _split_client_betas(kwargs: dict[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -689,11 +706,11 @@ class _MessagesAdapter:
         return isinstance(chunk, MessageDeltaEvent)
 
     async def call_provider(self, kwargs: dict[str, Any]) -> MessageResponse:
-        provider_kwargs, _ = _split_client_betas(kwargs)
+        provider_kwargs, _ = _split_client_betas(_with_upstream_user(kwargs))
         return await amessages(**provider_kwargs)  # type: ignore[return-value]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[MessageStreamEvent]:
-        provider_kwargs, _ = _split_client_betas(kwargs)
+        provider_kwargs, _ = _split_client_betas(_with_upstream_user(kwargs))
         return await amessages(**provider_kwargs)  # type: ignore[return-value]
 
     def prepare_stream_kwargs(
@@ -728,7 +745,7 @@ class _MessagesAdapter:
             extra["native_tools"] = native_tools
         if container is not None:
             extra["container"] = container
-        provider_kwargs, _ = _split_client_betas(kwargs)
+        provider_kwargs, _ = _split_client_betas(_with_upstream_user(kwargs))
         return await anthropic_tool_loop(
             completion_kwargs=provider_kwargs,
             pool=pool,
@@ -746,7 +763,7 @@ class _MessagesAdapter:
         use_budget: ToolUseBudget | None = None,
         container: ContainerLease | None = None,
     ) -> AsyncIterator[MessageStreamEvent]:
-        provider_kwargs, emit_native_mcp = _split_client_betas(kwargs)
+        provider_kwargs, emit_native_mcp = _split_client_betas(_with_upstream_user(kwargs))
         extra: dict[str, Any] = {}
         if emit_native_mcp:
             extra["emit_native_mcp"] = True
@@ -972,8 +989,10 @@ async def create_message(
         remaining_user_tools=tool_ctx.remaining_user_tools,
         web_search_declared_name=tool_ctx.web_search_declared_name,
     )
-    anthropic_metadata(request_fields)
+    # Only ``user_id`` means anything to a provider here, and the identifier replaces it.
+    request_fields.pop("metadata", None)
     scope_prompt_cache_key(request_fields, ctx)
+    bind_upstream_user(request_fields, ctx)
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
     if tool_ctx.use_sandbox:

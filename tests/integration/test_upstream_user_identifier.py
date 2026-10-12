@@ -386,3 +386,79 @@ def test_responses_turned_off_sends_no_identifier_at_all(
     _respond(client, headers, user="alice", safety_identifier="caller-chosen")
 
     assert not {"user", "safety_identifier", UPSTREAM_USER_FIELD} & set(responses_captured[0])
+
+
+# ---------------------------------------------------------------------------
+# Messages
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def messages_captured(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+
+    async def fake_amessages(**kwargs: Any) -> None:
+        calls.append(kwargs)
+        raise _Stop
+
+    monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
+    return calls
+
+
+def _message(client: TestClient, headers: dict[str, str], **body: Any) -> None:
+    client.post(
+        f"{API_ROOT}/messages",
+        json={
+            "model": "anthropic:claude-sonnet-4-5",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "hi"}],
+            **body,
+        },
+        headers=headers,
+    )
+
+
+def test_messages_replaces_the_callers_user_id_with_the_identifier(
+    make_client: ClientFactory, messages_captured: list[dict[str, Any]]
+) -> None:
+    client = make_client(reject_user_mismatch=False)
+    headers, workspace = _keyed_user(client)
+
+    _message(client, headers, metadata={"user_id": "end-user-7"})
+
+    assert messages_captured[0]["metadata"] == {"user_id": upstream_user_identifier(workspace, "end-user-7", None)}
+    assert UPSTREAM_USER_FIELD not in messages_captured[0]
+
+
+def test_messages_without_a_tag_digests_the_resolved_user(
+    make_client: ClientFactory, messages_captured: list[dict[str, Any]]
+) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _message(client, headers)
+
+    assert messages_captured[0]["metadata"] == {"user_id": upstream_user_identifier(workspace, "alice", None)}
+
+
+def test_messages_turned_off_drops_the_callers_user_id(
+    make_client: ClientFactory, messages_captured: list[dict[str, Any]]
+) -> None:
+    client = make_client(provider_user_identifier_enabled=False)
+    headers, _ = _keyed_user(client)
+
+    _message(client, headers, metadata={"user_id": "alice"})
+
+    assert not {"metadata", UPSTREAM_USER_FIELD} & set(messages_captured[0])
+
+
+def test_messages_served_as_a_chat_completion_gets_the_providers_chat_field(
+    make_client: ClientFactory, messages_captured: list[dict[str, Any]]
+) -> None:
+    client = make_client()
+    headers, workspace = _keyed_user(client)
+
+    _message(client, headers, model="openai:gpt-4o-mini")
+
+    assert messages_captured[0]["user"] == upstream_user_identifier(workspace, "alice", None)
+    assert not {"metadata", UPSTREAM_USER_FIELD} & set(messages_captured[0])
