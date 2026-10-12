@@ -711,6 +711,22 @@ async def get_db_if_needed(
             yield db
 
 
+async def verify_api_key_or_master_key_if_needed(
+    request: Request,
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> tuple[APIKey | None, bool] | None:
+    """Verify the caller's key in standalone mode, otherwise return ``None``.
+
+    The counterpart of ``verify_api_key_or_master_key`` for a data-plane route
+    that serves both modes: a hybrid gateway forwards the key to the control
+    plane, which verifies it while resolving the request.
+    """
+    if db is None:
+        return None
+    return await verify_api_key_or_master_key(request, db, config)
+
+
 def build_file_service(uow: UnitOfWork, backends: FileBackends, config: GatewayConfig) -> FileService:
     """Build Files operations for a scoped output request or cleanup job."""
 

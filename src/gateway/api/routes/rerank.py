@@ -11,12 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     get_config,
-    get_db,
-    get_inference_service,
+    get_db_if_needed,
     get_log_writer,
-    verify_api_key_or_master_key,
+    verify_api_key_or_master_key_if_needed,
 )
 from gateway.api.routes._passthrough import run_passthrough
+from gateway.api.routes._pipeline import record_inline_cost_settlement
 from gateway.core.config import GatewayConfig
 from gateway.models.api_keys import APIKey
 from gateway.models.pricing import ModelPricing
@@ -48,11 +48,10 @@ async def create_rerank(
     raw_request: Request,
     response: Response,
     request: RerankRequest,
-    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    auth_result: Annotated[tuple[APIKey | None, bool] | None, Depends(verify_api_key_or_master_key_if_needed)],
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
-    inference: Annotated[InferenceService, Depends(get_inference_service)],
 ) -> RerankResponse:
     """Rerank documents by relevance to a query.
 
@@ -107,5 +106,10 @@ async def create_rerank(
         estimate=estimate,
         enforce_require_pricing=True,
         billing=RERANK_BILLING,
+        inline_cost=True,
     )
-    return inference.rerank_response(outcome.result, pricing=outcome.pricing, cost=outcome.cost)
+    if outcome.inline_cost is not None:
+        record_inline_cost_settlement("attached")
+    return InferenceService.rerank_response(
+        outcome.result, pricing=outcome.pricing, cost=outcome.cost, inline_cost=outcome.inline_cost
+    )

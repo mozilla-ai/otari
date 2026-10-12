@@ -6377,18 +6377,13 @@
           "pricing_source": {
             "anyOf": [
               {
-                "enum": [
-                  "organization",
-                  "deployment",
-                  "defaults"
-                ],
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Which rate priced the request; absent when it was not priced",
+            "description": "Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced",
             "title": "Pricing Source"
           },
           "prompt_tokens": {
@@ -15120,18 +15115,13 @@
           "pricing_source": {
             "anyOf": [
               {
-                "enum": [
-                  "organization",
-                  "deployment",
-                  "defaults"
-                ],
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Which rate priced the request; absent when it was not priced",
+            "description": "Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced",
             "title": "Pricing Source"
           },
           "search_units": {

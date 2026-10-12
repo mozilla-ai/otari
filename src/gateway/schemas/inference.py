@@ -10,8 +10,6 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from gateway.models.pricing import PriceSource
-
 # Instructions, criteria and state may each be text or structured JSON.
 DecisionContent = str | dict[str, Any] | list[Any]
 
@@ -153,10 +151,15 @@ class InlineCost(BaseModel):
         exclude_if=_is_none,
         description="What the request cost, as a six-decimal USD string; absent when it was not priced",
     )
-    pricing_source: PriceSource | None = Field(
+    # A string rather than ``PriceSource``: a hybrid gateway carries the control
+    # plane's own name for the rate, as a completion's usage does.
+    pricing_source: str | None = Field(
         default=None,
         exclude_if=_is_none,
-        description="Which rate priced the request; absent when it was not priced",
+        description=(
+            "Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone "
+            "gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced"
+        ),
     )
 
 

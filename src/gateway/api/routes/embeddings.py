@@ -11,10 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
     get_config,
-    get_db,
-    get_inference_service,
+    get_db_if_needed,
     get_log_writer,
-    verify_api_key_or_master_key,
+    verify_api_key_or_master_key_if_needed,
 )
 from gateway.api.routes._passthrough import run_passthrough
 from gateway.api.routes._pipeline import record_inline_cost_settlement
@@ -58,11 +57,10 @@ async def create_embedding(
     raw_request: Request,
     response: Response,
     request: EmbeddingRequest,
-    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    auth_result: Annotated[tuple[APIKey | None, bool] | None, Depends(verify_api_key_or_master_key_if_needed)],
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
-    inference: Annotated[InferenceService, Depends(get_inference_service)],
 ) -> EmbeddingResponse:
     """OpenAI-compatible embeddings endpoint.
 
@@ -93,7 +91,7 @@ async def create_embedding(
         if request.dimensions is not None:
             embedding_kwargs["dimensions"] = request.dimensions
         embedding_kwargs.update(
-            inference.embedding_provider_options(
+            InferenceService.embedding_provider_options(
                 resolved.provider, selector=request.model, input_type=request.input_type
             )
         )
@@ -114,8 +112,11 @@ async def create_embedding(
         estimate=estimate,
         enforce_require_pricing=True,
         billing=EMBEDDINGS_BILLING,
+        inline_cost=True,
     )
-    body = inference.embeddings_response(outcome.result, pricing=outcome.pricing, cost=outcome.cost)
-    if outcome.cost is not None and outcome.pricing is not None:
+    body = InferenceService.embeddings_response(
+        outcome.result, pricing=outcome.pricing, cost=outcome.cost, inline_cost=outcome.inline_cost
+    )
+    if outcome.inline_cost is not None or (outcome.cost is not None and outcome.pricing is not None):
         record_inline_cost_settlement("attached" if body.usage is not None else "unattached")
     return body

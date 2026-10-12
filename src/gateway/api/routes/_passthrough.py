@@ -34,27 +34,44 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Generic, Protocol, TypeVar
 
+from any_llm import LLMProvider
 from any_llm.exceptions import AnyLLMError
+from any_llm.types.completion import CompletionUsage
 from fastapi import Depends, HTTPException, Request, Response, status
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import ContainerDep, get_config, get_db, get_log_writer
+from gateway.api.deps import ContainerDep, extract_credential_token, get_config, get_db, get_log_writer
 from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes._pipeline import (
+    DB_UNAVAILABLE_DETAIL,
+    NO_RESOLVABLE_PROVIDER_DETAIL,
     PROVIDER_CREDENTIALS_DETAIL,
+    _await_usage_report,
     _elapsed_ms,
+    _flush_pending_usage_reports,
+    _PendingUsageReport,
     _raise_for_unresolvable_model,
+    _schedule_usage_report,
     classify_provider_error,
     failure_status_code,
     log_gateway_rejection,
+    policy_in_hybrid_mode_detail,
     provider_error_headers,
     provider_failure_detail,
     rate_limit_headers,
     throttle_early_rejection,
 )
-from gateway.api.routes._platform import _classify_upstream_error, with_retry_hint
-from gateway.core.config import GatewayConfig
+from gateway.api.routes._platform import (
+    ResolvedAttempt,
+    _classify_upstream_error,
+    _report_platform_usage,
+    _resolve_platform_credentials,
+    build_attempt_client_args,
+    run_platform_attempts,
+    with_retry_hint,
+)
+from gateway.core.config import ATTEMPT_ID_HEADER, REQUEST_ID_HEADER, GatewayConfig
 from gateway.core.database import release_session
 from gateway.core.error_codes import MODEL_NOT_ALLOWED, PRICING_REQUIRED, PROVIDER_CREDENTIAL_REJECTED, error_headers
 from gateway.core.metered_pricing import BillableUsage, billable_usage, price_billable_usage
@@ -68,7 +85,7 @@ from gateway.models.pricing import ModelPricing
 from gateway.models.usage import UsageLog
 from gateway.ports.billing_port import BillingPort, InsufficientFundsError
 from gateway.rate_limit import check_rate_limit
-from gateway.schemas.inference import DecisionRequest, DecisionResponse
+from gateway.schemas.inference import DecisionRequest, DecisionResponse, InlineCost
 from gateway.services.budgets import (
     ZERO,
     BudgetScopeRequest,
@@ -163,6 +180,8 @@ class PassthroughOutcome(Generic[ResultT]):
     """The rate found for the request and where it came from, or ``None`` when there is none."""
     cost: Decimal | None = None
     """The cost written to this request's usage row, or ``None`` when it was not priced."""
+    inline_cost: InlineCost | None = None
+    """The cost the control plane settled a hybrid request at, or ``None`` when it settled none."""
 
 
 async def run_passthrough(
@@ -170,8 +189,8 @@ async def run_passthrough(
     endpoint: str,
     raw_request: Request,
     response: Response | None,
-    auth_result: tuple[APIKey | None, bool],
-    db: AsyncSession,
+    auth_result: tuple[APIKey | None, bool] | None,
+    db: AsyncSession | None,
     config: GatewayConfig,
     log_writer: LogWriter,
     model: str,
@@ -186,6 +205,7 @@ async def run_passthrough(
     request_params: Collection[str] = (),
     reserve_before_resolve: bool = False,
     relabel: bool = True,
+    inline_cost: bool = False,
 ) -> PassthroughOutcome[ResultT]:
     """Run the shared pass-through scaffold around a single provider call.
 
@@ -242,10 +262,30 @@ async def run_passthrough(
             pricing resolve first (the pricing key is the resolved instance).
         relabel: Rewrite the result's ``model`` field to the configured alias
             the caller used, so responses do not echo the aliased target.
+        inline_cost: Whether the route's response carries the cost. In hybrid
+            mode only such a route waits for the control plane to settle it.
+
+    In hybrid mode ``auth_result`` and ``db`` are ``None`` and the request runs
+    through :func:`_run_platform_passthrough` instead: the control plane
+    authorizes it, picks the credentials and prices what ``billing`` reports.
 
     Returns:
         The provider result plus the resolved selector and rate-limit headers.
     """
+    if config.is_hybrid_mode:
+        return await _run_platform_passthrough(
+            endpoint=endpoint,
+            raw_request=raw_request,
+            response=response,
+            config=config,
+            model=model,
+            call_provider=call_provider,
+            billing=billing,
+            map_provider_error=map_provider_error,
+            inline_cost=inline_cost,
+        )
+    if auth_result is None or db is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=DB_UNAVAILABLE_DETAIL)
     # Anchor request latency at the earliest point in the scaffold (monotonic,
     # so it is immune to wall-clock steps); recorded on the usage log below.
     started_at = time.monotonic()
@@ -657,6 +697,193 @@ def _billable_tokens(reported: ReportedUsage) -> BillableUsage | None:
         input_tokens=reported.input_tokens or 0,
         output_tokens=reported.output_tokens or 0,
         cache_tokens_included=True,
+    )
+
+
+class _AttemptRefusal(HTTPException):
+    """Carries a domain refusal raised inside an attempt out of ``run_platform_attempts``.
+
+    The runner re-raises an ``HTTPException`` unchanged and reads anything else as
+    a provider failure to fall through on, which a refusal of the request is not.
+    """
+
+    def __init__(self, refusal: TenancyError) -> None:
+        super().__init__(status_code=refusal.status_code)
+        self.refusal = refusal
+
+
+def _platform_resolved_provider(attempt: ResolvedAttempt) -> ResolvedProvider:
+    """The provider selector and credentials one control-plane attempt dispatches with."""
+    kwargs: dict[str, Any] = {"api_key": attempt.api_key}
+    if attempt.api_base:
+        kwargs["api_base"] = attempt.api_base
+    client_args = build_attempt_client_args(attempt)
+    if client_args is not None:
+        kwargs["client_args"] = client_args
+    return ResolvedProvider(
+        instance=attempt.provider,
+        provider=LLMProvider(attempt.provider),
+        model=attempt.model,
+        kwargs=kwargs,
+    )
+
+
+def _platform_usage(reported: ReportedUsage) -> CompletionUsage | None:
+    """The token usage to report for a result, or ``None`` when it reported no tokens."""
+    if not reported.input_tokens and not reported.output_tokens:
+        return None
+    prompt_tokens = reported.input_tokens or 0
+    completion_tokens = reported.output_tokens or 0
+    return CompletionUsage(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=reported.total_tokens or prompt_tokens + completion_tokens,
+    )
+
+
+async def _run_platform_passthrough(
+    *,
+    endpoint: str,
+    raw_request: Request,
+    response: Response | None,
+    config: GatewayConfig,
+    model: str,
+    call_provider: Callable[[ResolvedProvider], Awaitable[ResultT]],
+    billing: PassthroughBilling,
+    map_provider_error: Callable[[Exception], HTTPException | None] | None,
+    inline_cost: bool,
+) -> PassthroughOutcome[ResultT]:
+    """Run a pass-through request on a hybrid gateway.
+
+    The control plane authorizes the caller's key and returns the attempts to
+    try, so nothing is reserved or logged here: each attempt's outcome is
+    reported back to it, and the success report carries what ``billing`` reads off
+    the result, the tokens and counts it prices the request on. A refusal raised by the route itself (an
+    oversized upload, an option the provider does not take) is reported as the
+    final attempt and answered as standalone answers it.
+    """
+    if model in config.policy_names():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=policy_in_hybrid_mode_detail(model))
+    route = await _resolve_platform_credentials(
+        config=config,
+        user_token=extract_credential_token(raw_request),
+        model_selector=model,
+    )
+    headers = {REQUEST_ID_HEADER: route.request_id}
+    if response is not None:
+        response.headers[REQUEST_ID_HEADER] = route.request_id
+    if not route.attempts:
+        logger.error("Platform returned empty attempts list request_id=%s", route.request_id)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=NO_RESOLVABLE_PROVIDER_DETAIL)
+    track_request(raw_request, endpoint=endpoint, model=model, user_id=route.user_id)
+
+    resolved_by_attempt: dict[str, ResolvedProvider] = {}
+    pending_error_reports: list[_PendingUsageReport] = []
+    winner: ResolvedAttempt | None = None
+
+    def report_error(attempt: ResolvedAttempt, error_class: str | None, is_final_attempt: bool) -> None:
+        pending_error_reports.append(
+            _PendingUsageReport(
+                attempt_id=attempt.attempt_id,
+                outcome="error",
+                usage=None,
+                error_class=error_class,
+                is_final_attempt=is_final_attempt,
+            )
+        )
+
+    # The runner calls ``run_attempt`` once per attempt, in order, without
+    # passing the attempt, so the attempts are read off in the same order.
+    remaining = iter(route.attempts)
+
+    async def run_attempt(_kwargs: dict[str, Any], _on_first_response: Callable[[], None]) -> ResultT:
+        attempt = next(remaining)
+        resolved = resolved_by_attempt[attempt.attempt_id] = _platform_resolved_provider(attempt)
+        try:
+            return await call_provider(resolved)
+        except HTTPException:
+            report_error(attempt, None, True)
+            raise
+        except TenancyError as exc:
+            report_error(attempt, None, True)
+            raise _AttemptRefusal(exc) from exc
+        except Exception as exc:
+            mapped = map_provider_error(exc) if map_provider_error else None
+            if mapped is None:
+                raise
+            report_error(attempt, _classify_upstream_error(exc)[1], True)
+            raise mapped from exc
+
+    def report_attempt_outcome(
+        attempt: ResolvedAttempt, outcome: str, _result: Any, error_class: str | None, is_final_attempt: bool
+    ) -> None:
+        # The success report is sent below, once the result's usage is read.
+        if outcome != "success":
+            report_error(attempt, error_class, is_final_attempt)
+
+    def on_success(attempt: ResolvedAttempt) -> None:
+        nonlocal winner
+        winner = attempt
+        headers[ATTEMPT_ID_HEADER] = attempt.attempt_id
+        if response is not None:
+            response.headers[ATTEMPT_ID_HEADER] = attempt.attempt_id
+
+    try:
+        result = await run_platform_attempts(
+            route=route,
+            attempts=route.attempts,
+            base_request_fields={},
+            run_attempt=run_attempt,
+            extract_usage=lambda result: result,
+            classify_error=_classify_upstream_error,
+            report_attempt_outcome=report_attempt_outcome,
+            on_success=on_success,
+            max_tool_iterations=0,
+        )
+    except _AttemptRefusal as exc:
+        await _flush_pending_usage_reports(config, pending_error_reports, route.request_id)
+        raise exc.refusal from None
+    except HTTPException:
+        await _flush_pending_usage_reports(config, pending_error_reports, route.request_id)
+        raise
+    if winner is None:  # pragma: no cover - the runner calls on_success before it returns
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=NO_RESOLVABLE_PROVIDER_DETAIL)
+
+    for report in pending_error_reports:
+        _schedule_usage_report(
+            _report_platform_usage(
+                config,
+                report.attempt_id,
+                report.outcome,
+                None,
+                report.error_class,
+                is_final_attempt=report.is_final_attempt,
+            ),
+            report.attempt_id,
+        )
+    reported = billing.report(result)
+    success_report = _report_platform_usage(
+        config=config,
+        correlation_id=winner.attempt_id,
+        outcome="success",
+        usage=_platform_usage(reported),
+        units=dict(reported.units) or None,
+        is_final_attempt=True,
+    )
+    settlement = None
+    if inline_cost:
+        settlement = await _await_usage_report(success_report, winner.attempt_id, config)
+    else:
+        _schedule_usage_report(success_report, winner.attempt_id)
+    return PassthroughOutcome(
+        result=result,
+        resolved=resolved_by_attempt[winner.attempt_id],
+        headers=headers,
+        inline_cost=(
+            InlineCost(cost_usd=settlement.cost_usd, pricing_source=settlement.pricing_source)
+            if settlement is not None
+            else None
+        ),
     )
 
 

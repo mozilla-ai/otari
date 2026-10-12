@@ -8970,9 +8970,9 @@ export interface components {
             cost_usd?: string | null;
             /**
              * Pricing Source
-             * @description Which rate priced the request; absent when it was not priced
+             * @description Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced
              */
-            pricing_source?: ("organization" | "deployment" | "defaults") | null;
+            pricing_source?: string | null;
             /** Prompt Tokens */
             prompt_tokens: number;
             /** Total Tokens */
@@ -13310,9 +13310,9 @@ export interface components {
             cost_usd?: string | null;
             /**
              * Pricing Source
-             * @description Which rate priced the request; absent when it was not priced
+             * @description Which rate priced the request: `organization`, `deployment` or `defaults` on a standalone gateway, and the control plane's own name for it on a hybrid one; absent when it was not priced
              */
-            pricing_source?: ("organization" | "deployment" | "defaults") | null;
+            pricing_source?: string | null;
             /**
              * Search Units
              * @description Search units the request was billed for, present only when the model is priced per request: the provider's count rounded up, or one when it reported none

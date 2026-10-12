@@ -12,7 +12,7 @@ lock-in semantics, and the terminal all-failed status mapping uniformly.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, TypeVar
 
@@ -773,12 +773,14 @@ async def _report_platform_usage(
     session_label: str | None = None,
     *,
     ttft_ms: int | None = None,
+    units: Mapping[str, int] | None = None,
     is_final_attempt: bool,
 ) -> SettledCost | None:
     """POST a usage record back to the platform with bounded retries.
 
     ``is_final_attempt`` tells the platform that no later planned fallback will
-    run. Failures are swallowed after ``max_retries`` so they don't impact the
+    run. ``units`` carries the counts a rate that is not per token bills a
+    successful attempt on, keyed by pricing unit. Failures are swallowed after ``max_retries`` so they don't impact the
     user's response path. Non-retryable status codes (auth /
     payment-required / not-found / conflict / unprocessable) short-circuit the
     retry loop.
@@ -820,6 +822,11 @@ async def _report_platform_usage(
             if cache_write_tokens:
                 usage_payload["cache_write_1h_tokens"] = cache_write_1h_tokens_of(usage)
             payload["usage"] = usage_payload
+        # Beside ``usage`` rather than in it: a report with no token counts omits
+        # ``usage`` so the platform records it as unavailable, and a peer that
+        # does not read ``units`` must keep seeing that.
+        if units:
+            payload["units"] = dict(units)
     elif error_class is not None:
         payload["error_class"] = error_class
 

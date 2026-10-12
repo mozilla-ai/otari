@@ -14,18 +14,23 @@ from gateway.core.deployment import Deployment, Plane, RouterMount, deployment_f
 # Data-plane paths that need a control plane as well. None of them has hybrid
 # handling, so mounting one on a hybrid gateway would fail at request time.
 _DATA_PLANE_NEEDING_CONTROL = {
-    "/audio/speech",
-    "/audio/transcriptions",
     "/batches",
     "/decisions",
-    "/embeddings",
     "/files",
-    "/images/generations",
-    "/moderations",
-    "/rerank",
     "/routing/recommend",
     "/search",
     "/systemone",
+}
+
+# The pass-through paths, which a hybrid gateway serves with credentials the
+# control plane resolves, as it serves a completion.
+_PASSTHROUGH = {
+    "/audio/speech",
+    "/audio/transcriptions",
+    "/embeddings",
+    "/images/generations",
+    "/moderations",
+    "/rerank",
 }
 
 
@@ -87,7 +92,7 @@ def test_standalone_serves_both_planes() -> None:
 
     assert "/chat/completions" in standalone, "the data plane"
     assert "/keys" in standalone, "the control plane"
-    assert _DATA_PLANE_NEEDING_CONTROL <= standalone
+    assert _DATA_PLANE_NEEDING_CONTROL | _PASSTHROUGH <= standalone
 
 
 def test_a_hosted_control_plane_serves_no_data_plane() -> None:
@@ -97,10 +102,10 @@ def test_a_hosted_control_plane_serves_no_data_plane() -> None:
     assert "/keys" in hosted
     assert "/chat/completions" not in hosted
     assert "/messages" not in hosted
-    assert not _DATA_PLANE_NEEDING_CONTROL & hosted
+    assert not (_DATA_PLANE_NEEDING_CONTROL | _PASSTHROUGH) & hosted
     # Everything a hosted deployment drops is data plane; it keeps every
     # management route a standalone one has.
-    assert standalone - hosted == _DATA_PLANE_NEEDING_CONTROL | {
+    assert standalone - hosted == _DATA_PLANE_NEEDING_CONTROL | _PASSTHROUGH | {
         "/chat/completions",
         "/messages",
         "/messages/count_tokens",
@@ -128,6 +133,7 @@ def test_a_hybrid_gateway_serves_no_control_plane() -> None:
         "/messages",
         "/messages/count_tokens",
         "/responses",
+        *_PASSTHROUGH,
         # Discovery, answered from the platform's list for the caller's key.
         "/models",
     }
