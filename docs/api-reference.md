@@ -128,8 +128,8 @@ on their `usage`. On a stream the fields ride the terminal usage event: for Chat
 Completions, the last chunk that reports usage and either has no choices (OpenAI's
 `stream_options.include_usage` chunk) or finishes a choice (providers such as Cohere
 and Gemini report usage on the chunk carrying `finish_reason`); `message_delta` for
-Messages; and `response.completed` for Responses. The two fields always appear together, and an unpriced or
-unreported request carries neither.
+Messages; and `response.completed` for Responses. The two fields always appear
+together, and an unpriced or unreported request carries neither.
 
 In standalone mode the amount is the one the gateway wrote to its own usage
 record, including any gateway-run tool charges, and `pricing_source` names the
