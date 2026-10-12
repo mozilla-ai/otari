@@ -837,7 +837,7 @@ def get_inference_service(
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> InferenceService:
-    """The request's inference service."""
+    """Build the inference service on the request's Unit of Work, so its writes commit or roll back with the request."""
     return build_inference_service(uow, config)
 
 
