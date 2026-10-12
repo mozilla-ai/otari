@@ -4,6 +4,36 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.21.0](https://github.com/mozilla-ai/otari/releases/tag/v0.21.0) - 2026-10-12
+
+
+
+### Bug Fixes
+
+- **streaming:** Carry cost on a finish chunk that reports usage in [#2205](https://github.com/mozilla-ai/otari/pull/2205) by [@tbille](https://github.com/tbille) ([`de99264`](https://github.com/mozilla-ai/otari/commit/de9926495e88a60fa37244e45e0a8cc2bc7b4a66))
+- **providers:** Tell OpenAI and Anthropic SDK clients not to retry a provider failure resending cannot fix in [#2207](https://github.com/mozilla-ai/otari/pull/2207) by [@tbille](https://github.com/tbille) ([`54c1dfb`](https://github.com/mozilla-ai/otari/commit/54c1dfb7f891eb169d25c797f2ae92129de8f619))
+- **errors:** Answer a provider rejection with the provider's own sentence in [#2206](https://github.com/mozilla-ai/otari/pull/2206) by [@tbille](https://github.com/tbille) ([`8f8180d`](https://github.com/mozilla-ai/otari/commit/8f8180dbd922d66e7735e389e229f38746d540fa))
+- **budgets:** Say when a request's estimate does not fit the remaining budget in [#2215](https://github.com/mozilla-ai/otari/pull/2215) by [@tbille](https://github.com/tbille) ([`d19cd1b`](https://github.com/mozilla-ai/otari/commit/d19cd1bbbab833445890bcc980a7ba41203b3ec4))
+- **catalog:** List models at the rate they bill and keep alias and selector errors accurate in [#2217](https://github.com/mozilla-ai/otari/pull/2217) by [@tbille](https://github.com/tbille) ([`78ac731`](https://github.com/mozilla-ai/otari/commit/78ac7312e2370816e22a56a07547ab2b49d752f1))
+- **inference:** Classify provider errors and interrupted streams in [#2218](https://github.com/mozilla-ai/otari/pull/2218) by [@tbille](https://github.com/tbille) ([`a1abf47`](https://github.com/mozilla-ai/otari/commit/a1abf47cb4c25d5a0bb6ed5a9a1db26808cd8ab7))
+- **inference:** Name every spelling an unresolvable model can be sent as in [#2222](https://github.com/mozilla-ai/otari/pull/2222) by [@tbille](https://github.com/tbille) ([`199fd54`](https://github.com/mozilla-ai/otari/commit/199fd542d2d20fb50f79713921f0480683144c3e))
+- **inference:** Name the pass-through pricing refusal and document sub-micro-dollar costs in [#2231](https://github.com/mozilla-ai/otari/pull/2231) by [@tbille](https://github.com/tbille) ([`3686dba`](https://github.com/mozilla-ai/otari/commit/3686dbad0d2a72859dd030b01b1b2f8d35ac5157))
+- **inference:** Answer an image sent to a text-only model with one 400 and code in [#2232](https://github.com/mozilla-ai/otari/pull/2232) by [@tbille](https://github.com/tbille) ([`9272faa`](https://github.com/mozilla-ai/otari/commit/9272faa24179d28799617739da12c9419fbd3450))
+- **web:** Point a new organization with no provider at its first step in [#2223](https://github.com/mozilla-ai/otari/pull/2223) by [@jigjigjig](https://github.com/jigjigjig) ([`b115ae8`](https://github.com/mozilla-ai/otari/commit/b115ae855dfa4ebc77c642e2edb62fb60bc81f1f))
+- **web:** Make the New key dialog say what it needs in [#2224](https://github.com/mozilla-ai/otari/pull/2224) by [@jigjigjig](https://github.com/jigjigjig) ([`fcff74b`](https://github.com/mozilla-ai/otari/commit/fcff74b63482980a6acac8d9d6d0dacdfc04ff7c))
+- **web:** Plain-language copy and clearer toggle, menu and dead-end states in [#2225](https://github.com/mozilla-ai/otari/pull/2225) by [@jigjigjig](https://github.com/jigjigjig) ([`267b4d5`](https://github.com/mozilla-ai/otari/commit/267b4d5ff2ea80dcc33e59373fd204edae639944))
+- **pricing:** Name the real cause when an unpriced model is refused in [#2233](https://github.com/mozilla-ai/otari/pull/2233) by [@tbille](https://github.com/tbille) ([`7a35d75`](https://github.com/mozilla-ai/otari/commit/7a35d75f182159eb96eb3c9e396b5344653bf0c1))
+- **routing:** Hold a fallback on its own provider's budgets in [#2138](https://github.com/mozilla-ai/otari/pull/2138) by [@peteski22](https://github.com/peteski22) ([`0491f82`](https://github.com/mozilla-ai/otari/commit/0491f826bc6333b472f763d4f4c0a4f28d5e9e1a))
+- **catalog:** Serve a provider's undated model name from an organization key's dated build in [#2230](https://github.com/mozilla-ai/otari/pull/2230) by [@tbille](https://github.com/tbille) ([`6c93258`](https://github.com/mozilla-ai/otari/commit/6c93258330302502f0d20c40838b3f3dd46292b3))
+
+
+### Features
+
+- **routing:** Choose subagent candidates by harness by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`9e844be`](https://github.com/mozilla-ai/otari/commit/9e844beff432f33f55c3fa720a8dfcca898e0382))
+- **tools:** Add the web search resolver and move the web tool names in [#2216](https://github.com/mozilla-ai/otari/pull/2216) by [@aittalam](https://github.com/aittalam) ([`7cd1b2e`](https://github.com/mozilla-ai/otari/commit/7cd1b2e1aef44cc4579e84609befa7b7f02b9634))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.20.0...v0.21.0
 ## [0.20.0](https://github.com/mozilla-ai/otari/releases/tag/v0.20.0) - 2026-10-12
 
 
