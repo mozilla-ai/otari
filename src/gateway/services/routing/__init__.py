@@ -49,7 +49,7 @@ from gateway.services.routing.compiler import (
 )
 from gateway.services.routing.decide import RoutingSignal, decide_ordering, explain_router_ordering
 from gateway.services.routing.knn import KnnRoutingMemory, unpriced_router_candidates
-from gateway.services.routing.recommend import build_decision_request, recommendation_from_decision
+from gateway.services.routing.recommend import build_decision_request, candidates_for, recommendation_from_decision
 from gateway.types.budget_state import BudgetState
 
 __all__ = [
@@ -73,6 +73,7 @@ __all__ = [
     "backend_pool_is_teachable",
     "backend_requires_pricing",
     "build_decision_request",
+    "candidates_for",
     "clear_router_backend_cache",
     "compile_catalog_plan",
     "compile_policy",

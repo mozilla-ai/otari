@@ -685,6 +685,36 @@
             "title": "Agent Type",
             "type": "string"
           },
+          "candidates": {
+            "anyOf": [
+              {
+                "maxProperties": 255,
+                "minProperties": 2,
+                "patternProperties": {
+                  "^[^:\\s]+:\\S+$": {
+                    "anyOf": [
+                      {
+                        "maxLength": 1024,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "propertyNames": {
+                  "maxLength": 256
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The models the subagent may be sent to, as Otari model ids (`<provider>:<model>`), each with what it is for (or null when the name says enough). Required for `pi`, refused for `claude-code`.",
+            "title": "Candidates"
+          },
           "description": {
             "default": "",
             "description": "The caller's short description of the task.",
@@ -693,9 +723,11 @@
             "type": "string"
           },
           "harness": {
-            "description": "The agent harness asking, such as `claude-code`.",
-            "maxLength": 64,
-            "minLength": 1,
+            "description": "The agent harness asking. It decides the candidates: `agent_recommender_candidates`, Claude Code's own aliases, for `claude-code`, and the request's own `candidates` for `pi`.",
+            "enum": [
+              "claude-code",
+              "pi"
+            ],
             "title": "Harness",
             "type": "string"
           },
@@ -36026,7 +36058,7 @@
     },
     "/api/v1/routing/recommend": {
       "post": {
-        "description": "Recommend the model a subagent about to start should run on.\n\nThe harness sends the facts it holds at spawn time: its own ids for the\nsession and the spawning tool call, the subagent type, the task, the\nparent's model and the model the caller asked for, if any. The recommender\nthis build binds picks one of the candidate models and the answer names it.\nA standalone deployment asks the decision model `agent_recommender_model`\nnames to choose among `agent_recommender_candidates`; a hosted build may\nbind a recommender of its own, which the caller never configures. Where\nthe recommender reports them, the answer also carries a one-line reason\nand its probability for each candidate.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names who the decision is billed to.\n- API key: the decision is billed to the key's own user.",
+        "description": "Recommend the model a subagent about to start should run on.\n\nThe harness sends the facts it holds at spawn time: its own ids for the\nsession and the spawning tool call, the subagent type, the task, the\nparent's model and the model the caller asked for, if any. The recommender\nthis build binds picks one of the candidate models and the answer names it.\nA standalone deployment asks the decision model `agent_recommender_model`\nnames to choose among `agent_recommender_candidates` for Claude Code and\namong the request's own `candidates` for pi; a hosted build may bind a\nrecommender of its own, which the caller never configures. Where\nthe recommender reports them, the answer also carries a one-line reason\nand its probability for each candidate.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and names who the decision is billed to.\n- API key: the decision is billed to the key's own user.",
         "operationId": "routing-recommend_model_for_agent",
         "requestBody": {
           "content": {

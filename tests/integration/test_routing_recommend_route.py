@@ -90,6 +90,54 @@ def test_api_key_gets_the_decision_models_pick(client: TestClient, api_key_heade
     assert "user" not in sent
 
 
+PI_CANDIDATES = {"openai:gpt-5-mini": "small work", "anthropic:claude-opus-5-5": None}
+
+
+def test_pi_chooses_among_its_own_candidates(client: TestClient, api_key_header: dict[str, str]) -> None:
+    answer = {
+        **ANSWER,
+        "answers": {RECOMMENDATION_QUESTION: {"type": "choice", "choice": "openai:gpt-5-mini"}},
+    }
+    with _mock_decision(answer) as mock:
+        response = client.post(
+            PATH, json=_spawn(harness="pi", agent_type="scout", candidates=PI_CANDIDATES), headers=api_key_header
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["model"] == "openai:gpt-5-mini"
+    _, sent = mock.await_args.args
+    assert sent["questions"][RECOMMENDATION_QUESTION]["criteria"] == PI_CANDIDATES
+    assert "Harness: pi" in sent["state"]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"harness": "pi"}, id="pi-without-candidates"),
+        pytest.param({"harness": "claude-code", "candidates": PI_CANDIDATES}, id="claude-code-with-candidates"),
+        pytest.param({"harness": "pi", "candidates": {"openai:gpt-5-mini": None}}, id="one-candidate"),
+        pytest.param({"harness": "pi", "candidates": {"openai:gpt-5-mini": None, "sonnet": None}}, id="no-provider"),
+        pytest.param({"harness": "pi", "candidates": {f"openai:model-{i}": None for i in range(256)}}, id="too-many"),
+    ],
+)
+def test_candidates_that_do_not_fit_the_harness_are_unprocessable(
+    client: TestClient, api_key_header: dict[str, str], overrides: dict[str, Any]
+) -> None:
+    with _mock_decision() as mock:
+        response = client.post(PATH, json=_spawn(**overrides), headers=api_key_header)
+
+    assert response.status_code == 422
+    mock.assert_not_awaited()
+
+
+def test_an_unknown_harness_is_unprocessable(client: TestClient, api_key_header: dict[str, str]) -> None:
+    with _mock_decision() as mock:
+        response = client.post(PATH, json=_spawn(harness="codex"), headers=api_key_header)
+
+    assert response.status_code == 422
+    mock.assert_not_awaited()
+
+
 def test_caller_request_does_not_reach_the_decision_model(client: TestClient, api_key_header: dict[str, str]) -> None:
     with _mock_decision() as mock:
         response = client.post(PATH, json=_spawn(requested_model="requested-xyz"), headers=api_key_header)

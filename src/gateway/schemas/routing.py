@@ -1,6 +1,16 @@
 """Request and response models of the routing domain."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+from gateway.core.config import MAX_AGENT_MODEL_CANDIDATES
+
+Harness = Literal["claude-code", "pi"]
+"""The agent harnesses Otari recommends a subagent's model for."""
+
+OtariModelId = Annotated[str, StringConstraints(max_length=256, pattern=r"^[^:\s]+:\S+$")]
+"""A model as Otari names it, ``<provider>:<model>``."""
 
 
 class AgentModelRecommendationRequest(BaseModel):
@@ -27,7 +37,21 @@ class AgentModelRecommendationRequest(BaseModel):
         },
     )
 
-    harness: str = Field(min_length=1, max_length=64, description="The agent harness asking, such as `claude-code`.")
+    harness: Harness = Field(
+        description=(
+            "The agent harness asking. It decides the candidates: `agent_recommender_candidates`, Claude Code's "
+            "own aliases, for `claude-code`, and the request's own `candidates` for `pi`."
+        )
+    )
+    candidates: dict[OtariModelId, Annotated[str, StringConstraints(max_length=1024)] | None] | None = Field(
+        default=None,
+        min_length=2,
+        max_length=MAX_AGENT_MODEL_CANDIDATES,
+        description=(
+            "The models the subagent may be sent to, as Otari model ids (`<provider>:<model>`), each with what "
+            "it is for (or null when the name says enough). Required for `pi`, refused for `claude-code`."
+        ),
+    )
     session_id: str = Field(
         min_length=1, max_length=256, description="The harness's own id for the session the spawn happens in."
     )

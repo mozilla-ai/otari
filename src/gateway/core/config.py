@@ -1013,8 +1013,8 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
     agent_recommender_candidates: Annotated[dict[str, str | None], OMITTED] = Field(
         default_factory=lambda: dict(DEFAULT_AGENT_MODEL_CANDIDATES),
         description=(
-            "The models POST /api/v1/routing/recommend may send a subagent to, as the asking harness names "
-            "them, each with what it is for (or null when the name says enough). Two to 255. Defaults to "
+            "The models POST /api/v1/routing/recommend may send a Claude Code subagent to, as Claude Code "
+            "names them, each with what it is for (or null when the name says enough). Two to 255. Defaults to "
             "Claude Code's haiku, sonnet and opus aliases."
         ),
     )

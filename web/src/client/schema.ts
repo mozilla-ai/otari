@@ -4383,8 +4383,9 @@ export interface paths {
          *     parent's model and the model the caller asked for, if any. The recommender
          *     this build binds picks one of the candidate models and the answer names it.
          *     A standalone deployment asks the decision model `agent_recommender_model`
-         *     names to choose among `agent_recommender_candidates`; a hosted build may
-         *     bind a recommender of its own, which the caller never configures. Where
+         *     names to choose among `agent_recommender_candidates` for Claude Code and
+         *     among the request's own `candidates` for pi; a hosted build may bind a
+         *     recommender of its own, which the caller never configures. Where
          *     the recommender reports them, the answer also carries a one-line reason
          *     and its probability for each candidate.
          *
@@ -6335,6 +6336,13 @@ export interface components {
              */
             agent_type: string;
             /**
+             * Candidates
+             * @description The models the subagent may be sent to, as Otari model ids (`<provider>:<model>`), each with what it is for (or null when the name says enough). Required for `pi`, refused for `claude-code`.
+             */
+            candidates?: {
+                [key: string]: string | null;
+            } | null;
+            /**
              * Description
              * @description The caller's short description of the task.
              * @default
@@ -6342,9 +6350,10 @@ export interface components {
             description: string;
             /**
              * Harness
-             * @description The agent harness asking, such as `claude-code`.
+             * @description The agent harness asking. It decides the candidates: `agent_recommender_candidates`, Claude Code's own aliases, for `claude-code`, and the request's own `candidates` for `pi`.
+             * @enum {string}
              */
-            harness: string;
+            harness: "claude-code" | "pi";
             /**
              * Parent Model
              * @description The model the parent conversation runs on, as the harness names it.

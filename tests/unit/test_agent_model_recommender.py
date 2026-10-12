@@ -10,13 +10,14 @@ from decimal import Decimal
 import pytest
 
 from gateway.core.config import DEFAULT_AGENT_MODEL_CANDIDATES, validate_agent_recommender
-from gateway.exceptions.routing_exceptions import UnreadableRecommendationError
+from gateway.exceptions.routing_exceptions import CandidatesNotAllowedError, UnreadableRecommendationError
 from gateway.ports.agent_model_recommender_port import RecommendationUsage, SubagentSpawn
 from gateway.schemas.inference import DecisionResponse
 from gateway.services.routing.recommend import (
     MAX_TASK_CHARS,
     RECOMMENDATION_QUESTION,
     build_decision_request,
+    candidates_for,
     recommendation_from_decision,
 )
 
@@ -42,6 +43,27 @@ def _answer(**fields: object) -> DecisionResponse:
     return DecisionResponse.model_validate(
         {"model": "jev-1.13.0", "answers": {RECOMMENDATION_QUESTION: {"type": "choice", **fields}}}
     )
+
+
+PI_CANDIDATES = {"openai:gpt-5-mini": "small work", "anthropic:claude-opus-5-5": "hard work"}
+
+
+def test_claude_code_chooses_among_its_own_aliases() -> None:
+    assert candidates_for("claude-code", sent=None, claude_code=CANDIDATES) == CANDIDATES
+
+
+def test_pi_chooses_among_the_candidates_it_sent() -> None:
+    assert candidates_for("pi", sent=PI_CANDIDATES, claude_code=CANDIDATES) == PI_CANDIDATES
+
+
+def test_pi_without_candidates_is_refused() -> None:
+    with pytest.raises(CandidatesNotAllowedError, match="pi must send"):
+        candidates_for("pi", sent=None, claude_code=CANDIDATES)
+
+
+def test_claude_code_with_candidates_is_refused() -> None:
+    with pytest.raises(CandidatesNotAllowedError, match="may not send candidates"):
+        candidates_for("claude-code", sent=PI_CANDIDATES, claude_code=CANDIDATES)
 
 
 def test_builds_one_choice_question_over_the_candidates() -> None:

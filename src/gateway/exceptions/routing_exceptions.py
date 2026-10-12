@@ -6,6 +6,10 @@ so nothing an upstream said reaches the caller.
 """
 
 
+class CandidatesNotAllowedError(Exception):
+    """The request's candidates do not fit its harness. The message says which way."""
+
+
 class RecommenderNotConfiguredError(Exception):
     """This deployment names no recommender that can answer. The message says what to configure."""
 
