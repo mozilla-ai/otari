@@ -8,7 +8,7 @@ from gateway.core.settings_view import OMITTED, SettingsGroup, Shown
 
 
 class InferenceSettings(BaseModel):
-    """How a completion request is retried upstream and deduplicated."""
+    """How a completion request is retried upstream, deduplicated and streamed."""
 
     provider_max_retries: Annotated[int | None, Shown(SettingsGroup.MODELS)] = Field(
         default=None,
@@ -18,6 +18,19 @@ class InferenceSettings(BaseModel):
             "before Otari sees the failure. Unset leaves each provider SDK's own default. A provider "
             "instance's max_retries overrides it. Applies to the OpenAI-compatible, Anthropic, Groq, "
             "Cerebras, Together, Gemini and Vertex AI clients; other providers keep their SDK's behavior."
+        ),
+    )
+
+    streaming_first_chunk_hold_ms: Annotated[int, Shown(SettingsGroup.GENERAL)] = Field(
+        default=15000,
+        ge=0,
+        description=(
+            "How long in milliseconds a standalone gateway holds a streaming response's status line "
+            "for the provider's first chunk, so a provider failure before any output is answered with "
+            "its own HTTP status (and falls over in a routing policy) rather than as an error event "
+            "after a 200. A provider slower than this still streams: the response is committed and "
+            "keeps waiting. Streams that run gateway tools are not held. 0 commits the response as "
+            "soon as the stream opens."
         ),
     )
 

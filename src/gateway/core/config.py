@@ -1059,18 +1059,6 @@ class GatewayConfig(InferenceSettings, BudgetSettings, PricingSettings, Feedback
             "0 disables."
         ),
     )
-    streaming_first_chunk_hold_ms: Annotated[int, Shown(SettingsGroup.GENERAL)] = Field(
-        default=15000,
-        ge=0,
-        description=(
-            "How long in milliseconds a standalone gateway holds a streaming response's status line "
-            "for the provider's first chunk, so a provider failure before any output is answered with "
-            "its own HTTP status (and falls over in a routing policy) rather than as an error event "
-            "after a 200. A provider slower than this still streams: the response is committed and "
-            "keeps waiting. Streams that run gateway tools are not held. 0 commits the response as "
-            "soon as the stream opens."
-        ),
-    )
     model_discovery: Annotated[bool, Shown(SettingsGroup.MODELS)] = Field(
         default=True,
         description="Enable auto-discovery of models from configured providers via GET /api/v1/models",
