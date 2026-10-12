@@ -59,6 +59,7 @@ class IdentityProviderPort(Protocol):
         NOTE: No account is linked to the identity's ``(provider, subject)`` when this is called.
         The account this returns gains that link.
         An adapter must return an account only when this identity may sign in as it from then on.
+        A deactivated account is refused whatever an adapter returns.
 
         Each adapter decides whether to refuse an unknown identity or create an account for it.
         An adapter does not have to write anything.

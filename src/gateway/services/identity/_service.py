@@ -1,7 +1,10 @@
+import uuid
+
 from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import OAuthEmailNotVerifiedError, OAuthIdentityUnknownError
 from gateway.log_config import logger
 from gateway.models.identity import EmailAssertion, ProviderIdentity
+from gateway.models.tenancy import User
 from gateway.ports.identity_provider_port import IdentityProviderPort, IdentityResolution
 from gateway.repositories.identity import OAuthIdentityLinkRepository
 from gateway.repositories.tenancy import UserRepository
@@ -36,7 +39,7 @@ class IdentityService:
 
         Raises:
             OAuthEmailNotVerifiedError: If the provider says the address is not verified.
-            OAuthIdentityUnknownError: If the linked account is deactivated or gone,
+            OAuthIdentityUnknownError: If the account is deactivated or gone,
                 or the account the policy returns is linked to another identity at the same provider.
             TenancyError: If the identity provider policy refuses the identity.
 
@@ -47,13 +50,10 @@ class IdentityService:
         async with self._uow:
             link = await self._links.get_by_identity(external.provider, external.subject)
             if link is not None:
-                account = await self._users.get_locked(link.user_id)
-                if account is None or not account.is_active:
-                    raise OAuthIdentityUnknownError(label)
-                return IdentityResolution(identity=account, new_account=False)
+                return IdentityResolution(identity=await self._active_account(link.user_id, label), new_account=False)
 
             resolution = await self._identity_provider.resolve(external)
-            account = resolution.identity
+            account = await self._active_account(resolution.identity.id, label)
             # A concurrent first sign-in can link this same identity after the lookup above.
             existing = await self._links.get_for_user(account.id, external.provider)
             if existing is None:
@@ -71,4 +71,11 @@ class IdentityService:
                     account.id,
                 )
                 raise OAuthIdentityUnknownError(label)
-            return resolution
+            return IdentityResolution(identity=account, new_account=resolution.new_account)
+
+    async def _active_account(self, user_id: uuid.UUID, label: str) -> User:
+        """Return the account read under a lock, so a concurrent deactivation is seen before the sign-in completes."""
+        account = await self._users.get_locked(user_id)
+        if account is None or not account.is_active:
+            raise OAuthIdentityUnknownError(label)
+        return account

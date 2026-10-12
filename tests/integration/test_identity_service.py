@@ -7,9 +7,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.adapters.identity_provider_adapter import DeploymentIdentityProviderAdapter
+from gateway.core.unit_of_work import UnitOfWork
 from gateway.exceptions.identity_exceptions import OAuthIdentityUnknownError
 from gateway.models.identity import EmailAssertion, OAuthIdentityLink, ProviderIdentity
 from gateway.models.tenancy import User
+from gateway.ports.identity_provider_port import IdentityResolution
 from gateway.repositories.identity import OAuthIdentityLinkRepository
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.identity import IdentityService
@@ -79,10 +81,38 @@ async def test_a_tenant_provider_registers_no_account_under_open_signup(async_db
 
 
 async def test_open_signup_links_the_account_it_registers(async_db: AsyncSession) -> None:
-    resolution = await _service(async_db, open_signup=True).sign_in_with_oauth(
-        _verified("google", "nova@example.com")
-    )
+    resolution = await _service(async_db, open_signup=True).sign_in_with_oauth(_verified("google", "nova@example.com"))
 
     link = await async_db.get(OAuthIdentityLink, ("google", "provider-subject"))
     assert link is not None
     assert link.user_id == resolution.identity.id
+
+
+class _ReturnsAccount:
+    """An identity provider policy that signs every identity in as one account."""
+
+    def __init__(self, account: User) -> None:
+        self._account = account
+
+    async def resolve(self, external: ProviderIdentity) -> IdentityResolution:
+        return IdentityResolution(identity=self._account, new_account=False)
+
+
+async def test_a_deactivated_account_from_the_policy_is_refused_and_not_linked(async_db: AsyncSession) -> None:
+    organization = await create_organization(async_db, slug="acme")
+    account = await UserRepository(async_db).create_local_identity(
+        email="ada@example.com", full_name="Ada", active_organization_id=organization.id, is_active=False
+    )
+    await async_db.commit()
+    uow = UnitOfWork(async_db)
+    service = IdentityService(
+        uow,
+        identity_provider=_ReturnsAccount(account),
+        links=OAuthIdentityLinkRepository(uow),
+        users=UserRepository(uow),
+    )
+
+    with pytest.raises(OAuthIdentityUnknownError):
+        await service.sign_in_with_oauth(_verified("google", "ada@example.com"))
+
+    assert await _count(async_db, OAuthIdentityLink) == 0
