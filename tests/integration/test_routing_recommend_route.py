@@ -110,6 +110,15 @@ def test_pi_chooses_among_its_own_candidates(client: TestClient, api_key_header:
     assert "Harness: pi" in sent["state"]
 
 
+def test_a_pick_outside_the_sent_candidates_is_a_bad_gateway(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    with _mock_decision():
+        response = client.post(PATH, json=_spawn(harness="pi", candidates=PI_CANDIDATES), headers=api_key_header)
+
+    assert response.status_code == 502
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
@@ -118,6 +127,10 @@ def test_pi_chooses_among_its_own_candidates(client: TestClient, api_key_header:
         pytest.param({"harness": "pi", "candidates": {"openai:gpt-5-mini": None}}, id="one-candidate"),
         pytest.param({"harness": "pi", "candidates": {"openai:gpt-5-mini": None, "sonnet": None}}, id="no-provider"),
         pytest.param({"harness": "pi", "candidates": {f"openai:model-{i}": None for i in range(256)}}, id="too-many"),
+        pytest.param(
+            {"harness": "pi", "candidates": {"openai:gpt-5-mini": None, "openai:o4-mini": "x" * 1025}},
+            id="long-description",
+        ),
     ],
 )
 def test_candidates_that_do_not_fit_the_harness_are_unprocessable(
