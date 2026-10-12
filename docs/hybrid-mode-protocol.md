@@ -746,7 +746,7 @@ rather than as an explicit zero-token result.
 
 | API format | Non-streaming placement | Streaming placement |
 |---|---|---|
-| Chat Completions | `usage.cost_usd`, `usage.pricing_source` | Terminal usage chunk: `usage.cost_usd`, `usage.pricing_source` |
+| Chat Completions | `usage.cost_usd`, `usage.pricing_source` | Terminal usage chunk (a usage chunk with no choices, or one that carries `finish_reason`): `usage.cost_usd`, `usage.pricing_source` |
 | Messages | `usage.cost_usd`, `usage.pricing_source` | `message_delta.usage.cost_usd`, `message_delta.usage.pricing_source` |
 | Responses | `usage.cost_usd`, `usage.pricing_source` | `response.completed.response.usage.cost_usd`, `response.completed.response.usage.pricing_source` |
 

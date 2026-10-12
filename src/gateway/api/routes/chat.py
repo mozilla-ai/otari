@@ -64,6 +64,7 @@ from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.provider_fields import surface_provider_fields
 from gateway.services.files import FileService, StagedFile
+from gateway.services.inference import is_chat_stream_cost_carrier
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import (
     MAX_TOOL_ITERATIONS_CAP,
@@ -260,10 +261,7 @@ class _ChatAdapter:
         return True
 
     def is_stream_cost_carrier(self, chunk: ChatCompletionChunk) -> bool:
-        # OpenAI's include_usage chunk carries usage and no choices. Requiring
-        # the terminal shape prevents usage stamped onto content chunks from
-        # making an early chunk the carrier and buffering the whole stream.
-        return chunk.usage is not None and not chunk.choices
+        return is_chat_stream_cost_carrier(chunk)
 
     async def call_provider(self, kwargs: dict[str, Any]) -> ChatCompletion:
         return await acompletion(**kwargs)  # type: ignore[return-value]

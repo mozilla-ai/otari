@@ -33,6 +33,7 @@ from gateway.services.inference._responses_bridge import (
     uses_chat_completions_bridge,
 )
 from gateway.services.inference._responses_input import strip_gateway_minted_items
+from gateway.services.inference._stream_cost import is_chat_stream_cost_carrier
 from gateway.services.inference._sweeper import run_idempotency_sweeper
 
 __all__ = [
@@ -56,6 +57,7 @@ __all__ = [
     "call_responses",
     "close_decision_client",
     "decision_body",
+    "is_chat_stream_cost_carrier",
     "keep_claim_alive",
     "reported_charge",
     "request_decision",

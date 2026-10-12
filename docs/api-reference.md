@@ -124,9 +124,11 @@ it took, in `Otari-Provider`, `Otari-Attempt-Count`, `Otari-Fallback` and
 A priced response also carries its cost on the usage object it already returns,
 as `usage.cost_usd` (a six-decimal USD string) and `usage.pricing_source`. The
 standalone [rerank](#rerank) and embeddings endpoints carry the same two fields
-on their `usage`. On a stream the fields ride the terminal usage event: the last usage chunk for Chat
-Completions, `message_delta` for Messages, and `response.completed` for
-Responses. The two fields always appear together, and an unpriced or
+on their `usage`. On a stream the fields ride the terminal usage event: for Chat
+Completions, the last chunk that reports usage and either has no choices (OpenAI's
+`stream_options.include_usage` chunk) or finishes a choice (providers such as Cohere
+and Gemini report usage on the chunk carrying `finish_reason`); `message_delta` for
+Messages; and `response.completed` for Responses. The two fields always appear together, and an unpriced or
 unreported request carries neither.
 
 In standalone mode the amount is the one the gateway wrote to its own usage
