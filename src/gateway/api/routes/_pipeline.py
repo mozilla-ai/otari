@@ -959,10 +959,10 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
     stream_format: StreamFormat
 
     def stream_completion(self) -> Callable[[Any], bool] | None:
-        """Matches the chunk that completes a well-formed stream, or None where a stream may end without one.
+        """Says, for one stream, whether it is complete after each chunk, or None where a stream may end anywhere.
 
-        A stream that ends without such a chunk is failed with an SSE error rather
-        than closed as a success.
+        Called once per stream. A stream that ends incomplete is failed with an SSE
+        error rather than closed as a success.
         """
         ...
 

@@ -477,17 +477,30 @@ def _choice_chunk(index: int, content: str | None = None, finish_reason: Any = N
     )
 
 
-@pytest.mark.parametrize(("second_finishes", "interrupted"), [(False, True), (True, False)])
+@pytest.mark.parametrize(
+    ("chunks", "interrupted"),
+    [
+        ([_choice_chunk(0, "a"), _choice_chunk(1, "b"), _choice_chunk(0, finish_reason="stop")], True),
+        ([_choice_chunk(0, "a"), _choice_chunk(0, finish_reason="stop"), _choice_chunk(1, "b")], True),
+        (
+            [
+                _choice_chunk(0, "a"),
+                _choice_chunk(1, "b"),
+                _choice_chunk(0, finish_reason="stop"),
+                _choice_chunk(1, finish_reason="stop"),
+            ],
+            False,
+        ),
+    ],
+    ids=["second-cut", "second-starts-after-first-finished", "both-finish"],
+)
 def test_a_chat_stream_with_several_choices_is_complete_only_when_each_finishes(
     client: TestClient,
     master_key_header: dict[str, str],
-    second_finishes: bool,
+    chunks: list[ChatCompletionChunk],
     interrupted: bool,
 ) -> None:
     """With ``n`` above 1, one finished choice does not stand in for another that was cut."""
-    chunks = [_choice_chunk(0, "a"), _choice_chunk(1, "b"), _choice_chunk(0, finish_reason="stop")]
-    if second_finishes:
-        chunks.append(_choice_chunk(1, finish_reason="stop"))
     response = _stream_chat(client, master_key_header, chunks)
 
     assert response.status_code == 200, response.text

@@ -480,8 +480,16 @@ _STREAM_ERROR_MESSAGES = {
 _INCOMPLETE_STREAM_MESSAGE = "The upstream provider ended the stream before completing the message."
 
 
-def _is_message_stop(chunk: Any) -> bool:
-    return getattr(chunk, "type", None) == "message_stop"
+def _reached_message_stop() -> Callable[[Any], bool]:
+    """A predicate, for one stream, that holds from its ``message_stop`` on."""
+    stopped = False
+
+    def completes(chunk: Any) -> bool:
+        nonlocal stopped
+        stopped = stopped or getattr(chunk, "type", None) == "message_stop"
+        return stopped
+
+    return completes
 
 
 _STREAM_ERROR_STATUS_TYPES = {
@@ -630,7 +638,7 @@ class _MessagesAdapter:
         # provider reaches here through any-llm's bridge, which emits nothing at all
         # for an upstream that produced no chunks, and a tool-loop round can end the
         # same way after ``message_start`` went out.
-        return _is_message_stop
+        return _reached_message_stop()
 
     def stream_error_payload(self, exc: BaseException) -> str:
         if isinstance(exc, IncompleteStreamError):

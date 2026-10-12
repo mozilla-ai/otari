@@ -177,12 +177,12 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
 
 
 def _every_choice_finishes() -> Callable[[ChatCompletionChunk], bool]:
-    """A predicate, for one stream, matching the chunk after which every choice seen has a ``finish_reason``.
+    """A predicate, for one stream, that holds while every choice seen so far has a ``finish_reason``.
 
     Every complete chat stream reports one per choice, so with ``n`` above 1 a
-    stream that finishes one choice and cuts another is not complete. A
-    usage-only final chunk has no choices and follows them, so it neither
-    completes a stream nor stands in for the chunk that does.
+    stream that finishes one choice and cuts another is not complete, in
+    whichever order the choices arrive. A usage-only final chunk has no choices,
+    so it leaves the answer as it was.
     """
     seen: set[int] = set()
     finished: set[int] = set()

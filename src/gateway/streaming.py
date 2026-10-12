@@ -243,8 +243,9 @@ async def streaming_generator(
         error_payload: Renders the SSE error event for the exception that ended
             the stream, so a dialect can say what kind of failure it was. When
             omitted, ``fmt.error_payload`` is sent for every failure.
-        completes_stream: Identifies the chunk that completes a well-formed
-            stream. When set, an upstream that ends without one is failed with
+        completes_stream: Says, after each chunk, whether the stream so far is
+            complete; its answer after the last chunk decides. When set, an
+            upstream that ends incomplete is failed with
             :class:`IncompleteStreamError` through the error path, so the client
             gets an error event rather than a 200 that silently carried nothing.
 
@@ -289,8 +290,8 @@ async def streaming_generator(
                     yield fmt.keepalive
                     continue
                 chunks_received += 1
-                if not completed and completes_stream is not None and completes_stream(chunk):
-                    completed = True
+                if completes_stream is not None:
+                    completed = completes_stream(chunk)
                 chunk_usage = extract_usage(chunk)
                 if chunk_usage:
                     usage = merge_stream_usage(usage, chunk_usage)
