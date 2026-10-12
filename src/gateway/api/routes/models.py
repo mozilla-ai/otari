@@ -202,9 +202,10 @@ async def list_models(
 
     Returns models auto-discovered from configured providers, enriched with
     pricing data from the model_pricing table when available, and with each
-    model's context window and output limit where models.dev or genai-prices
-    knows them. Models that only exist in the pricing table are also included
-    for backward compatibility.
+    model's token limits: the context window from models.dev, or from
+    genai-prices where models.dev has none, and the output limit from models.dev
+    alone. A limit neither knows is null. Models that only exist in the pricing
+    table are also included for backward compatibility.
     """
     catalog = await build_merged_catalog(
         db, config, auth=auth, session_identity=session_identity, provider=provider, model_provider=model_provider
@@ -337,8 +338,6 @@ async def _find_model(
     if model_id not in aliases and withheld_as_unadvertised(config, scope, normalize_pricing_key(config, model_id)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{model_id}' not found")
 
-    models_dev = await load_catalog_metadata(config)
-
     # An alias resolves to its own entry, with pricing read from the resolved
     # target so the underlying provider/model stays hidden. Only the target's own
     # rows are loaded rather than the whole pricing table.
@@ -346,7 +345,11 @@ async def _find_model(
     if alias_target is not None:
         pricing_map = await get_pricing_map(db, model_keys=pricing_key_candidates(config, alias_target))
         return alias_model(
-            config, model_id, alias_target, normalized_pricing_lookup(config, pricing_map), models_dev=models_dev
+            config,
+            model_id,
+            alias_target,
+            normalized_pricing_lookup(config, pricing_map),
+            models_dev=await load_catalog_metadata(config),
         ), aliases
 
     # Check the pricing table first.
@@ -396,7 +399,7 @@ async def _find_model(
         fallback = ModelObject(id=model_id, created=0, owned_by=owner_from_key(model_id))
         apply_default_pricing(fallback)
         if fallback.pricing is not None:
-            apply_model_limits(config, models_dev, fallback)
+            apply_model_limits(config, await load_catalog_metadata(config), fallback)
             return mark_deployment_managed(
                 config, fallback, deployment_supplied_providers=scope.deployment_supplied_providers
             ), aliases
@@ -417,7 +420,7 @@ async def _find_model(
             pricing_source="configured" if pricing else "none",
         )
         apply_default_pricing(obj)
-        apply_model_limits(config, models_dev, obj)
+        apply_model_limits(config, await load_catalog_metadata(config), obj)
         return mark_deployment_managed(
             config, obj, deployment_supplied_providers=scope.deployment_supplied_providers
         ), aliases
@@ -425,7 +428,7 @@ async def _find_model(
     # Pricing-only model (no discovery data).
     assert pricing is not None
     obj = model_from_pricing(pricing)
-    apply_model_limits(config, models_dev, obj)
+    apply_model_limits(config, await load_catalog_metadata(config), obj)
     return mark_deployment_managed(
         config, obj, deployment_supplied_providers=scope.deployment_supplied_providers
     ), aliases

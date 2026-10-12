@@ -1684,9 +1684,10 @@ export interface paths {
          *
          *     Returns models auto-discovered from configured providers, enriched with
          *     pricing data from the model_pricing table when available, and with each
-         *     model's context window and output limit where models.dev or genai-prices
-         *     knows them. Models that only exist in the pricing table are also included
-         *     for backward compatibility.
+         *     model's token limits: the context window from models.dev, or from
+         *     genai-prices where models.dev has none, and the output limit from models.dev
+         *     alone. A limit neither knows is null. Models that only exist in the pricing
+         *     table are also included for backward compatibility.
          */
         get: operations["models-list_models"];
         put?: never;

@@ -27028,7 +27028,7 @@
     },
     "/api/v1/models": {
       "get": {
-        "description": "List all available models.\n\nReturns models auto-discovered from configured providers, enriched with\npricing data from the model_pricing table when available, and with each\nmodel's context window and output limit where models.dev or genai-prices\nknows them. Models that only exist in the pricing table are also included\nfor backward compatibility.",
+        "description": "List all available models.\n\nReturns models auto-discovered from configured providers, enriched with\npricing data from the model_pricing table when available, and with each\nmodel's token limits: the context window from models.dev, or from\ngenai-prices where models.dev has none, and the output limit from models.dev\nalone. A limit neither knows is null. Models that only exist in the pricing\ntable are also included for backward compatibility.",
         "operationId": "models-list_models",
         "parameters": [
           {

@@ -378,3 +378,15 @@ def test_disabled_models_dev_is_never_fetched_by_the_listing(postgres_url: str, 
         assert response.status_code == 200, response.text
         assert {model["id"]: _limits(model) for model in response.json()["data"]}[_QWEN] == (None, None)
     fetch.assert_not_awaited()
+
+
+def test_an_unknown_model_is_refused_without_fetching_models_dev(limits_client: TestClient) -> None:
+    """A 404 has no limits to report, so it never waits on a models.dev fetch."""
+    fetch = AsyncMock(return_value=_MODELS_DEV)
+    with patch.object(mcs, "_fetch", new=fetch):
+        response = limits_client.get(
+            f"{API_ROOT}/models/nebius:not-a-model", headers={API_KEY_HEADER: "Bearer test-master-key"}
+        )
+
+    assert response.status_code == 404, response.text
+    fetch.assert_not_awaited()

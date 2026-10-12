@@ -133,9 +133,9 @@ class ModelObject(BaseModel):
     # own rate), "configured" (DB), "default" (genai-prices fallback, only when
     # default_pricing is enabled), "dynamic" (a policy priced per request), or "none".
     pricing_source: str = "none"
-    # Token limits, from models.dev and then genai-prices (see ``model_limits``).
-    # Metadata only, independent of the default_pricing toggle; ``None`` when
-    # neither dataset knows the model.
+    # Token limits (see ``model_limits``): the context window from models.dev,
+    # then genai-prices; the output limit from models.dev alone. Metadata only,
+    # independent of the default_pricing toggle; ``None`` where neither knows one.
     context_window: int | None = None
     max_output_tokens: int | None = None
     # True when the deployment pays the upstream bill for this model, so the organization may not set its own rate.
