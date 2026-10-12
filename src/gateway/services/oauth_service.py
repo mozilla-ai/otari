@@ -352,10 +352,9 @@ async def exchange_code(
             credentials for ``provider``, or does not know its own address.
         OAuthStateError: If ``state`` names no authorization this deployment is
             still waiting on, for ``provider``, from this browser.
-        OAuthExchangeError: If the exchange or the identity fetch fails, for any
-            reason, or the identity carries no subject. The provider's own words
-            stay on the traceback and out of the response; see that error's
-            docstring.
+        OAuthExchangeError: If the exchange or the identity fetch fails, for any reason,
+            or the identity does not fit the link table.
+            The provider's own words stay on the traceback and out of the response, as that error's docstring says.
 
     """
     if flow_secret is None:
@@ -376,17 +375,18 @@ async def exchange_code(
         # error and description, which the response deliberately does not carry.
         logger.warning("OAuth code exchange with %s failed", provider, exc_info=True)
         raise OAuthExchangeError(provider_label(provider)) from error
-    if not profile.subject:
-        logger.warning("Refused a %s identity that carried no subject", provider)
-        raise OAuthExchangeError(provider_label(provider))
 
-    return ProviderIdentity(
-        provider=provider,
-        subject=profile.subject,
-        email=profile.email,
-        full_name=profile.name,
-        email_verified=EmailAssertion.from_claim(profile.email_verified),
-    )
+    try:
+        return ProviderIdentity(
+            provider=provider,
+            subject=profile.subject or "",
+            email=profile.email,
+            full_name=profile.name,
+            email_verified=EmailAssertion.from_claim(profile.email_verified),
+        )
+    except ValueError as error:
+        logger.warning("Refused a %s identity that the link table cannot hold", provider)
+        raise OAuthExchangeError(provider_label(provider)) from error
 
 
 def require_configured(config: GatewayConfig, provider: str) -> None:

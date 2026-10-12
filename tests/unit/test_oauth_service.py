@@ -582,8 +582,8 @@ class TestExchange:
         assert identity.email_verified is EmailAssertion.UNASSERTED
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("subject", [None, ""])
-    async def test_an_identity_with_no_subject_is_refused(
+    @pytest.mark.parametrize("subject", [None, "", "s" * 256])
+    async def test_an_identity_with_no_usable_subject_is_refused(
         self, monkeypatch: pytest.MonkeyPatch, subject: str | None
     ) -> None:
         self._stub_client(monkeypatch, self._profile(subject=subject))

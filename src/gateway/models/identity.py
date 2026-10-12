@@ -10,6 +10,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from gateway.models.base import Base, UtcDateTime
 
+MAX_EMAIL_LENGTH = 255
+MAX_PROVIDER_LENGTH = 50
+MAX_SUBJECT_LENGTH = 255
+
 
 class EmailAssertion(StrEnum):
     """What a provider says about the email address it returns.
@@ -43,6 +47,18 @@ class ProviderIdentity:
     full_name: str | None
     email_verified: EmailAssertion
 
+    def __post_init__(self) -> None:
+        for name, value, limit in (
+            ("provider", self.provider, MAX_PROVIDER_LENGTH),
+            ("subject", self.subject, MAX_SUBJECT_LENGTH),
+        ):
+            if not value or len(value) > limit:
+                msg = f"A provider identity's {name} must hold 1 to {limit} characters"
+                raise ValueError(msg)
+        if self.email is not None and len(self.email) > MAX_EMAIL_LENGTH:
+            msg = f"A provider identity's email must hold at most {MAX_EMAIL_LENGTH} characters"
+            raise ValueError(msg)
+
 
 class OAuthIdentityLink(Base):
     """A provider identity linked to one account.
@@ -57,11 +73,11 @@ class OAuthIdentityLink(Base):
     __tablename__ = "oauth_identity_link"
     __table_args__ = (UniqueConstraint("user_id", "provider", name="uq_oauth_identity_link_user_provider"),)
 
-    provider: Mapped[str] = mapped_column(String(50), primary_key=True)
-    subject: Mapped[str] = mapped_column(String(255), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(MAX_PROVIDER_LENGTH), primary_key=True)
+    subject: Mapped[str] = mapped_column(String(MAX_SUBJECT_LENGTH), primary_key=True)
     # The unique constraint above leads with this column, so it also serves as the column's index.
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
-    email_at_link: Mapped[str | None] = mapped_column(String(255))
+    email_at_link: Mapped[str | None] = mapped_column(String(MAX_EMAIL_LENGTH))
     email_verified_at_link: Mapped[bool]
     linked_at: Mapped[datetime] = mapped_column(
         UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
