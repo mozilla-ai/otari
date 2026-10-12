@@ -211,7 +211,6 @@ from gateway.services.inference import (
     Replay,
     StillInFlight,
     UnknownCaller,
-    is_image_input_rejection,
     is_provider_billing_error,
     is_upstream_connect_failure,
     is_upstream_request_fault,
@@ -564,7 +563,7 @@ def failure_error_message(exc: BaseException) -> str:
     The gateway's own wording where the failure is one it names, since an SDK's
     string form can redact to nothing (Cohere's leads with the response headers).
     """
-    if is_image_input_rejection(exc):
+    if _is_image_input_rejection(exc):
         return unsupported_image_detail()
     return str(exc)
 
@@ -682,6 +681,29 @@ def _is_account_quota_error(exc: BaseException) -> bool:
     )
 
 
+# Lowercase substrings of a rejection that says the model takes no image input.
+# Each is a provider's wording seen in a real response; add one only on the same footing.
+# Narrow for the same reason as the billing probes: each names images and says
+# they are refused, so a malformed request of any other kind cannot match.
+_IMAGE_REJECTION_PROBES: tuple[str, ...] = (
+    "image content is not supported",  # cohere
+    "unsupported chatmessagecontent type: image_url",  # fireworks
+)
+
+
+def _is_image_input_rejection(exc: BaseException) -> bool:
+    """Whether the provider refused the request because the model does not accept images.
+
+    Only a request fault can say that: a 400 or 422, or a rejection the provider
+    raised before assigning a status.
+    """
+    _kind, status_code = upstream_exception_shape(exc)
+    if status_code not in (None, 400, 422):
+        return False
+    message = upstream_error_message(exc).lower()
+    return any(probe in message for probe in _IMAGE_REJECTION_PROBES)
+
+
 def classify_provider_error(
     exc: BaseException, *, request_params: Collection[str] = _FORWARDED_PARAMS, model: str | None = None
 ) -> ProviderErrorMapping | None:
@@ -731,7 +753,7 @@ def classify_provider_error(
     if (param := _rejected_param(exc, request_params)) is not None:
         return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _provider_rejected_param_detail(param))
     # Each provider words this its own way, so it gets one wording and one code.
-    if is_image_input_rejection(exc):
+    if _is_image_input_rejection(exc):
         return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, unsupported_image_detail(model))
     if status_code is None:
         # A status-less InvalidRequestError means the provider (gemini, bedrock,
@@ -798,7 +820,7 @@ def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, st
     """
     if status_code == status.HTTP_400_BAD_REQUEST and _is_context_length_error(exc):
         return error_headers(CONTEXT_LENGTH_EXCEEDED)
-    if status_code == status.HTTP_400_BAD_REQUEST and is_image_input_rejection(exc):
+    if status_code == status.HTTP_400_BAD_REQUEST and _is_image_input_rejection(exc):
         return error_headers(UNSUPPORTED_CONTENT)
     missing = missing_credential(exc)
     if missing is not None and status_code == missing.status_code:

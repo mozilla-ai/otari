@@ -347,29 +347,6 @@ def is_provider_billing_error(exc: BaseException) -> bool:
     return any(probe in message for probe in _BILLING_MESSAGE_PROBES)
 
 
-# Lowercase substrings of a rejection that says the model takes no image input.
-# Each is a provider's wording seen in a real response; add one only on the same footing.
-# Narrow for the same reason as the billing probes: each names images and says
-# they are refused, so a malformed request of any other kind cannot match.
-_IMAGE_REJECTION_PROBES: tuple[str, ...] = (
-    "image content is not supported",  # cohere
-    "unsupported chatmessagecontent type: image_url",  # fireworks
-)
-
-
-def is_image_input_rejection(exc: BaseException) -> bool:
-    """Whether the provider refused the request because the model does not accept images.
-
-    Only a request fault can say that: a 400 or 422, or a rejection the provider
-    raised before assigning a status.
-    """
-    _kind, status_code = upstream_exception_shape(exc)
-    if status_code not in (None, 400, 422):
-        return False
-    message = upstream_error_message(exc).lower()
-    return any(probe in message for probe in _IMAGE_REJECTION_PROBES)
-
-
 def is_retry_futile(exc: BaseException) -> bool:
     """Whether resending the same request cannot change how ``exc`` ends it.
 

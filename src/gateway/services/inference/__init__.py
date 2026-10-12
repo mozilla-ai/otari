@@ -35,7 +35,6 @@ from gateway.services.inference._stream_cost import is_chat_stream_cost_carrier
 from gateway.services.inference._sweeper import run_idempotency_sweeper
 from gateway.services.inference._upstream_errors import (
     UpstreamErrorKind,
-    is_image_input_rejection,
     is_provider_billing_error,
     is_retry_futile,
     is_upstream_connect_failure,
@@ -77,7 +76,6 @@ __all__ = [
     "strip_gateway_minted_items",
     "uses_chat_completions_bridge",
     "UpstreamErrorKind",
-    "is_image_input_rejection",
     "is_provider_billing_error",
     "is_retry_futile",
     "is_upstream_connect_failure",
