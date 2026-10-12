@@ -209,6 +209,7 @@ def test_a_restricted_key_is_told_an_unresolvable_selector_is_invalid_not_forbid
     assert refusal is not None
     assert (refusal.code, refusal.status_code) == (INVALID_MODEL, 400)
     assert "no-such-model" in refusal.detail
+    assert "'provider:model' selector, an alias, or a model id from the catalog" in refusal.detail
 
 
 def test_a_restricted_key_is_refused_a_model_its_list_excludes() -> None:

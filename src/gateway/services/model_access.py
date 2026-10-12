@@ -23,7 +23,7 @@ from any_llm import LLMProvider
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import API_ROOT, GatewayConfig
 from gateway.core.error_codes import INVALID_MODEL, MODEL_NOT_ALLOWED, MODEL_NOT_FOUND, MODEL_NOT_SERVING
 from gateway.models.api_keys import APIKey
 from gateway.models.users import User
@@ -202,7 +202,8 @@ def model_not_allowed_detail(model: str) -> str:
 def unresolvable_model_detail(model_selector: str) -> str:
     """Human-readable 400 detail for a selector the gateway cannot resolve."""
     return (
-        f"Unknown or unsupported model {model_selector!r}. Use the format 'provider:model' with a configured provider."
+        f"Unknown or unsupported model {model_selector!r}. Send a 'provider:model' selector, an alias, "
+        f"or a model id from the catalog (GET {API_ROOT}/models)."
     )
 
 
