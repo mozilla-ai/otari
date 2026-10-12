@@ -322,6 +322,14 @@ in order:
 > Ollama). For those, set a `model_capabilities` override to enable native
 > passthrough where the served model truly supports it.
 
+The flags are per provider for hosted providers too, so a text-only model on a
+provider whose flag says images (Fireworks, Cohere) is sent the image, and the
+provider refuses it. Otari answers that refusal the same way whatever the
+provider wrote: a `400` with the code `unsupported_content` and a `detail`
+saying the model does not accept image content (see
+[Error codes](api-reference.md#error-codes)). To have such a model read images
+as text instead, set `supports_image: false` for it in `model_capabilities`.
+
 
 
 ## Configuration

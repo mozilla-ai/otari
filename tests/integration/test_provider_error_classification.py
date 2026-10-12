@@ -449,3 +449,70 @@ def test_a_dropped_connection_is_a_502_saying_the_provider_closed_it(
     assert response.json()["detail"] == "The provider closed the connection before answering"
     assert "internal-proxy" not in response.text
     assert "x-should-retry" not in response.headers
+
+
+_PNG_DATA_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+_IMAGE_DETAIL_TAIL = (
+    "does not accept image content. Remove the image parts, or send the request to a model that accepts images."
+)
+
+
+def _fireworks_image_rejection() -> openai.BadRequestError:
+    """Fireworks' 400, through its OpenAI-compatible SDK, for an image sent to a text-only model."""
+    error = {"message": "Unsupported ChatMessageContent type: image_url", "type": "invalid_request_error"}
+    request = httpx.Request("POST", "https://api.fireworks.ai/inference/v1/chat/completions")
+    return openai.BadRequestError(
+        f"Error code: 400 - {{'error': {error}}}",
+        response=httpx.Response(400, request=request, json={"error": error}),
+        body=error,
+    )
+
+
+def _cohere_image_rejection() -> CohereBadRequestError:
+    """Cohere's 400 for the same request, whose string form redacts to nothing."""
+    return CohereBadRequestError(
+        body={"id": "c0ffee", "message": "invalid request: image content is not supported for this model"},
+        headers={"x-debug-trace-id": "trace-SECRET-9f3a", "server": "envoy"},
+    )
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["unstreamed", "streamed"])
+@pytest.mark.parametrize(
+    "upstream", [_fireworks_image_rejection(), _cohere_image_rejection()], ids=["fireworks", "cohere"]
+)
+def test_chat_answers_an_image_the_model_cannot_take_in_otaris_words(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    upstream: Exception,
+    stream: bool,
+) -> None:
+    content = [
+        {"type": "text", "text": "What is in this picture?"},
+        {"type": "image_url", "image_url": {"url": _PNG_DATA_URL}},
+    ]
+    with patch("gateway.api.routes.chat.acompletion", new_callable=AsyncMock, side_effect=upstream):
+        response = client.post(
+            f"{API_ROOT}/chat/completions",
+            json={
+                "model": "openai:text-only-model",
+                "stream": stream,
+                "messages": [{"role": "user", "content": content}],
+            },
+            headers=api_key_header,
+        )
+
+    detail = f"The model 'openai:text-only-model' {_IMAGE_DETAIL_TAIL}"
+    assert response.status_code == 400
+    assert response.json() == {"detail": detail, "code": "unsupported_content"}
+    assert response.headers["Otari-Error-Code"] == "unsupported_content"
+    assert "SECRET" not in response.text
+
+    usage = client.get(f"{API_ROOT}/users/{api_key_obj['user_id']}/usage", headers=master_key_header).json()
+    errors = [row for row in usage if row["status"] == "error"]
+    assert len(errors) == 1
+    assert errors[0]["error_message"] == f"The model serving this request {_IMAGE_DETAIL_TAIL}"

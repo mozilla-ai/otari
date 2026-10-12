@@ -120,6 +120,7 @@ from gateway.core.error_codes import (
     PROVIDER_CREDENTIAL_REJECTED,
     PROVIDER_ERROR,
     PROVIDER_STREAM_INTERRUPTED,
+    UNSUPPORTED_CONTENT,
     UPSTREAM_RATE_LIMITED,
     error_code_of,
     error_headers,
@@ -210,6 +211,7 @@ from gateway.services.inference import (
     Replay,
     StillInFlight,
     UnknownCaller,
+    is_image_input_rejection,
     is_provider_billing_error,
     is_upstream_connect_failure,
     is_upstream_request_fault,
@@ -540,6 +542,33 @@ def _provider_rejected_param_detail(param: str) -> str:
     return f"The provider serving this model does not accept the '{param}' parameter"
 
 
+def unsupported_image_detail(model: str | None = None) -> str:
+    """Detail for a request carrying an image to a model that does not accept images."""
+    subject = f"The model '{model}'" if model else "The model serving this request"
+    return (
+        f"{subject} does not accept image content. "
+        "Remove the image parts, or send the request to a model that accepts images."
+    )
+
+
+def _model_as_named(provider: Any, model: str, display_model: str | None) -> str:
+    """The model as a caller names it: the alias it sent, else its ``provider:model`` selector."""
+    if display_model is not None:
+        return display_model
+    return f"{provider_key(provider)}:{model}" if provider else model
+
+
+def failure_error_message(exc: BaseException) -> str:
+    """The error a usage row records for a provider failure.
+
+    The gateway's own wording where the failure is one it names, since an SDK's
+    string form can redact to nothing (Cohere's leads with the response headers).
+    """
+    if is_image_input_rejection(exc):
+        return unsupported_image_detail()
+    return str(exc)
+
+
 def _rejected_param(exc: BaseException, request_params: Collection[str] = _FORWARDED_PARAMS) -> str | None:
     """The request param a provider SDK refused as an unknown keyword, if any.
 
@@ -654,7 +683,7 @@ def _is_account_quota_error(exc: BaseException) -> bool:
 
 
 def classify_provider_error(
-    exc: BaseException, *, request_params: Collection[str] = _FORWARDED_PARAMS
+    exc: BaseException, *, request_params: Collection[str] = _FORWARDED_PARAMS, model: str | None = None
 ) -> ProviderErrorMapping | None:
     """Map an upstream provider exception to a safe, specific (status, detail).
 
@@ -680,7 +709,8 @@ def classify_provider_error(
 
     ``request_params`` is the set of names a caller could have sent, which is
     what lets an SDK's unknown-keyword ``TypeError`` read as the caller's 400
-    (see :func:`_rejected_param`).
+    (see :func:`_rejected_param`). ``model``, the name the caller knows the
+    model by, is named in a detail that is about the model.
     """
     missing = missing_credential(exc)
     if missing is not None:
@@ -700,6 +730,9 @@ def classify_provider_error(
     # provider's SDK has no parameter for.
     if (param := _rejected_param(exc, request_params)) is not None:
         return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _provider_rejected_param_detail(param))
+    # Each provider words this its own way, so it gets one wording and one code.
+    if is_image_input_rejection(exc):
+        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, unsupported_image_detail(model))
     if status_code is None:
         # A status-less InvalidRequestError means the provider (gemini, bedrock,
         # anthropic) rejected the request shape before assigning an HTTP status.
@@ -765,6 +798,8 @@ def provider_error_headers(exc: BaseException, status_code: int) -> dict[str, st
     """
     if status_code == status.HTTP_400_BAD_REQUEST and _is_context_length_error(exc):
         return error_headers(CONTEXT_LENGTH_EXCEEDED)
+    if status_code == status.HTTP_400_BAD_REQUEST and is_image_input_rejection(exc):
+        return error_headers(UNSUPPORTED_CONTENT)
     missing = missing_credential(exc)
     if missing is not None and status_code == missing.status_code:
         return error_headers(missing.code)
@@ -976,8 +1011,11 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         """Build the format's wire error for ``status_code`` / ``message``."""
         ...
 
-    def provider_error(self, exc: BaseException) -> HTTPException:
-        """Map a single-attempt upstream failure to the format's wire error."""
+    def provider_error(self, exc: BaseException, model: str | None = None) -> HTTPException:
+        """Map a single-attempt upstream failure to the format's wire error.
+
+        ``model`` is the name the caller knows the failed model by, for a detail that names it.
+        """
         ...
 
     def stream_error_payload(self, exc: BaseException) -> str:
@@ -4741,7 +4779,7 @@ def build_streaming_response(
             endpoint=adapter.endpoint,
             user_id=user_id,
             usage_override=reported_usage,
-            error=str(exc),
+            error=failure_error_message(exc),
             status_code=failure_status_code(exc),
             latency_ms=_elapsed_ms(started_at),
             ttft_ms=_ttft_ms(started_at, first_chunk_at),
@@ -5095,11 +5133,17 @@ async def run_single_attempt_stream(
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
     except Exception as exc:
         await _log_failure_and_refund(
-            ctx, adapter, provider, model, str(exc), failure_status_code(exc), attribution=_failure_attribution(ctx)
+            ctx,
+            adapter,
+            provider,
+            model,
+            failure_error_message(exc),
+            failure_status_code(exc),
+            attribution=_failure_attribution(ctx),
         )
         # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Stream creation failed for %s:%s: %s", provider, model, exc)
-        raise adapter.provider_error(exc) from exc
+        raise adapter.provider_error(exc, _model_as_named(provider, model, display_model)) from exc
 
     files_bridge = tool_ctx.sandbox_files
     if files_bridge is not None:
@@ -5676,7 +5720,7 @@ async def log_absorbed_attempt(
     on the row that settles the request's reservation, so this row carries the
     attempt's tokens and none of the tool ledger. See :func:`log_usage`.
     """
-    await _log_absorbed_row(ctx, adapter, attempt, str(exc), failure_status_code(exc))
+    await _log_absorbed_row(ctx, adapter, attempt, failure_error_message(exc), failure_status_code(exc))
 
 
 # Starts the error of an absorbed row for a candidate that was skipped rather than
@@ -5957,11 +6001,11 @@ async def run_standalone_non_stream(
             adapter,
             provider,
             model,
-            str(e),
+            failure_error_message(e),
             failure_status_code(e),
             attribution=_failure_attribution(ctx),
             tool_tally=tool_ctx.tally,
         )
         # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Provider call failed for %s:%s: %s", provider, model, e)
-        raise adapter.provider_error(e) from e
+        raise adapter.provider_error(e, _model_as_named(provider, model, display_model)) from e

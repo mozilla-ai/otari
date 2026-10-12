@@ -45,6 +45,7 @@ from gateway.api.routes._pipeline import (
     PROVIDER_RATE_LIMITED_DETAIL,
     PROVIDER_TIMEOUT_DETAIL,
     classify_provider_error,
+    failure_error_message,
     failure_status_code,
     provider_error_headers,
     provider_failure_detail,
@@ -1580,3 +1581,71 @@ def test_the_502_keeps_its_retry_behavior() -> None:
     assert answer.status_code == 502
     assert answer.detail == "The provider failed the request with HTTP 500"
     assert SHOULD_RETRY_HEADER not in (answer.headers or {})
+
+
+# What two providers answered, verbatim, to an image sent to a text-only model.
+_FIREWORKS_IMAGE_MSG = "Unsupported ChatMessageContent type: image_url"
+_COHERE_IMAGE_MSG = "invalid request: image content is not supported for this model"
+_IMAGE_DETAIL_TAIL = (
+    "does not accept image content. Remove the image parts, or send the request to a model that accepts images."
+)
+
+
+def _image_rejections() -> list[Exception]:
+    fireworks = _openai_status_error(400, _openai_error(_FIREWORKS_IMAGE_MSG))
+    cohere = CohereBadRequestError(body={"id": "a1b2", "message": _COHERE_IMAGE_MSG}, headers=_COHERE_HEADERS)
+    return [fireworks, cohere, convert_exception(fireworks, "fireworks"), convert_exception(cohere, "cohere")]
+
+
+@pytest.mark.parametrize("exc", _image_rejections(), ids=["fireworks", "cohere", "fireworks-unified", "cohere-unified"])
+def test_an_image_the_model_cannot_take_is_one_400_with_one_code(exc: Exception) -> None:
+    mapping = classify_provider_error(exc, model="cohere:command-r7b-12-2024")
+
+    assert mapping == (400, f"The model 'cohere:command-r7b-12-2024' {_IMAGE_DETAIL_TAIL}")
+    assert provider_error_headers(exc, 400) == {"Otari-Error-Code": "unsupported_content"}
+    assert refusal_code(exc) == "unsupported_content"
+    assert failure_status_code(exc) == 400
+
+
+def test_an_image_rejection_without_a_model_names_the_serving_model() -> None:
+    exc = _image_rejections()[0]
+
+    assert classify_provider_error(exc) == (400, f"The model serving this request {_IMAGE_DETAIL_TAIL}")
+    assert stream_error_code(exc) == "unsupported_content"
+    assert stream_error_message(exc) == f"The model serving this request {_IMAGE_DETAIL_TAIL}"
+
+
+def test_an_image_rejection_is_recorded_on_the_usage_row_in_the_gateways_words() -> None:
+    cohere = _image_rejections()[1]
+
+    # Cohere's string form redacts to nothing, which left the row reading "LLM provider error".
+    assert redact_upstream_message(str(cohere)) == ""
+    assert failure_error_message(cohere) == f"The model serving this request {_IMAGE_DETAIL_TAIL}"
+    assert failure_error_message(_StatusError(400)) == _RAW
+
+
+def test_an_image_mention_on_a_gateway_fault_is_not_an_image_rejection() -> None:
+    exc = _openai_status_error(503, _openai_error(_COHERE_IMAGE_MSG))
+
+    assert classify_provider_error(exc) is None
+    assert provider_error_headers(exc, 503) is None
+
+
+def test_attempts_that_all_refuse_the_image_share_one_400() -> None:
+    fireworks, cohere = _image_rejections()[:2]
+
+    rejection = get_shared_rejection([fireworks, cohere])
+
+    assert rejection is not None
+    assert rejection.status_code == 400
+    assert rejection.detail == "None of the models tried accepts image content (2 attempts)."
+    assert rejection.headers == {"Otari-Error-Code": "unsupported_content"}
+
+
+def test_an_image_refusal_beside_another_rejection_shares_the_generic_400() -> None:
+    other = _openai_status_error(400, _openai_error(_OPENAI_TEMPERATURE_MSG))
+
+    rejection = get_shared_rejection([_image_rejections()[0], other])
+
+    assert rejection is not None
+    assert rejection.headers == {"Otari-Error-Code": "all_candidates_rejected"}

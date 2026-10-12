@@ -616,8 +616,8 @@ class _MessagesAdapter:
     ) -> HTTPException:
         return _anthropic_error(_ERROR_KIND_TO_ANTHROPIC_TYPE[kind], message, status_code, headers)
 
-    def provider_error(self, exc: BaseException) -> HTTPException:
-        mapping = classify_provider_error(exc)
+    def provider_error(self, exc: BaseException, model: str | None = None) -> HTTPException:
+        mapping = classify_provider_error(exc, model=model)
         if mapping is not None:
             error_type = _ERROR_KIND_TO_ANTHROPIC_TYPE[error_kind_for_status(mapping.status_code)]
             return _anthropic_error(

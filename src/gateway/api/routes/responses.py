@@ -264,8 +264,8 @@ class _ResponsesAdapter:
     ) -> HTTPException:
         return HTTPException(status_code=status_code, detail=message, headers=headers)
 
-    def provider_error(self, exc: BaseException) -> HTTPException:
-        mapping = classify_provider_error(exc)
+    def provider_error(self, exc: BaseException, model: str | None = None) -> HTTPException:
+        mapping = classify_provider_error(exc, model=model)
         if mapping is not None:
             return HTTPException(
                 status_code=mapping.status_code,

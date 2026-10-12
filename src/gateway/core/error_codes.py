@@ -27,6 +27,8 @@ MODEL_NOT_SERVING = "model_not_serving"
 # A provider key of the organization serves the provider, and none offers the model.
 MODEL_NOT_FOUND = "model_not_found"
 CONTEXT_LENGTH_EXCEEDED = "context_length_exceeded"
+# The model the request reached does not accept a kind of content the request carries, such as an image.
+UNSUPPORTED_CONTENT = "unsupported_content"
 PRICING_REQUIRED = "pricing_required"
 END_USER_BUDGET_NOT_ALLOWED = "end_user_budget_not_allowed"
 ALL_CANDIDATES_REJECTED = "all_candidates_rejected"

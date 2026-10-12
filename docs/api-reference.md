@@ -479,6 +479,7 @@ reworded.
 | `model_not_serving` | 403 | The organization offers the model on a provider key, with its serving switch off | |
 | `model_not_found` | 404 | A provider key of the organization serves the provider, and none offers the model | |
 | `context_length_exceeded` | 400 | The prompt is too long for the model | |
+| `unsupported_content` | 400 | The provider refused content the request carries because the model does not accept it, such as an image sent to a text-only model. `detail` names the model where it can. A routing policy moves on to its next candidate first, and answers with this code when every candidate refused the same way | |
 | `all_candidates_rejected` | 400 | Every model a routing policy, a catalog ID or the control plane tried rejected the request as invalid | |
 | `pricing_required` | 402 | `require_pricing` is on and the model has no price | |
 | `provider_not_configured` | 424 | The gateway holds no credential for the model's provider, so nothing was sent upstream. Not a 5xx, so a client does not retry it: add the credential in `config.yml`, through the dashboard, or in the environment variable the detail names | |
