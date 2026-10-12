@@ -46,6 +46,7 @@ from gateway.services.inference._upstream_errors import (
     upstream_exception_shape,
     upstream_retry_after,
 )
+from gateway.services.inference._upstream_user import chat_user_fields, upstream_user_identifier
 
 __all__ = [
     "REASONING_ITEM_ID_PREFIX",
@@ -64,6 +65,7 @@ __all__ = [
     "UnknownCaller",
     "aresponses_via_chat_completions",
     "call_responses",
+    "chat_user_fields",
     "close_decision_client",
     "decision_body",
     "is_chat_stream_cost_carrier",
@@ -74,6 +76,7 @@ __all__ = [
     "run_idempotency_sweeper",
     "serves_responses",
     "strip_gateway_minted_items",
+    "upstream_user_identifier",
     "uses_chat_completions_bridge",
     "UpstreamErrorKind",
     "is_provider_billing_error",

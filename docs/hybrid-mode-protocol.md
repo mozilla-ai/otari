@@ -351,10 +351,9 @@ platform bug and surfaced as `502 Bad Gateway`.
 `user_id` (optional) identifies the platform identity that owns the
 `X-User-Token` presented for this call, i.e. the token's creator. It is a
 stable, opaque string; Otari does not assume any particular format and never
-tries to parse it. Absent on older peers, which is exactly as valid as a peer
-omitting any other unrecognized field: nothing that reads this field may
-require it. When present, it is Otari's only way to key its own per-caller
+tries to parse it. When present, it is Otari's only way to key its own per-caller
 gateway-side state (aliases, routing memory, files, batches) in hybrid mode.
+See [End-user identifier](#end-user-identifier) for the one case that requires it.
 
 `workspace_id` and `organization_id` (both optional) identify the tenant that
 owns this resolution: the workspace the presented `X-User-Token` belongs to,
@@ -363,8 +362,25 @@ parses. They are the only tenant Otari sees, because `X-Gateway-Token`
 authenticates the calling gateway and carries no tenant of its own, so nothing
 downstream can recover them after the fact. Both are optional in the same
 fail-open sense as `user_id`: a peer that omits them costs whatever record
-needed a tenant, never the request. Otari records them and does not route on
-them, so neither value can reach a provider call.
+needed a tenant, never the request, except as the next section describes.
+Otari records them and does not route on them. Neither value reaches a provider
+call as itself; `workspace_id` and `user_id` reach one only inside a digest.
+
+#### End-user identifier
+
+While `provider_user_identifier_enabled` is on (the default), Otari sends each
+provider call an opaque identifier of the end user behind it, so a provider
+that enforces its usage policy per end user blocks that user and not the whole
+upstream account. The identifier is a digest of `workspace_id` and the
+caller's own user tag (`user` on chat and Responses, `metadata.user_id` on
+Messages), or of `workspace_id` and `user_id` when the caller sent no tag.
+
+So while the setting is on, a peer MUST send `workspace_id`, and MUST send
+`user_id` for a caller that sends no tag. Otari answers a resolve response
+without them with `502 Bad Gateway` and calls no provider, because a request
+it cannot identify is exactly the one that would put the whole account at
+risk. The single-attempt shape below carries neither field, so a peer still
+sending it needs the setting off.
 
 ### Response: single-attempt shape
 

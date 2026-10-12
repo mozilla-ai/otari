@@ -230,6 +230,7 @@ from gateway.services.inference import (
     upstream_exception_chain,
     upstream_exception_shape,
     upstream_retry_after,
+    upstream_user_identifier,
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
@@ -397,6 +398,10 @@ DB_UNAVAILABLE_DETAIL = "Database session unavailable"
 API_KEY_VALIDATION_FAILED_DETAIL = "API key validation failed"
 API_KEY_NO_USER_DETAIL = "API key has no associated user"
 NO_RESOLVABLE_PROVIDER_DETAIL = "Authorization service returned no resolvable provider"
+NO_UPSTREAM_USER_DETAIL = (
+    "Authorization service named no workspace and user for this request, so Otari cannot send the "
+    "provider the end-user identifier it requires"
+)
 PROVIDER_ERROR_DETAIL = "LLM provider error"
 PROVIDER_TIMEOUT_DETAIL = "LLM provider timeout"
 PROVIDER_STREAM_INTERRUPTED_DETAIL = "The provider's stream ended before it finished"
@@ -1209,6 +1214,7 @@ class RequestContext:
         rate_limit_grant: RateLimitGrant | None = None,
         end_user_budget_id: str | None = None,
         tags: dict[str, str] | None = None,
+        upstream_user: str | None = None,
     ) -> None:
         self.config = config
         # Sent to the client as ``Otari-Request-ID``: the platform's id in hybrid
@@ -1232,6 +1238,9 @@ class RequestContext:
         # pay that per candidate.
         self.organization_id = organization_id
         self.user_id = user_id
+        # The end-user identifier each provider call carries (see
+        # `bind_upstream_user`), or `None` while the feature is off.
+        self.upstream_user = upstream_user
         # The caller's request tags, written onto every usage row the request
         # writes once this context exists.
         self.tags = tags
@@ -1357,6 +1366,40 @@ def scope_prompt_cache_key(request_fields: dict[str, Any], ctx: RequestContext) 
     )
     request_fields["prompt_cache_key"] = hashlib.sha256(payload.encode()).hexdigest()
     return request_fields
+
+
+UPSTREAM_USER_FIELD = "_otari_upstream_user"
+"""Carries the end-user identifier from the route to each attempt's provider call.
+
+Never a caller field: each format adapter turns it into the field its provider
+reads just before the call.
+"""
+
+
+def _upstream_user(config: GatewayConfig, workspace_id: str | None, subject: str | None) -> str | None:
+    if not workspace_id or not subject:
+        return None
+    return upstream_user_identifier(workspace_id, subject, config.provider_user_identifier_key)
+
+
+def bind_upstream_user(request_fields: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    """Replace the caller's ``user`` with the identifier the preamble derived, in place."""
+    request_fields.pop("user", None)
+    request_fields.pop(UPSTREAM_USER_FIELD, None)
+    if ctx.upstream_user is not None:
+        request_fields[UPSTREAM_USER_FIELD] = ctx.upstream_user
+    return request_fields
+
+
+def with_upstream_user(
+    kwargs: dict[str, Any], fields_for: Callable[[dict[str, Any], str], dict[str, Any]]
+) -> dict[str, Any]:
+    """A copy of ``kwargs`` with the carried identifier in the fields ``fields_for`` names for this call."""
+    if UPSTREAM_USER_FIELD not in kwargs:
+        return kwargs
+    out = {key: value for key, value in kwargs.items() if key != UPSTREAM_USER_FIELD}
+    out.update(fields_for(out, kwargs[UPSTREAM_USER_FIELD]))
+    return out
 
 
 def _raise_for_unresolvable_model(model_selector: str, exc: Exception) -> NoReturn:
@@ -2240,6 +2283,7 @@ async def resolve_request_context(
     estimate_inputs: EstimateInputs | None = None
     prices: RequestPrices | None = None
     rate_limit_grant: RateLimitGrant | None = None
+    upstream_user: str | None = None
     request_id: str
 
     if hybrid_mode:
@@ -2271,6 +2315,10 @@ async def resolve_request_context(
             route.fallback_enabled,
             resolve_latency_ms,
         )
+        if config.provider_user_identifier_enabled:
+            upstream_user = _upstream_user(config, route.workspace_id, user_id_from_request or route.user_id)
+            if upstream_user is None:
+                raise adapter.error(502, NO_UPSTREAM_USER_DETAIL, ErrorKind.API)
     else:
         request_id = str(uuid.uuid4())
         response.headers[REQUEST_ID_HEADER] = request_id
@@ -2340,6 +2388,9 @@ async def resolve_request_context(
             key_allowlist = await resolve_request_allowlist(db, api_key)
         if not names_end_user:
             rate_limit_info = await check_rate_limit(raw_request, user_id)
+        if config.provider_user_identifier_enabled:
+            # Never `None` here: a standalone request always has a workspace and a user.
+            upstream_user = _upstream_user(config, str(workspace_id), user_id_from_request or user_id)
 
         # Tolerate an unparseable / unknown-provider selector here: the key's
         # allow-list, the budget check below and the downstream provider call
@@ -2768,6 +2819,7 @@ async def resolve_request_context(
         request_id=request_id,
         end_user_budget_id=end_user_budget_id,
         tags=tags,
+        upstream_user=upstream_user,
     )
 
 

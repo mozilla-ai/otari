@@ -32,6 +32,7 @@ from gateway.api.routes._pipeline import (
     DeclaredTools,
     ErrorKind,
     ToolBackends,
+    bind_upstream_user,
     classify_provider_error,
     default_attempt_kwargs,
     log_usage,
@@ -49,6 +50,7 @@ from gateway.api.routes._pipeline import (
     scope_prompt_cache_key,
     stream_error_code,
     stream_error_message,
+    with_upstream_user,
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost, with_retry_hint
 from gateway.api.routes._request_tags import RequestMetadata, request_tags
@@ -64,7 +66,7 @@ from gateway.models.usage import PLAYGROUND_USAGE_ENDPOINT
 from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.provider_fields import surface_provider_fields
 from gateway.services.files import FileService, StagedFile
-from gateway.services.inference import is_chat_stream_cost_carrier
+from gateway.services.inference import chat_user_fields, is_chat_stream_cost_carrier
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import (
     MAX_TOOL_ITERATIONS_CAP,
@@ -288,10 +290,10 @@ class _ChatAdapter:
         return is_chat_stream_cost_carrier(chunk)
 
     async def call_provider(self, kwargs: dict[str, Any]) -> ChatCompletion:
-        return await acompletion(**kwargs)  # type: ignore[return-value]
+        return await acompletion(**_with_upstream_user(kwargs))  # type: ignore[return-value]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[ChatCompletionChunk]:
-        return await acompletion(**kwargs)  # type: ignore[return-value]
+        return await acompletion(**_with_upstream_user(kwargs))  # type: ignore[return-value]
 
     def prepare_stream_kwargs(
         self,
@@ -330,7 +332,7 @@ class _ChatAdapter:
         if use_budget is not None:
             extra["use_budget"] = use_budget
         return await mcp_tool_loop(
-            completion_kwargs=kwargs,
+            completion_kwargs=_with_upstream_user(kwargs),
             pool=pool,
             max_iterations=max_iterations,
             **extra,
@@ -349,7 +351,7 @@ class _ChatAdapter:
         if use_budget is not None:
             extra["use_budget"] = use_budget
         return mcp_tool_loop_stream(
-            completion_kwargs=kwargs,
+            completion_kwargs=_with_upstream_user(kwargs),
             pool=pool,
             max_iterations=max_iterations,
             **extra,
@@ -383,6 +385,16 @@ class _ChatAdapter:
 
     def prepare_platform_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         return kwargs
+
+
+def _user_fields(kwargs: dict[str, Any], identifier: str) -> dict[str, Any]:
+    implementation, _, _ = str(kwargs.get("model", "")).partition(":")
+    return chat_user_fields(implementation, identifier)
+
+
+def _with_upstream_user(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Put the carried end-user identifier in the field this call's provider reads."""
+    return with_upstream_user(kwargs, _user_fields)
 
 
 _ADAPTER = _ChatAdapter()
@@ -609,6 +621,7 @@ async def run_chat_completion(
     )
     request_fields.pop("metadata", None)
     scope_prompt_cache_key(request_fields, ctx)
+    bind_upstream_user(request_fields, ctx)
     # Dispatch one cap, under the name any-llm understands and knows how to map to
     # any provider (via BaseOpenAIProvider._convert_completion_params). Popped
     # unconditionally so exactly one spelling reaches the provider call, whether

@@ -42,7 +42,14 @@ _CODE_USE_ID = f"{SERVER_TOOL_USE_ID_PREFIX}0123456789abcdef"
 @pytest.fixture
 def platform_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
-    app = app_for(GatewayConfig(mode="hybrid", platform={"base_url": "http://platform.test/api/v1"}))
+    app = app_for(
+        GatewayConfig(
+            mode="hybrid",
+            platform={"base_url": "http://platform.test/api/v1"},
+            # These resolve payloads name no tenant. The end-user identifier has its own tests.
+            provider_user_identifier_enabled=False,
+        )
+    )
     with TestClient(app) as client:
         yield client
     reset_config()
