@@ -324,6 +324,7 @@ from gateway.services.tools import (
     declares_code_execution,
     extract_web_tools,
     native_rendering,
+    provider_runs_code_natively,
     read_web_fetch_max_uses,
     read_web_search_max_uses,
     web_search_intercept_enabled,
@@ -2741,6 +2742,9 @@ async def resolve_request_context(
                         workspace_executor=(
                             code_execution_policy.executor if code_execution_policy is not None else None
                         ),
+                        candidate_providers=(
+                            tuple(attempt.provider for attempt in plan.attempts) if plan is not None else (gate_impl,)
+                        ),
                     )
                 )
                 # Bill the vision describe side-call before the reservation
@@ -2912,6 +2916,7 @@ class ToolContext:
         web_fetch_tool_entry: dict[str, Any] | None = None,
         web_fetch_policy: DomainPolicy | None = None,
         sandbox_files: SandboxFileBridge | None = None,
+        shared_with: ToolContext | None = None,
     ) -> None:
         self.config = config
         self.mcp_server_configs = mcp_server_configs
@@ -2963,22 +2968,62 @@ class ToolContext:
         # ``finally`` runs during stream exhaustion, and ``streaming_generator``
         # only awaits ``on_complete`` afterwards), and because a multi-attempt
         # request shares one tally across attempts: every executed call was paid
-        # for, whether or not its attempt won.
-        self.tally = ToolUsageTally()
+        # for, whether or not its attempt won. ``shared_with`` is the context of
+        # the same request's other attempts, whose tally and caps this one draws on.
+        self.tally: ToolUsageTally = shared_with.tally if shared_with is not None else ToolUsageTally()
         # The request's trace, handed to each backend beside the tally for the same reasons.
         self.trace = trace
         # Successful calls spend the caller's caps across all routing attempts.
-        caps = {
-            name: cap
-            for name, cap in (
-                (WEB_SEARCH_TOOL_NAME, self.max_web_search_uses),
-                (WEB_FETCH_TOOL_NAME, read_web_fetch_max_uses(self.web_fetch_tool_entry)),
-            )
-            if cap is not None
-        }
-        self.use_budget = ToolUseBudget(caps) if caps else None
+        self.use_budget: ToolUseBudget | None
+        if shared_with is not None:
+            self.use_budget = shared_with.use_budget
+        else:
+            caps = {
+                name: cap
+                for name, cap in (
+                    (WEB_SEARCH_TOOL_NAME, self.max_web_search_uses),
+                    (WEB_FETCH_TOOL_NAME, read_web_fetch_max_uses(self.web_fetch_tool_entry)),
+                )
+                if cap is not None
+            }
+            self.use_budget = ToolUseBudget(caps) if caps else None
         # Search and Fetch share a separate attempted-call cap across routing attempts.
-        self.web_retrieval_counter = WebRetrievalCounter()
+        self.web_retrieval_counter: WebRetrievalCounter = (
+            shared_with.web_retrieval_counter if shared_with is not None else WebRetrievalCounter()
+        )
+        # The candidates that run the code-execution keyword the other way from the head, if any.
+        self.code_split: CodeExecutionSplit | None = None
+
+    def for_candidate(self, provider: str | None) -> ToolContext:
+        """The tools the candidate on ``provider`` is dispatched with: these, or the split's.
+
+        Raises:
+            CandidateCannotServe: the candidate runs the code where this request was refused.
+        """
+        split = self.code_split
+        if split is None or not split.includes(provider):
+            return self
+        if isinstance(split.tools, HTTPException):
+            raise CandidateCannotServe(split.tools)
+        return split.tools
+
+    def request_fields_for(self, provider: str | None, head_fields: dict[str, Any]) -> dict[str, Any]:
+        """What the candidate on ``provider`` is sent: ``head_fields``, or the split's own.
+
+        Raises:
+            CandidateCannotServe: as :meth:`for_candidate` does.
+        """
+        if self.for_candidate(provider) is self:
+            return head_fields
+        assert self.code_split is not None and self.code_split.request_fields is not None
+        return self.code_split.request_fields
+
+    def build_request_fields(self, build: Callable[[ToolContext], dict[str, Any]]) -> dict[str, Any]:
+        """The request fields ``build`` makes from these tools, building the split's beside them."""
+        split = self.code_split
+        if split is not None and isinstance(split.tools, ToolContext):
+            split.request_fields = build(split.tools)
+        return build(self)
 
     def build_sandbox_backend(self) -> SandboxBackend:
         """The one place a ``SandboxBackend`` is constructed for this request.
@@ -3118,6 +3163,26 @@ class ToolContext:
             tally=self.tally,
             trace=self.trace,
         )
+
+
+@dataclass
+class CodeExecutionSplit:
+    """The candidates of a request that run its code-execution keyword the other way from its head.
+
+    A candidate is one of them when whether it runs ``keyword`` natively in
+    ``dialect`` is ``native``. ``tools`` is what they are dispatched with, or the
+    refusal that skips them, and ``request_fields`` what they are sent in place of
+    the head's, once the route has built it.
+    """
+
+    keyword: dict[str, Any]
+    dialect: Dialect
+    native: bool
+    tools: ToolContext | HTTPException
+    request_fields: dict[str, Any] | None = None
+
+    def includes(self, provider: str | None) -> bool:
+        return provider_runs_code_natively(self.keyword, provider=provider, dialect=self.dialect) is self.native
 
 
 def _overlay_mandate(merged: dict[str, GuardrailConfig], mandated: Iterable[GuardrailConfig]) -> None:
@@ -3348,6 +3413,10 @@ async def prepare_gateway_tools(
     MCP servers, the sandbox and the web tools cannot be combined in one request.
     Every backend URL comes from the deployment and never from the request.
 
+    Under ``auto``, a request whose candidates do not all run its provider's code-execution
+    keyword natively is admitted both ways, and the other way's refusal only skips the
+    candidates that need it (see :class:`CodeExecutionSplit`).
+
     NOTE: callers must not release the budget reservation after a refusal from here.
     """
     try:
@@ -3364,6 +3433,7 @@ async def prepare_gateway_tools(
             use_web_search=web.search_tool_entry is not None,
             use_web_fetch=web.fetch_tool_entry is not None,
         )
+        split = await _admit_split(adapter, ctx, code, claims=web_claims, mcp_servers_declared=bool(mcp_servers))
     except ControlPlaneError as exc:
         # A peer's refusal of the web search, code execution or MCP resolve is a domain error,
         # so without this it would answer in `main.py`'s shape rather than this route's.
@@ -3399,37 +3469,80 @@ async def prepare_gateway_tools(
     # Gotcha: the connection must not be held across the provider call that follows.
     await release_session(ctx.db)
 
-    return ToolContext(
-        config=ctx.config,
-        mcp_server_configs=mcp_servers,
-        use_sandbox=code.use_sandbox,
-        sandbox_tool_entry=code.tool_entry,
-        code_execution_port=backends.ports.code_execution,
-        sandbox_exec_timeout_s=code.exec_timeout_s,
-        sandbox_session_image=code.session_image,
-        sandbox_allowed_tools=code.allowed_tools,
-        code_execution_executor=code.executor,
-        sandbox_container_lease=code.container_lease,
-        sandbox_containers=code.containers,
-        use_web_search=web.search_tool_entry is not None,
-        web_search_tool_entry=web_access.search_tool_entry,
-        web_search_url=web_access.search_url,
-        web_search_auth_token=web_access.search_auth_token,
-        web_search_credential=web_access.search_credential,
-        use_web_fetch=web.fetch_tool_entry is not None,
-        web_fetch_tool_entry=web.fetch_tool_entry,
-        web_fetch_policy=web_access.fetch_policy,
-        remaining_user_tools=web.remaining_user_tools,
-        max_tool_iterations=min(
-            declared.max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
-            MAX_TOOL_ITERATIONS_CAP,
-            # The workspace's code-exec max_iterations bounds the loop too (no-op when unset).
-            code.max_iterations or MAX_TOOL_ITERATIONS_CAP,
-        ),
-        tools_header=declared.tools_header,
-        trace=ctx.trace,
-        sandbox_files=backends.sandbox_files,
-    )
+    def _tool_context(
+        code: AdmittedCodeExecution, web: DeclaredWebTools, shared_with: ToolContext | None = None
+    ) -> ToolContext:
+        return ToolContext(
+            config=ctx.config,
+            mcp_server_configs=mcp_servers,
+            use_sandbox=code.use_sandbox,
+            sandbox_tool_entry=code.tool_entry,
+            code_execution_port=backends.ports.code_execution,
+            sandbox_exec_timeout_s=code.exec_timeout_s,
+            sandbox_session_image=code.session_image,
+            sandbox_allowed_tools=code.allowed_tools,
+            code_execution_executor=code.executor,
+            sandbox_container_lease=code.container_lease,
+            sandbox_containers=code.containers,
+            use_web_search=web.search_tool_entry is not None,
+            web_search_tool_entry=web_access.search_tool_entry,
+            web_search_url=web_access.search_url,
+            web_search_auth_token=web_access.search_auth_token,
+            web_search_credential=web_access.search_credential,
+            use_web_fetch=web.fetch_tool_entry is not None,
+            web_fetch_tool_entry=web.fetch_tool_entry,
+            web_fetch_policy=web_access.fetch_policy,
+            remaining_user_tools=web.remaining_user_tools,
+            max_tool_iterations=min(
+                declared.max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
+                MAX_TOOL_ITERATIONS_CAP,
+                # The workspace's code-exec max_iterations bounds the loop too (no-op when unset).
+                code.max_iterations or MAX_TOOL_ITERATIONS_CAP,
+            ),
+            tools_header=declared.tools_header,
+            trace=ctx.trace,
+            sandbox_files=backends.sandbox_files,
+            shared_with=shared_with,
+        )
+
+    tool_ctx = _tool_context(code, web)
+    if code.split is not None:
+        assert split is not None
+        tool_ctx.code_split = CodeExecutionSplit(
+            keyword=code.split.keyword,
+            dialect=adapter.name,
+            native=code.executor is not CodeExecutor.PROVIDER,
+            tools=split if isinstance(split, HTTPException) else _tool_context(*split, shared_with=tool_ctx),
+        )
+    return tool_ctx
+
+
+async def _admit_split(
+    adapter: FormatAdapter[Any, Any],
+    ctx: RequestContext,
+    code: AdmittedCodeExecution,
+    *,
+    claims: WebClaims,
+    mcp_servers_declared: bool,
+) -> tuple[AdmittedCodeExecution, DeclaredWebTools] | HTTPException | None:
+    """The candidates of ``code.split``: their code execution and web tools, or the refusal that skips them.
+
+    The checks the head's admission makes for the whole request, made for them alone.
+    Nothing is logged for a refusal here, since the walk records each candidate it skips.
+    """
+    if code.split is None:
+        return None
+    other = code.split.other
+    if isinstance(other, TenancyError):
+        return domain_error(adapter, other)
+    try:
+        web = extract_web_tools(other.tools_after_sandbox, config=ctx.config, claims=claims)
+        check_web_tools_alone(web, use_sandbox=other.use_sandbox, mcp_servers_declared=mcp_servers_declared)
+    except WebToolDeclarationError as exc:
+        return domain_error(adapter, exc)
+    if other.use_sandbox and (unpriced := await _unpriced_tool(ctx, [CODE_EXECUTION_TOOL_NAME])) is not None:
+        return adapter.error(402, _unpriced_tool_detail(unpriced), ErrorKind.INVALID_REQUEST)
+    return other, web
 
 
 async def _admit_guardrails(
@@ -3516,11 +3629,13 @@ async def _admit_code_execution(
             container_id=declared.container_id,
             code_execution_header=declared.code_execution_header,
             config=ctx.config,
-            dispatch_provider=_dispatch_provider_name(ctx),
+            providers=_candidate_provider_names(ctx),
             dialect=adapter.name,
             resolve_policy=lambda: _resolve_code_execution_policy(adapter, ctx, backends.ports.code_execution_policy),
             container_registry=backends.sandbox_containers,
             mcp_servers_declared=mcp_servers_declared,
+            # The platform's attempts are walked with one set of tools, so hybrid keeps every candidate alike.
+            per_candidate=not ctx.hybrid_mode,
         )
     except (CodeExecutionDeclarationError, CodeExecutionRefusedError, CodeExecutionContainerBusyError) as exc:
         raise domain_error(adapter, exc) from exc
@@ -3709,15 +3824,46 @@ async def _require_tool_pricing(
     key that is never debited has no budget to protect. Serving an unpriced model but
     refusing an unpriced tool on the same key would be arbitrary.
     """
-    if ctx.db is None or not ctx.config.require_pricing:
-        return
-    if ctx.reservation is not None and not ctx.reservation.counts_toward_budget:
-        return
     tools = [CODE_EXECUTION_TOOL_NAME] if use_sandbox else []
     if use_web_search:
         tools.append(WEB_SEARCH_TOOL_NAME)
     if use_web_fetch:
         tools.append(WEB_FETCH_TOOL_NAME)
+    tool = await _unpriced_tool(ctx, tools)
+    if tool is None:
+        return
+    assert ctx.db is not None  # an unpriced tool is only found with a database to look it up in
+    key = gateway_tool_pricing_key(tool)
+    detail = _unpriced_tool_detail(tool)
+    logger.warning("Rejecting request: gateway tool '%s' has no pricing under '%s'", tool, key)
+    # Logged for the same reason the model gate logs its 402: an operator who
+    # turns require_pricing on has to be able to see that live traffic is
+    # being dropped, and by what.
+    await log_gateway_rejection(
+        db=ctx.db,
+        log_writer=ctx.log_writer,
+        api_key_id=ctx.api_key_id,
+        user_id=ctx.user_id,
+        model=key,
+        provider=GATEWAY_TOOL_PRICING_PROVIDER,
+        endpoint=adapter.endpoint,
+        detail=detail,
+        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        started_at=ctx.started_at,
+        request_id=ctx.request_id,
+        tags=ctx.tags,
+    )
+    # Same kind the model gate uses for its own 402, so both no-pricing
+    # rejections map to one wire shape per format.
+    raise adapter.error(402, detail, ErrorKind.INVALID_REQUEST)
+
+
+async def _unpriced_tool(ctx: RequestContext, tools: Iterable[str]) -> str | None:
+    """The first of ``tools`` this request would be billed for and has no price, as ``require_pricing`` reads it."""
+    if ctx.db is None or not ctx.config.require_pricing:
+        return None
+    if ctx.reservation is not None and not ctx.reservation.counts_toward_budget:
+        return None
     for tool in tools:
         pricing = await find_model_pricing(
             ctx.db,
@@ -3727,29 +3873,12 @@ async def _require_tool_pricing(
             organization_id=ctx.organization_id,
         )
         if pricing is None:
-            key = gateway_tool_pricing_key(tool)
-            detail = UNPRICED_TOOL_DETAIL_TEMPLATE.format(tool=tool, key=key)
-            logger.warning("Rejecting request: gateway tool '%s' has no pricing under '%s'", tool, key)
-            # Logged for the same reason the model gate logs its 402: an operator who
-            # turns require_pricing on has to be able to see that live traffic is
-            # being dropped, and by what.
-            await log_gateway_rejection(
-                db=ctx.db,
-                log_writer=ctx.log_writer,
-                api_key_id=ctx.api_key_id,
-                user_id=ctx.user_id,
-                model=key,
-                provider=GATEWAY_TOOL_PRICING_PROVIDER,
-                endpoint=adapter.endpoint,
-                detail=detail,
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                started_at=ctx.started_at,
-                request_id=ctx.request_id,
-                tags=ctx.tags,
-            )
-            # Same kind the model gate uses for its own 402, so both no-pricing
-            # rejections map to one wire shape per format.
-            raise adapter.error(402, detail, ErrorKind.INVALID_REQUEST)
+            return tool
+    return None
+
+
+def _unpriced_tool_detail(tool: str) -> str:
+    return UNPRICED_TOOL_DETAIL_TEMPLATE.format(tool=tool, key=gateway_tool_pricing_key(tool))
 
 
 # ---------------------------------------------------------------------------
@@ -5183,11 +5312,18 @@ def _candidate_admission(ctx: RequestContext) -> AdmitAttempt:
     return _admit
 
 
-def _failover_kwargs(adapter: FormatAdapter[Any, Any]) -> Callable[[Attempt, dict[str, Any]], dict[str, Any]]:
-    """Builds each candidate's kwargs for a plan that can fall over."""
+def _failover_kwargs(
+    adapter: FormatAdapter[Any, Any], tool_ctx: ToolContext
+) -> Callable[[Attempt, dict[str, Any]], dict[str, Any]]:
+    """Builds each candidate's kwargs for a plan that can fall over, from the request fields its tools need.
+
+    Raising :class:`CandidateCannotServe` for a candidate whose code execution was refused,
+    so the walk skips it before admitting it.
+    """
 
     def _build(attempt: Attempt, base_request_fields: dict[str, Any]) -> dict[str, Any]:
-        return with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, base_request_fields))
+        fields = tool_ctx.request_fields_for(attempt.provider.value, base_request_fields)
+        return with_failover_retries(attempt.provider, adapter.local_attempt_kwargs(attempt, fields))
 
     return _build
 
@@ -5271,6 +5407,8 @@ async def run_single_attempt_stream(
     ``streaming_first_chunk_hold_ms`` the stream is committed and keeps waiting
     (see the first-chunk regression test).
     """
+    # The tools of the candidate last opened, which is the one that served once the walk returns.
+    served_tools = tool_ctx
     try:
         if ctx.plan is not None and len(ctx.plan.attempts) > 1 and base_request_fields is not None:
 
@@ -5279,9 +5417,11 @@ async def run_single_attempt_stream(
                 attempt_kwargs: dict[str, Any],
                 mark_locked_in: Callable[[], None],
             ) -> AsyncIterator[ChunkT]:
+                nonlocal served_tools
                 if attempt.position > 1:
                     await top_up_reservation_for_attempt(ctx, attempt)
-                return await open_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=attempt_kwargs)
+                served_tools = tool_ctx.for_candidate(attempt.provider.value)
+                return await open_stream(adapter=adapter, tool_ctx=served_tools, call_kwargs=attempt_kwargs)
 
             absorbed_rows: list[asyncio.Task[None]] = []
             # Each absorbed failure is a candidate sent the request before the one that served.
@@ -5306,7 +5446,7 @@ async def run_single_attempt_stream(
                     run_attempt=_open_candidate,
                     max_tool_iterations=tool_ctx.max_tool_iterations,
                     policy_name=ctx.plan.policy_name,
-                    build_kwargs=_failover_kwargs(adapter),
+                    build_kwargs=_failover_kwargs(adapter, tool_ctx),
                     prepare_kwargs=prepare_kwargs,
                     admit_attempt=_candidate_admission(ctx),
                     on_absorbed=_absorbed,
@@ -5338,8 +5478,8 @@ async def run_single_attempt_stream(
         logger.error("Sandbox unreachable for %s:%s: %s", provider, model, exc)
         await release_reservation(ctx)
         if isinstance(exc, SandboxSessionGoneError):
-            await tool_ctx.forget_container()
-        raise _sandbox_error(adapter, exc, tool_ctx=tool_ctx) from exc
+            await served_tools.forget_container()
+        raise _sandbox_error(adapter, exc, tool_ctx=served_tools) from exc
     except WebSearchNotReachableError as exc:
         # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Web search backend unreachable for %s:%s: %s", provider, model, exc)
@@ -5374,7 +5514,7 @@ async def run_single_attempt_stream(
         model=model,
         config=ctx.config,
         db=ctx.db,
-        extra_headers=_container_headers(tool_ctx.container_lease) | _end_user_headers(ctx) | served_by,
+        extra_headers=_container_headers(served_tools.container_lease) | _end_user_headers(ctx) | served_by,
         log_writer=ctx.log_writer,
         api_key_id=ctx.api_key_id,
         user_id=ctx.user_id,
@@ -5391,7 +5531,7 @@ async def run_single_attempt_stream(
         attribution=stream_attribution,
         tool_tally=tool_ctx.tally,
         tags=ctx.tags,
-        tool_loop=tool_ctx.use_tool_loop,
+        tool_loop=served_tools.use_tool_loop,
     )
 
 
@@ -6053,6 +6193,8 @@ async def run_standalone_non_stream(
     request payload each candidate's kwargs are built from; without it, only the
     prebuilt ``call_kwargs`` can be dispatched and no fallover is possible.
     """
+    # The tools of the candidate last dispatched, which is the one that served once the walk returns.
+    served_tools = tool_ctx
     try:
         if ctx.plan is not None and len(ctx.plan.attempts) > 1 and base_request_fields is not None:
 
@@ -6061,11 +6203,13 @@ async def run_standalone_non_stream(
                 attempt_kwargs: dict[str, Any],
                 mark_locked_in: Callable[[], None],
             ) -> ResultT:
+                nonlocal served_tools
                 if attempt.position > 1:
                     await top_up_reservation_for_attempt(ctx, attempt)
+                served_tools = tool_ctx.for_candidate(attempt.provider.value)
                 return await dispatch_non_stream(
                     adapter=adapter,
-                    tool_ctx=tool_ctx,
+                    tool_ctx=served_tools,
                     call_kwargs=attempt_kwargs,
                     on_first_response=mark_locked_in,
                 )
@@ -6093,7 +6237,7 @@ async def run_standalone_non_stream(
                     run_attempt=_run_candidate,
                     max_tool_iterations=tool_ctx.max_tool_iterations,
                     policy_name=ctx.plan.policy_name,
-                    build_kwargs=_failover_kwargs(adapter),
+                    build_kwargs=_failover_kwargs(adapter, tool_ctx),
                     prepare_kwargs=prepare_kwargs,
                     admit_attempt=_candidate_admission(ctx),
                     on_absorbed=_absorbed,
@@ -6122,7 +6266,7 @@ async def run_standalone_non_stream(
         if ctx.rate_limit_info:
             for key, value in rate_limit_headers(ctx.rate_limit_info).items():
                 response.headers[key] = value
-        for key, value in _container_headers(tool_ctx.container_lease).items():
+        for key, value in _container_headers(served_tools.container_lease).items():
             response.headers[key] = value
         if ctx.db is not None:
             usage_data = adapter.extract_usage(result)
@@ -6182,7 +6326,7 @@ async def run_standalone_non_stream(
     except MaxToolIterationsExceeded as e:
         # Gateway-owned cap, not an upstream provider failure. 422 lets
         # callers distinguish a runaway tool loop from a real outage.
-        logger.warning("Tool loop iteration cap hit (standalone): cap=%d", tool_ctx.max_tool_iterations)
+        logger.warning("Tool loop iteration cap hit (standalone): cap=%d", served_tools.max_tool_iterations)
         await _log_failure_and_refund(
             ctx,
             adapter,
@@ -6202,8 +6346,8 @@ async def run_standalone_non_stream(
         logger.error("Sandbox unreachable for %s:%s: %s", provider, model, e)
         await release_reservation(ctx)
         if isinstance(e, SandboxSessionGoneError):
-            await tool_ctx.forget_container()
-        raise _sandbox_error(adapter, e, tool_ctx=tool_ctx) from e
+            await served_tools.forget_container()
+        raise _sandbox_error(adapter, e, tool_ctx=served_tools) from e
     except WebSearchNotReachableError as e:
         # codeql[py/clear-text-logging-sensitive-data]
         logger.error("Web search backend unreachable for %s:%s: %s", provider, model, e)

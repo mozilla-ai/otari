@@ -3,12 +3,13 @@
 A provider-native code-execution keyword (``code_execution``,
 ``code_interpreter``, ``code_execution_<date>``) is decided by the request's
 **executor** instead (:class:`gateway.models.tools.CodeExecutor`): the
-provider, Otari's sandbox, or ``auto``, which picks the provider only when it
-runs that tool natively for the dispatched model. ``auto`` is the default, and
-it is what lets a request written against a frontier model's own sandbox keep
-working when the model is swapped for one that has none. The deployment sets
-the default, a workspace policy may pin a value, and :data:`CODE_EXECUTION_HEADER`
-chooses per request where the workspace has not.
+provider, Otari's sandbox, or ``auto``, which picks the provider for each
+attempt whose model runs that tool natively and the sandbox for the rest. ``auto``
+is the default, and it is what lets a request written against a frontier
+model's own sandbox keep working when the model is swapped, or falls back, to
+one that has none. The deployment sets the default, a workspace policy may pin
+a value, and :data:`CODE_EXECUTION_HEADER` chooses per request where the
+workspace has not.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from gateway.services.tools._declarations import Tool, extract_first_matching_to
 from gateway.services.tools._native import Dialect
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from gateway.core.config import GatewayConfig
 
@@ -134,6 +135,29 @@ def provider_runs_code_natively(tool_entry: dict[str, Any] | None, *, provider: 
     key = _VERSIONED_CODE_EXECUTION_PREFIX if type_value.startswith(_VERSIONED_CODE_EXECUTION_PREFIX) else type_value
     native = _NATIVE_CODE_EXECUTION.get(key)
     return native is not None and native == (provider.lower(), dialect)
+
+
+def candidate_code_executors(
+    preference: CodeExecutor,
+    tool_entry: dict[str, Any] | None,
+    *,
+    providers: Sequence[str | None],
+    dialect: Dialect,
+    sandbox_configured: bool,
+) -> list[CodeExecutor]:
+    """Who runs this declaration on each candidate's attempt, head first.
+
+    :func:`decide_code_executor` for each candidate's provider, so ``auto`` with a
+    sandbox answers per candidate and every other preference answers alike for all.
+    """
+    return [
+        decide_code_executor(
+            preference,
+            sandbox_configured=sandbox_configured,
+            native_available=provider_runs_code_natively(tool_entry, provider=provider, dialect=dialect),
+        )
+        for provider in providers
+    ]
 
 
 def parse_code_execution_header(value: str | None) -> CodeExecutor | None:

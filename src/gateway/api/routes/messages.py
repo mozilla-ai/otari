@@ -45,6 +45,7 @@ from gateway.api.routes._pipeline import (
     DeclaredTools,
     ErrorKind,
     ToolBackends,
+    ToolContext,
     classify_provider_error,
     default_attempt_kwargs,
     domain_error,
@@ -83,7 +84,7 @@ from gateway.exceptions.tools_exceptions import ContainerOnManagedCredentialErro
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
-from gateway.services.code_execution import ContainerLease, check_container_on_credential
+from gateway.services.code_execution import ContainerLease, check_container_on_credential, gateway_container_value
 from gateway.services.files import StagedFile
 from gateway.services.inference import (
     bind_upstream_user,
@@ -857,7 +858,7 @@ async def create_message(
             sandbox_requested=sandbox_requested(
                 request.tools,
                 config=config,
-                provider=target.provider,
+                providers=target.candidate_providers,
                 dialect=_ADAPTER.name,
                 code_execution_header=code_execution_header,
                 workspace_executor=target.workspace_executor,
@@ -865,7 +866,7 @@ async def create_message(
             provider_container=provider_container_requested(
                 request.tools,
                 config=config,
-                provider=target.provider,
+                providers=target.candidate_providers,
                 dialect=_ADAPTER.name,
                 code_execution_header=code_execution_header,
                 workspace_executor=target.workspace_executor,
@@ -971,29 +972,36 @@ async def create_message(
         ),
     )
 
-    # Strip gateway-internal fields, convert any caller-supplied OpenAI-shaped
-    # tools to Anthropic shape so a mixed list works.
-    request_fields = _strip_gateway_fields(
-        request.model_dump(exclude_unset=True),
-        tools_extracted=tool_ctx.tools_extracted,
-        remaining_user_tools=tool_ctx.remaining_user_tools,
-        web_search_declared_name=tool_ctx.web_search_declared_name,
-    )
-    # Only ``user_id`` means anything to a provider here, and the identifier replaces it.
-    request_fields.pop("metadata", None)
-    scope_prompt_cache_key(request_fields, ctx)
-    bind_upstream_user(request_fields, ctx.upstream_user)
-    if request_fields.get("tools"):
-        request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
-    if tool_ctx.use_sandbox:
-        # ``container`` is the gateway's to honor when the sandbox runs the code:
-        # admission has already resolved it against this caller's leases, or
-        # refused the request. Forwarding it would ask the provider to attach a
-        # container no tool call will reach. ``prepare_gateway_tools`` either
-        # claimed the provider-native declaration or refused the request, so no
-        # provider tool survives alongside the sandbox and dropping it here cannot
-        # strand a container the provider would have used.
-        request_fields.pop("container", None)
+    def _request_fields(tools: ToolContext) -> dict[str, Any]:
+        # Strip gateway-internal fields, convert any caller-supplied OpenAI-shaped
+        # tools to Anthropic shape so a mixed list works.
+        fields = _strip_gateway_fields(
+            request.model_dump(exclude_unset=True),
+            tools_extracted=tools.tools_extracted,
+            remaining_user_tools=tools.remaining_user_tools,
+            web_search_declared_name=tools.web_search_declared_name,
+        )
+        # Only ``user_id`` means anything to a provider here, and the identifier replaces it.
+        fields.pop("metadata", None)
+        scope_prompt_cache_key(fields, ctx)
+        bind_upstream_user(fields, ctx.upstream_user)
+        if fields.get("tools"):
+            fields["tools"] = openai_to_anthropic_tools(fields["tools"])
+        if tools.use_sandbox:
+            # ``container`` is the gateway's to honor when the sandbox runs the code:
+            # admission has already resolved it against this caller's leases, or
+            # refused the request. Forwarding it would ask the provider to attach a
+            # container no tool call will reach. ``prepare_gateway_tools`` either
+            # claimed the provider-native declaration or refused the request, so no
+            # provider tool survives alongside the sandbox and dropping it here cannot
+            # strand a container the provider would have used.
+            fields.pop("container", None)
+        elif gateway_container_value(fields.get("container")) is not None:
+            # Otari's own ``auto``, there for the candidates whose code the sandbox runs.
+            fields.pop("container")
+        return fields
+
+    request_fields = tool_ctx.build_request_fields(_request_fields)
 
     prepare_kwargs = None
     if container_inputs:

@@ -32,6 +32,7 @@ from gateway.api.routes._pipeline import (
     DeclaredTools,
     ErrorKind,
     ToolBackends,
+    ToolContext,
     _flush_pending_usage_reports,
     _PendingUsageReport,
     classify_provider_error,
@@ -525,7 +526,7 @@ async def create_response(
             sandbox_requested=sandbox_requested(
                 request_body.tools,
                 config=config,
-                provider=target.provider,
+                providers=target.candidate_providers,
                 dialect=_ADAPTER.name,
                 code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
                 workspace_executor=target.workspace_executor,
@@ -655,39 +656,43 @@ async def create_response(
         ),
     )
 
-    # Strip gateway-internal fields, flatten any caller-supplied function tools
-    # to the Responses shape.
-    request_fields = _strip_gateway_fields(
-        request_body.model_dump(exclude_none=True),
-        tools_extracted=tool_ctx.tools_extracted,
-        remaining_user_tools=tool_ctx.remaining_user_tools,
-        web_search_declared_name=tool_ctx.web_search_declared_name,
-    )
-    forwarded_metadata(request_fields)
-    scope_prompt_cache_key(request_fields, ctx)
-    # This is an internal handoff populated below, never a client request field.
-    # ``ResponsesRequest`` permits extra fields for OpenAI compatibility, so
-    # remove a caller-supplied value before constructing the provider kwargs.
-    request_fields.pop(_CODEX_EXTRA_BODY_FIELD, None)
-    client_metadata = request_fields.pop(_CODEX_CLIENT_METADATA_FIELD, None)
-    if request_fields.get("tools"):
-        request_fields["tools"] = openai_to_responses_tools(request_fields["tools"])
+    def _request_fields(tools: ToolContext) -> dict[str, Any]:
+        # Strip gateway-internal fields, flatten any caller-supplied function tools
+        # to the Responses shape.
+        request_fields = _strip_gateway_fields(
+            request_body.model_dump(exclude_none=True),
+            tools_extracted=tools.tools_extracted,
+            remaining_user_tools=tools.remaining_user_tools,
+            web_search_declared_name=tools.web_search_declared_name,
+        )
+        forwarded_metadata(request_fields)
+        scope_prompt_cache_key(request_fields, ctx)
+        # This is an internal handoff populated below, never a client request field.
+        # ``ResponsesRequest`` permits extra fields for OpenAI compatibility, so
+        # remove a caller-supplied value before constructing the provider kwargs.
+        request_fields.pop(_CODEX_EXTRA_BODY_FIELD, None)
+        client_metadata = request_fields.pop(_CODEX_CLIENT_METADATA_FIELD, None)
+        if request_fields.get("tools"):
+            request_fields["tools"] = openai_to_responses_tools(request_fields["tools"])
 
-    input_payload, codex_extra_body = _codex_extra_body(request_fields.pop("input"), client_metadata)
-    stream = bool(request_fields.pop("stream", False))
-    request_fields.pop("model", None)
-    request_fields.pop("safety_identifier", None)
-    bind_upstream_user(request_fields, ctx.upstream_user)
+        input_payload, codex_extra_body = _codex_extra_body(request_fields.pop("input"), client_metadata)
+        request_fields.pop("stream", None)
+        request_fields.pop("model", None)
+        request_fields.pop("safety_identifier", None)
+        bind_upstream_user(request_fields, ctx.upstream_user)
 
-    # base_request_fields is what gets merged with per-attempt creds; it
-    # includes ``provider`` and ``input_data`` so each attempt has the full
-    # call shape.
-    base_request_fields = {**request_fields}
-    if not ctx.hybrid_mode:
-        base_request_fields["provider"] = provider
-    base_request_fields["input_data"] = input_payload
-    if codex_extra_body is not None:
-        base_request_fields[_CODEX_EXTRA_BODY_FIELD] = codex_extra_body
+        # What gets merged with per-attempt creds; it includes ``provider`` and
+        # ``input_data`` so each attempt has the full call shape.
+        base_request_fields = {**request_fields}
+        if not ctx.hybrid_mode:
+            base_request_fields["provider"] = provider
+        base_request_fields["input_data"] = input_payload
+        if codex_extra_body is not None:
+            base_request_fields[_CODEX_EXTRA_BODY_FIELD] = codex_extra_body
+        return base_request_fields
+
+    base_request_fields = tool_ctx.build_request_fields(_request_fields)
+    stream = bool(request_body.stream)
 
     # ------------------------------------------------------------------
     # Streaming path

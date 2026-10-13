@@ -20,10 +20,12 @@ from gateway.services.tools._builtin_tool import BuiltinTool
 from gateway.services.tools._code_execution_admission import (
     CONTAINER_GONE_DETAIL_TEMPLATE,
     AdmittedCodeExecution,
+    SplitCodeExecution,
     admit_code_execution,
 )
 from gateway.services.tools._code_execution_declarations import (
     CODE_EXECUTION_HEADER,
+    candidate_code_executors,
     code_execution_declaration_forms,
     decide_code_executor,
     declares_code_execution,
@@ -117,6 +119,7 @@ __all__ = [
     "WEB_FETCH_HEADER",
     "WEB_SEARCH_HEADER",
     "AdmittedCodeExecution",
+    "SplitCodeExecution",
     "BuiltinTool",
     "DeclaredWebTools",
     "Dialect",
@@ -132,6 +135,7 @@ __all__ = [
     "admit_mcp_servers",
     "admit_web_access",
     "apply_web_access_policy",
+    "candidate_code_executors",
     "check_web_tools_alone",
     "claim_web_declarations",
     "code_execution_declaration_forms",

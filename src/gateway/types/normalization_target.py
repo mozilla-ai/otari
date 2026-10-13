@@ -18,6 +18,8 @@ class NormalizationTarget:
     which sees every workspace.
     ``credential_workspace_id`` is the one the request dispatches under, so
     anything done at a provider is done with the credential the request will use.
+    ``candidate_providers`` is the provider of every candidate the request may
+    dispatch to, head first, which is what the code-execution executor decides against.
     """
 
     user_id: str
@@ -27,3 +29,4 @@ class NormalizationTarget:
     file_workspace_id: uuid.UUID | None
     credential_workspace_id: uuid.UUID | None
     workspace_executor: CodeExecutor | None
+    candidate_providers: tuple[LLMProvider | None, ...]

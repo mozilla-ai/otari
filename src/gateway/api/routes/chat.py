@@ -544,7 +544,7 @@ async def run_chat_completion(
             sandbox_requested=sandbox_requested(
                 request.tools,
                 config=config,
-                provider=target.provider,
+                providers=target.candidate_providers,
                 dialect=adapter.name,
                 code_execution_header=raw_request.headers.get(CODE_EXECUTION_HEADER),
                 workspace_executor=target.workspace_executor,
