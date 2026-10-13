@@ -1834,7 +1834,7 @@ class GatewayConfig(
             raise ValueError(msg) from exc
 
     def validate_declared_access(self) -> None:
-        """Refuse ``budgets`` and ``api_keys`` declarations that cannot be applied, naming no secret.
+        """Refuse ``budgets`` and ``api_keys`` declarations on a hybrid gateway.
 
         A hybrid gateway holds no budgets or keys of its own, so it refuses both
         rather than ignoring them, the way it refuses ``rate_limits``.
@@ -1845,8 +1845,6 @@ class GatewayConfig(
                 "declare them on the control plane instead"
             )
             raise ValueError(msg)
-        if problems := self.declared_api_key_problems(self.master_key):
-            raise ValueError("; ".join(problems))
 
     def validate_aliases(self) -> None:
         """Validate the ``aliases`` map at startup so misconfig fails fast."""

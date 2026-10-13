@@ -22,9 +22,9 @@ import any_fetch
 import any_search
 from gateway import features
 from gateway.api.deps import (
+    build_budget_service,
     build_file_service,
     build_inference_service,
-    get_budget_service,
     get_membership_listener,
     get_unit_of_work,
     get_workspace_code_execution_policies,
@@ -53,6 +53,7 @@ from gateway.ports.rate_limit_store_port import RateLimitStorePort
 from gateway.rate_limit import RateLimiter, RateLimitGrantMiddleware, RateLimitRules, UserRateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
+from gateway.services.api_keys import refuse_unusable_declared_secrets
 from gateway.services.bootstrap_service import bootstrap_first_api_key
 from gateway.services.budgets import run_reservation_sweeper
 from gateway.services.catalog import reset_selector_index
@@ -560,7 +561,7 @@ async def apply_declared_access(config: GatewayConfig, session: "AsyncSession", 
     """
     # Only when a key is declared: resolving can create the default workspace on a schema built without Alembic.
     workspace_id = await default_workspace_id(session) if config.api_keys else None
-    budgets = get_budget_service(get_unit_of_work(session), session)
+    budgets = build_budget_service(get_unit_of_work(session), session)
     await budgets.apply_declared_access(
         config.budgets, config.api_keys, workspace_id=workspace_id, fingerprint=key_format.fingerprint
     )
@@ -937,6 +938,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     _validate_metrics_support(config)
     _validate_rate_limit_store(config)
     config.validate_declared_access()
+    refuse_unusable_declared_secrets(config.api_keys, config.master_key)
     # A set-but-invalid OTARI_SECRET_KEY must not silently pass startup and then
     # break provider-credential storage at request time. Fail fast here instead.
     validate_secret_key()

@@ -11,7 +11,8 @@ import pytest
 from pydantic import SecretStr, ValidationError
 
 from gateway.core.config import GatewayConfig, load_config
-from gateway.core.settings.api_keys import ApiKeyConfig, declared_secret_problem
+from gateway.core.settings.api_keys import ApiKeyConfig
+from gateway.services.api_keys import declared_secret_problem, refuse_unusable_declared_secrets
 
 SECRET = "tk-" + secrets.token_urlsafe(48)
 OTHER_SECRET = "tk-" + secrets.token_urlsafe(48)
@@ -50,6 +51,10 @@ def _load(tmp_path: Path, text: str) -> GatewayConfig:
 def _config(**fields: Any) -> GatewayConfig:
     """Build a config from raw values, as config.yml would give them."""
     return GatewayConfig(**fields)
+
+
+def _check_secrets(config: GatewayConfig) -> None:
+    refuse_unusable_declared_secrets(config.api_keys, config.master_key)
 
 
 def _key(secret: str = SECRET, **fields: Any) -> dict[str, Any]:
@@ -107,21 +112,21 @@ def test_a_weak_or_malformed_secret_is_refused_without_being_quoted(secret: str,
 
     config = _config(api_keys={"mlpa": _key(secret)})
     with pytest.raises(ValueError, match=r"api_keys\.mlpa\.secret") as refused:
-        config.validate_declared_access()
+        _check_secrets(config)
     if secret.strip():
         assert secret.strip() not in str(refused.value)
 
 
 def test_a_minted_shape_secret_is_accepted() -> None:
     assert declared_secret_problem(SECRET) is None
-    _config(api_keys={"mlpa": _key()}).validate_declared_access()
+    _check_secrets(_config(api_keys={"mlpa": _key()}))
 
 
 def test_two_keys_may_not_share_a_secret() -> None:
     config = _config(api_keys={"one": _key(), "two": _key()})
 
     with pytest.raises(ValueError, match=r"api_keys\.two\.secret is the same as api_keys\.one\.secret") as refused:
-        config.validate_declared_access()
+        _check_secrets(config)
     assert SECRET not in str(refused.value)
 
 
@@ -129,7 +134,7 @@ def test_a_secret_may_not_be_the_master_key() -> None:
     config = _config(master_key=SECRET, api_keys={"mlpa": _key()})
 
     with pytest.raises(ValueError, match="must differ from the master key"):
-        config.validate_declared_access()
+        _check_secrets(config)
 
 
 def test_a_hybrid_gateway_refuses_declarations() -> None:
@@ -193,7 +198,8 @@ def test_nothing_declared_is_valid() -> None:
     assert config.budgets == {}
     assert config.api_keys == {}
     config.validate_declared_access()
+    _check_secrets(config)
 
 
 def test_a_different_secret_per_key_is_valid() -> None:
-    _config(api_keys={"one": _key(), "two": _key(OTHER_SECRET)}).validate_declared_access()
+    _check_secrets(_config(api_keys={"one": _key(), "two": _key(OTHER_SECRET)}))

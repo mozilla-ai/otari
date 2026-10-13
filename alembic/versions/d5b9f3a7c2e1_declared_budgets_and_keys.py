@@ -28,14 +28,13 @@ _CONFIG_NAME_INDEX = "uq_api_keys_config_name"
 
 
 def upgrade() -> None:
-    """Add the two markers."""
     op.add_column("budgets", sa.Column("origin", sa.String(length=16), nullable=True))
     op.add_column("api_keys", sa.Column("config_name", sa.String(), nullable=True))
     op.create_index(_CONFIG_NAME_INDEX, "api_keys", ["config_name"], unique=True)
 
 
 def downgrade() -> None:
-    """Drop the two markers. The rows they marked stay, as ordinary budgets and keys."""
+    # The rows they marked stay, as ordinary budgets and keys.
     op.drop_index(_CONFIG_NAME_INDEX, table_name="api_keys")
     op.drop_column("api_keys", "config_name")
     op.drop_column("budgets", "origin")
