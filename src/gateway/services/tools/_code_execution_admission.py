@@ -24,9 +24,10 @@ from gateway.services.code_execution import (
     requested_container,
 )
 from gateway.services.sandbox_backend import SERVED_TOOL_NAMES
+from gateway.services.tools import _code_execution_tool
+from gateway.services.tools._candidate_tools import ProviderToolDeclaration, decide_candidate_tools
 from gateway.services.tools._code_execution_declarations import (
     CODE_EXECUTION_HEADER,
-    candidate_code_executors,
     extract_code_execution_tool,
     first_provider_code_execution_tool,
     parse_code_execution_header,
@@ -217,13 +218,21 @@ async def admit_code_execution(
         # A pin decides only a provider's keyword. The explicit type runs here whatever the pin says.
         if executor_conflict and provider_code_entry is not None:
             raise CodeExecutionRefusedError(CODE_EXECUTOR_PINNED_DETAIL)
-        executors = candidate_code_executors(
-            executor_preference,
-            provider_code_entry,
-            providers=providers or [None],
-            dialect=dialect,
-            sandbox_configured=True,
-        )
+        executors = [
+            CodeExecutor.OTARI if _code_execution_tool.TOOL.name in candidate.claimed else CodeExecutor.PROVIDER
+            for candidate in decide_candidate_tools(
+                [
+                    ProviderToolDeclaration(
+                        tool=_code_execution_tool.TOOL,
+                        entry=provider_code_entry or {},
+                        preference=executor_preference,
+                        backend_configured=True,
+                    )
+                ],
+                providers=providers or [None],
+                dialect=dialect,
+            )
+        ]
         executor = executors[0]
         if len(set(executors)) > 1:
             if per_candidate and sandbox_tool_entry is None:

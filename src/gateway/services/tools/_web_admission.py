@@ -14,14 +14,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from gateway.exceptions.tools_exceptions import WebSearchInterceptedError, WebToolDeclarationError
-from gateway.models.tools import WebTool
+from gateway.models.tools import CodeExecutor, WebTool
+from gateway.services.tools import _web_fetch_tool, _web_search_tool
+from gateway.services.tools._builtin_tool import BuiltinTool
+from gateway.services.tools._candidate_tools import ProviderToolDeclaration, decide_candidate_tools
 from gateway.services.tools._native import Dialect
 from gateway.services.tools._web_access import WebAccessGrant, apply_web_access_policy
 from gateway.services.tools._web_declarations import (
     WEB_FETCH_HEADER,
     WEB_SEARCH_HEADER,
-    claims_provider_web_fetch,
-    claims_provider_web_search,
     extract_web_fetch_tool,
     extract_web_search_tool,
     first_provider_web_fetch_tool,
@@ -165,6 +166,76 @@ def _validate_managed_web_declarations(tools: list[dict[str, Any]] | None, *, cl
     }
     if any(_function_tool_name(entry) in managed_names for entry in entries):
         raise WebToolDeclarationError(WEB_TOOL_RESERVED_NAME_DETAIL)
+
+
+def _claimed_for_the_chain(
+    tool: BuiltinTool,
+    tool_entry: dict[str, Any] | None,
+    *,
+    preference: CodeExecutor | None,
+    backend_configured: bool,
+    providers: Sequence[str | None],
+    dialect: Dialect,
+) -> bool:
+    if tool_entry is None:
+        return False
+    declaration = ProviderToolDeclaration(
+        tool=tool, entry=tool_entry, preference=preference, backend_configured=backend_configured, uniform=True
+    )
+    decided = decide_candidate_tools([declaration], providers=providers or [None], dialect=dialect)
+    return tool.name in decided[0].claimed
+
+
+def claims_provider_web_search(
+    tool_entry: dict[str, Any] | None,
+    *,
+    requested: CodeExecutor | None,
+    intercept: bool,
+    backend_configured: bool,
+    providers: Sequence[str | None],
+    dialect: Dialect,
+) -> bool:
+    """Whether the gateway runs a provider-named web-search declaration itself.
+
+    Only with a backend to run it on. Interception claims every keyword, and the
+    request's :data:`WEB_SEARCH_HEADER` cannot take that back (see
+    :func:`web_search_header_conflicts`); without interception the header decides,
+    and without either nothing is claimed. ``auto`` claims a keyword unless every
+    candidate in ``providers`` (the fallback chain, head first) runs it natively,
+    so a chain that falls back to a model with no search of its own never
+    forwards it a search nobody will run.
+    """
+    return _claimed_for_the_chain(
+        _web_search_tool.TOOL,
+        tool_entry,
+        preference=CodeExecutor.OTARI if intercept else requested,
+        backend_configured=backend_configured,
+        providers=providers,
+        dialect=dialect,
+    )
+
+
+def claims_provider_web_fetch(
+    tool_entry: dict[str, Any] | None,
+    *,
+    requested: CodeExecutor | None,
+    fetch_enabled: bool,
+    providers: Sequence[str | None],
+    dialect: Dialect,
+) -> bool:
+    """Whether the gateway runs a provider-named web-fetch declaration itself.
+
+    :func:`claims_provider_web_search`'s rule under :data:`WEB_FETCH_HEADER`, without
+    interception: nothing is claimed without the header or with fetch disabled.
+    """
+    return _claimed_for_the_chain(
+        _web_fetch_tool.TOOL,
+        tool_entry,
+        preference=requested,
+        backend_configured=fetch_enabled,
+        providers=providers,
+        dialect=dialect,
+    )
 
 
 def claim_web_declarations(

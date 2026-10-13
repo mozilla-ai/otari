@@ -46,12 +46,14 @@ from gateway.services.files import FileService, StagedFile, provider_holds_copie
 from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.provider_kwargs import ProviderAccounts, effective_credential
 from gateway.services.tools import (
+    CODE_EXECUTION_TOOL,
+    CandidateTools,
     Dialect,
-    candidate_code_executors,
+    ProviderToolDeclaration,
+    decide_candidate_tools,
     extract_code_execution_tool,
     first_provider_code_execution_tool,
     parse_code_execution_header,
-    provider_runs_code_natively,
     resolve_code_executor_preference,
 )
 
@@ -75,7 +77,7 @@ def _executor_preference(
     return preference
 
 
-def _keyword_executors(
+def _keyword_candidates(
     keyword: dict[str, Any],
     *,
     config: GatewayConfig,
@@ -83,19 +85,23 @@ def _keyword_executors(
     dialect: Dialect,
     code_execution_header: str | None,
     workspace_executor: CodeExecutor | None,
-) -> tuple[list[str | None], list[CodeExecutor]]:
-    """Each candidate's provider and who runs ``keyword`` on its attempt, as admission decides it.
+) -> list[CandidateTools] | None:
+    """What each candidate is sent for ``keyword``, as admission decides it, head first.
 
-    No executors for a header outside the vocabulary, which admission refuses.
+    ``None`` where admission refuses the request: a header outside the vocabulary,
+    or ``otari`` with no sandbox to run it on.
     """
-    names = [provider.value if provider is not None else None for provider in providers] or [None]
     preference = _executor_preference(config, code_execution_header, workspace_executor)
-    if preference is None:
-        return names, []
-    executors = candidate_code_executors(
-        preference, keyword, providers=names, dialect=dialect, sandbox_configured=config.sandbox_configured()
+    if preference is None or (preference is CodeExecutor.OTARI and not config.sandbox_configured()):
+        return None
+    declaration = ProviderToolDeclaration(
+        tool=CODE_EXECUTION_TOOL,
+        entry=keyword,
+        preference=preference,
+        backend_configured=config.sandbox_configured(),
     )
-    return names, executors
+    names = [provider.value if provider is not None else None for provider in providers] or [None]
+    return decide_candidate_tools([declaration], providers=names, dialect=dialect)
 
 
 def provider_container_requested(
@@ -120,7 +126,7 @@ def provider_container_requested(
     keyword = first_provider_code_execution_tool(remaining)
     if explicit is not None or keyword is None:
         return False
-    names, executors = _keyword_executors(
+    candidates = _keyword_candidates(
         keyword,
         config=config,
         providers=providers,
@@ -128,13 +134,12 @@ def provider_container_requested(
         code_execution_header=code_execution_header,
         workspace_executor=workspace_executor,
     )
-    if len(set(executors)) > 1:
+    if not candidates:
+        return False
+    claimed = [CODE_EXECUTION_TOOL.name in candidate.claimed for candidate in candidates]
+    if any(claimed) and not all(claimed):
         return True
-    return (
-        bool(executors)
-        and executors[0] is CodeExecutor.PROVIDER
-        and provider_runs_code_natively(keyword, provider=names[0], dialect=dialect)
-    )
+    return CODE_EXECUTION_TOOL.name in candidates[0].native
 
 
 def sandbox_requested(
@@ -163,7 +168,7 @@ def sandbox_requested(
     keyword = first_provider_code_execution_tool(remaining)
     if keyword is None or not config.sandbox_configured():
         return False
-    _, executors = _keyword_executors(
+    candidates = _keyword_candidates(
         keyword,
         config=config,
         providers=providers,
@@ -171,7 +176,7 @@ def sandbox_requested(
         code_execution_header=code_execution_header,
         workspace_executor=workspace_executor,
     )
-    return CodeExecutor.OTARI in executors
+    return any(CODE_EXECUTION_TOOL.name in candidate.claimed for candidate in candidates or [])
 
 
 async def normalize_request_messages(

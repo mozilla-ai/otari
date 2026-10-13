@@ -27,7 +27,6 @@ from gateway.services.tools import (
     Dialect,
     WorkspaceCodeExecutionPolicyUpdate,
     admit_code_execution,
-    candidate_code_executors,
     code_execution_declaration_forms,
     decide_code_executor,
     extract_code_execution_tool,
@@ -179,47 +178,6 @@ def test_everything_else_is_not_natively_served(
 
 def test_provider_name_is_matched_case_insensitively() -> None:
     assert provider_runs_code_natively(ANTHROPIC_DATED, provider="Anthropic", dialect=Dialect.MESSAGES) is True
-
-
-@pytest.mark.parametrize(
-    ("providers", "executors"),
-    [
-        (["anthropic"], [CodeExecutor.PROVIDER]),
-        (["anthropic", "anthropic"], [CodeExecutor.PROVIDER, CodeExecutor.PROVIDER]),
-        # Claude falling back to Vertex or Bedrock: only the fallback runs on the sandbox.
-        (["anthropic", "vertexai"], [CodeExecutor.PROVIDER, CodeExecutor.OTARI]),
-        (["anthropic", "bedrock"], [CodeExecutor.PROVIDER, CodeExecutor.OTARI]),
-        (["mistral", "anthropic"], [CodeExecutor.OTARI, CodeExecutor.PROVIDER]),
-        (["anthropic", None], [CodeExecutor.PROVIDER, CodeExecutor.OTARI]),
-    ],
-)
-def test_auto_decides_each_candidate_on_its_own(providers: list[str | None], executors: list[CodeExecutor]) -> None:
-    decided = candidate_code_executors(
-        CodeExecutor.AUTO, ANTHROPIC_DATED, providers=providers, dialect=Dialect.MESSAGES, sandbox_configured=True
-    )
-    assert decided == executors
-
-
-@pytest.mark.parametrize(
-    ("preference", "sandbox", "executor"),
-    [
-        (CodeExecutor.OTARI, True, CodeExecutor.OTARI),
-        (CodeExecutor.PROVIDER, True, CodeExecutor.PROVIDER),
-        # With nowhere to bring the code, auto leaves every candidate with the provider.
-        (CodeExecutor.AUTO, False, CodeExecutor.PROVIDER),
-    ],
-)
-def test_every_other_preference_decides_every_candidate_alike(
-    preference: CodeExecutor, sandbox: bool, executor: CodeExecutor
-) -> None:
-    decided = candidate_code_executors(
-        preference,
-        ANTHROPIC_DATED,
-        providers=["anthropic", "vertexai"],
-        dialect=Dialect.MESSAGES,
-        sandbox_configured=sandbox,
-    )
-    assert decided == [executor, executor]
 
 
 # --- which native result shape a caller expects back -----------------------------------

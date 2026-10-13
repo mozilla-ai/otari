@@ -10,8 +10,8 @@ from gateway.core.config import GatewayConfig
 from gateway.exceptions.tools_exceptions import WebToolDeclarationError
 from gateway.models.tools import CodeExecutor
 from gateway.services.tools import Dialect, WebClaims, claim_web_declarations, extract_web_tools
+from gateway.services.tools._web_admission import claims_provider_web_fetch
 from gateway.services.tools._web_declarations import (
-    claims_provider_web_fetch,
     parse_web_fetch_header,
     provider_runs_web_fetch_natively,
 )

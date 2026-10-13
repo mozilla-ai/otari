@@ -21,7 +21,6 @@ Anthropic's web-fetch keyword (``web_fetch_<date>``) follows the same rule under
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
 from gateway.core.env import otari_env
@@ -142,55 +141,6 @@ def parse_web_search_header(value: str | None) -> CodeExecutor | None:
     return _parse_executor_header(value, WEB_SEARCH_HEADER)
 
 
-def _claims_provider_keyword(
-    tool_entry: dict[str, Any] | None,
-    *,
-    requested: CodeExecutor | None,
-    intercept: bool,
-    backend_configured: bool,
-    providers: Sequence[str | None],
-    runs_natively: Callable[[str | None], bool],
-) -> bool:
-    if tool_entry is None or not backend_configured:
-        return False
-    if intercept:
-        return True
-    if requested is CodeExecutor.AUTO:
-        return not providers or not all(runs_natively(provider) for provider in providers)
-    return requested is CodeExecutor.OTARI
-
-
-def claims_provider_web_search(
-    tool_entry: dict[str, Any] | None,
-    *,
-    requested: CodeExecutor | None,
-    intercept: bool,
-    backend_configured: bool,
-    providers: Sequence[str | None],
-    dialect: Dialect,
-) -> bool:
-    """Whether the gateway runs a provider-named web-search declaration itself.
-
-    Only with a backend to run it on. Interception claims every keyword, and the
-    request's :data:`WEB_SEARCH_HEADER` cannot take that back (see
-    :func:`web_search_header_conflicts`); without interception the header decides,
-    and without either nothing is claimed. ``auto`` claims a keyword unless every
-    candidate in ``providers`` (the fallback chain, head first) runs it natively,
-    so a chain that falls back to a model with no search of its own never
-    forwards it a search nobody will run.
-    """
-    return _claims_provider_keyword(
-        tool_entry,
-        requested=requested,
-        intercept=intercept,
-        backend_configured=backend_configured,
-        providers=providers,
-        runs_natively=lambda provider: provider_runs_web_search_natively(
-            tool_entry, provider=provider, dialect=dialect
-        ),
-    )
-
-
 def web_search_header_conflicts(requested: CodeExecutor | None, *, intercept: bool) -> bool:
     """Whether the request asked the provider to run a search the deployment claims.
 
@@ -243,29 +193,6 @@ def parse_web_fetch_header(value: str | None) -> CodeExecutor | None:
     Raises ``ValueError`` for a value outside the vocabulary.
     """
     return _parse_executor_header(value, WEB_FETCH_HEADER)
-
-
-def claims_provider_web_fetch(
-    tool_entry: dict[str, Any] | None,
-    *,
-    requested: CodeExecutor | None,
-    fetch_enabled: bool,
-    providers: Sequence[str | None],
-    dialect: Dialect,
-) -> bool:
-    """Whether the gateway runs a provider-named web-fetch declaration itself.
-
-    :func:`claims_provider_web_search`'s rule under :data:`WEB_FETCH_HEADER`, without
-    interception: nothing is claimed without the header or with fetch disabled.
-    """
-    return _claims_provider_keyword(
-        tool_entry,
-        requested=requested,
-        intercept=False,
-        backend_configured=fetch_enabled,
-        providers=providers,
-        runs_natively=lambda provider: provider_runs_web_fetch_natively(tool_entry, provider=provider, dialect=dialect),
-    )
 
 
 def extract_web_search_tool(

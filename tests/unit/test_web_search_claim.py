@@ -8,8 +8,8 @@ import pytest
 
 from gateway.models.tools import CodeExecutor
 from gateway.services.tools import Dialect
+from gateway.services.tools._web_admission import claims_provider_web_search
 from gateway.services.tools._web_declarations import (
-    claims_provider_web_search,
     first_provider_web_search_tool,
     parse_web_search_header,
     provider_runs_web_search_natively,

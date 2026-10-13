@@ -21,7 +21,7 @@ from gateway.services.tools._declarations import Tool, extract_first_matching_to
 from gateway.services.tools._native import Dialect
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Mapping
 
     from gateway.core.config import GatewayConfig
 
@@ -135,29 +135,6 @@ def provider_runs_code_natively(tool_entry: dict[str, Any] | None, *, provider: 
     key = _VERSIONED_CODE_EXECUTION_PREFIX if type_value.startswith(_VERSIONED_CODE_EXECUTION_PREFIX) else type_value
     native = _NATIVE_CODE_EXECUTION.get(key)
     return native is not None and native == (provider.lower(), dialect)
-
-
-def candidate_code_executors(
-    preference: CodeExecutor,
-    tool_entry: dict[str, Any] | None,
-    *,
-    providers: Sequence[str | None],
-    dialect: Dialect,
-    sandbox_configured: bool,
-) -> list[CodeExecutor]:
-    """Who runs this declaration on each candidate's attempt, head first.
-
-    :func:`decide_code_executor` for each candidate's provider, so ``auto`` with a
-    sandbox answers per candidate and every other preference answers alike for all.
-    """
-    return [
-        decide_code_executor(
-            preference,
-            sandbox_configured=sandbox_configured,
-            native_available=provider_runs_code_natively(tool_entry, provider=provider, dialect=dialect),
-        )
-        for provider in providers
-    ]
 
 
 def parse_code_execution_header(value: str | None) -> CodeExecutor | None:
