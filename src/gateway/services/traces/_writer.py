@@ -151,6 +151,10 @@ class TraceWriter:
         except TimeoutError:
             SPANS_DROPPED.labels(reason=on_timeout).inc(size)
             return
+        # Stopping cancels the write in flight, and its transaction rolls back.
+        except asyncio.CancelledError:
+            SPANS_DROPPED.labels(reason="shutdown").inc(size)
+            raise
         # A batch is one transaction, so one trace the database refuses for what it
         # holds (its API key deleted since the request) would sink every tenant's
         # spans with it: that batch is retried a trace at a time, and only the trace
@@ -159,8 +163,13 @@ class TraceWriter:
         # dropped at once rather than stalling the writer.
         except DATA_ERRORS as exc:
             if len(batch) > 1:
-                for trace in batch:
-                    await self._write((trace,), timeout=timeout, on_timeout=on_timeout)
+                for position, trace in enumerate(batch):
+                    try:
+                        await self._write((trace,), timeout=timeout, on_timeout=on_timeout)
+                    except asyncio.CancelledError:
+                        rest = batch[position + 1 :]
+                        SPANS_DROPPED.labels(reason="shutdown").inc(sum(len(t.spans) for t in rest))
+                        raise
                 return
             self._drop(size, exc)
             return

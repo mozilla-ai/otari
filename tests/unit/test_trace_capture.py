@@ -346,6 +346,54 @@ async def test_shutdown_flushes_within_its_limit_and_drops_the_rest() -> None:
     assert _dropped("shutdown") - before > 0
 
 
+@pytest.mark.asyncio
+async def test_a_batch_cancelled_mid_write_at_shutdown_is_counted() -> None:
+    """Stopping cancels the write in flight, which rolls back; those spans are a drop too."""
+    writing = asyncio.Event()
+
+    async def hang(traces: tuple[TraceWrite, ...]) -> WriteResult:
+        writing.set()
+        await asyncio.Event().wait()
+        return WriteResult()
+
+    store = AsyncMock()
+    store.write.side_effect = hang
+    writer = _writer(store, batch_spans=2, write_timeout_s=10.0)
+    before = _dropped("shutdown")
+    await writer.start()
+
+    writer.submit(_write(2, "in-flight"))
+    await writing.wait()
+    await writer.stop()
+
+    assert _dropped("shutdown") - before == 2
+
+
+@pytest.mark.asyncio
+async def test_a_retry_cancelled_at_shutdown_counts_the_traces_it_had_not_reached() -> None:
+    retrying = asyncio.Event()
+
+    async def refuse_then_hang(traces: tuple[TraceWrite, ...]) -> WriteResult:
+        if len(traces) > 1:
+            raise IntegrityError("INSERT", {}, Exception("foreign key"))
+        retrying.set()
+        await asyncio.Event().wait()
+        return WriteResult()
+
+    store = AsyncMock()
+    store.write.side_effect = refuse_then_hang
+    writer = _writer(store, batch_spans=100, write_timeout_s=10.0)
+    before = _dropped("shutdown")
+    await writer.start()
+
+    writer.submit(_write(2, "a"))
+    writer.submit(_write(3, "b"))
+    await retrying.wait()
+    await writer.stop()
+
+    assert _dropped("shutdown") - before == 5
+
+
 def test_submitting_never_waits_on_the_store() -> None:
     """``submit`` is a plain function: it cannot await anything a store does."""
     assert not asyncio.iscoroutinefunction(TraceWriter.submit)
