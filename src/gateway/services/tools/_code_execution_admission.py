@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from gateway.exceptions import TenancyError
@@ -25,15 +25,15 @@ from gateway.services.code_execution import (
 )
 from gateway.services.sandbox_backend import SERVED_TOOL_NAMES
 from gateway.services.tools import _code_execution_tool
-from gateway.services.tools._candidate_tools import ProviderToolDeclaration, decide_candidate_tools
+from gateway.services.tools._candidate_tools import ProviderToolDeclaration
 from gateway.services.tools._code_execution_declarations import (
     CODE_EXECUTION_HEADER,
+    decide_code_executor,
     extract_code_execution_tool,
     first_provider_code_execution_tool,
     parse_code_execution_header,
     resolve_code_executor_preference,
 )
-from gateway.services.tools._native import Dialect
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
@@ -104,11 +104,7 @@ def _echoable_container_id(value: str) -> str:
 
 @dataclass(frozen=True)
 class AdmittedCodeExecution:
-    """Who runs a request's code, and the sandbox it runs in when the gateway does.
-
-    ``split`` is set where the request's candidates do not all run its provider's
-    keyword the way its head does, and says how the others are served.
-    """
+    """Who runs a request's code on one candidate's attempt, and the sandbox it runs in when the gateway does."""
 
     allowed_tools: frozenset[str] | None
     container_lease: ContainerLease | None
@@ -120,61 +116,27 @@ class AdmittedCodeExecution:
     tool_entry: dict[str, Any] | None
     tools_after_sandbox: list[dict[str, Any]] | None
     use_sandbox: bool
-    split: SplitCodeExecution | None = None
 
 
-@dataclass(frozen=True)
-class SplitCodeExecution:
-    """The candidates that run a provider's code-execution keyword the other way from the request's head.
-
-    A candidate is one of them when it runs ``keyword`` natively and the head does
-    not, or the other way round. ``other`` is their admission, or the refusal that
-    skips them.
-    """
-
-    keyword: dict[str, Any]
-    other: AdmittedCodeExecution | TenancyError
-
-
-@dataclass(frozen=True)
-class _Declared:
-    """What admission read from one request, whichever executor then runs its code."""
-
-    container_id: object
-    keyword_entry: dict[str, Any] | None
-    policy: ResolvedCodeExecutionPolicy | None
-    sandbox_tool_entry: dict[str, Any] | None
-    tools_after_sandbox: list[dict[str, Any]] | None
-
-
-async def admit_code_execution(
+async def declare_code_execution(
     tools: list[dict[str, Any]] | None,
     *,
     container_id: object,
     code_execution_header: str | None,
     config: GatewayConfig,
-    providers: Sequence[str | None],
-    dialect: Dialect,
     resolve_policy: Callable[[], Awaitable[ResolvedCodeExecutionPolicy | None]],
     container_registry: SandboxContainerRegistry | None,
     mcp_servers_declared: bool,
-    per_candidate: bool = True,
-) -> AdmittedCodeExecution:
-    """Decide who runs the request's code, and the sandbox it runs in when the gateway does.
+) -> DeclaredCodeExecution:
+    """Read the code execution one request declared, refusing what no candidate could serve.
 
-    ``providers`` is every candidate the request may dispatch to, head first. Under
-    ``auto``, a candidate that runs the provider's keyword natively keeps it and one
-    that does not runs it on the sandbox: the head's admission is returned, and the
-    others' is on ``split``. Without ``per_candidate``, or beside an explicit
-    ``otari_code_execution``, the provider keeps it only when every candidate runs it natively.
     ``resolve_policy`` reads the workspace's code execution policy, and is awaited only when the
     request declares code execution and this deployment has a sandbox to run it.
     ``container_registry`` is where held sandboxes are leased, ``None`` where this deployment holds none.
 
     Raises:
-        CodeExecutionDeclarationError: the declaration or its container cannot be served as written.
-        CodeExecutionRefusedError: the workspace's policy refuses it.
-        CodeExecutionContainerBusyError: the named container is serving another request.
+        CodeExecutionDeclarationError: the declaration cannot be served as written.
+        CodeExecutionRefusedError: the header asks for an executor the workspace's policy pins away.
     """
     # The deployment decides whether code can run here, because a hosted provider has no URL.
     sandbox_available = config.sandbox_configured()
@@ -184,7 +146,7 @@ async def admit_code_execution(
         raise CodeExecutionDeclarationError(CODE_EXECUTION_HEADER_INVALID_DETAIL) from None
 
     # The explicit gateway type always runs here.
-    # A provider's keyword is only found here, and the executor decides it below.
+    # A provider's keyword is only found here, and the executor decides it for each candidate.
     sandbox_tool_entry, tools_after_sandbox = extract_code_execution_tool(tools)
     provider_code_entry = first_provider_code_execution_tool(tools_after_sandbox)
     if sandbox_tool_entry is not None and not sandbox_available:
@@ -204,13 +166,12 @@ async def admit_code_execution(
     if names_held_sandbox and sandbox_available and requested_executor in (None, CodeExecutor.AUTO):
         requested_executor = CodeExecutor.OTARI
 
-    executor: CodeExecutor | None = None
-    other_executor: CodeExecutor | None = None
+    preference: CodeExecutor | None = None
     code_execution_policy: ResolvedCodeExecutionPolicy | None = None
     # Without a sandbox, a provider's keyword is forwarded and no policy is read.
     if sandbox_available and (sandbox_tool_entry is not None or provider_code_entry is not None):
         code_execution_policy = await resolve_policy()
-        executor_preference, executor_conflict = resolve_code_executor_preference(
+        preference, executor_conflict = resolve_code_executor_preference(
             requested=requested_executor,
             workspace=code_execution_policy.executor if code_execution_policy is not None else None,
             deployment=config.effective_code_executor(),
@@ -218,172 +179,205 @@ async def admit_code_execution(
         # A pin decides only a provider's keyword. The explicit type runs here whatever the pin says.
         if executor_conflict and provider_code_entry is not None:
             raise CodeExecutionRefusedError(CODE_EXECUTOR_PINNED_DETAIL)
-        executors = [
-            CodeExecutor.OTARI if _code_execution_tool.TOOL.name in candidate.claimed else CodeExecutor.PROVIDER
-            for candidate in decide_candidate_tools(
-                [
-                    ProviderToolDeclaration(
-                        tool=_code_execution_tool.TOOL,
-                        entry=provider_code_entry or {},
-                        preference=executor_preference,
-                        backend_configured=True,
-                    )
-                ],
-                providers=providers or [None],
-                dialect=dialect,
-            )
-        ]
-        executor = executors[0]
-        if len(set(executors)) > 1:
-            if per_candidate and sandbox_tool_entry is None:
-                other_executor = CodeExecutor.PROVIDER if executor is CodeExecutor.OTARI else CodeExecutor.OTARI
-            else:
-                executor = CodeExecutor.OTARI
-    elif requested_executor is CodeExecutor.OTARI and provider_code_entry is not None:
-        raise CodeExecutionDeclarationError(CODE_EXECUTOR_NOT_CONFIGURED_DETAIL)
+    elif provider_code_entry is not None:
+        if requested_executor is CodeExecutor.OTARI:
+            raise CodeExecutionDeclarationError(CODE_EXECUTOR_NOT_CONFIGURED_DETAIL)
+        preference = requested_executor or config.effective_code_executor()
 
-    declared = _Declared(
+    return DeclaredCodeExecution(
+        config=config,
         container_id=container_id,
+        container_registry=container_registry,
         keyword_entry=provider_code_entry,
+        mcp_servers_declared=mcp_servers_declared,
         policy=code_execution_policy,
+        preference=preference,
+        sandbox_available=sandbox_available,
         sandbox_tool_entry=sandbox_tool_entry,
         tools_after_sandbox=tools_after_sandbox,
     )
-    admitted = await _admit_executor(
-        declared,
-        executor,
-        config=config,
-        container_registry=container_registry,
-        mcp_servers_declared=mcp_servers_declared,
-        beside_sandbox=other_executor is CodeExecutor.OTARI,
-    )
-    if other_executor is None:
-        return admitted
-    assert provider_code_entry is not None  # only a provider's keyword is decided per candidate
-    other: AdmittedCodeExecution | TenancyError
-    try:
-        other = await _admit_executor(
-            declared,
-            other_executor,
-            config=config,
-            container_registry=container_registry,
-            mcp_servers_declared=mcp_servers_declared,
-            beside_sandbox=True,
-        )
-    except TenancyError as refusal:
-        other = refusal
-    return replace(admitted, split=SplitCodeExecution(keyword=provider_code_entry, other=other))
 
 
-async def _admit_executor(
-    declared: _Declared,
-    executor: CodeExecutor | None,
-    *,
-    config: GatewayConfig,
-    container_registry: SandboxContainerRegistry | None,
-    mcp_servers_declared: bool,
-    beside_sandbox: bool,
-) -> AdmittedCodeExecution:
-    """Admit the request's code as ``executor`` runs it, ``None`` where nothing was decided.
+class DeclaredCodeExecution:
+    """The code execution one request declared, read once and admitted for each way its candidates run it.
 
-    ``beside_sandbox`` is set where other candidates run the code on the sandbox,
-    whose ``auto`` container a provider's attempt then leaves out rather than refuses.
+    ``preference`` is who the request asked to run a provider's keyword, ``None``
+    where it declared no code execution. Without a sandbox it is read without the
+    workspace's pin, which only chooses between the sandbox and the provider.
     """
-    sandbox_tool_entry = declared.sandbox_tool_entry
-    tools_after_sandbox = declared.tools_after_sandbox
-    provider_code_entry = declared.keyword_entry
-    code_execution_policy = declared.policy
-    sandbox_max_iterations: int | None = None
-    sandbox_exec_timeout_s: int | None = None
-    # A workspace policy below may only narrow the image and the tool kinds from the deployment's defaults.
-    sandbox_session_image: str | None = config.effective_sandbox_image()
-    sandbox_allowed_tools: frozenset[str] | None = None
-    sandbox_container_lease: ContainerLease | None = None
 
-    if executor is not None:
-        if provider_code_entry is not None and executor is CodeExecutor.OTARI:
-            # The claimed keyword keeps the caller's declaration shape, and so the result blocks it expects.
-            # An explicit type beside it is folded in and adds only its hint.
-            claimed, tools_after_sandbox = extract_code_execution_tool(tools_after_sandbox, intercept=True)
-            assert claimed is not None  # ``provider_code_entry`` was found in the same list
-            # A copy, since a provider's attempt of the same request forwards the caller's own entry.
-            claimed = dict(claimed)
-            if sandbox_tool_entry is not None and not claimed.get("purpose_hint"):
-                if sandbox_tool_entry.get("purpose_hint"):
-                    claimed["purpose_hint"] = sandbox_tool_entry["purpose_hint"]
-            sandbox_tool_entry = claimed
-        elif provider_code_entry is not None and sandbox_tool_entry is not None:
-            # Two sandboxes would split the caller's state across two places, so the request is refused.
-            raise CodeExecutionDeclarationError(SANDBOX_PROVIDER_TOOL_CONFLICT_DETAIL)
-    use_sandbox = executor is not None and sandbox_tool_entry is not None
+    def __init__(
+        self,
+        *,
+        config: GatewayConfig,
+        container_id: object,
+        container_registry: SandboxContainerRegistry | None,
+        keyword_entry: dict[str, Any] | None,
+        mcp_servers_declared: bool,
+        policy: ResolvedCodeExecutionPolicy | None,
+        preference: CodeExecutor | None,
+        sandbox_available: bool,
+        sandbox_tool_entry: dict[str, Any] | None,
+        tools_after_sandbox: list[dict[str, Any]] | None,
+    ) -> None:
+        self.config = config
+        self.container_id = container_id
+        self.container_registry = container_registry
+        self.keyword_entry = keyword_entry
+        self.mcp_servers_declared = mcp_servers_declared
+        self.policy = policy
+        self.preference = preference
+        self.sandbox_available = sandbox_available
+        self.sandbox_tool_entry = sandbox_tool_entry
+        self.tools_after_sandbox = tools_after_sandbox
+        # One claim on a held sandbox per request, however many of its candidates run the code there.
+        self._leases: dict[str, ContainerLease | TenancyError] = {}
 
-    if use_sandbox:
-        assert sandbox_tool_entry is not None
-        if mcp_servers_declared:
-            raise CodeExecutionDeclarationError(SANDBOX_MCP_CONFLICT_DETAIL)
-        # The policy only narrows what the deployment allows. No policy means no narrowing.
-        if code_execution_policy is not None:
-            if not code_execution_policy.enabled:
-                raise CodeExecutionRefusedError(SANDBOX_NOT_ENABLED_DETAIL)
-            if not sandbox_tool_entry.get("purpose_hint") and code_execution_policy.default_purpose_hint:
-                sandbox_tool_entry["purpose_hint"] = code_execution_policy.default_purpose_hint
-            sandbox_max_iterations = code_execution_policy.max_iterations
-            sandbox_exec_timeout_s = code_execution_policy.exec_timeout_s
-            if code_execution_policy.tools is not None:
-                # An empty intersection is refused, because a tool with nothing to run fails silently.
-                # It uses the same served set as the check on a policy write.
-                if not code_execution_policy.tools & set(SERVED_TOOL_NAMES):
-                    raise CodeExecutionRefusedError(SANDBOX_TOOLS_EXCLUDED_DETAIL)
-                sandbox_allowed_tools = code_execution_policy.tools
-            if code_execution_policy.image is not None:
-                # Re-checked because an operator may remove an image after a workspace pinned it.
-                if code_execution_policy.image not in config.pinnable_sandbox_images():
-                    raise CodeExecutionRefusedError(SANDBOX_IMAGE_NOT_ALLOWED_DETAIL)
-                sandbox_session_image = code_execution_policy.image
+    def provider_declaration(self, *, uniform: bool) -> ProviderToolDeclaration | None:
+        """The provider's keyword this request declared, to decide for each candidate; ``None`` where it made none.
 
-    # A request that names no container has its sandbox released with it.
-    # ``auto`` asks to hold one, and an ID asks for that one back.
-    sandbox_containers = container_registry if use_sandbox else None
-    if use_sandbox:
-        container_request = requested_container(declared.container_id) or requested_container(
-            (sandbox_tool_entry or {}).get("container")
+        Beside the explicit type, which always runs on the sandbox, every candidate is decided alike.
+        """
+        if self.keyword_entry is None:
+            return None
+        return ProviderToolDeclaration(
+            tool=_code_execution_tool.TOOL,
+            entry=self.keyword_entry,
+            preference=self.preference,
+            backend_configured=self.sandbox_available,
+            uniform=uniform or self.sandbox_tool_entry is not None,
         )
-        if container_request is None:
-            # Nothing asked for, so nothing is held.
-            sandbox_containers = None
-        elif container_request != CONTAINER_AUTO:
-            # An ID names one sandbox and its files, so a deployment that cannot honor it refuses.
-            # It resolves against this caller's own leases before any new lease.
+
+    async def admit(self, *, claimed: bool, beside_sandbox: bool) -> AdmittedCodeExecution:
+        """Admit the request's code for the candidates where Otari runs the keyword (``claimed``), or not.
+
+        ``beside_sandbox`` is set where other candidates run the code on the sandbox,
+        whose ``auto`` container a provider's attempt then leaves out rather than refuses.
+
+        Raises:
+            CodeExecutionDeclarationError: the declaration or its container cannot be served this way.
+            CodeExecutionRefusedError: the workspace's policy refuses it.
+            CodeExecutionContainerBusyError: the named container is serving another request.
+        """
+        executor: CodeExecutor | None = None
+        if self.preference is not None and self.sandbox_available:
+            if claimed:
+                executor = CodeExecutor.OTARI
+            elif self.keyword_entry is not None:
+                executor = CodeExecutor.PROVIDER
+            else:
+                executor = decide_code_executor(self.preference, sandbox_configured=True, native_available=False)
+        return await self._admit_executor(executor, beside_sandbox=beside_sandbox)
+
+    async def _admit_executor(self, executor: CodeExecutor | None, *, beside_sandbox: bool) -> AdmittedCodeExecution:
+        config = self.config
+        sandbox_tool_entry = self.sandbox_tool_entry
+        tools_after_sandbox = self.tools_after_sandbox
+        provider_code_entry = self.keyword_entry
+        code_execution_policy = self.policy
+        sandbox_max_iterations: int | None = None
+        sandbox_exec_timeout_s: int | None = None
+        # A workspace policy below may only narrow the image and the tool kinds from the deployment's defaults.
+        sandbox_session_image: str | None = config.effective_sandbox_image()
+        sandbox_allowed_tools: frozenset[str] | None = None
+        sandbox_container_lease: ContainerLease | None = None
+
+        if executor is not None:
+            if provider_code_entry is not None and executor is CodeExecutor.OTARI:
+                # The claimed keyword keeps the caller's declaration shape, and so the result blocks it expects.
+                # An explicit type beside it is folded in and adds only its hint.
+                claimed, tools_after_sandbox = extract_code_execution_tool(tools_after_sandbox, intercept=True)
+                assert claimed is not None  # ``provider_code_entry`` was found in the same list
+                # A copy, since a provider's attempt of the same request forwards the caller's own entry.
+                claimed = dict(claimed)
+                if sandbox_tool_entry is not None and not claimed.get("purpose_hint"):
+                    if sandbox_tool_entry.get("purpose_hint"):
+                        claimed["purpose_hint"] = sandbox_tool_entry["purpose_hint"]
+                sandbox_tool_entry = claimed
+            elif provider_code_entry is not None and sandbox_tool_entry is not None:
+                # Two sandboxes would split the caller's state across two places, so the request is refused.
+                raise CodeExecutionDeclarationError(SANDBOX_PROVIDER_TOOL_CONFLICT_DETAIL)
+        use_sandbox = executor is not None and sandbox_tool_entry is not None
+
+        if use_sandbox:
+            assert sandbox_tool_entry is not None
+            if self.mcp_servers_declared:
+                raise CodeExecutionDeclarationError(SANDBOX_MCP_CONFLICT_DETAIL)
+            # The policy only narrows what the deployment allows. No policy means no narrowing.
+            if code_execution_policy is not None:
+                if not code_execution_policy.enabled:
+                    raise CodeExecutionRefusedError(SANDBOX_NOT_ENABLED_DETAIL)
+                if not sandbox_tool_entry.get("purpose_hint") and code_execution_policy.default_purpose_hint:
+                    sandbox_tool_entry["purpose_hint"] = code_execution_policy.default_purpose_hint
+                sandbox_max_iterations = code_execution_policy.max_iterations
+                sandbox_exec_timeout_s = code_execution_policy.exec_timeout_s
+                if code_execution_policy.tools is not None:
+                    # An empty intersection is refused, because a tool with nothing to run fails silently.
+                    # It uses the same served set as the check on a policy write.
+                    if not code_execution_policy.tools & set(SERVED_TOOL_NAMES):
+                        raise CodeExecutionRefusedError(SANDBOX_TOOLS_EXCLUDED_DETAIL)
+                    sandbox_allowed_tools = code_execution_policy.tools
+                if code_execution_policy.image is not None:
+                    # Re-checked because an operator may remove an image after a workspace pinned it.
+                    if code_execution_policy.image not in config.pinnable_sandbox_images():
+                        raise CodeExecutionRefusedError(SANDBOX_IMAGE_NOT_ALLOWED_DETAIL)
+                    sandbox_session_image = code_execution_policy.image
+
+        # A request that names no container has its sandbox released with it.
+        # ``auto`` asks to hold one, and an ID asks for that one back.
+        sandbox_containers = self.container_registry if use_sandbox else None
+        if use_sandbox:
+            container_request = requested_container(self.container_id) or requested_container(
+                (sandbox_tool_entry or {}).get("container")
+            )
+            if container_request is None:
+                # Nothing asked for, so nothing is held.
+                sandbox_containers = None
+            elif container_request != CONTAINER_AUTO:
+                sandbox_container_lease = await self._lease(container_request)
+            # ``auto`` without container reuse is not an error, and the response names no container.
+        else:
+            # The provider runs this code, so a container ID that only this gateway mints is refused.
+            # ``auto`` can change the executor between turns, so a client can send one unchanged.
+            stray = (None if beside_sandbox else gateway_container_value(self.container_id)) or (
+                gateway_container_value((provider_code_entry or {}).get("container"))
+            )
+            if stray is not None:
+                raise CodeExecutionDeclarationError(CONTAINER_NOT_GATEWAY_RUN_DETAIL)
+        return AdmittedCodeExecution(
+            allowed_tools=sandbox_allowed_tools,
+            container_lease=sandbox_container_lease,
+            containers=sandbox_containers,
+            exec_timeout_s=sandbox_exec_timeout_s,
+            executor=executor,
+            max_iterations=sandbox_max_iterations,
+            session_image=sandbox_session_image,
+            tool_entry=sandbox_tool_entry,
+            tools_after_sandbox=tools_after_sandbox,
+            use_sandbox=use_sandbox,
+        )
+
+    async def _lease(self, container_request: str) -> ContainerLease:
+        """The held sandbox ``container_request`` names, claimed once for every candidate that runs there.
+
+        An ID names one sandbox and its files, so a deployment that cannot honor it refuses.
+        It resolves against this caller's own leases before any new lease.
+        """
+        if container_request not in self._leases:
             gone = CodeExecutionDeclarationError(
                 CONTAINER_GONE_DETAIL_TEMPLATE.format(container_id=_echoable_container_id(container_request))
             )
-            if sandbox_containers is None:
-                raise gone
-            try:
-                sandbox_container_lease = await sandbox_containers.resolve(container_request)
-            except ContainerNotFoundError:
-                raise gone from None
-            except ContainerBusyError:
-                # The caller owns this ID, so a retry can succeed.
-                raise CodeExecutionContainerBusyError(CONTAINER_BUSY_DETAIL) from None
-        # ``auto`` without container reuse is not an error, and the response names no container.
-    else:
-        # The provider runs this code, so a container ID that only this gateway mints is refused.
-        # ``auto`` can change the executor between turns, so a client can send one unchanged.
-        stray = (None if beside_sandbox else gateway_container_value(declared.container_id)) or (
-            gateway_container_value((provider_code_entry or {}).get("container"))
-        )
-        if stray is not None:
-            raise CodeExecutionDeclarationError(CONTAINER_NOT_GATEWAY_RUN_DETAIL)
-    return AdmittedCodeExecution(
-        allowed_tools=sandbox_allowed_tools,
-        container_lease=sandbox_container_lease,
-        containers=sandbox_containers,
-        exec_timeout_s=sandbox_exec_timeout_s,
-        executor=executor,
-        max_iterations=sandbox_max_iterations,
-        session_image=sandbox_session_image,
-        tool_entry=sandbox_tool_entry,
-        tools_after_sandbox=tools_after_sandbox,
-        use_sandbox=use_sandbox,
-    )
+            outcome: ContainerLease | TenancyError = gone
+            if self.container_registry is not None:
+                try:
+                    outcome = await self.container_registry.resolve(container_request)
+                except ContainerNotFoundError:
+                    outcome = gone
+                except ContainerBusyError:
+                    # The caller owns this ID, so a retry can succeed.
+                    outcome = CodeExecutionContainerBusyError(CONTAINER_BUSY_DETAIL)
+            self._leases[container_request] = outcome
+        outcome = self._leases[container_request]
+        if isinstance(outcome, TenancyError):
+            raise outcome
+        return outcome

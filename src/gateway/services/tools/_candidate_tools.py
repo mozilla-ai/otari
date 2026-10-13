@@ -52,6 +52,10 @@ class CandidateTools:
     claimed: frozenset[str] = frozenset()
     native: frozenset[str] = frozenset()
 
+    def __or__(self, other: CandidateTools) -> CandidateTools:
+        """The same candidate's answers for two sets of declarations, taken together."""
+        return CandidateTools(claimed=self.claimed | other.claimed, native=self.native | other.native)
+
 
 class _Decision(Enum):
     CLAIMED = auto()

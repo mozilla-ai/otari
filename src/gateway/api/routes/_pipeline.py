@@ -41,7 +41,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Coroutine, Iterable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import Enum, StrEnum, auto
@@ -312,21 +312,25 @@ from gateway.services.tool_usage import (
 from gateway.services.tools import (
     CONTAINER_GONE_DETAIL_TEMPLATE,
     AdmittedCodeExecution,
+    CandidateTools,
+    DeclaredCodeExecution,
     DeclaredWebTools,
     Dialect,
+    ProviderToolDeclaration,
     ToolUseBudget,
     WebClaims,
-    admit_code_execution,
     admit_mcp_servers,
     admit_web_access,
     check_web_tools_alone,
-    claim_web_declarations,
+    decide_candidate_tools,
+    declare_code_execution,
     declares_code_execution,
     extract_web_tools,
     native_rendering,
-    provider_runs_code_natively,
+    read_web_declarations,
     read_web_fetch_max_uses,
     read_web_search_max_uses,
+    validate_web_declarations,
     web_search_intercept_enabled,
 )
 from gateway.services.traces import RequestTrace, TurnFacts, harness_of, resolve_session
@@ -2916,7 +2920,7 @@ class ToolContext:
         web_fetch_tool_entry: dict[str, Any] | None = None,
         web_fetch_policy: DomainPolicy | None = None,
         sandbox_files: SandboxFileBridge | None = None,
-        shared_with: ToolContext | None = None,
+        shared: SharedToolUse | None = None,
     ) -> None:
         self.config = config
         self.mcp_server_configs = mcp_server_configs
@@ -2968,61 +2972,51 @@ class ToolContext:
         # ``finally`` runs during stream exhaustion, and ``streaming_generator``
         # only awaits ``on_complete`` afterwards), and because a multi-attempt
         # request shares one tally across attempts: every executed call was paid
-        # for, whether or not its attempt won. ``shared_with`` is the context of
-        # the same request's other attempts, whose tally and caps this one draws on.
-        self.tally: ToolUsageTally = shared_with.tally if shared_with is not None else ToolUsageTally()
+        # for, whether or not its attempt won. ``shared`` is what the same request's
+        # other attempts spend, where they are dispatched with tools of their own.
+        if shared is None:
+            caps = _tool_use_caps(self.web_search_tool_entry, self.web_fetch_tool_entry)
+            shared = SharedToolUse(use_budget=ToolUseBudget(caps) if caps else None)
+        self.tally: ToolUsageTally = shared.tally
         # The request's trace, handed to each backend beside the tally for the same reasons.
         self.trace = trace
         # Successful calls spend the caller's caps across all routing attempts.
-        self.use_budget: ToolUseBudget | None
-        if shared_with is not None:
-            self.use_budget = shared_with.use_budget
-        else:
-            caps = {
-                name: cap
-                for name, cap in (
-                    (WEB_SEARCH_TOOL_NAME, self.max_web_search_uses),
-                    (WEB_FETCH_TOOL_NAME, read_web_fetch_max_uses(self.web_fetch_tool_entry)),
-                )
-                if cap is not None
-            }
-            self.use_budget = ToolUseBudget(caps) if caps else None
+        self.use_budget: ToolUseBudget | None = shared.use_budget
         # Search and Fetch share a separate attempted-call cap across routing attempts.
-        self.web_retrieval_counter: WebRetrievalCounter = (
-            shared_with.web_retrieval_counter if shared_with is not None else WebRetrievalCounter()
-        )
-        # The candidates that run the code-execution keyword the other way from the head, if any.
-        self.code_split: CodeExecutionSplit | None = None
+        self.web_retrieval_counter: WebRetrievalCounter = shared.web_retrieval_counter
+        # Each candidate's tools by its provider, where the request's candidates are not all dispatched alike.
+        self.candidate_variants: dict[str | None, CandidateVariant] = {}
 
     def for_candidate(self, provider: str | None) -> ToolContext:
-        """The tools the candidate on ``provider`` is dispatched with: these, or the split's.
+        """The tools the candidate on ``provider`` is dispatched with: these, or its variant's.
 
         Raises:
-            CandidateCannotServe: the candidate runs the code where this request was refused.
+            CandidateCannotServe: the candidate's tools were refused.
         """
-        split = self.code_split
-        if split is None or not split.includes(provider):
+        variant = self.candidate_variants.get(provider)
+        if variant is None:
             return self
-        if isinstance(split.tools, HTTPException):
-            raise CandidateCannotServe(split.tools)
-        return split.tools
+        if isinstance(variant.tools, HTTPException):
+            raise CandidateCannotServe(variant.tools)
+        return variant.tools
 
-    def request_fields_for(self, provider: str | None, head_fields: dict[str, Any]) -> dict[str, Any]:
-        """What the candidate on ``provider`` is sent: ``head_fields``, or the split's own.
+    def request_fields_for(self, provider: str | None, base_fields: dict[str, Any]) -> dict[str, Any]:
+        """What the candidate on ``provider`` is sent: ``base_fields``, built from these tools, or its variant's own.
 
         Raises:
             CandidateCannotServe: as :meth:`for_candidate` does.
         """
         if self.for_candidate(provider) is self:
-            return head_fields
-        assert self.code_split is not None and self.code_split.request_fields is not None
-        return self.code_split.request_fields
+            return base_fields
+        request_fields = self.candidate_variants[provider].request_fields
+        assert request_fields is not None  # built by ``build_request_fields`` before any candidate is dispatched
+        return request_fields
 
     def build_request_fields(self, build: Callable[[ToolContext], dict[str, Any]]) -> dict[str, Any]:
-        """The request fields ``build`` makes from these tools, building the split's beside them."""
-        split = self.code_split
-        if split is not None and isinstance(split.tools, ToolContext):
-            split.request_fields = build(split.tools)
+        """The request fields ``build`` makes from these tools, building each other variant's beside them."""
+        for variant in {id(variant): variant for variant in self.candidate_variants.values()}.values():
+            if isinstance(variant.tools, ToolContext) and variant.tools is not self:
+                variant.request_fields = build(variant.tools)
         return build(self)
 
     def build_sandbox_backend(self) -> SandboxBackend:
@@ -3166,23 +3160,33 @@ class ToolContext:
 
 
 @dataclass
-class CodeExecutionSplit:
-    """The candidates of a request that run its code-execution keyword the other way from its head.
+class SharedToolUse:
+    """What every attempt of one request spends together, whichever tools each is dispatched with."""
 
-    A candidate is one of them when whether it runs ``keyword`` natively in
-    ``dialect`` is ``native``. ``tools`` is what they are dispatched with, or the
-    refusal that skips them, and ``request_fields`` what they are sent in place of
-    the head's, once the route has built it.
+    tally: ToolUsageTally = field(default_factory=ToolUsageTally)
+    use_budget: ToolUseBudget | None = None
+    web_retrieval_counter: WebRetrievalCounter = field(default_factory=WebRetrievalCounter)
+
+
+def _tool_use_caps(search_entry: dict[str, Any] | None, fetch_entry: dict[str, Any] | None) -> dict[str, int]:
+    """The ``max_uses`` caps the caller's declarations set, by tool name."""
+    caps = (
+        (WEB_SEARCH_TOOL_NAME, read_web_search_max_uses(search_entry)),
+        (WEB_FETCH_TOOL_NAME, read_web_fetch_max_uses(fetch_entry)),
+    )
+    return {name: cap for name, cap in caps if cap is not None}
+
+
+@dataclass(eq=False)
+class CandidateVariant:
+    """How the candidates that share one answer about a request's built-in tools are dispatched.
+
+    ``tools`` is what they are dispatched with, or the refusal that skips them, and
+    ``request_fields`` what they are sent, once the route has built it.
     """
 
-    keyword: dict[str, Any]
-    dialect: Dialect
-    native: bool
     tools: ToolContext | HTTPException
     request_fields: dict[str, Any] | None = None
-
-    def includes(self, provider: str | None) -> bool:
-        return provider_runs_code_natively(self.keyword, provider=provider, dialect=self.dialect) is self.native
 
 
 def _overlay_mandate(merged: dict[str, GuardrailConfig], mandated: Iterable[GuardrailConfig]) -> None:
@@ -3413,27 +3417,30 @@ async def prepare_gateway_tools(
     MCP servers, the sandbox and the web tools cannot be combined in one request.
     Every backend URL comes from the deployment and never from the request.
 
-    Under ``auto``, a request whose candidates do not all run its provider's code-execution
-    keyword natively is admitted both ways, and the other way's refusal only skips the
-    candidates that need it (see :class:`CodeExecutionSplit`).
+    A built-in tool declared in a provider's own words is decided for each candidate
+    the request may be sent to (``decide_candidate_tools``), and the candidates that
+    share one answer are admitted together. A refusal of one answer skips only its
+    candidates, and refuses the request only where no candidate is left. Hybrid mode
+    decides every candidate alike, since the platform's attempts share one set of tools.
 
     NOTE: callers must not release the budget reservation after a refusal from here.
     """
     try:
-        web_claims = _admit_web_declarations(adapter, ctx, declared)
+        web_candidates = _admit_web_declarations(adapter, ctx, declared)
         await _admit_guardrails(adapter, ctx, response, declared)
         mcp_servers = await _admit_mcp_servers(adapter, ctx, declared, backends.ports.mcp_server)
-        code = await _admit_code_execution(adapter, ctx, declared, backends, mcp_servers_declared=bool(mcp_servers))
-        web = _extract_web_tools(adapter, ctx, code, claims=web_claims, mcp_servers_declared=bool(mcp_servers))
-        web_access = await _admit_web_access(adapter, ctx, web, backends.ports.web_search_policy)
-        await _require_tool_pricing(
-            adapter,
-            ctx,
-            use_sandbox=code.use_sandbox,
-            use_web_search=web.search_tool_entry is not None,
-            use_web_fetch=web.fetch_tool_entry is not None,
+        code = await _declare_code_execution(adapter, ctx, declared, backends, mcp_servers_declared=bool(mcp_servers))
+        code_candidates = _decide_for_candidates(adapter, ctx, [code.provider_declaration(uniform=ctx.hybrid_mode)])
+        candidates = [web | code_tools for web, code_tools in zip(web_candidates, code_candidates, strict=True)]
+        answers = await _admit_candidates(
+            adapter, ctx, declared, code, candidates, mcp_servers=mcp_servers, port=backends.ports.web_search_policy
         )
-        split = await _admit_split(adapter, ctx, code, claims=web_claims, mcp_servers_declared=bool(mcp_servers))
+        if not any(isinstance(answer, _AdmittedTools) for answer in answers.values()):
+            refusal = answers[candidates[0].claimed]
+            assert isinstance(refusal, _ToolRefusal)
+            if refusal.unpriced_tool is not None:
+                await _log_unpriced_tool_rejection(adapter, ctx, refusal.unpriced_tool)
+            raise refusal.error
     except ControlPlaneError as exc:
         # A peer's refusal of the web search, code execution or MCP resolve is a domain error,
         # so without this it would answer in `main.py`'s shape rather than this route's.
@@ -3469,9 +3476,14 @@ async def prepare_gateway_tools(
     # Gotcha: the connection must not be held across the provider call that follows.
     await release_session(ctx.db)
 
-    def _tool_context(
-        code: AdmittedCodeExecution, web: DeclaredWebTools, shared_with: ToolContext | None = None
-    ) -> ToolContext:
+    admitted = {claimed: answer for claimed, answer in answers.items() if isinstance(answer, _AdmittedTools)}
+    caps: dict[str, int] = {}
+    for answer in admitted.values():
+        caps |= _tool_use_caps(answer.web_access.search_tool_entry, answer.web.fetch_tool_entry)
+    shared = SharedToolUse(use_budget=ToolUseBudget(caps) if caps else None)
+
+    def _tool_context(answer: _AdmittedTools) -> ToolContext:
+        code, web, web_access = answer.code, answer.web, answer.web_access
         return ToolContext(
             config=ctx.config,
             mcp_server_configs=mcp_servers,
@@ -3502,47 +3514,130 @@ async def prepare_gateway_tools(
             tools_header=declared.tools_header,
             trace=ctx.trace,
             sandbox_files=backends.sandbox_files,
-            shared_with=shared_with,
+            shared=shared,
         )
 
-    tool_ctx = _tool_context(code, web)
-    if code.split is not None:
-        assert split is not None
-        tool_ctx.code_split = CodeExecutionSplit(
-            keyword=code.split.keyword,
-            dialect=adapter.name,
-            native=code.executor is not CodeExecutor.PROVIDER,
-            tools=split if isinstance(split, HTTPException) else _tool_context(*split, shared_with=tool_ctx),
-        )
+    contexts = {claimed: _tool_context(answer) for claimed, answer in admitted.items()}
+    # The first candidate that can be served is the one the request's own fields are built for.
+    tool_ctx = next(contexts[candidate.claimed] for candidate in candidates if candidate.claimed in contexts)
+    if len(answers) > 1:
+        variants = {
+            claimed: CandidateVariant(tools=answer.error if isinstance(answer, _ToolRefusal) else contexts[claimed])
+            for claimed, answer in answers.items()
+        }
+        tool_ctx.candidate_variants = {
+            provider: variants[candidate.claimed]
+            for provider, candidate in zip(_candidate_provider_names(ctx), candidates, strict=True)
+        }
     return tool_ctx
 
 
-async def _admit_split(
+@dataclass(frozen=True)
+class _AdmittedTools:
+    """The built-in tools admitted for the candidates that share one answer about them."""
+
+    code: AdmittedCodeExecution
+    web: DeclaredWebTools
+    web_access: _AdmittedWebAccess
+
+
+@dataclass(frozen=True)
+class _ToolRefusal:
+    """Why the candidates that share one answer cannot be served.
+
+    ``unpriced_tool`` is the tool ``require_pricing`` refused, logged as a rejection
+    only where the refusal answers the request.
+    """
+
+    error: HTTPException
+    unpriced_tool: str | None = None
+
+
+def _decide_for_candidates(
+    adapter: FormatAdapter[Any, Any], ctx: RequestContext, declarations: Iterable[ProviderToolDeclaration | None]
+) -> list[CandidateTools]:
+    """What each candidate of the request is sent for ``declarations``, head first."""
+    return decide_candidate_tools(
+        [declaration for declaration in declarations if declaration is not None],
+        providers=_candidate_provider_names(ctx),
+        dialect=adapter.name,
+    )
+
+
+async def _admit_candidates(
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
-    code: AdmittedCodeExecution,
+    declared: DeclaredTools,
+    code: DeclaredCodeExecution,
+    candidates: Sequence[CandidateTools],
     *,
-    claims: WebClaims,
-    mcp_servers_declared: bool,
-) -> tuple[AdmittedCodeExecution, DeclaredWebTools] | HTTPException | None:
-    """The candidates of ``code.split``: their code execution and web tools, or the refusal that skips them.
+    mcp_servers: list[McpServerConfig] | None,
+    port: WebSearchPolicyPort,
+) -> dict[frozenset[str], _AdmittedTools | _ToolRefusal]:
+    """The tools each set of claims among ``candidates`` is admitted with, or why it is refused, head's first.
 
-    The checks the head's admission makes for the whole request, made for them alone.
-    Nothing is logged for a refusal here, since the walk records each candidate it skips.
+    The checks admission makes for a whole request, made once for the candidates that
+    share one answer. Nothing is logged for a refusal here: the walk records each
+    candidate it skips, and the caller logs the one that answers the request.
     """
-    if code.split is None:
-        return None
-    other = code.split.other
-    if isinstance(other, TenancyError):
-        return domain_error(adapter, other)
+    beside_sandbox = any(CODE_EXECUTION_TOOL_NAME in candidate.claimed for candidate in candidates)
+    answers: dict[frozenset[str], _AdmittedTools | _ToolRefusal] = {}
+    for candidate in candidates:
+        if candidate.claimed not in answers:
+            answers[candidate.claimed] = await _admit_claims(
+                adapter,
+                ctx,
+                declared,
+                code,
+                candidate.claimed,
+                beside_sandbox=beside_sandbox,
+                mcp_servers_declared=bool(mcp_servers),
+                port=port,
+            )
+    return answers
+
+
+async def _admit_claims(
+    adapter: FormatAdapter[Any, Any],
+    ctx: RequestContext,
+    declared: DeclaredTools,
+    code: DeclaredCodeExecution,
+    claimed: frozenset[str],
+    *,
+    beside_sandbox: bool,
+    mcp_servers_declared: bool,
+    port: WebSearchPolicyPort,
+) -> _AdmittedTools | _ToolRefusal:
+    """The tools a candidate is dispatched with where Otari runs the provider keywords in ``claimed``."""
     try:
-        web = extract_web_tools(other.tools_after_sandbox, config=ctx.config, claims=claims)
-        check_web_tools_alone(web, use_sandbox=other.use_sandbox, mcp_servers_declared=mcp_servers_declared)
+        admitted = await code.admit(claimed=CODE_EXECUTION_TOOL_NAME in claimed, beside_sandbox=beside_sandbox)
+    except (CodeExecutionDeclarationError, CodeExecutionRefusedError, CodeExecutionContainerBusyError) as exc:
+        return _ToolRefusal(domain_error(adapter, exc))
+    claims = WebClaims(search=WEB_SEARCH_TOOL_NAME in claimed, fetch=WEB_FETCH_TOOL_NAME in claimed)
+    try:
+        web = extract_web_tools(admitted.tools_after_sandbox, config=ctx.config, claims=claims)
+        check_web_tools_alone(web, use_sandbox=admitted.use_sandbox, mcp_servers_declared=mcp_servers_declared)
     except WebToolDeclarationError as exc:
-        return domain_error(adapter, exc)
-    if other.use_sandbox and (unpriced := await _unpriced_tool(ctx, [CODE_EXECUTION_TOOL_NAME])) is not None:
-        return adapter.error(402, _unpriced_tool_detail(unpriced), ErrorKind.INVALID_REQUEST)
-    return other, web
+        return _ToolRefusal(domain_error(adapter, exc))
+    try:
+        web_access = await _admit_web_access(adapter, ctx, web, port)
+    except HTTPException as exc:
+        return _ToolRefusal(exc)
+    billed = [
+        name
+        for name, used in (
+            (CODE_EXECUTION_TOOL_NAME, admitted.use_sandbox),
+            (WEB_SEARCH_TOOL_NAME, web.search_tool_entry is not None),
+            (WEB_FETCH_TOOL_NAME, web.fetch_tool_entry is not None),
+        )
+        if used
+    ]
+    if (unpriced := await _unpriced_tool(ctx, billed)) is not None:
+        # Same kind the model gate uses for its own 402, so both no-pricing
+        # rejections map to one wire shape per format.
+        error = adapter.error(402, _unpriced_tool_detail(unpriced), ErrorKind.INVALID_REQUEST)
+        return _ToolRefusal(error, unpriced_tool=unpriced)
+    return _AdmittedTools(code=admitted, web=web, web_access=web_access)
 
 
 async def _admit_guardrails(
@@ -3582,62 +3677,58 @@ async def _admit_mcp_servers(
 
 def _admit_web_declarations(
     adapter: FormatAdapter[Any, Any], ctx: RequestContext, declared: DeclaredTools
-) -> WebClaims:
-    """Refuse an ambiguous managed web declaration, and say which provider web keywords the gateway claims."""
+) -> list[CandidateTools]:
+    """Who runs the request's provider web keywords on each candidate, head first.
+
+    A declaration ambiguous whatever a candidate claims is refused here, before any
+    network or database work; one ambiguous for only some candidates refuses them alone.
+    """
     try:
-        return claim_web_declarations(
+        declarations = read_web_declarations(
             declared.tools,
             web_search_header=declared.web_search_header,
             web_fetch_header=declared.web_fetch_header,
             config=ctx.config,
-            providers=_candidate_provider_names(ctx),
-            dialect=adapter.name,
+            uniform=True,
         )
+        candidates = _decide_for_candidates(adapter, ctx, declarations)
+        distinct = dict.fromkeys(
+            WebClaims(search=WEB_SEARCH_TOOL_NAME in candidate.claimed, fetch=WEB_FETCH_TOOL_NAME in candidate.claimed)
+            for candidate in candidates
+        )
+        refusals: list[WebToolDeclarationError] = []
+        for claims in distinct:
+            try:
+                validate_web_declarations(declared.tools, claims=claims)
+            except WebToolDeclarationError as exc:
+                refusals.append(exc)
+        if refusals and len(refusals) == len(distinct):
+            raise refusals[0]
     except (WebToolDeclarationError, WebSearchInterceptedError) as exc:
         raise domain_error(adapter, exc) from exc
+    return candidates
 
 
-def _extract_web_tools(
-    adapter: FormatAdapter[Any, Any],
-    ctx: RequestContext,
-    code: AdmittedCodeExecution,
-    *,
-    claims: WebClaims,
-    mcp_servers_declared: bool,
-) -> DeclaredWebTools:
-    """Take the managed web tools out of what code execution left, refusing one this deployment cannot serve."""
-    try:
-        web = extract_web_tools(code.tools_after_sandbox, config=ctx.config, claims=claims)
-        check_web_tools_alone(web, use_sandbox=code.use_sandbox, mcp_servers_declared=mcp_servers_declared)
-    except WebToolDeclarationError as exc:
-        raise domain_error(adapter, exc) from exc
-    return web
-
-
-async def _admit_code_execution(
+async def _declare_code_execution(
     adapter: FormatAdapter[Any, Any],
     ctx: RequestContext,
     declared: DeclaredTools,
     backends: ToolBackends,
     *,
     mcp_servers_declared: bool,
-) -> AdmittedCodeExecution:
-    """Decide who runs the request's code, and the sandbox it runs in when the gateway does."""
+) -> DeclaredCodeExecution:
+    """Read the request's code execution, refusing what no candidate could serve."""
     try:
-        return await admit_code_execution(
+        return await declare_code_execution(
             declared.tools,
             container_id=declared.container_id,
             code_execution_header=declared.code_execution_header,
             config=ctx.config,
-            providers=_candidate_provider_names(ctx),
-            dialect=adapter.name,
             resolve_policy=lambda: _resolve_code_execution_policy(adapter, ctx, backends.ports.code_execution_policy),
             container_registry=backends.sandbox_containers,
             mcp_servers_declared=mcp_servers_declared,
-            # The platform's attempts are walked with one set of tools, so hybrid keeps every candidate alike.
-            per_candidate=not ctx.hybrid_mode,
         )
-    except (CodeExecutionDeclarationError, CodeExecutionRefusedError, CodeExecutionContainerBusyError) as exc:
+    except (CodeExecutionDeclarationError, CodeExecutionRefusedError) as exc:
         raise domain_error(adapter, exc) from exc
 
 
@@ -3799,22 +3890,39 @@ async def _copying_produced_files(
         yield chunk
 
 
-async def _require_tool_pricing(
-    adapter: FormatAdapter[Any, Any],
-    ctx: RequestContext,
-    *,
-    use_sandbox: bool,
-    use_web_search: bool,
-    use_web_fetch: bool = False,
-) -> None:
-    """Reject a request whose gateway-run tool cannot be billed.
+async def _log_unpriced_tool_rejection(adapter: FormatAdapter[Any, Any], ctx: RequestContext, tool: str) -> None:
+    """Record a request refused because ``tool`` has no price.
+
+    Logged for the same reason the model gate logs its 402: an operator who
+    turns require_pricing on has to be able to see that live traffic is
+    being dropped, and by what.
+    """
+    assert ctx.db is not None  # an unpriced tool is only found with a database to look it up in
+    key = gateway_tool_pricing_key(tool)
+    logger.warning("Rejecting request: gateway tool '%s' has no pricing under '%s'", tool, key)
+    await log_gateway_rejection(
+        db=ctx.db,
+        log_writer=ctx.log_writer,
+        api_key_id=ctx.api_key_id,
+        user_id=ctx.user_id,
+        model=key,
+        provider=GATEWAY_TOOL_PRICING_PROVIDER,
+        endpoint=adapter.endpoint,
+        detail=_unpriced_tool_detail(tool),
+        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        started_at=ctx.started_at,
+        request_id=ctx.request_id,
+        tags=ctx.tags,
+    )
+
+
+async def _unpriced_tool(ctx: RequestContext, tools: Iterable[str]) -> str | None:
+    """The first of ``tools`` this request would be billed for and has no price, as ``require_pricing`` reads it.
 
     Same posture ``require_pricing`` already applies to an unpriced model: the
     gateway does not perform work it cannot meter, because a budget cap cannot
-    restrain a charge that is never recorded. Checked here, at admission, rather
-    than mid-loop, so the caller pays nothing for a request that was never going
-    to settle, and next to the missing-URL 400 so both misconfigurations surface
-    from the same place.
+    restrain a charge that is never recorded. Checked at admission, rather than
+    mid-loop, so the caller pays nothing for a request that was never going to settle.
 
     MCP tools are deliberately not covered: their names come from a caller-supplied
     server, are unbounded, and are not something an operator can pre-price.
@@ -3824,42 +3932,6 @@ async def _require_tool_pricing(
     key that is never debited has no budget to protect. Serving an unpriced model but
     refusing an unpriced tool on the same key would be arbitrary.
     """
-    tools = [CODE_EXECUTION_TOOL_NAME] if use_sandbox else []
-    if use_web_search:
-        tools.append(WEB_SEARCH_TOOL_NAME)
-    if use_web_fetch:
-        tools.append(WEB_FETCH_TOOL_NAME)
-    tool = await _unpriced_tool(ctx, tools)
-    if tool is None:
-        return
-    assert ctx.db is not None  # an unpriced tool is only found with a database to look it up in
-    key = gateway_tool_pricing_key(tool)
-    detail = _unpriced_tool_detail(tool)
-    logger.warning("Rejecting request: gateway tool '%s' has no pricing under '%s'", tool, key)
-    # Logged for the same reason the model gate logs its 402: an operator who
-    # turns require_pricing on has to be able to see that live traffic is
-    # being dropped, and by what.
-    await log_gateway_rejection(
-        db=ctx.db,
-        log_writer=ctx.log_writer,
-        api_key_id=ctx.api_key_id,
-        user_id=ctx.user_id,
-        model=key,
-        provider=GATEWAY_TOOL_PRICING_PROVIDER,
-        endpoint=adapter.endpoint,
-        detail=detail,
-        status_code=status.HTTP_402_PAYMENT_REQUIRED,
-        started_at=ctx.started_at,
-        request_id=ctx.request_id,
-        tags=ctx.tags,
-    )
-    # Same kind the model gate uses for its own 402, so both no-pricing
-    # rejections map to one wire shape per format.
-    raise adapter.error(402, detail, ErrorKind.INVALID_REQUEST)
-
-
-async def _unpriced_tool(ctx: RequestContext, tools: Iterable[str]) -> str | None:
-    """The first of ``tools`` this request would be billed for and has no price, as ``require_pricing`` reads it."""
     if ctx.db is None or not ctx.config.require_pricing:
         return None
     if ctx.reservation is not None and not ctx.reservation.counts_toward_budget:
@@ -5317,7 +5389,7 @@ def _failover_kwargs(
 ) -> Callable[[Attempt, dict[str, Any]], dict[str, Any]]:
     """Builds each candidate's kwargs for a plan that can fall over, from the request fields its tools need.
 
-    Raising :class:`CandidateCannotServe` for a candidate whose code execution was refused,
+    Raising :class:`CandidateCannotServe` for a candidate whose built-in tools were refused,
     so the walk skips it before admitting it.
     """
 

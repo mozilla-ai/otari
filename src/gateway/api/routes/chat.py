@@ -32,6 +32,7 @@ from gateway.api.routes._pipeline import (
     DeclaredTools,
     ErrorKind,
     ToolBackends,
+    ToolContext,
     classify_provider_error,
     default_attempt_kwargs,
     log_usage,
@@ -622,22 +623,26 @@ async def run_chat_completion(
         ),
     )
 
-    request_fields = _strip_gateway_fields(
-        request.model_dump(exclude_unset=True),
-        tools_extracted=tool_ctx.tools_extracted,
-        remaining_user_tools=tool_ctx.remaining_user_tools,
-        web_search_declared_name=tool_ctx.web_search_declared_name,
-    )
-    request_fields.pop("metadata", None)
-    scope_prompt_cache_key(request_fields, ctx)
-    bind_upstream_user(request_fields, ctx.upstream_user)
-    # Dispatch one cap, under the name any-llm understands and knows how to map to
-    # any provider (via BaseOpenAIProvider._convert_completion_params). Popped
-    # unconditionally so exactly one spelling reaches the provider call, whether
-    # the caller sent a value or an explicit null.
-    request_fields.pop("max_completion_tokens", None)
-    if output_cap is not None:
-        request_fields["max_tokens"] = output_cap
+    def _request_fields(tools: ToolContext) -> dict[str, Any]:
+        fields = _strip_gateway_fields(
+            request.model_dump(exclude_unset=True),
+            tools_extracted=tools.tools_extracted,
+            remaining_user_tools=tools.remaining_user_tools,
+            web_search_declared_name=tools.web_search_declared_name,
+        )
+        fields.pop("metadata", None)
+        scope_prompt_cache_key(fields, ctx)
+        bind_upstream_user(fields, ctx.upstream_user)
+        # Dispatch one cap, under the name any-llm understands and knows how to map to
+        # any provider (via BaseOpenAIProvider._convert_completion_params). Popped
+        # unconditionally so exactly one spelling reaches the provider call, whether
+        # the caller sent a value or an explicit null.
+        fields.pop("max_completion_tokens", None)
+        if output_cap is not None:
+            fields["max_tokens"] = output_cap
+        return fields
+
+    request_fields = tool_ctx.build_request_fields(_request_fields)
 
     # ------------------------------------------------------------------
     # Streaming path: in hybrid mode, iterate `route.attempts` before any

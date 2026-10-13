@@ -9,8 +9,16 @@ import pytest
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.tools_exceptions import WebToolDeclarationError
 from gateway.models.tools import CodeExecutor
-from gateway.services.tools import Dialect, WebClaims, claim_web_declarations, extract_web_tools
-from gateway.services.tools._web_admission import claims_provider_web_fetch
+from gateway.services.tools import (
+    WEB_FETCH_TOOL_NAME,
+    WEB_SEARCH_TOOL_NAME,
+    Dialect,
+    WebClaims,
+    decide_candidate_tools,
+    extract_web_tools,
+    read_web_declarations,
+    validate_web_declarations,
+)
 from gateway.services.tools._web_declarations import (
     parse_web_fetch_header,
     provider_runs_web_fetch_natively,
@@ -39,16 +47,28 @@ def test_only_anthropics_dated_keyword_on_messages_is_native(
     assert provider_runs_web_fetch_natively(entry, provider=provider, dialect=dialect) is native
 
 
-def _claims(
+def _claimed(
     *,
     requested: CodeExecutor | None,
     providers: list[str | None],
     fetch_enabled: bool = True,
     entry: dict[str, Any] | None = ANTHROPIC_FETCH,
-) -> bool:
-    return claims_provider_web_fetch(
-        entry, requested=requested, fetch_enabled=fetch_enabled, providers=providers, dialect=Dialect.MESSAGES
+) -> list[bool]:
+    """Whether Otari runs the fetch on each candidate in ``providers``, head first."""
+    declarations = read_web_declarations(
+        [entry] if entry is not None else [],
+        web_search_header=None,
+        web_fetch_header=requested.value if requested is not None else None,
+        config=GatewayConfig(web_fetch_enabled=fetch_enabled),
+        uniform=False,
     )
+    decided = decide_candidate_tools(declarations, providers=providers, dialect=Dialect.MESSAGES)
+    return [WEB_FETCH_TOOL_NAME in candidate.claimed for candidate in decided]
+
+
+def _claims(*, providers: list[str | None], **kwargs: Any) -> bool:
+    """Whether Otari runs the fetch on any of ``providers``."""
+    return any(_claimed(providers=providers, **kwargs))
 
 
 @pytest.mark.parametrize("provider", ["anthropic", "gemini"])
@@ -59,17 +79,16 @@ def test_without_the_header_nothing_is_claimed(provider: str) -> None:
 @pytest.mark.parametrize(
     ("providers", "claimed"),
     [
-        (["anthropic"], False),
-        (["anthropic", "anthropic"], False),
-        (["gemini"], True),
-        (["anthropic", "gemini"], True),
-        ([None], True),
-        ([], True),
+        (["anthropic"], [False]),
+        (["anthropic", "anthropic"], [False, False]),
+        (["gemini"], [True]),
+        (["anthropic", "gemini"], [False, True]),
+        ([None], [True]),
     ],
-    ids=["anthropic", "all-anthropic", "non-anthropic", "non-anthropic-fallback", "unknown-provider", "unknown-chain"],
+    ids=["anthropic", "all-anthropic", "non-anthropic", "non-anthropic-fallback", "unknown-provider"],
 )
-def test_auto_claims_unless_every_candidate_runs_the_fetch(providers: list[str | None], claimed: bool) -> None:
-    assert _claims(requested=CodeExecutor.AUTO, providers=providers) is claimed
+def test_auto_decides_each_candidate_on_its_own(providers: list[str | None], claimed: list[bool]) -> None:
+    assert _claimed(requested=CodeExecutor.AUTO, providers=providers) == claimed
 
 
 def test_otari_claims_even_anthropics_own_fetch() -> None:
@@ -107,14 +126,11 @@ def _config() -> GatewayConfig:
 
 
 def _claim(tools: list[dict[str, Any]], *, fetch_header: str | None, provider: str = "gemini") -> WebClaims:
-    return claim_web_declarations(
-        tools,
-        web_search_header=None,
-        web_fetch_header=fetch_header,
-        config=_config(),
-        providers=[provider],
-        dialect=Dialect.MESSAGES,
+    declarations = read_web_declarations(
+        tools, web_search_header=None, web_fetch_header=fetch_header, config=_config(), uniform=False
     )
+    claimed = decide_candidate_tools(declarations, providers=[provider], dialect=Dialect.MESSAGES)[0].claimed
+    return WebClaims(search=WEB_SEARCH_TOOL_NAME in claimed, fetch=WEB_FETCH_TOOL_NAME in claimed)
 
 
 def test_the_fetch_header_does_not_claim_a_search_keyword() -> None:
@@ -124,17 +140,17 @@ def test_the_fetch_header_does_not_claim_a_search_keyword() -> None:
 
 def test_a_claimed_keyword_beside_otari_web_fetch_is_a_duplicate() -> None:
     with pytest.raises(WebToolDeclarationError, match="at most once"):
-        _claim([dict(ANTHROPIC_FETCH), {"type": "otari_web_fetch"}], fetch_header="auto")
+        validate_web_declarations([dict(ANTHROPIC_FETCH), {"type": "otari_web_fetch"}], claims=WebClaims(fetch=True))
 
 
 def test_an_unclaimed_keyword_beside_otari_web_fetch_is_not_a_duplicate() -> None:
-    assert _claim([dict(ANTHROPIC_FETCH), {"type": "otari_web_fetch"}], fetch_header=None) == WebClaims()
+    validate_web_declarations([dict(ANTHROPIC_FETCH), {"type": "otari_web_fetch"}], claims=WebClaims())
 
 
 def test_a_claimed_keyword_reserves_the_function_name() -> None:
     caller_function = {"type": "function", "function": {"name": "web_fetch"}}
     with pytest.raises(WebToolDeclarationError, match="reserved"):
-        _claim([dict(ANTHROPIC_FETCH), caller_function], fetch_header="auto")
+        validate_web_declarations([dict(ANTHROPIC_FETCH), caller_function], claims=WebClaims(fetch=True))
 
 
 def test_a_claimed_keyword_is_taken_out_of_the_forwarded_tools() -> None:
@@ -143,9 +159,10 @@ def test_a_claimed_keyword_is_taken_out_of_the_forwarded_tools() -> None:
 
     web = extract_web_tools([entry, other], config=_config(), claims=WebClaims(fetch=True))
 
-    assert web.fetch_tool_entry is entry
-    assert entry["allowed_domains"] == ["docs.example.com"]
+    assert web.fetch_tool_entry == {**ANTHROPIC_FETCH, "allowed_domains": ["docs.example.com"]}
     assert web.remaining_user_tools == [other]
+    # A copy: another candidate of the same request may forward the caller's own entry.
+    assert entry["allowed_domains"] == ["Docs.Example.com."]
 
 
 def test_an_unclaimed_keyword_is_left_for_the_provider() -> None:

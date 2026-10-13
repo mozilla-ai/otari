@@ -20,15 +20,17 @@ from gateway.api.routes._normalize import provider_container_requested, sandbox_
 from gateway.core.config import GatewayConfig
 from gateway.exceptions.tools_exceptions import CodeExecutionDeclarationError, CodeExecutionRefusedError
 from gateway.models.tools import CodeExecutor, ResolvedCodeExecutionPolicy
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
 from gateway.services.tool_settings_service import get_field_options, validate_value
 from gateway.services.tools import (
     CODE_EXECUTION_HEADER,
-    AdmittedCodeExecution,
+    DeclaredCodeExecution,
     Dialect,
     WorkspaceCodeExecutionPolicyUpdate,
-    admit_code_execution,
     code_execution_declaration_forms,
+    decide_candidate_tools,
     decide_code_executor,
+    declare_code_execution,
     extract_code_execution_tool,
     first_provider_code_execution_tool,
     native_code_execution_dialect,
@@ -409,29 +411,34 @@ def test_a_header_outside_the_vocabulary_decides_nothing() -> None:
 # --- admission, per candidate ------------------------------------------------------------------
 
 
-async def _admit(
+async def _declare(
     tools: list[dict[str, Any]],
     *,
-    providers: Sequence[str | None],
     policy: ResolvedCodeExecutionPolicy | None = None,
     container_id: object = None,
-    per_candidate: bool = True,
-) -> AdmittedCodeExecution:
+    sandbox: bool = True,
+    header: str | None = None,
+) -> DeclaredCodeExecution:
     async def _policy() -> ResolvedCodeExecutionPolicy | None:
         return policy
 
-    return await admit_code_execution(
+    return await declare_code_execution(
         tools,
         container_id=container_id,
-        code_execution_header=None,
-        config=GatewayConfig(sandbox_url="http://sandbox:8080"),
-        providers=providers,
-        dialect=Dialect.MESSAGES,
+        code_execution_header=header,
+        config=GatewayConfig(sandbox_url="http://sandbox:8080" if sandbox else None),
         resolve_policy=_policy,
         container_registry=None,
         mcp_servers_declared=False,
-        per_candidate=per_candidate,
     )
+
+
+def _claims(declared: DeclaredCodeExecution, providers: Sequence[str | None], *, uniform: bool = False) -> list[bool]:
+    declaration = declared.provider_declaration(uniform=uniform)
+    if declaration is None:
+        return [False for _ in providers]
+    decided = decide_candidate_tools([declaration], providers=providers, dialect=Dialect.MESSAGES)
+    return [CODE_EXECUTION_TOOL_NAME in candidate.claimed for candidate in decided]
 
 
 def _disabled() -> ResolvedCodeExecutionPolicy:
@@ -441,66 +448,69 @@ def _disabled() -> ResolvedCodeExecutionPolicy:
 
 
 @pytest.mark.asyncio
-async def test_a_split_admits_the_head_and_the_other_candidates_each_their_own_way() -> None:
+async def test_each_way_of_running_the_keyword_is_admitted_on_its_own() -> None:
     tools = [dict(ANTHROPIC_DATED)]
+    declared = await _declare(tools)
+    assert _claims(declared, ["anthropic", "vertexai"]) == [False, True]
 
-    admitted = await _admit(tools, providers=["anthropic", "vertexai"])
+    native = await declared.admit(claimed=False, beside_sandbox=True)
+    sandboxed = await declared.admit(claimed=True, beside_sandbox=True)
 
-    assert admitted.executor is CodeExecutor.PROVIDER
-    assert not admitted.use_sandbox
-    assert admitted.tools_after_sandbox == tools
-    assert admitted.split is not None
-    other = admitted.split.other
-    assert isinstance(other, AdmittedCodeExecution)
-    assert other.use_sandbox
-    assert other.tools_after_sandbox is None
-    # The head forwards the caller's own entry, so the sandbox's is a copy of it.
-    assert other.tool_entry == ANTHROPIC_DATED
-    assert other.tool_entry is not tools[0]
-
-
-@pytest.mark.asyncio
-async def test_a_refusal_of_the_other_way_is_kept_for_its_candidates_alone() -> None:
-    admitted = await _admit([ANTHROPIC_DATED], providers=["anthropic", "vertexai"], policy=_disabled())
-
-    assert admitted.executor is CodeExecutor.PROVIDER
-    assert admitted.split is not None
-    assert isinstance(admitted.split.other, CodeExecutionRefusedError)
+    assert native.executor is CodeExecutor.PROVIDER
+    assert not native.use_sandbox
+    assert native.tools_after_sandbox == tools
+    assert sandboxed.use_sandbox
+    assert sandboxed.tools_after_sandbox is None
+    # The native attempt forwards the caller's own entry, so the sandbox's is a copy of it.
+    assert sandboxed.tool_entry == ANTHROPIC_DATED
+    assert sandboxed.tool_entry is not tools[0]
 
 
 @pytest.mark.asyncio
-async def test_a_refusal_of_the_heads_way_refuses_the_request() -> None:
+async def test_a_refusal_of_one_way_leaves_the_other_admitted() -> None:
+    declared = await _declare([ANTHROPIC_DATED], policy=_disabled())
+
+    native = await declared.admit(claimed=False, beside_sandbox=True)
+    assert native.executor is CodeExecutor.PROVIDER
     with pytest.raises(CodeExecutionRefusedError):
-        await _admit([ANTHROPIC_DATED], providers=["vertexai", "anthropic"], policy=_disabled())
+        await declared.admit(claimed=True, beside_sandbox=True)
 
 
 @pytest.mark.asyncio
-async def test_otaris_auto_container_is_left_to_a_split_and_refused_without_one() -> None:
-    admitted = await _admit([ANTHROPIC_DATED], providers=["anthropic", "vertexai"], container_id="auto")
-    assert admitted.split is not None
-    assert isinstance(admitted.split.other, AdmittedCodeExecution)
+async def test_otaris_auto_container_is_left_out_beside_the_sandbox_and_refused_without_it() -> None:
+    declared = await _declare([ANTHROPIC_DATED], container_id="auto")
+
+    assert not (await declared.admit(claimed=False, beside_sandbox=True)).use_sandbox
+    with pytest.raises(CodeExecutionDeclarationError):
+        await declared.admit(claimed=False, beside_sandbox=False)
+
+
+@pytest.mark.asyncio
+async def test_uniform_or_beside_the_explicit_type_every_candidate_runs_alike() -> None:
+    hybrid = await _declare([ANTHROPIC_DATED])
+    assert _claims(hybrid, ["anthropic", "vertexai"], uniform=True) == [True, True]
+
+    explicit = await _declare([{"type": "otari_code_execution"}, ANTHROPIC_DATED])
+    assert _claims(explicit, ["anthropic", "vertexai"]) == [True, True]
+    assert (await explicit.admit(claimed=True, beside_sandbox=True)).use_sandbox
+
+
+@pytest.mark.asyncio
+async def test_candidates_that_agree_are_decided_alike() -> None:
+    declared = await _declare([ANTHROPIC_DATED])
+
+    assert _claims(declared, ["anthropic", "anthropic"]) == [False, False]
+    assert _claims(declared, ["vertexai", "bedrock"]) == [True, True]
+
+
+@pytest.mark.asyncio
+async def test_without_a_sandbox_nothing_is_claimed_and_nothing_runs_here() -> None:
+    declared = await _declare([ANTHROPIC_DATED], sandbox=False)
+
+    assert _claims(declared, ["anthropic", "vertexai"]) == [False, False]
+    admitted = await declared.admit(claimed=False, beside_sandbox=False)
+    assert admitted.executor is None
+    assert not admitted.use_sandbox
 
     with pytest.raises(CodeExecutionDeclarationError):
-        await _admit([ANTHROPIC_DATED], providers=["anthropic", "anthropic"], container_id="auto")
-
-
-@pytest.mark.asyncio
-async def test_without_per_candidate_or_beside_the_explicit_type_every_candidate_runs_alike() -> None:
-    hybrid = await _admit([ANTHROPIC_DATED], providers=["anthropic", "vertexai"], per_candidate=False)
-    assert hybrid.split is None
-    assert hybrid.use_sandbox
-
-    explicit = await _admit([{"type": "otari_code_execution"}, ANTHROPIC_DATED], providers=["anthropic", "vertexai"])
-    assert explicit.split is None
-    assert explicit.use_sandbox
-
-
-@pytest.mark.asyncio
-async def test_candidates_that_agree_are_not_split() -> None:
-    native = await _admit([ANTHROPIC_DATED], providers=["anthropic", "anthropic"])
-    assert native.split is None
-    assert not native.use_sandbox
-
-    sandboxed = await _admit([ANTHROPIC_DATED], providers=["vertexai", "bedrock"])
-    assert sandboxed.split is None
-    assert sandboxed.use_sandbox
+        await _declare([ANTHROPIC_DATED], sandbox=False, header="otari")

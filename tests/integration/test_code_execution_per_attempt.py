@@ -301,6 +301,50 @@ def test_a_sandbox_refusal_skips_only_the_fallback_that_needs_it(
     assert (skipped[0].error_message or "").startswith("Skipped: ")
 
 
+def test_a_head_whose_sandbox_is_refused_is_skipped_for_a_fallback_that_runs_the_code_itself(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    workspace_id = client.get(f"{API_ROOT}/workspaces", headers=master_key_header).json()["data"][0]["id"]
+    stored = client.put(
+        f"{API_ROOT}/workspaces/{workspace_id}/code-execution-policy",
+        json={"enabled": False},
+        headers=master_key_header,
+    )
+    assert stored.status_code == 200, stored.text
+
+    response, seen = _post_messages(client, api_key_header, _messages_body("vertex-then-claude"))
+
+    assert response.status_code == 200, response.text
+    assert response.json()["content"][0]["text"] == "via-provider"
+    assert seen.loop_calls == []
+    assert [seen.tool_types(call) for call in seen.provider_calls] == [{"code_execution_20250825"}]
+    skipped = [row for row in _rows(db_session) if row.status == "absorbed" and row.provider == "vertexai"]
+    assert len(skipped) == 1
+    assert (skipped[0].error_message or "").startswith("Skipped: ")
+
+
+def test_a_request_none_of_whose_candidates_can_run_the_code_is_refused(
+    client: TestClient, api_key_header: dict[str, str], master_key_header: dict[str, str]
+) -> None:
+    workspace_id = client.get(f"{API_ROOT}/workspaces", headers=master_key_header).json()["data"][0]["id"]
+    stored = client.put(
+        f"{API_ROOT}/workspaces/{workspace_id}/code-execution-policy",
+        json={"enabled": False},
+        headers=master_key_header,
+    )
+    assert stored.status_code == 200, stored.text
+
+    response, seen = _post_messages(client, {**api_key_header, _HEADER: "otari"}, _messages_body("claude-then-vertex"))
+
+    assert response.status_code == 403, response.text
+    assert "not enabled" in response.json()["detail"]["error"]["message"]
+    assert seen.provider_calls == []
+    assert seen.loop_calls == []
+
+
 def test_a_plan_whose_candidates_all_run_the_code_never_uses_the_sandbox(
     client: TestClient, api_key_header: dict[str, str]
 ) -> None:
