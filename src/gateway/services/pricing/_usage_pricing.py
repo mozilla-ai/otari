@@ -174,9 +174,13 @@ def _warn_legacy(rate: ModelPricing, meter: str) -> None:
     if key in _LEGACY_WARNED:
         return
     _LEGACY_WARNED.add(key)
-    fix = "images" if meter == _IMAGES else "requests"
+    if meter == _IMAGES:
+        # An images rate is per million images, where this one is read as raw USD per image.
+        fix = "set its unit to images and multiply its input price by 1,000,000"
+    else:
+        fix = "set its unit to requests, keeping its price"
     logger.warning(
-        "Pricing %s is a token rate read per %s; set its unit to %s, as a later release reads it strictly",
+        "Pricing %s is a token rate read per %s; %s, as a later release reads it strictly",
         rate.model_key,
         "image" if meter == _IMAGES else "request",
         fix,

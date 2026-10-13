@@ -21,8 +21,8 @@ export function pricingUnitOf(value: string | null | undefined): PricingUnit {
 
 // The unit a rate for a request on each pass-through endpoint is most likely in.
 // A rate's unit decides what it bills, and audio and moderations report no
-// tokens, so a token rate there would bill nothing. Every other endpoint is
-// priced by its tokens.
+// tokens, so a token rate there is read per request only until the gateway
+// reads rates strictly. Every other endpoint is priced by its tokens.
 const ENDPOINT_UNITS: Readonly<Record<string, PricingUnit>> = {
   "/v1/rerank": "requests",
   "/v1/images/generations": "images",

@@ -138,7 +138,9 @@ per million, which is how every rate travels on the wire. The model lists name
 such a rate by its unit, for example "$0.002 per request". The same choice is on
 Activity's "Price this model", which opens per request for a rerank, audio or
 moderation request and per image for an image generation. The unit decides what
-a rate bills: a token rate on an audio or moderation request bills nothing.
+a rate bills. A token rate on an audio or moderation request is still read per
+request for now and logs a warning; a later release reads it strictly, as
+tokens, which those requests do not report, so price them per request.
 
 Exact page names and availability can change with deployment mode and installed
 extensions. The running dashboard is the source of truth.

@@ -11730,7 +11730,7 @@
             "title": "Effective To"
           },
           "input_price_per_million": {
-            "description": "Price per 1M input tokens",
+            "description": "Price per 1M of the rate's unit: input tokens, requests or images",
             "minimum": 0.0,
             "title": "Input Price Per Million",
             "type": "number"
@@ -11744,7 +11744,7 @@
             "type": "string"
           },
           "output_price_per_million": {
-            "description": "Price per 1M output tokens",
+            "description": "Price per 1M output tokens; unused by a rate in requests or images",
             "minimum": 0.0,
             "title": "Output Price Per Million",
             "type": "number"
@@ -11962,13 +11962,13 @@
             "title": "Effective To"
           },
           "input_price_per_million": {
-            "description": "Price per 1M input tokens",
+            "description": "Price per 1M of the rate's unit: input tokens, requests or images",
             "minimum": 0.0,
             "title": "Input Price Per Million",
             "type": "number"
           },
           "output_price_per_million": {
-            "description": "Price per 1M output tokens",
+            "description": "Price per 1M output tokens; unused by a rate in requests or images",
             "minimum": 0.0,
             "title": "Output Price Per Million",
             "type": "number"
@@ -16945,7 +16945,7 @@
             "title": "Effective At"
           },
           "input_price_per_million": {
-            "description": "Price per 1M input tokens",
+            "description": "Price per 1M of the rate's unit: input tokens, requests or images",
             "minimum": 0.0,
             "title": "Input Price Per Million",
             "type": "number"
@@ -16956,7 +16956,7 @@
             "type": "string"
           },
           "output_price_per_million": {
-            "description": "Price per 1M output tokens",
+            "description": "Price per 1M output tokens; unused by a rate in requests or images",
             "minimum": 0.0,
             "title": "Output Price Per Million",
             "type": "number"

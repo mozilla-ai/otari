@@ -155,8 +155,8 @@ def test_the_legacy_reading_warns_once_per_model_and_meter(caplog: pytest.LogCap
 
     warnings = [record.getMessage() for record in caplog.records if "legacy:warned-once" in record.getMessage()]
     assert len(warnings) == 2
-    assert "set its unit to images" in warnings[0]
-    assert "set its unit to requests" in warnings[1]
+    assert "set its unit to images and multiply its input price by 1,000,000" in warnings[0]
+    assert "set its unit to requests, keeping its price" in warnings[1]
 
 
 def test_the_strict_reading_never_warns(caplog: pytest.LogCaptureFixture) -> None:

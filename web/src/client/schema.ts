@@ -11623,7 +11623,7 @@ export interface components {
             effective_to?: string | null;
             /**
              * Input Price Per Million
-             * @description Price per 1M input tokens
+             * @description Price per 1M of the rate's unit: input tokens, requests or images
              */
             input_price_per_million: number;
             /**
@@ -11633,7 +11633,7 @@ export interface components {
             model_key: string;
             /**
              * Output Price Per Million
-             * @description Price per 1M output tokens
+             * @description Price per 1M output tokens; unused by a rate in requests or images
              */
             output_price_per_million: number;
             /**
@@ -11749,12 +11749,12 @@ export interface components {
             effective_to?: string | null;
             /**
              * Input Price Per Million
-             * @description Price per 1M input tokens
+             * @description Price per 1M of the rate's unit: input tokens, requests or images
              */
             input_price_per_million: number;
             /**
              * Output Price Per Million
-             * @description Price per 1M output tokens
+             * @description Price per 1M output tokens; unused by a rate in requests or images
              */
             output_price_per_million: number;
             /**
@@ -14100,7 +14100,7 @@ export interface components {
             effective_at?: string | null;
             /**
              * Input Price Per Million
-             * @description Price per 1M input tokens
+             * @description Price per 1M of the rate's unit: input tokens, requests or images
              */
             input_price_per_million: number;
             /**
@@ -14110,7 +14110,7 @@ export interface components {
             model_key: string;
             /**
              * Output Price Per Million
-             * @description Price per 1M output tokens
+             * @description Price per 1M output tokens; unused by a rate in requests or images
              */
             output_price_per_million: number;
             /**
