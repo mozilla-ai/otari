@@ -153,6 +153,62 @@ def test_missing_pricing_refusal_carries_its_code_on_every_route(
     assert resp.headers["Otari-Error-Code"] == "pricing_required"
 
 
+_COMPLETION_BODIES = [
+    ("chat/completions", {"messages": _MESSAGES}),
+    # The Messages dialect names the user in its own metadata field.
+    ("messages", {"messages": _MESSAGES, "max_tokens": 16, "metadata": {"user_id": "priced-user"}}),
+    ("responses", {"input": "hi"}),
+]
+
+
+@pytest.mark.parametrize(("path", "body"), _COMPLETION_BODIES)
+def test_known_unpriced_model_is_pricing_required_on_every_completion_route(
+    strict_pricing_client: TestClient, path: str, body: dict[str, Any]
+) -> None:
+    """A model that resolves but has no price is still refused as unpriced."""
+    c = strict_pricing_client
+    c.post(f"{API_ROOT}/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
+    resp = c.post(
+        f"{API_ROOT}/{path}", json={**body, "model": "openai:gpt-4o", "user": "priced-user"}, headers=_MASTER_HEADER
+    )
+    assert resp.status_code == 402, resp.text
+    assert resp.headers["Otari-Error-Code"] == "pricing_required"
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        *_COMPLETION_BODIES,
+        ("embeddings", {"input": "hi"}),
+        ("rerank", {"query": "q", "documents": ["a", "b"]}),
+        ("images/generations", {"prompt": "a cat"}),
+    ],
+)
+@pytest.mark.parametrize("model", ["no-such-model", "nosuchprovider:some-model"])
+def test_unresolvable_model_is_invalid_model_not_pricing_required(
+    strict_pricing_client: TestClient, path: str, body: dict[str, Any], model: str
+) -> None:
+    """A model nothing resolves is invalid_model even with require_pricing on.
+
+    It has no price either, so the pricing gate would otherwise answer first
+    with a 402 that sends the caller to price a model that does not exist. The
+    refusal still leaves its row.
+    """
+    c = strict_pricing_client
+    c.post(f"{API_ROOT}/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
+    resp = c.post(f"{API_ROOT}/{path}", json={**body, "model": model, "user": "priced-user"}, headers=_MASTER_HEADER)
+    assert resp.status_code == 400, resp.text
+    assert resp.headers["Otari-Error-Code"] == "invalid_model"
+    assert "Unknown or unsupported model" in resp.text
+
+    rows = c.get(f"{API_ROOT}/usage", params={"status": "error"}, headers=_MASTER_HEADER).json()
+    assert len(rows) == 1
+    assert rows[0]["model"] == model
+    assert rows[0]["provider"] is None
+    assert rows[0]["status_code"] == 400
+    assert rows[0]["cost"] is None
+
+
 def test_budget_exempt_key_writes_no_pricing_rejection_row(strict_pricing_client: TestClient) -> None:
     """A budget-exempt key skips the gate, so no missing-pricing row is written.
 

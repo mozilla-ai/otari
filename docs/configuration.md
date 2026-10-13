@@ -520,7 +520,9 @@ rejected instead of bypassing the budget. The 402 says what to do: with
 misspelled name, so it points at `GET /api/v1/models` and at adding a price;
 with it off, it offers both adding a price and turning the fallback on. A model
 whose provider has no credential at all is refused as `provider_not_configured`
-instead, since pricing it would not make it servable.
+instead, since pricing it would not make it servable, and a selector nothing
+resolves (no configured provider, alias, policy or catalog id) as `invalid_model`,
+since there is no model to price.
 
 With `require_pricing: false`, such a request is served, its model tokens carry
 no cost, and its response carries no inline `cost_usd`. The usage row records no
