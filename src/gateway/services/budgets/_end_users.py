@@ -17,7 +17,7 @@ from gateway.models.api_keys import APIKey
 from gateway.models.budgets import Budget
 from gateway.models.users import User
 from gateway.repositories.budgets import BudgetRepositories
-from gateway.schemas.budgets import EndUserPublic
+from gateway.schemas.budgets import EndUserBudgetPublic, EndUserPublic
 from gateway.services.budgets._periods import budget_window
 
 # Long enough for an email address or an opaque id, short enough that a caller
@@ -115,6 +115,38 @@ class _EndUsers:
         if blocked is not None:
             user.blocked = blocked
         return EndUserPublic.from_model(user)
+
+    async def page(
+        self, api_key: APIKey, *, budget_id: str | None, blocked: bool | None, skip: int, limit: int
+    ) -> list[EndUserPublic]:
+        """A page of the key owner's end users."""
+        _require_service_key(api_key)
+        users = await self._repositories.end_users.page(
+            str(api_key.user_id), budget_id=budget_id, blocked=blocked, skip=skip, limit=limit
+        )
+        return [EndUserPublic.from_model(user) for user in users]
+
+    async def count(self, api_key: APIKey, *, budget_id: str | None, blocked: bool | None) -> int:
+        """How many of the key owner's end users ``page`` lists across every page."""
+        _require_service_key(api_key)
+        return await self._repositories.end_users.count_matching(
+            str(api_key.user_id), budget_id=budget_id, blocked=blocked
+        )
+
+    async def budgets(self, api_key: APIKey) -> list[EndUserBudgetPublic]:
+        """The budgets the key may assign, each with how many of its owner's end users are on it."""
+        _require_service_key(api_key)
+        budget_ids = api_key.assignable_end_user_budgets()
+        counts = await self._repositories.end_users.count_by_budget(str(api_key.user_id), budget_ids)
+        return [
+            EndUserBudgetPublic(
+                budget_id=budget_id,
+                is_default=budget_id == api_key.end_user_budget_id,
+                end_user_count=counts.get(budget_id, (0, 0))[0],
+                blocked_end_user_count=counts.get(budget_id, (0, 0))[1],
+            )
+            for budget_id in budget_ids
+        ]
 
     async def _available_owner(self, api_key: APIKey) -> str:
         """The key's user, refused when it is blocked or deleted, since its end users bill through it."""

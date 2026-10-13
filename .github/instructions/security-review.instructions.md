@@ -34,6 +34,9 @@ through the deployment's default workspace, but accepting a cookie here would
 let any signed-in organization member spend that default workspace's provider
 credentials and budget without holding a data-plane key.
 Read-only catalog routes use `verify_catalog_reader`.
+The routes a service key manages its own end users with (`api/routes/end_users.py`)
+use `verify_service_key`: no master key, no cookie, and every lookup scoped to the
+key's user, with a budget change limited to the key's `end_user_budget_ids`.
 
 The Playground's completion endpoint (`api/routes/playground.py`) is the single
 exception, and what makes it one is the work it does before the pipeline: it

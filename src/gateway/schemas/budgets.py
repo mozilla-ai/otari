@@ -227,6 +227,15 @@ class EndUserUpdate(BaseModel):
     )
 
 
+class EndUserBudgetPublic(BaseModel):
+    """A budget a service key may put its end users on, and how many of them are on it."""
+
+    budget_id: str
+    is_default: bool = Field(description="Whether a new end user starts here when its request names no budget")
+    end_user_count: int = Field(description="End users of the key's user on this budget, blocked ones included")
+    blocked_end_user_count: int
+
+
 class BudgetResetLogResponse(BaseModel):
     """Response model for one budget reset event (per user)."""
 
@@ -599,6 +608,7 @@ __all__ = [
     "BudgetResponse",
     "CreateBudgetRequest",
     "CreateScopedBudgetRequest",
+    "EndUserBudgetPublic",
     "EndUserPublic",
     "EndUserPut",
     "EndUserUpdate",

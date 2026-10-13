@@ -1136,6 +1136,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/end-user-budgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List End User Budgets
+         * @description List the budgets the calling service key may put its end users on, with how many end users each holds.
+         *
+         *     Requires a service key. The counts cover the end users of the key's user, blocked ones included and deleted
+         *     ones not.
+         */
+        get: operations["end-users-list_end_user_budgets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/end-users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List End Users
+         * @description List the end users of the calling service key, oldest first.
+         *
+         *     Requires a service key. End users belong to the key's user, so every service key of one user lists the same
+         *     end users. A deleted end user is not listed.
+         */
+        get: operations["end-users-list_end_users"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/end-users/{external_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get End User
+         * @description Get an end user of the calling service key by the id the service names it by.
+         *
+         *     Requires a service key. An id no end user of the key's user goes by answers 404.
+         */
+        get: operations["end-users-get_end_user"];
+        /**
+         * Put End User
+         * @description Put an end user of the calling service key on a budget from the key's list, creating it if needed.
+         *
+         *     Requires a service key. Answers 201 when the end user was created. An end user already on the budget keeps its
+         *     current period, so repeating the call changes nothing. A budget that is not on the key's ``end_user_budget_ids``
+         *     is refused with 403 and ``end_user_budget_not_allowed``.
+         */
+        put: operations["end-users-put_end_user"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update End User
+         * @description Block, unblock or move an end user of the calling service key.
+         *
+         *     Requires a service key. A move restarts the end user's period on the new budget but keeps what it has spent and
+         *     used so far. The budget must be on the key's ``end_user_budget_ids``, or the move is refused with 403 and
+         *     ``end_user_budget_not_allowed``.
+         */
+        patch: operations["end-users-update_end_user"];
+        trace?: never;
+    };
     "/api/v1/feedback": {
         parameters: {
             query?: never;
@@ -9148,6 +9232,26 @@ export interface components {
             prompt_tokens: number;
             /** Total Tokens */
             total_tokens: number;
+        };
+        /**
+         * EndUserBudgetPublic
+         * @description A budget a service key may put its end users on, and how many of them are on it.
+         */
+        EndUserBudgetPublic: {
+            /** Blocked End User Count */
+            blocked_end_user_count: number;
+            /** Budget Id */
+            budget_id: string;
+            /**
+             * End User Count
+             * @description End users of the key's user on this budget, blocked ones included
+             */
+            end_user_count: number;
+            /**
+             * Is Default
+             * @description Whether a new end user starts here when its request names no budget
+             */
+            is_default: boolean;
         };
         /**
          * EndUserPublic
@@ -18110,6 +18214,177 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EmbeddingResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "end-users-list_end_user_budgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserBudgetPublic"][];
+                };
+            };
+        };
+    };
+    "end-users-list_end_users": {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+                /** @description Only end users on this budget. */
+                budget_id?: string | null;
+                /** @description Only end users that are, or are not, blocked. */
+                blocked?: boolean | null;
+                /** @description Also count every matching end user, in the Otari-Total-Count response header. */
+                include_total?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserPublic"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "end-users-get_end_user": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The id the service names the end user by in a request's user field */
+                external_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "end-users-put_end_user": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The id the service names the end user by in a request's user field */
+                external_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EndUserPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserPublic"];
+                };
+            };
+            /** @description The end user was created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    "end-users-update_end_user": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The id the service names the end user by in a request's user field */
+                external_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EndUserUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EndUserPublic"];
                 };
             };
             /** @description Validation Error */

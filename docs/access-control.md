@@ -199,26 +199,52 @@ the declared settings back over changes made through the API; see
 
 ### Managing end users
 
-An end user is addressed by the key and the id the service named it by:
+A service manages its own end users with its service key, addressing each one
+by the id it names it by. It needs neither the master key nor its key's id:
 
 | Request | Does |
 |---|---|
-| `GET /api/v1/keys/{key_id}/end-users/{external_id}` | Reads the end user: its budget, counters and whether it is blocked |
-| `PUT /api/v1/keys/{key_id}/end-users/{external_id}` `{"budget_id": ...}` | Puts the end user on a budget, creating it first if it has not made a request yet (201) |
-| `PATCH /api/v1/keys/{key_id}/end-users/{external_id}` `{"blocked": true}` or `{"budget_id": ...}` | Blocks, unblocks or moves the end user |
+| `GET /api/v1/end-users` | Lists the end users, oldest first |
+| `GET /api/v1/end-users/{external_id}` | Reads the end user: its budget, counters and whether it is blocked |
+| `PUT /api/v1/end-users/{external_id}` `{"budget_id": ...}` | Puts the end user on a budget, creating it first if it has not made a request yet (201) |
+| `PATCH /api/v1/end-users/{external_id}` `{"blocked": true}` or `{"budget_id": ...}` | Blocks, unblocks or moves the end user |
+| `GET /api/v1/end-user-budgets` | Lists the budgets on the key's list, with how many end users are on each |
 
-A budget set this way must be on the key's list too. Moving an end user
-restarts its period on the new budget and applies that budget's per-minute
-limits, but keeps its spend, tokens and requests so far, as moving a user
-through `/api/v1/users` does: an end user that used up one budget can be over
-the next one's limits until that period resets. End users belong to the key's
-user, so every service key of one user reaches the same end users.
+```http
+PATCH /api/v1/end-users/fxa123:memories
+Authorization: Bearer <service key>
 
-To list end users, use `/api/v1/users`, where each one carries
-`parent_user_id` (the key's user) and `external_id`.
-`GET /api/v1/users?parent_user_id=...&external_id=...` filters on them, and
-`include_total=true` counts every match in the `Otari-Total-Count` header. The
-users API can also put an end user on any deployment budget, not only one on a
+{"budget_id": "end-user-budget-ai"}
+```
+
+These routes take only a service key: another API key is refused with 403,
+and the master key and a dashboard session do not authenticate them.
+`GET /api/v1/end-users` takes `skip` and `limit` (up to 1000), narrows on
+`budget_id` and `blocked`, and with `include_total=true` counts every match in
+the `Otari-Total-Count` header. Its list and the counts on
+`/api/v1/end-user-budgets` leave out deleted end users, and the counts include
+blocked ones, which `blocked_end_user_count` also gives on its own.
+
+A budget set this way must be on the key's list: any other is refused with 403
+and `end_user_budget_not_allowed`, so a key cannot put an end user on a budget
+it was not given. Moving an end user restarts its period on the new budget and
+applies that budget's per-minute limits, but keeps its spend, tokens and
+requests so far, as moving a user through `/api/v1/users` does: an end user
+that used up one budget can be over the next one's limits until that period
+resets.
+
+End users belong to the key's user, so every service key of one user reaches
+the same end users, and a key of another user reaches none of them: an id it
+does not own answers 404, as one that does not exist does. Give each service
+its own user to keep their end users apart.
+
+A deployment operator reaches any service key's end users through the same
+routes under the key, with the master key:
+`GET`, `PUT` and `PATCH /api/v1/keys/{key_id}/end-users/{external_id}`. A budget
+set there must be on that key's list too. The users API lists end users across
+keys, where each one carries `parent_user_id` (the key's user) and
+`external_id`: `GET /api/v1/users?parent_user_id=...&external_id=...` filters on
+them, and it can put an end user on any deployment budget, not only one on a
 key's list.
 
 ### Where end users apply

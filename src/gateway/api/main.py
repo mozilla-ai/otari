@@ -21,6 +21,7 @@ from gateway.api.routes import (
     chat,
     decisions,
     embeddings,
+    end_users,
     files,
     health,
     hooks,
@@ -203,6 +204,10 @@ _CORE_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(providers.catalog_router, Plane.CONTROL),
     RouterMount(providers.router, Plane.CONTROL),
     RouterMount(keys.router, Plane.CONTROL),
+    # A service key managing its own end users, rather than the operator gate
+    # ``keys.router`` holds over every key's.
+    RouterMount(end_users.router, Plane.CONTROL),
+    RouterMount(end_users.budgets_router, Plane.CONTROL),
     RouterMount(users.router, Plane.CONTROL),
     RouterMount(organizations.router, Plane.CONTROL),
     RouterMount(organization_budgets.budgets_router, Plane.CONTROL),

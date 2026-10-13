@@ -464,6 +464,26 @@ async def verify_api_key(
     return await _verify_and_update_api_key(db, token, _api_key_format(request, db))
 
 
+async def verify_service_key(api_key: Annotated[APIKey, Depends(verify_api_key)]) -> APIKey:
+    """Verify an API key that is a service key, for the routes where it manages its own end users.
+
+    Neither the master key nor a dashboard session passes: these routes are
+    scoped by the key they authenticate with, and either of those names no key.
+    Any other valid key is refused with 403, since it is authenticated but has
+    no end users to manage.
+    """
+    if not api_key.is_service_key or not api_key.user_id:
+        record_auth_failure("not_service_key")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint requires a service key.",
+        )
+    return api_key
+
+
+ServiceKey = Annotated[APIKey, Depends(verify_service_key)]
+
+
 async def verify_master_key(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],

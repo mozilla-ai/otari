@@ -96,6 +96,9 @@ dashboard session. It does not prove that the session may act deployment-wide.
   (`types/session_principal.py`). Adding a second such route means doing all
   three, not reusing the type.
 - Non-billable catalog reads use `verify_catalog_reader`.
+- A service key manages its own end users (`routes/end_users.py`) through
+  `verify_service_key`, which takes neither the master key nor a cookie, and
+  the budgets service scopes every lookup to the key's user.
 
 Tenant lookups include the tenant predicate and return 404 for a foreign ID.
 Client filters may narrow the server-derived scope and never widen it. A tenant
