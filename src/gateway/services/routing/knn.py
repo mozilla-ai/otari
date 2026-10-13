@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING
 from any_llm import aembedding
 from any_llm.exceptions import AnyLLMError
 from sqlalchemy import delete, func, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.database import create_session
@@ -195,24 +195,29 @@ class KnnRoutingMemory:
         if not prompt.strip() or not scores:
             return 0
         embedding = await self._embed(prompt)
-        async with create_session() as db:
-            db.add(
-                RoutingMemory(
-                    user_id=user_id,
-                    workspace_id=workspace_id,
-                    embedding_model=self.embedding_model,
-                    embedding=embedding,
-                    qualities={model: float(score) for model, score in scores.items()},
-                    task_id=task_id,
-                    label_source=label_source,
+        try:
+            async with create_session() as db:
+                db.add(
+                    RoutingMemory(
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        embedding_model=self.embedding_model,
+                        embedding=embedding,
+                        qualities={model: float(score) for model, score in scores.items()},
+                        task_id=task_id,
+                        label_source=label_source,
+                    )
                 )
-            )
-            try:
-                await db.commit()
-            except SQLAlchemyError:
-                await db.rollback()
-                raise
-        await self._evict_if_needed(user_id, workspace_id)
+                try:
+                    await db.commit()
+                except SQLAlchemyError:
+                    await db.rollback()
+                    raise
+            await self._evict_if_needed(user_id, workspace_id)
+        except TimeoutError as exc:
+            # A connect timeout arrives bare, the same type an embedding timeout
+            # has; raised as a database error so the caller can tell them apart.
+            raise OperationalError("database connection timed out", None, exc) from exc
         return 1
 
     # -- scoring -----------------------------------------------------------
