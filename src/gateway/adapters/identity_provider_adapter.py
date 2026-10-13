@@ -56,6 +56,10 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         NOTE: Concurrent sign-ins on one account are serialized on PostgreSQL only.
         On SQLite, the later of two concurrent sign-ins can overwrite the provider that the first recorded.
 
+        If ``open_signup`` is disabled, an account nobody has verified yet is signed in only while it has an
+        active membership or an invitation it can still accept. Revoking an invitation, letting it lapse or
+        removing the member leaves the account behind, and the signup form refuses to claim it for the same reason.
+
         Raises:
             OAuthEmailNotVerifiedError: If the provider returned no address, or one it did not verify.
             OAuthIdentityUnknownError: If no active account holds the address,
@@ -85,6 +89,12 @@ class DeploymentIdentityProviderAdapter(IdentityProviderPort):
         # The address is looked up again rather than compared here, so both lookups treat letter case alike.
         holder = await self._users.get_by_email(address)
         if holder is None or holder.id != identity.id:
+            raise OAuthIdentityUnknownError(provider)
+        if (
+            not self._open_signup
+            and identity.email_verified_at is None
+            and not await self._organizations.has_live_membership(identity.id)
+        ):
             raise OAuthIdentityUnknownError(provider)
 
         if identity.oauth_provider is None:

@@ -338,6 +338,108 @@ def test_an_address_nobody_put_on_the_roster_is_refused_rather_than_provisioned(
     assert SESSION_COOKIE_NAME not in response.cookies
 
 
+def _invite(client: TestClient, master_key_header: dict[str, str], *, email: str) -> dict[str, Any]:
+    response = client.post(
+        f"{API_ROOT}/organizations/me/member-invitations",
+        json={"email": email, "role": "member"},
+        headers=master_key_header,
+    )
+    assert response.status_code == 201, response.text
+    invitation: dict[str, Any] = response.json()
+    return invitation
+
+
+def test_an_invitee_signs_in_with_a_provider_before_accepting(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Closed signup still admits an address with an invitation it can accept, which then waits in its inbox."""
+    _invite(client, master_key_header, email="ada@example.com")
+    stub_exchange(monkeypatch)
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+
+    assert response.status_code == 200, response.text
+    pending = client.get(f"{API_ROOT}/organizations/me/pending-memberships")
+    assert pending.status_code == 200, pending.text
+    assert pending.json()["count"] == 1
+
+
+@pytest.mark.parametrize("ending", ["revoked", "removed"])
+def test_a_provider_cannot_claim_an_identity_the_roster_no_longer_holds(
+    client: TestClient,
+    db_session: Session,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+    ending: str,
+) -> None:
+    """Inviting or adding an address creates its identity, and ending that leaves the identity behind.
+
+    The signup form refuses to claim it where signup is closed, and a provider
+    sign-in is the same claim by another route.
+    """
+    if ending == "revoked":
+        invitation = _invite(client, master_key_header, email="ada@example.com")
+        revoked = client.delete(
+            f"{API_ROOT}/organizations/me/member-invitations/{invitation['invitation_id']}",
+            headers=master_key_header,
+        )
+        assert revoked.status_code == 200, revoked.text
+    else:
+        added = client.post(
+            f"{API_ROOT}/organizations/me/members",
+            json={"email": "ada@example.com", "role": "member"},
+            headers=master_key_header,
+        )
+        assert added.status_code == 201, added.text
+        removed = client.delete(
+            f"{API_ROOT}/organizations/me/members/{added.json()['organization_member_id']}",
+            headers=master_key_header,
+        )
+        assert removed.status_code == 200, removed.text
+    stub_exchange(monkeypatch)
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"})
+
+    assert response.status_code == 401
+    assert "not registered on this gateway" in response.json()["detail"]
+    assert SESSION_COOKIE_NAME not in response.cookies
+    identity = _identity(db_session, "ada@example.com")
+    db_session.refresh(identity)
+    assert identity.email_verified_at is None
+    assert identity.oauth_provider is None
+
+
+def test_a_removed_member_who_already_signed_in_with_a_provider_still_can(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The rule is about claiming an account, not signing in to one: a password sign-in is not refused here either."""
+    added = client.post(
+        f"{API_ROOT}/organizations/me/members",
+        json={"email": "ada@example.com", "role": "member"},
+        headers=master_key_header,
+    )
+    assert added.status_code == 201, added.text
+    stub_exchange(monkeypatch)
+    assert client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c", "state": "s"}).status_code == 200
+    client.cookies.clear()
+    removed = client.delete(
+        f"{API_ROOT}/organizations/me/members/{added.json()['organization_member_id']}",
+        headers=master_key_header,
+    )
+    assert removed.status_code == 200, removed.text
+
+    response = client.post(f"{API_ROOT}/auth/oauth/google/callback", json={"code": "c2", "state": "s"})
+
+    assert response.status_code == 200, response.text
+
+
 @pytest.fixture
 def signup_open(test_config: GatewayConfig, monkeypatch: pytest.MonkeyPatch) -> None:
     """Enable open_signup on the deployment that TestClient serves."""
