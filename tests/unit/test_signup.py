@@ -345,6 +345,80 @@ def test_closed_signup_creates_no_identity_for_an_unknown_address(tmp_path: Path
         assert _identity_count(tmp_path) == before
 
 
+def _invite(client: TestClient, *, email: str) -> dict[str, object]:
+    response = client.post(
+        f"{API_ROOT}/organizations/me/member-invitations",
+        json={"email": email, "role": "member"},
+        headers={"Otari-Key": MASTER_KEY},
+    )
+    assert response.status_code == 201, response.text
+    return response.json()  # type: ignore[no-any-return]
+
+
+def _lapse_invitations(tmp_path: Path) -> None:
+    """Put every invitation's deadline in the past without anyone presenting its token, as an unopened link."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'signup-test.db'}")
+    with engine.begin() as connection:
+        connection.execute(text("UPDATE invitation SET expires_at = '2000-01-01 00:00:00'"))
+    engine.dispose()
+
+
+def test_closed_signup_claims_an_identity_with_a_pending_invitation(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with _client(tmp_path) as client:
+        _invite(client, email="ada@example.com")
+
+        token = _captured_verification_link(caplog, client, email="ada@example.com")
+
+        assert client.post(f"{API_ROOT}/auth/verify-email", json={"token": token}).status_code == 200
+
+
+@pytest.mark.parametrize("ending", ["revoked", "lapsed", "removed"])
+def test_closed_signup_refuses_an_identity_the_roster_no_longer_holds(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, ending: str
+) -> None:
+    """Inviting or adding an address creates its identity, and ending that leaves the identity behind.
+
+    Claiming it would let somebody an admin revoked or removed sign in to a
+    deployment that keeps signup closed, and from there create an organization.
+    """
+    headers = {"Otari-Key": MASTER_KEY}
+    with _client(tmp_path) as client:
+        if ending == "removed":
+            added = client.post(
+                f"{API_ROOT}/organizations/me/members",
+                json={"email": "eve@example.com", "role": "member"},
+                headers=headers,
+            )
+            assert added.status_code == 201, added.text
+            removed = client.delete(
+                f"{API_ROOT}/organizations/me/members/{added.json()['organization_member_id']}", headers=headers
+            )
+            assert removed.status_code == 200, removed.text
+        else:
+            invitation = _invite(client, email="eve@example.com")
+            if ending == "revoked":
+                revoked = client.delete(
+                    f"{API_ROOT}/organizations/me/member-invitations/{invitation['invitation_id']}", headers=headers
+                )
+                assert revoked.status_code == 200, revoked.text
+            else:
+                _lapse_invitations(tmp_path)
+
+        gateway_logger.addHandler(caplog.handler)
+        caplog.set_level(logging.INFO, logger="gateway")
+        try:
+            response = _signup(client, email="eve@example.com")
+        finally:
+            gateway_logger.removeHandler(caplog.handler)
+
+        assert response.status_code == 200
+        assert response.json() == _signup(client, email="nobody@example.com").json()
+        assert "mail:console" not in caplog.text
+        assert _credentials(tmp_path, email="eve@example.com") == (None, None)
+
+
 def test_open_signup_registers_an_unknown_address_and_verification_lets_it_sign_in(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:

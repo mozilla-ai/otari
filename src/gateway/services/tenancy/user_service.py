@@ -289,6 +289,8 @@ async def create_user_for_signup(
     A refusal writes nothing and mails nothing, so it does not reveal which addresses hold an account.
     An address that has a password, an address that is already verified, and a deactivated identity are refused.
     An unknown address is registered where ``open_signup`` is on, and refused otherwise.
+    Where it is off, an identity with no active membership and no invitation it can still accept is refused too:
+    revoking, declining or outliving an invitation leaves the identity behind, and the roster no longer holds it.
     A verified address is refused because a password set on it would sign in with no proof of the mailbox.
     A deactivated identity is refused so that no password or verification token waits on it for a reactivation.
     ``password`` is validated before the lookup, so a policy violation answers the same for every address.
@@ -311,9 +313,18 @@ async def create_user_for_signup(
     validate_new_password(password)
 
     address = validated_email(email)
+    organizations = OrganizationService(
+        db,
+        membership_listener=membership_listener,
+        uow=uow,
+        workspace_listener=workspace_listener,
+    )
     identity = await UserRepository(db).get_by_email(address)
     if identity is not None and (
-        identity.hashed_password is not None or identity.email_verified_at is not None or not identity.is_active
+        identity.hashed_password is not None
+        or identity.email_verified_at is not None
+        or not identity.is_active
+        or (not config.open_signup and not await organizations.has_live_membership(identity.id))
     ):
         # Pays the same bcrypt cost the claim path pays hashing a fresh
         # password, so the two cases are closer in wall-clock time than a bare
@@ -334,12 +345,7 @@ async def create_user_for_signup(
                     await verify_absent_password_async(password)
                     return None
                 # The registration, the password and the verification token below are committed together.
-                registration = await OrganizationService(
-                    db,
-                    membership_listener=membership_listener,
-                    uow=uow,
-                    workspace_listener=workspace_listener,
-                ).provision_signup_tenancy(email=address, full_name=full_name)
+                registration = await organizations.provision_signup_tenancy(email=address, full_name=full_name)
                 if not registration.created:
                     # This answers like every other enumeration-safe refusal.
                     await verify_absent_password_async(password)

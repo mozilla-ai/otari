@@ -313,6 +313,19 @@ class OrganizationService:
         """Whether an identity is an active member of an organization."""
         return await self.members.get_active_by_organization_and_user(organization_id, user_id) is not None
 
+    async def has_live_membership(self, user_id: uuid.UUID) -> bool:
+        """Whether an identity is an active member anywhere, or holds an invitation it can still accept.
+
+        A revoked, declined or lapsed invitation leaves its identity behind, so
+        the identity existing is not the same as anyone still wanting it here.
+        """
+        if await self.members.get_first_active_for_user(user_id) is not None:
+            return True
+        _, pending = await self.invitations.get_live_pending_for_user_with_context(
+            user_id, now=datetime.now(UTC), limit=1
+        )
+        return pending > 0
+
     async def has_organization(self, organization_id: uuid.UUID) -> bool:
         """Return whether an organization with this ID exists."""
         return await self.organizations.get(organization_id) is not None
