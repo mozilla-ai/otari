@@ -7,7 +7,7 @@ import { formatCost, formatNumber } from "@/shared/helpers/format"
 
 import { formatDuration } from "./format"
 import { LevelChip } from "./LevelChip"
-import { TypeMark } from "./observationTypes"
+import { OBSERVATION_TYPES, TypeMark } from "./observationTypes"
 import { matchesSearch } from "./search"
 import { buildTree, flattenTreeOrder } from "./tree"
 import { observationCost, summarizeTrace, type Trace } from "./types"
@@ -110,7 +110,7 @@ export function TraceTreeView({
               type="button"
               role="option"
               aria-selected={selected}
-              aria-label={`${obs.type.charAt(0)}${obs.type.slice(1).toLowerCase()}, ${obs.name}, ${formatDuration(obs.endMs - obs.startMs)}`}
+              aria-label={`${OBSERVATION_TYPES[obs.type].label}, ${obs.name}, ${formatDuration(obs.endMs - obs.startMs)}`}
               onClick={() => onSelect(obs.id)}
               className={`flex min-h-11 w-full items-center gap-1 px-3 text-left outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-foreground ${selected ? "bg-primary-subtle" : "hover:bg-surface-alt"}`}
             >
@@ -199,7 +199,7 @@ export function TraceTreeView({
             <button
               type="button"
               className={ROW}
-              aria-label={`${obs.type.charAt(0)}${obs.type.slice(1).toLowerCase()}, ${obs.name}, ${formatDuration(obs.endMs - obs.startMs)}`}
+              aria-label={`${OBSERVATION_TYPES[obs.type].label}, ${obs.name}, ${formatDuration(obs.endMs - obs.startMs)}`}
               onClick={() => onSelect(obs.id)}
             >
               <span className="flex min-w-0 items-center gap-2">

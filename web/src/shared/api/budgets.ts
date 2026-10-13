@@ -111,6 +111,24 @@ export function useScopedBudgets(enabled = true) {
   })
 }
 
+// The ceiling on one API key's own spend, or null when the key has none. Other
+// ceilings can cap the same requests (its owner's budget, its workspace's), so
+// this is the key's own allowance and not the one that binds. Gated like the
+// list above, and keyed under it so a write to any ceiling refreshes it.
+export function useApiKeyCeiling(keyId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: [SCOPED_BUDGETS, "api_token", keyId],
+    queryFn: async () => {
+      const rows = await apiFetch<ScopedBudget[]>(
+        `/scoped-budgets?scope_type=api_token&scope_id=${encodeURIComponent(keyId ?? "")}`,
+      )
+      return rows[0] ?? null
+    },
+    staleTime: 60_000,
+    enabled: enabled && keyId !== null,
+  })
+}
+
 export function useCreateScopedBudget() {
   const queryClient = useQueryClient()
   return useMutation({

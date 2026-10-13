@@ -20,6 +20,7 @@ import {
   formatRelativeTime,
   formatTraceTimestamp,
 } from "./format"
+import { GatewayPanel } from "./GatewayPanel"
 import { type Format, IOBlock } from "./IOBlock"
 import { LogView } from "./LogView"
 import { NavHeader, type NavView } from "./NavHeader"
@@ -515,13 +516,15 @@ export function TracePeek({
             </Tab>
           ))}
         </TabRow>
-        <Segmented
-          size="sm"
-          label="Format"
-          options={FORMAT_OPTIONS}
-          value={format}
-          onChange={(next) => setFormat(next as Format)}
-        />
+        {observation || activeTab === "log" ? (
+          <Segmented
+            size="sm"
+            label="Format"
+            options={FORMAT_OPTIONS}
+            value={format}
+            onChange={(next) => setFormat(next as Format)}
+          />
+        ) : null}
       </div>
 
       <div ref={bodyRef} className="relative flex min-h-0 flex-1 overflow-auto">
@@ -597,12 +600,14 @@ export function TracePeek({
             <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-auto p-4 md:min-w-[360px]">
               {activeTab === "attributes" && observation ? (
                 <Attributes trace={trace} observation={observation} />
+              ) : !observation ? (
+                <GatewayPanel trace={trace} onSelect={setSelectedId} />
               ) : (
                 <PreviewBody
-                  input={observation ? observation.input : trace.input}
-                  output={observation ? observation.output : trace.output}
-                  statusMessage={observation?.statusMessage}
-                  level={observation?.level ?? "DEFAULT"}
+                  input={observation.input}
+                  output={observation.output}
+                  statusMessage={observation.statusMessage}
+                  level={observation.level}
                   format={format}
                 />
               )}

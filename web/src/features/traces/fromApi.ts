@@ -6,6 +6,14 @@ import type {
 } from "@/client"
 
 import {
+  failureLabel,
+  type GuardrailVerdict,
+  gatewayEvents,
+  guardrailProfile,
+  guardrailVerdict,
+  mcpServer,
+} from "./gateway"
+import {
   buildTraceTree,
   type SpanNode,
   sessionName,
@@ -24,6 +32,8 @@ const TYPE_BY_KIND: Record<string, ObservationType> = {
   llm: "GENERATION",
   tool: "TOOL",
   agent: "AGENT",
+  guardrail: "GUARDRAIL",
+  mcp_connect: "MCP",
 }
 
 const TURN_LEVEL: Record<TraceTurn["state"], ObservationLevel> = {
@@ -33,14 +43,41 @@ const TURN_LEVEL: Record<TraceTurn["state"], ObservationLevel> = {
   incomplete: "WARNING",
 }
 
-function spanLevel(span: TraceSpan): ObservationLevel {
+const GUARDRAIL_LEVEL: Record<GuardrailVerdict, ObservationLevel> = {
+  passed: "DEFAULT",
+  blocked: "ERROR",
+  flagged: "WARNING",
+  refused: "ERROR",
+  unchecked: "WARNING",
+}
+
+const GUARDRAIL_STATUS: Record<GuardrailVerdict, string | undefined> = {
+  passed: undefined,
+  blocked: "Flagged, and the request was refused.",
+  flagged: "Flagged in monitor mode. The request still went to the model.",
+  refused: "Could not run, and the request was refused.",
+  unchecked: "Could not run. The request went to the model unchecked.",
+}
+
+function spanLevel(
+  span: TraceSpan,
+  verdict: GuardrailVerdict | null,
+): ObservationLevel {
+  if (verdict) return GUARDRAIL_LEVEL[verdict]
   if (span.outcome !== "error") return "DEFAULT"
   return span.recovered ? "WARNING" : "ERROR"
 }
 
-function spanStatus(span: TraceSpan): string | undefined {
+function spanStatus(
+  span: TraceSpan,
+  verdict: GuardrailVerdict | null,
+): string | undefined {
+  if (verdict) return GUARDRAIL_STATUS[verdict]
   if (span.outcome !== "error") return undefined
-  const error = span.error_class ?? "error"
+  if (span.kind === "mcp_connect") {
+    return "Connecting to the server or listing its tools failed."
+  }
+  const error = failureLabel(span.error_class)
   return span.recovered ? `${error}, recovered by a fallback` : error
 }
 
@@ -50,6 +87,12 @@ function spanMetadata(span: TraceSpan): Record<string, string> {
   metadata.Origin = span.origin
   if (span.tool_type) metadata["Tool type"] = span.tool_type
   if (span.tool_call_id) metadata["Tool call ID"] = span.tool_call_id
+  if (span.kind === "guardrail") {
+    metadata.Profile = guardrailProfile(span) ?? "Unknown"
+  }
+  if (span.kind === "mcp_connect") {
+    metadata.Server = mcpServer(span) ?? "Unknown"
+  }
   if (span.request_id) metadata["Request ID"] = span.request_id
   // A client-run tool's start is inferred from the step before it.
   if (span.approximate) metadata.Timing = "Approximate"
@@ -107,24 +150,31 @@ export function toTrace(
       }
     }
 
-    const ids = new Set(detail.spans.map((span) => span.span_id))
+    const byId = new Map(detail.spans.map((span) => [span.span_id, span]))
     const visit = (node: SpanNode) => {
       const { span } = node
+      const verdict =
+        span.kind === "guardrail"
+          ? guardrailVerdict(
+              span,
+              span.parent_span_id ? byId.get(span.parent_span_id) : undefined,
+            )
+          : null
       const startMs = offset(span.start_time ?? span.end_time) ?? 0
       const endMs = offset(span.end_time) ?? startMs + (span.duration_ms ?? 0)
       observations.push({
         id: span.span_id,
         traceId: summary.trace_id,
         parentObservationId:
-          span.parent_span_id && ids.has(span.parent_span_id)
+          span.parent_span_id && byId.has(span.parent_span_id)
             ? span.parent_span_id
             : (turnOf.get(span.span_id) ?? null),
         type: TYPE_BY_KIND[span.kind] ?? "SPAN",
         name: spanLabel(span),
         startMs,
         endMs: Math.max(startMs, endMs),
-        level: spanLevel(span),
-        statusMessage: spanStatus(span),
+        level: spanLevel(span, verdict),
+        statusMessage: spanStatus(span, verdict),
         model: span.model ?? undefined,
         provider: span.provider ?? undefined,
         promptTokens: span.input_tokens ?? undefined,
@@ -154,5 +204,12 @@ export function toTrace(
       ...(detail ? { State: detail.state } : {}),
     },
     observations,
+    gateway: detail
+      ? {
+          events: gatewayEvents(detail),
+          apiKeyId: summary.api_key_id,
+          cost: summary.cost,
+        }
+      : undefined,
   }
 }

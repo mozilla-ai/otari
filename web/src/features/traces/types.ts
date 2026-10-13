@@ -2,7 +2,17 @@
 // (MIT, Copyright (c) 2023-2026 ClickHouse, Inc.), carrying Otari-shaped
 // fields on generations. Filled from the trace API by `fromApi.ts`.
 
-export type ObservationType = "SPAN" | "GENERATION" | "AGENT" | "TOOL" | "EVENT"
+import type { GatewayEvent } from "./gateway"
+
+// GUARDRAIL and MCP are the gateway's own work, which Langfuse has no type for.
+export type ObservationType =
+  | "SPAN"
+  | "GENERATION"
+  | "AGENT"
+  | "TOOL"
+  | "EVENT"
+  | "GUARDRAIL"
+  | "MCP"
 
 export type ObservationLevel = "DEBUG" | "DEFAULT" | "WARNING" | "ERROR"
 
@@ -43,6 +53,12 @@ export interface Trace {
   output: unknown
   metadata: Record<string, string>
   observations: Observation[]
+  /** Absent until the session's spans have loaded. */
+  gateway?: {
+    events: GatewayEvent[]
+    apiKeyId: string | null
+    cost: number
+  }
 }
 
 export interface TraceSummary {
@@ -77,8 +93,11 @@ export function summarizeTrace(trace: Trace): TraceSummary {
   const models = new Set<string>()
   for (const o of trace.observations) {
     latencyMs = Math.max(latencyMs, o.endMs)
-    promptTokens += o.promptTokens ?? 0
-    completionTokens += o.completionTokens ?? 0
+    // A turn repeats its generations' tokens as its own, so only generations count.
+    if (o.type === "GENERATION") {
+      promptTokens += o.promptTokens ?? 0
+      completionTokens += o.completionTokens ?? 0
+    }
     inputCost += o.inputCost ?? 0
     outputCost += o.outputCost ?? 0
     totalCost += observationCost(o)

@@ -4,6 +4,8 @@ import {
   FiDisc,
   FiGitBranch,
   FiMessageSquare,
+  FiServer,
+  FiShield,
   FiTerminal,
   FiTool,
 } from "react-icons/fi"
@@ -12,10 +14,10 @@ import type { ObservationType } from "./types"
 
 export type TypeKey = ObservationType | "TRACE"
 
-// The trace, generation and tool marks are the shell's own Sessions,
-// Playground and Tools glyphs. The types that do work take chart slots 1 to 3
-// in order; a span only groups them, so it stays neutral. Full class strings,
-// so Tailwind sees every one.
+// The trace, generation, tool, guardrail and MCP marks are the shell's own
+// Sessions, Playground, Tools, Guardrails and MCP servers glyphs. The types
+// that do work take chart slots 1 to 5 in order; a span only groups them, so it
+// stays neutral. Full class strings, so Tailwind sees every one.
 export const OBSERVATION_TYPES: Record<
   TypeKey,
   { label: string; icon: IconType; inkClass: string; barClass: string | null }
@@ -49,6 +51,18 @@ export const OBSERVATION_TYPES: Record<
     icon: FiTool,
     inkClass: "text-chart-cat-2",
     barClass: "bg-[var(--trace-bar-tool)]",
+  },
+  GUARDRAIL: {
+    label: "Guardrail",
+    icon: FiShield,
+    inkClass: "text-chart-cat-4",
+    barClass: "bg-[var(--trace-bar-guardrail)]",
+  },
+  MCP: {
+    label: "MCP",
+    icon: FiServer,
+    inkClass: "text-chart-cat-5",
+    barClass: "bg-[var(--trace-bar-mcp)]",
   },
   EVENT: {
     label: "Event",

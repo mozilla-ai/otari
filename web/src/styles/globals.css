@@ -110,6 +110,8 @@
   --trace-bar-agent: #a280c8;
   --trace-bar-generation: #20a3bc;
   --trace-bar-span: #899499;
+  --trace-bar-guardrail: #65a467;
+  --trace-bar-mcp: #c77595;
   --trace-bar-ink: #08090a;
   --trace-switch-track: var(--color-surface-subtle);
   --trace-switch-thumb: var(--color-surface);
@@ -487,6 +489,8 @@
   --trace-bar-agent: #c09aeb;
   --trace-bar-generation: #37c1de;
   --trace-bar-span: #a5b0b5;
+  --trace-bar-guardrail: #7ec27c;
+  --trace-bar-mcp: #ea8db2;
   --trace-bar-ink: #08090a;
   --trace-switch-track: var(--color-surface-alt);
   --trace-switch-thumb: color-mix(

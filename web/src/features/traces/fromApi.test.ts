@@ -51,6 +51,58 @@ describe("toTrace", () => {
     })
   })
 
+  it("draws guardrail checks and MCP connections as their own types", () => {
+    const trace = toTrace(
+      traceSummary({ api_key_id: "key-1" }),
+      traceDetail({
+        spans: [
+          traceSpan({ span_id: "req-1" }),
+          traceSpan({
+            span_id: "g-1",
+            parent_span_id: "req-1",
+            kind: "guardrail",
+            outcome: "error",
+            error_class: "guardrail_flagged",
+            attributes: {
+              "otari.guardrail.profile": "pii",
+              "otari.guardrail.mode": "monitor",
+            },
+          }),
+          traceSpan({
+            span_id: "mcp-1",
+            parent_span_id: "req-1",
+            kind: "mcp_connect",
+            outcome: "error",
+            error_class: "mcp_unreachable",
+            attributes: { "otari.mcp.server": "github" },
+          }),
+        ],
+      }),
+    )
+    const byId = new Map(trace.observations.map((o) => [o.id, o]))
+
+    // A monitor-mode flag let the request through, so it is not an error.
+    expect(byId.get("g-1")).toMatchObject({
+      type: "GUARDRAIL",
+      name: "pii",
+      level: "WARNING",
+    })
+    expect(byId.get("mcp-1")).toMatchObject({
+      type: "MCP",
+      name: "github",
+      level: "ERROR",
+    })
+    expect(trace.gateway).toMatchObject({ apiKeyId: "key-1", cost: 0.02 })
+    expect(trace.gateway?.events.map((e) => e.word)).toEqual([
+      "Flagged",
+      "Unreachable",
+    ])
+  })
+
+  it("has no gateway report until the spans load", () => {
+    expect(toTrace(traceSummary()).gateway).toBeUndefined()
+  })
+
   it("puts each turn's steps under the turn once a session has several", () => {
     const base = traceDetail()
     const detail = traceDetail({
@@ -81,6 +133,8 @@ describe("toTrace", () => {
     expect(byId.get("req-1")?.parentObservationId).toBe("turn-0")
     expect(byId.get("req-2")?.parentObservationId).toBe("turn-1")
     expect(byId.get("llm-2")?.parentObservationId).toBe("req-2")
+    // The turns carry their steps' tokens too, and are not counted twice.
+    expect(summarizeTrace(trace).totalTokens).toBe(12)
   })
 
   it("keeps an instrumented agent's own span tree", () => {

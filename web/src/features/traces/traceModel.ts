@@ -1,6 +1,8 @@
 import type { TraceDetail, TraceSpan, TraceSummary, TraceTurn } from "@/client"
 import type { ChipTone } from "@/design-system/indicators/Chip"
 
+import { guardrailProfile, mcpServer } from "./gateway"
+
 export interface SpanNode {
   span: TraceSpan
   children: SpanNode[]
@@ -71,9 +73,9 @@ export function spanLabel(span: TraceSpan): string {
     case "routing_attempt":
       return "Routing attempt"
     case "guardrail":
-      return "Guardrail check"
+      return guardrailProfile(span) ?? "Guardrail check"
     case "mcp_connect":
-      return "MCP connection"
+      return mcpServer(span) ?? "MCP connection"
     case "agent":
       return span.name
     default:
