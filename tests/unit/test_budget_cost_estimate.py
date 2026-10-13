@@ -189,6 +189,7 @@ def _axis(budget: Budget, *, new_request: bool = True, **counters: object) -> st
         "amount": Decimal(0),
         "held_tokens": 0,
         "held_requests": 0,
+        "resets_at": None,
     }
     base.update(counters)
     return _blocked_axis(budget, new_request=new_request, **base).name  # type: ignore[arg-type]

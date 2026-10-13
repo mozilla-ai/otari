@@ -254,7 +254,8 @@ class _ReservationMoves:
         detail = refusal_detail(
             hold.budget.subject, blocked, new_request=hold.new_request, reserved_output_tokens=reserved_output_tokens
         )
+        retry_after = blocked.retry_after(datetime.now(UTC))
         if hold.budget.provider_key_id is not None:
-            return ProviderSpendCeilingExceededError(detail, scope_type=hold.budget.scope_type)
+            return ProviderSpendCeilingExceededError(detail, scope_type=hold.budget.scope_type, retry_after=retry_after)
         BUDGET_EXCEEDED.inc()
-        return SpendCeilingExceededError(detail, scope_type=hold.budget.scope_type)
+        return SpendCeilingExceededError(detail, scope_type=hold.budget.scope_type, retry_after=retry_after)

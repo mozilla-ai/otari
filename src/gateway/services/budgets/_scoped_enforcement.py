@@ -10,7 +10,7 @@ No hold takes a row lock, so a refusal releases the holds already taken.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -404,7 +404,7 @@ def refused_axis(
             new_request=new_request,
         )
         if blocked is not None:
-            return blocked
+            return replace(blocked, resets_at=_as_utc(usage.period_end))
     return BlockedAxis("budget")
 
 

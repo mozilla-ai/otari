@@ -45,11 +45,19 @@ PROVIDER_ERROR = "provider_error"
 PROVIDER_STREAM_INTERRUPTED = "provider_stream_interrupted"
 
 
-def error_headers(code: str, *, budget_scope: str | None = None, rule: str | None = None) -> dict[str, str]:
+def error_headers(
+    code: str,
+    *,
+    budget_scope: str | None = None,
+    rule: str | None = None,
+    retry_after: int | None = None,
+) -> dict[str, str]:
     """``Otari-Error-Code`` plus any of the extra headers that have a value."""
     headers = {ERROR_CODE_HEADER: code}
     if budget_scope is not None:
         headers[BUDGET_SCOPE_HEADER] = budget_scope
+    if retry_after is not None:
+        headers["Retry-After"] = str(retry_after)
     if rule is not None:
         headers[RATE_LIMIT_RULE_HEADER] = rule
     return headers

@@ -19,7 +19,7 @@ def test_a_hold_that_does_not_fit_carries_both_amounts() -> None:
         "budget", committed=Decimal("0"), cap=Decimal("0.0015"), wanted=Decimal("0.0021"), new_request=True
     )
 
-    assert blocked == BlockedAxis("budget", remaining=Decimal("0.0015"), held=Decimal("0.0021"))
+    assert blocked == BlockedAxis("budget", remaining=Decimal("0.0015"), held=Decimal("0.0021"), exceeds_cap=True)
     assert refusal_detail("Organization", blocked, new_request=True) == (
         "Organization has $0.0015 of budget remaining, less than this request's estimated cost of $0.0021"
     )

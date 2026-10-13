@@ -46,7 +46,7 @@ class ApplicableCeiling:
 
 @dataclass(frozen=True)
 class CeilingUsage:
-    """A ceiling's cap, its recorded use and its holds, on each axis."""
+    """A ceiling's cap, its recorded use and its holds, on each axis, and when its window ends."""
 
     max_budget: Decimal | None
     current_spend: Decimal
@@ -57,6 +57,7 @@ class CeilingUsage:
     request_limit: int | None
     current_requests: int
     reserved_requests: int
+    period_end: datetime | None
 
 
 @dataclass(frozen=True)
@@ -193,7 +194,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
         )
 
     async def get_usage(self, scoped_budget_id: str) -> CeilingUsage | None:
-        """Return this ceiling's cap, recorded use and holds on each axis, or None when it no longer exists."""
+        """Return this ceiling's cap, recorded use, holds and window end, or None when it no longer exists."""
         row = (
             await self.db.execute(
                 select(
@@ -206,6 +207,7 @@ class ScopedBudgetRepository(BaseRepository[ScopedBudget, Never, Never]):
                     Budget.request_limit,
                     ScopedBudget.current_requests,
                     ScopedBudget.reserved_requests,
+                    ScopedBudget.period_end,
                 )
                 .join(Budget, Budget.budget_id == ScopedBudget.budget_id)
                 .where(ScopedBudget.id == scoped_budget_id)

@@ -285,6 +285,42 @@ carried. The same holds for the vision side-call a request makes to describe an
 attachment. Cap batch-heavy workloads in dollars rather than in tokens. See
 [Importing external usage](external-usage.md).
 
+### Reservations are taken up front
+
+The hold is the request's worst case, taken before dispatch: its prompt at
+roughly four characters per token, plus its whole output token limit. A request
+with `max_tokens: 8192` therefore holds the price of 8192 output tokens however
+few the model ends up writing, and a user close to the cap is refused once that
+hold no longer fits, even when the answer would have cost a fraction of it.
+The trade is deliberate: a request is admitted only when its worst case fits, so
+an admitted request cannot take a budget past its cap, at the price of refusing
+some requests near the cap that would have fit. A client that sends a realistic output limit,
+rather than the model's maximum, keeps more of its allowance usable near the
+cap.
+
+Holds are also what bound concurrent requests from one user or end user. Each
+admitted request keeps its hold until it settles, and a new request is admitted
+only while recorded spend, every hold still in flight and its own hold together
+fit under the cap, checked in one conditional update so two requests cannot both
+take the last of it. Ten parallel requests near the cap are therefore admitted
+only as far as their combined worst case fits, and the rest are refused rather
+than overspending. A hold a crashed request leaves behind is returned after
+`budget_reservation_ttl_sec` (15 minutes by default). Scoped ceilings hold the
+same way, so a key's ceiling bounds all of its end users' in-flight requests
+together.
+
+### Refusals and `Retry-After`
+
+A refusal is a 403 with `Otari-Error-Code: budget_exceeded`, and
+`Otari-Budget-Scope` names the budget that refused: `user`, or the ceiling's
+scope. When that budget resets, the refusal also carries `Retry-After`, the
+whole seconds (rounded up) until its current window ends: the next UTC
+midnight, ISO week or month for a calendar budget, and the end of the user's or
+ceiling's own period for a rolling one, which only the gateway knows. Where
+several budgets apply, it is the window of the one that refused. A budget with
+no period never resets and sends no `Retry-After`, and neither does a refusal of
+a hold larger than the whole cap, since a fresh window would refuse it too.
+
 ## Workspace-scoped spend
 
 Usage is attributed to the workspace bound to the authenticating API key.

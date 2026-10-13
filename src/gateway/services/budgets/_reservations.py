@@ -3,7 +3,7 @@ from __future__ import annotations
 import contextlib
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from math import ceil
@@ -234,8 +234,9 @@ def _blocked_axis(
     held_tokens: int,
     held_requests: int,
     new_request: bool,
+    resets_at: datetime | None,
 ) -> BlockedAxis:
-    """Which capped axis had no room, for the refusal message.
+    """Which capped axis had no room, for the refusal message, and when the user's window ends.
 
     The gate is one conditional UPDATE that matches no row, so nothing in its
     result says which of three caps bound. Recomputed here from the counters, on
@@ -288,7 +289,7 @@ def _blocked_axis(
             new_request=new_request,
         )
         if blocked is not None:
-            return blocked
+            return replace(blocked, resets_at=resets_at)
     # Every capped axis has room, so the row moved under this request between the
     # gate and here, or the user was deleted. Neither is an axis, and naming one
     # would be a guess.
@@ -768,7 +769,11 @@ async def reserve_budget(
                     new_request=new_request,
                     reserved_output_tokens=reserved_output_tokens,
                 ),
-                headers=error_codes.error_headers(error_codes.BUDGET_EXCEEDED, budget_scope=refused.scope_type),
+                headers=error_codes.error_headers(
+                    error_codes.BUDGET_EXCEEDED,
+                    budget_scope=refused.scope_type,
+                    retry_after=blocked.retry_after(datetime.now(UTC)),
+                ),
             )
 
     if budget is None:
@@ -883,6 +888,7 @@ async def reserve_budget(
                 held_tokens=held_tokens,
                 held_requests=held_requests,
                 new_request=new_request,
+                resets_at=refused_on.next_budget_reset_at,
             )
             if refused_on is not None
             else BlockedAxis("budget")
@@ -895,7 +901,11 @@ async def reserve_budget(
                 new_request=new_request,
                 reserved_output_tokens=reserved_output_tokens,
             ),
-            headers=error_codes.error_headers(error_codes.BUDGET_EXCEEDED, budget_scope="user"),
+            headers=error_codes.error_headers(
+                error_codes.BUDGET_EXCEEDED,
+                budget_scope="user",
+                retry_after=blocked.retry_after(datetime.now(UTC)),
+            ),
         )
 
     return await _held_handle(
@@ -1183,7 +1193,11 @@ async def increase_reservation(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=refusal_detail(refused.subject, blocked, new_request=False),
-                headers=error_codes.error_headers(error_codes.BUDGET_EXCEEDED, budget_scope=refused.scope_type),
+                headers=error_codes.error_headers(
+                    error_codes.BUDGET_EXCEEDED,
+                    budget_scope=refused.scope_type,
+                    retry_after=blocked.retry_after(datetime.now(UTC)),
+                ),
             )
         # Recorded here, next to the hold it describes, and before the per-user
         # call below can refuse: what the caller's refund releases is what the

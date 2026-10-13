@@ -41,6 +41,7 @@ from gateway.services.budgets import (
     reserve_budget,
 )
 from gateway.services.budgets import _ledger as budget_ledger
+from gateway.services.budgets._periods import seconds_until
 from gateway.types.attempt import Attempt
 
 from .conftest import _to_async_url
@@ -1349,6 +1350,92 @@ async def test_a_ceiling_too_small_for_the_hold_names_both_amounts(async_db: Asy
     )
     assert refusal.value.headers is not None
     assert refusal.value.headers["Otari-Budget-Scope"] == "workspace"
+    # The hold is larger than the whole cap, so no window would admit it.
+    assert "Retry-After" not in refusal.value.headers
+
+
+async def _spent_ceiling_refusal(async_db: AsyncSession, tenancy: Fixture, **cadence: Any) -> HTTPException:
+    """The refusal of a $1 request by a $10 workspace ceiling with its allowance spent."""
+    cap = await _scoped(
+        async_db, scope_type="workspace", scope_id=str(tenancy.workspace_id), max_budget=10.0, **cadence
+    )
+    cap.current_spend = Decimal("10")
+    async_db.add(cap)
+    await async_db.commit()
+    with pytest.raises(HTTPException) as refusal:
+        await reserve_budget(async_db, tenancy.user_id, 1.0, scope=tenancy.scope())
+    assert refusal.value.headers is not None
+    assert refusal.value.headers["Otari-Budget-Scope"] == "workspace"
+    return refusal.value
+
+
+@pytest.mark.asyncio
+async def test_a_spent_calendar_ceiling_says_when_its_day_ends(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """``Retry-After`` counts down to the UTC midnight that ends the ceiling's window."""
+    now = datetime.now(UTC)
+    before = datetime.now(UTC)
+    refusal = await _spent_ceiling_refusal(
+        async_db,
+        tenancy,
+        reset_alignment="calendar_day",
+        period_start=_midnight(now),
+        period_end=_midnight(now) + timedelta(days=1),
+    )
+    after = datetime.now(UTC)
+
+    assert refusal.headers is not None
+    end = _midnight(now) + timedelta(days=1)
+    assert seconds_until(end, after) <= int(refusal.headers["Retry-After"]) <= seconds_until(end, before)
+
+
+@pytest.mark.asyncio
+async def test_a_spent_rolling_ceiling_says_when_its_period_ends(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """A rolling window ends where its own row says, not a whole period from the refusal."""
+    now = datetime.now(UTC)
+    end = now + timedelta(minutes=20)
+    refusal = await _spent_ceiling_refusal(
+        async_db, tenancy, budget_duration_sec=3600, period_start=end - timedelta(hours=1), period_end=end
+    )
+    after = datetime.now(UTC)
+
+    assert refusal.headers is not None
+    assert seconds_until(end, after) <= int(refusal.headers["Retry-After"]) <= seconds_until(end, now)
+
+
+@pytest.mark.asyncio
+async def test_a_spent_ceiling_that_never_resets_sends_no_wait(async_db: AsyncSession, tenancy: Fixture) -> None:
+    refusal = await _spent_ceiling_refusal(async_db, tenancy)
+
+    assert refusal.headers is not None
+    assert "Retry-After" not in refusal.headers
+
+
+@pytest.mark.asyncio
+async def test_a_refused_top_up_says_when_the_window_ends(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """Growing an admitted reservation is refused with the same wait as admitting one."""
+    now = datetime.now(UTC)
+    end = now + timedelta(minutes=20)
+    cap = await _scoped(
+        async_db,
+        scope_type="workspace",
+        scope_id=str(tenancy.workspace_id),
+        max_budget=10.0,
+        budget_duration_sec=3600,
+        period_start=end - timedelta(hours=1),
+        period_end=end,
+    )
+    cap.current_spend = Decimal("8")
+    async_db.add(cap)
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, tenancy.user_id, 1.0, scope=tenancy.scope())
+    with pytest.raises(HTTPException) as refusal:
+        await increase_reservation(async_db, handle, estimate=3.0)
+    after = datetime.now(UTC)
+
+    assert refusal.value.headers is not None
+    assert seconds_until(end, after) <= int(refusal.value.headers["Retry-After"]) <= seconds_until(end, now)
+    await refund_reservation(async_db, handle)
 
 
 @pytest.mark.asyncio

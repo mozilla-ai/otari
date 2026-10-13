@@ -3,6 +3,7 @@
 Every surface that caps spend derives its window here, so a calendar-aligned budget gets the same window on each.
 """
 
+import math
 from datetime import UTC, datetime, timedelta
 
 from gateway.models.budgets import ALIGN_DAY, ALIGN_MONTH, ALIGN_WEEK
@@ -71,9 +72,22 @@ def budget_window(now: datetime, budget: object) -> tuple[datetime, datetime] | 
     )
 
 
+def seconds_until(end: datetime, now: datetime) -> int:
+    """Whole seconds from ``now`` until ``end``, rounded up and never less than one.
+
+    Rounded up so a client that waits this long lands in the next window rather
+    than a fraction of a second before it. A naive ``end`` is read as UTC, which
+    is how SQLite hands back a stored timestamp.
+    """
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=UTC)
+    return max(math.ceil((end - now).total_seconds()), 1)
+
+
 __all__ = [
     "MAX_BUDGET_DURATION_SEC",
     "aligned_window",
     "budget_window",
     "period_window",
+    "seconds_until",
 ]

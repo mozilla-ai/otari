@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
+
+from gateway.services.budgets._periods import seconds_until
 
 _MICRO_DOLLAR = Decimal("0.000001")
 
@@ -15,11 +18,23 @@ class BlockedAxis:
     ``remaining`` is set only when the dollar axis was under its cap and this
     request's hold (``held``) did not fit in what was left. That refusal is about
     the size of the request, not about spend already made, so it reads differently.
+
+    ``exceeds_cap`` is set when the hold alone is larger than the cap, so a fresh
+    window would refuse it too. ``resets_at`` is when the refusing budget's window
+    ends, None for a budget that never resets.
     """
 
     name: str
     remaining: Decimal | None = None
     held: Decimal | None = None
+    exceeds_cap: bool = False
+    resets_at: datetime | None = None
+
+    def retry_after(self, now: datetime) -> int | None:
+        """Seconds until the refusing budget's window ends, or None when waiting would not let the request in."""
+        if self.resets_at is None or self.exceeds_cap:
+            return None
+        return seconds_until(self.resets_at, now)
 
 
 def blocked_on(
@@ -35,12 +50,13 @@ def blocked_on(
     The test is the gate's own, both clauses: a hold that would push the axis
     past its cap, and, for an arrival only, an axis already at or over its cap.
     """
+    exceeds_cap = wanted > cap
     if committed + wanted > cap:
         if name == "budget" and committed < cap:
-            return BlockedAxis(name, remaining=cap - committed, held=wanted)
-        return BlockedAxis(name)
+            return BlockedAxis(name, remaining=cap - committed, held=wanted, exceeds_cap=exceeds_cap)
+        return BlockedAxis(name, exceeds_cap=exceeds_cap)
     if new_request and committed >= cap:
-        return BlockedAxis(name)
+        return BlockedAxis(name, exceeds_cap=exceeds_cap)
     return None
 
 

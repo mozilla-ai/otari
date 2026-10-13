@@ -476,7 +476,7 @@ reworded.
 
 | `Otari-Error-Code` | Status | Meaning | Also sent |
 |---|---|---|---|
-| `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token` |
+| `budget_exceeded` | 403 | A budget refused the request | `Otari-Budget-Scope`: `user` for the billed user's own budget, otherwise the ceiling's scope: `organization`, `workspace`, `workspace_member`, `org_member` or `api_token`; `Retry-After`: seconds until the refusing budget's window ends, when it resets and the request would fit a fresh one |
 | `user_blocked` | 403 | The billed user is blocked | |
 | `user_not_found` | 404 | The billed user does not exist | |
 | `rate_limited` | 429 | A gateway rate limit is full | `Otari-Rate-Limit-Rule` for a `rate_limits` rule; `Retry-After` when waiting helps |
@@ -499,7 +499,9 @@ reworded.
 A `budget_exceeded` refusal's `detail` tells a spent budget (`... has exceeded
 budget limit`) from a request whose estimated cost is larger than the budget it
 has left (`... has $X of budget remaining, less than this request's estimated
-cost of $Y`); see [Budgets](access-control.md#budgets).
+cost of $Y`); see [Budgets](access-control.md#budgets). Its `Retry-After` is
+when the budget resets, which may be days away for a monthly budget; see
+[Refusals and `Retry-After`](access-control.md#refusals-and-retry-after).
 
 A streamed request whose provider fails before producing any output is answered
 with an ordinary HTTP error, with the same status, `detail` and code the request

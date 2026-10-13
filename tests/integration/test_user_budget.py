@@ -1,8 +1,14 @@
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select, update
+from sqlalchemy.orm import Session
 
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
+from gateway.models.users import User
+from gateway.services.budgets._periods import seconds_until
 
 
 def test_create_user(client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -511,3 +517,150 @@ def test_user_exceeded_budget_blocked_on_unknown_pricing(
     )
     assert response.status_code == 403
     assert "budget" in response.json()["detail"].lower()
+
+
+def _spent_user(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+    user_id: str,
+    budget: dict[str, Any],
+) -> None:
+    """A user on ``budget`` (a $1 cap plus its cadence) with the whole dollar allowance already spent."""
+    budget_id = client.post(
+        f"{API_ROOT}/budgets", json={"max_budget": 1.0, **budget}, headers=master_key_header
+    ).json()["budget_id"]
+    client.post(f"{API_ROOT}/users", json={"user_id": user_id, "budget_id": budget_id}, headers=master_key_header)
+    client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": "openai:gpt-4o", "input_price_per_million": 2.5, "output_price_per_million": 10.0},
+        headers=master_key_header,
+    )
+    db_session.execute(update(User).where(User.user_id == user_id).values(spend=Decimal("1.0")))
+    db_session.commit()
+
+
+def _next_monday(moment: datetime) -> datetime:
+    midnight = moment.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight + timedelta(days=7 - midnight.weekday())
+
+
+def test_a_spent_calendar_budget_says_when_its_week_ends(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+    test_messages: list[dict[str, str]],
+) -> None:
+    """``Retry-After`` is the seconds until the ISO week ends, the window the refusing budget counts over."""
+    _spent_user(client, master_key_header, db_session, "weekly-user", {"reset_alignment": "calendar_week"})
+
+    before = datetime.now(UTC)
+    response = client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "openai:gpt-4o", "messages": test_messages, "user": "weekly-user"},
+        headers=master_key_header,
+    )
+    after = datetime.now(UTC)
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "budget_exceeded"
+    assert response.headers["Otari-Budget-Scope"] == "user"
+    # Bracketed by two clock reads, since the gateway reads its own between them.
+    retry_after = int(response.headers["Retry-After"])
+    assert seconds_until(_next_monday(after), after) <= retry_after <= seconds_until(_next_monday(before), before)
+
+
+def test_a_spent_rolling_budget_says_when_its_period_ends(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+    test_messages: list[dict[str, str]],
+) -> None:
+    """A rolling period ends where the user's own window does, which only the gateway knows."""
+    _spent_user(client, master_key_header, db_session, "hourly-user", {"budget_duration_sec": 3600})
+    resets_at = db_session.execute(select(User.next_budget_reset_at).where(User.user_id == "hourly-user")).scalar_one()
+    assert resets_at is not None
+
+    before = datetime.now(UTC)
+    response = client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "openai:gpt-4o", "messages": test_messages, "user": "hourly-user"},
+        headers=master_key_header,
+    )
+    after = datetime.now(UTC)
+
+    assert response.status_code == 403
+    retry_after = int(response.headers["Retry-After"])
+    assert seconds_until(resets_at, after) <= retry_after <= seconds_until(resets_at, before)
+    assert 0 < retry_after <= 3600
+
+
+def test_a_messages_refusal_carries_the_same_wait(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """The Messages dialect renders its own error envelope, and keeps the header through it."""
+    _spent_user(client, master_key_header, db_session, "daily-user", {"reset_alignment": "calendar_day"})
+
+    response = client.post(
+        f"{API_ROOT}/messages",
+        json={
+            "model": "openai:gpt-4o",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "Hello"}],
+            "metadata": {"user_id": "daily-user"},
+        },
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 403
+    assert response.headers["Otari-Error-Code"] == "budget_exceeded"
+    assert 0 < int(response.headers["Retry-After"]) <= 86400
+
+
+def test_a_budget_that_never_resets_sends_no_wait(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+    test_messages: list[dict[str, str]],
+) -> None:
+    """A lifetime cap has no window to wait out, so no ``Retry-After`` tells a client to try again."""
+    _spent_user(client, master_key_header, db_session, "lifetime-user", {})
+
+    response = client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "openai:gpt-4o", "messages": test_messages, "user": "lifetime-user"},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 403
+    assert response.headers["Otari-Budget-Scope"] == "user"
+    assert "Retry-After" not in response.headers
+
+
+def test_a_request_larger_than_the_whole_budget_sends_no_wait(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_messages: list[dict[str, str]],
+) -> None:
+    """A fresh window would refuse the same estimate, so waiting for one would not help."""
+    budget_id = client.post(
+        f"{API_ROOT}/budgets", json={"max_budget": 0.0015, "budget_duration_sec": 3600}, headers=master_key_header
+    ).json()["budget_id"]
+    client.post(f"{API_ROOT}/users", json={"user_id": "tiny-user", "budget_id": budget_id}, headers=master_key_header)
+    client.post(
+        f"{API_ROOT}/pricing",
+        json={"model_key": "openai:gpt-4o", "input_price_per_million": 2.5, "output_price_per_million": 10.0},
+        headers=master_key_header,
+    )
+
+    response = client.post(
+        f"{API_ROOT}/chat/completions",
+        json={"model": "openai:gpt-4o", "messages": test_messages, "user": "tiny-user"},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 403
+    assert "remaining" in response.json()["detail"]
+    assert "Retry-After" not in response.headers

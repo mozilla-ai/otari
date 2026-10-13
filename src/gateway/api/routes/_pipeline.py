@@ -1867,7 +1867,7 @@ def spend_ceiling_refusal(exc: SpendCeilingExceededError) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail=str(exc),
-        headers=error_headers(BUDGET_EXCEEDED, budget_scope=exc.scope_type),
+        headers=error_headers(BUDGET_EXCEEDED, budget_scope=exc.scope_type, retry_after=exc.retry_after),
     )
 
 

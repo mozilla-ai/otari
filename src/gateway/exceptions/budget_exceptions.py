@@ -204,11 +204,15 @@ class SpendCeilingAlreadyExistsError(Exception):
 
 
 class SpendCeilingExceededError(Exception):
-    """A scoped ceiling has no room for a request on one of its axes."""
+    """A scoped ceiling has no room for a request on one of its axes.
 
-    def __init__(self, detail: str, *, scope_type: ScopeType) -> None:
+    ``retry_after`` is the seconds until the ceiling's window ends, None when waiting would not help.
+    """
+
+    def __init__(self, detail: str, *, scope_type: ScopeType, retry_after: int | None = None) -> None:
         super().__init__(detail)
         self.scope_type = scope_type
+        self.retry_after = retry_after
 
 
 class ProviderSpendCeilingExceededError(SpendCeilingExceededError):
