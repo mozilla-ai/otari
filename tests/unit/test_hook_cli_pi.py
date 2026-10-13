@@ -72,6 +72,15 @@ def test_relative_path_is_resolved_against_cwd(repo: Path) -> None:
     assert result.exit_code == 2, result.output
 
 
+def test_home_relative_path_is_expanded(monkeypatch: pytest.MonkeyPatch, repo: Path) -> None:
+    # pi expands `~/...` itself, so a gate must see the real target.
+    monkeypatch.setenv("HOME", str(repo.parent))
+    result = _invoke(_pre(repo, "edit", {"path": f"~/{repo.name}/CHANGELOG.md"}))
+    assert result.exit_code == 2, result.output
+    result = _invoke(_pre(repo, "read", {"path": f"~/{repo.name}/.env"}))
+    assert result.exit_code == 2, result.output
+
+
 def test_read_maps_to_read_target(repo: Path) -> None:
     result = _invoke(_pre(repo, "read", {"path": ".env"}))
     assert result.exit_code == 2, result.output
