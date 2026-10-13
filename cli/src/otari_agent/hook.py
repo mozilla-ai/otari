@@ -3234,14 +3234,14 @@ def _offer_starter_guardrail(root: Path, repo_only: bool = False) -> None:
             click.echo(f"Wrote {starter}. Split it into {GUARDRAIL_DIR}/ when it grows.")
         elif not repo_only and _hook_guardrail_spec(root) is not None:
             click.echo(
-                f"Skipping. otari hook will still be registered below and will check your own gates in "
+                f"Skipping. otari hook will still check your own gates in "
                 f"{GuardrailOrigin.USER.directory} here. This repo's gates start once {GUARDRAIL_FILE} or "
                 f"{GUARDRAIL_DIR}/ exists; see docs/agent-guardrails.md."
             )
         else:
             click.echo(
-                f"Skipping. otari hook will still be registered below, but every gate check "
-                f"passes until {GUARDRAIL_FILE} or {GUARDRAIL_DIR}/ exists; see docs/agent-guardrails.md."
+                f"Skipping. Every otari hook gate check passes until {GUARDRAIL_FILE} or "
+                f"{GUARDRAIL_DIR}/ exists; see docs/agent-guardrails.md."
             )
 
 
