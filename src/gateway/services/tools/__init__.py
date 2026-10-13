@@ -14,7 +14,7 @@ and ``apply_web_access_policy`` narrows its web access to what its workspace per
 ``default_to_pin`` hold a write through ``/api/v1/search-tools`` to the instance rules, and
 ``run_connection_test`` tests an instance with one search or fetch.
 ``resolve_search`` and ``resolve_fetch`` say which provider, key and options a web search or fetch runs with.
-``pick_direct_search_instance``, ``resolve_direct_search`` and ``search_on_any_search`` hold the direct
+``pick_direct_search_instance``, ``resolve_direct_search`` and ``run_direct_search`` hold the direct
 search endpoint's rules and run its call, and ``SearchQuery`` with the helpers beside it map LiteLLM's
 search fields onto a provider. ``build_web_provider_client`` builds the client the web tools' providers
 are called through, one per app, and ``WebToolFailure`` is what a failed web tool call may show its caller.
@@ -118,7 +118,7 @@ from gateway.services.tools._web_search import (
     resolve_direct_search,
     resolve_fetch,
     resolve_search,
-    search_on_any_search,
+    run_direct_search,
 )
 from gateway.services.tools._web_search_keys import WebSearchKeyService, WorkspaceSearchKeys
 from gateway.services.tools._web_search_responses import WEB_SEARCH_CALL_ID_PREFIX
@@ -219,5 +219,5 @@ __all__ = [
     "page_budget_chars",
     "pick_direct_search_instance",
     "resolve_direct_search",
-    "search_on_any_search",
+    "run_direct_search",
 ]

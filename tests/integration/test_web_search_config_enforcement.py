@@ -746,7 +746,7 @@ def test_the_direct_search_endpoint_honors_the_same_veto(
         headers=master_key_header,
     ).json()
 
-    with patch("gateway.api.routes.search.run_search", new=AsyncMock()) as ran:
+    with patch("gateway.services.search_backend.run_search", new=AsyncMock()) as ran:
         response = client.post(
             f"{API_ROOT}/search/stub-search",
             json={"query": "anything"},
@@ -789,7 +789,7 @@ def test_invalid_legacy_domain_rule_returns_503_from_direct_search(
         headers=master_key_header,
     ).json()
 
-    with patch("gateway.api.routes.search.run_search", new=AsyncMock()) as ran:
+    with patch("gateway.services.search_backend.run_search", new=AsyncMock()) as ran:
         response = client.post(
             f"{API_ROOT}/search/invalid-config-search",
             json={"query": "anything"},
@@ -817,7 +817,7 @@ def test_the_direct_search_endpoint_is_unchanged_for_a_workspace_with_no_row(
     from gateway.services.search_backend import SearchHit, SearchOutcome
 
     outcome = SearchOutcome(results=[SearchHit(url="https://example.com", title="t", snippet="s")], cost_usd=0.0)
-    with patch("gateway.api.routes.search.run_search", new=AsyncMock(return_value=outcome)):
+    with patch("gateway.services.search_backend.run_search", new=AsyncMock(return_value=outcome)):
         response = client.post(
             f"{API_ROOT}/search/open-stub-search",
             json={"query": "anything"},

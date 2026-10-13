@@ -304,6 +304,11 @@ _FAILURE_HEADERS = ("Otari-Error-Provider", "Otari-Error-Status", "Otari-Error-T
         ),
         pytest.param({"error": "timeout"}, ("fake", None, "timeout", "true"), id="timeout"),
         pytest.param({"in_body_error": "quota"}, ("fake", None, "quota", "false"), id="inside-a-200"),
+        pytest.param(
+            {"error": "unexpected_response", "error_status": 200},
+            ("fake", None, "unexpected_response", "false"),
+            id="an-unreadable-200",
+        ),
     ],
 )
 def test_a_provider_failure_carries_its_safe_fields_as_headers(
@@ -708,7 +713,7 @@ def test_a_config_priced_search_is_reserved_before_it_runs(
         headers=master_key_header,
     ).json()
 
-    with patch("gateway.api.routes.search.search_on_any_search", AsyncMock()) as searched:
+    with patch("gateway.api.routes.search.run_direct_search", AsyncMock()) as searched:
         resp = client.post(
             f"{API_ROOT}/search/fake-search",
             json=SEARCH_PAYLOAD,
@@ -746,7 +751,7 @@ def test_search_is_tracked_while_its_provider_call_runs(client: TestClient, api_
         seen.append(registry.snapshot())
         return DirectSearchResult(response=SearchResponse(search_tool=search.instance.name, results=[]), cost=None)
 
-    with patch("gateway.api.routes.search.search_on_any_search", slow_search):
+    with patch("gateway.api.routes.search.run_direct_search", slow_search):
         resp = client.post(
             f"{API_ROOT}/search",
             json={**SEARCH_PAYLOAD, "search_tool_name": "fake-search"},
@@ -914,7 +919,7 @@ def test_an_unnamed_call_runs_on_the_workspaces_own_key_priced_as_web_search(
     _price(client, master_key_header, "otari:web_search", 5000.0)
     _price(client, master_key_header, "fake:fake-search", 9000.0)
     keyed = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
-    with patch("gateway.api.routes.search.run_keyed_search", keyed):
+    with patch("gateway.services.search_backend.run_keyed_search", keyed):
         resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 200, resp.text
@@ -938,7 +943,7 @@ def test_the_new_fields_are_refused_on_a_call_a_tavily_key_serves(
     headers = _keyed(client, master_key_header, "org-key-fields")
     _add_org_search_key(client, master_key_header, "tvly-org-secret")
     keyed = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
-    with patch("gateway.api.routes.search.run_keyed_search", keyed):
+    with patch("gateway.services.search_backend.run_keyed_search", keyed):
         refused = client.post(f"{API_ROOT}/search", json={**SEARCH_PAYLOAD, **field}, headers=headers)
         defaults = client.post(
             f"{API_ROOT}/search", json={**SEARCH_PAYLOAD, "include_raw": False, "provider_options": {}}, headers=headers
@@ -964,7 +969,7 @@ def test_search_without_a_usable_key_uses_the_named_tool(
     )
     assert turned_off.status_code == 200, turned_off.text
     keyed = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
-    with patch("gateway.api.routes.search.run_keyed_search", keyed):
+    with patch("gateway.services.search_backend.run_keyed_search", keyed):
         resp = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=api_key_header)
 
     assert resp.status_code == 200, resp.text
@@ -980,7 +985,7 @@ def test_a_named_call_runs_on_the_tools_own_key_though_the_workspace_has_one(
     headers = _keyed(client, master_key_header, "named-call")
     _add_org_search_key(client, master_key_header, "tvly-org-secret")
     keyed = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
-    with patch("gateway.api.routes.search.run_keyed_search", keyed):
+    with patch("gateway.services.search_backend.run_keyed_search", keyed):
         by_path = client.post(f"{API_ROOT}/search/fake-search", json=SEARCH_PAYLOAD, headers=headers)
         by_body = client.post(
             f"{API_ROOT}/search", json={**SEARCH_PAYLOAD, "search_tool_name": "fake-search"}, headers=headers
@@ -1040,7 +1045,7 @@ def test_a_library_tool_without_its_key_is_refused_before_the_provider(
     keyless_client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     headers = _keyed(keyless_client, master_key_header, "keyless")
-    with patch("gateway.api.routes.search.search_on_any_search", AsyncMock()) as searched:
+    with patch("gateway.api.routes.search.run_direct_search", AsyncMock()) as searched:
         resp = keyless_client.post(f"{API_ROOT}/search/exa", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 400
@@ -1108,7 +1113,7 @@ def test_an_unnamed_call_runs_on_the_credential_the_port_answers(
     credential = WebSearchCredential(provider="brave", source=WebToolCredentialSource.ORG, api_key="brave-key")
     _stub_policy(client, _policy(credential=credential))
     keyed = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
-    with patch("gateway.api.routes.search.run_keyed_search", keyed):
+    with patch("gateway.services.search_backend.run_keyed_search", keyed):
         resp = client.post(f"{API_ROOT}/search", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 200, resp.text
@@ -1146,7 +1151,7 @@ def test_the_new_fields_are_refused_on_a_searxng_tool(
 ) -> None:
     headers = _keyed(searxng_client, master_key_header, "searxng-user")
     old = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS, cost_usd=None))
-    with patch("gateway.api.routes.search.run_search", old):
+    with patch("gateway.services.search_backend.run_search", old):
         refused = searxng_client.post(f"{API_ROOT}/search/local", json={**SEARCH_PAYLOAD, **field}, headers=headers)
         defaults = searxng_client.post(
             f"{API_ROOT}/search/local",
@@ -1172,13 +1177,16 @@ def test_an_old_clients_failure_carries_its_safe_fields_and_never_its_body(
     failed = SearchProviderError(
         "searxng search returned HTTP 503: upstream-body-sentinel", tag="http_error", status=503
     )
-    with patch("gateway.api.routes.search.run_search", AsyncMock(side_effect=failed)):
+    with patch("gateway.services.search_backend.run_search", AsyncMock(side_effect=failed)):
         resp = searxng_client.post(f"{API_ROOT}/search/local", json=SEARCH_PAYLOAD, headers=headers)
 
     assert resp.status_code == 502
     assert tuple(resp.headers.get(name) for name in _FAILURE_HEADERS) == ("searxng", "503", "http_error", "true")
     assert "upstream-body-sentinel" not in resp.text
     assert all("upstream-body-sentinel" not in value for value in resp.headers.values())
+    # Nor on the usage row, which keeps the failure's safe fields and the provider's status.
+    (row,) = _search_rows(searxng_client, master_key_header, "searxng-failed")
+    assert (row["error_message"], row["status_code"]) == ("searxng search failed (http_error, HTTP 503)", 503)
 
 
 def test_a_searxng_tools_reported_cost_is_none_so_its_rate_bills(
@@ -1187,7 +1195,7 @@ def test_a_searxng_tools_reported_cost_is_none_so_its_rate_bills(
     headers = _keyed(searxng_client, master_key_header, "searxng-billed")
     _price(searxng_client, master_key_header, "searxng:local", 2000.0)
     old = AsyncMock(return_value=SearchOutcome(results=_OLD_CLIENT_HITS))
-    with patch("gateway.api.routes.search.run_search", old):
+    with patch("gateway.services.search_backend.run_search", old):
         assert searxng_client.post(f"{API_ROOT}/search/local", json=SEARCH_PAYLOAD, headers=headers).status_code == 200
     (row,) = _search_rows(searxng_client, master_key_header, "searxng-billed")
     assert Decimal(str(row["cost"])) == Decimal("0.002")

@@ -16,12 +16,10 @@ rather than the multi-query array, and the filters with no field below
 are called out in ``docs/api-reference.md`` so a migrating caller can check for
 them.
 
-The search runs on any-search through the app's web provider client. A
-``searxng`` tool still runs on the old client in
-:mod:`gateway.services.search_backend` until any-search has its adapter, and so
-does a workspace's Tavily or Brave organization key. Which tool, which key and
-which count a request gets are the tools services' rules
-(:func:`gateway.services.tools.resolve_direct_search`); this module reads the
+Which tool, which key and which count a request gets, and the call itself, on
+any-search or on an old client until any-search has the provider's adapter, are
+the tools services' (:func:`gateway.services.tools.resolve_direct_search` and
+:func:`gateway.services.tools.run_direct_search`); this module reads the
 request and its dependencies, gates, bills and logs.
 
 Both the body-selected (``POST /api/v1/search``) and path-selected
@@ -52,21 +50,18 @@ bill precisely.
 import time
 import uuid
 from datetime import UTC, datetime
-from decimal import Decimal
 from typing import Annotated, Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import any_search
 from gateway.api.deps import (
-    PortSessionDep,
     WebProviderClientDep,
     WebSearchPolicyPortDep,
     get_budget_service,
     get_config,
-    get_db,
+    get_db_if_needed,
     get_log_writer,
     verify_api_key_or_master_key,
 )
@@ -85,6 +80,7 @@ from gateway.core.config import END_USER_BUDGET_HEADER, GatewayConfig
 from gateway.core.database import release_session
 from gateway.core.metered_pricing import quantize_cost
 from gateway.exceptions.tools_exceptions import (
+    DirectSearchFailedError,
     DirectSearchFieldRefusedError,
     SearchToolMisconfiguredError,
     SearchToolNotFoundError,
@@ -101,7 +97,7 @@ from gateway.models.tools import WebTool
 from gateway.models.usage import UsageLog
 from gateway.ports.web_search_policy_port import WebSearchPolicyPort, WebSearchPolicyScope
 from gateway.rate_limit import admit_rate_limit_rules, check_rate_limit
-from gateway.schemas.tools import SearchRequest, SearchResponse, SearchResultItem
+from gateway.schemas.tools import SearchRequest, SearchResponse
 from gateway.services.budgets import (
     BudgetScopeRequest,
     BudgetService,
@@ -112,20 +108,7 @@ from gateway.services.budgets import (
 from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
 from gateway.services.pricing_service import find_model_pricing, flat_request_cost
-from gateway.services.search_backend import (
-    SearchOutcome,
-    SearchProviderError,
-    run_keyed_search,
-    run_search,
-    search_tool,
-)
-from gateway.services.tools import (
-    DirectSearch,
-    WebToolFailure,
-    pick_direct_search_instance,
-    resolve_direct_search,
-    search_on_any_search,
-)
+from gateway.services.tools import pick_direct_search_instance, resolve_direct_search, run_direct_search
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 
 router = APIRouter(tags=["search"])
@@ -144,12 +127,11 @@ async def create_search(
     response: Response,
     request: SearchRequest,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     budget_service: Annotated[BudgetService, Depends(get_budget_service)],
     web_search_policy: WebSearchPolicyPortDep,
-    policy_session: PortSessionDep,
     web_provider_client: WebProviderClientDep,
 ) -> SearchResponse:
     """Run a search against a configured search tool.
@@ -182,7 +164,6 @@ async def create_search(
         log_writer=log_writer,
         budget_service=budget_service,
         web_search_policy=web_search_policy,
-        policy_session=policy_session,
         web_provider_client=web_provider_client,
     )
 
@@ -194,12 +175,11 @@ async def create_search_for_tool(
     request: SearchRequest,
     search_tool_name: Annotated[str, Path(description="Configured search tool to run against")],
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
     budget_service: Annotated[BudgetService, Depends(get_budget_service)],
     web_search_policy: WebSearchPolicyPortDep,
-    policy_session: PortSessionDep,
     web_provider_client: WebProviderClientDep,
 ) -> SearchResponse:
     """Run a search against the search tool named in the path.
@@ -231,7 +211,6 @@ async def create_search_for_tool(
         log_writer=log_writer,
         budget_service=budget_service,
         web_search_policy=web_search_policy,
-        policy_session=policy_session,
         web_provider_client=web_provider_client,
     )
 
@@ -243,12 +222,11 @@ async def _dispatch_search(
     request: SearchRequest,
     tool_name: str | None,
     auth_result: tuple[APIKey | None, bool],
-    db: AsyncSession,
+    db: AsyncSession | None,
     config: GatewayConfig,
     log_writer: LogWriter,
     budget_service: BudgetService,
     web_search_policy: WebSearchPolicyPort,
-    policy_session: AsyncSession | None,
     web_provider_client: httpx.AsyncClient,
 ) -> SearchResponse:
     """Run the search request scaffold: reserve, call, log, settle.
@@ -258,6 +236,10 @@ async def _dispatch_search(
     the any-llm provider instances, and a search tool is neither a model nor an
     any-llm provider.
     """
+    # The session the policy port reads on too, so one release before the provider call
+    # frees the request's one connection. Never None: the endpoint is mounted only where
+    # a process serves both planes, which get_db_if_needed hands a session.
+    assert db is not None
     started_at = time.monotonic()
     api_key, _ = auth_result
     api_key_id = api_key.id if api_key else None
@@ -350,9 +332,6 @@ async def _dispatch_search(
             status_code=status.HTTP_403_FORBIDDEN,
         )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=refusal.message)
-    # The policy is read on a session of its own, which would otherwise hold its
-    # connection through the provider call.
-    await release_session(policy_session)
 
     # A workspace whose organization brought its own search key searches with it on a
     # call that names no tool, so its own account pays. The tool is still what the
@@ -466,99 +445,50 @@ async def _dispatch_search(
         user_id=user_id,
         api_key_id=api_key_id,
     )
-    # Nothing holds a pooled connection through the provider call; settlement
-    # below opens a new transaction on the same session.
+    # The policy port read on this same session, so this frees the request's one
+    # connection before the provider call; settlement checks one back out.
     await release_session(db)
 
     try:
-        if search.resolved.runner == "library":
-            result = await search_on_any_search(search, web_provider_client)
-            search_response, reported_cost = result.response, result.cost
+        result = await run_direct_search(search, web_provider_client)
+    except Exception as exc:
+        if isinstance(exc, DirectSearchFailedError):
+            # The failure's safe fields ride as headers (decision 67); the detail stays generic.
+            failed, row_status, headers = exc.message, exc.upstream_status or status.HTTP_502_BAD_GATEWAY, exc.headers
         else:
-            outcome = await _search_on_old_client(search, web_provider_client)
-            search_response = _to_response(tool.name, outcome)
-            reported_cost = Decimal(str(outcome.cost_usd)) if outcome.cost_usd is not None else None
-        # The provider's own charge is the true cost; the configured flat rate is
-        # the fallback for a provider that reports none.
-        # Rounded once, here, so the row and the reconciled spend agree.
-        cost = quantize_cost(reported_cost if reported_cost is not None else flat_request_cost(pricing))
-        await log_writer.put(
-            usage_row(
-                status="success",
-                # Search bills per request; there are no tokens to report, and a
-                # zero is truthful where a null would read as "unknown".
-                prompt_tokens=0,
-                completion_tokens=0,
-                total_tokens=0,
-                cost=cost,
-            )
-        )
-        await reconcile_reservation(db, reservation, cost)
-    except HTTPException:
+            # Raised by something other than the provider, and named by its type alone,
+            # since an adapter's exception text could carry the query.
+            failed, row_status, headers = type(exc).__name__, failure_status_code(exc), None
+        await log_writer.put(usage_row(status="error", error_message=failed, status_code=row_status))
+        await refund_reservation(db, reservation)
+        logger.error("Search failed for tool '%s' (%s): %s", tool.name, search.resolved.provider, failed)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=PASSTHROUGH_PROVIDER_ERROR_DETAIL, headers=headers
+        ) from exc
+    except BaseException:
+        # A cancelled request, its client gone, is refunded all the same.
         await refund_reservation(db, reservation)
         raise
-    except Exception as exc:
-        error_message = _error_message(exc)
-        failure = _failure(search, exc)
-        # The provider's own status where it gave one, as the other routes' rows keep it.
-        row_status = failure.status if failure is not None and failure.status is not None else None
-        await log_writer.put(
-            usage_row(status="error", error_message=error_message, status_code=row_status or failure_status_code(exc))
+
+    # The provider's own charge is the true cost; the configured flat rate is
+    # the fallback for a provider that reports none.
+    # Rounded once, here, so the row and the reconciled spend agree.
+    cost = quantize_cost(result.cost if result.cost is not None else flat_request_cost(pricing))
+    await log_writer.put(
+        usage_row(
+            status="success",
+            # Search bills per request; there are no tokens to report, and a
+            # zero is truthful where a null would read as "unknown".
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+            cost=cost,
         )
-        await refund_reservation(db, reservation)
-        # The provider's message is kept on the usage log and the gateway log,
-        # never in the response: the old clients' can carry upstream internals,
-        # and the pass-through routes hold the same line.
-        logger.error("Search failed for tool '%s' (%s): %s", tool.name, search.resolved.provider, error_message)
-        # The failure's safe fields ride as headers (decision 67), for a caller
-        # that tells a retry from a refusal; the detail stays generic.
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=PASSTHROUGH_PROVIDER_ERROR_DETAIL,
-            headers=failure.as_headers() if failure is not None else None,
-        ) from exc
+    )
+    await reconcile_reservation(db, reservation, cost)
 
     if rate_limit_info:
         for header, value in rate_limit_headers(rate_limit_info).items():
             response.headers[header] = value
 
-    return search_response
-
-
-async def _search_on_old_client(search: DirectSearch, client: httpx.AsyncClient) -> SearchOutcome:
-    """A search that does not run on any-search yet: a Tavily or Brave organization key, or a ``searxng`` tool."""
-    if search.credential is not None:
-        return await run_keyed_search(search.credential, search.query, timeout_s=search.resolved.timeout, client=client)
-    return await run_search(search_tool(search.resolved), search.query, client=client)
-
-
-def _failure(search: DirectSearch, exc: Exception) -> WebToolFailure | None:
-    """The safe fields of a provider's failure, or ``None`` for anything else raised on the way."""
-    if isinstance(exc, any_search.ProviderError):
-        return WebToolFailure.from_provider_error(exc)
-    if isinstance(exc, SearchProviderError):
-        return WebToolFailure.of(search.resolved.provider, exc.status, exc.tag)
-    return None
-
-
-def _error_message(exc: Exception) -> str:
-    """What the usage row and the log keep of a failed search.
-
-    any-search's errors carry no body, URL or query, and the old clients' carry
-    the upstream status and body, which stay out of the response. Anything else
-    raised on the way is named by its type only, since its text could carry the
-    query.
-    """
-    if isinstance(exc, any_search.ProviderError | SearchProviderError):
-        return str(exc)
-    return type(exc).__name__
-
-
-def _to_response(tool_name: str, outcome: SearchOutcome) -> SearchResponse:
-    return SearchResponse(
-        search_tool=tool_name,
-        results=[
-            SearchResultItem(title=hit.title or "", url=hit.url, snippet=hit.snippet or "", date=hit.date)
-            for hit in outcome.results
-        ],
-    )
+    return result.response

@@ -19,6 +19,7 @@ from gateway.core.error_codes import (
 
 # A retry may help a timeout, a rate limit or a fault on the provider's side.
 _RETRYABLE_TAGS = frozenset({"timeout"})
+_CLIENT_ERROR = 400
 _TOO_MANY_REQUESTS = 429
 _SERVER_ERROR = 500
 
@@ -34,7 +35,12 @@ class WebToolFailure:
 
     @classmethod
     def of(cls, provider: str | None, status: int | None, tag: str) -> "WebToolFailure":
-        """The failure of ``provider`` with this status and tag, its retryability read from them."""
+        """The failure of ``provider`` with this status and tag, its retryability read from them.
+
+        Only an error status is kept: an answer that came back 200 and could not
+        be read failed with no status of its own.
+        """
+        status = status if status is not None and status >= _CLIENT_ERROR else None
         retryable = tag in _RETRYABLE_TAGS or status == _TOO_MANY_REQUESTS or (status or 0) >= _SERVER_ERROR
         return cls(provider=provider, status=status, tag=tag, retryable=retryable)
 

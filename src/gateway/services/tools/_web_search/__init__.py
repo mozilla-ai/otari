@@ -5,7 +5,7 @@ from gateway.services.tools._web_search._direct import (
     DirectSearchResult,
     pick_direct_search_instance,
     resolve_direct_search,
-    search_on_any_search,
+    run_direct_search,
 )
 from gateway.services.tools._web_search._litellm import (
     CHARS_PER_TOKEN,
@@ -32,5 +32,5 @@ __all__ = [
     "resolve_direct_search",
     "resolve_fetch",
     "resolve_search",
-    "search_on_any_search",
+    "run_direct_search",
 ]

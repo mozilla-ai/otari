@@ -1,4 +1,4 @@
-"""The direct endpoint's rules: which instance, which key, which count, and the call on any-search (design J).
+"""The direct endpoint's rules: which instance, which key, which count, and the call itself (design J).
 
 ``POST /api/v1/search`` reads the request and its dependencies, then asks
 these. The instance comes from the path, else the body's
@@ -8,9 +8,10 @@ rules, the timeout, the usage row's names and the response's ``search_tool``.
 A named call runs on that instance with its own key. An unnamed one runs on
 the organization key the workspace's policy carries, when it has one, on the
 key's own provider and options, priced under ``otari:web_search`` (decisions
-33 and 51). Of the workspace's policy, only
-the on/off switch, which the route applies, and the ``max_results`` ceiling
-apply here; its provider options do not (design G).
+33 and 51). Of the workspace's policy, only the on/off switch, which the
+route applies, and the ``max_results`` ceiling apply here; its provider
+options do not (design G). The call runs on any-search, or on an old client
+for a provider any-search has no adapter for yet.
 """
 
 from dataclasses import dataclass, replace
@@ -28,12 +29,13 @@ from gateway.core.settings.tools import (
     effective_search_instances,
 )
 from gateway.exceptions.tools_exceptions import (
+    DirectSearchFailedError,
     DirectSearchFieldRefusedError,
     SearchToolMisconfiguredError,
     SearchToolSelectionError,
 )
 from gateway.models.tools import ResolvedWebSearchConfig, WebSearchCredential
-from gateway.schemas.tools import SearchRequest, SearchResponse
+from gateway.schemas.tools import SearchRequest, SearchResponse, SearchResultItem
 from gateway.services.tools._web_search._litellm import (
     SearchQuery,
     direct_count,
@@ -41,6 +43,7 @@ from gateway.services.tools._web_search._litellm import (
     litellm_results,
 )
 from gateway.services.tools._web_search._resolve import ResolvedSearch, resolve_search
+from gateway.services.tools._web_tool_failure import WebToolFailure
 
 
 @dataclass(frozen=True)
@@ -70,7 +73,7 @@ class DirectSearch:
 
 @dataclass(frozen=True)
 class DirectSearchResult:
-    """What a direct search on any-search answered, and what the provider said it cost."""
+    """What a direct search answered, and what the provider said it cost."""
 
     response: SearchResponse
     cost: Decimal | None
@@ -189,14 +192,36 @@ def resolve_direct_search(
     )
 
 
-async def search_on_any_search(search: DirectSearch, client: httpx.AsyncClient) -> DirectSearchResult:
-    """Run a direct search that runs on any-search, through the app's web provider client.
+async def run_direct_search(search: DirectSearch, client: httpx.AsyncClient) -> DirectSearchResult:
+    """Run a direct search on what serves it, through the app's web provider client.
 
-    The count is always passed as ``max_results``, so a native count option
-    cannot pass the workspace's ceiling. Raises ``any_search.ProviderError``
+    any-search for a library-backed provider; until their adapters exist, the
+    old SearXNG client for a ``searxng`` tool and the old Tavily or Brave client
+    for an organization key on either. Raises :class:`DirectSearchFailedError`
     when the provider fails the call, an error it signals inside a successful
-    answer included.
+    answer included. Its message, for the usage row and the log, holds only the
+    failure's safe fields: an old client's own text can quote the upstream body,
+    or a URL carrying the query.
     """
+    # Imported here: the old clients' module imports this package's root.
+    from gateway.services.search_backend import SearchProviderError
+
+    try:
+        if search.resolved.runner == "library":
+            return await _on_any_search(search, client)
+        return await _on_old_client(search, client)
+    except any_search.ProviderError as exc:
+        failure = WebToolFailure.from_provider_error(exc)
+    except SearchProviderError as exc:
+        failure = WebToolFailure.of(search.resolved.provider, exc.status, exc.tag)
+    detail = failure.tag if failure.status is None else f"{failure.tag}, HTTP {failure.status}"
+    raise DirectSearchFailedError(
+        f"{failure.provider} search failed ({detail})", headers=failure.as_headers(), upstream_status=failure.status
+    )
+
+
+async def _on_any_search(search: DirectSearch, client: httpx.AsyncClient) -> DirectSearchResult:
+    # The count is always passed as max_results, so a native count option cannot pass the workspace's ceiling.
     resolved = search.resolved
     options = {**resolved.options, **litellm_native_options(resolved.provider, search.query, resolved.options)}
     async with any_search.AnySearch.create(
@@ -216,4 +241,26 @@ async def search_on_any_search(search: DirectSearch, client: httpx.AsyncClient) 
             raw=result.raw if search.include_raw else None,
         ),
         cost=result.cost,
+    )
+
+
+async def _on_old_client(search: DirectSearch, client: httpx.AsyncClient) -> DirectSearchResult:
+    # Imported here, as in run_direct_search; looked up on each call, so a test that stubs a client still reaches it.
+    from gateway.services.search_backend import run_keyed_search, run_search, search_tool
+
+    if search.credential is not None:
+        outcome = await run_keyed_search(
+            search.credential, search.query, timeout_s=search.resolved.timeout, client=client
+        )
+    else:
+        outcome = await run_search(search_tool(search.resolved), search.query, client=client)
+    return DirectSearchResult(
+        response=SearchResponse(
+            search_tool=search.instance.name,
+            results=[
+                SearchResultItem(title=hit.title or "", url=hit.url, snippet=hit.snippet or "", date=hit.date)
+                for hit in outcome.results
+            ],
+        ),
+        cost=Decimal(str(outcome.cost_usd)) if outcome.cost_usd is not None else None,
     )

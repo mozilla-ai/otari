@@ -450,7 +450,7 @@ def test_stored_tool_is_immediately_dispatchable(
     assert _create(client, master_key_header).status_code == 201
     outcome = SearchOutcome(results=[SearchHit(url="https://example.com", title="Example")])
     mock = AsyncMock(return_value=outcome)
-    with patch("gateway.api.routes.search.run_search", mock):
+    with patch("gateway.services.search_backend.run_search", mock):
         resp = client.post(f"{API_ROOT}/search/local", json={"query": "otari"}, headers=api_key_header)
     assert resp.status_code == 200, resp.text
     assert resp.json()["search_tool"] == "local"

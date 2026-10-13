@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict
 
 from gateway.core.config import GatewayConfig
 from gateway.schemas.tools import SearchRequest
-from gateway.services.tools import pick_direct_search_instance, resolve_direct_search, search_on_any_search
+from gateway.services.tools import pick_direct_search_instance, resolve_direct_search, run_direct_search
 
 
 class LiteLLMSearchResult(BaseModel):
@@ -53,7 +53,7 @@ async def _response(**request: Any) -> dict[str, Any]:
     instance = pick_direct_search_instance(config, None)
     search = resolve_direct_search(config, instance, None, SearchRequest(query="q", **request), named=False)
     async with httpx.AsyncClient() as client:
-        result = await search_on_any_search(search, client)
+        result = await run_direct_search(search, client)
     response: dict[str, Any] = result.response.model_dump(mode="json")
     return response
 
