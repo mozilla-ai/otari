@@ -4,6 +4,30 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.22.0](https://github.com/mozilla-ai/otari/releases/tag/v0.22.0) - 2026-10-13
+
+
+
+### Bug Fixes
+
+- **models:** Report models' ctx window and output limit in the model list in [#2214](https://github.com/mozilla-ai/otari/pull/2214) by [@aittalam](https://github.com/aittalam) ([`3f8f9e6`](https://github.com/mozilla-ai/otari/commit/3f8f9e6d94580d55b732063a9efa0aa3fd224a48))
+- **playground:** Ignore the body user when deriving the end-user identifier by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`bb6a141`](https://github.com/mozilla-ai/otari/commit/bb6a14143312d0a4ddc4ad89435b19ca90a3f89f))
+- **playground:** Stop forwarding the body user to the data plane in [#2247](https://github.com/mozilla-ai/otari/pull/2247) by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`87361da`](https://github.com/mozilla-ai/otari/commit/87361da6f1319197d6ceef6d29615cbbdc40ec5e))
+- **web:** Lay data tables out as cards on a phone and wrap their empty messages in [#2227](https://github.com/mozilla-ai/otari/pull/2227) by [@jigjigjig](https://github.com/jigjigjig) ([`d1cf05e`](https://github.com/mozilla-ai/otari/commit/d1cf05ec79b16fcbb03acaf7800c69bafc61b331))
+- **pricing:** Price pass-through usage by the rate's unit in [#2241](https://github.com/mozilla-ai/otari/pull/2241) by [@tbille](https://github.com/tbille) ([`ab5d3f1`](https://github.com/mozilla-ai/otari/commit/ab5d3f115a5b43b78f31b5436a432d771ff5a314))
+- **hybrid:** Serve embeddings, rerank, images, audio and moderations on the data plane in [#2240](https://github.com/mozilla-ai/otari/pull/2240) by [@tbille](https://github.com/tbille) ([`9f341a8`](https://github.com/mozilla-ai/otari/commit/9f341a8735e3f5af1cf624b811dae3508dce0d0b))
+- **dashboard:** Lay the budgets table out in one line per row in [#2249](https://github.com/mozilla-ai/otari/pull/2249) by [@jigjigjig](https://github.com/jigjigjig) ([`61b22c3`](https://github.com/mozilla-ai/otari/commit/61b22c3862336ab2c0b1b466631ecc909322e85c))
+
+
+### Features
+
+- **config:** Add the provider user identifier settings by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`1d183d3`](https://github.com/mozilla-ai/otari/commit/1d183d3b6abd148374a1dd9d09fa01348f25bb01))
+- **chat:** Send providers a per-end-user identifier by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`2b17470`](https://github.com/mozilla-ai/otari/commit/2b174706b437b15a5490bbdc57ca2c4b72ffd57b))
+- **responses:** Send a safety identifier to providers by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`e5c8949`](https://github.com/mozilla-ai/otari/commit/e5c894925b7920bd094628e3023011d4783043c5))
+- **messages:** Replace the caller's metadata.user_id with the identifier by [@dpoulopoulos](https://github.com/dpoulopoulos) ([`298dbd8`](https://github.com/mozilla-ai/otari/commit/298dbd8c6e3a4e420f7b7e8ea8221dd9dcb6180b))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.21.0...v0.22.0
 ## [0.21.0](https://github.com/mozilla-ai/otari/releases/tag/v0.21.0) - 2026-10-12
 
 
