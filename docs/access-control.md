@@ -486,6 +486,12 @@ inviter holds the link too, so that person accepts without a password and then
 signs in through a provider or resets their password, either of which proves the
 address.
 
+An invitee does not need the link. Signing up with the invited address, or
+signing in with Google or GitHub, completes the account the invitation created,
+and every invitation still waiting on it is listed under Invitations in the
+dashboard, where it can be accepted or declined. Someone who is not yet a member
+of any organization is taken there straight after signing in.
+
 A password chosen through a link counts as verified so the person can sign in,
 but Otari records that an organization vouched for the address rather than that
 the person proved it. A vouched address does not trigger

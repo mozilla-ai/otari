@@ -23,6 +23,7 @@ import {
   bootstrap,
   HOSTED_SURFACES,
   organizationContext,
+  pendingOrganizationInvitation,
   seriesPoint,
   usageTotals,
   workspaceActivation,
@@ -1649,5 +1650,86 @@ describe("the first-steps strip on the tenant Overview", () => {
       expect(screen.getByRole("button", { name: /refresh/i })).toBeEnabled()
     })
     expect(screen.queryByText(GET_STARTED)).not.toBeInTheDocument()
+  })
+})
+
+describe("OverviewIndex for an identity with no organization", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  /** The context answers 404 for an identity with no active membership. */
+  function mockWithoutOrganization(
+    invitations: ReturnType<typeof pendingOrganizationInvitation>[],
+  ) {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.endsWith(`${API_ROOT}/organizations/me`)) {
+        return jsonResponse({ detail: "Organization not found" }, 404)
+      }
+      if (url.includes(`${API_ROOT}/organizations/me/pending-memberships`)) {
+        return jsonResponse({ data: invitations, count: invitations.length })
+      }
+      if (url.includes(`${API_ROOT}/usage/summary`)) {
+        return jsonResponse(summary({}))
+      }
+      if (url.includes(`${API_ROOT}/providers/health`)) {
+        return jsonResponse({
+          providers: [],
+          healthy: 1,
+          total: 1,
+          checked_at: null,
+        })
+      }
+      if (url.includes(`${API_ROOT}/providers`)) {
+        return jsonResponse({ providers: [{ provider: "openai" }] })
+      }
+      return jsonResponse([])
+    })
+  }
+
+  function renderHome() {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    return render(
+      <QueryClientProvider client={client}>
+        <DeploymentProvider
+          value={bootstrap({
+            deployment_type: "hosted",
+            surfaces: HOSTED_SURFACES,
+          })}
+        >
+          <OverviewIndex />
+        </DeploymentProvider>
+      </QueryClientProvider>,
+      {
+        wrapper: withRouter({
+          url: "/",
+          routes: [{ path: "/invitations", element: <LocationProbe /> }],
+        }),
+      },
+    )
+  }
+
+  it("sends an invitee who signed up before accepting to their invitations", async () => {
+    mockWithoutOrganization([pendingOrganizationInvitation()])
+
+    renderHome()
+
+    expect(await screen.findByTestId("loc")).toHaveTextContent("/invitations")
+  })
+
+  it("stays on the overview when nothing is waiting", async () => {
+    mockWithoutOrganization([])
+
+    renderHome()
+
+    expect(
+      await screen.findByText(
+        "At-a-glance spend, traffic, and health across the gateway.",
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId("loc")).not.toBeInTheDocument()
   })
 })

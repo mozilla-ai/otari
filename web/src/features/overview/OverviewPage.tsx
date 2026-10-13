@@ -1,6 +1,6 @@
 import { Button } from "@heroui/react"
 import type { LinkProps } from "@tanstack/react-router"
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Link, Navigate, useNavigate } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { useEffect, useMemo, useState } from "react"
 import type { UsageEntry } from "@/client"
@@ -25,10 +25,12 @@ import {
   errorRateHealth,
   providerHealthStatus,
 } from "@/features/overview/overview"
+import { ApiError } from "@/shared/api/client"
 import { useModels } from "@/shared/api/models"
 import {
   useDeploymentOperator,
   useOrganizationContext,
+  usePendingOrganizationInvitations,
 } from "@/shared/api/organizations"
 import { useOverviewSummary } from "@/shared/api/overview"
 import { useProviderHealth, useProviders } from "@/shared/api/providers"
@@ -343,9 +345,23 @@ function UsageKpiCells({
  */
 export function OverviewIndex() {
   const { answer, isSettled } = useDeploymentOperator()
+  const context = useOrganizationContext()
+  // A 404 here is an identity with no active membership anywhere: somebody who
+  // signed up or signed in before accepting the invitation that created their
+  // account. Every page below would fail for them, and the inbox is the one
+  // that can fix it, so they are sent there rather than left to find it in the
+  // switcher.
+  const hasNoOrganization =
+    context.data === undefined &&
+    context.error instanceof ApiError &&
+    context.error.status === 404
+  const invitations = usePendingOrganizationInvitations(hasNoOrganization)
 
-  if (!isSettled) {
+  if (!isSettled || (hasNoOrganization && invitations.isPending)) {
     return <PageLoading />
+  }
+  if (hasNoOrganization && (invitations.data ?? []).length > 0) {
+    return <Navigate to="/invitations" replace />
   }
   if (answer === "not-operator") {
     return <OrganizationOverview />

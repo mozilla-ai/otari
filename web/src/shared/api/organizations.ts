@@ -390,7 +390,7 @@ export function useRevokeOrganizationMemberInvitation() {
 // every `/organizations` path by design. Neither is something a retry
 // fixes, and the entry point that reads the count treats a failure as "nothing
 // waiting" rather than showing an error in the chrome.
-export function usePendingOrganizationInvitations() {
+export function usePendingOrganizationInvitations(enabled = true) {
   return useQuery({
     queryKey: [ORGANIZATIONS, "pending-memberships"],
     queryFn: () =>
@@ -400,6 +400,7 @@ export function usePendingOrganizationInvitations() {
     staleTime: 60_000,
     retry: (failureCount, error) =>
       !(error instanceof ApiError && error.status === 404) && failureCount < 3,
+    enabled,
   })
 }
 
