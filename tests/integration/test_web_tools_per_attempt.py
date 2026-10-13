@@ -272,7 +272,9 @@ def _post_messages(
     async def fake_loop_amessages(**kwargs: Any) -> MessageResponse:
         rounds.append(kwargs)
         if len(rounds) == 1:
-            arguments = {"query": "otari"} if run_loop_for == "search" else {"url": "https://example.com"}
+            arguments: dict[str, object] = (
+                {"query": "otari"} if run_loop_for == "search" else {"url": "https://example.com"}
+            )
             use = ToolUseBlock(type="tool_use", id="toolu_1", name=_NAMES[run_loop_for or "search"], input=arguments)
             return _reply("", content=[use], stop_reason="tool_use")
         return _reply("via-otari")
