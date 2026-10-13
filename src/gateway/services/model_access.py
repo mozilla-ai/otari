@@ -243,13 +243,16 @@ class ModelRefusal:
     detail: str
 
 
-def unresolved_model_refusal(selector: str) -> ModelRefusal:
-    """The refusal for a selector no instance, known provider, alias, policy or catalog id resolves.
+def unresolved_model_refusal(resolved_instance: str | None, *, selector: str) -> ModelRefusal | None:
+    """Why a selector that resolved to no instance is turned away, or ``None`` when it resolved.
 
-    It is an invalid model whatever the pricing settings: a name that names nothing
-    is not unpriced. A ``provider:model`` pair whose model the gateway does not
-    know locally still resolves, and is left to the pricing gate and the provider.
+    A selector no instance, known provider, alias, policy or catalog id resolves is
+    an invalid model whatever the pricing settings: a name that names nothing is not
+    unpriced. A ``provider:model`` pair whose model the gateway does not know locally
+    still resolves, and is left to the pricing gate and the provider.
     """
+    if resolved_instance is not None:
+        return None
     return ModelRefusal(
         code=INVALID_MODEL, status_code=HTTPStatus.BAD_REQUEST, detail=unresolvable_model_detail(selector)
     )
@@ -268,7 +271,7 @@ def key_model_refusal(allowlist: list[str] | None, canonical_key: str | None, *,
     if allowlist is None:
         return None
     if canonical_key is None:
-        return unresolved_model_refusal(selector)
+        return unresolved_model_refusal(None, selector=selector)
     if is_model_allowed(allowlist, canonical_key):
         return None
     return ModelRefusal(

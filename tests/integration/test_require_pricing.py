@@ -165,7 +165,7 @@ _COMPLETION_BODIES = [
 def test_known_unpriced_model_is_pricing_required_on_every_completion_route(
     strict_pricing_client: TestClient, path: str, body: dict[str, Any]
 ) -> None:
-    """A model that resolves but has no price is still refused as unpriced."""
+    """A model that resolves but has no price is refused as unpriced."""
     c = strict_pricing_client
     c.post(f"{API_ROOT}/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
     resp = c.post(

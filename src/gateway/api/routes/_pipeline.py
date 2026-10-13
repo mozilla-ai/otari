@@ -2626,8 +2626,8 @@ async def resolve_request_context(
                     tags=tags,
                 )
             raise
-        if gate_instance is None:
-            unresolved = unresolved_model_refusal(model)
+        unresolved = unresolved_model_refusal(gate_instance, selector=model)
+        if unresolved is not None:
             await refund_reservation(db, reservation)
             await log_gateway_rejection(
                 db=db,
