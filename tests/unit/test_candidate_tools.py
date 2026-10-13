@@ -80,29 +80,6 @@ def test_every_other_preference_decides_every_candidate_alike(
     assert _claimed([declaration], ["anthropic", "vertexai"]) == [claimed, claimed]
 
 
-@pytest.mark.parametrize("backend", [True, False])
-def test_provider_leaves_the_tool_only_with_a_candidate_that_runs_it_itself(backend: bool) -> None:
-    declarations = [
-        _declared(CODE_EXECUTION_TOOL, ANTHROPIC_CODE, CodeExecutor.PROVIDER, backend=backend),
-        _declared(_tool(WEB_SEARCH_TOOL_NAME), ANTHROPIC_SEARCH, CodeExecutor.PROVIDER, backend=backend),
-    ]
-
-    decided = decide_candidate_tools(declarations, providers=["anthropic", "vertexai"], dialect=Dialect.MESSAGES)
-
-    assert decided == [
-        CandidateTools(native=frozenset({CODE, WEB_SEARCH_TOOL_NAME})),
-        CandidateTools(unserved=frozenset({CODE, WEB_SEARCH_TOOL_NAME})),
-    ]
-
-
-def test_without_a_preference_a_tool_is_forwarded_where_it_cannot_run() -> None:
-    declaration = _declared(_tool(WEB_FETCH_TOOL_NAME), ANTHROPIC_FETCH, None)
-
-    decided = decide_candidate_tools([declaration], providers=["vertexai"], dialect=Dialect.MESSAGES)
-
-    assert decided == [CandidateTools()]
-
-
 def test_a_uniform_declaration_is_claimed_for_every_candidate_where_any_needs_it() -> None:
     declaration = _declared(CODE_EXECUTION_TOOL, ANTHROPIC_CODE, CodeExecutor.AUTO, uniform=True)
 

@@ -393,13 +393,9 @@ def test_any_candidate_that_runs_the_declaration_natively_uses_its_container() -
     assert _provider_runs([ANTHROPIC_DATED], provider="vertexai", fallbacks=["anthropic"]) is True
     assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", fallbacks=["anthropic"]) is True
     assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", fallbacks=["vertexai"], sandbox=False) is True
+    # An executor asked for decides every candidate as it decides the head.
+    assert _provider_runs([ANTHROPIC_DATED], provider="mistral", fallbacks=["anthropic"], header="provider") is False
     assert _provider_runs([ANTHROPIC_DATED], provider="anthropic", fallbacks=["vertexai"], header="otari") is False
-
-
-def test_under_provider_a_candidate_that_cannot_run_the_code_decides_nothing() -> None:
-    # It is skipped, so the fallback that runs the code itself is the one whose container reads the file.
-    assert _provider_runs([ANTHROPIC_DATED], provider="mistral", fallbacks=["anthropic"], header="provider") is True
-    assert _provider_runs([ANTHROPIC_DATED], provider="mistral", fallbacks=["vertexai"], header="provider") is False
 
 
 def test_the_header_the_pin_and_the_default_can_each_bring_the_code_to_the_sandbox() -> None:

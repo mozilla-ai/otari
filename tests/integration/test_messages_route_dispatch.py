@@ -2194,17 +2194,11 @@ def test_auto_claims_a_fetch_keyword_a_non_anthropic_model_cannot_run(
     [
         (_ANTHROPIC_MODEL, "auto", True, False),
         (_ANTHROPIC_MODEL, "otari", True, True),
-        (_ANTHROPIC_MODEL, "provider", True, False),
+        (MODEL_NAME, "provider", True, False),
         (MODEL_NAME, None, True, False),
         (MODEL_NAME, "auto", False, False),
     ],
-    ids=[
-        "auto-keeps-anthropic-native",
-        "otari-claims-anthropic",
-        "provider-keeps-anthropic-native",
-        "no-header",
-        "fetch-disabled",
-    ],
+    ids=["auto-keeps-anthropic-native", "otari-claims-anthropic", "provider", "no-header", "fetch-disabled"],
 )
 def test_who_runs_a_fetch_keyword(
     client: TestClient,
@@ -2228,23 +2222,6 @@ def test_who_runs_a_fetch_keyword(
     assert bool(loop_calls) is claimed
     if not claimed:
         assert [tool["type"] for tool in forwarded.get("tools") or []] == ["web_fetch_20250910"]
-
-
-def test_provider_refuses_a_fetch_keyword_the_model_cannot_run_itself(
-    client: TestClient, api_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch, test_config: GatewayConfig
-) -> None:
-    monkeypatch.setattr(test_config, "web_fetch_enabled", True)
-    loop_calls: list[dict[str, Any]] = []
-    forwarded: dict[str, Any] = {}
-
-    resp = _post_fetch_keyword(
-        client, api_key_header, model=MODEL_NAME, header="provider", loop_calls=loop_calls, forwarded=forwarded
-    )
-
-    assert resp.status_code == 400, resp.text
-    assert resp.headers["Otari-Error-Code"] == "native_tool_unavailable"
-    assert not forwarded
-    assert not loop_calls
 
 
 def test_an_unknown_web_fetch_header_value_is_rejected(

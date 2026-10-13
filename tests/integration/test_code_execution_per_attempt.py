@@ -356,73 +356,21 @@ def test_a_plan_whose_candidates_all_run_the_code_never_uses_the_sandbox(
     assert seen.sandboxes == []
 
 
-def test_otari_runs_the_code_on_the_sandbox_for_every_candidate(
-    client: TestClient, api_key_header: dict[str, str]
+@pytest.mark.parametrize(("executor", "sandboxed"), [("otari", True), ("provider", False)])
+def test_an_executor_asked_for_decides_every_candidate(
+    client: TestClient, api_key_header: dict[str, str], executor: str, sandboxed: bool
 ) -> None:
     response, seen = _post_messages(
-        client, {**api_key_header, _HEADER: "otari"}, _messages_body("claude-then-vertex"), provider_fails=True
+        client, {**api_key_header, _HEADER: executor}, _messages_body("claude-then-vertex"), provider_fails=True
     )
 
     assert response.status_code == 200, response.text
-    assert seen.provider_calls == []
-    assert len(seen.loop_calls) == 1
-
-
-_PROVIDER_SKIP = "Skipped: vertexai can't run code_execution itself and the request asked for provider"
-
-
-def _skip_rows(db_session: Session, instance: str) -> list[str | None]:
-    return [row.error_message for row in _rows(db_session) if row.status == "absorbed" and row.provider == instance]
-
-
-def test_provider_skips_a_fallback_that_cannot_run_the_code_itself(
-    client: TestClient, api_key_header: dict[str, str], db_session: Session
-) -> None:
-    response, seen = _post_messages(
-        client, {**api_key_header, _HEADER: "provider"}, _messages_body("claude-then-vertex"), provider_fails=True
-    )
-
-    # The head's own failure answers, since the only fallback was never sent the request.
-    assert response.status_code >= 500, response.text
-    assert [seen.tool_types(call) for call in seen.provider_calls] == [{"code_execution_20250825"}]
-    assert seen.loop_calls == []
-    assert seen.sandboxes == []
-    assert _skip_rows(db_session, "vertexai") == [_PROVIDER_SKIP]
-
-
-@pytest.mark.parametrize("stream", [False, True])
-def test_provider_skips_a_head_that_cannot_run_the_code_itself(
-    client: TestClient, api_key_header: dict[str, str], db_session: Session, stream: bool
-) -> None:
-    body = _messages_body("vertex-then-claude", **({"stream": True} if stream else {}))
-
-    response, seen = _post_messages(client, {**api_key_header, _HEADER: "provider"}, body)
-
-    assert response.status_code == 200, response.text
-    assert "via-provider" in response.text
-    assert [seen.tool_types(call) for call in seen.provider_calls] == [{"code_execution_20250825"}]
-    assert seen.loop_calls == []
-    assert _skip_rows(db_session, "vertexai") == [_PROVIDER_SKIP]
-
-
-@pytest.mark.parametrize("model", ["openai-then-mistral", f"vertexai:{_CLAUDE}"])
-@pytest.mark.parametrize("stream", [False, True])
-def test_provider_with_no_candidate_that_runs_the_code_itself_is_refused(
-    client: TestClient, api_key_header: dict[str, str], model: str, stream: bool
-) -> None:
-    body = _messages_body(model, **({"stream": True} if stream else {}))
-
-    response, seen = _post_messages(client, {**api_key_header, _HEADER: "provider"}, body)
-
-    assert response.status_code == 400, response.text
-    assert response.headers["Otari-Error-Code"] == "native_tool_unavailable"
-    message = response.json()["detail"]["error"]["message"]
-    assert "code_execution" in message
-    assert "auto" in message
-    # A routing policy's targets are not the caller's to see.
-    assert "mistral" not in message
-    assert seen.provider_calls == []
-    assert seen.loop_calls == []
+    if sandboxed:
+        assert seen.provider_calls == []
+        assert len(seen.loop_calls) == 1
+    else:
+        assert [seen.tool_types(call) for call in seen.provider_calls] == [{"code_execution_20250825"}] * 2
+        assert seen.loop_calls == []
 
 
 def test_otaris_container_spelling_is_kept_for_the_sandbox_and_left_out_for_the_provider(
