@@ -30,7 +30,9 @@ function trackConnection(queryClient: QueryClient) {
       queryClient.getQueryCache().subscribe((event) => {
         if (event.type !== "updated") return
         const { action } = event
-        if (action.type === "success") failing = false
+        // A manual cache write (`setQueryData`) reaches no gateway, so it says
+        // nothing about the connection.
+        if (action.type === "success" && !action.manual) failing = false
         else if (action.type === "error") failing = isUnreachable(action.error)
         else return
         onStoreChange()

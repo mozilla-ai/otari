@@ -3,7 +3,7 @@ import {
   QueryClientProvider,
   useQuery,
 } from "@tanstack/react-query"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ConnectionStatus } from "@/app/ConnectionStatus"
@@ -85,12 +85,13 @@ describe("ConnectionStatus", () => {
       if (calls === 1) throw new TypeError("Failed to fetch")
       return jsonResponse({ ok: true })
     })
-    renderWithProbe()
+    const { client } = renderWithProbe()
 
-    await waitFor(() => expect(calls).toBe(2))
     await waitFor(() =>
-      expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
+      expect(client.getQueryState(["probe"])?.status).toBe("success"),
     )
+    expect(calls).toBe(2)
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 
   it("is not held up by a failure a page left behind once requests succeed", async () => {
@@ -122,6 +123,21 @@ describe("ConnectionStatus", () => {
     await waitFor(() =>
       expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
     )
+  })
+
+  it("keeps the alert through a cache write while the gateway is unreachable", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(
+      new TypeError("Failed to fetch"),
+    )
+    const { client } = renderWithProbe()
+    await screen.findByRole("alert")
+
+    // `setQueryData` reaches no gateway, so it is not an answer from one.
+    await act(async () => {
+      client.setQueryData(["optimistic"], { ok: true })
+    })
+
+    expect(screen.getByRole("alert")).toBeInTheDocument()
   })
 
   it("stays quiet for an error that is not a lost connection", async () => {
