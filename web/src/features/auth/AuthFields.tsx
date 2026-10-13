@@ -47,7 +47,7 @@ export function AuthEmailField({
       type="email"
       isRequired
       isReadOnly={isReadOnly}
-      className="flex flex-col gap-1"
+      className="group flex flex-col gap-1"
     >
       <Label className="text-body">{label}</Label>
       {/* autoComplete="username" and not "email": this is the handle the
@@ -70,14 +70,26 @@ export function AuthEmailField({
         autoFocus={autoFocus}
         className="read-only:bg-surface-alt read-only:text-muted"
       />
-      {description ? (
-        <FieldMessages>
-          {/* HeroUI's Description reaches the input as aria-describedby
-              through the TextField's "description" slot, which a raw span
-              does not. */}
-          <Description className="text-muted">{description}</Description>
-        </FieldMessages>
-      ) : null}
+      {/* The field validates natively (`type="email"`, `isRequired`) and turns
+          red on a refused submit, so the reason has to render with it. It takes
+          the description's line rather than one of its own, as
+          `AuthPasswordField`'s error does. */}
+      <FieldMessages shouldReserve={description !== undefined}>
+        <FieldError className="text-danger">
+          {({ validationDetails }) =>
+            validationDetails.valueMissing
+              ? "Enter your email."
+              : "Enter a valid email address."
+          }
+        </FieldError>
+        {description ? (
+          // HeroUI's Description reaches the input as aria-describedby through
+          // the TextField's "description" slot, which a raw span does not.
+          <Description className="text-muted group-data-[invalid=true]:hidden">
+            {description}
+          </Description>
+        ) : null}
+      </FieldMessages>
     </TextField>
   )
 }

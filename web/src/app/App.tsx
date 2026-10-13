@@ -102,7 +102,8 @@ export default function App({
  * again.
  */
 function DeploymentRoot({ hash }: { hash: string }) {
-  const { deployment_type, session_type, public_catalog } = useDeployment()
+  const { deployment_type, session_type, public_catalog, open_signup } =
+    useDeployment()
   const { isAuthenticated } = useAuth()
 
   // A hybrid gateway is data-plane only: otari.ai owns its organizations,
@@ -152,8 +153,14 @@ function DeploymentRoot({ hash }: { hash: string }) {
   // previous link's result.
   const publicAuth = publicAuthPath(hash)
   if (publicAuth) {
+    // Signup's heading is "Claim your account" where signup is closed, so its
+    // tab says the same.
+    const title =
+      publicAuth === "/signup" && !open_signup
+        ? "Claim account"
+        : PUBLIC_AUTH_TITLES[publicAuth]
     return (
-      <PublicPageTitle page={PUBLIC_AUTH_TITLES[publicAuth]}>
+      <PublicPageTitle page={title}>
         <PublicAuthPage path={publicAuth} hash={hash} key={hash} />
       </PublicPageTitle>
     )

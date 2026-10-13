@@ -271,6 +271,43 @@ describe("App", () => {
     ).toBeInTheDocument()
   })
 
+  it("opens an emailed link pasted into a tab that is already signed in", async () => {
+    window.localStorage.setItem("otari.dashboard.hasSession", "1")
+    vi.mocked(siteFetch).mockResolvedValue({
+      build: "test-build",
+      version: "1.0.0",
+    } as never)
+    vi.mocked(apiFetch).mockImplementation(async (path) => {
+      if (path === "/invitations/validate") {
+        return {
+          email: "ada@example.com",
+          organization_name: "Acme",
+          role: "member",
+          expires_at: "2026-01-08T00:00:00+00:00",
+          needs_password: false,
+        } as never
+      }
+      return [] as never
+    })
+    window.location.hash = "#/"
+    renderApp(bootstrap())
+    expect(await screen.findByText("Lazy overview")).toBeInTheDocument()
+
+    // The router hears the hash change too, and its catch-all used to send
+    // the unknown path to the overview before the page above it could read it.
+    window.location.hash = "#/accept-invitation?token=abc123"
+
+    expect(await screen.findByText("ada@example.com")).toBeInTheDocument()
+    expect(window.location.hash).toBe("#/accept-invitation?token=abc123")
+  })
+
+  it("titles closed signup after its heading", () => {
+    window.location.hash = "#/signup"
+    renderApp(bootstrap({ mail_ready: true, open_signup: false }))
+
+    expect(document.title).toBe("Claim account · Otari")
+  })
+
   it("remounts with a fresh token when a different invitation link opens in the same tab", async () => {
     // App.tsx keys the accept-invitation branch on the hash for exactly this:
     // without it, a same-type re-render on hashchange would keep the first

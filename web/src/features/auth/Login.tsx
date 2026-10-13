@@ -1,5 +1,5 @@
 import { Button, Input, Label, TextField } from "@heroui/react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   FiAlertCircle,
   FiChevronRight,
@@ -43,6 +43,15 @@ import {
   renderableOAuthProviders,
 } from "./oauthProviders"
 import { PublicAuthLink } from "./PublicAuthLayout"
+import { forgetSignInAddress, readSignInAddress } from "./signInAddress"
+
+/** Whether the primary pointer is a mouse or a trackpad rather than a finger. */
+function hasFinePointer(): boolean {
+  return (
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(pointer: fine)").matches
+  )
+}
 
 /** Which box an error belongs beside. */
 type CredentialField = "email" | "password" | "masterKey"
@@ -260,7 +269,12 @@ export function Login() {
 
   const [masterKey, setMasterKey] = useState("")
   const [isKeyVisible, setIsKeyVisible] = useState(false)
-  const [email, setEmail] = useState("")
+  // Handed over by the accept-invitation page after it set a first password.
+  const [prefilledEmail] = useState(readSignInAddress)
+  useEffect(() => {
+    forgetSignInAddress()
+  }, [])
+  const [email, setEmail] = useState(prefilledEmail)
   const [password, setPassword] = useState("")
   const [error, setError] = useState<unknown>(null)
   const [errorField, setErrorField] = useState<CredentialField>()
@@ -275,13 +289,16 @@ export function Login() {
   // success; it clears on the refusal path, where the person stays here.
   const [pendingProvider, setPendingProvider] = useState<string>()
   // The typed credential is folded behind a row while another way in is offered
-  // above it, and open straight away when it is the only one. Opened by the
-  // visitor, it takes focus; open on arrival, it must not, or the soft keyboard
-  // covers the page before anyone asked to type.
+  // above it, and open straight away when it is the only one or an address was
+  // handed over. Opened by the visitor, it takes focus. Open on arrival, it
+  // takes focus only under a fine pointer: on a touch screen focus raises the
+  // soft keyboard over the page before anyone asked to type.
   const [isFormOpen, setIsFormOpen] = useState(
-    () => oauthProviders.length === 0 && !offersPasskey,
+    () =>
+      (oauthProviders.length === 0 && !offersPasskey) || prefilledEmail !== "",
   )
   const [didOpenForm, setDidOpenForm] = useState(false)
+  const [focusesOnArrival] = useState(() => isFormOpen && hasFinePointer())
   // A refusal from a provider or a passkey, which belongs under the rows it came
   // from and not under the typed credential's own fields.
   const [methodError, setMethodError] = useState<unknown>(null)
@@ -709,12 +726,13 @@ export function Login() {
                       errorId={ERROR_IDS.email}
                     />
                     {/* 16px, not the 14px HeroUI drops to from `sm:` up: under
-                        16px iOS Safari zooms the page on focus. No autoFocus,
-                        which on a page load raises the soft keyboard over half a
-                        phone screen and makes a focus ring the resting state. */}
+                        16px iOS Safari zooms the page on focus. */}
                     <Input
                       placeholder="you@example.com"
-                      autoFocus={didOpenForm}
+                      autoFocus={
+                        didOpenForm ||
+                        (focusesOnArrival && prefilledEmail === "")
+                      }
                       autoComplete="username"
                       aria-describedby={
                         errorField === "email" ? ERROR_IDS.email : undefined
@@ -732,29 +750,33 @@ export function Login() {
                     isRequired
                     validationBehavior={VALIDATION}
                     isInvalid={errorField === "password"}
-                    className="flex flex-col gap-2"
+                    // A grid so the recovery link can share the label's line
+                    // while following the input in the DOM: the tab order then
+                    // goes from the address to the password, not to the link.
+                    className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-2"
                   >
-                    <div className="flex flex-wrap items-center justify-between gap-x-2">
-                      <LabelRow
-                        label="Password"
-                        error={errorField === "password" ? error : null}
-                        errorId={ERROR_IDS.password}
-                      />
-                      {offersRecovery ? (
-                        <PublicAuthLink isInline to="#/recover-password">
-                          Forgot your password?
-                        </PublicAuthLink>
-                      ) : null}
-                    </div>
+                    <LabelRow
+                      label="Password"
+                      error={errorField === "password" ? error : null}
+                      errorId={ERROR_IDS.password}
+                    />
                     <Input
+                      autoFocus={focusesOnArrival && prefilledEmail !== ""}
                       autoComplete="current-password"
                       aria-describedby={
                         errorField === "password"
                           ? ERROR_IDS.password
                           : undefined
                       }
-                      className="h-10 text-base"
+                      className="col-span-2 h-10 text-base"
                     />
+                    {offersRecovery ? (
+                      <div className="col-start-2 row-start-1">
+                        <PublicAuthLink isInline to="#/recover-password">
+                          Forgot your password?
+                        </PublicAuthLink>
+                      </div>
+                    ) : null}
                   </TextField>
                   {offersResendVerification ? (
                     <PublicAuthLink to="#/resend-verification">
@@ -784,7 +806,7 @@ export function Login() {
                     <div className="relative">
                       <Input
                         placeholder="otari-mk-…"
-                        autoFocus={didOpenForm}
+                        autoFocus={didOpenForm || focusesOnArrival}
                         autoComplete="off"
                         aria-describedby={
                           errorField === "masterKey"

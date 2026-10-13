@@ -17,22 +17,26 @@
  * way in on a deployment that sends no mail. When the address can already
  * sign in, accepting is one button and the next step is signing in.
  *
- * A session is treated as this browser's state rather than proof of who is
- * reading: accepting takes no identity, so a signed-in visitor still gets the
- * page the link was meant for.
+ * Accepting takes no identity, so the membership always goes to the invited
+ * address whoever is signed in here. A session for a different address is
+ * therefore told who the invitation is for and offered a way to sign out and
+ * continue, rather than an accept that reads as if it joined them.
  */
 
 import { Button, Link } from "@heroui/react"
 import { useState } from "react"
 import { ErrorBanner } from "@/design-system/feedback/ErrorBanner"
+import { InfoBanner } from "@/design-system/feedback/InfoBanner"
 import { useAuth } from "@/features/auth/AuthContext"
 import { LoginPageShell } from "@/features/auth/LoginPageShell"
 import {
   goToPublicAuthPage,
   PublicAuthLink,
 } from "@/features/auth/PublicAuthLayout"
+import { rememberSignInAddress } from "@/features/auth/signInAddress"
 import {
   useAcceptInvitation,
+  useOrganizationContext,
   useValidateInvitation,
 } from "@/shared/api/organizations"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
@@ -51,7 +55,19 @@ export function AcceptInvitationPage() {
   const [token] = useState(() => tokenFromHash(window.location.hash))
   const preview = useValidateInvitation(token ?? "")
   const accept = useAcceptInvitation()
-  const { isAuthenticated } = useAuth()
+  const { isAuthenticated, logout } = useAuth()
+  // Whose session this browser holds, where the context can say. A caller with
+  // no organization gets a 404 and no address, so a mismatch is only claimed
+  // when both addresses are known.
+  const sessionContext = useOrganizationContext(isAuthenticated)
+  const sessionEmail = isAuthenticated
+    ? sessionContext.data?.caller?.email
+    : undefined
+  const invitedEmail = preview.data?.email
+  const isSomeoneElse =
+    typeof sessionEmail === "string" &&
+    invitedEmail !== undefined &&
+    sessionEmail.toLowerCase() !== invitedEmail.toLowerCase()
   const deployment = useDeployment()
   // Absent on a hosted deployment, which serves no such page; see
   // `welcomeGuideHref`. The rule above it goes with it, since a card ending in
@@ -89,11 +105,11 @@ export function AcceptInvitationPage() {
           {/* No article before the role: two of the three ("a owner", "a
               admin") read wrong, and the roles are the server's words. */}
           <p className="text-sm text-foreground">
-            You're now a member of{" "}
-            <strong>{accept.data.organization_name}</strong>, with the{" "}
+            <strong>{invitedEmail ?? "The invited address"}</strong> is now a
+            member of <strong>{accept.data.organization_name}</strong>, with the{" "}
             <strong>{accept.data.role}</strong> role.
           </p>
-          {isAuthenticated && !accept.data.password_set ? (
+          {isAuthenticated && !isSomeoneElse && !accept.data.password_set ? (
             <>
               <p className="text-center text-xs text-muted">
                 You're already signed in, so there is nothing left to set up.
@@ -120,7 +136,10 @@ export function AcceptInvitationPage() {
               <Button
                 variant="primary"
                 fullWidth
-                onPress={() => goToPublicAuthPage("#/")}
+                onPress={() => {
+                  if (invitedEmail) rememberSignInAddress(invitedEmail)
+                  goToPublicAuthPage("#/")
+                }}
               >
                 Go to sign in
               </Button>
@@ -134,7 +153,7 @@ export function AcceptInvitationPage() {
             </>
           )}
         </>
-      ) : preview.isLoading ? (
+      ) : preview.isLoading || sessionContext.isLoading ? (
         <p className="text-sm text-muted">Checking your invitation…</p>
       ) : preview.error ? (
         <>
@@ -148,7 +167,18 @@ export function AcceptInvitationPage() {
             <strong>{preview.data.email}</strong> to join with the{" "}
             <strong>{preview.data.role}</strong> role.
           </p>
-          {preview.data.needs_password ? (
+          {isSomeoneElse ? (
+            <>
+              <InfoBanner tone="warning">
+                This invitation is for {preview.data.email}, and you're signed
+                in as {sessionEmail}. Sign out to accept it as{" "}
+                {preview.data.email}.
+              </InfoBanner>
+              <Button variant="primary" fullWidth onPress={() => void logout()}>
+                Sign out and continue
+              </Button>
+            </>
+          ) : preview.data.needs_password ? (
             <ClaimForm
               token={token}
               preview={preview.data}
