@@ -1,20 +1,29 @@
 """Unit tests for which betas the Messages route forwards.
 
 Two never reach a provider: the gateway's own MCP client capability, and every
-beta at all when the dispatched provider has no Anthropic Messages API, where
-any-llm refuses the whole request and a model swap would otherwise stop working.
+beta at all when the dispatched model is served with no Anthropic Messages API,
+where any-llm refuses the whole request and a model swap would otherwise stop
+working.
 """
 
 from __future__ import annotations
 
-import pytest
-from any_llm import AnyLLM
+import json
+from typing import Any
 
-from gateway.api.routes.messages import _serves_messages_natively, _split_client_betas
+import pytest
+from any_llm import AnyLLM, amessages
+
+from gateway.api.routes.messages import _serves_messages_natively, _split_client_betas, _with_upstream_user
+from gateway.services.inference import UPSTREAM_USER_FIELD
 from gateway.services.mcp_loop_messages import MCP_CLIENT_BETA
 
 ANTHROPIC = "anthropic:claude-sonnet-4-6"
 OPEN_MODEL = "nebius:openai/gpt-oss-120b"
+BEDROCK_CLAUDE = "bedrock:anthropic.claude-sonnet-4-5-20250929-v1:0"
+BEDROCK_CLAUDE_PROFILE = "bedrock:us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+BEDROCK_LLAMA = "bedrock:meta.llama3-70b-instruct-v1:0"
+THINKING_BETA = "interleaved-thinking-2025-05-14"
 
 
 def test_a_native_provider_keeps_its_betas() -> None:
@@ -82,3 +91,78 @@ def test_nativeness_follows_the_provider_flag(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(AnyLLM.get_provider_class("nebius"), "SUPPORTS_MESSAGES_NATIVE", True)
 
     assert _serves_messages_natively(OPEN_MODEL)
+
+
+@pytest.mark.parametrize("model", [ANTHROPIC, BEDROCK_CLAUDE, BEDROCK_CLAUDE_PROFILE])
+def test_a_model_with_a_messages_api_of_its_own_is_native(model: str) -> None:
+    assert _serves_messages_natively(model)
+
+
+@pytest.mark.parametrize("model", [OPEN_MODEL, BEDROCK_LLAMA])
+def test_a_bridged_model_is_not_native(model: str) -> None:
+    assert not _serves_messages_natively(model)
+
+
+def test_bedrock_keeps_betas_for_claude_and_drops_them_for_other_models() -> None:
+    betas = [MCP_CLIENT_BETA, THINKING_BETA]
+
+    claude, _ = _split_client_betas({"model": BEDROCK_CLAUDE_PROFILE, "betas": betas})
+    llama, _ = _split_client_betas({"model": BEDROCK_LLAMA, "betas": betas})
+
+    assert claude["betas"] == [THINKING_BETA]
+    assert "betas" not in llama
+
+
+class _Stop(Exception):
+    """Ends the call once the boto3 client has seen the request."""
+
+
+class _BedrockRuntime:
+    """A bedrock-runtime client that records the one call it receives."""
+
+    def __init__(self) -> None:
+        self.calls: dict[str, dict[str, Any]] = {}
+
+    def invoke_model(self, **kwargs: Any) -> None:
+        self.calls["invoke_model"] = kwargs
+        raise _Stop
+
+    def converse(self, **kwargs: Any) -> None:
+        self.calls["converse"] = kwargs
+        raise _Stop
+
+
+async def _dispatch_to_bedrock(model: str) -> dict[str, dict[str, Any]]:
+    """Send a Messages request with a beta and an end-user identifier through any-llm's Bedrock provider."""
+    client = _BedrockRuntime()
+    kwargs = {
+        "model": model,
+        "max_tokens": 16,
+        "messages": [{"role": "user", "content": "hi"}],
+        "betas": [THINKING_BETA],
+        UPSTREAM_USER_FIELD: "id",
+    }
+    provider_kwargs, _ = _split_client_betas(_with_upstream_user(kwargs))
+    with pytest.raises(_Stop):
+        await amessages(**provider_kwargs, client_args={"client": client, "region_name": "us-east-1"})
+    return client.calls
+
+
+@pytest.mark.asyncio
+async def test_bedrock_claude_reaches_invoke_model_with_its_betas_and_identifier() -> None:
+    calls = await _dispatch_to_bedrock(BEDROCK_CLAUDE_PROFILE)
+
+    request = calls["invoke_model"]
+    body = json.loads(request["body"])
+    assert body["anthropic_beta"] == [THINKING_BETA]
+    assert body["metadata"] == {"user_id": "id"}
+    assert "requestMetadata" not in request
+
+
+@pytest.mark.asyncio
+async def test_other_bedrock_models_reach_converse_with_request_metadata_and_no_betas() -> None:
+    calls = await _dispatch_to_bedrock(BEDROCK_LLAMA)
+
+    request = calls["converse"]
+    assert request["requestMetadata"] == {"otari_user": "id"}
+    assert "anthropic_beta" not in json.dumps(request)

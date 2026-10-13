@@ -133,18 +133,18 @@ def _merge_anthropic_betas(body_betas: list[str] | None, raw_request: Request) -
 
 
 def _serves_messages_natively(dispatch_model: Any) -> bool:
-    """Whether the dispatched provider has an Anthropic Messages API of its own.
+    """Whether the dispatched model is served by an Anthropic Messages API of its own.
 
-    A bridged provider (``SUPPORTS_MESSAGES`` without ``SUPPORTS_MESSAGES_NATIVE``)
-    goes through any-llm's Messages-to-Completions conversion, which refuses
-    ``betas``. An unknown or unparseable selector answers yes, so nothing is
-    stripped on a guess; any-llm then refuses the beta itself.
+    any-llm answers per model (Bedrock serves only its Claude models natively).
+    A bridged model goes through any-llm's Messages-to-Completions conversion,
+    which refuses ``betas``. An unknown or unparseable selector answers yes, so
+    nothing is stripped on a guess; any-llm then refuses the beta itself.
     """
     if not isinstance(dispatch_model, str) or not dispatch_model:
         return True
     try:
-        provider, _ = AnyLLM.split_model_provider(dispatch_model)
-        return AnyLLM.get_provider_class(provider).SUPPORTS_MESSAGES_NATIVE
+        provider, model = AnyLLM.split_model_provider(dispatch_model)
+        return AnyLLM.get_provider_class(provider).serves_messages_natively(model)
     except Exception:  # noqa: BLE001 - any-llm raises its own types for an unknown provider
         return True
 
@@ -164,9 +164,9 @@ def _split_client_betas(kwargs: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     """Take out the betas no provider should see, and say whether MCP's was among them.
 
     Two never travel. The MCP client capability is the gateway's own, consumed
-    here. And every beta is dropped for a provider with no Messages API of its
-    own, where any-llm refuses the request outright: a beta names an Anthropic
-    feature that provider was never going to serve, so forwarding it would make
+    here. And every beta is dropped for a model served with no Messages API of
+    its own, where any-llm refuses the request outright: a beta names an Anthropic
+    feature that model was never going to serve, so forwarding it would make
     a request stop working purely because its model changed, which is the swap
     `auto` exists to keep invisible.
     """

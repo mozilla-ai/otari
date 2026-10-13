@@ -126,9 +126,10 @@ def chat_user_fields(provider: LLMProvider | str | None, identifier: str) -> dic
 def messages_user_fields(provider: LLMProvider | str | None, identifier: str, *, native: bool) -> dict[str, Any]:
     """The Messages keyword arguments that carry ``identifier`` to ``provider``.
 
-    ``native`` says ``provider`` has a Messages API of its own. any-llm serves any
-    other as a chat completion, where it drops ``metadata`` and forwards extra
-    keyword arguments to that call, so the provider's chat field is used instead.
+    ``native`` says the call's model is served by a Messages API of its own.
+    any-llm serves any other as a chat completion, where it drops ``metadata``
+    and forwards extra keyword arguments to that call, so the provider's chat
+    field is used instead.
     """
     if native:
         return {"metadata": {"user_id": identifier}}
