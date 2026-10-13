@@ -4,6 +4,22 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.23.0](https://github.com/mozilla-ai/otari/releases/tag/v0.23.0) - 2026-10-13
+
+
+
+### Features
+
+- **config:** Declare budgets and API keys in config.yml in [#2186](https://github.com/mozilla-ai/otari/pull/2186) by [@daavoo](https://github.com/daavoo) ([`25de977`](https://github.com/mozilla-ai/otari/commit/25de977174aa0272d647be164240f401b83803c5))
+- **traces:** Store agent traces in a traces domain in [#2086](https://github.com/mozilla-ai/otari/pull/2086) by [@agpituk](https://github.com/agpituk) ([`9353d75`](https://github.com/mozilla-ai/otari/commit/9353d751f8ce4198c27800fe2f07447849c175b6))
+
+
+### Performance
+
+- **usage:** Keep telemetry ingest from starving the request pool in [#2251](https://github.com/mozilla-ai/otari/pull/2251) by [@daavoo](https://github.com/daavoo) ([`144c2a3`](https://github.com/mozilla-ai/otari/commit/144c2a3edd7d79c4ced023ae3f22baf1a653ec0c))
+
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.22.0...v0.23.0
 ## [0.22.0](https://github.com/mozilla-ai/otari/releases/tag/v0.22.0) - 2026-10-13
 
 
