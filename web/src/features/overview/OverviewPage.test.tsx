@@ -1658,7 +1658,6 @@ describe("OverviewIndex for an identity with no organization", () => {
     vi.restoreAllMocks()
   })
 
-  /** The context answers 404 for an identity with no active membership. */
   function mockWithoutOrganization(
     invitations: ReturnType<typeof pendingOrganizationInvitation>[],
   ) {
