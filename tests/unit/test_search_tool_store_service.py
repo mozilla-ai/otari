@@ -18,7 +18,6 @@ from gateway.core.settings.tools import (
 from gateway.models.tools import SearchToolCredential
 from gateway.repositories.tools import SearchToolRepository
 from gateway.services import search_tool_store_service as store
-from gateway.services.search_backend import resolve_search_tool
 from gateway.services.search_tool_store_service import (
     apply_to_config,
     config_file_fetch_tools,
@@ -31,6 +30,7 @@ from gateway.services.secret_box import (
     encrypt_secret,
     generate_secret_key,
 )
+from gateway.services.tools import resolve_search
 
 
 @pytest.fixture(autouse=True)
@@ -106,9 +106,9 @@ def test_stored_tool_resolves_on_the_request_path() -> None:
     config = GatewayConfig()
     _prime({"local": {"provider": "searxng", "api_base": "http://searxng:8080"}})
     apply_to_config(config)
-    tool = resolve_search_tool(config, "local")
-    assert tool.provider == "searxng"
-    assert tool.api_base == "http://searxng:8080"
+    resolved = resolve_search(config, None, requested="local", request_options=None)
+    assert resolved is not None
+    assert (resolved.provider, resolved.api_base) == ("searxng", "http://searxng:8080")
 
 
 def test_stored_searxng_tool_inherits_web_search_url() -> None:
@@ -116,7 +116,9 @@ def test_stored_searxng_tool_inherits_web_search_url() -> None:
     config = GatewayConfig(web_search_url="http://searxng:8080")
     _prime({"local": {"provider": "searxng"}})
     apply_to_config(config)
-    assert resolve_search_tool(config, "local").api_base == "http://searxng:8080"
+    resolved = resolve_search(config, None, requested="local", request_options=None)
+    assert resolved is not None
+    assert resolved.api_base == "http://searxng:8080"
 
 
 def test_row_to_entry_decrypts_api_key(monkeypatch: pytest.MonkeyPatch) -> None:

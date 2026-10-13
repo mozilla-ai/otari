@@ -14,6 +14,13 @@ ERROR_CODE_HEADER = "Otari-Error-Code"
 BUDGET_SCOPE_HEADER = "Otari-Budget-Scope"
 # The ``rate_limits`` rule a 429 names.
 RATE_LIMIT_RULE_HEADER = "Otari-Rate-Limit-Rule"
+# What a direct search's 502 shows of a provider's failure (decision 67): the
+# provider, its own HTTP status, a tag naming the failure, and whether a retry
+# may help (``true`` or ``false``). A field with no value sends no header.
+ERROR_PROVIDER_HEADER = "Otari-Error-Provider"
+ERROR_STATUS_HEADER = "Otari-Error-Status"
+ERROR_TAG_HEADER = "Otari-Error-Tag"
+ERROR_RETRYABLE_HEADER = "Otari-Error-Retryable"
 
 BUDGET_EXCEEDED = "budget_exceeded"
 USER_BLOCKED = "user_blocked"

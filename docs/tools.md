@@ -163,9 +163,12 @@ With `require_pricing: true`, an unpriced gateway-run tool is refused before the
 model call. A failed tool invocation is recorded but not charged. Charges settle
 on the final usage row alongside model tokens.
 
-Direct `POST /api/v1/search` uses a different price key,
+Direct `POST /api/v1/search` prices a search on a tool under that tool's own key,
 `<provider>:<search-tool-name>`, because it calls a configured search provider
-without a model tool loop.
+without a model tool loop. A search a workspace's
+[organization search key](#organization-search-keys) served is priced under
+`otari:web_search` instead, since the deployment cannot price the organization's
+own provider account. A provider's reported cost, when it reports one, comes first.
 
 ## What clients receive
 
@@ -554,7 +557,8 @@ A runnable example lives under `demo/web-search/`.
 A workspace web-access policy can:
 
 - disable `otari_web_search`, `otari_web_fetch`, and `POST /api/v1/search`
-- lower `max_results`
+- lower `max_results`, for `otari_web_search` and `POST /api/v1/search`; unset,
+  only the provider's own maximum bounds it
 - narrow allowed domains or add blocked domains for Search results and Fetch
   destinations, including redirects
 - provide a default purpose hint
@@ -569,7 +573,8 @@ backend, enable deployment-disabled Fetch, or relax an operator limit. Fetch
 remains available subject to deployment and workspace policy when no Search
 backend is configured.
 
-The policy also applies to direct search where relevant. In hybrid mode, the
+On direct search, the policy's switch and its `max_results` apply; its domain
+lists, purpose hint and provider options do not. In hybrid mode, the
 connected control plane supplies workspace search configuration. A hosted control
 plane reads a workspace with no policy as off, so web access is something a
 workspace turns on.
@@ -583,8 +588,8 @@ and admins manage the keys under `/api/v1/organizations/me/web-search-keys`: add
 rename or replace a key, archive it, and make one key per provider the
 organization's default. Only the last four characters of a key are ever shown.
 
-Each workspace searches with one key, for model-initiated and
-[direct search](#direct-search) alike:
+Each workspace searches with one key, for model-initiated search and for a
+[direct search](#direct-search) that names no tool:
 
 1. the key the workspace pinned as its own, if any;
 2. otherwise an organization default, Tavily before Brave;
@@ -612,9 +617,26 @@ A SearXNG search tool can reuse `web_search_url`, so model-initiated and direct
 search can share one backend. They remain distinct surfaces with separate
 pricing keys.
 
-A workspace with a usable [organization search key](#organization-search-keys)
-runs its direct searches on that key rather than on the named tool's backend.
-The named tool must still be configured, and the request is still allowlisted,
-rate-limited, priced and timed out as that tool. A Brave key localizes results to
-the request's `country`; Tavily takes a country by its full name, so a Tavily key
-does not.
+A direct search that names no tool runs on the workspace's usable
+[organization search key](#organization-search-keys), if it has one, in place of
+the deployment's default tool. That tool must still be configured, and the request
+is still allowlisted, rate-limited and timed out as that tool and logged under its
+name, while the search is priced under `otari:web_search`. A search that names a
+tool, in the path or in `search_tool_name`, runs on that tool with its own key. A
+Brave key localizes results to the request's `country`; Tavily takes a country by
+its full name, so a Tavily key does not.
+
+The request, the response and the errors are in the
+[API reference](api-reference.md#search).
+
+### Search providers
+
+- **Exa** (`exa`) needs an API key, read from the tool's `api_key`, such as
+  `${EXA_API_KEY}`, and reports what each search costs (`costDollars.total`), which
+  is what the search is billed at. Exa's [pricing](https://exa.ai/docs/admin/pricing),
+  read 2026-10-13, is per search, covering up to 10 results, and every result past
+  10 adds to it, so a workspace's `max_results` ceiling also bounds what one search
+  can cost. A search with no results reported a cost of 0 when the adapter was
+  written.
+- **SearXNG** (`searxng`) is self-hosted and reports no cost, so a search is billed
+  at the tool's rate.

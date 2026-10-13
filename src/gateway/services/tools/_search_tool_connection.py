@@ -1,14 +1,16 @@
 """Connection tests for search and fetch instances: one search or one fetch, reported without its content.
 
 An instance is tested as the resolver will call it: a provider any-search or
-any-fetch serves through the library, with a client of its own, and a
-``searxng`` instance, until any-search has its adapter, through the direct
-endpoint's own client. The answer says whether the call worked, the error's tag
-when it did not, and how many hits or characters came back.
+any-fetch serves through the library, and a ``searxng`` instance, until
+any-search has its adapter, through the direct endpoint's old client, both on
+the app's web provider client. The answer says whether the call worked, the
+error's tag when it did not, and how many hits or characters came back.
 """
 
 from collections.abc import Mapping
 from typing import Any
+
+import httpx
 
 import any_fetch
 import any_search
@@ -23,20 +25,15 @@ from gateway.core.settings.tools import (
     instance_from_entry,
 )
 from gateway.exceptions.tools_exceptions import (
+    SearchToolMisconfiguredError,
     SearchToolNotFoundError,
     SearchToolRefusedError,
     SearchToolUntestableError,
 )
 from gateway.log_config import logger
 from gateway.schemas.tools import SearchToolTestResponse
-from gateway.services.search_backend import (
-    SearchProviderError,
-    SearchQuery,
-    SearchToolError,
-    resolve_search_tool,
-    run_search,
-)
 from gateway.services.tools._search_tool_writes import check_tool_entry, check_tool_name_is_free, check_tool_write
+from gateway.services.tools._web_search import SearchQuery, resolve_search
 
 
 def instance_to_test(config: GatewayConfig, name: str) -> tuple[ToolInstance, Mapping[str, Any]]:
@@ -102,17 +99,19 @@ def _library_call(instance: ToolInstance) -> tuple[dict[str, Any], dict[str, Any
     return settings, {**instance.provider_defaults, **kept}
 
 
-async def _test_with_library(instance: ToolInstance, *, query: str | None, url: str | None) -> SearchToolTestResponse:
-    """One search or fetch through any-search or any-fetch, the provider opening a client of its own."""
+async def _test_with_library(
+    instance: ToolInstance, *, query: str | None, url: str | None, client: httpx.AsyncClient
+) -> SearchToolTestResponse:
+    """One search or fetch through any-search or any-fetch, on ``client``."""
     settings, options = _library_call(instance)
     try:
         if instance.kind == "search":
-            async with any_search.AnySearch.create(instance.provider, **settings) as engine:
+            async with any_search.AnySearch.create(instance.provider, **settings, client=client) as engine:
                 result = await engine.search(str(query), **options)
             if result.error is not None:
                 return SearchToolTestResponse(ok=False, error=result.error.tag)
             return SearchToolTestResponse(ok=True, hits=len(result.hits))
-        async with any_fetch.AnyFetch.create(instance.provider, **settings) as fetcher:
+        async with any_fetch.AnyFetch.create(instance.provider, **settings, client=client) as fetcher:
             page = await fetcher.fetch(str(url), **options)
         if page.error is not None:
             return SearchToolTestResponse(ok=False, error=page.error.tag)
@@ -125,17 +124,24 @@ async def _test_with_library(instance: ToolInstance, *, query: str | None, url: 
 
 
 async def _test_with_old_client(
-    config: GatewayConfig, name: str, entry: Mapping[str, Any], query: str
+    config: GatewayConfig, name: str, entry: Mapping[str, Any], query: str, client: httpx.AsyncClient
 ) -> SearchToolTestResponse:
-    """One search through the direct endpoint's own client, which serves SearXNG until any-search does."""
+    """One search through the direct endpoint's old client, which serves SearXNG until any-search does."""
+    # Imported here: the old client's module imports this package's root, which imports this module.
+    from gateway.services.search_backend import SearchProviderError, run_search, search_tool
+
     try:
         # Resolved as the direct endpoint resolves it, against this entry alone,
         # so an unsaved one inherits web_search_url and the engines the same way.
-        tool = resolve_search_tool(config.model_copy(update={"search_tools": {name: dict(entry)}}), name)
-    except SearchToolError as exc:
+        unsaved = config.model_copy(update={"search_tools": {name: dict(entry)}})
+        resolved = resolve_search(unsaved, None, requested=name, request_options=None)
+    except SearchToolMisconfiguredError as exc:
         raise SearchToolRefusedError(str(exc)) from None
+    if resolved is None:
+        # Unreachable: a named instance resolves or raises.
+        raise SearchToolRefusedError(f"Search tool '{name}' is not configured correctly.")
     try:
-        outcome = await run_search(tool, SearchQuery(query=query))
+        outcome = await run_search(search_tool(resolved), SearchQuery(query=query), client=client)
     except SearchProviderError as exc:
         return SearchToolTestResponse(ok=False, error=exc.tag)
     return SearchToolTestResponse(ok=True, hits=len(outcome.results))
@@ -148,12 +154,13 @@ async def run_connection_test(
     *,
     query: str | None,
     url: str | None,
+    client: httpx.AsyncClient,
 ) -> SearchToolTestResponse:
-    """Run one search or one fetch on ``instance`` and say how it went, never what came back."""
+    """Run one search or one fetch on ``instance`` through ``client`` and say how it went, never what came back."""
     if instance.kind == "search" and instance.provider in SEARCH_PROVIDERS_WITHOUT_ADAPTER:
-        response = await _test_with_old_client(config, instance.name, entry, str(query))
+        response = await _test_with_old_client(config, instance.name, entry, str(query), client)
     else:
-        response = await _test_with_library(instance, query=query, url=url)
+        response = await _test_with_library(instance, query=query, url=url, client=client)
     logger.info(
         "Connection test of %s instance '%s': %s",
         instance.kind,

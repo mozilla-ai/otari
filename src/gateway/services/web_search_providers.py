@@ -83,7 +83,18 @@ _TAVILY_OPTION_KEYS = ("max_results", "search_depth", "topic", "time_range", "in
 
 
 class WebSearchProviderError(RuntimeError):
-    """The search provider could not be reached or returned malformed data."""
+    """The search provider could not be reached or returned malformed data.
+
+    ``tag`` names the failure (``timeout``, ``network``, ``http_error``,
+    ``invalid_response``) and ``status`` is the provider's HTTP status when it
+    answered with one, for a caller that reports the failure without the message.
+    """
+
+    def __init__(self, message: str, *, tag: str = "provider_error", status: int | None = None) -> None:
+        """Carry the message for the log, and the tag and status for a caller that reports only those."""
+        super().__init__(message)
+        self.tag = tag
+        self.status = status
 
 
 def is_sendable_api_key(api_key: str) -> bool:
@@ -289,18 +300,19 @@ async def _request(
         raise WebSearchProviderError(msg) from None
     except httpx.HTTPError as exc:
         msg = f"{provider} search could not be reached: {exc}"
-        raise WebSearchProviderError(msg) from exc
+        tag = "timeout" if isinstance(exc, httpx.TimeoutException) else "network"
+        raise WebSearchProviderError(msg, tag=tag) from exc
 
     if response.status_code >= httpx.codes.BAD_REQUEST:
         msg = f"{provider} search returned HTTP {response.status_code}"
-        raise WebSearchProviderError(msg)
+        raise WebSearchProviderError(msg, tag="http_error", status=response.status_code)
 
     try:
         body = response.json()
     except ValueError as exc:
         msg = f"{provider} search returned a body that is not JSON"
-        raise WebSearchProviderError(msg) from exc
+        raise WebSearchProviderError(msg, tag="invalid_response") from exc
     if not isinstance(body, dict):
         msg = f"{provider} search returned a {type(body).__name__} body, expected an object"
-        raise WebSearchProviderError(msg)
+        raise WebSearchProviderError(msg, tag="invalid_response")
     return body

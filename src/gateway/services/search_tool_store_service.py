@@ -8,8 +8,8 @@ Both mean the same thing to a request, so the dispatch path must see them merged
 A fetch instance is the same, with ``fetch_tools:`` and the rows whose ``kind`` is
 ``fetch``.
 
-Resolution has to stay synchronous: ``resolve_search_tool`` reads
-``config.search_tools`` on the request path with no database session of its own.
+Resolution has to stay synchronous: the resolver reads ``config.search_tools``
+on the request path with no database session of its own.
 So stored rows are overlaid onto ``config.search_tools`` and
 ``config.fetch_tools`` in memory: loaded at startup, refreshed on a TTL, and
 re-applied immediately on the worker that served a write. A stored row wins over

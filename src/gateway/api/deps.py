@@ -1360,9 +1360,6 @@ def get_workspace_search_keys(db: Annotated[AsyncSession, Depends(get_db)]) -> W
     )
 
 
-WorkspaceSearchKeysDep = Annotated[WorkspaceSearchKeys, Depends(get_workspace_search_keys)]
-
-
 def get_rate_limit_service(
     uow: Annotated[UnitOfWork, Depends(get_unit_of_work)],
     config: Annotated[GatewayConfig, Depends(get_config)],

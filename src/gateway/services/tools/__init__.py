@@ -14,7 +14,10 @@ and ``apply_web_access_policy`` narrows its web access to what its workspace per
 ``default_to_pin`` hold a write through ``/api/v1/search-tools`` to the instance rules, and
 ``run_connection_test`` tests an instance with one search or fetch.
 ``resolve_search`` and ``resolve_fetch`` say which provider, key and options a web search or fetch runs with.
-``build_web_provider_client`` builds the client the web tools' providers are called through, one per app.
+``pick_direct_search_instance``, ``resolve_direct_search`` and ``search_on_any_search`` hold the direct
+search endpoint's rules and run its call, and ``SearchQuery`` with the helpers beside it map LiteLLM's
+search fields onto a provider. ``build_web_provider_client`` builds the client the web tools' providers
+are called through, one per app, and ``WebToolFailure`` is what a failed web tool call may show its caller.
 ``WEB_SEARCH_TOOL_NAME``, ``WEB_FETCH_TOOL_NAME`` and the two tool definitions name the web tools to the model.
 """
 
@@ -100,10 +103,27 @@ from gateway.services.tools._web_names import (
     web_search_tool_definition,
 )
 from gateway.services.tools._web_provider_client import build_web_provider_client
-from gateway.services.tools._web_search import ResolvedFetch, ResolvedSearch, resolve_fetch, resolve_search
+from gateway.services.tools._web_search import (
+    CHARS_PER_TOKEN,
+    DEFAULT_MAX_TOKENS_PER_PAGE,
+    DIRECT_DEFAULT_MAX_RESULTS,
+    DirectSearch,
+    DirectSearchResult,
+    ResolvedFetch,
+    ResolvedSearch,
+    SearchQuery,
+    filter_hits_by_domain,
+    page_budget_chars,
+    pick_direct_search_instance,
+    resolve_direct_search,
+    resolve_fetch,
+    resolve_search,
+    search_on_any_search,
+)
 from gateway.services.tools._web_search_keys import WebSearchKeyService, WorkspaceSearchKeys
 from gateway.services.tools._web_search_responses import WEB_SEARCH_CALL_ID_PREFIX
 from gateway.services.tools._web_search_results import DEFAULT_MAX_RESULTS, web_search_max_results_baseline
+from gateway.services.tools._web_tool_failure import WebToolFailure
 from gateway.services.tools._workspace_defaults import CodeExecutionWorkspaceDefaults
 
 __all__ = [
@@ -187,5 +207,17 @@ __all__ = [
     "ResolvedSearch",
     "resolve_fetch",
     "resolve_search",
+    "CHARS_PER_TOKEN",
+    "DEFAULT_MAX_TOKENS_PER_PAGE",
+    "DIRECT_DEFAULT_MAX_RESULTS",
+    "DirectSearch",
+    "DirectSearchResult",
+    "SearchQuery",
+    "WebToolFailure",
     "build_web_provider_client",
+    "filter_hits_by_domain",
+    "page_budget_chars",
+    "pick_direct_search_instance",
+    "resolve_direct_search",
+    "search_on_any_search",
 ]

@@ -34,10 +34,11 @@ import { useAutosave } from "@/shared/hooks/useAutosave"
 // nothing else. Hosted, the platform reads a workspace with no row as off, so
 // the switch reads the stored `enabled` alone and only ever writes it.
 
-// The server's own bounds (`workspace_web_search_service`): a ceiling above
-// what the backend honors could never take effect, and the list bound stops one
-// workspace's row growing without limit.
-export const MAX_RESULTS = 20
+// The server's own bounds (`workspace_web_search_service`). The results bound
+// is only the largest number its column holds, since the gateway sets no
+// ceiling of its own; the list bound stops one workspace's row growing without
+// limit.
+export const MAX_RESULTS = 2147483647
 const MAX_DOMAINS = 100
 
 // Anything that means the entry is not a bare host. The server compares each
@@ -224,7 +225,7 @@ export function WorkspaceWebSearchCard({
         <PolicyRow
           key={`results-${selected.workspace_id}`}
           label="Max results for this workspace"
-          help="Search only. Lowers how many results one search returns."
+          help="Search only. Lowers how many results one search returns. Empty: the provider's own maximum."
           placeholder="10"
           isNumeric
           committed={

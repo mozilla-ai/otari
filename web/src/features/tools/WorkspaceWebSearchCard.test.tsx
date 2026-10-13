@@ -248,14 +248,30 @@ describe("WorkspaceWebSearchCard", () => {
     })
   })
 
-  it("refuses a ceiling the backend could never honor without asking the server", async () => {
+  it("takes a ceiling above 20, since the gateway sets none of its own", async () => {
     const calls = mockApi({ config: allowed() })
     const user = userEvent.setup()
     await renderOpen(user)
 
     await user.type(
       screen.getByLabelText("Max results for this workspace"),
-      "500",
+      "50",
+    )
+    await user.tab()
+
+    expect(
+      ((await putBody(calls)) as { max_results: number }).max_results,
+    ).toBe(50)
+  })
+
+  it("refuses a ceiling the server cannot store without asking it", async () => {
+    const calls = mockApi({ config: allowed() })
+    const user = userEvent.setup()
+    await renderOpen(user)
+
+    await user.type(
+      screen.getByLabelText("Max results for this workspace"),
+      "3000000000",
     )
     await user.tab()
 
@@ -512,8 +528,8 @@ describe("WorkspaceWebSearchCard", () => {
   it("keeps its ceiling equal to the one the server enforces", () => {
     // Duplicated here because `openapi-typescript` drops `maximum` when it
     // generates `schema.ts`, so the spec is the only place both sides can be
-    // compared. Without this, raising the backend cap would leave the form
-    // quietly refusing values the server would take.
+    // compared. Without this, a change to the server's bound would leave the
+    // form refusing values the server would take, or the other way round.
     const spec = JSON.parse(
       readFileSync(
         join(import.meta.dirname, "../../../../docs/public/openapi.json"),

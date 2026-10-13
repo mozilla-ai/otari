@@ -32,13 +32,10 @@ from gateway.services.tenancy.organization_service import OrganizationService
 from gateway.services.tenancy.workspace_listener import NullWorkspaceListener
 from gateway.services.web_retrieval_policy import read_domain_list
 
-# The old in-loop backend's ceiling on returned hits, repeated rather than
-# imported because that backend imports the tools package, which imports this
-# package. A stored value above it would read as a configured limit and do
-# nothing, since the backend clamps to this anyway, so it is refused at the
-# write rather than silently clamped at resolve time. Same call as the code
-# execution policy service makes for its two.
-_MAX_RESULTS = 20
+# The largest result ceiling the column holds, a 32-bit integer. Not a ceiling
+# of the gateway's own, which sets none (decision 65): a larger value is refused
+# as malformed rather than failing in the database.
+_MAX_STORED_RESULTS = 2_147_483_647
 # Bound the opaque bag so one workspace's row cannot grow without limit; the
 # same numbers the hosted `WorkspaceWebSearchConfigUpdate` uses, since this is
 # the same configuration.
@@ -95,10 +92,11 @@ class WorkspaceWebSearchConfigUpdate(BaseModel):
     max_results: int | None = Field(
         default=None,
         gt=0,
-        le=_MAX_RESULTS,
+        le=_MAX_STORED_RESULTS,
         description=(
-            "Search only: ceiling on results one search returns; only ever lowers "
-            f"the effective limit, so at most {_MAX_RESULTS}"
+            "Search only: ceiling on results one search returns, through otari_web_search and "
+            "POST /api/v1/search; it only ever lowers the count a request asks for. Unset, the "
+            "provider's own maximum is the only limit."
         ),
     )
     purpose_hint: str | None = Field(
@@ -229,9 +227,9 @@ def read_web_search_policy(answer: Mapping[str, Any]) -> ResolvedWebSearchConfig
         raise ValueError("enabled must be a boolean")
     max_results = answer.get("max_results")
     if max_results is not None and (
-        not isinstance(max_results, int) or isinstance(max_results, bool) or not 1 <= max_results <= _MAX_RESULTS
+        not isinstance(max_results, int) or isinstance(max_results, bool) or max_results < 1
     ):
-        raise ValueError(f"max_results must be an integer from 1 to {_MAX_RESULTS}")
+        raise ValueError("max_results must be an integer of at least 1")
     purpose_hint = answer.get("purpose_hint")
     if purpose_hint is not None and (not isinstance(purpose_hint, str) or len(purpose_hint) > _MAX_PURPOSE_HINT_LENGTH):
         raise ValueError(f"purpose_hint must be a string of at most {_MAX_PURPOSE_HINT_LENGTH} characters")

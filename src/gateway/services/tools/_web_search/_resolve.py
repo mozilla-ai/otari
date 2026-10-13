@@ -109,7 +109,8 @@ class _Resolved:
     call. ``api_key`` and ``api_base`` go to the library as they are, ``""``
     meaning none. ``options`` are the layered options without the count, for
     the caller to apply as its door does (design G, item 3). ``label`` and
-    ``rate_keys`` are what billing records (design L).
+    ``rate_keys`` are what billing records (design L). ``on_credential`` says
+    a credential serves the call rather than an instance.
     """
 
     name: str | None
@@ -121,6 +122,7 @@ class _Resolved:
     timeout: float
     label: str | None
     rate_keys: tuple[str, ...]
+    on_credential: bool = False
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -363,6 +365,7 @@ def _search_on_credential(
         timeout=timeout,
         label=label,
         rate_keys=rate_keys,
+        on_credential=True,
     )
 
 
@@ -425,6 +428,7 @@ def _fetch_on_credential(credential: WebFetchCredential) -> ResolvedFetch | None
         timeout=IN_LOOP_TIMEOUT_S,
         label=label,
         rate_keys=rate_keys,
+        on_credential=True,
     )
 
 

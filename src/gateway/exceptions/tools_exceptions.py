@@ -373,6 +373,27 @@ class SearchToolMisconfiguredError(TenancyValidationError):
         super().__init__(problem or f"Search tool '{name}' is not configured correctly.")
 
 
+class SearchToolSelectionError(TenancyValidationError):
+    """A direct search that names no search instance it can run on (contract C6).
+
+    No instance exists, a name matches none, or no name is given while several
+    exist and no default names one.
+    """
+
+
+class DirectSearchFieldRefusedError(TenancyValidationError):
+    """A direct search asking ``include_raw`` or ``provider_options`` of a call that does not run on any-search.
+
+    A ``searxng`` instance until its adapter, and a Tavily or Brave organization
+    key until theirs.
+    """
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(
+            f"include_raw and provider_options are not available yet for a {provider} search: leave them unset."
+        )
+
+
 class WebSearchOptionRefusedError(TenancyValidationError):
     """A request's ``provider_options`` key the provider serving it does not take from a request.
 
@@ -406,6 +427,7 @@ class WebSearchCredentialRefusedError(TenancyError):
 __all__ = [
     "CodeExecutionPolicyResolutionFailedError",
     "CodeExecutionPolicyResolutionFailure",
+    "DirectSearchFieldRefusedError",
     "McpResolutionFailure",
     "McpServerResolutionFailedError",
     "McpSessionsInterruptedError",
@@ -414,6 +436,7 @@ __all__ = [
     "SearchToolMisconfiguredError",
     "SearchToolNotFoundError",
     "SearchToolRefusedError",
+    "SearchToolSelectionError",
     "SearchToolUntestableError",
     "WebAccessNotEnabledError",
     "WebAccessRefusedError",

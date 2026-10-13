@@ -8,7 +8,7 @@ read-only, and a tool added at runtime is immediately dispatchable.
 """
 
 import asyncio
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 import any_fetch
 import any_search
+from gateway.api.deps import get_web_provider_client
 from gateway.core.config import API_KEY_HEADER, API_ROOT, GatewayConfig
 from gateway.core.settings.tools import (
     ToolInstance,
@@ -31,7 +32,6 @@ from gateway.core.settings.tools import (
 from gateway.models.tenancy import DashboardSession, Organization, OrganizationMember, User
 from gateway.models.tools import SearchToolCredential
 from gateway.schemas.tools import SearchProviderOptionSchema
-from gateway.services import search_backend
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
 from gateway.services.search_backend import SearchHit, SearchOutcome
 from gateway.services.search_tool_store_service import refresh_tool_instances, reset_search_tool_cache
@@ -459,19 +459,34 @@ def test_stored_tool_is_immediately_dispatchable(
     assert dispatched.api_base == "http://searxng:8080"
 
 
+@pytest.fixture
+def fake_file_client(test_config: GatewayConfig, clean_database: None) -> Iterator[TestClient]:
+    """A client whose config-file search tool is a ``fake`` one, which answers with one hit of its own."""
+    file_tool = {"provider": "fake", "options": {"hits": [{"url": "https://file.example"}]}}
+    yield from build_test_client(test_config.model_copy(update={"search_tools": {"from-file": file_tool}}))
+
+
+def _searched_urls(client: TestClient, headers: dict[str, str], tool: str) -> list[str]:
+    resp = client.post(f"{API_ROOT}/search/{tool}", json={"query": "q"}, headers=headers)
+    assert resp.status_code == 200, resp.text
+    return [result["url"] for result in resp.json()["results"]]
+
+
 def test_deleting_a_stored_tool_restores_the_config_one(
-    client: TestClient, master_key_header: dict[str, str], api_key_header: dict[str, str]
+    fake_file_client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    _create(client, master_key_header, name="from-file", provider="exa", api_base=None, api_key="stored-key")
-    mock = AsyncMock(return_value=SearchOutcome(results=[]))
-    with patch("gateway.api.routes.search.run_search", mock):
-        client.post(f"{API_ROOT}/search/from-file", json={"query": "q"}, headers=api_key_header)
-    assert mock.call_args.args[0].api_key == "stored-key"
+    client = fake_file_client
+    client.post(f"{API_ROOT}/users", json={"user_id": "searcher"}, headers=master_key_header)
+    key = client.post(
+        f"{API_ROOT}/keys", json={"key_name": "searcher", "user_id": "searcher"}, headers=master_key_header
+    )
+    api_key_header = {API_KEY_HEADER: f"Bearer {key.json()['key']}"}
+    stored = {"hits": [{"url": "https://stored.example"}]}
+    _create(client, master_key_header, name="from-file", provider="fake", api_base=None, options=stored)
+    assert _searched_urls(client, api_key_header, "from-file") == ["https://stored.example"]
 
     assert client.delete(f"{API_ROOT}/search-tools/from-file", headers=master_key_header).status_code == 204
-    with patch("gateway.api.routes.search.run_search", mock):
-        client.post(f"{API_ROOT}/search/from-file", json={"query": "q"}, headers=api_key_header)
-    assert mock.call_args.args[0].api_key == "file-key"
+    assert _searched_urls(client, api_key_header, "from-file") == ["https://file.example"]
 
 
 def test_reencrypt_allows_secret_key_retirement(
@@ -785,8 +800,34 @@ def test_testing_an_unknown_instance_is_404(client: TestClient, master_key_heade
     assert resp.status_code == 404
 
 
+def _answer_provider_calls(client: TestClient, answer: Callable[[httpx.Request], httpx.Response]) -> None:
+    """Answer the app's provider calls with ``answer``, through the web provider client the routes take."""
+
+    async def web_provider_client() -> AsyncIterator[httpx.AsyncClient]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as answering:
+            yield answering
+
+    client.app.dependency_overrides[get_web_provider_client] = web_provider_client  # type: ignore[attr-defined]
+
+
+def test_a_library_instance_is_tested_through_the_apps_web_provider_client(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        hit = {"url": "https://a.example", "title": "A"}
+        return httpx.Response(200, json={"results": [hit], "costDollars": {"total": 0.005}})
+
+    _answer_provider_calls(client, answer)
+    resp = _test(client, master_key_header, provider="exa", api_key="exa-key", query="otari")
+    assert resp.json() == {"ok": True, "error": None, "hits": 1, "characters": None}
+    assert [str(request.url) for request in requests] == ["https://api.exa.ai/search"]
+
+
 def test_a_searxng_instance_is_tested_through_the_direct_endpoints_client(
-    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+    client: TestClient, master_key_header: dict[str, str]
 ) -> None:
     requests: list[httpx.Request] = []
 
@@ -798,7 +839,7 @@ def test_a_searxng_instance_is_tested_through_the_direct_endpoints_client(
             return httpx.Response(502, text="bad gateway")
         return httpx.Response(200, json={"results": [{"url": "https://a.example"}, {"url": "https://b.example"}]})
 
-    monkeypatch.setattr(search_backend, "_client", httpx.AsyncClient(transport=httpx.MockTransport(answer)))
+    _answer_provider_calls(client, answer)
     searxng = {"provider": "searxng", "api_base": "http://searxng:8080"}
     assert _test(client, master_key_header, query="otari", **searxng).json() == {
         "ok": True,

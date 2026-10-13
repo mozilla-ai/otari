@@ -357,9 +357,99 @@ search tool directly. This is separate from `otari_web_search`, which lets a
 model request searches during a completion. Both are described in
 [Built-in tools](tools.md).
 
+The request and the response follow LiteLLM's `/v1/search`, so a client written
+for it works against Otari with its base URL changed. `include_raw` and
+`provider_options` are Otari's own.
+
+**Which tool.** The path names the tool. On `POST /api/v1/search`, the body's
+`search_tool_name` does, else the deployment's `web_search_default_tool`, else
+the only configured tool. A call that names no tool runs on the workspace's
+[organization search key](tools.md#organization-search-keys) when it has a usable
+one; a named call runs on that tool with its own key. Either way the tool decides
+the key allow-list entry (`<provider>:<tool>`), the `rate_limits` rules, the
+timeout and the usage row's model and provider.
+
+**Request.**
+
+| Field | Type | Meaning |
+|---|---|---|
+| `query` | string, required | What to search for. |
+| `search_tool_name` | string | The tool, when the path does not name one. |
+| `max_results` | integer, at least 1 | How many results. 10 when unset. No upper bound of Otari's own: lowered to the workspace's ceiling when its web-access policy sets one, and to the provider's own maximum (100 for Exa). |
+| `search_domain_filter` | up to 20 domains | Only results from these domains and their subdomains; a leading `-` excludes a domain instead. Exa filters natively; for other providers the results are filtered after the search. |
+| `country` | two-letter ISO code | Localizes results where the provider can (Exa's `userLocation`); ignored where it cannot. |
+| `max_tokens_per_page` | integer, at least 1 | The page budget, at four characters a token: it cuts every result's `snippet`, and bounds the page text Exa returns, at most 10,000 characters. Unset, a budget of 1,024 tokens cuts every provider's snippet but Exa's, whose page text that budget already bounds. |
+| `include_raw` | boolean | Also return `raw`, the provider's whole response. Default `false`. |
+| `provider_options` | object | Native options of the provider serving the call, under its own names, as `GET /api/v1/search-tools/providers` lists them. They win over the tool's own options; the fields above win over them. An option the provider does not take, or takes only from the deployment, is a 400 naming it. A call that names no tool may be served by an organization key on another provider, so name the tool when the options are meant for one provider. |
+| `user` | string | Who the search is billed to; see below. |
+
+Until any-search has their adapters, `include_raw` and `provider_options` are a
+400 on a `searxng` tool and on a call a Tavily or Brave organization key serves;
+`false` and `{}` pass.
+
+**Response.**
+
+```json
+{
+  "object": "search",
+  "search_tool": "exa-search",
+  "results": [
+    {
+      "title": "Python 3.14.0 (final) is here!",
+      "url": "https://blog.python.org/2025/10/python-3140-final-is-here.html",
+      "snippet": "Python 3.14.0 is the newest major release ...",
+      "date": "2025-10-01T00:00:00.000Z",
+      "last_updated": null
+    }
+  ]
+}
+```
+
+`title` and `snippet` are always strings, empty when the provider gave none.
+`snippet` is the page text when the provider returned it, else its excerpt. `date`
+is the page's date as the provider gave it, else `null`, and `last_updated` is
+`null`. `raw` appears only when the request set `include_raw`.
+
 A service key's `user` field names one of its end users here as it does on chat
 completions: the search is billed to that end user, under the key's end-user
 budget, and counted by `rate_limits`.
+
+**Errors.** Where a refusal carries a stable code, it is in the
+`Otari-Error-Code` header and the body's `code`; see [Error codes](#error-codes).
+
+| Situation | Status | `Otari-Error-Code` |
+|---|---|---|
+| No credentials, or a key that is not valid | 401 | |
+| No tool is configured, the tool named is not, or several are and the call names none with no default | 400 | |
+| The tool cannot run as configured, such as a `searxng` tool with no address | 400 | |
+| A `provider_options` key the provider does not take from a request | 400 | |
+| `include_raw` or `provider_options` on a call that does not run on any-search yet | 400 | |
+| The master key without a `user` | 400 | |
+| The body fails schema validation, such as an `include_raw` that is not a boolean | 422 | `invalid_request` |
+| The workspace turned web search off | 403 | |
+| The key's allow-list does not name `<provider>:<tool>` | 403 | |
+| A `user` naming another user, where the key rejects a mismatch | 403 | |
+| A service key's `Otari-End-User-Budget` is not one it may use | 403 | `end_user_budget_not_allowed` |
+| A budget refuses the search | 403 | `budget_exceeded` |
+| A rate limit is full | 429 | `rate_limited` |
+| The workspace's organization search key cannot be used as it is | 502 | |
+| The provider failed the search, or could not be reached | 502 | |
+| The workspace's stored web-access policy cannot be read | 503 | |
+
+Every provider failure is a 502 whose `detail` names no upstream detail, whatever
+the provider answered, unlike the completion routes, which classify a provider's
+failure. The 502 carries what is safe to show of the failure as headers instead,
+never a body, a URL or the query:
+
+| Header | Value |
+|---|---|
+| `Otari-Error-Provider` | The provider that failed, such as `exa`. |
+| `Otari-Error-Status` | The provider's own HTTP status; absent when it gave none, as for a timeout or an error inside a successful answer. |
+| `Otari-Error-Tag` | What failed, in the provider's terms or the library's: `timeout`, `network`, `http_error`, `invalid_response`, `unexpected_response`, or the provider's own code, such as Exa's `INVALID_API_KEY`. |
+| `Otari-Error-Retryable` | `true` for a timeout, a 429 or a 5xx from the provider, when a retry may help; otherwise `false`. |
+
+A 502 for the workspace's organization search key, and one for a failure that is
+not the provider's, carries none of them.
 
 Search-tool management lives under `/api/v1/search-tools`. The generated OpenAPI
 document describes the supported providers, filters, and management schemas.

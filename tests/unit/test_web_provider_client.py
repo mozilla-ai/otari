@@ -1,7 +1,6 @@
 """The web provider client: one per app, built and closed by the lifespan (decision 55).
 
-Replaces the direct endpoint's process-wide pooled client. Every route that
-calls a web provider takes the app's client through ``get_web_provider_client``.
+Every route that calls a web provider takes the app's client through ``get_web_provider_client``.
 """
 
 from collections.abc import Iterator
@@ -92,10 +91,11 @@ async def test_a_cookie_a_provider_sets_never_rides_on_the_next_call(monkeypatch
     assert sent == [None, None]
 
 
-def test_the_client_caps_no_connections_and_keeps_20_idle(monkeypatch: pytest.MonkeyPatch) -> None:
-    """httpx's default of 100 would queue a burst of calls into pool timeouts; no per-request client had a cap."""
+@pytest.mark.asyncio
+async def test_the_client_caps_no_connections_and_keeps_20_idle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """httpx's default of 100 would queue a burst of calls into pool timeouts."""
     built = _through(monkeypatch, lambda _request: httpx.Response(200))
-    build_web_provider_client()
+    await build_web_provider_client().aclose()
     (kwargs,) = built
     assert kwargs["limits"] == httpx.Limits(max_connections=None, max_keepalive_connections=20)
     # httpx's defaults otherwise, so environment proxies still apply.

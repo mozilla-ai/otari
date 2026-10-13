@@ -11,7 +11,7 @@ exceptions, since one client serves every tenant's searches and keys:
   never rides on another's;
 - it sets no cap on total connections, keeping httpx's 20 idle keep-alive ones,
   so a burst of calls is not queued into pool timeouts by httpx's default of
-  100, which no per-request client had before.
+  100.
 """
 
 from http.cookiejar import Cookie, CookieJar

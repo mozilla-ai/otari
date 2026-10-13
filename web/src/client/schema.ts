@@ -4676,8 +4676,10 @@ export interface paths {
          * Create Search
          * @description Run a search against a configured search tool.
          *
-         *     The tool is taken from ``search_tool_name``, which may be omitted when
-         *     exactly one tool is configured.
+         *     The tool is taken from ``search_tool_name``, which may be omitted when the
+         *     deployment's ``web_search_default_tool`` names one, or when exactly one
+         *     tool is configured. Such a call runs on the workspace's organization search
+         *     key when it has one.
          *
          *     Authentication modes:
          *     - Master key: the ``user`` field is required and may name any existing user.
@@ -14067,7 +14069,7 @@ export interface components {
         };
         /**
          * SearchRequest
-         * @description A search request, following LiteLLM's ``/v1/search`` body.
+         * @description A direct search request: LiteLLM's ``/v1/search`` body, plus ``include_raw`` and ``provider_options``.
          * @example {
          *       "max_results": 5,
          *       "query": "otari llm gateway"
@@ -14080,8 +14082,14 @@ export interface components {
              */
             country?: string | null;
             /**
+             * Include Raw
+             * @description Also return the provider's whole response, as raw.
+             * @default false
+             */
+            include_raw: boolean;
+            /**
              * Max Results
-             * @description Maximum number of results to return
+             * @description Maximum number of results to return; 10 when unset. Lowered to the workspace's ceiling when it sets one, and to the provider's own maximum.
              */
             max_results?: number | null;
             /**
@@ -14089,6 +14097,13 @@ export interface components {
              * @description Approximate cap on the page content returned per result
              */
             max_tokens_per_page?: number | null;
+            /**
+             * Provider Options
+             * @description Native options for the provider that serves the call, under the provider's own names, as GET /api/v1/search-tools/providers lists them. An option the provider does not take from a request is refused with a 400. On a call that names no tool they go to whichever provider serves it, so name the tool when they are meant for one provider.
+             */
+            provider_options?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Query
              * @description The search query
@@ -14101,7 +14116,7 @@ export interface components {
             search_domain_filter?: string[] | null;
             /**
              * Search Tool Name
-             * @description Configured search tool to run against. Optional when exactly one tool is configured, and ignored on POST /api/v1/search/{search_tool_name}.
+             * @description Configured search tool to run against. Optional when the deployment names a default (web_search_default_tool) or has exactly one tool, and ignored on POST /api/v1/search/{search_tool_name}.
              */
             search_tool_name?: string | null;
             /**
@@ -14112,7 +14127,7 @@ export interface components {
         };
         /**
          * SearchResponse
-         * @description A completed search.
+         * @description A completed direct search.
          */
         SearchResponse: {
             /**
@@ -14121,6 +14136,13 @@ export interface components {
              * @constant
              */
             object: "search";
+            /**
+             * Raw
+             * @description The provider's whole response, untouched; only when the request set include_raw.
+             */
+            raw?: {
+                [key: string]: unknown;
+            } | null;
             /** Results */
             results: components["schemas"]["SearchResultItem"][];
             /**
@@ -14131,15 +14153,29 @@ export interface components {
         };
         /**
          * SearchResultItem
-         * @description One search result.
+         * @description One search result, shaped as LiteLLM's ``SearchResult``.
          */
         SearchResultItem: {
-            /** Date */
+            /**
+             * Date
+             * @description The page's date, as the provider gave it.
+             */
             date?: string | null;
-            /** Snippet */
-            snippet?: string | null;
-            /** Title */
-            title?: string | null;
+            /**
+             * Last Updated
+             * @description Always null: no provider reports it.
+             */
+            last_updated?: string | null;
+            /**
+             * Snippet
+             * @description The page text the provider returned, else its excerpt, cut to the page budget.
+             */
+            snippet: string;
+            /**
+             * Title
+             * @description The page's title; empty when the provider gave none.
+             */
+            title: string;
             /** Url */
             url: string;
         };
@@ -14220,7 +14256,7 @@ export interface components {
             characters?: number | null;
             /**
              * Error
-             * @description When not ok, the error's tag: timeout, network, http_error, invalid_response, or the provider's own.
+             * @description When not ok, the error's tag: timeout, network, http_error, invalid_response, unexpected_response (an answer whose shape the provider changed), or the provider's own.
              */
             error?: string | null;
             /**
@@ -16495,7 +16531,7 @@ export interface components {
             enabled: boolean;
             /**
              * Max Results
-             * @description Search only: ceiling on results one search returns; only ever lowers the effective limit, so at most 20
+             * @description Search only: ceiling on results one search returns, through otari_web_search and POST /api/v1/search; it only ever lowers the count a request asks for. Unset, the provider's own maximum is the only limit.
              */
             max_results?: number | null;
             /**

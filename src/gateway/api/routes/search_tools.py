@@ -29,11 +29,13 @@ sees.
 from collections.abc import Mapping
 from typing import Annotated, Any
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    WebProviderClientDep,
     catalog_reader_operates_deployment,
     get_config,
     get_db,
@@ -463,12 +465,13 @@ async def _dispatch_test(
     *,
     query: str | None,
     url: str | None,
+    client: httpx.AsyncClient,
 ) -> SearchToolTestResponse:
     """Run a connection test as a provider call: no pooled connection held across it, and seen in flight."""
     check_test_input(instance, query=query, url=url)
     await release_session(db)
     track_request(raw_request, endpoint=TEST_ENDPOINT, model=instance.name, provider=instance.provider)
-    return await run_connection_test(config, instance, entry, query=query, url=url)
+    return await run_connection_test(config, instance, entry, query=query, url=url, client=client)
 
 
 @router.post("/test")
@@ -477,6 +480,7 @@ async def test_unsaved_search_tool(
     raw_request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    web_provider_client: WebProviderClientDep,
 ) -> SearchToolTestResponse:
     """Test an instance before saving it, with one search or one fetch.
 
@@ -489,7 +493,9 @@ async def test_unsaved_search_tool(
     name = request.name.strip()
     entry = request.to_entry()
     instance = unsaved_instance_to_test(config, name, entry, kind=request.kind)
-    return await _dispatch_test(raw_request, db, config, instance, entry, query=request.query, url=request.url)
+    return await _dispatch_test(
+        raw_request, db, config, instance, entry, query=request.query, url=request.url, client=web_provider_client
+    )
 
 
 @router.post("/{name}/test")
@@ -499,6 +505,7 @@ async def test_search_tool(
     raw_request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    web_provider_client: WebProviderClientDep,
 ) -> SearchToolTestResponse:
     """Test a configured or stored instance with one search or one fetch.
 
@@ -512,4 +519,6 @@ async def test_search_tool(
     except DATABASE_ERRORS:
         logger.warning("Search tool overlay refresh failed before testing '%s'; testing the loaded one", name)
     instance, entry = instance_to_test(config, name)
-    return await _dispatch_test(raw_request, db, config, instance, entry, query=request.query, url=request.url)
+    return await _dispatch_test(
+        raw_request, db, config, instance, entry, query=request.query, url=request.url, client=web_provider_client
+    )

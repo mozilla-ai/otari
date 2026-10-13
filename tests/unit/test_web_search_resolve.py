@@ -362,6 +362,82 @@ def test_a_base_url_is_passed_without_blanks_or_a_trailing_slash() -> None:
     assert resolved.api_base == "http://searxng:8080"
 
 
+def _named(config: GatewayConfig, name: str) -> ResolvedSearch:
+    resolved = resolve_search(config, None, requested=name, request_options=None)
+    assert resolved is not None
+    return resolved
+
+
+def test_a_library_instance_takes_its_providers_endpoint_and_its_name_as_its_provider() -> None:
+    resolved = _named(GatewayConfig(search_tools={"exa": {"api_key": "k"}}), "exa")
+    assert (resolved.provider, resolved.api_base, resolved.runner) == ("exa", "https://api.exa.ai", "library")
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"provider": "exa", "api_key": "secret", "api_base": "http://exa.internal"},
+        {"provider": "searxng", "api_key": "secret", "api_base": "http://searxng:8080"},
+    ],
+)
+def test_a_key_never_goes_to_an_instances_own_plain_http_endpoint(entry: dict[str, Any]) -> None:
+    with pytest.raises(SearchToolMisconfiguredError, match="api_base must use https when api_key is set"):
+        _named(GatewayConfig(search_tools={"search": entry}), "search")
+
+
+def test_a_searxng_instance_needs_no_key() -> None:
+    resolved = _named(
+        GatewayConfig(search_tools={"local": {"provider": "searxng", "api_base": "http://searxng:8080/"}}), "local"
+    )
+    assert (resolved.runner, resolved.api_key, resolved.api_base) == ("old", "", "http://searxng:8080")
+
+
+@pytest.mark.parametrize(
+    ("entry", "api_base"),
+    [
+        pytest.param({"provider": "searxng"}, "http://searxng:8080", id="inherits-web-search-url"),
+        pytest.param(
+            {"provider": "searxng", "api_base": "http://adapter:9000"}, "http://adapter:9000", id="its-own-wins"
+        ),
+    ],
+)
+def test_a_searxng_instances_endpoint(entry: dict[str, Any], api_base: str) -> None:
+    """Contract C8: the in-loop backend's URL is the default, so one config line is enough."""
+    config = GatewayConfig(search_tools={"local": entry}, web_search_url="http://searxng:8080/")
+    assert _named(config, "local").api_base == api_base
+
+
+@pytest.mark.parametrize(
+    ("entry", "engines"),
+    [
+        pytest.param({"provider": "searxng"}, "duckduckgo,mojeek", id="inherits-web-search-engines"),
+        pytest.param({"provider": "searxng", "options": {"engines": "wikipedia"}}, "wikipedia", id="its-own-wins"),
+    ],
+)
+def test_a_searxng_instances_engines(entry: dict[str, Any], engines: str) -> None:
+    """Contract C8: both doors query the same engines on the same backend."""
+    config = GatewayConfig(
+        search_tools={"local": entry}, web_search_url="http://searxng:8080", web_search_engines="duckduckgo,mojeek"
+    )
+    assert _named(config, "local").options["engines"] == engines
+
+
+def test_the_deployments_engines_never_reach_another_provider() -> None:
+    config = GatewayConfig(search_tools={"exa": {"api_key": "k"}}, web_search_engines="duckduckgo,mojeek")
+    assert "engines" not in _named(config, "exa").options
+
+
+def test_a_result_says_whether_a_credential_or_an_instance_serves_it() -> None:
+    config = GatewayConfig(search_tools={"fake": _FAKE})
+    key = WebSearchCredential(provider="fake", source=_ORG, api_key="org-key")
+
+    on_key = resolve_search(config, None, requested="fake", request_options=None, direct_credential=key)
+    on_instance = _named(config, "fake")
+
+    assert on_key is not None and on_key.on_credential
+    assert not on_instance.on_credential
+
+
 def test_a_credential_for_a_provider_this_gateway_cannot_call_is_ignored(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.WARNING, logger="gateway")
     credential = WebSearchCredential(provider="unheard-of", source=_HYBRID, api_key="key-of-the-peer")

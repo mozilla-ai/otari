@@ -16404,7 +16404,7 @@
         "type": "object"
       },
       "SearchRequest": {
-        "description": "A search request, following LiteLLM's ``/v1/search`` body.",
+        "description": "A direct search request: LiteLLM's ``/v1/search`` body, plus ``include_raw`` and ``provider_options``.",
         "example": {
           "max_results": 5,
           "query": "otari llm gateway"
@@ -16424,10 +16424,15 @@
             "description": "Two-letter ISO country code to localize results to",
             "title": "Country"
           },
+          "include_raw": {
+            "default": false,
+            "description": "Also return the provider's whole response, as raw.",
+            "title": "Include Raw",
+            "type": "boolean"
+          },
           "max_results": {
             "anyOf": [
               {
-                "maximum": 20.0,
                 "minimum": 1.0,
                 "type": "integer"
               },
@@ -16435,7 +16440,7 @@
                 "type": "null"
               }
             ],
-            "description": "Maximum number of results to return",
+            "description": "Maximum number of results to return; 10 when unset. Lowered to the workspace's ceiling when it sets one, and to the provider's own maximum.",
             "title": "Max Results"
           },
           "max_tokens_per_page": {
@@ -16450,6 +16455,19 @@
             ],
             "description": "Approximate cap on the page content returned per result",
             "title": "Max Tokens Per Page"
+          },
+          "provider_options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Native options for the provider that serves the call, under the provider's own names, as GET /api/v1/search-tools/providers lists them. An option the provider does not take from a request is refused with a 400. On a call that names no tool they go to whichever provider serves it, so name the tool when they are meant for one provider.",
+            "title": "Provider Options"
           },
           "query": {
             "description": "The search query",
@@ -16482,7 +16500,7 @@
                 "type": "null"
               }
             ],
-            "description": "Configured search tool to run against. Optional when exactly one tool is configured, and ignored on POST /api/v1/search/{search_tool_name}.",
+            "description": "Configured search tool to run against. Optional when the deployment names a default (web_search_default_tool) or has exactly one tool, and ignored on POST /api/v1/search/{search_tool_name}.",
             "title": "Search Tool Name"
           },
           "user": {
@@ -16505,13 +16523,26 @@
         "type": "object"
       },
       "SearchResponse": {
-        "description": "A completed search.",
+        "description": "A completed direct search.",
         "properties": {
           "object": {
             "const": "search",
             "default": "search",
             "title": "Object",
             "type": "string"
+          },
+          "raw": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider's whole response, untouched; only when the request set include_raw.",
+            "title": "Raw"
           },
           "results": {
             "items": {
@@ -16534,7 +16565,7 @@
         "type": "object"
       },
       "SearchResultItem": {
-        "description": "One search result.",
+        "description": "One search result, shaped as LiteLLM's ``SearchResult``.",
         "properties": {
           "date": {
             "anyOf": [
@@ -16545,9 +16576,10 @@
                 "type": "null"
               }
             ],
+            "description": "The page's date, as the provider gave it.",
             "title": "Date"
           },
-          "snippet": {
+          "last_updated": {
             "anyOf": [
               {
                 "type": "string"
@@ -16556,18 +16588,18 @@
                 "type": "null"
               }
             ],
-            "title": "Snippet"
+            "description": "Always null: no provider reports it.",
+            "title": "Last Updated"
+          },
+          "snippet": {
+            "description": "The page text the provider returned, else its excerpt, cut to the page budget.",
+            "title": "Snippet",
+            "type": "string"
           },
           "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
+            "description": "The page's title; empty when the provider gave none.",
+            "title": "Title",
+            "type": "string"
           },
           "url": {
             "title": "Url",
@@ -16575,7 +16607,9 @@
           }
         },
         "required": [
-          "url"
+          "title",
+          "url",
+          "snippet"
         ],
         "title": "SearchResultItem",
         "type": "object"
@@ -16730,7 +16764,7 @@
                 "type": "null"
               }
             ],
-            "description": "When not ok, the error's tag: timeout, network, http_error, invalid_response, or the provider's own.",
+            "description": "When not ok, the error's tag: timeout, network, http_error, invalid_response, unexpected_response (an answer whose shape the provider changed), or the provider's own.",
             "title": "Error"
           },
           "hits": {
@@ -22605,14 +22639,14 @@
             "anyOf": [
               {
                 "exclusiveMinimum": 0.0,
-                "maximum": 20.0,
+                "maximum": 2147483647.0,
                 "type": "integer"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Search only: ceiling on results one search returns; only ever lowers the effective limit, so at most 20",
+            "description": "Search only: ceiling on results one search returns, through otari_web_search and POST /api/v1/search; it only ever lowers the count a request asks for. Unset, the provider's own maximum is the only limit.",
             "title": "Max Results"
           },
           "provider_options": {
@@ -38286,7 +38320,7 @@
     },
     "/api/v1/search": {
       "post": {
-        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use on the budget ``Otari-End-User-Budget`` names (or\n  the key's default), and is billed and rate limited as that end user, as\n  on chat completions.",
+        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when the\ndeployment's ``web_search_default_tool`` names one, or when exactly one\ntool is configured. Such a call runs on the workspace's organization search\nkey when it has one.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend bind to the key's own user. A ``user`` field\n  naming a different user is rejected with 403 (or ignored, when the key's\n  own ``reject_user_mismatch`` is false, or the deployment-wide setting is\n  disabled and the key does not override it); it is never billed to that\n  user.\n- Service key: a ``user`` field names one of the key owner's end users,\n  created on first use on the budget ``Otari-End-User-Budget`` names (or\n  the key's default), and is billed and rate limited as that end user, as\n  on chat completions.",
         "operationId": "search-create_search",
         "requestBody": {
           "content": {

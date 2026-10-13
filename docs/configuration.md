@@ -655,7 +655,10 @@ A search tool's rate is keyed `provider:tool` (`exa:exa-search` for a tool named
 `providers:`. That rate is what a search reserves against the caller's budget
 before it runs; without one no dollars are held, though the search still holds
 one request against a request-count budget. A successful search settles at the
-provider's reported charge when it reports one, and at the rate otherwise.
+provider's reported charge when it reports one, and at the rate otherwise. A
+search a workspace's organization search key served is priced under
+`otari:web_search` instead, since the deployment cannot price the organization's
+own provider account.
 
 Rerank accepts either unit. A rerank model priced `unit: tokens` is charged
 on the input tokens the provider reports. Providers that bill reranking per
@@ -708,8 +711,8 @@ request's price.
 ## Search tools
 
 `search_tools` names the deployment's search instances. Direct `POST /api/v1/search`
-calls use them by name, and the in-loop `otari_web_search` tool uses the default
-one (below). `fetch_tools` names fetch instances, for the `otari_web_fetch` tool
+calls use them by name, or the default one (below) when they name none, and the
+in-loop `otari_web_search` tool uses the default one. `fetch_tools` names fetch instances, for the `otari_web_fetch` tool
 and for enriching search results. Both can also be stored at runtime through
 `/api/v1/search-tools`, a fetch instance with `kind: fetch` and listed with
 `?kind=fetch`, and search instances from Tools too. A stored instance wins over
@@ -798,11 +801,12 @@ file or environment, then to the built-in default.
 A default that names no instance, set in the file or earlier at runtime, is treated
 as unset, with a warning at startup, or from the refresh that first finds it so.
 
-In this release these settings are read and checked, and no request uses them yet.
-They take effect in later releases: `web_fetch_default_tool` when web fetch moves
-onto the fetch instances, `web_search_default_tool` for unnamed direct calls when
-the direct endpoint does, and the in-loop parts of the other two, with a search
-instance's `fetch_tool`, when in-loop search does.
+In this release `web_search_default_tool` picks the tool for a direct
+`POST /api/v1/search` that names none, and no other request uses these settings
+yet. The rest take effect in later releases: `web_fetch_default_tool` when web
+fetch moves onto the fetch instances, and the in-loop parts of
+`web_search_default_tool` and `web_search_max_calls`, with a search instance's
+`fetch_tool`, when in-loop search does.
 
 After that, the old in-loop backend still serves some requests until it is
 removed. In that period `web_fetch_default_tool` governs every fetch tool call,

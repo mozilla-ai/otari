@@ -864,10 +864,9 @@ def gateway_tool_pricing_key(tool: str) -> str:
 
     ``model_key`` is a free-form ``provider:model`` string, so a tool the gateway
     runs itself is priced as ``otari:<tool>`` (for example ``otari:web_search``).
-    Note this is a different key from the one ``POST /v1/search`` uses for the same
-    search: that endpoint prices ``<search-provider>:<tool>`` because it knows which
-    commercial API it called, while the tool loop only knows the operator-configured
-    backend URL.
+    ``POST /v1/search`` prices a search on a configured tool under that tool's
+    ``<search-provider>:<tool>`` instead, and under this key only a search a
+    workspace's organization key served, whose provider the deployment cannot price.
     """
     return f"{GATEWAY_TOOL_PRICING_PROVIDER}:{tool}"
 
