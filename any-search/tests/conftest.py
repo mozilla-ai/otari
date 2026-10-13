@@ -6,16 +6,17 @@ from collections.abc import Iterator
 import pytest
 
 from any_search import install_log_filter
-from any_search._logging import RedactProviderUrls
+from any_search._logging import LOGGERS, RedactProviderUrls
 
 
 @pytest.fixture(autouse=True)
 def _remove_the_log_filter() -> Iterator[None]:
     """Remove the filter after every test, so no test depends on another having installed it."""
     yield
-    logger = logging.getLogger("httpx")
-    for existing in [existing for existing in logger.filters if isinstance(existing, RedactProviderUrls)]:
-        logger.removeFilter(existing)
+    for name in LOGGERS:
+        logger = logging.getLogger(name)
+        for existing in [existing for existing in logger.filters if isinstance(existing, RedactProviderUrls)]:
+            logger.removeFilter(existing)
 
 
 @pytest.fixture

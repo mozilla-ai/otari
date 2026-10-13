@@ -4,9 +4,9 @@ Mojeek's Web Search API takes everything as query parameters, the key
 included, so the request URL is a secret. The adapter passes them to
 ``self._http``, which turns a transport failure into a ``ProviderError``
 without its text, and never hands the URL to a logger. httpx logs it at INFO,
-which the log filter (``install_log_filter``) redacts during a provider call;
-httpcore, below it, logs at DEBUG only the method, the host and the response
-headers.
+and over HTTP/2 hpack logs the path with its query at DEBUG; the log filter
+(``install_log_filter``) redacts both during a provider call. httpcore, between
+the two, logs at DEBUG only the method, the host and the response headers.
 
 It always sends ``fmt=json``, since Mojeek answers in XML otherwise; ``t``,
 from ``max_results`` and at most 10, the most Mojeek's entry plan returns; and
@@ -15,8 +15,9 @@ last-modified time as its date.
 
 Mojeek signals a refused key, or a spent daily quota, inside a 200, in
 ``response.status``: any status but ``OK`` is the result's ``error``, with a
-tag of the adapter's own, never Mojeek's text. Other failures are HTTP
-statuses with a plain body, such as a 503 for a malformed parameter.
+tag of the adapter's own, never Mojeek's text, and no HTTP status. Other
+failures are HTTP statuses with a plain body, such as a 503 for a malformed
+parameter.
 
 Every field read from a successful answer is checked, so a change on Mojeek's
 side fails the call rather than degrading it: ``response`` and its ``status``
@@ -24,9 +25,9 @@ must be there and, when the status is ``OK``, ``results`` and each item's
 ``url``, ``title`` and ``desc``, which Mojeek documents on every result and
 sends on every one. ``pdate`` and ``timestamp`` are documented on every result
 too, but sent only on request, so they are checked when present: they must be
-Unix times, where 0 means none. Anything else raises ``unexpected_response``. Fields the adapter
-does not read are ignored, so a field Mojeek adds breaks nothing. Mojeek
-reports no cost.
+Unix times, where 0 means none. Anything else raises ``unexpected_response``.
+Fields the adapter does not read are ignored, so a field Mojeek adds breaks
+nothing. Mojeek reports no cost.
 
 API: https://www.mojeek.com/support/api/search/request_parameters.html and
 https://www.mojeek.com/support/api/search/json_response.html. Pricing, read
@@ -209,8 +210,10 @@ class MojeekProvider(AnySearch):
         answer = body.get("response")
         if not isinstance(answer, dict) or not isinstance(answer.get("status"), str):
             raise _unexpected(response)
-        if answer["status"] != "OK":
-            error = SearchError(tag=_status_tag(answer["status"]), status=response.status_code)
+        status = answer["status"].strip()
+        if status.upper() != "OK":
+            # Inside a 200, so the error has no HTTP status of its own.
+            error = SearchError(tag=_status_tag(status))
             return SearchResult(provider=self.METADATA.name, hits=[], cost_source="none", error=error, raw=body)
         results = answer.get("results")
         if not isinstance(results, list):
@@ -246,7 +249,7 @@ def _body(response: httpx.Response) -> dict[str, Any]:
 
 def _status_tag(status: str) -> str:
     """The tag for a status other than ``OK``, from how it starts, so none of Mojeek's text reaches an error."""
-    lowered = status.strip().lower()
+    lowered = status.lower()
     return next((tag for start, tag in _STATUS_TAGS if lowered.startswith(start)), "error")
 
 

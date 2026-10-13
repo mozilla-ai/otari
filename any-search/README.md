@@ -64,8 +64,9 @@ library accepts it from anyone, and enforcing that is the host's job).
 
 The query is the user's content, and some providers put it, or the key, in the request URL, which
 httpx logs at INFO. Every provider call runs with a context variable set, and a filter on the
-`httpx` logger replaces the URL with `<redacted>` in records emitted during one. Requests made by
-other code in the process are left alone.
+`httpx` logger replaces the URL with `<redacted>` in records emitted during one. Over HTTP/2, hpack
+logs each request header at DEBUG, the path with its query included, so the filter also redacts
+the headers in hpack's records. Requests made by other code in the process are left alone.
 
 Importing the package does not install the filter, so it never changes a process's logging on its
 own. A host calls `install_log_filter()` once at startup; the command line installs it itself.

@@ -46,11 +46,11 @@ jobs:
       HAS_MOJEEK_KEY: ${{ secrets.MOJEEK_API_KEY != '' }}
 
     steps:
-    - name: Say so when the keys are absent
+    - name: Say so when the Exa key is absent
       if: env.HAS_EXA_KEY != 'true' && github.event_name == 'pull_request'
       run: echo "::notice::The EXA_API_KEY secret is not available to this run; the Exa live tests skip."
 
-    - name: Fail a scheduled or manual run without the keys
+    - name: Fail a scheduled or manual run without the Exa key
       if: env.HAS_EXA_KEY != 'true' && github.event_name != 'pull_request'
       run: |
         echo "::error::The EXA_API_KEY secret is not set, so the Exa live tests cannot run."

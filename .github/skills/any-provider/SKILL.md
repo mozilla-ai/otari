@@ -77,9 +77,10 @@ The four cases a fixture can record:
 ## Search checklist (any-search)
 
 - `METADATA`: `max_results` is the provider's own limit; `query_in_url` and `key_in_url` say
-  whether either travels in the URL. When one does, build the URL yourself and never pass it to a
-  logger, and add a test over a real socket (a local server) that no log record and no transport
-  error carries the key or the query: `httpx.MockTransport` skips httpcore, which logs below httpx.
+  whether either travels in the URL. When one does, pass them as the request's `params`, never
+  format the URL yourself or hand it to a logger, and add a test over a real socket (a local
+  server) that no log record and no transport error carries the key or the query:
+  `httpx.MockTransport` skips httpcore, which logs below httpx.
 - Map `max_results`, and also cut the hits to it, since a replayed fixture does not honor it. A
   native count option that stands in for it gets the same cap. Map `time_range` (`day`, `week`,
   `month`, `year`) to the provider's recency filter, rounded to the precision of its dates.
@@ -151,7 +152,9 @@ The first search provider with the key in the URL and errors inside a 200.
   the URL yourself, and set `query_in_url` and `key_in_url`. httpx logs the URL at INFO, which the
   log filter redacts during a provider call. httpcore, below it, logs at DEBUG only the method, the
   host and the response headers, so a redirect's `Location` would be the one way the key reached
-  it; Mojeek sent none in any case tried. Only a test over a real socket shows this.
+  it; Mojeek sent none in any case tried. Only a test over a real socket shows this. Over HTTP/2,
+  which a host's client may use, hpack logs every request header at DEBUG, the path included, so
+  the filter covers hpack's loggers too.
 - Errors inside a 200 can be the only way a provider refuses a key: Mojeek answers a bad key with
   HTTP 200 and `response.status` `Access Denied: invalid key/password`, not the `ERROR: ...` its
   documentation shows. That key records the `in_body_error` fixture; the `error` one came from a

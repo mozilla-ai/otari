@@ -132,8 +132,11 @@ async def test_time_range_is_mojeeks_own_word_and_wins_over_since(time_range: st
 @pytest.mark.asyncio
 async def test_a_week_is_the_date_it_starts_on() -> None:
     """Mojeek has no word for a week, and takes a date as YYYYMMDD."""
+    before = datetime.now(UTC) - timedelta(weeks=1)
     _, request = await _search(time_range="week")
-    assert _params(request)["since"] == (datetime.now(UTC) - timedelta(weeks=1)).strftime("%Y%m%d")
+    after = datetime.now(UTC) - timedelta(weeks=1)
+    # Either day, should the search run across midnight.
+    assert _params(request)["since"] in {before.strftime("%Y%m%d"), after.strftime("%Y%m%d")}
 
 
 @pytest.mark.asyncio
@@ -162,7 +165,8 @@ async def test_a_refused_key_is_an_error_inside_the_answer() -> None:
     result, _ = await _search(_recorded("in_body_error"))
     assert result.hits == []
     assert result.error is not None
-    assert (result.error.tag, result.error.status) == ("access_denied", 200)
+    # Mojeek's status is inside a 200, which is no failure status.
+    assert (result.error.tag, result.error.status) == ("access_denied", None)
     assert result.raw == _recorded("in_body_error").json()
 
 
@@ -181,6 +185,15 @@ async def test_any_status_but_ok_is_tagged_without_its_text(status: str, tag: st
     result, _ = await _search(httpx.Response(200, json=body))
     assert result.error is not None
     assert (result.hits, result.error.tag) == ([], tag)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["OK ", "ok"])
+async def test_an_ok_status_is_read_whatever_its_spacing_or_case(status: str) -> None:
+    body = _recorded("normal").json()
+    body["response"]["status"] = status
+    result, _ = await _search(httpx.Response(200, json=body))
+    assert (len(result.hits), result.error) == (3, None)
 
 
 SENTINEL = "sentinel-body-text"
@@ -338,15 +351,16 @@ SENTINEL_QUERY = "sentinel-query-2b8d40"
 
 
 @asynccontextmanager
-async def _local_mojeek() -> AsyncIterator[str]:
-    """A local server that answers every request with the recorded search, over a real socket."""
+async def _local_mojeek(*, answers: bool = True) -> AsyncIterator[str]:
+    """A local server that answers every request with the recorded search over a real socket, or hangs up."""
     body = json.dumps(_recorded("normal").json()).encode()
 
     async def answer(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         await reader.readuntil(b"\r\n\r\n")
-        head = f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {len(body)}\r\n\r\n"
-        writer.write(head.encode() + body)
-        await writer.drain()
+        if answers:
+            head = f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {len(body)}\r\n\r\n"
+            writer.write(head.encode() + body)
+            await writer.drain()
         writer.close()
 
     server = await asyncio.start_server(answer, "127.0.0.1", 0)
@@ -383,9 +397,8 @@ async def test_no_log_record_from_httpx_or_httpcore_carries_the_key_or_the_query
 @pytest.mark.usefixtures("log_filter")
 async def test_a_transport_failure_carries_neither_the_key_nor_the_query(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.DEBUG)
-    async with _local_mojeek() as api_base:
-        pass  # The server is closed, so nothing listens on its port any more.
-    async with httpx.AsyncClient(trust_env=False) as client:
+    # The server hangs up without an answer, which httpx raises as a transport error.
+    async with _local_mojeek(answers=False) as api_base, httpx.AsyncClient(trust_env=False) as client:
         async with AnySearch.create("mojeek", api_key=SENTINEL_KEY, api_base=api_base, client=client) as mojeek:
             with pytest.raises(ProviderError) as raised:
                 await mojeek.search(SENTINEL_QUERY)
