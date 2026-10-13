@@ -101,6 +101,14 @@ _HOOK_COMMAND_TOOL_FIELDS_BY_HARNESS = {
 _PI_EDIT_TOOL_PATH_FIELDS = {"edit": "path", "write": "path"}
 _PI_READ_TOOL_PATH_FIELDS = {"read": "path"}
 
+
+def _hook_pi_expand_home(target: Any, harness: str) -> Any:
+    """pi's tools accept a `~/...` path and expand it themselves; match that so a gate sees the real target."""
+    if harness == "pi" and isinstance(target, str) and target.startswith("~"):
+        return str(Path(target).expanduser())
+    return target
+
+
 # Codex's own edit tool, sharing Claude Code's apply_patch envelope
 # convention: unlike Edit/Write, tool_input carries no bare file_path;
 # "command" holds the whole patch text, and the path(s) it touches are named
@@ -1458,7 +1466,8 @@ _JUDGE_CLI_BINARY_NAMES = {"claude": "claude", "codex": "codex"}
 # Which judge_cli backend a gate gets when neither it nor --judge-cli names
 # one: whichever CLI the harness actually invoking this hook run is itself
 # built on. See _hook_collect_judge_verdicts for the full precedence order.
-_JUDGE_CLI_DEFAULT_BY_HARNESS = {"claude-code": ("claude",), "codex": ("codex",)}
+# pi is built on neither, so it takes whichever of the two is installed.
+_JUDGE_CLI_DEFAULT_BY_HARNESS = {"claude-code": ("claude",), "codex": ("codex",), "pi": ("claude", "codex")}
 
 
 def _hook_resolve_judge_cli(candidates: tuple[str, ...]) -> tuple[str, str] | None:
@@ -2311,7 +2320,7 @@ def hook(
             paths = list(dict.fromkeys(resolved_paths))
             path_source = "pre_tool_use.edit_target"
         elif path_field:
-            target = tool_input.get(path_field)
+            target = _hook_pi_expand_home(tool_input.get(path_field), harness)
             if not target:
                 return
             paths = _hook_evidence_paths(target, repo, root)
@@ -2319,7 +2328,7 @@ def hook(
                 return  # Outside the repo under both spellings: nothing a policy can name.
             path_source = "pre_tool_use.edit_target"
         elif read_field:
-            target = tool_input.get(read_field)
+            target = _hook_pi_expand_home(tool_input.get(read_field), harness)
             if not target:
                 return
             # Collected exactly the way the edit branch above collects its
