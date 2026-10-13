@@ -332,9 +332,9 @@ The resulting list is tried in order, and the first entry found on `PATH` is use
 | --- | --- | --- |
 | `claude` | `claude -p --model <model> --tools "" --strict-mcp-config` | `claude-haiku-4-5-20251001` |
 | `codex` | `codex exec - [--model <model>] --sandbox read-only --ask-for-approval never --skip-git-repo-check --ephemeral --color never` | none: `--model` is passed only when given, so the account's own default applies |
-| `pi` | `pi -p --no-tools --no-session --no-skills --no-prompt-templates --no-context-files --offline [--model <model>]` | none: `--model` is passed only when given, so pi's own configured default applies |
+| `pi` | `pi -p --mode json --no-tools --no-session --no-skills --no-prompt-templates --no-context-files --offline --provider otari --model <model>` | `nebius:openai/gpt-oss-120b` through Otari, which needs the pi-otari extension; `--judge-model` replaces `--provider otari --model ...` with `--model <model>`, any pi model pattern |
 
-`--judge-model` or `OTARI_HOOK_JUDGE_MODEL` overrides the model for any of them. With `claude`, every built-in tool and MCP server is disabled for the call, and their definitions are left out of the prompt. Codex has no equivalent flag, so `--sandbox read-only` and `--ask-for-approval never` bound what an attempted tool call can do, not whether the model attempts one. `--ephemeral` keeps the call from leaving a rollout file that a later `Stop` event could mistake for session evidence. With `pi`, `--no-tools` leaves the model nothing to call, and extensions stay on so the pi-otari extension loads and an Otari-routed model resolves.
+`--judge-model` or `OTARI_HOOK_JUDGE_MODEL` overrides the model for any of them. With `claude`, every built-in tool and MCP server is disabled for the call, and their definitions are left out of the prompt. Codex has no equivalent flag, so `--sandbox read-only` and `--ask-for-approval never` bound what an attempted tool call can do, not whether the model attempts one. `--ephemeral` keeps the call from leaving a rollout file that a later `Stop` event could mistake for session evidence. With `pi`, `--no-tools` leaves the model nothing to call, JSON mode keeps a reasoning model's thinking out of the verdict, and extensions stay on so the pi-otari extension loads and an Otari-routed model resolves.
 
 ### `verifier`
 

@@ -525,6 +525,8 @@ def test_pi_p_call_shape(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         [
             "/fake/bin/pi",
             "-p",
+            "--mode",
+            "json",
             "--no-tools",
             "--no-session",
             "--no-skills",
