@@ -16,6 +16,7 @@ a second row. The endpoint accepts only metadata and numeric token counts; promp
 completions, and tool payloads are rejected by the request schema, not stored.
 """
 
+import functools
 import uuid
 from datetime import datetime
 from decimal import Decimal
@@ -376,8 +377,15 @@ async def _insert_rows(
     """
     if not rows:
         return
+    insert = functools.partial(
+        insert_ignoring_duplicates,
+        conflict=(UsageLog.source, UsageLog.source_event_id),
+        returning=UsageLog.source_event_id,
+        lock_timeout_ms=INGEST_LOCK_TIMEOUT_MS,
+    )
     try:
-        inserted = await _insert_and_commit(db, rows)
+        inserted = await insert(db, rows)
+        await db.commit()
     except IntegrityError:
         await db.rollback()
     else:
@@ -388,7 +396,8 @@ async def _insert_rows(
     refused = 0
     for row in rows:
         try:
-            inserted = await _insert_and_commit(db, [row])
+            inserted = await insert(db, [row])
+            await db.commit()
         except IntegrityError:
             await db.rollback()
             refused += 1
@@ -400,19 +409,6 @@ async def _insert_rows(
             result.duplicate += 1 - len(inserted)
     if refused:
         logger.warning("external usage: %d events refused by the database for source=%s", refused, source)
-
-
-async def _insert_and_commit(db: AsyncSession, rows: list[UsageLog]) -> list[str]:
-    """Insert and commit ``rows``, returning the event ids that were new."""
-    inserted = await insert_ignoring_duplicates(
-        db,
-        rows,
-        conflict=(UsageLog.source, UsageLog.source_event_id),
-        returning=UsageLog.source_event_id,
-        lock_timeout_ms=INGEST_LOCK_TIMEOUT_MS,
-    )
-    await db.commit()
-    return inserted
 
 
 async def ingest_external_events(
