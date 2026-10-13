@@ -385,28 +385,30 @@ def test_the_fallbacks_request_carries_no_keyword_for_the_tool_otari_runs(
     assert loop_extra.get("native_tools") == frozenset({WEB_SEARCH_TOOL_NAME})
 
 
-def test_a_streamed_fallback_that_cannot_search_runs_otaris_search(
-    client: TestClient, api_key_header: dict[str, str]
+@pytest.mark.parametrize("tool", ["search", "fetch"])
+def test_a_streamed_fallback_that_cannot_run_the_tool_runs_otaris(
+    client: TestClient, api_key_header: dict[str, str], tool: str
 ) -> None:
     response, seen = _post_messages(
         client,
-        _auto(api_key_header, "search"),
-        _messages_body("claude-then-vertex", _SEARCH, stream=True),
+        _auto(api_key_header, tool),
+        _messages_body("claude-then-vertex", _DECLARATIONS[tool], stream=True),
         provider_fails=True,
     )
 
     assert response.status_code == 200, response.text
     assert "via-otari" in response.text
-    assert [seen.tool_types(call) for call in seen.provider_calls] == [{"web_search_20250305"}]
+    assert [seen.tool_types(call) for call in seen.provider_calls] == [{_DECLARATIONS[tool]["type"]}]
     loop_kwargs, loop_extra = seen.loop_calls[0]
     assert seen.tool_types(loop_kwargs) == set()
-    assert loop_extra.get("native_tools") == frozenset({WEB_SEARCH_TOOL_NAME})
+    assert loop_extra.get("native_tools") == frozenset({_NAMES[tool]})
     assert len(seen.web_backends) == 1
 
 
-def test_a_streamed_native_head_opens_no_backend(client: TestClient, api_key_header: dict[str, str]) -> None:
+@pytest.mark.parametrize("tool", ["search", "fetch"])
+def test_a_streamed_native_head_opens_no_backend(client: TestClient, api_key_header: dict[str, str], tool: str) -> None:
     response, seen = _post_messages(
-        client, _auto(api_key_header, "search"), _messages_body("claude-then-vertex", _SEARCH, stream=True)
+        client, _auto(api_key_header, tool), _messages_body("claude-then-vertex", _DECLARATIONS[tool], stream=True)
     )
 
     assert response.status_code == 200, response.text
@@ -415,51 +417,54 @@ def test_a_streamed_native_head_opens_no_backend(client: TestClient, api_key_hea
     assert seen.web_backends == []
 
 
-def test_a_search_policy_refusal_skips_only_the_fallback_that_needs_it(
+@pytest.mark.parametrize("tool", ["search", "fetch"])
+def test_a_web_access_policy_refusal_skips_only_the_fallback_that_needs_it(
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
     db_session: Session,
+    tool: str,
 ) -> None:
-    """A workspace with web search off still has Anthropic run its own."""
+    """A workspace with web access off still has Anthropic run its own."""
     workspace_id = _default_workspace_id(client, master_key_header)
     stored = client.put(
         f"{API_ROOT}/workspaces/{workspace_id}/web-search", json={"enabled": False}, headers=master_key_header
     )
     assert stored.status_code == 200, stored.text
-    body = _messages_body("claude-then-vertex", _SEARCH)
+    body = _messages_body("claude-then-vertex", _DECLARATIONS[tool])
 
-    served, served_seen = _post_messages(client, _auto(api_key_header, "search"), body)
+    served, served_seen = _post_messages(client, _auto(api_key_header, tool), body)
     assert served.status_code == 200, served.text
     assert served_seen.web_backends == []
 
-    failed, seen = _post_messages(client, _auto(api_key_header, "search"), body, provider_fails=True)
+    failed, seen = _post_messages(client, _auto(api_key_header, tool), body, provider_fails=True)
 
     assert failed.status_code >= 500, failed.text
     assert len(seen.provider_calls) == 1
-    assert seen.loop_calls == [], "the fallback searched where the workspace switched search off"
+    assert seen.loop_calls == [], "the fallback used the web where the workspace switched it off"
     skipped = [row for row in _rows(db_session) if row.status == "absorbed" and row.provider == "vertexai"]
     assert len(skipped) == 1
     assert (skipped[0].error_message or "").startswith("Skipped: ")
 
 
+@pytest.mark.parametrize("tool", ["search", "fetch"])
 def test_an_unpriced_tool_skips_only_the_fallback_that_needs_it(
-    client: TestClient, api_key_header: dict[str, str], db_session: Session
+    client: TestClient, api_key_header: dict[str, str], db_session: Session, tool: str
 ) -> None:
     async def unpriced(_ctx: Any, tools: Any) -> str | None:
-        return WEB_FETCH_TOOL_NAME if WEB_FETCH_TOOL_NAME in list(tools) else None
+        return _NAMES[tool] if _NAMES[tool] in list(tools) else None
 
-    body = _messages_body("claude-then-vertex", _FETCH)
+    body = _messages_body("claude-then-vertex", _DECLARATIONS[tool])
     with patch("gateway.api.routes._pipeline._unpriced_tool", new=unpriced):
-        served, _ = _post_messages(client, _auto(api_key_header, "fetch"), body)
-        failed, seen = _post_messages(client, _auto(api_key_header, "fetch"), body, provider_fails=True)
+        served, _ = _post_messages(client, _auto(api_key_header, tool), body)
+        failed, seen = _post_messages(client, _auto(api_key_header, tool), body, provider_fails=True)
 
     assert served.status_code == 200, served.text
     assert failed.status_code >= 500, failed.text
     assert seen.loop_calls == []
     skipped = [row for row in _rows(db_session) if row.status == "absorbed" and row.provider == "vertexai"]
     assert len(skipped) == 1
-    assert "otari:web_fetch" in (skipped[0].error_message or "")
+    assert f"otari:{_NAMES[tool]}" in (skipped[0].error_message or "")
     rejections = [row for row in _rows(db_session) if row.provider == "otari" and row.status != "success"]
     assert rejections == [], "a refusal that answered no request was logged as one"
 
