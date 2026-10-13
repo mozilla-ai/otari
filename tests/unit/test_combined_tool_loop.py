@@ -52,7 +52,7 @@ from gateway.exceptions.tools_exceptions import McpServerDeclarationError
 from gateway.services import mcp_loop as chat_loop_module
 from gateway.services import mcp_loop_messages as messages_loop_module
 from gateway.services import mcp_loop_responses as responses_loop_module
-from gateway.services._tool_loop import CombinedToolBackend, owning_backend, tool_failure_detail
+from gateway.services._tool_loop import tool_failure_detail
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop import mcp_tool_loop, mcp_tool_loop_stream
 from gateway.services.mcp_loop_messages import anthropic_tool_loop, anthropic_tool_loop_stream
@@ -61,7 +61,9 @@ from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME, CodeExecu
 from gateway.services.tools import (
     MAX_USES_EXCEEDED_ERROR,
     WEB_SEARCH_TOOL_NAME,
+    CombinedToolBackend,
     ToolUseBudget,
+    owning_backend,
     refuse_shadowed_builtin_tools,
 )
 from gateway.types.code_execution import ResultBlock

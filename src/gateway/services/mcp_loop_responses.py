@@ -35,7 +35,6 @@ from gateway.log_config import logger
 from gateway.services._tool_loop import (
     StreamAction,
     log_tool_failure,
-    owning_backend,
     run_tool_loop,
     run_tool_loop_stream,
     tool_failure_detail,
@@ -57,6 +56,7 @@ from gateway.services.tools import (
     ToolUseBudget,
     is_capped_call,
     native_rendering,
+    owning_backend,
 )
 
 if TYPE_CHECKING:

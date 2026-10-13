@@ -252,7 +252,6 @@ from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_loop import (
     DEFAULT_MAX_TOOL_ITERATIONS,
     MAX_TOOL_ITERATIONS_CAP,
-    CombinedToolBackend,
     MaxToolIterationsExceeded,
     ToolBackend,
 )
@@ -323,6 +322,7 @@ from gateway.services.tools import (
     CONTAINER_GONE_DETAIL_TEMPLATE,
     AdmittedCodeExecution,
     CandidateTools,
+    CombinedToolBackend,
     DeclaredCodeExecution,
     DeclaredWebTools,
     Dialect,

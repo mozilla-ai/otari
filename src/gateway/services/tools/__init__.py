@@ -51,6 +51,7 @@ from gateway.services.tools._code_execution_policy import (
 )
 from gateway.services.tools._code_execution_responses import CODE_INTERPRETER_CALL_ID_PREFIX
 from gateway.services.tools._code_execution_tool import TOOL as CODE_EXECUTION_TOOL
+from gateway.services.tools._combined_backend import CombinedToolBackend, owning_backend
 from gateway.services.tools._declarations import Tool, extract_first_matching_tool
 from gateway.services.tools._loop_limits import MAX_TOOL_ITERATIONS_CAP
 from gateway.services.tools._mcp_admission import admit_mcp_servers, refuse_shadowed_builtin_tools
@@ -138,6 +139,7 @@ __all__ = [
     "CODE_EXECUTION_HEADER",
     "CODE_EXECUTION_TOOL",
     "CODE_INTERPRETER_CALL_ID_PREFIX",
+    "CombinedToolBackend",
     "CONTAINER_GONE_DETAIL_TEMPLATE",
     "MAX_USES_EXCEEDED_ERROR",
     "SERVER_TOOL_USE_ID_PREFIX",
@@ -216,6 +218,7 @@ __all__ = [
     "WebToolFailure",
     "build_web_provider_client",
     "filter_hits_by_domain",
+    "owning_backend",
     "page_budget_chars",
     "pick_direct_search_instance",
     "resolve_direct_search",

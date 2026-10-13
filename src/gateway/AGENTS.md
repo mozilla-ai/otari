@@ -202,7 +202,7 @@ will read it (`FileService.provider_file_ids`). The tool loop is in
 `services/mcp_loop.py`, sandbox and search backends under `services/`, and
 outbound URL checks in `services/url_safety.py`. A request that declares several
 tools gets one loop over all of them: `_open_tool_backends` in `_pipeline.py`
-opens each declared backend into a `CombinedToolBackend` (`services/_tool_loop.py`).
+opens each declared backend into a `CombinedToolBackend` (`services/tools/_combined_backend.py`).
 
 Deployment settings establish available backends. Workspace code-execution and
 web-search policy can disable or narrow those settings but cannot widen them.

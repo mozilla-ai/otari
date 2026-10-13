@@ -28,19 +28,23 @@ from any_llm.types.completion import PromptTokensDetails
 from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.services._tool_loop import (
-    CombinedToolBackend,
     MaxToolIterationsExceeded,
     StreamAction,
     ToolBackend,
     log_tool_failure,
-    owning_backend,
     run_tool_loop,
     run_tool_loop_stream,
     tool_failure_detail,
 )
 from gateway.services.inference import require_choices
 from gateway.services.providers import acompletion
-from gateway.services.tools import MAX_TOOL_ITERATIONS_CAP, MAX_USES_EXCEEDED_ERROR, ToolUseBudget, is_capped_call
+from gateway.services.tools import (
+    MAX_TOOL_ITERATIONS_CAP,
+    MAX_USES_EXCEEDED_ERROR,
+    ToolUseBudget,
+    is_capped_call,
+    owning_backend,
+)
 
 if TYPE_CHECKING:
     from any_llm.types.completion import ChatCompletion, ChatCompletionChunk, CompletionUsage
@@ -52,7 +56,6 @@ __all__ = [
     "DEFAULT_MAX_TOOL_ITERATIONS",
     "MAX_TOOL_ITERATIONS_CAP",
     "PURPOSE_HINT_HEADER",
-    "CombinedToolBackend",
     "MaxToolIterationsExceeded",
     "ToolBackend",
     "inject_purpose_hints",
