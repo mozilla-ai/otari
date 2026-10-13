@@ -130,7 +130,7 @@ class _BedrockRuntime:
         raise _Stop
 
 
-async def _dispatch_to_bedrock(model: str) -> dict[str, dict[str, Any]]:
+async def _dispatch_to_bedrock(model: str, **extra: Any) -> dict[str, dict[str, Any]]:
     """Send a Messages request with a beta and an end-user identifier through any-llm's Bedrock provider."""
     client = _BedrockRuntime()
     kwargs = {
@@ -139,6 +139,7 @@ async def _dispatch_to_bedrock(model: str) -> dict[str, dict[str, Any]]:
         "messages": [{"role": "user", "content": "hi"}],
         "betas": [THINKING_BETA],
         UPSTREAM_USER_FIELD: "id",
+        **extra,
     }
     provider_kwargs, _ = _split_client_betas(_with_upstream_user(kwargs))
     with pytest.raises(_Stop):
@@ -160,6 +161,16 @@ async def test_bedrock_claude_reaches_invoke_model_with_its_identifier_and_no_cl
 @pytest.mark.asyncio
 async def test_other_bedrock_models_reach_converse_with_request_metadata_and_no_betas() -> None:
     calls = await _dispatch_to_bedrock(BEDROCK_LLAMA)
+
+    request = calls["converse"]
+    assert request["requestMetadata"] == {"otari_user": "id"}
+    assert "anthropic_beta" not in json.dumps(request)
+
+
+@pytest.mark.asyncio
+async def test_bedrock_claude_with_structured_output_reaches_converse_with_request_metadata() -> None:
+    schema = {"type": "json_schema", "schema": {"type": "object", "properties": {"a": {"type": "string"}}}}
+    calls = await _dispatch_to_bedrock(BEDROCK_CLAUDE_PROFILE, output_format=schema)
 
     request = calls["converse"]
     assert request["requestMetadata"] == {"otari_user": "id"}

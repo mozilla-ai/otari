@@ -155,18 +155,29 @@ def _serves_messages_natively(dispatch_model: Any) -> bool:
 _PROVIDERS_WITHOUT_CLIENT_BETAS = frozenset({"bedrock"})
 
 
-def _forwards_client_betas(dispatch_model: Any) -> bool:
-    """Whether a client's betas reach the dispatched model: native, and not on a provider that refuses them."""
-    if not _serves_messages_natively(dispatch_model):
+def _dispatched_natively(kwargs: dict[str, Any]) -> bool:
+    """Whether this call reaches its model's own Messages API, as any-llm will dispatch it.
+
+    Bedrock serves a Claude request with ``output_format`` through the bridge, whatever the model.
+    """
+    model = kwargs.get("model")
+    provider, _, _ = str(model).partition(":")
+    if provider == "bedrock" and kwargs.get("output_format") is not None:
         return False
-    provider, _, _ = str(dispatch_model).partition(":")
+    return _serves_messages_natively(model)
+
+
+def _forwards_client_betas(kwargs: dict[str, Any]) -> bool:
+    """Whether a client's betas reach the dispatched model: native, and not on a provider that refuses them."""
+    if not _dispatched_natively(kwargs):
+        return False
+    provider, _, _ = str(kwargs.get("model")).partition(":")
     return provider not in _PROVIDERS_WITHOUT_CLIENT_BETAS
 
 
 def _user_fields(kwargs: dict[str, Any], identifier: str) -> dict[str, Any]:
-    model = kwargs.get("model")
-    implementation, _, _ = str(model).partition(":")
-    return messages_user_fields(implementation, identifier, native=_serves_messages_natively(model))
+    implementation, _, _ = str(kwargs.get("model")).partition(":")
+    return messages_user_fields(implementation, identifier, native=_dispatched_natively(kwargs))
 
 
 def _with_upstream_user(kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -189,9 +200,7 @@ def _split_client_betas(kwargs: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         return kwargs, False
 
     saw_mcp_beta = MCP_CLIENT_BETA in betas
-    provider_betas = (
-        [beta for beta in betas if beta != MCP_CLIENT_BETA] if _forwards_client_betas(kwargs.get("model")) else []
-    )
+    provider_betas = [beta for beta in betas if beta != MCP_CLIENT_BETA] if _forwards_client_betas(kwargs) else []
     if provider_betas == betas:
         return kwargs, False
 
