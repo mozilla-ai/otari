@@ -90,7 +90,7 @@ _JUDGE_ENFORCEMENTS = {"advisory"}
 # this module stays dependency-free of that CLI-only concern (subprocess
 # names, PATH resolution): a gate author only ever needs to know these two
 # names exist, not how either is actually invoked.
-_SUPPORTED_JUDGE_CLIS = {"claude", "codex"}
+_SUPPORTED_JUDGE_CLIS = {"claude", "codex", "pi"}
 
 # A `**` in a forbidden glob crosses path segments by recursing over every
 # split point in the submitted path (domain/evaluators.py's _segments_match).

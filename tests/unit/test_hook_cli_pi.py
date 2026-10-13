@@ -7,6 +7,8 @@ extension is what registers the hook with pi; see docs/agent-guardrails.md.
 """
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -168,10 +170,114 @@ def test_missing_fields_fail_open(repo: Path) -> None:
     assert _invoke({"hook_event_name": "PreToolUse", "cwd": str(repo / "nope")}).exit_code == 0
 
 
-def test_setup_writes_nothing_for_pi(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.chdir(repo)
-    result = CliRunner().invoke(hook_cli.hook, ["setup", "--harness", "pi"])
+def test_stop_outside_a_repo_exits_zero_without_evaluating(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """What stops a pi judge call from looping: it runs in a non-repo workdir, where the hook bails."""
+
+    def boom(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("nothing may be evaluated outside a repo")
+
+    monkeypatch.setattr(hook_cli, "check_policy", boom)
+    monkeypatch.setattr(subprocess, "run", boom)
+    outside = tmp_path / "judge-workdir"
+    outside.mkdir()
+    result = _invoke({"hook_event_name": "Stop", "cwd": str(outside), "bash_commands": ["ls"]})
     assert result.exit_code == 0, result.output
-    assert "pi-otari" in result.output
-    assert not (repo / ".claude").exists()
-    assert not (repo / ".codex").exists()
+
+
+# `otari hook setup --harness pi`
+
+_PI = "/usr/local/bin/pi"
+_PKG = "@mozilla-ai/pi-otari"
+
+
+def _fake_pi(
+    monkeypatch: pytest.MonkeyPatch, *, listing: str = "", install_rc: int = 0, install_out: str = "installed"
+) -> list[list[str]]:
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        assert argv[0] == _PI, "only pi may be run"
+        if argv[1:] == ["list"]:
+            return subprocess.CompletedProcess(argv, 0, stdout=listing, stderr="")
+        return subprocess.CompletedProcess(argv, install_rc, stdout=install_out, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(shutil, "which", lambda name: _PI if name == "pi" else None)
+    return calls
+
+
+def _setup(input: str | None = None) -> Any:  # noqa: A002
+    return CliRunner().invoke(hook_cli.hook, ["setup", "--harness", "pi"], input=input)
+
+
+def _assert_no_harness_files(root: Path) -> None:
+    assert not (root / ".claude").exists()
+    assert not (root / ".codex").exists()
+
+
+def test_setup_pi_missing_prints_install_instructions(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("must not run anything"))
+    result = _setup()
+    assert result.exit_code == 0, result.output
+    assert f"pi install npm:{_PKG}" in result.output
+    _assert_no_harness_files(repo)
+
+
+def test_setup_pi_already_installed_runs_no_install(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(repo)
+    calls = _fake_pi(monkeypatch, listing=f"User packages:\n  npm:{_PKG}\n")
+    result = _setup(input="n\n")  # declines the starter guardrail
+    assert result.exit_code == 0, result.output
+    assert "already installed" in result.output
+    assert calls == [[_PI, "list"]]
+    _assert_no_harness_files(repo)
+
+
+def test_setup_pi_installs_on_confirm(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(repo)
+    calls = _fake_pi(monkeypatch, listing="No packages installed.\n", install_out="added pi-otari")
+    result = _setup(input="y\nn\n")  # install, then decline the starter
+    assert result.exit_code == 0, result.output
+    assert calls == [[_PI, "list"], [_PI, "install", f"npm:{_PKG}"]]
+    assert "added pi-otari" in result.output
+    _assert_no_harness_files(repo)
+
+
+def test_setup_pi_declined_does_not_install(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(repo)
+    calls = _fake_pi(monkeypatch)
+    result = _setup(input="n\nn\n")
+    assert result.exit_code == 0, result.output
+    assert calls == [[_PI, "list"]]
+    assert "Skipping" in result.output
+
+
+def test_setup_pi_install_failure_is_a_click_exception(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(repo)
+    _fake_pi(monkeypatch, install_rc=1, install_out="npm ERR!")
+    result = _setup(input="y\n")
+    assert result.exit_code != 0
+    assert "npm ERR!" in result.output
+    assert "exited 1" in result.output
+
+
+def test_setup_pi_offers_the_starter_guardrail_in_a_repo(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(repo)
+    _fake_pi(monkeypatch, listing=_PKG)
+    (repo / hook_cli.GUARDRAIL_FILE).unlink()
+    result = _setup(input="y\n")
+    assert result.exit_code == 0, result.output
+    assert (repo / hook_cli.GUARDRAIL_FILE).is_file()
+    _assert_no_harness_files(repo)
+
+
+def test_setup_pi_outside_a_repo_installs_the_extension_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    calls = _fake_pi(monkeypatch)
+    result = _setup(input="y\n")
+    assert result.exit_code == 0, result.output
+    assert calls[-1] == [_PI, "install", f"npm:{_PKG}"]
+    assert list(tmp_path.iterdir()) == []
