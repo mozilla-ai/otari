@@ -638,7 +638,7 @@ function DeploymentBudgetsPage() {
   // restarts at the top of the document.
   const showOnboarding = !loading && rows.length === 0
   // Memoized on the values the cells actually read so DataTable's per-row
-  // cache holds across selection clicks (see the DataTable docstring).
+  // cache holds across re-renders (see the DataTable docstring).
   // historyOpen is a real dependency: it drives the History button label, so
   // toggling it must invalidate the cached rows.
   const columns = useMemo<DataTableColumn<Budget>[]>(
