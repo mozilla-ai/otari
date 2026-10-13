@@ -11,10 +11,11 @@ becomes ``FetchedPage.error``, except ``CRAWL_EMPTY_CONTENT``: the page was
 fetched and has no text, which is an empty page, not a failure.
 
 Every field read from a successful answer is checked, so a change on Exa's
-side fails the call rather than degrading it: ``results`` and a ``statuses``
-entry for the URL, ``success`` or ``error``, must be there (the only entry when
-its id is not the URL, which Exa may have normalized); a success needs its
-page's ``url`` and ``title``; and a ``text`` must be a string, a
+side fails the call rather than degrading it: ``results`` must be there, and
+``statuses``, which Exa documents as optional, needs an entry for the URL,
+``success`` or ``error``, when it has any (the only entry when its id is not
+the URL, which Exa may have normalized); a success needs its page's ``url`` and
+``title``; and a ``text`` must be a string, a
 ``publishedDate`` parse and a ``costDollars.total`` be a number when there is
 one. A page without text, which Exa documents as optional, is an empty page. Anything else raises
 ``unexpected_response``, an answer with no page and no reason included. Exa
@@ -115,14 +116,15 @@ class ExaProvider(AnyFetch):
         response = await self._http.request("POST", endpoint, json=payload, headers={"x-api-key": self._api_key or ""})
         body = _body(response)
         results = body.get("results")
-        statuses = body.get("statuses")
+        # Exa documents statuses as optional; without them the page in results is the answer.
+        statuses = body.get("statuses", [])
         if not isinstance(results, list) or not isinstance(statuses, list):
             raise _unexpected(response)
         cost = _cost(body, response)
         cost_source: Literal["reported", "none"] = "none" if cost is None else "reported"
 
-        status = _status_of(url, statuses, response)
-        if status["status"] == "error":
+        status = _status_of(url, statuses, response) if statuses else None
+        if status is not None and status["status"] == "error":
             # None for a page fetched with no text, which is an empty page rather than a failure.
             return FetchedPage(
                 url=url,
@@ -192,7 +194,6 @@ def _status_of(url: str, statuses: list[Any], response: httpx.Response) -> dict[
         if status["id"] == url:
             return status
     if len(checked) != 1:
-        # None at all is no page and no reason: nothing says whether the page was fetched.
         raise _unexpected(response)
     return checked[0]
 

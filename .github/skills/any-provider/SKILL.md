@@ -135,8 +135,9 @@ What each adapter does is in its library's README; these are the lessons for the
 
 ### 2026-10-13, field checks and the live workflow (both libraries)
 
-- A provider's OpenAPI spec can mark as optional what every answer carries: Exa marks
+- A provider's OpenAPI spec can mark as optional what every recorded answer carries: Exa marks
   `costDollars` optional on both endpoints, and on `/contents` also `results` and `statuses`.
-  Require what the adapter relies on to tell a page from a failure (`results`, `statuses`), take
-  the rest as optional but type-checked, and let the live tests' `EXPECTED` require what the host relies
-  on, such as a reported cost, so its absence is noticed without failing every call.
+  Follow the spec rather than the recordings: require only what the spec requires or the adapter
+  cannot answer without (`results`), take the rest as optional but type-checked, and let the live
+  tests' `EXPECTED` require what the host relies on, such as a reported cost, so its absence is
+  noticed without failing every call.

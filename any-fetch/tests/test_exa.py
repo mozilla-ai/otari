@@ -162,6 +162,25 @@ async def test_text_that_fills_exas_own_limit_counts_as_cut() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("statuses", [None, []], ids=["absent", "empty"])
+async def test_without_statuses_the_page_in_results_is_the_answer(statuses: Any) -> None:
+    """Exa documents statuses as optional."""
+    body = _answer()
+    if statuses is None:
+        del body["statuses"]
+    else:
+        body["statuses"] = statuses
+    page, _ = await _fetch(httpx.Response(200, json=body))
+    assert (page.title, page.error) == (f"Title {SENTINEL}", None)
+
+    body["results"] = []
+    with pytest.raises(ProviderError) as raised:
+        await _fetch(httpx.Response(200, json=body))
+    # No page and no reason.
+    assert raised.value.tag == "unexpected_response"
+
+
+@pytest.mark.asyncio
 async def test_a_success_without_text_is_an_empty_page() -> None:
     """Exa documents a result's text as optional."""
     body = _answer()
@@ -260,9 +279,7 @@ def _setting(value: Any, *path: str | int) -> Any:
     [
         pytest.param(_without("results"), id="results-missing"),
         pytest.param(_setting({}, "results"), id="results-not-a-list"),
-        pytest.param(_without("statuses"), id="statuses-missing"),
         pytest.param(_setting(None, "statuses"), id="statuses-null"),
-        pytest.param(_setting([], "statuses"), id="no-status-for-the-url"),
         pytest.param(_setting(["success"], "statuses"), id="status-not-an-object"),
         pytest.param(_without("statuses", 0, "id"), id="status-id-missing"),
         pytest.param(_setting(f"done {SENTINEL}", "statuses", 0, "status"), id="status-unknown"),
