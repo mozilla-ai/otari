@@ -44,6 +44,7 @@ jobs:
       # step, and the key is exposed to the steps that need it only.
       HAS_EXA_KEY: ${{ secrets.EXA_API_KEY != '' }}
       HAS_MOJEEK_KEY: ${{ secrets.MOJEEK_API_KEY != '' }}
+      HAS_TABSTACK_KEY: ${{ secrets.TABSTACK_API_KEY != '' }}
 
     steps:
     - name: Say so when the Exa key is absent
@@ -64,6 +65,16 @@ jobs:
       if: env.HAS_MOJEEK_KEY != 'true' && github.event_name != 'pull_request'
       run: |
         echo "::error::The MOJEEK_API_KEY secret is not set, so the Mojeek live tests cannot run."
+        exit 1
+
+    - name: Say so when the Tabstack key is absent
+      if: env.HAS_TABSTACK_KEY != 'true' && github.event_name == 'pull_request'
+      run: echo "::notice::The TABSTACK_API_KEY secret is not available to this run; the Tabstack live tests skip."
+
+    - name: Fail a scheduled or manual run without the Tabstack key
+      if: env.HAS_TABSTACK_KEY != 'true' && github.event_name != 'pull_request'
+      run: |
+        echo "::error::The TABSTACK_API_KEY secret is not set, so the Tabstack live tests cannot run."
         exit 1
 
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -90,4 +101,5 @@ jobs:
       env:
         ANY_FETCH_LIVE: "1"
         EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+        TABSTACK_API_KEY: ${{ secrets.TABSTACK_API_KEY }}
       run: uv run pytest -v -rs any-fetch/tests/test_live.py

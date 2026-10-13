@@ -70,6 +70,11 @@ SCENARIOS: dict[str, dict[Case, Scenario]] = {
         "error": Scenario({"error": "http_status", "error_status": 404}),
         "in_body_error": Scenario({"in_body_error": "crawl_not_found"}),
     },
+    "tabstack": {
+        "normal": Scenario(handler=_replay("tabstack", "normal")),
+        "empty": Scenario(handler=_replay("tabstack", "empty")),
+        "error": Scenario(handler=_replay("tabstack", "error")),
+    },
 }
 
 PROVIDERS = AnyFetch.get_supported_providers()
